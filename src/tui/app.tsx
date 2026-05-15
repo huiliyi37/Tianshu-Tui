@@ -569,7 +569,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setSummaryState(prev => ({
           ...prev,
           phase: phaseTracker.current.current(),
-          stepCount: phaseTracker.current.stepCount(),
+          stepCount: agent.getTrajectoryStats().totalTools,
           contextPct: Math.min(session.getEstimatedTokens() / maxTokens, 1),
           elapsedMs: Date.now() - streamStartRef.current,
         }))
