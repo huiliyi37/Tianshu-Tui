@@ -16,8 +16,10 @@ import { WRITE_FILE_TOOL } from './tools/write-file.js'
 import { BASH_TOOL } from './tools/bash.js'
 import { EDIT_FILE_TOOL } from './tools/edit.js'
 import { createDeepSeekClient } from './api/deepseek.js'
+import { killAll } from './tools/process-tracker.js'
 import { configSchema } from './config/schema.js'
 import { DEFAULT_CONFIG } from './config/default.js'
+import { runConfigCLI } from './config/manager.js'
 import type { Config, ProviderConfig } from './config/schema.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
@@ -140,6 +142,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   useEffect(() => {
     shutdownCallback = () => {
       agent.abort()
+      killAll()
       persist.compact(session.getMessages())
     }
     return () => { shutdownCallback = null }
@@ -158,6 +161,13 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 }
 
 async function main() {
+  // CLI subcommand routing
+  const args = process.argv.slice(2)
+  if (args[0] === 'config') {
+    runConfigCLI(args.slice(1))
+    return
+  }
+
   const config = loadConfig()
   const provider = config.provider.providers[config.provider.default]
   if (!provider) {

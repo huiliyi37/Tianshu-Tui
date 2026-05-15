@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent } from './truncation.js'
+import { track } from './process-tracker.js'
 
 const DANGEROUS_PATTERNS = ['git push', 'rm -rf', 'git reset --hard', 'sudo', 'chmod 777']
 
@@ -50,16 +51,16 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
     const timeout = (params.input.timeout as number) ?? 120_000
 
     return new Promise((resolve) => {
-      const child = spawn('sh', ['-c', command], {
+      const child = track(spawn('sh', ['-c', command], {
         cwd: params.cwd,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
-      })
+      }))
 
       let stdout = ''
       let stderr = ''
 
-      child.stdout.on('data', (data: Buffer) => {
+      child.stdout!.on('data', (data: Buffer) => {
         const text = data.toString()
         stdout += text
         params.onOutput?.(text)
@@ -68,7 +69,7 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         }
       })
 
-      child.stderr.on('data', (data: Buffer) => {
+      child.stderr!.on('data', (data: Buffer) => {
         const text = data.toString()
         stderr += text
         params.onOutput?.(text)

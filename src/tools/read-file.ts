@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent } from './truncation.js'
 import { validatePath } from './path-validate.js'
+import { GitignoreFilter } from './gitignore.js'
 
 export const READ_FILE_TOOL: Tool = {
   definition: {
@@ -40,6 +41,11 @@ Bad: re-reading the same file multiple times in one session without it being mod
     }
     if (!existsSync(filePath)) {
       return { content: `Error: File not found: ${filePath}`, isError: true }
+    }
+
+    const filter = new GitignoreFilter(params.cwd)
+    if (filter.isIgnored(params.cwd, filePath)) {
+      return { content: `Error: File is gitignored (node_modules, build artifacts, etc.): ${filePath}`, isError: true }
     }
 
     const content = readFileSync(filePath, 'utf-8')

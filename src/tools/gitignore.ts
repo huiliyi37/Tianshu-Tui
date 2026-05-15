@@ -1,0 +1,92 @@
+import { readFileSync, existsSync } from 'fs'
+import { resolve, join, relative } from 'path'
+
+const DEFAULT_IGNORE = [
+  'node_modules', '.git', '.svn', '.hg',
+  '__pycache__', '.pytest_cache', '.mypy_cache',
+  '.next', '.nuxt', '.cache', '.turbo',
+  'dist', 'build', 'out', 'target',
+  '.env', '.env.local', '.env.production',
+  '*.pyc', '*.pyo', '*.so', '*.dylib', '*.dll',
+  '*.min.js', '*.min.css', '*.map',
+  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+  '.DS_Store', 'Thumbs.db',
+]
+
+export class GitignoreFilter {
+  private patterns: string[] = []
+
+  constructor(cwd: string) {
+    this.patterns = [...DEFAULT_IGNORE]
+    this.loadGitignore(cwd)
+  }
+
+  private loadGitignore(cwd: string): void {
+    const gitignorePath = join(cwd, '.gitignore')
+    if (!existsSync(gitignorePath)) return
+    try {
+      const content = readFileSync(gitignorePath, 'utf-8')
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed.startsWith('#')) continue
+        this.patterns.push(trimmed)
+      }
+    } catch { /* ignore */ }
+  }
+
+  isIgnored(cwd: string, filePath: string): boolean {
+    const absPath = resolve(cwd, filePath)
+    const relPath = relative(cwd, absPath)
+
+    for (const pattern of this.patterns) {
+      if (this.matchPattern(pattern, relPath)) return true
+    }
+    return false
+  }
+
+  private matchPattern(pattern: string, relPath: string): boolean {
+    // Negation patterns — not supported, skip
+    if (pattern.startsWith('!')) return false
+
+    // Directory-only patterns (trailing /)
+    const dirOnly = pattern.endsWith('/')
+    const cleanPattern = dirOnly ? pattern.slice(0, -1) : pattern
+
+    // Check if any path segment or the full path matches
+    const segments = relPath.split('/')
+    for (let i = 0; i < segments.length; i++) {
+      const candidate = segments.slice(i).join('/')
+      if (this.matchGlob(cleanPattern, candidate)) return true
+      if (dirOnly && i === 0 && segments.length > 1 && this.matchGlob(cleanPattern, segments[i]!)) return true
+    }
+
+    return false
+  }
+
+  private matchGlob(pattern: string, str: string): boolean {
+    // Exact match
+    if (pattern === str) return true
+
+    // Wildcard patterns
+    if (pattern.includes('*')) {
+      const re = globToRegex(pattern)
+      return re.test(str)
+    }
+
+    // Prefix match — "src" matches "src/anything"
+    if (str.startsWith(pattern + '/') || str === pattern) return true
+
+    // Suffix match — ".min.js" matches "app.min.js"
+    if (pattern.startsWith('.') && str.endsWith(pattern)) return true
+
+    return false
+  }
+}
+
+function globToRegex(glob: string): RegExp {
+  const escaped = glob
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]')
+  return new RegExp(`(^|/)${escaped}$`)
+}
