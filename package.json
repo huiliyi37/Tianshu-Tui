@@ -1,8 +1,34 @@
 {
   "name": "rivet",
   "version": "0.1.0",
+  "description": "Terminal coding agent optimized for DeepSeek V4 prefix cache",
+  "license": "MIT",
   "type": "module",
-  "files": ["dist/", "README.md"],
+  "keywords": [
+    "coding-agent",
+    "terminal",
+    "tui",
+    "deepseek",
+    "ai",
+    "cli"
+  ],
+  "homepage": "https://github.com/user/rivet#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/user/rivet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/user/rivet/issues"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "completions/"
+  ],
   "bin": {
     "rivet": "./dist/main.js"
   },
