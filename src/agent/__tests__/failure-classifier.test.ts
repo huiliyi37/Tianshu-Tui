@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyFailure, classifyTestRun } from '../failure-classifier.js'
+import { classifyFailure, classifyTestRun, isTransient } from '../failure-classifier.js'
 
 describe('classifyFailure', () => {
   it('classifies TS type errors correctly', () => {
@@ -81,5 +81,27 @@ FAIL  src/utils/math.test.ts > should divide
     assert.equal(results.length, 2)
     assert.equal(results[0]!.class, 'assertion')
     assert.equal(results[1]!.class, 'type_error')
+  })
+})
+
+describe('isTransient', () => {
+  it('returns true for timeout class', () => {
+    assert.equal(isTransient('timeout'), true)
+  })
+
+  it('returns true for flaky class', () => {
+    assert.equal(isTransient('flaky'), true)
+  })
+
+  it('returns false for type_error', () => {
+    assert.equal(isTransient('type_error'), false)
+  })
+
+  it('returns false for assertion', () => {
+    assert.equal(isTransient('assertion'), false)
+  })
+
+  it('classifies ECONNRESET as transient from raw error text', () => {
+    assert.equal(isTransient(classifyFailure('Error: ECONNRESET connection reset').class), true)
   })
 })

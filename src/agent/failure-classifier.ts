@@ -38,6 +38,11 @@ export function classifyFailure(errorText: string): ClassifiedFailure {
     return { class: 'timeout', suggestion: 'Check for infinite loops, unawaited async, or slow operations. Consider increasing timeout.', confidence: 0.8 }
   }
 
+  // 4b. Network/transient errors
+  if (/ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|fetch failed/i.test(errorText)) {
+    return { class: 'timeout', suggestion: 'Transient network error. Retry may succeed.', confidence: 0.85 }
+  }
+
   // 5. Snapshot
   if (/snapshot/i.test(errorText) && (/diff/.test(errorText) || /mismatch/.test(errorText))) {
     return { class: 'snapshot', suggestion: 'Review snapshot diff. If change is intentional, update snapshots.', confidence: 0.85 }
@@ -86,4 +91,10 @@ export function classifyTestRun(output: string): ClassifiedFailure[] {
   }
 
   return failures
+}
+
+const TRANSIENT_CLASSES: ReadonlySet<FailureClass> = new Set(['timeout', 'flaky'])
+
+export function isTransient(failureClass: FailureClass): boolean {
+  return TRANSIENT_CLASSES.has(failureClass)
 }
