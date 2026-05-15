@@ -1,5 +1,5 @@
 # ~/.opencode/config.toml
-# OpenCode TUI configuration
+# Rivet configuration
 
 [provider]
 default = "deepseek"

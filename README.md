@@ -1,4 +1,4 @@
-# OpenCode TUI
+# Rivet
 
 A terminal coding agent powered by DeepSeek V4, with prefix cache optimization for the 1M context window. Ink 6 + React TUI, streaming responses, tool execution loop.
 
@@ -39,7 +39,7 @@ src/
 ├── prompt/
 │   ├── engine.ts         PromptEngine: frozen system prompt + volatile context
 │   ├── static.ts         System prompt builder (~3,800 tokens with tools)
-│   ├── volatile.ts       Volatile context: .opencode.md, git status (30s cache)
+│   ├── volatile.ts       Volatile context: .rivet.md, git status (30s cache)
 │   └── fingerprint.ts    SHA-256 fingerprint for cache drift detection
 ├── tools/
 │   ├── bash.ts           Shell execution (spawn), live output streaming
@@ -77,7 +77,7 @@ User input → App.handleSubmit
   └─ Agent loop:
        PromptEngine.buildRequest(messages)
          → static system prompt (frozen, cache anchor)
-         → volatile context (.opencode.md, git status, working set)
+         → volatile context (.rivet.md, git status, working set)
        ApiClient.stream(request, callbacks)
          → SSE parse → content blocks (text, thinking, tool_use)
          → retry on 429/502/503/529 (exp backoff)

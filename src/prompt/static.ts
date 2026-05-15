@@ -1,7 +1,7 @@
 import os from 'os'
 import type { ToolDefinition } from '../api/types.js'
 
-const BASE_PROMPT = `You are OpenCode, an interactive CLI coding agent. You help users with software engineering tasks in the terminal.
+const BASE_PROMPT = `You are Rivet, an interactive CLI coding agent. You help users with software engineering tasks in the terminal.
 
 ## Environment
 - Platform: {platform}

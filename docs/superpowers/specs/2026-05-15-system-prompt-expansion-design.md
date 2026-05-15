@@ -1,4 +1,4 @@
-# OpenCode TUI System Prompt 架构优化
+# Rivet System Prompt 架构优化
 
 **日期**: 2026-05-15
 **基于**: deep-brainstorm 三轮分析 + 3 路并行 Scout 调研
@@ -56,7 +56,7 @@ system prompt (分层组装, ~2000+ tokens):
 │   └── edit.md: 先读后改 + old_string 唯一性
 │
 └── Volatile (注入 user message, 不在 system 中)
-    └── git status + .opencode.md + working set
+    └── git status + .rivet.md + working set
 ```
 
 ### 关键修正: volatile 注入方式

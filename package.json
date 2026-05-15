@@ -1,10 +1,10 @@
 {
-  "name": "opencode-tui",
+  "name": "rivet",
   "version": "0.1.0",
   "type": "module",
   "files": ["dist/", "README.md"],
   "bin": {
-    "opencode": "./dist/main.js"
+    "rivet": "./dist/main.js"
   },
   "scripts": {
     "dev": "tsup --watch",

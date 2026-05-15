@@ -216,7 +216,7 @@ export function runConfigCLI(args: string[]): void {
       }
 
       default:
-        console.log(`OpenCode Config Manager
+        console.log(`Rivet Config Manager
 
 Usage: opencode config <command>
 

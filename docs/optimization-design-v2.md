@@ -1,4 +1,4 @@
-# OpenCode TUI 优化增补设计
+# Rivet 优化增补设计
 
 **日期**: 2026-05-15
 **基于**: 代码审查（第一波缺陷）+ 3 路并行 Scout 调研（第二波优化）
@@ -307,7 +307,7 @@ for (const tu of toolUses) {
 **优化**: 参考 Claude Code 的 system prompt 结构，扩充到 1000+ tokens：
 
 ```typescript
-const BASE_PROMPT = `You are OpenCode, an interactive CLI coding agent.
+const BASE_PROMPT = `You are Rivet, an interactive CLI coding agent.
 
 ## Environment
 - Platform: {platform}
@@ -633,6 +633,6 @@ export function estimateTokens(messages: Message[]): number {
 ### Scout 3: 开源 Agent 对比
 - **Aider**: repo-map 是核心上下文优化
 - **Plandex**: 缓存作为跨 provider 特性
-- **OpenCode**: 会话持久化 + 消息顺序对缓存的影响
+- **Rivet**: 会话持久化 + 消息顺序对缓存的影响
 - **Qwen Code**: per-provider context window 配置
 - **llm-d**: KV cache 是生产 AI agent 最重要的指标

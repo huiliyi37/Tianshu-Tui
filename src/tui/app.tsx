@@ -95,7 +95,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         case '/help':
           addLog({ type: 'text', content: `Available commands:
 /help — Show this help
-/exit — Exit OpenCode TUI
+/exit — Exit Rivet
 /quit — Exit
 /compact — Compact conversation context
 /model [name|list] — Show or switch model

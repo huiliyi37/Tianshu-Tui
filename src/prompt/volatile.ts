@@ -9,8 +9,8 @@ export interface VolatileContext {
   workingSet?: string[]
 }
 
-function readOpenCodeMd(cwd: string): string | undefined {
-  const path = join(cwd, '.opencode.md')
+function readRivetMd(cwd: string): string | undefined {
+  const path = join(cwd, '.rivet.md')
   try {
     if (existsSync(path)) return readFileSync(path, 'utf-8')
   } catch { /* ignore */ }
@@ -46,7 +46,7 @@ function getGitStatus(): string | undefined {
 export function buildVolatileBlock(ctx: VolatileContext): string {
   const parts: string[] = []
 
-  const md = ctx.opencodeMd ?? readOpenCodeMd(ctx.cwd)
+  const md = ctx.opencodeMd ?? readRivetMd(ctx.cwd)
   if (md) {
     parts.push(`## Project Instructions\n\n${md}`)
   }
