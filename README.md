@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.4 Phase 1 complete — 93 source files, ~9,600 LOC, 197 tests passing. Subagent orchestration: typed work orders, headless worker sessions, tool allowlist. 天枢 persona with design-doc-first workflow.
+P2.4 Phase 1 complete — 97 source files, ~10,200 LOC, 210 tests passing. Subagent orchestration: typed work orders, headless worker sessions, tool allowlist, delegate_task tool wired to runtime. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -36,7 +36,8 @@ src/
 │   ├── verification.ts   VerificationState: passed/failed/blocked tracking
 │   ├── work-order.ts     WorkOrder/WorkerResult types + zod schemas
 │   ├── worker-session.ts Headless WorkerSession with independent context
-│   └── worker-prompts.ts Decomposition + result-aggregation prompts
+│   ├── worker-prompts.ts Decomposition + result-aggregation prompts
+│   └── coordinator.ts    DelegationCoordinator: budget gate, model routing
 ├── api/
 │   ├── client.ts         Streaming API client with retry (exp backoff 1s/2s/4s)
 │   ├── deepseek.ts       DeepSeek V4 provider: dual-format usage mapping
@@ -70,6 +71,8 @@ src/
 │   ├── related-tests.ts  Test file inference for source paths
 │   ├── output-store.ts   Three-layer: raw→disk, compressed→LLM, summary→TUI
 │   ├── registry.ts       Tool registration, approval gating, allowlist filtering
+│   ├── default-registry.ts  Default tool registry factory (8 core tools)
+│   ├── delegate-task.ts  delegate_task tool: Phase 1 read-only worker delegation
 │   ├── gitignore.ts      .gitignore parser + default ignore patterns
 │   ├── process-tracker.ts Child process tracker (killAll on abort)
 │   ├── path-validate.ts  Path traversal protection

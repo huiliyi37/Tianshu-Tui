@@ -11,18 +11,12 @@ import { SessionContext } from './agent/context.js'
 import { SessionPersist } from './agent/session-persist.js'
 import { PromptEngine } from './prompt/engine.js'
 import { ToolRegistry } from './tools/registry.js'
-import { READ_FILE_TOOL } from './tools/read-file.js'
-import { WRITE_FILE_TOOL } from './tools/write-file.js'
-import { BASH_TOOL } from './tools/bash.js'
-import { EDIT_FILE_TOOL } from './tools/edit.js'
-import { GREP_TOOL } from './tools/grep.js'
-import { GLOB_TOOL } from './tools/glob.js'
-import { DIFF_TOOL } from './tools/diff.js'
-import { RUN_TESTS_TOOL } from './tools/run-tests.js'
-import { INSPECT_PROJECT_TOOL } from './tools/inspect-project.js'
-import { REPO_MAP_TOOL } from './tools/repo-map.js'
-import { RELATED_TESTS_TOOL } from './tools/related-tests.js'
+import { createDefaultToolRegistry } from './tools/default-registry.js'
+import { createDelegateTaskTool, type DelegateTaskCoordinator } from './tools/delegate-task.js'
 import { createDeepSeekClient } from './api/deepseek.js'
+import { DelegationCoordinator } from './agent/coordinator.js'
+import type { WorkerRuntimeFactory } from './agent/coordinator.js'
+import type { ModelCapabilityCard } from './model/capability.js'
 import { killAll } from './tools/process-tracker.js'
 import { configSchema } from './config/schema.js'
 import { DEFAULT_CONFIG } from './config/default.js'
@@ -80,6 +74,10 @@ let shutdownCallback: (() => void) | null = null
 // Module-level initial input (from pipe stdin)
 let _pipedInput: string | undefined
 
+// Module-level mutable coordinator reference — updated on model switch,
+// read by the delegate_task tool's execute method.
+let _coordinatorRef: DelegationCoordinator | null = null
+
 function gracefulShutdown() {
   shutdownCallback?.()
   process.exit(0)
@@ -89,20 +87,19 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   const initialInput = _pipedInput
   const cwd = process.cwd()
 
-  // Stable singletons — created once, never change
+  // Base tool registry — contains all core tools, no delegate_task.
+  // Used as the worker base registry (delegate_task must not enter worker allowlist).
   const [toolRegistry] = useState(() => {
-    const reg = new ToolRegistry()
-    reg.register(READ_FILE_TOOL)
-    reg.register(WRITE_FILE_TOOL)
-    reg.register(BASH_TOOL)
-    reg.register(EDIT_FILE_TOOL)
-    reg.register(GREP_TOOL)
-    reg.register(GLOB_TOOL)
-    reg.register(DIFF_TOOL)
-    reg.register(RUN_TESTS_TOOL)
-    reg.register(INSPECT_PROJECT_TOOL)
-    reg.register(REPO_MAP_TOOL)
-    reg.register(RELATED_TESTS_TOOL)
+    const reg = createDefaultToolRegistry()
+    // Register delegate_task with a mutable coordinator reference.
+    // The coordinator is recreated in useMemo on model switch; the tool reads
+    // the latest via a closure over a module-level ref.
+    reg.register(createDelegateTaskTool({
+      delegate: async (request) => {
+        if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+        return _coordinatorRef.delegate(request)
+      },
+    }))
     return reg
   })
 
@@ -146,6 +143,48 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       maxTokens: Math.min(2048, compactModel.maxTokens),
       thinkingBudget: 1024,
     }) : undefined
+
+    // --- P2.4: DelegationCoordinator ---
+    // Phase 1 uses a single model card; recommendModelForTask trivially picks it.
+    const modelCards: ModelCapabilityCard[] = [{
+      model: currentModel.id,
+      toolUseReliability: 0.8,
+      jsonStability: 0.8,
+      editSuccessRate: 0.7,
+      testRepairRate: 0.6,
+      contextWindow: currentModel.contextWindow,
+      cacheEconomics: 'strong',
+      recommendedTasks: ['code_search'],
+    }]
+
+    const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => ({
+      order: _order,
+      client: createDeepSeekClient({
+        apiKey,
+        model: card.model,
+        reasoningEffort: undefined,
+        maxTokens: Math.min(4096, card.contextWindow),
+        thinkingBudget: 4096,
+      }),
+      promptEngine: new PromptEngine({
+        model: card.model,
+        maxTokens: 4096,
+        staticCtx: { tools: workerRegistry.getDefinitions() },
+        volatileCtx: { cwd },
+      }),
+      toolRegistry: workerRegistry,
+      cwd,
+      maxTurns: 4,
+      contextWindow: card.contextWindow,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+    })
+
+    _coordinatorRef = new DelegationCoordinator({
+      baseToolRegistry: toolRegistry,
+      modelCards,
+      maxWorkers: 2,
+      runtimeFactory,
+    })
 
     return new AgentLoop(
       {
