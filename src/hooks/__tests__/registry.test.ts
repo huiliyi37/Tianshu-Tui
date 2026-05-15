@@ -1,17 +1,18 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { HookRegistry } from '../registry.js'
-import type { PreToolUseInput, PostToolUseInput } from '../types.js'
+import type { HookHandler, PreToolUseInput, PostToolUseInput } from '../types.js'
 
 describe('HookRegistry', () => {
   it('registers and fires a PreToolUse hook that can modify input', () => {
     const registry = new HookRegistry()
     const modified: PreToolUseInput[] = []
 
-    registry.register('PreToolUse', (input) => {
+    const handler: HookHandler<'PreToolUse'> = (input) => {
       modified.push(input)
       return { input: { ...input.input, injected: true } }
-    })
+    }
+    registry.register('PreToolUse', handler)
 
     const result = registry.firePreToolUse({ toolName: 'bash', input: { command: 'ls' } })
     assert.equal(modified.length, 1)
@@ -21,12 +22,12 @@ describe('HookRegistry', () => {
 
   it('supports multiple hooks and chains modified input', () => {
     const registry = new HookRegistry()
-    registry.register('PreToolUse', (input) => ({
+    registry.register('PreToolUse', ((input: PreToolUseInput) => ({
       input: { ...input.input, step1: true },
-    }))
-    registry.register('PreToolUse', (input) => ({
+    })) as HookHandler<'PreToolUse'>)
+    registry.register('PreToolUse', ((input: PreToolUseInput) => ({
       input: { ...input.input, step2: true },
-    }))
+    })) as HookHandler<'PreToolUse'>)
 
     const result = registry.firePreToolUse({ toolName: 'edit_file', input: { path: 'a.ts' } })
     assert.equal(result.input!.step1, true)
@@ -48,10 +49,10 @@ describe('HookRegistry', () => {
   it('fires PostToolUse hooks with result', () => {
     const registry = new HookRegistry()
     const seen: PostToolUseInput[] = []
-    registry.register('PostToolUse', (input) => {
+    registry.register('PostToolUse', ((input: PostToolUseInput) => {
       seen.push(input)
       return {}
-    })
+    }) as HookHandler<'PostToolUse'>)
 
     registry.firePostToolUse({ toolName: 'edit_file', input: { path: 'a.ts' }, result: 'ok', isError: false })
     assert.equal(seen.length, 1)

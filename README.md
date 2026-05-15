@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.4 Phase 4 complete — 357 tests passing, typecheck clean. Subagent orchestration with write workers, adaptive model routing, TUI cockpit, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 445 tests passing, typecheck clean. MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection. All prior features: subagent orchestration, adaptive model routing, TUI cockpit, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -32,6 +32,7 @@ src/
 │   ├── context.ts        Session state: messages, usage, turn count
 │   ├── session-persist.ts JSONL session persistence (~/.rivet/sessions/)
 │   ├── checkpoint.ts     Per-project git checkpoint + rollback v2 (agent-owned files only)
+│   ├── file-history.ts   Per-file snapshot backup + rewind (undo backbone)
 │   ├── evidence.ts       File tracking + test result badge
 │   ├── failure-classifier.ts  Test failure categorization + fix suggestions
 │   ├── verification.ts   VerificationState: passed/failed/blocked tracking
@@ -52,6 +53,9 @@ src/
 │   ├── provider.ts       ProviderCapabilities abstraction (thinking, cache, effort)
 │   ├── sse.ts            SSE parser with id/retry field support
 │   └── types.ts          Message, ContentBlock, Usage, ToolDefinition types
+├── hooks/
+│   ├── types.ts          HookEvent, HookHandler, PreToolUse/PostToolUse/Notification/SubagentStop types
+│   └── registry.ts       HookRegistry: register, fire, input chaining, block support
 ├── prompt/
 │   ├── engine.ts         PromptEngine: frozen system prompt + volatile context + XML protocol
 │   ├── static.ts         System prompt builder with 天枢 persona
@@ -74,12 +78,16 @@ src/
 │   ├── glob.ts           File discovery with **/*/?/{a,b} support
 │   ├── diff.ts           Git diff with three-layer output
 │   ├── run-tests.ts      Test runner with framework detection + parsing
+│   ├── git.ts            Structured git: status, diff_summary, commit (spawnSync, no shell injection)
+│   ├── todo.ts           Session-scoped task list with Zod validation
+│   ├── web-fetch.ts      URL fetch with HTML→Markdown, SSRF protection, 15s timeout
+│   ├── undo.ts           File-level undo via snapshot rewind (preview + confirm)
 │   ├── inspect-project.ts Project summary: language, framework, scripts
 │   ├── repo-map.ts       Annotated file tree with entry/test/config markers
 │   ├── related-tests.ts  Test file inference for source paths
 │   ├── output-store.ts   Three-layer: raw→disk, compressed→LLM, summary→TUI
 │   ├── registry.ts       Tool registration, approval gating, allowlist filtering
-│   ├── default-registry.ts  Default tool registry factory (8 core tools)
+│   ├── default-registry.ts  Default tool registry factory (11 core tools)
 │   ├── delegate-task.ts  delegate_task tool: Phase 1 read-only worker delegation
 │   ├── gitignore.ts      .gitignore parser + default ignore patterns
 │   ├── process-tracker.ts Child process tracker (killAll on abort)
@@ -101,9 +109,14 @@ src/
 ├── failures/
 │   └── sample.ts         Redacted failure sample library for testing
 ├── config/
-│   ├── schema.ts         Zod config schema (provider, agent, compact, cache)
+│   ├── schema.ts         Zod config schema (provider, agent, compact, cache, mcp)
 │   ├── default.ts        Default config: DeepSeek V4 Pro/Flash
 │   └── manager.ts        CLI config manager (rivet config <command>)
+├── mcp/
+│   ├── config.ts         MCP server config schema (stdio/SSE validation)
+│   ├── wrapper.ts        MCP tool → Rivet Tool adapter (mcp__<server>__<tool> naming)
+│   ├── manager.ts        Connection lifecycle, parallel tool discovery, error handling
+│   └── types.ts          McpConnectionState type
 └── tui/
     ├── app.tsx            Main app: slash commands, approval UI, cockpit, live tool output
     ├── input.tsx          Input bar with cursor, history, Ctrl+A/E/W/U
@@ -135,8 +148,10 @@ User input → App.handleSubmit
          → retry on 429/502/503/529 (exp backoff)
          → Intent extraction every 500 chars → speculative file pre-read
        Tool execution (if tool_use blocks)
+         → PreToolUse hook (input modification / block)
          → approval check → prewarm cache fast-path for read_file
-         → spawn/exec → result → cache invalidation for writes
+         → spawn/exec → result → PostToolUse hook (result modification)
+         → cache invalidation for writes
          → tool history recorded (last 5, injected into next volatile context)
          → live output streaming via onOutput callback
          → child process tracked (killAll on SIGINT/SIGTERM)
@@ -169,7 +184,7 @@ The prompt is split into 4 layers for maximum cache stability:
 
 - **Prefix cache optimization** — Frozen system prompt + structured message ordering
 - **Streaming TUI** — Ink 6 (React for CLI), 50ms render batching (~20fps)
-- **12 builtin tools** — bash, diff, edit_file, read_file, write_file, grep, glob, inspect_project, repo_map, run_tests, related_tests, output_store
+- **15 builtin tools** — bash, diff, edit_file, read_file, write_file, grep, glob, run_tests, git, todo, web_fetch, undo, inspect_project, repo_map, related_tests
 - **Non-blocking git status** — Stale cache + async refresh, no event loop blocking
 - **Approval workflow** — y/n confirmation for dangerous operations
 - **Session persistence** — JSONL append, resume on restart, compact on exit
@@ -188,7 +203,8 @@ The prompt is split into 4 layers for maximum cache stability:
 - **Compaction cache anchor** — First 2 messages preserved as cache anchor after compaction, stable XML summary header
 - **Truncated JSON recovery** — Recovers partial tool_use JSON from streaming
 - **Slash commands** — /help /exit /compact /model /clear /rollback /sessions /resume /verbose /debug /evidence
-- **Config CLI** — Manage API keys, providers, models from terminal
+- **Config CLI** — Manage API keys, providers, models, MCP servers from terminal
+- **MCP client** — Model Context Protocol: connect external tool servers (stdio), auto-discover tools, register as `mcp__<server>__<tool>`, parallel init, approval heuristics, `/mcp` + `/debug mcp` status
 - **.gitignore filter** — Skips node_modules, .git, build artifacts
 - **Graceful shutdown** — SIGINT/SIGTERM → abort agent + persist session + kill children
 - **ErrorBoundary** — React errors caught without crashing the process
@@ -222,6 +238,12 @@ The prompt is split into 4 layers for maximum cache stability:
 - **Model capability routing** — ModelCapabilityCard + recommendModelForTask scoring per task type
 - **Failure sample library** — createFailureSample with automatic secret redaction (sk-* patterns)
 - **Raw output path safety** — SHA-256 hashed filenames, no toolUseId in path
+- **Agent hooks** — PreToolUse/PostToolUse/Notification/SubagentStop lifecycle hooks; input chaining, block support, synchronous handlers
+- **Structured git tool** — status, diff_summary, commit actions via spawnSync (no shell injection); approval-gated commits
+- **Todo tracking** — Session-scoped task list with Zod validation; read/write actions, status icons, concurrency-safe
+- **Web fetch** — URL fetching with HTML→Markdown conversion, SSRF protection (private IP blocking), 15s timeout, 50K truncation
+- **File-level undo** — Per-file snapshot backup system; versioned backups in `~/.rivet/file-history/{sessionId}/`, preview + confirm workflow, orphaned backup cleanup
+- **SSRF protection** — DNS resolution + private IP detection (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80) before any HTTP fetch
 
 ## Configuration
 
@@ -272,6 +294,30 @@ Place `~/.rivet/config.json` (optional, uses defaults if missing):
 }
 ```
 
+### MCP Server Configuration
+
+Connect external tool servers via Model Context Protocol:
+
+```bash
+# Add a local MCP server (stdio transport)
+rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp
+
+# Add a remote MCP server (SSE transport)
+rivet config mcp add-sse ctx7 http://localhost:3001/sse
+
+# List configured servers
+rivet config mcp list
+
+# Enable/disable without removing config
+rivet config mcp disable fs
+rivet config mcp enable fs
+
+# Remove a server
+rivet config mcp remove fs
+```
+
+MCP tools appear as `mcp__<serverId>__<toolName>` and are auto-discovered at startup. Use `/mcp` or `/debug mcp` to check connection status.
+
 ## Slash Commands (in TUI)
 
 | Command | Description |
@@ -281,16 +327,18 @@ Place `~/.rivet/config.json` (optional, uses defaults if missing):
 | `/compact` | Compact conversation context now |
 | `/model [name\|list]` | Show or switch model |
 | `/verbose` | Toggle verbose tool output (20 → 200 lines) |
-| `/debug [prompt\|fingerprint\|cache]` | Debug prompt, cache fingerprint, or cache stats with savings |
+| `/debug [prompt\|fingerprint\|cache\|mcp]` | Debug prompt, cache fingerprint, cache stats, or MCP connections |
 | `/clear` | Clear screen (visual only) |
 | `/sessions` | List all saved sessions |
 | `/resume <number>` | Restore a saved session |
 | `/rollback` | Preview changes since checkpoint (`/rollback confirm` to execute) |
+| `/undo` | Undo last file change (preview diff, `confirm` to restore) |
 | `/evidence` | Show last turn evidence summary |
 | `/context` | Show context ledger: health, tokens, API round safety, compact events |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
 | `/cockpit` | Toggle expanded cockpit panel (Esc to collapse) |
+| `/mcp` | Show MCP server connection status |
 
 ## User Manual
 
@@ -383,6 +431,56 @@ During streaming responses, Rivet detects file paths in the model's output and p
 - Cache is invalidated on `write_file` / `edit_file` to prevent stale data
 - Files larger than 100KB are skipped to avoid blocking the event loop
 
+### Agent Hooks
+
+The hook system allows intercepting tool execution at lifecycle points:
+
+- **PreToolUse** — Runs before each tool call. Can modify the tool input (e.g. auto-format paths) or block execution entirely (e.g. security policy)
+- **PostToolUse** — Runs after each tool call. Can modify the result (e.g. redact secrets from output)
+- **Notification** — Receives informational events (e.g. status changes)
+- **SubagentStop** — Receives worker completion events
+
+Hooks are synchronous and execute in registration order. PreToolUse supports input chaining (each handler receives the modified input from the previous one) and short-circuit blocking.
+
+### Structured Git Tool
+
+The `git` tool provides type-safe git operations without raw shell commands:
+
+- **status** — Show working tree status, current branch, and file changes
+- **diff_summary** — Show diff stats for staged and unstaged changes
+- **commit** — Stage all changes and commit with a message (requires approval)
+
+Commit messages are passed via `spawnSync` args array — never interpolated into a shell string — preventing command injection.
+
+### Todo Tracking
+
+The `todo` tool maintains a session-scoped task list:
+
+- **write** — Replace the entire list with a new one (validated via Zod)
+- **read** — Return the current list with status icons (✓ completed, ► in progress, ○ pending)
+
+Useful for multi-step tasks where the agent needs to track its own progress.
+
+### Web Fetch
+
+The `web_fetch` tool retrieves web content:
+
+- URL validation (http/https only) and DNS resolution
+- **SSRF protection** — Blocks requests to private/reserved IPs (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80)
+- HTML content is converted to Markdown (links, headings, code blocks preserved)
+- 15 second timeout, 50K character truncation limit
+- Requires user approval for all requests
+
+### File-Level Undo
+
+The undo system captures file snapshots before each modification:
+
+- Every `write_file` / `edit_file` creates a versioned backup in `~/.rivet/file-history/{sessionId}/`
+- Backups are SHA-256 hashed filenames, up to 100 snapshots retained
+- Orphaned backups are cleaned up when snapshots are evicted
+- `undo` tool shows a preview (files changed, +/- lines) before restoring
+- `undo confirm` restores files to their pre-modification state
+
 ### Worker Safety
 
 Worker sessions enforce a timeout budget (`timeoutMs` from the work order) — if a worker runs too long, it is automatically aborted via `AbortController`. The batch dispatch respects `maxWorkers` concurrency (chunked by the limit, not unbounded).
@@ -406,10 +504,13 @@ Session memory survives across compaction. Use it to bookmark decisions or prefe
 | `/compact` | Compact conversation to free context space |
 | `/debug cache` | Show detailed cache stats: hit rate, tokens, savings |
 | `/debug fingerprint` | Show prompt fingerprint and drift detection |
+| `/debug mcp` | Show MCP server connection details |
 | `/debug prompt` | Show current system prompt preview |
 | `/verbose` | Toggle between 20-line and 200-line tool output |
 | `/rollback` | Preview changes since last checkpoint |
 | `/rollback confirm` | Discard all changes since last checkpoint |
+| `/undo` | Preview last file change undo (diff stats) |
+| `/undo confirm` | Restore files to previous snapshot |
 | `/sessions` | List saved sessions |
 | `/resume <N>` | Restore a saved session |
 | `/evidence` | Show last turn evidence (files read, modified, tests) |
@@ -472,7 +573,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (353)
+npm run test                   # Run all tests (445)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```

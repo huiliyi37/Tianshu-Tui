@@ -69,7 +69,15 @@ export class FileHistory {
       }
       this.snapshots.push(snapshot)
       if (this.snapshots.length > MAX_SNAPSHOTS) {
+        const evicted = this.snapshots.slice(0, this.snapshots.length - MAX_SNAPSHOTS)
         this.snapshots = this.snapshots.slice(-MAX_SNAPSHOTS)
+        for (const s of evicted) {
+          for (const b of Object.values(s.trackedFileBackups)) {
+            if (b.backupFileName) {
+              try { await unlink(join(this.backupDir, this.sessionId, b.backupFileName)) } catch { /* already gone */ }
+            }
+          }
+        }
       }
     }
   }

@@ -1,6 +1,29 @@
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 import type { Tool, ToolCallParams } from './types.js'
 
 const MAX_CONTENT_LENGTH = 50_000
+
+export function isPrivateIP(ip: string): boolean {
+  if (isIP(ip) === 4) {
+    const octets = ip.split('.').map(Number)
+    if (octets[0] === 10) return true
+    if (octets[0] === 172 && octets[1]! >= 16 && octets[1]! <= 31) return true
+    if (octets[0] === 192 && octets[1] === 168) return true
+    if (octets[0] === 127) return true
+    if (octets[0] === 0) return true
+    if (octets[0] === 169 && octets[1] === 254) return true
+    return false
+  }
+  if (isIP(ip) === 6) {
+    const lower = ip.toLowerCase()
+    if (lower === '::1') return true
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true
+    if (lower.startsWith('fe80')) return true
+    return false
+  }
+  return false
+}
 
 export function htmlToMarkdown(html: string): string {
   let text = html
@@ -50,6 +73,15 @@ Requires user approval since it makes network requests.`,
 
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       return { content: `Unsupported protocol: ${url.protocol}. Only http and https are allowed.`, isError: true }
+    }
+
+    try {
+      const { address } = await lookup(url.hostname)
+      if (isPrivateIP(address)) {
+        return { content: `Access denied: ${url.hostname} resolves to a private/reserved IP (${address})`, isError: true }
+      }
+    } catch {
+      return { content: `Could not resolve hostname: ${url.hostname}`, isError: true }
     }
 
     try {

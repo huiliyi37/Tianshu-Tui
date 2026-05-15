@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T20:52:09.410Z
-> Files: 164 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T22:23:08.053Z
+> Files: 199 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -12,11 +12,11 @@
 ## ./
 
 - `.gitignore` — Git ignore rules (~23 tok)
-- `CLAUDE.md` — Rivet (~255 tok)
+- `CLAUDE.md` — Rivet (~310 tok)
 - `config.example.toml` — ~/.opencode/config.toml (~232 tok)
 - `package-lock.json` — npm lock file (~19981 tok)
 - `package.json` — Node.js package manifest (~164 tok)
-- `README.md` — Project documentation (~4800 tok)
+- `README.md` — Project documentation (~7877 tok)
 - `tsconfig.json` — TypeScript configuration (~153 tok)
 - `tsup.config.ts` (~65 tok)
 
@@ -31,6 +31,7 @@
 ## .superpowers/brainstorm/
 
 - `2026-05-15-rivet-open-model-terminal-agent-fragments.json` (~1635 tok)
+- `2026-05-16-rivet-execution-resilience-layer-fragments.json` — Declares exists (~1500 tok)
 - `2026-05-16-rivet-glanceable-cockpit-techstyle-fragments.json` (~1123 tok)
 - `2026-05-16-rivet-subagent-orchestration-fragments.json` — Rivet subagent orchestration brainstorm fragments (~2146 tok)
 - `2026-05-16-rivet-subagent-orchestration-fragments.json` (~2146 tok)
@@ -43,16 +44,20 @@
 ## docs/analysis/
 
 - `2026-05-15-handoff.md` — Handoff: Rivet v0.1 — 2026-05-15 (updated P2.2) (~2443 tok)
+- `2026-05-16-xml-protocol-code-review-fixes.md` — 工作记录：XML Protocol + Code Review Fixes (~783 tok)
 
 ## docs/superpowers/plans/
 
 - `2026-05-15-rivet-p2-2-capability-reliability-layer.md` — Rivet P2.2 Capability Reliability Layer 实现计划 (~14754 tok)
 - `2026-05-15-rivet-p2-3-harness-cockpit-implementation.md` — Rivet P2.3 Harness Cockpit TUI 实现计划 (~13437 tok)
 - `2026-05-15-rivet-performance-optimization.md` — Rivet 性能优化与 Claude Code 对标实现计划 (~10205 tok)
+- `2026-05-16-rivet-execution-resilience-layer-implementation.md` — Execution Resilience Layer 实现计划 (~6873 tok)
+- `2026-05-16-rivet-gap-closing-hooks-git-todo-webfetch-undo.md` — Rivet 差距弥补：Hooks / Git / Todo / WebFetch / Undo 实现计划 (~11245 tok)
 - `2026-05-16-rivet-glanceable-cockpit-techstyle-implementation.md` — Rivet Glanceable Cockpit + 科技风视觉层 实现计划 (~6867 tok)
+- `2026-05-16-rivet-mcp-client-implementation.md` — Rivet MCP Client 实现计划 (~7790 tok)
 - `2026-05-16-rivet-progressive-context-engine-implementation.md` — Rivet Progressive Context Engine 实现计划 (~18102 tok)
 - `2026-05-16-rivet-subagent-orchestration-implementation.md` — Rivet 子代理协同 Phase 1 实现计划 (~14921 tok)
-- `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5624 tok)
+- `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5642 tok)
 
 ## docs/superpowers/specs/
 
@@ -60,6 +65,7 @@
 - `2026-05-15-rivet-p2-1-performance-dev-capability-optimization.md` — P2.1：Rivet 性能层与开发能力层优化建议 (~2607 tok)
 - `2026-05-15-rivet-p2-3-harness-cockpit-design.md` — Rivet P2.3 Harness Cockpit TUI 设计 (~3319 tok)
 - `2026-05-15-system-prompt-expansion-design.md` — OpenCode TUI System Prompt 架构优化 (~791 tok)
+- `2026-05-16-rivet-execution-resilience-layer-design.md` — Rivet Execution Resilience Layer 设计 (~1696 tok)
 - `2026-05-16-rivet-glanceable-cockpit-techstyle-design.md` — Rivet Glanceable Cockpit + 科技风视觉层 设计 (~1897 tok)
 - `2026-05-16-rivet-progressive-context-engine-design.md` — Rivet Progressive Context Engine 方案设计 (~3845 tok)
 - `2026-05-16-rivet-subagent-orchestration-design.md` — Rivet 主控模型子代理协同能力深度头脑风暴结果 (~7664 tok)
@@ -86,7 +92,7 @@
 
 ## src/
 
-- `main.tsx` — Read piped stdin (non-TTY only) as initial input (~2700 tok)
+- `main.tsx` — Read piped stdin (non-TTY only) as initial input (~3766 tok)
 - `validation.ts` — Exports isValidSessionId, assertValidSessionId (~78 tok)
 
 ## src/agent/
@@ -96,18 +102,23 @@
 - `checkpoint.ts` — Create a checkpoint by recording the current HEAD hash and dirty worktree state. (~1577 tok)
 - `context.ts` — Replace all messages (used after compaction) (~1512 tok)
 - `coordinator-state.ts` — Cumulative event counts — each completed work order increments queued, running, AND its terminal sta (~490 tok)
-- `coordinator.ts` — Exports DelegationRequest, CoordinatorRun, WorkerRuntimeFactory, DelegationCoordinatorConfig + 2 mor (~1221 tok)
+- `coordinator.ts` — Exports DelegationRequest, CoordinatorRun, WorkerRuntimeFactory, DelegationCoordinatorConfig + 2 mor (~1269 tok)
 - `evidence.ts` — Exports EvidenceState, EvidenceTracker (~483 tok)
-- `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~345 tok)
-- `loop.ts` — API routes: GET (1 endpoints) (~4111 tok)
+- `failure-classifier.ts` — Classify all failures found in a test run output (~1162 tok)
+- `file-history.ts` — Exports FileBackup, FileSnapshot, DiffStats, FileHistory (~1525 tok)
+- `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~5220 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
-- `session-persist.ts` — Append a single message to the session file (~893 tok)
+- `session-persist.ts` — Append a single message to the session file (~1064 tok)
+- `task-state.ts` — Exports TaskState, extractTaskState (~326 tok)
 - `trace-store.ts` — Exports TraceEventKind, TraceEventStatus, DoomLoopLevel, TraceEvent + 9 more (~718 tok)
+- `trajectory.ts` — Exports TrajectoryEntry, TrajectoryRecorder (~312 tok)
+- `turn-harness.ts` — Exports ToolExecution, ToolExecutionResult, TurnHarnessConfig, TurnHarness (~765 tok)
 - `verification.ts` — Exports VerificationState, emptyVerificationState, addVerificationRun, summarizeVerification + 2 mor (~514 tok)
 - `work-order.ts` — Zod schemas: workOrderKindSchema, workerProfileSchema, aggregationPolicySchema, workOrderScopeSchema (~2145 tok)
 - `work-queue.ts` — Exports QueueEntry, WorkOrderQueue (~472 tok)
 - `worker-prompts.ts` — buildWorkerPrompt, buildWorkerRepairPrompt, buildPrimaryWorkerPacket (~2263 tok)
-- `worker-session.ts` — Headless runWorkerSession: independent SessionContext, repair retry loop (~3544 tok)
+- `worker-session.ts` — Exports WorkerSessionConfig, WorkerTranscript, WorkerSessionRun, runWorkerSession (~1077 tok)
 
 ## src/agent/__tests__/
 
@@ -117,10 +128,15 @@
 - `context-ledger-state.test.ts` — Declares makeLedger (~543 tok)
 - `coordinator-state.test.ts` — Declares state (~791 tok)
 - `coordinator.test.ts` — WorkerRuntimeFactory: fakeTool, makeRegistry, resultFor (~2588 tok)
-- `intent-extractor.test.ts` — Declares Intent (~536 tok)
+- `failure-classifier.test.ts` — Declares errors (~1068 tok)
+- `file-history.test.ts` — Declares TMP (~742 tok)
+- `intent-extractor.test.ts` — Declares Intent (~812 tok)
 - `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~2900 tok)
 - `prewarm.test.ts` — API routes: GET (9 endpoints) (~443 tok)
+- `task-state.test.ts` — Declares entries (~563 tok)
 - `trace-store.test.ts` — Declares TraceEvent (~604 tok)
+- `trajectory.test.ts` — Declares tr (~518 tok)
+- `turn-harness.test.ts` — TurnHarnessConfig: makeConfig (~1644 tok)
 - `verification.test.ts` — Declares baseRun (~739 tok)
 - `work-order.test.ts` — Declares order (~1254 tok)
 - `work-queue.test.ts` — Declares order (~762 tok)
@@ -152,12 +168,13 @@
 
 ## src/config/
 
-- `default.ts` — Exports DEFAULT_CONFIG (~298 tok)
-- `schema.ts` — Zod schemas: modelConfigSchema, providerSchema, agentSchema, compactSchema + 2 more (~588 tok)
+- `default.ts` — Exports DEFAULT_CONFIG (~324 tok)
+- `manager.ts` — Exports loadConfig, listProviders, getProvider, getDefaultProvider + 10 more (~3370 tok)
+- `schema.ts` — Zod schemas: modelConfigSchema, providerSchema, agentSchema, compactSchema + 2 more (~623 tok)
 
 ## src/context/
 
-- `ledger.ts` — Exports createContextLedger (~315 tok)
+- `ledger.ts` — Exports createContextLedger (~340 tok)
 - `microcompact.ts` — Exports microcompactToolResults, applyMicrocompact (~926 tok)
 - `reactive-compact.ts` — Exports ReactiveRoundSelectionOptions, CompactBoundaryInput, selectReactiveCompactRounds, createComp (~384 tok)
 - `resume-preflight.ts` — Exports runResumePreflight (~682 tok)
@@ -182,6 +199,28 @@
 
 - `sample.test.ts` — Declares sample (~300 tok)
 
+## src/hooks/
+
+- `registry.ts` — API routes: GET (4 endpoints) (~628 tok)
+- `types.ts` — Exports HookEvent, PreToolUseInput, PostToolUseInput, NotificationInput + 6 more (~326 tok)
+
+## src/hooks/__tests__/
+
+- `registry.test.ts` — Declares registry (~840 tok)
+
+## src/mcp/
+
+- `config.ts` — Zod schemas: mcpServerConfigSchema, mcpConfigSchema (~268 tok)
+- `manager.ts` — Exports McpToolDef, ConnectedServer, McpManager (~1342 tok)
+- `types.ts` — Exports McpConnectionState (~54 tok)
+- `wrapper.ts` — Exports mcpToolName, createMcpToolWrapper (~616 tok)
+
+## src/mcp/__tests__/
+
+- `config.test.ts` — Declares config (~541 tok)
+- `manager.test.ts` — Declares makeConfig (~1004 tok)
+- `wrapper.test.ts` — Declares mcpDef (~1363 tok)
+
 ## src/model/
 
 - `capability.ts` — Exports ModelCapabilityCard, recommendModelForTask (~400 tok)
@@ -192,10 +231,10 @@
 
 ## src/prompt/
 
-- `engine.ts` — Build a request. Volatile context is injected as an independent user message (~1661 tok)
+- `engine.ts` — Build a request. Volatile context is injected as an independent user message (~1749 tok)
 - `fingerprint.ts` — Exports PrefixFingerprint, DriftEvent, computeFingerprint, detectDrift (~400 tok)
 - `static.ts` — Exports StaticPromptContext, buildSystemPrompt (~946 tok)
-- `volatile.ts` — Build the volatile `<context>` block injected into the user message. (~960 tok)
+- `volatile.ts` — Build the volatile `<context>` block injected into the user message. (~1129 tok)
 
 ## src/prompt/__tests__/
 
@@ -217,10 +256,11 @@
 ## src/tools/
 
 - `bash.ts` — Exports BASH_TOOL (~1107 tok)
-- `default-registry.ts` — createDefaultToolRegistry: 8 core tools factory (~893 tok)
+- `default-registry.ts` — Exports createDefaultToolRegistry (~318 tok)
 - `delegate-task.ts` — createDelegateTaskTool: Phase 1 read-only worker delegation tool (~2416 tok)
 - `diff.ts` — Exports DIFF_TOOL (~1291 tok)
 - `edit.ts` — Exports EDIT_FILE_TOOL (~942 tok)
+- `git.ts` — Exports GIT_TOOL (~1038 tok)
 - `glob.ts` — /*.ts") (~1317 tok)
 - `grep.ts` — Exports GREP_TOOL (~2330 tok)
 - `output-store.ts` — Exports ToolOutputMeta, persistRawOutput, buildModelOutput, buildUiOutput (~794 tok)
@@ -228,8 +268,11 @@
 - `read-file.ts` — Exports READ_FILE_TOOL (~654 tok)
 - `registry.ts` — Exports ToolRegistry (~304 tok)
 - `run-tests.ts` — Exports RUN_TESTS_TOOL (~3052 tok)
+- `todo.ts` — Zod schemas: todoItemSchema, todoActionSchema (~880 tok)
 - `truncation.ts` — Exports truncateContent (~112 tok)
 - `types.ts` — Content sent to model as tool_result (~270 tok)
+- `undo.ts` — Exports createUndoTool (~629 tok)
+- `web-fetch.ts` — API routes: GET (1 endpoints) (~1266 tok)
 - `write-file.ts` — Exports WRITE_FILE_TOOL (~508 tok)
 
 ## src/tools/__tests__/
@@ -238,25 +281,29 @@
 - `delegate-task.test.ts` — Delegate task tool: input validation, coordinator call tests (~2492 tok)
 - `diff.test.ts` — makeParams: git (~887 tok)
 - `edit.test.ts` — TEST_DIR: makeParams (~832 tok)
+- `git.test.ts` — Declares TMP (~802 tok)
 - `glob.test.ts` — /*.ts' })) (~1200 tok)
 - `grep.test.ts` — Exports helper (~1243 tok)
 - `output-store.test.ts` — Declares meta (~1015 tok)
 - `path-validate.test.ts` — Declares result (~621 tok)
 - `registry-filter.test.ts` — filterToolRegistry: allowlist, unknown tool, isolation tests (~1819 tok)
 - `run-tests.test.ts` — makeParams: setupProject (~993 tok)
+- `todo.test.ts` — Declares result (~596 tok)
+- `undo.test.ts` — Declares TMP (~672 tok)
+- `web-fetch.test.ts` — Declares result (~783 tok)
 
 ## src/tui/
 
 - `agent-status.tsx` — MAX_VISIBLE_ITEMS (~1232 tok)
-- `app.tsx` — STREAM_FLUSH_MS (~8541 tok)
+- `app.tsx` — STREAM_FLUSH_MS (~9022 tok)
 - `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
 - `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)
 - `log-state.ts` — Exports LogEntry, createLogEntry, appendLogInPlace, visibleLogs + 2 more (~586 tok)
-- `phase-tracker.ts` — Exports Phase, LastAction, PhaseTracker (~369 tok)
+- `phase-tracker.ts` — Exports Phase, LastAction, PhaseTracker (~482 tok)
 - `status-bar.tsx` — tokenBar (~586 tok)
 - `stream.tsx` — StreamOutput (~105 tok)
-- `summary-bar.tsx` — truncate (~1240 tok)
+- `summary-bar.tsx` — truncate (~1249 tok)
 - `theme.ts` — Exports RivetTheme, getTheme (~456 tok)
 - `thinking.tsx` — ThinkingCollapser — uses useState (~242 tok)
 - `tool-card.tsx` — MAX_COLLAPSED_LINES (~456 tok)
@@ -265,7 +312,7 @@
 ## src/tui/__tests__/
 
 - `log-state.test.ts` — Declares LogEntry (~803 tok)
-- `phase-tracker.test.ts` — Declares pt (~750 tok)
+- `phase-tracker.test.ts` — Declares pt (~1177 tok)
 - `status-bar.test.ts` — contextColor: roundsColor, usageColor, cacheColor (~436 tok)
 - `summary-bar.test.ts` — Declares state (~888 tok)
 - `theme.test.ts` — Declares theme (~331 tok)

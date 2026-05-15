@@ -20,7 +20,8 @@ Key paths:
 - `src/tui/` — Terminal UI (Ink 6 + React), SummaryBar, PhaseTracker, theme system
 - `src/api/` — SSE streaming client + provider abstraction
 - `src/agent/` — Agent loop + session management + sub-agent coordinator
-- `src/tools/` — bash, read_file, write_file, edit_file, delegate_task
+- `src/tools/` — bash, read_file, write_file, edit_file, git, todo, web_fetch, undo, delegate_task
+- `src/hooks/` — Agent hooks (PreToolUse/PostToolUse/Notification/SubagentStop)
 - `src/mcp/` — MCP client (Model Context Protocol) — config, wrapper, manager, tool discovery
 - `src/prompt/` — System prompt assembly + cache fingerprinting
 - `src/compact/` — Context compaction (micro + smart)
@@ -29,4 +30,4 @@ Key paths:
 
 ## Slash Commands
 
-`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/context`, `/evidence`, `/auto`, `/mcp`, `/cockpit`
+`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/undo`, `/context`, `/evidence`, `/auto`, `/mcp`, `/cockpit`

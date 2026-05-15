@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
 import type { Tool, ToolCallParams } from './types.js'
 
 const ACTIONS = ['status', 'diff_summary', 'commit'] as const
@@ -14,7 +14,7 @@ export const GIT_TOOL: Tool = {
     description: `Structured git operations. Actions:
 - status: Show working tree status, current branch, and file changes
 - diff_summary: Show diff stats for staged and unstaged changes
-- commit: Stage all tracked changes and commit with a message
+- commit: Stage all changes (including untracked files) and commit with a message
 
 For complex git operations (branch, merge, rebase, push, pull, log), use the bash tool instead.`,
     input_schema: {
@@ -80,10 +80,15 @@ For complex git operations (branch, merge, rebase, push, pull, log), use the bas
             return { content: 'Nothing to commit. Working tree clean.' }
           }
           runGit('add -A', cwd)
-          // Escape double quotes and backticks in message
-          const safeMessage = message.replace(/"/g, "'").replace(/`/g, "'")
-          const result = runGit(`commit -m "${safeMessage}"`, cwd)
-          return { content: result.trim() }
+          const result = spawnSync('git', ['commit', '-m', message], {
+            cwd,
+            encoding: 'utf-8',
+            timeout: 10_000,
+          })
+          if (result.status !== 0) {
+            return { content: `git commit failed: ${(result.stderr ?? '').trim()}`, isError: true }
+          }
+          return { content: result.stdout.trim() }
         }
       }
     } catch (err) {
