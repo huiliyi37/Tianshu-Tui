@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdir
 import { join } from 'path'
 import { homedir } from 'os'
 import type { Message } from '../api/types.js'
+import type { SessionMetadata } from '../context/types.js'
+import type { SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
+import { appendSessionMemory, buildSessionMemoryBlock, loadSessionMemory } from '../context/session-memory.js'
 
 const SESSION_DIR = join(homedir(), '.rivet', 'sessions')
 
@@ -14,10 +17,14 @@ function ensureDir(dir: string): void {
 
 export class SessionPersist {
   private filePath: string
+  private metadataPath: string
+  private sessionId: string
 
   constructor(sessionId: string) {
     ensureDir(SESSION_DIR)
+    this.sessionId = sessionId
     this.filePath = join(SESSION_DIR, `${sessionId}.jsonl`)
+    this.metadataPath = join(SESSION_DIR, `${sessionId}.meta.json`)
   }
 
   /** Append a single message to the session file */
@@ -51,6 +58,31 @@ export class SessionPersist {
   /** Get the session file path */
   getPath(): string {
     return this.filePath
+  }
+
+  writeMetadata(metadata: SessionMetadata): void {
+    writeFileSync(this.metadataPath, JSON.stringify(metadata, null, 2) + '\n')
+  }
+
+  loadMetadata(): SessionMetadata | undefined {
+    if (!existsSync(this.metadataPath)) return undefined
+    try {
+      return JSON.parse(readFileSync(this.metadataPath, 'utf-8')) as SessionMetadata
+    } catch {
+      return undefined
+    }
+  }
+
+  loadMemory(): SessionMemoryState {
+    return loadSessionMemory(SESSION_DIR, this.sessionId)
+  }
+
+  appendMemory(input: { text: string; source: SessionMemoryEntry['source']; createdAt: number }): SessionMemoryState {
+    return appendSessionMemory(SESSION_DIR, this.sessionId, input)
+  }
+
+  buildMemoryBlock(): string {
+    return buildSessionMemoryBlock(this.loadMemory())
   }
 
   /** List all session files */

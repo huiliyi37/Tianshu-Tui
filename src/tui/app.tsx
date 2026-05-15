@@ -13,6 +13,7 @@ import { microCompact, estimateTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
+import { runResumePreflight } from '../context/resume-preflight.js'
 
 interface PendingApproval {
   id: string
@@ -223,6 +224,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
+/memory [text] — Show or add session memory
 /rollback — Preview changes since last checkpoint (/rollback confirm to execute)
 /evidence — Show last turn evidence summary
 /auto — Toggle auto-approve (current: ${autoSafeRef.current ? 'auto-safe' : 'manual'})` }))
@@ -351,9 +353,32 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           }
           const targetId = sessions[idx]!
           const p = new SessionPersist(targetId)
-          const msgs = p.load()
-          session.replaceMessages(msgs)
-          pushStatic(createLogEntry({ type: 'text', content: `Restored session ${targetId.slice(0, 8)}... (${msgs.length} messages)` }))
+          const rawMsgs = p.load()
+          const preflight = runResumePreflight(rawMsgs)
+          session.replaceMessages(preflight.messages)
+          if (preflight.repaired) {
+            p.compact(preflight.messages)
+          }
+          pushStatic(createLogEntry({ type: 'text', content: `Restored session ${targetId.slice(0, 8)}... (${preflight.messages.length} messages, apiSafe=${preflight.safe})` }))
+          if (preflight.repaired) {
+            pushStatic(createLogEntry({ type: 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted} orphan tool call(s).` }))
+          }
+          setIsStreaming(false)
+          return
+        }
+
+        case '/memory': {
+          const text = parts.slice(1).join(' ').trim()
+          if (!text) {
+            const memory = persist.loadMemory()
+            const content = memory.entries.length === 0
+              ? 'Session memory is empty.'
+              : memory.entries.map(entry => `- [${entry.source}] ${entry.text}`).join('\n')
+            pushStatic(createLogEntry({ type: 'text', content }))
+          } else {
+            persist.appendMemory({ text, source: 'manual', createdAt: Date.now() })
+            pushStatic(createLogEntry({ type: 'text', content: 'Saved to session memory.' }))
+          }
           setIsStreaming(false)
           return
         }

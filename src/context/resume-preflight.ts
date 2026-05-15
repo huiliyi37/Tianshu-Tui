@@ -14,6 +14,7 @@ export function runResumePreflight(messages: Message[]): ResumePreflightReport {
       repaired: false,
       syntheticResultsInserted: 0,
       orphanToolResultIds: invariant.orphanToolResult,
+      safe: !invariant.orphanToolResult.length,
       messages,
     }
   }
@@ -57,6 +58,7 @@ export function runResumePreflight(messages: Message[]): ResumePreflightReport {
     repaired: true,
     syntheticResultsInserted: inserted,
     orphanToolResultIds: newInvariant.orphanToolResult,
+    safe: !newInvariant.orphanToolUse.length && !newInvariant.orphanToolResult.length,
     messages: repaired,
   }
 }

@@ -121,6 +121,7 @@ export interface ResumePreflightReport {
   repaired: boolean
   syntheticResultsInserted: number
   orphanToolResultIds: string[]
+  safe: boolean
   messages: Message[]
 }
 
@@ -150,4 +151,11 @@ export interface SessionMemoryEntry {
 export interface SessionMemoryState {
   sessionId: string
   entries: SessionMemoryEntry[]
+}
+
+export interface SessionMetadata {
+  sessionId: string
+  updatedAt: number
+  compactEvents: CompactEvent[]
+  lastLedger?: ContextLedger
 }
