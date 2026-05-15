@@ -1,11 +1,29 @@
 import type { Message } from '../api/types.js'
 import { KEEP_RECENT_MESSAGES, CACHE_ANCHOR_MESSAGES } from './constants.js'
+import { groupIntoRounds } from '../context/rounds.js'
+
+const TOOL_RESULT_PREVIEW_CHARS = 1200
+
+function compactToolResultBlock(block: any): { block: any; changed: boolean } {
+  if (block.type !== 'tool_result') return { block, changed: false }
+  if (typeof block.content !== 'string' || block.content.length <= TOOL_RESULT_PREVIEW_CHARS) return { block, changed: false }
+  return {
+    block: {
+      ...block,
+      content: `<microcompacted tool_result original_chars="${block.content.length}">\n${block.content.slice(0, TOOL_RESULT_PREVIEW_CHARS)}\n</microcompacted tool_result>`,
+    },
+    changed: true,
+  }
+}
 
 /**
- * MicroCompact: lightweight truncation without API calls.
+ * MicroCompact: lightweight round-safe truncation without API calls.
  *
- * When total estimated tokens exceed the context window, truncate the
- * middle messages while keeping:
+ * Two-tier strategy:
+ *   Tier 1: shorten large tool_result content blocks (zero API cost)
+ *   Tier 2: remove complete safe rounds from the middle
+ *
+ * Always preserves:
  *   - First CACHE_ANCHOR_MESSAGES (cache anchor — preserves prefix structure)
  *   - Last KEEP_RECENT_MESSAGES (recent context)
  *
@@ -20,22 +38,52 @@ export function microCompact(
     return { messages, truncated: 0 }
   }
 
-  const anchor = messages.slice(0, CACHE_ANCHOR_MESSAGES)
-  const recent = messages.slice(-KEEP_RECENT_MESSAGES)
-  const middle = messages.slice(CACHE_ANCHOR_MESSAGES, -KEEP_RECENT_MESSAGES)
+  // Tier 1: shorten large tool_result content (zero API cost)
+  let compactedCount = 0
+  const shortened = messages.map(msg => {
+    if (!Array.isArray(msg.content)) return msg
+    let modified = false
+    const blocks = msg.content.map((block: any) => {
+      const result = compactToolResultBlock(block)
+      if (result.changed) { compactedCount++; modified = true }
+      return result.block
+    })
+    return modified ? { ...msg, content: blocks } : msg
+  })
 
-  let totalTokens = estimatedTokens
-  let removeCount = 0
-  while (removeCount < middle.length && totalTokens > contextWindow) {
-    totalTokens -= estimateMessageTokens(middle[removeCount]!)
-    removeCount++
+  let currentTokens = estimateTokens(shortened)
+
+  if (currentTokens <= contextWindow) {
+    return { messages: shortened, truncated: compactedCount }
   }
 
-  const keptMiddle = middle.slice(removeCount)
-  return {
-    messages: [...anchor, ...keptMiddle, ...recent],
-    truncated: removeCount,
+  // Tier 2: remove complete safe rounds from the middle
+  const anchorEnd = CACHE_ANCHOR_MESSAGES
+  const recentStart = Math.max(0, shortened.length - KEEP_RECENT_MESSAGES)
+  const rounds = groupIntoRounds(shortened)
+  const removeIndexes = new Set<number>()
+
+  for (const round of rounds) {
+    // Only remove rounds that are fully in the removable middle zone
+    if (round.startMessageIndex >= anchorEnd && round.endMessageIndex <= recentStart && round.apiInvariant === 'ok') {
+      const roundTokens = round.tokenEstimate
+      if (currentTokens - roundTokens <= contextWindow * 0.7) continue // keep some headroom
+      for (let idx = round.startMessageIndex; idx < round.endMessageIndex; idx++) {
+        removeIndexes.add(idx)
+      }
+      currentTokens -= roundTokens
+      compactedCount += round.endMessageIndex - round.startMessageIndex
+      if (currentTokens <= contextWindow) break
+    }
   }
+
+  if (removeIndexes.size > 0) {
+    const result = shortened.filter((_, idx) => !removeIndexes.has(idx))
+    return { messages: result, truncated: compactedCount }
+  }
+
+  // Fallback: if no complete rounds could be removed, keep the shortened version
+  return { messages: shortened, truncated: compactedCount }
 }
 
 /** Token estimation for a single message, accounting for CJK vs ASCII character density. */

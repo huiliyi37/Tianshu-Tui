@@ -65,7 +65,7 @@ export interface WorkingSetEntry {
   lastRoundIndex: number
 }
 
-export interface SessionMemoryState {
+export interface LedgerSessionMemoryState {
   path: string
   lastSummarizedRoundIndex: number
   lastUpdatedAt: number
@@ -81,9 +81,35 @@ export interface ContextLedger {
   anchors: ContextAnchor[]
   workingSet: WorkingSetEntry[]
   compactedSpans: CompactedSpan[]
-  sessionMemory: SessionMemoryState | null
+  sessionMemory: LedgerSessionMemoryState | null
   tokenBudget: ContextBudget
   apiInvariantStatus: ApiInvariantStatus
+}
+
+// ─── Compact Tier & Policy ────────────────────────────────────
+
+export type CompactTier = 0 | 1 | 2 | 3 | 4
+
+export interface CompactDecision {
+  tier: CompactTier
+  reason: string
+  shouldCompact: boolean
+}
+
+export interface CompactCircuitBreakerState {
+  consecutiveFailures: number
+  disabledUntilTurn?: number
+}
+
+// ─── Compact Event ────────────────────────────────────────────
+
+export interface CompactEvent {
+  turn: number
+  tier: CompactTier
+  reason: string
+  beforeTokens: number
+  afterTokens: number
+  createdAt: number
 }
 
 // ─── Resume Preflight ─────────────────────────────────────────
@@ -110,4 +136,18 @@ export interface MicrocompactResult {
   compactedCount: number
   tokensSaved: number
   compactedRoundIds: string[]
+}
+
+// ─── Session Memory Sidecar ──────────────────────────────────────
+
+export interface SessionMemoryEntry {
+  id: string
+  createdAt: number
+  text: string
+  source: 'manual' | 'compact' | 'resume'
+}
+
+export interface SessionMemoryState {
+  sessionId: string
+  entries: SessionMemoryEntry[]
 }

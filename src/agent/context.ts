@@ -1,4 +1,5 @@
 import type { Message, ContentBlock, Usage } from '../api/types.js'
+import type { CompactEvent, ContextLedger } from '../context/types.js'
 import { estimateMessageTokens, estimateTokens } from '../compact/micro.js'
 
 export const EMPTY_USAGE: Usage = {
@@ -27,6 +28,8 @@ export interface SessionState {
   testResults: Array<{ passed: number; failed: number }>
   turnCacheHistory: TurnCacheSnapshot[]
   compactedAtTurns: Set<number>
+  contextLedger?: ContextLedger
+  compactEvents: CompactEvent[]
 }
 
 export class SessionContext {
@@ -44,6 +47,7 @@ export class SessionContext {
       testResults: [],
       turnCacheHistory: [],
       compactedAtTurns: new Set(),
+      compactEvents: [],
     }
   }
 
@@ -158,5 +162,25 @@ export class SessionContext {
 
   getElapsedMs(): number {
     return Date.now() - this.state.startTime
+  }
+
+  setContextLedger(ledger: ContextLedger): void {
+    this.state.contextLedger = ledger
+  }
+
+  getContextLedger(): ContextLedger | undefined {
+    return this.state.contextLedger
+  }
+
+  recordCompactEvent(event: CompactEvent): void {
+    this.state.compactEvents = [...this.state.compactEvents, event]
+  }
+
+  getCompactEvents(): CompactEvent[] {
+    return [...this.state.compactEvents]
+  }
+
+  getWorkingSet(): string[] {
+    return [...new Set([...this.state.filesRead, ...this.state.filesModified])]
   }
 }
