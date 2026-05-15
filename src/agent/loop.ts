@@ -7,7 +7,8 @@ import { SessionContext } from './context.js'
 import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
-import { recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
+import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
+import { createContextLedger } from '../context/ledger.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
@@ -109,6 +110,16 @@ export class AgentLoop {
     return microCompact(messages, this.config.contextWindow, tokenCount)
   }
 
+  private refreshLedger(): void {
+    const ledger = createContextLedger(
+      'session',
+      '',
+      this.session.getMessages(),
+      this.config.contextWindow,
+    )
+    this.session.setContextLedger(ledger)
+  }
+
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     this.session.addUserMessage(userInput)
@@ -123,23 +134,30 @@ export class AgentLoop {
 
         const messages = this.session.getMessages()
         const estTokens = this.session.getEstimatedTokens()
-        const decision = shouldAutoCompact(messages, this.config.compact, estTokens)
-        if (decision.shouldCompact) {
+        const compactDecision = decideCompactTier({
+          estimatedTokens: estTokens,
+          maxTokens: this.config.contextWindow,
+          turn: this.session.getTurnCount(),
+          failures: this.compactFailures,
+        })
+        const legacyDecision = shouldAutoCompact(messages, this.config.compact, estTokens)
+        if (compactDecision.shouldCompact && legacyDecision.shouldCompact) {
           const beforeTokens = estTokens
           try {
-            const { messages: compacted } = await this.compactMessages(messages, decision.tokenCount)
+            const { messages: compacted } = await this.compactMessages(messages, estTokens)
             this.session.replaceMessages(compacted)
             this.session.markCompacted(turn)
             const afterTokens = this.session.getEstimatedTokens()
             this.session.recordCompactEvent({
               turn: this.session.getTurnCount(),
               tier: this.config.compactClient ? 2 : 1,
-              reason: `auto compact: ${decision.reason}`,
+              reason: `auto compact: ${compactDecision.reason}`,
               beforeTokens,
               afterTokens,
               createdAt: Date.now(),
             })
             this.compactFailures = recordCompactSuccess(this.compactFailures)
+            this.refreshLedger()
           } catch (err) {
             this.compactFailures = recordCompactFailure(this.compactFailures, this.session.getTurnCount())
             throw err
@@ -268,12 +286,14 @@ export class AgentLoop {
           }
 
           this.session.addToolResults(toolResults)
+          this.refreshLedger()
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
           continue
         }
 
         const badge = this.evidence.buildBadge()
         if (badge) callbacks.onTextDelta('\n' + badge)
+        this.refreshLedger()
         callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
         this.evidence.reset()
         break

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { PromptEngine } from '../engine.js'
 import type { Message } from '../../api/types.js'
+import { groupIntoRounds, computeInvariantStatus } from '../../context/rounds.js'
 
 function makeEngine() {
   return new PromptEngine({
@@ -66,5 +67,22 @@ describe('PromptEngine message normalization', () => {
 
     assert.equal(request.messages.some(msg => Array.isArray(msg.content) && msg.content.some(block => block.type === 'tool_result')), false)
     assert.ok(request.messages.some(msg => msg.role === 'user' && msg.content === 'new request'))
+  })
+
+  it('normalizes broken history into API-safe rounds', () => {
+    const messages: Message[] = [
+      { role: 'user', content: 'fix it' },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'call_safe', name: 'edit_file', input: { file_path: '/repo/a.ts' } }],
+      },
+      { role: 'user', content: 'continue' },
+    ]
+
+    const request = makeEngine().buildRequest(messages)
+    const rounds = groupIntoRounds(request.messages)
+    const invariant = computeInvariantStatus(rounds)
+
+    assert.equal(invariant.brokenRounds, 0, `Expected 0 broken rounds, got ${invariant.brokenRounds}`)
   })
 })

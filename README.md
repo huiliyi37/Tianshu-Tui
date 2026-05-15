@@ -248,6 +248,9 @@ Place `~/.rivet/config.json` (optional, uses defaults if missing):
 | `/resume <number>` | Restore a saved session |
 | `/rollback` | Preview changes since checkpoint (`/rollback confirm` to execute) |
 | `/evidence` | Show last turn evidence summary |
+| `/context` | Show context ledger: health, tokens, API round safety, compact events |
+| `/memory` | List session memory entries |
+| `/memory <text>` | Save a manual session memory entry |
 
 ## User Manual
 
@@ -277,13 +280,25 @@ Type your request in the input bar and press Enter. Rivet will:
 ### Understanding the Status Bar
 
 ```
-deepseek-v4-pro  cache:98.7%  ¥0.15  ████░░░░░░  125K/1M (12%)
-│                │            │      │            └── context usage
-│                │            │      └── token budget bar (color: green/yellow/red)
-│                │            └── estimated cost (cache discount applied)
+deepseek-v4-pro  cache:98.7%  ctx:healthy  rounds:safe  ¥0.15  ████░░░░░░  125K/1M (12%)
+│                │            │            │             │      │            └── context usage
+│                │            │            │             │      └── token budget bar (color: green/yellow/red)
+│                │            │            │             └── estimated cost (cache discount applied)
+│                │            │            └── API round invariant (green=safe, red=broken)
+│                │            └── context health (green=healthy, yellow=warning/compacting, red=critical)
 │                └── cache hit rate (green ≥80%, yellow ≥40%, red <40%)
 └── current model
 ```
+
+### Context Cockpit
+
+Rivet tracks context health in real time. The status bar shows:
+
+- **`ctx:<state>`** — `healthy`, `warning`, `compacting`, or `critical` based on token usage
+- **`rounds:safe`** / **`rounds:!`** — whether all API message rounds pass invariant checks
+- **`/context`** — detailed view: token sections, round diagnostics, compact history
+
+Session memory (`/memory`) stores per-session notes that survive across compaction. Use it to bookmark decisions or preferences within a session.
 
 ### Slash Commands Quick Reference
 
@@ -302,6 +317,9 @@ deepseek-v4-pro  cache:98.7%  ¥0.15  ████░░░░░░  125K/1M (1
 | `/sessions` | List saved sessions |
 | `/resume <N>` | Restore a saved session |
 | `/evidence` | Show last turn evidence (files read, modified, tests) |
+| `/context` | Show context health, token sections, round diagnostics |
+| `/memory` | List session memory entries |
+| `/memory <text>` | Save a manual session memory entry |
 | `/clear` | Clear screen |
 | `/exit` | Save session and exit |
 

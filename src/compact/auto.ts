@@ -12,6 +12,7 @@ import {
 } from './constants.js'
 import { microCompact, estimateTokens } from './micro.js'
 import type { CompactionConfig } from './constants.js'
+import { createCompactBoundaryMessage, selectReactiveCompactRounds } from '../context/reactive-compact.js'
 
 export interface CompactionDecision {
   shouldCompact: boolean
@@ -155,15 +156,19 @@ export async function smartCompact(
     return { summary: '', messages: truncated, truncatedCount: removedCount }
   }
 
-  // Stable XML header for prefix cache: the opening tag and attributes
-  // are consistent across compactions, so DeepSeek can match the prefix
-  // on subsequent turns even after re-compaction.
-  const compactMessage: Message = {
-    role: 'user',
-    content: `<compact-summary turns-removed="${oldMessages.length}">
-${summary}
-</compact-summary>`,
-  }
+  const selectedRounds = selectReactiveCompactRounds(messages, {
+    anchorMessages: CACHE_ANCHOR_MESSAGES,
+    recentMessages: KEEP_RECENT_MESSAGES,
+  })
+  const firstRound = selectedRounds[0]
+  const lastRound = selectedRounds[selectedRounds.length - 1]
+  const compactMessage = createCompactBoundaryMessage({
+    startIndex: firstRound?.startMessageIndex ?? CACHE_ANCHOR_MESSAGES,
+    endIndex: lastRound?.endMessageIndex ?? Math.max(CACHE_ANCHOR_MESSAGES, messages.length - KEEP_RECENT_MESSAGES - 1),
+    summary,
+    tokenBefore: tokenCount,
+    tokenAfter: Math.ceil(summary.length / 4),
+  })
 
   return {
     summary,
