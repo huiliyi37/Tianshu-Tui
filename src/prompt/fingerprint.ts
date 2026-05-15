@@ -17,6 +17,17 @@ function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex')
 }
 
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    return `{${Object.keys(obj).sort().map(key => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
 export function computeFingerprint(
   systemText: string,
   tools: ToolDefinition[] | undefined,
@@ -24,7 +35,7 @@ export function computeFingerprint(
   const systemSha256 = sha256(systemText)
 
   const toolsSha256 = tools && tools.length > 0
-    ? sha256(tools.map(t => t.name).sort().join(','))
+    ? sha256(stableStringify([...tools].sort((a, b) => a.name.localeCompare(b.name))))
     : sha256('')
 
   const combinedSha256 = sha256(`${systemSha256}:${toolsSha256}`)

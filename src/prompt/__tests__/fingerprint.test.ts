@@ -61,6 +61,33 @@ describe('computeFingerprint', () => {
     // Empty array and undefined both produce empty tools hash
     assert.equal(fp1.toolsSha256, fp2.toolsSha256)
   })
+
+  it('detects tool description changes', () => {
+    const fp1 = computeFingerprint('system', SAMPLE_TOOLS)
+    const modified = SAMPLE_TOOLS.map(tool => tool.name === 'bash'
+      ? { ...tool, description: 'Run shell commands with approval rules' }
+      : tool)
+    const fp2 = computeFingerprint('system', modified)
+
+    assert.notEqual(fp1.toolsSha256, fp2.toolsSha256)
+    assert.notEqual(fp1.combinedSha256, fp2.combinedSha256)
+  })
+
+  it('detects tool schema changes', () => {
+    const fp1 = computeFingerprint('system', SAMPLE_TOOLS)
+    const modified = SAMPLE_TOOLS.map(tool => tool.name === 'read_file'
+      ? {
+          ...tool,
+          input_schema: {
+            ...tool.input_schema,
+            required: ['file_path'],
+          },
+        }
+      : tool)
+    const fp2 = computeFingerprint('system', modified)
+
+    assert.notEqual(fp1.toolsSha256, fp2.toolsSha256)
+  })
 })
 
 describe('detectDrift', () => {
