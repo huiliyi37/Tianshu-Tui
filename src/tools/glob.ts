@@ -1,6 +1,7 @@
 import { readdirSync, existsSync, statSync } from 'fs'
 import { join, resolve, relative } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
+import { GitignoreFilter } from './gitignore.js'
 
 const EXCLUDE_DIRS = new Set([
   'node_modules', '.git', 'dist', '.next', 'build', 'target', '__pycache__',
@@ -131,10 +132,12 @@ Bad: glob(pattern="node_modules/**") (excluded by default)`,
     }
 
     const regex = globToRegex(pattern)
+    const gitignore = new GitignoreFilter(params.cwd)
     const files: string[] = []
     walkDir(searchRoot, files, searchRoot, regex)
 
     const matches = files
+      .filter(f => !gitignore.isIgnored(params.cwd, join(searchRoot, f)))
       .sort()
       .map((f) => relative(params.cwd, join(searchRoot, f)))
 

@@ -79,12 +79,12 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         }
       })
 
-      const buildResult = (code: number, isTimeout = false) => {
+      const buildResult = async (code: number, isTimeout = false) => {
         const raw = stdout + (stderr ? '\n' + stderr : '')
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
         const meta = { command, exitCode, durationMs }
-        const rawPath = persistRawOutput(params.toolUseId, raw)
+        const rawPath = await persistRawOutput(params.toolUseId, raw)
 
         return {
           content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
@@ -94,15 +94,15 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         }
       }
 
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         child.kill('SIGTERM')
         setTimeout(() => child.kill('SIGKILL'), 3000)
-        resolve(buildResult(0, true))
+        resolve(await buildResult(0, true))
       }, timeout)
 
-      child.on('close', (code) => {
+      child.on('close', async (code) => {
         clearTimeout(timer)
-        resolve(buildResult(code ?? 1))
+        resolve(await buildResult(code ?? 1))
       })
 
       child.on('error', (err) => {

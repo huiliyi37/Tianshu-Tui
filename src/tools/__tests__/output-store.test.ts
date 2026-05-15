@@ -1,9 +1,30 @@
-import { describe, it } from 'node:test'
+import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildModelOutput, buildUiOutput } from '../output-store.js'
+import { existsSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { persistRawOutput, buildModelOutput, buildUiOutput } from '../output-store.js'
 
 describe('output-store', () => {
   const meta = { command: 'npm test', exitCode: 0, durationMs: 1500 }
+
+  describe('persistRawOutput', () => {
+    const rawDir = join(tmpdir(), 'rivet-raw')
+
+    afterEach(() => {
+      // Clean up test files
+      try {
+        const testFile = join(rawDir, 'test-id.raw')
+        if (existsSync(testFile)) rmSync(testFile)
+      } catch { /* ignore */ }
+    })
+
+    it('writes raw output to file and returns path', async () => {
+      const path = await persistRawOutput('test-id', 'hello world')
+      assert.ok(existsSync(path))
+      assert.ok(path.endsWith('test-id.raw'))
+    })
+  })
 
   describe('buildModelOutput', () => {
     it('includes header with command, exit code, duration, line count', () => {
@@ -19,13 +40,11 @@ describe('output-store', () => {
       assert.ok(result.includes(small))
     })
 
-    it('truncates large output with head/tail', () => {
-      const large = 'x'.repeat(10_000)
-      const result = buildModelOutput(large, { ...meta, exitCode: 1 })
-      assert.ok(result.includes('bytes omitted'))
+    it('truncates large output with head/tail by lines', () => {
+      const lines = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n')
+      const result = buildModelOutput(lines, { ...meta, exitCode: 1 })
+      assert.ok(result.includes('lines omitted'))
       assert.ok(result.startsWith('[npm test] exit=1'))
-      // Should have head and tail content
-      assert.ok(result.includes('x'.repeat(100)))
     })
 
     it('handles empty output', () => {

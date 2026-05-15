@@ -48,10 +48,8 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const absPath = resolve(params.cwd, searchPath)
 
     // Try ripgrep first, fall back to native search
-    if (!literal) {
-      const rgResult = await tryRipgrep(pattern, absPath, glob, maxResults, params.cwd)
-      if (rgResult !== null) return rgResult
-    }
+    const rgResult = await tryRipgrep(pattern, absPath, glob, maxResults, params.cwd, literal)
+    if (rgResult !== null) return rgResult
 
     // Native fallback
     const regex = buildRegex(pattern, literal)
@@ -94,6 +92,7 @@ async function tryRipgrep(
   glob: string | undefined,
   maxResults: number,
   cwd: string,
+  literal: boolean,
 ): Promise<ToolResult | null> {
   return new Promise((resolve) => {
     const args = [
@@ -102,6 +101,9 @@ async function tryRipgrep(
       '--max-count', String(maxResults),
       '--color', 'never',
     ]
+    if (literal) {
+      args.push('--fixed-strings')
+    }
     if (glob) {
       args.push('--glob', glob)
     }
