@@ -60,12 +60,23 @@ export function finishTraceEvent(
   return { ...store, events }
 }
 
+function sortedStringify(obj: Record<string, unknown>): string {
+  const sorted: Record<string, unknown> = {}
+  for (const key of Object.keys(obj).sort()) {
+    const val = obj[key]
+    sorted[key] = val && typeof val === 'object' && !Array.isArray(val)
+      ? JSON.parse(sortedStringify(val as Record<string, unknown>))
+      : val
+  }
+  return JSON.stringify(sorted)
+}
+
 export function fingerprintToolCall(
   name: string,
   input: Record<string, unknown>,
   outputClass: string,
 ): string {
-  const payload = JSON.stringify({ name, input, outputClass }, Object.keys({ name, input, outputClass }).sort())
+  const payload = sortedStringify({ name, input, outputClass })
   return createHash('sha256').update(payload).digest('hex').slice(0, 16)
 }
 

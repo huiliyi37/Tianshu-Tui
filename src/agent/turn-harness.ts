@@ -43,12 +43,15 @@ export class TurnHarness {
         && this.config.retryableClasses.includes(errorClass)
         && this.config.maxRetries > 0
       ) {
-        retried = true
-        result = await exec.execute()
-        if (result.isError) {
-          result = {
-            content: `${result.content}\n\n[Retry failed. Error class: ${errorClass}. This is a transient error — consider alternative approach.]`,
-            isError: true,
+        for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
+          retried = true
+          result = await exec.execute()
+          if (!result.isError) break
+          if (attempt === this.config.maxRetries - 1) {
+            result = {
+              content: `${result.content}\n\n[All ${this.config.maxRetries} retries failed. Error class: ${errorClass}. Consider alternative approach.]`,
+              isError: true,
+            }
           }
         }
       }

@@ -19,6 +19,10 @@ import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { runResumePreflight } from '../context/resume-preflight.js'
 import type { McpManager } from '../mcp/manager.js'
+import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel } from './cockpit/index.js'
+import type { Panel } from './cockpit/types.js'
+import { PANEL_LABELS } from './cockpit/types.js'
+import { assessToolRisk } from '../agent/approval-risk.js'
 
 interface PendingApproval {
   id: string
@@ -63,8 +67,8 @@ interface SlashHandlerContext {
   setVerbose: (v: boolean) => void
   setAutoSafe: (v: boolean) => void
   rollbackTokenRef: React.MutableRefObject<string | null>
-  cockpitExpandedRef: React.MutableRefObject<boolean>
-  setCockpitExpanded: (v: boolean | ((prev: boolean) => boolean)) => void
+  cockpitPanelRef: React.MutableRefObject<Panel | null>
+  setCockpitPanel: (v: Panel | null | ((prev: Panel | null) => Panel | null)) => void
   pushStatic: (entry: LogEntry) => void
   setIsStreaming: (v: boolean) => void
   setCacheHitRate: (v: number) => void
@@ -95,7 +99,7 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /evidence — Show last turn evidence summary
 /mcp — Show MCP server status
 /auto — Toggle auto-approve (current: ${ctx.autoSafeRef.current ? 'auto-safe' : 'manual'})
-/cockpit — Toggle expanded cockpit panel
+/cockpit [summary|trace|verify|context|safety|model|off] — Toggle or switch cockpit panel
 Ctrl+C — Interrupt current turn (press twice to exit)` }))
       setIsStreaming(false)
       return true
@@ -302,9 +306,16 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     }
 
     case '/cockpit': {
-      ctx.setCockpitExpanded(prev => !prev)
-      if (!ctx.cockpitExpandedRef.current) {
-        pushStatic(createLogEntry({ type: 'text', content: 'Cockpit panel expanded. Type /cockpit again to collapse.' }))
+      const subcmd = parts[1] as Panel | 'off' | undefined
+      if (subcmd === 'off') {
+        ctx.setCockpitPanel(null)
+        pushStatic(createLogEntry({ type: 'text', content: 'Cockpit panel collapsed.' }))
+      } else if (subcmd && subcmd in PANEL_LABELS) {
+        ctx.setCockpitPanel(subcmd as Panel)
+        pushStatic(createLogEntry({ type: 'text', content: `Cockpit: ${PANEL_LABELS[subcmd as Panel]} panel. /cockpit off to collapse.` }))
+      } else {
+        ctx.setCockpitPanel(prev => prev ? null : 'summary')
+        pushStatic(createLogEntry({ type: 'text', content: ctx.cockpitPanelRef.current ? `Cockpit: ${PANEL_LABELS[ctx.cockpitPanelRef.current]} panel. /cockpit off to collapse.` : 'Cockpit panel collapsed.' }))
       }
       setIsStreaming(false)
       return true
@@ -327,6 +338,42 @@ function renderStaticEntry(entry: LogEntry, verbose: boolean) {
     default:
       return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
   }
+}
+
+// --- Cockpit panel view ---
+
+interface CockpitViewProps {
+  panel: Panel
+  agent: AgentLoop
+  session: SessionContext
+  model: string
+  cacheHitRate: number
+  cost: number
+  summaryState: SummaryState
+}
+
+function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState }: CockpitViewProps) {
+  const theme = getTheme()
+  const traceStore = agent.getTraceStore()
+  const evidence = agent.getEvidenceState()
+  const ledger = session.getContextLedger()
+  const doomLevel = agent.getDoomLoopLevel()
+  const usage = session.getTotalUsage()
+  const risk = assessToolRisk('', {}, doomLevel)
+  const compactEvents = session.getCompactEvents()
+
+  return (
+    <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor={theme.primary}>
+      <Text color={theme.primary} bold>─── COCKPIT ───</Text>
+      <CockpitRail activePanel={panel} onSelect={() => {}} />
+      {panel === 'summary' && <SummaryBar state={summaryState} />}
+      {panel === 'trace' && <TracePanel events={traceStore.events.map(e => ({ id: e.id, turn: e.turn, kind: e.kind, name: e.name, status: e.status, durationMs: e.durationMs, summary: e.summary }))} />}
+      {panel === 'verify' && <VerificationPanel filesRead={evidence.filesRead.size} filesModified={evidence.filesModified.size} verifications={evidence.verifications.map(v => ({ tool: v.command, status: v.status, summary: `${v.passed}✓ ${v.failed}✗ ${v.skipped}skip` }))} />}
+      {panel === 'context' && ledger && <ContextPanel estimatedTokens={ledger.tokenBudget.estimatedTokens} maxTokens={ledger.tokenBudget.maxTokens} rounds={ledger.rounds.length} compactionState={ledger.tokenBudget.compactionState} brokenRounds={ledger.apiInvariantStatus.brokenRounds} compactEvents={compactEvents.map(e => ({ turn: e.turn, tier: e.tier, beforeTokens: e.beforeTokens, afterTokens: e.afterTokens }))} />}
+      {panel === 'safety' && <SafetyPanel doomLoopLevel={doomLevel} riskLevel={risk.level} riskReasons={risk.reasons} recentFingerprints={new Set(traceStore.toolFingerprints).size} />}
+      {panel === 'model' && <ModelPanel model={model} cacheHitRate={cacheHitRate} inputTokens={usage.input_tokens} outputTokens={usage.output_tokens} cacheReadTokens={usage.cache_read_input_tokens} cacheWriteTokens={usage.cache_creation_input_tokens} cost={cost} />}
+    </Box>
+  )
 }
 
 // --- Main App ---
@@ -355,9 +402,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     task: '', phase: 'idle', stepCount: 0, totalSteps: 0,
     contextPct: 0, elapsedMs: 0, lastAction: null, risk: 'none',
   })
-  const [cockpitExpanded, setCockpitExpanded] = useState(false)
-  const cockpitExpandedRef = useRef(false)
-  useEffect(() => { cockpitExpandedRef.current = cockpitExpanded }, [cockpitExpanded])
+  const [cockpitPanel, setCockpitPanel] = useState<Panel | null>(null)
+  const cockpitPanelRef = useRef<Panel | null>(null)
+  useEffect(() => { cockpitPanelRef.current = cockpitPanel }, [cockpitPanel])
 
   const pushStatic = useCallback((entry: LogEntry) => {
     setStaticItems(prev => [...prev, entry])
@@ -460,8 +507,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       return
     }
 
-    if (_key.escape && cockpitExpanded) {
-      setCockpitExpanded(false)
+    if (_key.escape && cockpitPanel) {
+      setCockpitPanel(null)
       return
     }
     if (sessionPrompt === 'waiting') {
@@ -544,8 +591,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       const slashCtx: SlashHandlerContext = {
         parts, agent, session, persist, model, maxTokens, availableModels, onModelSwitch,
         currentSessionId, cost, cacheHitRate, autoSafeRef, verboseRef,
-        setVerbose, setAutoSafe, rollbackTokenRef, cockpitExpandedRef,
-        setCockpitExpanded, pushStatic, setIsStreaming, setCacheHitRate, setSummaryState,
+        setVerbose, setAutoSafe, rollbackTokenRef, cockpitPanelRef,
+        setCockpitPanel, pushStatic, setIsStreaming, setCacheHitRate, setSummaryState,
         mcpManagerRef,
       }
       if (handleSlashCommand(slashCtx)) return
@@ -716,7 +763,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const currentTokens = session.getEstimatedTokens()
   const tokenEstimate = Math.floor(streamingText.length / 4)
-  const theme = getTheme()
 
   return (
     <>
@@ -733,15 +779,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           contextHealth={session.getContextLedger()?.tokenBudget.compactionState ?? 'healthy'}
           apiSafe={(session.getContextLedger()?.apiInvariantStatus.brokenRounds ?? 0) === 0}
         />
-        {isStreaming && !cockpitExpanded && <SummaryBar state={summaryState} />}
-        {cockpitExpanded && (
-          <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor={theme.primary}>
-            <Text color={theme.primary} bold>─── COCKPIT ───</Text>
-            <Text>Phase: <Text bold>{summaryState.phase}</Text> ({summaryState.stepCount} steps) │ Context: <Text color={theme.contextColor(summaryState.contextPct)}>{Math.round(summaryState.contextPct * 100)}%</Text> │ Cost: <Text dimColor>¥{cost.toFixed(4)}</Text></Text>
-            <Text>Last: {summaryState.lastAction ? `${summaryState.lastAction.tool} ${summaryState.lastAction.target} → ${summaryState.lastAction.success ? '✓' : '✗'}` : 'none'} │ Turns: {session.getTurnCount()}</Text>
-            <Text>Risk: <Text color={summaryState.risk === 'high' ? theme.error : theme.dim}>{summaryState.risk}</Text> │ Cache: <Text color={theme.success}>{(cacheHitRate * 100).toFixed(1)}%</Text></Text>
-          </Box>
-        )}
+        {isStreaming && !cockpitPanel && <SummaryBar state={summaryState} />}
+        {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">Previous session found.</Text>

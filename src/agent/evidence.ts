@@ -64,4 +64,6 @@ export class EvidenceTracker {
     this.state.filesModified.clear()
     this.state.verifications = []
   }
+
+  getState(): EvidenceState { return this.state }
 }

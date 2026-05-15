@@ -83,7 +83,7 @@ describe('TurnHarness', () => {
     assert.equal(trajectory.getEntries()[0]!.status, 'failed')
   })
 
-  it('retries once then fails with reflexion hint', async () => {
+  it('retries once then fails with reflection hint', async () => {
     const trajectory = new TrajectoryRecorder()
     const harness = new TurnHarness(makeConfig(), trajectory)
     const result = await harness.executeTool({
@@ -95,7 +95,25 @@ describe('TurnHarness', () => {
       classify: () => 'timeout',
     })
     assert.equal(result.isError, true)
-    assert.ok(result.content.includes('[Retry failed.'))
+    assert.ok(result.content.includes('[All 1 retries failed.'))
+    assert.equal(trajectory.getEntries()[0]!.status, 'retried-failed')
+  })
+
+  it('retries up to maxRetries attempts', async () => {
+    const trajectory = new TrajectoryRecorder()
+    const harness = new TurnHarness(makeConfig({ maxRetries: 3, retryableClasses: ['timeout'] }), trajectory)
+    let calls = 0
+    const result = await harness.executeTool({
+      id: 'tu4b',
+      name: 'bash',
+      input: { command: 'curl api' },
+      turn: 1,
+      execute: async () => { calls++; return { content: 'ECONNRESET', isError: true } },
+      classify: () => 'timeout',
+    })
+    assert.equal(calls, 4) // 1 initial + 3 retries
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('[All 3 retries failed.'))
     assert.equal(trajectory.getEntries()[0]!.status, 'retried-failed')
   })
 

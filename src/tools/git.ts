@@ -1,11 +1,15 @@
-import { execSync, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import type { Tool, ToolCallParams } from './types.js'
 
 const ACTIONS = ['status', 'diff_summary', 'commit'] as const
 type GitAction = (typeof ACTIONS)[number]
 
-function runGit(args: string, cwd: string): string {
-  return execSync(`git ${args}`, { cwd, encoding: 'utf-8', timeout: 10_000 })
+function runGit(args: string[], cwd: string): string {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
+  if (result.status !== 0) {
+    throw new Error((result.stderr ?? '').trim() || `git exited with status ${result.status}`)
+  }
+  return result.stdout
 }
 
 export const GIT_TOOL: Tool = {
@@ -45,9 +49,9 @@ For complex git operations (branch, merge, rebase, push, pull, log), use the bas
     try {
       switch (action) {
         case 'status': {
-          const branch = runGit('branch --show-current', cwd).trim()
-          const porcelain = runGit('status --porcelain', cwd).trim()
-          const untracked = runGit('ls-files --others --exclude-standard', cwd).trim()
+          const branch = runGit(['branch', '--show-current'], cwd).trim()
+          const porcelain = runGit(['status', '--porcelain'], cwd).trim()
+          const untracked = runGit(['ls-files', '--others', '--exclude-standard'], cwd).trim()
           const lines = [`Branch: ${branch}`]
           if (!porcelain) {
             lines.push('Status: clean')
@@ -61,8 +65,8 @@ For complex git operations (branch, merge, rebase, push, pull, log), use the bas
         }
 
         case 'diff_summary': {
-          const staged = runGit('diff --cached --stat', cwd).trim()
-          const unstaged = runGit('diff --stat', cwd).trim()
+          const staged = runGit(['diff', '--cached', '--stat'], cwd).trim()
+          const unstaged = runGit(['diff', '--stat'], cwd).trim()
           const lines: string[] = []
           if (staged) lines.push('Staged:', staged)
           if (unstaged) lines.push('Unstaged:', unstaged)
@@ -75,11 +79,11 @@ For complex git operations (branch, merge, rebase, push, pull, log), use the bas
           if (!message) {
             return { content: 'Commit requires a "message" parameter.', isError: true }
           }
-          const status = runGit('status --porcelain', cwd).trim()
+          const status = runGit(['status', '--porcelain'], cwd).trim()
           if (!status) {
             return { content: 'Nothing to commit. Working tree clean.' }
           }
-          runGit('add -A', cwd)
+          runGit(['add', '-A'], cwd)
           const result = spawnSync('git', ['commit', '-m', message], {
             cwd,
             encoding: 'utf-8',

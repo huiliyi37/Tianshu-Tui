@@ -3,6 +3,7 @@ import { isIP } from 'node:net'
 import type { Tool, ToolCallParams } from './types.js'
 
 const MAX_CONTENT_LENGTH = 50_000
+const MAX_REDIRECTS = 5
 
 export function isPrivateIP(ip: string): boolean {
   if (isIP(ip) === 4) {
@@ -85,21 +86,69 @@ Requires user approval since it makes network requests.`,
     }
 
     try {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 15_000)
+      const headers = { 'User-Agent': 'Rivet/0.1 (terminal coding agent)' }
 
-      const response = await fetch(rawUrl, {
-        signal: controller.signal,
-        headers: { 'User-Agent': 'Rivet/0.1 (terminal coding agent)' },
-      })
-      clearTimeout(timeout)
+      let currentUrl = rawUrl
+      let response: Response | undefined
+      for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        let hopUrl: URL
+        try {
+          hopUrl = new URL(currentUrl)
+        } catch {
+          return { content: `Invalid redirect URL: ${currentUrl}`, isError: true }
+        }
+        if (hopUrl.protocol !== 'http:' && hopUrl.protocol !== 'https:') {
+          return { content: `Redirect to unsupported protocol: ${hopUrl.protocol}`, isError: true }
+        }
+        try {
+          const { address } = await lookup(hopUrl.hostname)
+          if (isPrivateIP(address)) {
+            return { content: `Access denied: ${hopUrl.hostname} resolves to private/reserved IP (${address})`, isError: true }
+          }
+        } catch {
+          return { content: `Could not resolve hostname: ${hopUrl.hostname}`, isError: true }
+        }
+
+        const hopController = new AbortController()
+        const hopTimeout = setTimeout(() => hopController.abort(), 10_000)
+        try {
+          response = await fetch(currentUrl, {
+            signal: hopController.signal,
+            headers,
+            redirect: 'manual',
+          })
+        } finally {
+          clearTimeout(hopTimeout)
+        }
+
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('location')
+          if (!location) {
+            return { content: `Redirect ${response.status} with no Location header`, isError: true }
+          }
+          currentUrl = new URL(location, currentUrl).href
+          continue
+        }
+        break
+      }
+
+      if (!response || response.status >= 300) {
+        return { content: `Too many redirects (>${MAX_REDIRECTS}) for ${rawUrl}`, isError: true }
+      }
 
       if (!response.ok) {
         return { content: `HTTP ${response.status} ${response.statusText} for ${rawUrl}`, isError: true }
       }
 
       const contentType = response.headers.get('content-type') ?? ''
-      const body = await response.text()
+      const bodyController = new AbortController()
+      const bodyTimeout = setTimeout(() => bodyController.abort(), 15_000)
+      let body: string
+      try {
+        body = await response.text()
+      } finally {
+        clearTimeout(bodyTimeout)
+      }
 
       let content: string
       if (contentType.includes('text/html')) {
