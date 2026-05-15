@@ -3,8 +3,9 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { render } from 'ink'
-import { createElement, useState, useMemo, useCallback } from 'react'
+import { createElement, useState, useMemo, useCallback, useEffect } from 'react'
 import { App } from './tui/app.js'
+import { ErrorBoundary } from './tui/error-boundary.js'
 import { AgentLoop } from './agent/loop.js'
 import { SessionContext } from './agent/context.js'
 import { SessionPersist } from './agent/session-persist.js'
@@ -62,6 +63,14 @@ function getOrCreateSessionId(): string {
   const id = randomUUID()
   writeFileSync(idFile, id)
   return id
+}
+
+// Module-level shutdown callback — set by Root component, called by signal handlers
+let shutdownCallback: (() => void) | null = null
+
+function gracefulShutdown() {
+  shutdownCallback?.()
+  process.exit(0)
 }
 
 function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: string; config: Config }) {
@@ -127,6 +136,15 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     if (found) setCurrentModel(found)
   }, [provider.models])
 
+  // Register shutdown callback for signal handlers
+  useEffect(() => {
+    shutdownCallback = () => {
+      agent.abort()
+      persist.compact(session.getMessages())
+    }
+    return () => { shutdownCallback = null }
+  }, [agent, persist, session])
+
   return createElement(App, {
     agent,
     session,
@@ -154,8 +172,11 @@ async function main() {
   }
 
   const { waitUntilExit } = render(
-    createElement(Root, { provider, apiKey, config }),
+    createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config })),
   )
+
+  process.on('SIGINT', gracefulShutdown)
+  process.on('SIGTERM', gracefulShutdown)
 
   await waitUntilExit()
 }
