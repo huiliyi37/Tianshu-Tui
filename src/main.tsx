@@ -21,6 +21,7 @@ import { killAll } from './tools/process-tracker.js'
 import { configSchema } from './config/schema.js'
 import { DEFAULT_CONFIG } from './config/default.js'
 import { runConfigCLI } from './config/manager.js'
+import { McpManager } from './mcp/manager.js'
 import type { Config, ProviderConfig } from './config/schema.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
@@ -78,6 +79,9 @@ let _pipedInput: string | undefined
 // read by the delegate_task tool's execute method.
 let _coordinatorRef: DelegationCoordinator | null = null
 
+// Module-level MCP manager reference — initialized in Root, shut down on exit
+let _mcpManager: McpManager | null = null
+
 function gracefulShutdown() {
   shutdownCallback?.()
   process.exit(0)
@@ -102,6 +106,50 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     }))
     return reg
   })
+
+  // MCP initialization — discovers tools from configured MCP servers and registers them
+  const [, setMcpReady] = useState(false)
+
+  useEffect(() => {
+    if (!config.mcp.enabled || Object.keys(config.mcp.servers).length === 0) {
+      setMcpReady(true)
+      return
+    }
+
+    const mgr = new McpManager(config.mcp)
+    _mcpManager = mgr
+
+    mgr.initialize().then(() => {
+      const mcpTools = mgr.getAllTools()
+      for (const tool of mcpTools) {
+        toolRegistry.register(tool)
+      }
+      setMcpReady(true)
+
+      const states = mgr.getStates()
+      const connected = states.filter(s => s.status === 'connected')
+      const failed = states.filter(s => s.status === 'error')
+      if (connected.length > 0 || failed.length > 0) {
+        const parts: string[] = []
+        if (connected.length > 0) {
+          const toolCount = connected.reduce((s, c) => s + c.toolCount, 0)
+          parts.push(`${connected.length} server(s) connected (${toolCount} tools)`)
+        }
+        if (failed.length > 0) {
+          parts.push(`${failed.length} server(s) failed: ${failed.map(s => `${s.serverId}: ${s.error}`).join(', ')}`)
+        }
+        console.error(`[MCP] ${parts.join('; ')}`)
+      }
+    }).catch((err) => {
+      console.error('[MCP] Initialization failed:', (err as Error).message)
+      setMcpReady(true)
+    })
+
+    return () => {
+      mgr.shutdown().catch(() => {})
+      _mcpManager = null
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [session] = useState(() => new SessionContext())
 
@@ -217,6 +265,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     shutdownCallback = () => {
       agent.abort()
       killAll()
+      _mcpManager?.shutdown().catch(() => {})
       persist.compact(session.getMessages())
     }
     return () => { shutdownCallback = null }
@@ -268,6 +317,7 @@ async function main() {
     config set-default <p>   Set default provider
     config add-model <p>     Add a model to provider
     config remove-model <p>  Remove a model from provider
+    config mcp              Manage MCP servers (list, add-stdio, add-sse, remove, enable, disable)
 
   Slash commands (inside session):
     /help       Show available commands
