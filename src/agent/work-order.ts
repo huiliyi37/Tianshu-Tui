@@ -4,6 +4,7 @@ import type { CapabilityTask } from '../model/capability.js'
 import type { VerificationMetadata } from '../tools/types.js'
 
 export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff'] as const
+export const WRITE_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
 export const PHASE1_DISALLOWED_WORKER_TOOLS = ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task'] as const
 
 export const workOrderKindSchema = z.enum([
@@ -98,6 +99,7 @@ export const workerResultSchema = z.object({
     title: z.string().min(1),
     content: z.string().min(1),
   })),
+  patchSummary: z.string().optional(),
   verification: verificationMetadataSchema.optional(),
   changedFiles: z.array(z.string()),
   risks: z.array(z.string()),
@@ -142,6 +144,38 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
       maxTurns: input.budget?.maxTurns ?? 4,
       maxTokens: input.budget?.maxTokens ?? 4096,
       timeoutMs: input.budget?.timeoutMs ?? 120_000,
+      maxRetries: input.budget?.maxRetries ?? 1,
+    },
+  })
+}
+
+export interface CreateWriteWorkOrderInput extends Omit<CreateReadOnlyWorkOrderInput, 'profile'> {
+  profile?: WorkerProfile
+}
+
+export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrder {
+  const id = input.id ?? `wo_${randomUUID()}`
+  return workOrderSchema.parse({
+    id,
+    parentTurnId: input.parentTurnId,
+    kind: input.kind,
+    profile: input.profile ?? 'patcher',
+    objective: input.objective,
+    scope: input.scope,
+    constraints: input.constraints ?? [
+      'Return a patchSummary describing all changes made.',
+      'List every changed file in changedFiles.',
+      'Include verification results if tests were run.',
+    ],
+    allowedTools: [...WRITE_WORKER_TOOLS],
+    disallowedTools: ['delegate_task'],
+    dedupeKey: `write:${input.scope.files?.join(',') || input.objective}`,
+    dependencies: input.dependencies ?? [],
+    aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
+    budget: {
+      maxTurns: input.budget?.maxTurns ?? 8,
+      maxTokens: input.budget?.maxTokens ?? 8192,
+      timeoutMs: input.budget?.timeoutMs ?? 180_000,
       maxRetries: input.budget?.maxRetries ?? 1,
     },
   })

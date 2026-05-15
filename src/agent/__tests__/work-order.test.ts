@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 import {
   buildBlockedWorkerResult,
   createReadOnlyWorkOrder,
+  createWriteWorkOrder,
   mapWorkOrderKindToCapabilityTask,
   parseWorkerResult,
   READ_ONLY_WORKER_TOOLS,
+  WRITE_WORKER_TOOLS,
 } from '../work-order.js'
 
 describe('work-order contract', () => {
@@ -93,5 +95,38 @@ describe('work-order contract', () => {
     assert.equal(mapWorkOrderKindToCapabilityTask('code_search'), 'repo_summarization')
     assert.equal(mapWorkOrderKindToCapabilityTask('review'), 'risky_refactor')
     assert.equal(mapWorkOrderKindToCapabilityTask('verify'), 'test_failure_diagnosis')
+  })
+
+  it('creates a write-capable work order with expanded tool allowlist', () => {
+    const order = createWriteWorkOrder({
+      id: 'wo_write',
+      parentTurnId: 'turn_1',
+      kind: 'patch_proposal',
+      objective: 'Fix the null check in coordinator.',
+      scope: { files: ['src/agent/coordinator.ts'] },
+    })
+
+    assert.equal(order.profile, 'patcher')
+    assert.deepEqual(order.allowedTools, [...WRITE_WORKER_TOOLS])
+    assert.equal(order.disallowedTools.includes('delegate_task'), true)
+    assert.equal(order.budget.maxTurns, 8)
+    assert.ok(order.dedupeKey.startsWith('write:'))
+  })
+
+  it('accepts patchSummary in worker result schema', () => {
+    const result = parseWorkerResult(JSON.stringify({
+      workOrderId: 'wo_1',
+      status: 'passed',
+      summary: 'Applied fix.',
+      patchSummary: 'Changed null check on line 42.',
+      findings: [],
+      artifacts: [],
+      changedFiles: ['src/agent/coordinator.ts'],
+      risks: [],
+      nextActions: [],
+    }), 'wo_1')
+
+    assert.equal(result.patchSummary, 'Changed null check on line 42.')
+    assert.deepEqual(result.changedFiles, ['src/agent/coordinator.ts'])
   })
 })
