@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink'
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 
 const MAX_COLLAPSED_LINES = 12
 
@@ -14,10 +14,15 @@ interface ToolCardProps {
 
 export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath }: ToolCardProps) {
   const limit = verbose ? 200 : MAX_COLLAPSED_LINES
-  const lines = result.split('\n')
-  const isLong = lines.length > limit
-  const displayLines = isLong ? lines.slice(0, limit) : lines
-  const truncated = isLong ? lines.length - limit : 0
+  const { displayText, truncated } = useMemo(() => {
+    const lines = result.split('\n')
+    const isLong = lines.length > limit
+    const displayLines = isLong ? lines.slice(0, limit) : lines
+    return {
+      displayText: displayLines.join('\n'),
+      truncated: isLong ? lines.length - limit : 0,
+    }
+  }, [result, limit])
 
   return (
     <Box
@@ -30,7 +35,7 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
       <Text bold color={isError ? 'red' : 'cyan'}>
         ── {name} ──{isStreaming ? ' (running)' : ''}
       </Text>
-      <Text>{displayLines.join('\n')}</Text>
+      <Text>{displayText}</Text>
       {truncated > 0 && (
         <Text dimColor>... {truncated} more lines{rawPath ? ` [raw: ${rawPath}]` : ''}</Text>
       )}

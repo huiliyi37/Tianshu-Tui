@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendLog, summarizeToolOutput, updateToolLog, visibleLogs, type LogEntry } from '../log-state.js'
+import { appendLogInPlace, summarizeToolOutput, updateToolLog, visibleLogs, createLogEntry, type LogEntry } from '../log-state.js'
 
 describe('TUI log state helpers', () => {
   it('updates an existing tool log instead of appending a duplicate', () => {
     const logs: LogEntry[] = [
-      { type: 'text', content: '> npm test' },
+      { type: 'text', id: 'l0', content: '> npm test' },
       { type: 'tool', id: 'tool-1', toolName: 'bash', content: 'running' },
     ]
 
@@ -36,7 +36,7 @@ describe('TUI log state helpers', () => {
   })
 
   it('keeps only the visible tail of logs', () => {
-    const logs = Array.from({ length: 60 }, (_, i): LogEntry => ({ type: 'text', content: String(i) }))
+    const logs = Array.from({ length: 60 }, (_, i): LogEntry => ({ type: 'text', id: `l${i}`, content: String(i) }))
 
     assert.equal(visibleLogs(logs, 50).length, 50)
     assert.equal(visibleLogs(logs, 50)[0]!.content, '10')
@@ -58,5 +58,30 @@ describe('TUI log state helpers', () => {
 
     assert.ok(summary.split('\n').length <= 25)
     assert.ok(summary.includes('lines omitted'))
+  })
+
+  it('assigns stable sequential IDs to log entries', () => {
+    const a = createLogEntry({ type: 'text', content: 'hello' })
+    const b = createLogEntry({ type: 'text', content: 'world' })
+
+    assert.ok(a.id.startsWith('l'))
+    assert.ok(b.id.startsWith('l'))
+    assert.notEqual(a.id, b.id)
+  })
+
+  it('preserves preset ID when given', () => {
+    const entry = createLogEntry({ id: 'tool-42', type: 'tool', content: 'result' })
+
+    assert.equal(entry.id, 'tool-42')
+  })
+
+  it('appends in place and trims when exceeding store limit', () => {
+    const logs: LogEntry[] = []
+    for (let i = 0; i < 250; i++) {
+      appendLogInPlace(logs, { type: 'text', id: `l${i}`, content: String(i) })
+    }
+
+    assert.ok(logs.length < 250)
+    assert.ok(logs.length > 0)
   })
 })

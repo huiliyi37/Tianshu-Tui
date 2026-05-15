@@ -1,14 +1,25 @@
 export interface LogEntry {
   type: 'text' | 'tool' | 'checkpoint' | 'evidence'
-  id?: string
+  id: string
   content: string
   toolName?: string
   isError?: boolean
   rawPath?: string
 }
 
-export function appendLog(logs: LogEntry[], entry: LogEntry): LogEntry[] {
-  return [...logs, entry]
+let _nextLogId = 0
+
+const MAX_LOG_STORE = 200
+
+export function createLogEntry(entry: { id?: string; type: LogEntry['type']; content: string; toolName?: string; isError?: boolean; rawPath?: string }): LogEntry {
+  return { ...entry, id: entry.id ?? `l${_nextLogId++}` }
+}
+
+export function appendLogInPlace(logs: LogEntry[], entry: LogEntry): void {
+  logs.push(entry)
+  if (logs.length > MAX_LOG_STORE) {
+    logs.splice(0, logs.length - MAX_LOG_STORE + 50)
+  }
 }
 
 export function visibleLogs(logs: LogEntry[], maxVisible: number): LogEntry[] {
@@ -36,7 +47,6 @@ export function updateToolLog(
   }
 
   const existing = logs[idx]!
-  // Skip update if content unchanged — prevents unnecessary React reconciliation
   if (existing.content === content && existing.isError === isError && existing.rawPath === rawPath) {
     return logs
   }
