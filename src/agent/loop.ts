@@ -4,7 +4,7 @@ import { PromptEngine } from '../prompt/engine.js'
 import { ToolRegistry } from '../tools/registry.js'
 import type { ToolCallParams } from '../tools/types.js'
 import { SessionContext } from './context.js'
-import { shouldAutoCompact, smartCompact } from '../compact/index.js'
+import { shouldAutoCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
 
@@ -48,6 +48,17 @@ export class AgentLoop {
     this.abortController?.abort()
   }
 
+  /**
+   * Compact messages when context window pressure is high.
+   *
+   * Currently uses microCompact (truncation). When a compact-model client
+   * is added to AgentConfig, switch to smartCompact for LLM-based summarization:
+   *
+   *   const { messages } = await smartCompact(
+   *     this.config.client, messages, tokenCount,
+   *     this.config.contextWindow, this.config.compact.model,
+   *   )
+   */
   private compactMessages(
     messages: Message[],
     tokenCount: number,
