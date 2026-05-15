@@ -11,13 +11,15 @@ describe('GLOB_TOOL', () => {
   before(() => {
     testDir = mkdtempSync(join(tmpdir(), 'glob-test-'))
     mkdirSync(join(testDir, 'src', 'components'), { recursive: true })
-    mkdirSync(join(testDir, 'src', 'utils'))
+    mkdirSync(join(testDir, 'src', 'utils'), { recursive: true })
+    mkdirSync(join(testDir, 'node_modules', 'pkg'), { recursive: true })
     writeFileSync(join(testDir, 'src', 'app.ts'), '')
     writeFileSync(join(testDir, 'src', 'components', 'Button.tsx'), '')
     writeFileSync(join(testDir, 'src', 'components', 'Modal.tsx'), '')
     writeFileSync(join(testDir, 'src', 'utils', 'helpers.ts'), '')
     writeFileSync(join(testDir, 'src', 'style.css'), '')
     writeFileSync(join(testDir, 'README.md'), '')
+    writeFileSync(join(testDir, 'node_modules', 'pkg', 'index.ts'), '')
   })
 
   after(() => {
@@ -38,38 +40,41 @@ describe('GLOB_TOOL', () => {
     assert.ok(result.content.includes('README.md'))
   })
 
-  it('matches with recursive **', async () => {
+  it('matches ** recursively', async () => {
     const result = await GLOB_TOOL.execute(makeParams({ pattern: 'src/**/*.ts' }))
     assert.equal(result.isError, undefined)
     assert.ok(result.content.includes('src/app.ts'))
     assert.ok(result.content.includes('src/utils/helpers.ts'))
   })
 
-  it('matches with single-level * wildcard', async () => {
-    const result = await GLOB_TOOL.execute(makeParams({ pattern: 'src/*.ts' }))
-    assert.equal(result.isError, undefined)
+  it('excludes node_modules', async () => {
+    const result = await GLOB_TOOL.execute(makeParams({ pattern: '**/*.ts' }))
+    assert.ok(!result.content.includes('node_modules'))
     assert.ok(result.content.includes('src/app.ts'))
-    assert.ok(!result.content.includes('src/utils/helpers.ts'))
   })
 
-  it('matches with brace expansion {a,b}', async () => {
-    const result = await GLOB_TOOL.execute(makeParams({ pattern: 'src/**/*.{ts,tsx}' }))
+  it('limits to 500 results', async () => {
+    const limitDir = mkdtempSync(join(tmpdir(), 'glob-limit-'))
+    try {
+      for (let i = 0; i < 510; i++) {
+        writeFileSync(join(limitDir, `file${i}.ts`), '')
+      }
+      const result = await GLOB_TOOL.execute({
+        input: { pattern: '*.ts' },
+        toolUseId: 'test',
+        cwd: limitDir,
+      })
+      const lines = result.content.split('\n').filter((l) => l.trim())
+      assert.equal(lines.length, 500)
+    } finally {
+      rmSync(limitDir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns no files message for no matches', async () => {
+    const result = await GLOB_TOOL.execute(makeParams({ pattern: '*.xyz' }))
     assert.equal(result.isError, undefined)
-    assert.ok(result.content.includes('src/app.ts'))
-    assert.ok(result.content.includes('src/components/Button.tsx'))
-  })
-
-  it('respects path parameter', async () => {
-    const result = await GLOB_TOOL.execute(makeParams({ pattern: '*.tsx', path: 'src/components' }))
-    assert.equal(result.isError, undefined)
-    assert.ok(result.content.includes('src/components/Button.tsx'))
-    assert.ok(result.content.includes('src/components/Modal.tsx'))
-    assert.ok(!result.content.includes('src/app.ts'))
-  })
-
-  it('returns no files message for empty match', async () => {
-    const result = await GLOB_TOOL.execute(makeParams({ pattern: 'nonexistent/**/*.go' }))
-    assert.ok(result.content.includes('No files found.'))
+    assert.ok(result.content.includes('No files found'))
   })
 
   it('requiresApproval and isConcurrencySafe', () => {

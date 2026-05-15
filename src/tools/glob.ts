@@ -1,9 +1,81 @@
-import { readdirSync } from 'fs'
-import { resolve, join, relative } from 'path'
-import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { GitignoreFilter } from './gitignore.js'
+import { readdirSync, existsSync, statSync } from 'fs'
+import { join, resolve, relative } from 'path'
+import type { Tool, ToolCallParams } from './types.js'
 
+const EXCLUDE_DIRS = new Set([
+  'node_modules', '.git', 'dist', '.next', 'build', 'target', '__pycache__',
+])
 const MAX_RESULTS = 500
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.+^$()|[\]\\{}]/g, '\\$&')
+}
+
+function globToRegex(pattern: string): RegExp {
+  let regex = ''
+  let i = 0
+  while (i < pattern.length) {
+    const ch = pattern[i]!
+    if (ch === '*' && pattern[i + 1] === '*') {
+      regex += '.*'
+      i += 2
+      if (pattern[i] === '/') i++
+    } else if (ch === '*') {
+      regex += '[^/]*'
+      i++
+    } else if (ch === '?') {
+      regex += '[^/]'
+      i++
+    } else if (ch === '{') {
+      const end = pattern.indexOf('}', i)
+      if (end === -1) {
+        regex += '\\{'
+        i++
+      } else {
+        const alternatives = pattern
+          .slice(i + 1, end)
+          .split(',')
+          .map((a) => escapeRegex(a.trim()))
+          .join('|')
+        regex += `(?:${alternatives})`
+        i = end + 1
+      }
+    } else if ('.+^$()|[]\\{}'.includes(ch)) {
+      regex += '\\' + ch
+      i++
+    } else {
+      regex += ch
+      i++
+    }
+  }
+  return new RegExp(`^${regex}$`)
+}
+
+function walkDir(dir: string, results: string[], root: string): void {
+  if (results.length >= MAX_RESULTS) return
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    if (results.length >= MAX_RESULTS) return
+    const fullPath = join(dir, name)
+    let s: ReturnType<typeof statSync>
+    try {
+      s = statSync(fullPath)
+    } catch {
+      continue
+    }
+    if (s.isDirectory()) {
+      if (EXCLUDE_DIRS.has(name)) continue
+      walkDir(fullPath, results, root)
+    } else if (s.isFile()) {
+      results.push(relative(root, fullPath))
+    }
+  }
+}
 
 export const GLOB_TOOL: Tool = {
   definition: {
@@ -24,127 +96,55 @@ Bad: glob(pattern="node_modules/**") (excluded by default)`,
     input_schema: {
       type: 'object',
       properties: {
-        pattern: { type: 'string', description: 'Glob pattern e.g. "src/**/*.ts" or "*.md"' },
-        path: { type: 'string', description: 'Search root directory (default: cwd)' },
+        pattern: {
+          type: 'string',
+          description: 'Glob pattern e.g. "src/**/*.ts" or "*.md"',
+        },
+        path: {
+          type: 'string',
+          description: 'Search root directory (default: cwd)',
+        },
       },
       required: ['pattern'],
     },
   },
 
-  async execute(params: ToolCallParams): Promise<ToolResult> {
+  async execute(params: ToolCallParams) {
     const pattern = params.input.pattern as string
-    const searchRoot = (params.input.path as string) ?? '.'
+    const searchRoot = params.input.path
+      ? resolve(params.cwd, params.input.path as string)
+      : params.cwd
 
-    const absRoot = resolve(params.cwd, searchRoot)
-    const filter = new GitignoreFilter(params.cwd)
-
+    if (!existsSync(searchRoot)) {
+      return { content: `Error: Directory not found: ${searchRoot}`, isError: true }
+    }
     try {
-      const results = walkGlob(absRoot, pattern, params.cwd, filter)
-      if (results.length === 0) {
-        return { content: 'No files found.' }
+      const stat = statSync(searchRoot)
+      if (!stat.isDirectory()) {
+        return { content: `Error: Not a directory: ${searchRoot}`, isError: true }
       }
-      return { content: results.slice(0, MAX_RESULTS).join('\n') }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return { content: `Error: ${message}`, isError: true }
+    } catch {
+      return { content: `Error: Cannot access path: ${searchRoot}`, isError: true }
+    }
+
+    const regex = globToRegex(pattern)
+    const files: string[] = []
+    walkDir(searchRoot, files, searchRoot)
+
+    const matches = files
+      .filter((f) => regex.test(f))
+      .sort()
+      .map((f) => {
+        const absPath = join(searchRoot, f)
+        return relative(params.cwd, absPath)
+      })
+
+    return {
+      content: matches.length > 0 ? matches.join('\n') : 'No files found matching pattern',
     }
   },
 
   requiresApproval: () => false,
   isConcurrencySafe: () => true,
   isEnabled: () => true,
-}
-
-function compilePattern(pattern: string): { parts: string[]; isAbsolute: boolean } {
-  const isAbsolute = pattern.startsWith('/')
-  const parts = pattern.replace(/\/+/g, '/').split('/')
-  return { parts, isAbsolute }
-}
-
-function matchSegment(segment: string, name: string): boolean {
-  if (segment === '**') return true
-  // Handle brace expansion: {a,b}
-  if (segment.includes('{') && segment.includes('}')) {
-    const braceRe = /^(.*)\{([^}]+)\}(.*)$/
-    const m = segment.match(braceRe)
-    if (m) {
-      const [, prefix, group, suffix] = m
-      const options = group!.split(',')
-      return options.some(o => matchSegment(`${prefix}${o}${suffix ?? ''}`, name))
-    }
-  }
-  // Convert glob to regex
-  const reStr = segment
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\?/g, '[^/]')
-  return new RegExp(`^${reStr}$`).test(name)
-}
-
-function walkGlob(root: string, pattern: string, cwd: string, filter: GitignoreFilter): string[] {
-  const { parts } = compilePattern(pattern)
-  const results: string[] = []
-
-  function walk(dir: string, partIdx: number) {
-    if (results.length >= MAX_RESULTS) return
-
-    if (partIdx >= parts.length) {
-      results.push(relative(cwd, dir))
-      return
-    }
-
-    const segment = parts[partIdx]!
-
-    if (segment === '**') {
-      // ** matches zero or more directories
-      // Option 1: zero directories — skip to next part
-      walk(dir, partIdx + 1)
-      // Option 2: one or more directories — descend
-      try {
-        const entries = readdirSync(dir, { withFileTypes: true })
-        for (const entry of entries) {
-          const full = join(dir, entry.name)
-          if (entry.isDirectory()) {
-            if (!filter.isIgnored(cwd, full)) {
-              walk(full, partIdx)       // continue **
-              walk(full, partIdx + 1)   // or stop ** here
-            }
-          } else if (entry.isFile()) {
-            // ** can also match files directly
-            walk(full, partIdx + 1)
-          }
-        }
-      } catch { /* skip unreadable */ }
-      return
-    }
-
-    // Regular segment: match current directory entries
-    try {
-      const entries = readdirSync(dir, { withFileTypes: true })
-      for (const entry of entries) {
-        const full = join(dir, entry.name)
-        if (filter.isIgnored(cwd, full)) continue
-
-        if (matchSegment(segment, entry.name)) {
-          if (partIdx === parts.length - 1) {
-            // Last segment: add files and dirs that match
-            if (entry.isFile()) {
-              results.push(relative(cwd, full))
-            }
-            // For last segment matching a directory, also include it
-            // (user asked for "src/components" etc.)
-          } else {
-            // Not last segment: must be directory to descend
-            if (entry.isDirectory()) {
-              walk(full, partIdx + 1)
-            }
-          }
-        }
-      }
-    } catch { /* skip unreadable */ }
-  }
-
-  walk(root, 0)
-  results.sort()
-  return results
 }
