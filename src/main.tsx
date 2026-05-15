@@ -124,7 +124,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       model: currentModel.id,
       maxTokens: currentModel.maxTokens,
       staticCtx: { tools: toolRegistry.getDefinitions() },
-      volatileCtx: { cwd },
+      volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
     })
     const client = createDeepSeekClient({
       apiKey,
@@ -170,7 +170,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
         model: card.model,
         maxTokens: 4096,
         staticCtx: { tools: workerRegistry.getDefinitions() },
-        volatileCtx: { cwd },
+        volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
       }),
       toolRegistry: workerRegistry,
       cwd,

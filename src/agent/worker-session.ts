@@ -91,38 +91,45 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     compact: config.compact,
   }, session, config.cwd)
 
-  const transcript = emptyTranscript()
-  let latestText = await runOnce(agent, buildWorkerPrompt(config.order), transcript)
+  const timeoutMs = config.order.budget.timeoutMs
+  const timer = setTimeout(() => agent.abort(), timeoutMs)
 
-  for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
-    try {
-      const result = parseWorkerResult(latestText, config.order.id)
-      return {
-        result,
-        transcript,
-        session,
-        usage: session.getTotalUsage(),
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      transcript.errors.push(message)
-      if (attempt === config.order.budget.maxRetries) {
+  try {
+    const transcript = emptyTranscript()
+    let latestText = await runOnce(agent, buildWorkerPrompt(config.order), transcript)
+
+    for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
+      try {
+        const result = parseWorkerResult(latestText, config.order.id)
         return {
-          result: buildBlockedWorkerResult(config.order, message),
+          result,
           transcript,
           session,
           usage: session.getTotalUsage(),
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        transcript.errors.push(message)
+        if (attempt === config.order.budget.maxRetries) {
+          return {
+            result: buildBlockedWorkerResult(config.order, message),
+            transcript,
+            session,
+            usage: session.getTotalUsage(),
+          }
+        }
+        transcript.repairAttempts++
+        latestText = await runOnce(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript)
       }
-      transcript.repairAttempts++
-      latestText = await runOnce(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript)
     }
-  }
 
-  return {
-    result: buildBlockedWorkerResult(config.order, 'Worker result parser exited unexpectedly'),
-    transcript,
-    session,
-    usage: session.getTotalUsage(),
+    return {
+      result: buildBlockedWorkerResult(config.order, 'Worker result parser exited unexpectedly'),
+      transcript,
+      session,
+      usage: session.getTotalUsage(),
+    }
+  } finally {
+    clearTimeout(timer)
   }
 }

@@ -262,6 +262,7 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
         pushStatic(createLogEntry({ type: 'text', content }))
       } else {
         ctx.persist.appendMemory({ text, source: 'manual', createdAt: Date.now() })
+        ctx.agent.updateSessionMemory(ctx.persist.buildMemoryBlock())
         pushStatic(createLogEntry({ type: 'text', content: 'Saved to session memory.' }))
       }
       setIsStreaming(false)

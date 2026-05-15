@@ -110,8 +110,12 @@ export class DelegationCoordinator {
       return { status: 'skipped', results: [], packet: buildPrimaryWorkerPacket([]) }
     }
 
-    const individualRuns = await Promise.all(runnables.map(r => this.delegate(r)))
-    const allResults = individualRuns.flatMap(r => r.results)
+    const allResults: WorkerResult[] = []
+    for (let i = 0; i < runnables.length; i += this.config.maxWorkers) {
+      const chunk = runnables.slice(i, i + this.config.maxWorkers)
+      const runs = await Promise.all(chunk.map(r => this.delegate(r)))
+      allResults.push(...runs.flatMap(r => r.results))
+    }
     const aggregated = aggregateResults(allResults, policy)
 
     return {

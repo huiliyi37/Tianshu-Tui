@@ -110,6 +110,10 @@ export class AgentLoop {
     this.config.approvalMode = mode
   }
 
+  updateSessionMemory(block: string): void {
+    this.config.promptEngine.updateSessionMemory(block)
+  }
+
   private isHighRisk(toolName: string, input: Record<string, unknown>): boolean {
     const destructive = /\b(rm\s+-|git\s+reset\s+--hard|git\s+clean\s+-|push\s+--force|killall|pkill|drop\s+table)\b/i
     if (toolName === 'bash') {
@@ -298,7 +302,18 @@ export class AgentLoop {
                 recordAgentTouchedFile(this.cwd, tu.input.file_path)
               }
 
-              const result = await this.config.toolRegistry.execute(tu.name, params)
+              // Prewarm cache fast-path for read_file
+              let result: import('../tools/types.js').ToolResult
+              if (tu.name === 'read_file' && typeof tu.input.file_path === 'string') {
+                const cached = this.prewarm.get(tu.input.file_path)
+                if (cached) {
+                  result = { content: cached }
+                } else {
+                  result = await this.config.toolRegistry.execute(tu.name, params)
+                }
+              } else {
+                result = await this.config.toolRegistry.execute(tu.name, params)
+              }
               callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false, result.rawPath, result.uiContent)
 
               // Record tool history for volatile context injection

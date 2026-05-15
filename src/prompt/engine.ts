@@ -155,4 +155,8 @@ export class PromptEngine {
   getSystemPrompt(): string {
     return this.systemPrompt
   }
+
+  updateSessionMemory(block: string): void {
+    this.config.volatileCtx.sessionMemoryBlock = block
+  }
 }
