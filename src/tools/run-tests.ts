@@ -89,7 +89,8 @@ function parseOutput(raw: string, runner: string): ParsedResult {
 
   // Extract failure details
   const failLines: Array<{ name: string; error: string }> = []
-  const nodeTestFails = raw.matchAll(/not ok \d+ - (.+)\n((?:  .*\n)*)/g)
+  // Node 22 test runner: ✖ test_name (duration)
+  const nodeTestFails = raw.matchAll(/✖\s+(.+?)(?:\s+\([\d.]+m?s\))?\n((?:  .*\n)*)/g)
   for (const m of nodeTestFails) {
     failLines.push({ name: (m[1] ?? '').trim(), error: (m[2] ?? '').trim() })
   }
