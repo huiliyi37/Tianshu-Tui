@@ -133,6 +133,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /compact — Compact conversation context
 /model [name|list] — Show or switch model
 /verbose — Toggle verbose tool output
+/debug [prompt|fingerprint|cache] — Debug prefix cache and prompt
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session` })
@@ -180,6 +181,27 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           addLog({ type: 'text', content: verbose ? 'Verbose mode: off (show 20 lines)' : 'Verbose mode: on (show 200 lines)' })
           setIsStreaming(false)
           return
+
+        case '/debug': {
+          const subcmd = parts[1]
+          const info = agent.getDebugInfo()
+          if (subcmd === 'prompt') {
+            addLog({ type: 'text', content: `System prompt (${info.systemPromptLength} chars):\n${info.systemPromptPreview}\n\nTools (${info.toolCount}): ${info.toolNames.join(', ')}` })
+          } else if (subcmd === 'fingerprint') {
+            const fp = info.fingerprint
+            const drift = info.drift
+            addLog({ type: 'text', content: `Fingerprint:\n  system:  ${fp.systemSha256.slice(0, 16)}...\n  tools:   ${fp.toolsSha256.slice(0, 16)}...\n  combined: ${fp.combinedSha256.slice(0, 16)}...\n\nDrift: ${drift ? drift.message : 'none (cache stable)'}` })
+          } else if (subcmd === 'cache') {
+            const usage = session.getTotalUsage()
+            const hitRate = cacheHitRate
+            const totalCached = usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+            addLog({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${cost.toFixed(4)}` })
+          } else {
+            addLog({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache]' })
+          }
+          setIsStreaming(false)
+          return
+        }
 
         case '/clear':
           logRef.current = []
@@ -259,7 +281,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           thinkingFlushRef.current = setTimeout(() => {
             setStreamingThinking(thinkingBufferRef.current)
             thinkingFlushRef.current = null
-          }, 50)
+          }, 150)
         }
       },
       onToolUse: (id, name) => {
@@ -272,9 +294,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           toolOutputAccumRef.current.set(id, prev + result)
           scheduleToolFlush(id, name)
         } else {
-          // Final result: clear accumulation, update with summarized output
+          // Final result: clear accumulation, update directly
+          // loop.ts already routes uiContent for tools that provide it
           toolOutputAccumRef.current.delete(id)
-          updateLogEntry(id, name, summarizeToolOutput(result, verbose ? 200 : 24), isError)
+          updateLogEntry(id, name, result, isError)
         }
       },
       onTurnComplete: (_usage) => {

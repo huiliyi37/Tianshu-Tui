@@ -1,7 +1,7 @@
 import { spawn } from 'child_process'
 import type { Tool, ToolCallParams } from './types.js'
-import { truncateContent } from './truncation.js'
 import { track } from './process-tracker.js'
+import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 
 const DANGEROUS_PATTERNS = ['git push', 'rm -rf', 'git reset --hard', 'sudo', 'chmod 777']
 
@@ -49,6 +49,7 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
   async execute(params: ToolCallParams) {
     const command = params.input.command as string
     const timeout = (params.input.timeout as number) ?? 120_000
+    const startTime = Date.now()
 
     return new Promise((resolve) => {
       const child = track(spawn('sh', ['-c', command], {
@@ -78,35 +79,35 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         }
       })
 
+      const buildResult = (code: number, isTimeout = false) => {
+        const raw = stdout + (stderr ? '\n' + stderr : '')
+        const durationMs = Date.now() - startTime
+        const exitCode = isTimeout ? -1 : code
+        const meta = { command, exitCode, durationMs }
+        const rawPath = persistRawOutput(params.toolUseId, raw)
+
+        return {
+          content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
+          uiContent: buildUiOutput(raw, meta),
+          rawPath,
+          isError: exitCode !== 0,
+        }
+      }
+
       const timer = setTimeout(() => {
         child.kill('SIGTERM')
         setTimeout(() => child.kill('SIGKILL'), 3000)
-        const output = stdout + (stderr ? '\n' + stderr : '')
-        resolve({
-          content: truncateContent(output || 'Command timed out', 12000, 6000, 4000),
-          isError: true,
-        })
+        resolve(buildResult(0, true))
       }, timeout)
 
       child.on('close', (code) => {
         clearTimeout(timer)
-        const output = stdout + (stderr ? '\n' + stderr : '')
-        if (code !== 0) {
-          resolve({
-            content: truncateContent(output || `Exit code: ${code}`, 12000, 6000, 4000),
-            isError: true,
-          })
-        } else {
-          resolve({ content: truncateContent(output, 12000, 6000, 4000) })
-        }
+        resolve(buildResult(code ?? 1))
       })
 
       child.on('error', (err) => {
         clearTimeout(timer)
-        resolve({
-          content: truncateContent(err.message, 12000, 6000, 4000),
-          isError: true,
-        })
+        resolve({ content: err.message, isError: true })
       })
     })
   },

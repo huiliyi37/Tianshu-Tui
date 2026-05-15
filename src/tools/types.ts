@@ -8,7 +8,12 @@ export interface ToolCallParams {
 }
 
 export interface ToolResult {
+  /** Content sent to model as tool_result */
   content: string
+  /** UI summary override — falls back to content if not provided */
+  uiContent?: string
+  /** Path to persisted raw output file */
+  rawPath?: string
   isError?: boolean
 }
 

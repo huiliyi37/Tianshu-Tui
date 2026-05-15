@@ -50,6 +50,20 @@ export class AgentLoop {
     this.abortController?.abort()
   }
 
+  getDebugInfo() {
+    const fp = this.config.promptEngine.getFingerprint()
+    const drift = this.config.promptEngine.checkDrift()
+    const sysPrompt = this.config.promptEngine.getSystemPrompt()
+    return {
+      fingerprint: fp,
+      drift,
+      systemPromptLength: sysPrompt.length,
+      systemPromptPreview: sysPrompt.slice(0, 200) + (sysPrompt.length > 200 ? '...' : ''),
+      toolCount: this.config.toolRegistry.getDefinitions().length,
+      toolNames: this.config.toolRegistry.getDefinitions().map(t => t.name),
+    }
+  }
+
   private async compactMessages(
     messages: Message[],
     tokenCount: number,
@@ -154,7 +168,7 @@ export class AgentLoop {
               }
 
               const result = await this.config.toolRegistry.execute(tu.name, params)
-              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false)
+              callbacks.onToolResult(tu.id, tu.name, result.uiContent ?? result.content, result.isError ?? false)
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: tu.id,

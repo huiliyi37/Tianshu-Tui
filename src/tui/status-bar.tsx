@@ -1,4 +1,5 @@
 import { Box, Text } from 'ink'
+import { memo } from 'react'
 
 interface StatusBarProps {
   model: string
@@ -13,7 +14,7 @@ function tokenBar(current: number, max: number, width = 10): string {
   return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
-export function StatusBar({ model, cacheHitRate, totalCost, currentTokens, maxTokens }: StatusBarProps) {
+export const StatusBar = memo(function StatusBar({ model, cacheHitRate, totalCost, currentTokens, maxTokens }: StatusBarProps) {
   const hitPct = (cacheHitRate * 100).toFixed(1)
   const usagePct = ((currentTokens / maxTokens) * 100).toFixed(0)
   const bar = tokenBar(currentTokens, maxTokens)
@@ -35,4 +36,4 @@ export function StatusBar({ model, cacheHitRate, totalCost, currentTokens, maxTo
       </Box>
     </Box>
   )
-}
+})
