@@ -3,7 +3,12 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { SessionMemoryEntry, SessionMemoryState } from './types.js'
 
+function isValidSessionId(id: string): boolean {
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(id)
+}
+
 function memoryPath(dir: string, sessionId: string): string {
+  if (!isValidSessionId(sessionId)) throw new Error(`Invalid sessionId: ${sessionId}`)
   return join(dir, `${sessionId}.memory.json`)
 }
 

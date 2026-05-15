@@ -580,7 +580,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           currentTokens={currentTokens}
           maxTokens={maxTokens}
           contextHealth={session.getContextLedger()?.tokenBudget.compactionState ?? 'healthy'}
-          apiSafe={session.getContextLedger()?.apiInvariantStatus.brokenRounds === 0}
+          apiSafe={(session.getContextLedger()?.apiInvariantStatus.brokenRounds ?? 0) === 0}
         />
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">

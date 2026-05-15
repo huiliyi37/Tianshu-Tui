@@ -21,6 +21,7 @@ export class SessionPersist {
   private sessionId: string
 
   constructor(sessionId: string) {
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) throw new Error(`Invalid sessionId: ${sessionId}`)
     ensureDir(SESSION_DIR)
     this.sessionId = sessionId
     this.filePath = join(SESSION_DIR, `${sessionId}.jsonl`)

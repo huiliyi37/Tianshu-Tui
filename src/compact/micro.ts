@@ -7,13 +7,9 @@ const TOOL_RESULT_PREVIEW_CHARS = 1200
 function compactToolResultBlock(block: any): { block: any; changed: boolean } {
   if (block.type !== 'tool_result') return { block, changed: false }
   if (typeof block.content !== 'string' || block.content.length <= TOOL_RESULT_PREVIEW_CHARS) return { block, changed: false }
-  return {
-    block: {
-      ...block,
-      content: `<microcompacted tool_result original_chars="${block.content.length}">\n${block.content.slice(0, TOOL_RESULT_PREVIEW_CHARS)}\n</microcompacted tool_result>`,
-    },
-    changed: true,
-  }
+  const stub = `<microcompacted tool_result original_chars="${block.content.length}">\n${block.content.slice(0, TOOL_RESULT_PREVIEW_CHARS)}\n</microcompacted tool_result>`
+  if (stub.length >= block.content.length) return { block, changed: false }
+  return { block: { ...block, content: stub }, changed: true }
 }
 
 /**

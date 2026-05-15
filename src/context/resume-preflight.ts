@@ -21,31 +21,32 @@ export function runResumePreflight(messages: Message[]): ResumePreflightReport {
 
   const repaired = [...messages]
   let inserted = 0
-  const orphanToolUseIds = new Set<string>()
 
-  for (const round of rounds) {
-    if (round.apiInvariant === 'broken' && round.hasToolUse) {
-      const asstMsg = messages[round.startMessageIndex]
-      if (asstMsg && asstMsg.role === 'assistant' && typeof asstMsg.content !== 'string') {
-        for (const block of asstMsg.content) {
-          if (block.type === 'tool_use') {
-            orphanToolUseIds.add(block.id)
-          }
-        }
-      }
+  // Walk rounds in reverse so insertion indices stay stable
+  const brokenRounds = [...rounds]
+    .filter(r => r.apiInvariant === 'broken' && r.hasToolUse)
+    .reverse()
+
+  for (const round of brokenRounds) {
+    const asstMsg = repaired[round.startMessageIndex]
+    if (!asstMsg || asstMsg.role !== 'assistant' || typeof asstMsg.content === 'string') continue
+
+    const orphanIds: string[] = []
+    for (const block of asstMsg.content) {
+      if (block.type === 'tool_use') orphanIds.push(block.id)
     }
-  }
+    if (orphanIds.length === 0) continue
 
-  if (orphanToolUseIds.size > 0) {
-    const syntheticResults = [...orphanToolUseIds].map(id => ({
+    const syntheticResults = orphanIds.map(id => ({
       type: 'tool_result' as const,
       tool_use_id: id,
       content: 'Tool result unavailable: recovered from interrupted tool execution.',
       is_error: true,
     }))
 
-    repaired.push({ role: 'user', content: syntheticResults })
-    inserted = syntheticResults.length
+    // Insert right after the assistant message with orphan tool_use
+    repaired.splice(round.startMessageIndex + 1, 0, { role: 'user', content: syntheticResults })
+    inserted += syntheticResults.length
   }
 
   const newRounds = groupIntoRounds(repaired)

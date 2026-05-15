@@ -133,7 +133,7 @@ export class AgentLoop {
             const afterTokens = this.session.getEstimatedTokens()
             this.session.recordCompactEvent({
               turn: this.session.getTurnCount(),
-              tier: 1,
+              tier: this.config.compactClient ? 2 : 1,
               reason: `auto compact: ${decision.reason}`,
               beforeTokens,
               afterTokens,

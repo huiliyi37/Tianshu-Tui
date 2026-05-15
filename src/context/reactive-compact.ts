@@ -22,9 +22,13 @@ export function selectReactiveCompactRounds(messages: Message[], options: Reacti
   return rounds.filter(round => round.startMessageIndex > anchorEnd && round.endMessageIndex <= recentStart && round.apiInvariant === 'ok')
 }
 
+function escapeAttr(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+}
+
 export function createCompactBoundaryMessage(input: CompactBoundaryInput): Message {
   return {
     role: 'user',
-    content: `<compact-summary source_start="${input.startIndex}" source_end="${input.endIndex}" token_before="${input.tokenBefore}" token_after="${input.tokenAfter}">\n${input.summary}\n</compact-summary>`,
+    content: `<compact-summary source_start="${input.startIndex}" source_end="${input.endIndex}" token_before="${input.tokenBefore}" token_after="${input.tokenAfter}">\n${escapeAttr(input.summary)}\n</compact-summary>`,
   }
 }
