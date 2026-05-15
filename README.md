@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.4 Phase 4 complete — 353 tests passing, typecheck clean. Subagent orchestration with write workers, adaptive model routing, TUI cockpit, progressive context engine, and theme system. 天枢 persona with design-doc-first workflow.
+P2.4 Phase 4 complete — 357 tests passing, typecheck clean. Subagent orchestration with write workers, adaptive model routing, TUI cockpit, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -126,14 +126,18 @@ src/
 User input → App.handleSubmit
   ├─ Slash command? → handle directly (/help, /exit, /compact, /model, /clear)
   └─ Agent loop:
-       PromptEngine.buildRequest(messages)
+       PromptEngine.buildRequest(messages, toolHistory)
          → static system prompt (frozen, cache anchor)
-         → volatile context (.rivet.md, git status, working set)
+         → volatile context (.rivet.md, git status, working set, tool-history)
+         → per-turn tool history injected into last user message
        ApiClient.stream(request, callbacks)
          → SSE parse → content blocks (text, thinking, tool_use)
          → retry on 429/502/503/529 (exp backoff)
+         → Intent extraction every 500 chars → speculative file pre-read
        Tool execution (if tool_use blocks)
-         → approval check → spawn/exec → result
+         → approval check → prewarm cache fast-path for read_file
+         → spawn/exec → result → cache invalidation for writes
+         → tool history recorded (last 5, injected into next volatile context)
          → live output streaming via onOutput callback
          → child process tracked (killAll on SIGINT/SIGTERM)
        Loop until no tool_use or maxTurns reached
@@ -159,7 +163,7 @@ The prompt is split into 4 layers for maximum cache stability:
 | L1 | Frozen system prompt | Never changes → always cache hit |
 | L2 | Tool definitions (stable-sorted) | Only changes when tools are added/removed |
 | L3 | *(reserved for project memory)* | Future use |
-| L4 | Volatile context (cwd, git status, .rivet.md) | Changes per turn, isolated from L1-L2 |
+| L4 | Volatile context (cwd, git status, .rivet.md, tool-history, session-memory) | Changes per turn, isolated from L1-L2; tool history per-turn injection |
 
 ## Features
 
@@ -286,7 +290,7 @@ Place `~/.rivet/config.json` (optional, uses defaults if missing):
 | `/context` | Show context ledger: health, tokens, API round safety, compact events |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
-| `/cockpit` | Toggle expanded cockpit panel (phase tracker + live metrics) |
+| `/cockpit` | Toggle expanded cockpit panel (Esc to collapse) |
 
 ## User Manual
 
@@ -342,12 +346,12 @@ During streaming, a live **SummaryBar** appears showing:
 └ step 3 │ risk: none
 ```
 
-- **Phase tracker** — Maps tool names to phases: searching (read/grep/glob), coding (edit/write), testing (run_tests), running (bash)
-- **Context bar** — Visual token usage with color coding (cyan → yellow → red)
+- **Phase tracker** — Maps tool names to phases: searching (read/grep/glob), coding (edit/write), testing (run_tests), running (bash). Debounced: requires 2 consecutive same-type tools before switching phase.
+- **Context bar** — Visual token usage with color coding (cyan → yellow → red). **Bold** at ≥95%.
 - **Last action** — Shows which tool ran last and whether it succeeded
 - **Risk indicator** — `medium` when bash runs without auto-approve, otherwise `none`
 
-Type `/cockpit` to toggle the expanded cockpit panel with additional metrics (phase detail, turn count, cache hit rate).
+Type `/cockpit` to toggle the expanded cockpit panel with additional metrics (phase detail, turn count, cache hit rate). Press **Esc** to collapse.
 
 ### Subagent Orchestration
 
@@ -369,13 +373,28 @@ The context engine manages long conversations safely:
 - **Reactive compact** — Compaction selects only API-invariant rounds, preserving cache anchors and recent context
 - **Compact policy** — Progressive tier decision with circuit breaker: 3 consecutive compaction failures disables auto-compact
 
+### Speculative Pre-warming
+
+During streaming responses, Rivet detects file paths in the model's output and pre-reads them into cache before the model issues a `read_file` tool call:
+
+- Intent extraction runs every 500 characters of streaming text
+- Detected file paths (src/\*, config/\*, docs/\*, etc.) are pre-read into a TTL cache (30s expiry, 20 entries max)
+- When a `read_file` tool call arrives, cached files return instantly (fast-path)
+- Cache is invalidated on `write_file` / `edit_file` to prevent stale data
+- Files larger than 100KB are skipped to avoid blocking the event loop
+
+### Worker Safety
+
+Worker sessions enforce a timeout budget (`timeoutMs` from the work order) — if a worker runs too long, it is automatically aborted via `AbortController`. The batch dispatch respects `maxWorkers` concurrency (chunked by the limit, not unbounded).
+
 ### Session Memory
 
 Session memory survives across compaction. Use it to bookmark decisions or preferences:
 
 - `/memory` — List all entries for the current session
 - `/memory Always use pnpm for this project` — Save a note
-- Memory entries are included in the volatile context block sent to the model
+- Memory entries are automatically injected into the volatile context block sent to the model
+- Memory is reflected in the context ledger via `getSessionMemoryState()`
 
 ### Slash Commands Quick Reference
 
