@@ -107,6 +107,12 @@
 | 23:45 | Edited docs/analysis/2026-05-15-handoff.md | 6→7 lines | ~108 |
 | 23:47 | Session end: 8 writes across 2 files (README.md, 2026-05-15-handoff.md) | 7 reads | ~4788 tok |
 
+## Session: 2026-05-16 Progressive Context Planning
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 02:55 | Created Progressive Context Engine implementation plan | docs/superpowers/plans/2026-05-16-rivet-progressive-context-engine-implementation.md | TDD task plan for Context Ledger, API rounds, resume preflight, session memory, compact ladder, and Context Cockpit | ~19000 |
+
 ## Session: P2.2 Full Implementation
 
 | Task | Action | Key Changes | Outcome |
@@ -248,3 +254,261 @@
 | 02:35 | Created src/tui/__tests__/use-terminal-size.test.ts | — | ~113 |
 | 02:36 | fixed TUI maximum update depth on session re-entry | src/tui/use-terminal-size.ts, use-terminal-size.test.ts, .wolf/buglog.json | cached useSyncExternalStore snapshot reference; typecheck, 221 tests, build pass | ~700 |
 | 02:37 | Session end: 3 writes across 3 files (log-state.test.ts, use-terminal-size.ts, use-terminal-size.test.ts) | 5 reads | ~9204 tok |
+| 02:38 | Session end: 3 writes across 3 files (log-state.test.ts, use-terminal-size.ts, use-terminal-size.test.ts) | 5 reads | ~9204 tok |
+| 02:38 | Created src/tui/agent-status.tsx | — | ~1232 |
+| 02:40 | Created src/tui/app.tsx | — | ~6721 |
+| 02:41 | Session end: 5 writes across 5 files (log-state.test.ts, use-terminal-size.ts, use-terminal-size.test.ts, agent-status.tsx, app.tsx) | 8 reads | ~17157 tok |
+| 02:46 | Session end: 5 writes across 5 files (log-state.test.ts, use-terminal-size.ts, use-terminal-size.test.ts, agent-status.tsx, app.tsx) | 40 reads | ~29425 tok |
+| 02:50 | Created docs/superpowers/specs/2026-05-16-rivet-progressive-context-engine-design.md | — | ~4101 |
+| 02:51 | Session end: 6 writes across 6 files (log-state.test.ts, use-terminal-size.ts, use-terminal-size.test.ts, agent-status.tsx, app.tsx) | 40 reads | ~33819 tok |
+
+## Session: 2026-05-15 02:57
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 02:59 | Created src/tui/tool-card.tsx | — | ~431 |
+| 03:01 | Created src/tui/app.tsx | — | ~6985 |
+| 03:02 | Session end: 2 writes across 2 files (tool-card.tsx, app.tsx) | 2 reads | ~14513 tok |
+| 03:03 | Session end: 2 writes across 2 files (tool-card.tsx, app.tsx) | 2 reads | ~14513 tok |
+| 03:05 | Created docs/superpowers/plans/2026-05-16-rivet-progressive-context-engine-implementation.md | — | ~19030 |
+| 03:06 | Session end: 3 writes across 3 files (tool-card.tsx, app.tsx, 2026-05-16-rivet-progressive-context-engine-implementation.md) | 2 reads | ~34902 tok |
+| 03:15 | Created src/tui/app.tsx | — | ~6416 |
+
+## Session: 2026-05-15 03:17
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 03:17 | Edited src/tui/app.tsx | inline fix | ~19 |
+| 03:17 | Edited src/tui/app.tsx | 1→4 lines | ~73 |
+| 03:17 | Edited src/tui/app.tsx | 3→2 lines | ~35 |
+| 03:17 | Edited src/tui/app.tsx | 2→1 lines | ~19 |
+| 03:19 | Session end: 4 writes across 1 files (app.tsx) | 3 reads | ~6909 tok |
+| 03:23 | Session end: 4 writes across 1 files (app.tsx) | 5 reads | ~39421 tok |
+| 03:24 | Session end: 4 writes across 1 files (app.tsx) | 7 reads | ~39421 tok |
+| 03:29 | Session end: 4 writes across 1 files (app.tsx) | 7 reads | ~39421 tok |
+| 03:31 | Created src/context/types.ts | — | ~780 |
+| 03:31 | Created src/context/token-estimate.ts | — | ~288 |
+| 03:31 | Created src/context/rounds.ts | — | ~1703 |
+| 03:31 | Created src/context/ledger.ts | — | ~315 |
+| 03:31 | Created src/context/resume-preflight.ts | — | ~539 |
+| 03:32 | Created src/context/microcompact.ts | — | ~926 |
+
+## Session: 2026-05-15 03:32
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 03:32 | Created src/context/token-estimate.ts | — | ~18 |
+| 03:33 | Created src/context/__tests__/rounds.test.ts | — | ~2586 |
+| 03:33 | Created src/context/__tests__/ledger.test.ts | — | ~444 |
+| 03:33 | Created src/context/__tests__/resume-preflight.test.ts | — | ~1321 |
+| 03:33 | Created src/context/__tests__/microcompact.test.ts | — | ~1539 |
+| 03:33 | Edited src/context/__tests__/ledger.test.ts | inline fix | ~14 |
+| 03:35 | Session end: 6 writes across 5 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 0 reads | ~5922 tok |
+| 03:37 | Session end: 6 writes across 5 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 12 reads | ~21896 tok |
+| 03:41 | Edited src/prompt/engine.ts | added 1 condition(s) | ~400 |
+| 03:42 | Edited src/prompt/engine.ts | modified buildRequest() | ~329 |
+| 03:42 | Edited src/prompt/engine.ts | modified constructor() | ~195 |
+| 03:42 | Edited src/prompt/engine.ts | modified buildRequest() | ~68 |
+| 03:42 | Edited src/prompt/engine.ts | inline fix | ~19 |
+| 03:43 | Session end: 11 writes across 6 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 20 reads | ~42432 tok |
+| 03:43 | Session end: 11 writes across 6 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 20 reads | ~42432 tok |
+| 03:44 | Session end: 11 writes across 6 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 20 reads | ~42432 tok |
+| 03:46 | Session end: 11 writes across 6 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 22 reads | ~43366 tok |
+| 03:46 | Session end: 11 writes across 6 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 22 reads | ~43366 tok |
+| 03:46 | Edited src/tui/app.tsx | inline fix | ~15 |
+| 03:47 | Session end: 12 writes across 7 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 24 reads | ~44971 tok |
+| 03:47 | Session end: 12 writes across 7 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 24 reads | ~44971 tok |
+| 03:49 | Session end: 12 writes across 7 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 24 reads | ~44971 tok |
+| 03:52 | Edited src/context/types.ts | expanded (+11 lines) | ~80 |
+| 03:52 | Edited src/agent/context.ts | added 1 import(s) | ~62 |
+| 03:52 | Edited src/agent/context.ts | 12→14 lines | ~111 |
+| 03:52 | Edited src/agent/context.ts | 3→4 lines | ~27 |
+| 03:52 | Edited src/agent/context.ts | modified getElapsedMs() | ~167 |
+| 03:53 | Created src/agent/__tests__/context-ledger-state.test.ts | — | ~543 |
+| 03:53 | Edited src/context/types.ts | 8→8 lines | ~51 |
+| 03:53 | Edited src/context/types.ts | inline fix | ~14 |
+| 03:53 | Edited src/compact/micro.ts | added 9 condition(s) | ~960 |
+| 03:53 | Edited src/context/types.ts | expanded (+14 lines) | ~93 |
+| 03:53 | Created src/context/session-memory.ts | — | ~560 |
+| 03:54 | Session end: 23 writes across 12 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 32 reads | ~73098 tok |
+| 03:54 | Created src/context/__tests__/session-memory.test.ts | — | ~701 |
+| 03:54 | Edited src/context/types.ts | expanded (+15 lines) | ~154 |
+| 03:58 | Created src/prompt/volatile.ts | — | ~784 |
+| 03:58 | Edited src/context/types.ts | 9→10 lines | ~70 |
+| 03:58 | Edited src/context/types.ts | expanded (+7 lines) | ~66 |
+| 03:58 | Edited src/context/resume-preflight.ts | modified if() | ~94 |
+| 03:58 | Edited src/context/resume-preflight.ts | 9→10 lines | ~96 |
+| 03:59 | Edited src/agent/session-persist.ts | added 1 condition(s) | ~866 |
+| 03:59 | Edited src/tui/app.tsx | added 1 import(s) | ~38 |
+| 03:59 | Edited src/tui/app.tsx | CSS: preflight | ~334 |
+| 03:59 | Edited src/tui/app.tsx | added 1 condition(s) | ~215 |
+| 04:00 | Edited src/tui/app.tsx | 2→3 lines | ~48 |
+| 04:01 | Created docs/superpowers/specs/2026-05-16-rivet-glanceable-cockpit-techstyle-design.md | — | ~2023 |
+| 04:02 | Edited src/tui/status-bar.tsx | 7→9 lines | ~63 |
+| 04:02 | Edited src/tui/status-bar.tsx | inline fix | ~49 |
+| 04:03 | Edited src/tui/status-bar.tsx | CSS: ctx, rounds | ~128 |
+| 04:03 | Edited src/agent/loop.ts | added 2 import(s) | ~104 |
+| 04:03 | Edited src/agent/loop.ts | 3→4 lines | ~57 |
+| 04:03 | Edited src/tui/app.tsx | added optional chaining | ~110 |
+| 04:03 | Created docs/superpowers/plans/2026-05-16-rivet-glanceable-cockpit-techstyle-implementation.md | — | ~2273 |
+| 04:03 | Edited src/agent/loop.ts | added error handling | ~313 |
+| 04:03 | Edited src/tui/app.tsx | added 1 condition(s) | ~367 |
+| 04:03 | Edited src/tui/app.tsx | expanded (+8 lines) | ~181 |
+| 04:03 | Edited src/tui/app.tsx | 3→4 lines | ~70 |
+| 04:05 | Edited docs/superpowers/plans/2026-05-16-rivet-glanceable-cockpit-techstyle-implementation.md | added optional chaining | ~4835 |
+| 04:05 | Edited src/agent/loop.ts | inline fix | ~26 |
+| 04:06 | Created .superpowers/brainstorm/2026-05-16-rivet-glanceable-cockpit-techstyle-fragments.json | — | ~1123 |
+| 04:06 | Session end: 50 writes across 21 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 40 reads | ~102777 tok |
+| 04:07 | Session end: 50 writes across 21 files (token-estimate.ts, rounds.test.ts, ledger.test.ts, resume-preflight.test.ts, microcompact.test.ts) | 40 reads | ~102777 tok |
+
+## Session: 2026-05-15 04:09
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-15 04:14
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 04:15 | Edited src/tui/app.tsx | added nullish coalescing | ~27 |
+| 04:15 | Edited src/context/session-memory.ts | added 1 condition(s) | ~84 |
+| 04:15 | Edited src/agent/session-persist.ts | added 1 condition(s) | ~94 |
+| 04:15 | Edited src/context/reactive-compact.ts | modified escapeAttr() | ~144 |
+| 04:15 | Edited src/context/resume-preflight.ts | modified for() | ~298 |
+| 04:15 | Edited src/compact/micro.ts | added 1 condition(s) | ~168 |
+| 04:15 | Session end: 6 writes across 6 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 7 reads | ~15038 tok |
+| 04:16 | Edited src/agent/loop.ts | inline fix | ~16 |
+| 04:16 | Session end: 7 writes across 7 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 9 reads | ~16644 tok |
+| 04:20 | Session end: 7 writes across 7 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 17 reads | ~21077 tok |
+| 04:20 | Edited src/agent/loop.ts | added 1 import(s) | ~63 |
+| 04:21 | Edited src/agent/loop.ts | modified refreshLedger() | ~85 |
+| 04:21 | Edited src/agent/loop.ts | 1→2 lines | ~32 |
+| 04:21 | Edited src/agent/loop.ts | 2→3 lines | ~50 |
+| 04:21 | Edited src/agent/loop.ts | 3→4 lines | ~64 |
+| 04:21 | Edited src/compact/auto.ts | added 1 import(s) | ~63 |
+| 04:21 | Edited src/compact/auto.ts | added optional chaining | ~463 |
+| 04:22 | Edited src/compact/auto.ts | 7→7 lines | ~98 |
+| 04:22 | Edited src/agent/loop.ts | 4→4 lines | ~84 |
+| 04:22 | Edited src/agent/loop.ts | modified if() | ~159 |
+| 04:22 | Edited src/agent/loop.ts | "auto compact: ${decision." → "auto compact: ${compactDe" | ~19 |
+| 04:22 | Edited src/agent/loop.ts | inline fix | ~26 |
+| 04:23 | Session end: 19 writes across 8 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 25 reads | ~25256 tok |
+| 04:23 | Created src/prompt/__tests__/volatile.test.ts | — | ~516 |
+| 04:23 | Created src/tui/__tests__/status-bar.test.ts | — | ~436 |
+| 04:24 | Edited src/prompt/__tests__/engine.test.ts | added 1 import(s) | ~74 |
+| 04:24 | Edited src/prompt/__tests__/engine.test.ts | expanded (+17 lines) | ~208 |
+| 04:24 | Edited README.md | 11→14 lines | ~214 |
+| 04:24 | Session end: 24 writes across 12 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 27 reads | ~31284 tok |
+| 04:24 | Edited README.md | expanded (+12 lines) | ~319 |
+| 04:25 | Edited README.md | 1→4 lines | ~66 |
+| 04:25 | Edited docs/analysis/2026-05-15-handoff.md | expanded (+24 lines) | ~278 |
+| 04:25 | Session end: 27 writes across 13 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 31 reads | ~42389 tok |
+| 04:25 | Session end: 27 writes across 13 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 32 reads | ~42820 tok |
+| 04:26 | Created src/tui/theme.ts | — | ~521 |
+| 04:26 | Created src/tui/phase-tracker.ts | — | ~320 |
+| 04:27 | Created src/tui/summary-bar.tsx | — | ~1240 |
+| 04:27 | Created src/tui/__tests__/theme.test.ts | — | ~336 |
+| 04:27 | Created src/tui/__tests__/phase-tracker.test.ts | — | ~648 |
+| 04:27 | Created src/tui/__tests__/summary-bar.test.ts | — | ~888 |
+| 04:27 | Edited src/tui/__tests__/theme.test.ts | inline fix | ~11 |
+| 04:28 | Session end: 34 writes across 19 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 32 reads | ~46784 tok |
+| 04:28 | Edited src/tui/tool-card.tsx | added 1 import(s) | ~456 |
+| 04:28 | Created src/tui/status-bar.tsx | — | ~586 |
+| 04:28 | Created src/types/gradient-string.d.ts | — | ~59 |
+| 04:29 | Edited src/tui/app.tsx | added 4 import(s) | ~322 |
+| 04:29 | Edited src/tui/app.tsx | expanded (+7 lines) | ~191 |
+| 04:29 | Edited src/tui/app.tsx | CSS: type, content | ~132 |
+| 04:29 | Edited src/tui/app.tsx | 2→6 lines | ~109 |
+| 04:29 | Edited src/tui/app.tsx | 2→3 lines | ~51 |
+| 04:30 | Created src/agent/__tests__/work-queue.test.ts | — | ~777 |
+| 04:30 | Edited src/tui/app.tsx | added 1 condition(s) | ~130 |
+| 04:30 | Created docs/superpowers/specs/2026-05-16-rivet-xml-protocol-speculative-engine-design.md | — | ~2197 |
+| 04:30 | Created src/agent/work-queue.ts | — | ~431 |
+| 04:30 | Edited src/tui/app.tsx | modified if() | ~252 |
+| 04:30 | Edited src/agent/__tests__/work-queue.test.ts | inline fix | ~17 |
+| 04:30 | Edited src/tui/app.tsx | added optional chaining | ~230 |
+| 04:30 | Edited src/tui/app.tsx | 3→3 lines | ~56 |
+| 04:30 | Edited src/agent/work-queue.ts | modified constructor() | ~462 |
+| 04:30 | Created .superpowers/brainstorm/2026-05-16-rivet-xml-protocol-speculative-engine-fragments.json | — | ~1213 |
+| 04:31 | Edited src/tui/app.tsx | CSS: phase, elapsedMs | ~68 |
+| 04:31 | Edited src/agent/work-queue.ts | added 1 condition(s) | ~24 |
+| 04:31 | Edited src/tui/app.tsx | added optional chaining | ~91 |
+| 04:31 | Edited src/agent/__tests__/work-queue.test.ts | modified order() | ~107 |
+| 04:31 | Session end: 56 writes across 26 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 35 reads | ~79917 tok |
+| 04:31 | Edited src/agent/__tests__/work-queue.test.ts | 15→15 lines | ~118 |
+| 04:31 | Edited src/tui/app.tsx | expanded (+9 lines) | ~408 |
+| 04:31 | Created src/agent/__tests__/coordinator-state.test.ts | — | ~791 |
+| 04:31 | Edited src/tui/app.tsx | 3→5 lines | ~132 |
+| 04:31 | Created src/agent/coordinator-state.ts | — | ~457 |
+| 04:32 | Created src/agent/__tests__/aggregation.test.ts | — | ~708 |
+| 04:32 | Created src/agent/aggregation.ts | — | ~363 |
+| 04:32 | Session end: 63 writes across 30 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 37 reads | ~85803 tok |
+| 04:33 | Edited src/agent/__tests__/coordinator.test.ts | expanded (+85 lines) | ~978 |
+| 04:33 | Edited src/agent/coordinator.ts | added 2 import(s) | ~210 |
+| 04:33 | Edited src/agent/coordinator.ts | 7→8 lines | ~57 |
+| 04:33 | Edited src/agent/coordinator.ts | added 1 condition(s) | ~723 |
+| 04:33 | Edited src/agent/__tests__/coordinator.test.ts | 7→7 lines | ~80 |
+| 04:34 | Edited src/agent/work-order.ts | 2→3 lines | ~96 |
+| 04:35 | Edited src/agent/work-order.ts | 19→20 lines | ~200 |
+| 04:35 | Edited src/agent/work-order.ts | modified createReadOnlyWorkOrder() | ~636 |
+| 04:35 | Edited src/agent/__tests__/work-order.test.ts | 7→9 lines | ~63 |
+| 04:36 | Created docs/superpowers/plans/2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md | — | ~2023 |
+| 04:36 | Edited src/agent/__tests__/work-order.test.ts | expanded (+33 lines) | ~356 |
+| 04:36 | Created src/agent/__tests__/adaptive-routing.test.ts | — | ~703 |
+| 04:36 | Created src/agent/adaptive-routing.ts | — | ~488 |
+| 04:37 | Edited docs/superpowers/plans/2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md | added error handling | ~4003 |
+| 04:37 | Session end: 77 writes across 37 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 50 reads | ~116813 tok |
+| 04:38 | Session end: 77 writes across 37 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 50 reads | ~116813 tok |
+| 04:38 | Session end: 77 writes across 37 files (app.tsx, session-memory.ts, session-persist.ts, reactive-compact.ts, resume-preflight.ts) | 50 reads | ~116813 tok |
+| 04:39 | Created src/tui/theme.ts | — | ~456 |
+| 04:39 | Created src/tui/phase-tracker.ts | — | ~369 |
+| 04:39 | Created src/types/gradient-string.d.ts | — | ~69 |
+| 04:39 | Created src/tui/__tests__/phase-tracker.test.ts | — | ~750 |
+
+## Session: 2026-05-15 04:40
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 04:41 | Created src/tui/app.tsx | — | ~8570 |
+| 04:41 | Session end: 1 writes across 1 files (app.tsx) | 4 reads | ~17884 tok |
+| 04:42 | Edited src/tui/app.tsx | 3→1 lines | ~17 |
+
+## Session: 2026-05-15 04:42
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 04:46 | Created src/agent/intent-extractor.ts | — | ~345 |
+| 04:46 | Created src/prompt/__tests__/static.test.ts | — | ~748 |
+| 04:46 | Created src/agent/prewarm.ts | — | ~323 |
+| 04:46 | Created src/agent/__tests__/intent-extractor.test.ts | — | ~536 |
+| 04:46 | Created src/agent/__tests__/prewarm.test.ts | — | ~443 |
+| 04:46 | Created src/prompt/static.ts | — | ~946 |
+| 04:47 | Edited docs/superpowers/plans/2026-05-16-rivet-glanceable-cockpit-techstyle-implementation.md | modified feat() | ~251 |
+| 04:47 | Edited src/prompt/__tests__/volatile.test.ts | 4→4 lines | ~62 |
+| 04:47 | Edited src/agent/coordinator-state.ts | 8→9 lines | ~74 |
+| 04:47 | Edited src/agent/adaptive-routing.ts | 1→3 lines | ~43 |
+| 04:47 | Edited src/compact/auto.ts | added optional chaining | ~98 |
+| 04:47 | Edited src/context/resume-preflight.ts | 5→8 lines | ~105 |
+| 04:47 | Edited src/agent/adaptive-routing.ts | inline fix | ~25 |
+| 04:48 | Created src/validation.ts | — | ~78 |
+| 04:48 | Edited src/context/session-memory.ts | modified memoryPath() | ~118 |
+| 04:48 | Edited src/agent/session-persist.ts | modified constructor() | ~20 |
+| 04:48 | Created src/prompt/__tests__/volatile.test.ts | — | ~1221 |
+| 04:48 | Edited src/agent/session-persist.ts | added 1 import(s) | ~157 |
+| 04:48 | Edited src/prompt/volatile.ts | expanded (+8 lines) | ~98 |
+| 04:48 | Edited src/prompt/volatile.ts | added 2 condition(s) | ~150 |
+| 04:48 | Edited docs/superpowers/plans/2026-05-16-rivet-progressive-context-engine-implementation.md | modified fix() | ~296 |
+| 04:48 | Edited src/prompt/engine.ts | 3→3 lines | ~71 |
+| 04:48 | Session end: 22 writes across 18 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 17 reads | ~72185 tok |
+| 04:49 | Edited src/prompt/engine.ts | added 2 condition(s) | ~340 |
+| 04:49 | Edited docs/superpowers/plans/2026-05-16-rivet-subagent-orchestration-implementation.md | modified feat() | ~284 |
+| 04:49 | Edited src/agent/loop.ts | added 5 import(s) | ~337 |
+| 04:49 | Edited src/agent/loop.ts | added error handling | ~468 |
+| 04:49 | Edited src/agent/loop.ts | added 1 condition(s) | ~88 |
+| 04:49 | Edited src/agent/loop.ts | 1→2 lines | ~42 |
+| 04:49 | Edited src/agent/loop.ts | added 3 condition(s) | ~410 |
+| 04:50 | Session end: 29 writes across 20 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 18 reads | ~75092 tok |
+| 04:50 | Edited CLAUDE.md | 9→14 lines | ~210 |
+| 04:50 | Session end: 30 writes across 21 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 18 reads | ~75316 tok |
+| 04:52 | Session end: 30 writes across 21 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 21 reads | ~78373 tok |
+| 04:52 | Edited docs/analysis/2026-05-15-handoff.md | expanded (+33 lines) | ~518 |

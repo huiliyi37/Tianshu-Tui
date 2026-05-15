@@ -355,6 +355,630 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-05-16T02:35:00+08:00"
+    },
+    {
+      "id": "bug-023",
+      "timestamp": "2026-05-15T19:41:06.318Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/prompt/engine.ts",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 17→34 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:41:06.318Z"
+    },
+    {
+      "id": "bug-024",
+      "timestamp": "2026-05-15T19:42:04.062Z",
+      "error_message": "Type error",
+      "file": "src/prompt/engine.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:42:04.062Z"
+    },
+    {
+      "id": "bug-025",
+      "timestamp": "2026-05-15T19:42:30.965Z",
+      "error_message": "Wrong reference: volatileBlock should be this",
+      "file": "src/prompt/engine.ts",
+      "root_cause": "Used \"volatileBlock\" instead of \"this\"",
+      "fix": "Changed volatileBlock → this",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:42:30.965Z"
+    },
+    {
+      "id": "bug-026",
+      "timestamp": "2026-05-15T19:46:44.257Z",
+      "error_message": "Wrong reference: getTotalUsage should be getEstimatedTokens",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Used \"getTotalUsage\" instead of \"getEstimatedTokens\"",
+      "fix": "Changed getTotalUsage → getEstimatedTokens",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:46:44.257Z"
+    },
+    {
+      "id": "bug-027",
+      "timestamp": "2026-05-15T19:52:34.685Z",
+      "error_message": "Type error",
+      "file": "src/context/types.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:52:34.685Z"
+    },
+    {
+      "id": "bug-028",
+      "timestamp": "2026-05-15T19:52:38.785Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/context.ts",
+      "root_cause": "Had '../compact/micro.js'",
+      "fix": "Changed to '../context/types.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:52:38.785Z"
+    },
+    {
+      "id": "bug-029",
+      "timestamp": "2026-05-15T19:53:34.553Z",
+      "error_message": "Wrong reference: SessionMemoryState should be LedgerSessionMemoryState",
+      "file": "src/context/types.ts",
+      "root_cause": "Used \"SessionMemoryState\" instead of \"LedgerSessionMemoryState\"",
+      "fix": "Changed SessionMemoryState → LedgerSessionMemoryState",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:53:34.553Z"
+    },
+    {
+      "id": "bug-030",
+      "timestamp": "2026-05-15T19:53:34.962Z",
+      "error_message": "Missing guard clause",
+      "file": "src/compact/micro.ts",
+      "root_cause": "No early return/throw for edge case: block.type !== 'tool_result'",
+      "fix": "Added guard clause: if (block.type !== 'tool_result')",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:53:34.962Z"
+    },
+    {
+      "id": "bug-031",
+      "timestamp": "2026-05-15T19:59:22.364Z",
+      "error_message": "CSS fix: type",
+      "file": "src/tui/app.tsx",
+      "root_cause": "type: 'text', content: `Restored session ${targetId.slice(0, 8) → 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted",
+      "fix": "Changed type: 'text', content: `Restored session ${targetId.slice(0, 8) → 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted",
+      "tags": [
+        "auto-detected",
+        "style-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T19:59:22.364Z"
+    },
+    {
+      "id": "bug-032",
+      "timestamp": "2026-05-15T20:02:57.250Z",
+      "error_message": "Wrong reference: StatusBarProps should be contextHealth",
+      "file": "src/tui/status-bar.tsx",
+      "root_cause": "Used \"StatusBarProps\" instead of \"contextHealth\"",
+      "fix": "Changed StatusBarProps → contextHealth",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:02:57.250Z"
+    },
+    {
+      "id": "bug-033",
+      "timestamp": "2026-05-15T20:03:11.980Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:03:11.980Z"
+    },
+    {
+      "id": "bug-034",
+      "timestamp": "2026-05-15T20:03:19.223Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:03:19.223Z"
+    },
+    {
+      "id": "bug-035",
+      "timestamp": "2026-05-15T20:05:01.136Z",
+      "error_message": "Null/undefined access in ",
+      "file": "docs/superpowers/plans/2026-05-16-rivet-glanceable-cockpit-techstyle-implementation.md",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:05:01.136Z"
+    },
+    {
+      "id": "bug-036",
+      "timestamp": "2026-05-15T20:15:06.892Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:15:06.892Z"
+    },
+    {
+      "id": "bug-037",
+      "timestamp": "2026-05-15T20:15:08.361Z",
+      "error_message": "Wrong return value",
+      "file": "src/context/session-memory.ts",
+      "root_cause": "Was returning: join(dir, `${sessionId}.memory.json`)",
+      "fix": "Now returns: /^[a-zA-Z0-9_-]{1,128}$/.test(id)",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:15:08.361Z"
+    },
+    {
+      "id": "bug-038",
+      "timestamp": "2026-05-15T20:15:27.984Z",
+      "error_message": "Missing guard clause",
+      "file": "src/context/resume-preflight.ts",
+      "root_cause": "No early return/throw for edge case: !asstMsg || asstMsg.role !== 'assistant' || typeof asstMsg.c",
+      "fix": "Added guard clause: if (!asstMsg || asstMsg.role !== 'assistant')",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:15:27.984Z"
+    },
+    {
+      "id": "bug-039",
+      "timestamp": "2026-05-15T20:20:54.398Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Had '../context/types.js'",
+      "fix": "Changed to '../context/ledger.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-15T20:22:32.929Z"
+    },
+    {
+      "id": "bug-040",
+      "timestamp": "2026-05-15T20:21:00.055Z",
+      "error_message": "Type error",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:21:00.055Z"
+    },
+    {
+      "id": "bug-041",
+      "timestamp": "2026-05-15T20:21:50.497Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/compact/auto.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:21:50.497Z"
+    },
+    {
+      "id": "bug-042",
+      "timestamp": "2026-05-15T20:22:26.456Z",
+      "error_message": "Wrong condition in logic",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Condition was: if (decision.shouldCompact)",
+      "fix": "Changed to: if (compactDecision.shouldCompact && legacyDecision.sh)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:22:26.456Z"
+    },
+    {
+      "id": "bug-043",
+      "timestamp": "2026-05-15T20:22:48.509Z",
+      "error_message": "Wrong reference: decision should be estTokens",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Used \"decision\" instead of \"estTokens\"",
+      "fix": "Changed decision → estTokens",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:22:48.509Z"
+    },
+    {
+      "id": "bug-044",
+      "timestamp": "2026-05-15T20:24:18.190Z",
+      "error_message": "Type error",
+      "file": "src/prompt/__tests__/engine.test.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:24:18.190Z"
+    },
+    {
+      "id": "bug-045",
+      "timestamp": "2026-05-15T20:24:50.505Z",
+      "error_message": "Significant refactor of ",
+      "file": "README.md",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 8→20 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:24:50.505Z"
+    },
+    {
+      "id": "bug-046",
+      "timestamp": "2026-05-15T20:29:49.712Z",
+      "error_message": "Type error",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation | Also: phaseTracker.current.onTurnComplete(); setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-15T20:31:02.096Z"
+    },
+    {
+      "id": "bug-047",
+      "timestamp": "2026-05-15T20:30:17.632Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 16→22 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:30:17.632Z"
+    },
+    {
+      "id": "bug-048",
+      "timestamp": "2026-05-15T20:30:29.206Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check) | Also: setSummaryState(prev => ({ ...prev, approvalNeeded: { tool: ",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-15T20:31:09.862Z"
+    },
+    {
+      "id": "bug-049",
+      "timestamp": "2026-05-15T20:30:49.029Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Had 'string'",
+      "fix": "Changed to 'bash'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:30:49.029Z"
+    },
+    {
+      "id": "bug-050",
+      "timestamp": "2026-05-15T20:31:02.710Z",
+      "error_message": "Missing guard clause",
+      "file": "src/agent/work-queue.ts",
+      "root_cause": "No early return/throw for edge case: !entry",
+      "fix": "Added guard clause: if (!entry)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:31:02.710Z"
+    },
+    {
+      "id": "bug-051",
+      "timestamp": "2026-05-15T20:33:04.166Z",
+      "error_message": "Missing await",
+      "file": "src/agent/__tests__/coordinator.test.ts",
+      "root_cause": "Async call without await — returned Promise instead of value",
+      "fix": "Added await to async call",
+      "tags": [
+        "auto-detected",
+        "async-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:33:04.166Z"
+    },
+    {
+      "id": "bug-052",
+      "timestamp": "2026-05-15T20:33:50.076Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/agent/__tests__/coordinator.test.ts",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 7→7 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:33:50.076Z"
+    },
+    {
+      "id": "bug-053",
+      "timestamp": "2026-05-15T20:34:55.766Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/work-order.ts",
+      "root_cause": "Had 'bash'",
+      "fix": "Changed to 'read_file'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:34:55.766Z"
+    },
+    {
+      "id": "bug-054",
+      "timestamp": "2026-05-15T20:36:07.662Z",
+      "error_message": "Type error",
+      "file": "src/agent/__tests__/work-order.test.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:36:07.662Z"
+    },
+    {
+      "id": "bug-055",
+      "timestamp": "2026-05-15T20:37:36.147Z",
+      "error_message": "Missing error handling in extractIntents",
+      "file": "docs/superpowers/plans/2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:37:36.147Z"
+    },
+    {
+      "id": "bug-056",
+      "timestamp": "2026-05-15T20:47:44.990Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/compact/auto.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:47:44.990Z"
+    },
+    {
+      "id": "bug-057",
+      "timestamp": "2026-05-15T20:47:51.730Z",
+      "error_message": "Wrong reference: 10000 should be LATENCY_PENALTY_DIVISOR",
+      "file": "src/agent/adaptive-routing.ts",
+      "root_cause": "Used \"10000\" instead of \"LATENCY_PENALTY_DIVISOR\"",
+      "fix": "Changed 10000 → LATENCY_PENALTY_DIVISOR",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:47:51.730Z"
+    },
+    {
+      "id": "bug-058",
+      "timestamp": "2026-05-15T20:48:32.841Z",
+      "error_message": "Wrong condition in logic",
+      "file": "src/prompt/volatile.ts",
+      "root_cause": "Condition was: if (ctx.sessionMemoryBlock)",
+      "fix": "Changed to: if (ctx.toolHistory && ctx.toolHistory.length > 0)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:48:32.841Z"
+    },
+    {
+      "id": "bug-059",
+      "timestamp": "2026-05-15T20:49:06.709Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/prompt/engine.ts",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 11→27 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:49:06.709Z"
+    },
+    {
+      "id": "bug-060",
+      "timestamp": "2026-05-15T20:49:22.876Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:49:22.876Z"
+    },
+    {
+      "id": "bug-061",
+      "timestamp": "2026-05-15T20:50:34.362Z",
+      "error_message": "Significant refactor of ",
+      "file": "CLAUDE.md",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 9→14 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:50:34.362Z"
     }
   ]
 }
