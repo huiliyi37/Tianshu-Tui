@@ -17,7 +17,9 @@ import { createContextLedger } from '../context/ledger.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
-import { classifyTestRun } from './failure-classifier.js'
+import { classifyFailure, classifyTestRun } from './failure-classifier.js'
+import { TurnHarness } from './turn-harness.js'
+import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
@@ -64,6 +66,8 @@ export class AgentLoop {
   private prewarm = new PrewarmCache()
   private streamedText = ''
   private lastPrewarmAt = 0
+  private trajectory = new TrajectoryRecorder()
+  private harness: TurnHarness
 
   constructor(
     private config: AgentConfig,
@@ -72,6 +76,10 @@ export class AgentLoop {
   ) {
     this.cwd = cwd ?? process.cwd()
     this.evidence = new EvidenceTracker()
+    this.harness = new TurnHarness(
+      { maxRetries: 1, retryableClasses: ['timeout', 'flaky'] },
+      this.trajectory,
+    )
   }
 
   private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
@@ -118,6 +126,14 @@ export class AgentLoop {
 
   updateSessionMemory(block: string): void {
     this.config.promptEngine.updateSessionMemory(block)
+  }
+
+  getTrajectoryStats(): { totalTools: number; failures: number; retries: number; avgDurationMs: number } {
+    return this.trajectory.summarize()
+  }
+
+  resetTrajectory(): void {
+    this.trajectory.reset()
   }
 
   private isHighRisk(toolName: string, input: Record<string, unknown>): boolean {
@@ -176,6 +192,7 @@ export class AgentLoop {
 
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
+    this.trajectory.reset()
     this.session.addUserMessage(userInput)
     let checkpointCreatedThisTurn = false
 
@@ -326,50 +343,62 @@ export class AgentLoop {
                 await this.config.fileHistory.trackEdit(tu.input.file_path, tu.id)
               }
 
-              // Prewarm cache fast-path for read_file
-              let result: import('../tools/types.js').ToolResult
-              if (tu.name === 'read_file' && typeof tu.input.file_path === 'string') {
-                const cached = this.prewarm.get(tu.input.file_path)
-                if (cached) {
-                  result = { content: cached }
-                } else {
-                  result = await this.config.toolRegistry.execute(tu.name, params)
-                }
-              } else {
-                result = await this.config.toolRegistry.execute(tu.name, params)
-              }
+              // Execute via TurnHarness (retry + trajectory recording)
+              let rawToolResult: import('../tools/types.js').ToolResult | undefined
+              const harnessResult = await this.harness.executeTool({
+                id: tu.id,
+                name: tu.name,
+                input: tu.input,
+                execute: async () => {
+                  // Prewarm cache fast-path for read_file
+                  if (tu.name === 'read_file' && typeof tu.input.file_path === 'string') {
+                    const cached = this.prewarm.get(tu.input.file_path)
+                    if (cached) return { content: cached }
+                  }
+                  const r = await this.config.toolRegistry.execute(tu.name, params)
+                  rawToolResult = r
+                  return { content: r.content, isError: r.isError }
+                },
+                classify: (content) => classifyFailure(content).class,
+              })
 
               // PostToolUse hook — can modify result
               const postHookResult = this.config.hooks?.firePostToolUse({
                 toolName: tu.name,
                 input: tu.input as Record<string, unknown>,
-                result: result.content,
-                isError: result.isError ?? false,
+                result: harnessResult.content,
+                isError: harnessResult.isError,
               }) ?? {}
-              const finalContent = postHookResult.result ?? result.content
+              const finalContent = postHookResult.result ?? harnessResult.content
 
-              callbacks.onToolResult(tu.id, tu.name, finalContent, result.isError ?? false, result.rawPath, result.uiContent)
+              callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError, rawToolResult?.rawPath, rawToolResult?.uiContent)
 
               // Record tool history for volatile context injection
-              this.recordToolHistory(tu.name, tu.input, result.isError ?? false, result.content)
+              this.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content)
 
               // Invalidate prewarm cache after writes
-              if ((tu.name === 'write_file' || tu.name === 'edit_file') && !result.isError && typeof tu.input.file_path === 'string') {
+              if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError && typeof tu.input.file_path === 'string') {
                 this.prewarm.invalidate(tu.input.file_path)
               }
 
-              if (tu.name === 'read_file' && !result.isError) {
+              if (tu.name === 'read_file' && !harnessResult.isError) {
                 this.evidence.trackFileRead(tu.input.file_path as string)
-              } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !result.isError) {
+              } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
                 this.evidence.trackFileModified(tu.input.file_path as string)
-              } else if (tu.name === 'run_tests') {
-                if (result.verification) {
-                  this.evidence.trackVerification(result.verification)
+              } else if (tu.name === 'run_tests' && !harnessResult.isError && rawToolResult) {
+                if (rawToolResult.verification) {
+                  this.evidence.trackVerification(rawToolResult.verification)
                 }
-                if (result.verification && result.verification.status !== 'passed') {
-                  const failures = classifyTestRun(result.content)
+                if (rawToolResult.verification && rawToolResult.verification.status !== 'passed') {
+                  const failures = classifyTestRun(harnessResult.content)
                   if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
-                    result.content += `\n\nDiagnosis: ${failures[0]!.suggestion}`
+                    toolResults.push({
+                      type: 'tool_result',
+                      tool_use_id: tu.id,
+                      content: `${finalContent}\n\nDiagnosis: ${failures[0]!.suggestion}`,
+                      is_error: harnessResult.isError,
+                    })
+                    continue
                   }
                 }
               }
@@ -378,7 +407,7 @@ export class AgentLoop {
                 type: 'tool_result',
                 tool_use_id: tu.id,
                 content: finalContent,
-                is_error: result.isError,
+                is_error: harnessResult.isError,
               })
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err)
