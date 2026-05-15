@@ -9,7 +9,7 @@ import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
-import { rollbackToCheckpoint } from '../agent/checkpoint.js'
+import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { appendLog, summarizeToolOutput, updateToolLog, visibleLogs, type LogEntry } from './log-state.js'
 
 interface PendingApproval {
@@ -138,7 +138,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
-/rollback — Undo all changes since last checkpoint` })
+/rollback — Preview changes since last checkpoint (/rollback confirm to execute)` })
           setIsStreaming(false)
           return
 
@@ -206,11 +206,21 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
 
         case '/rollback': {
-          const result = rollbackToCheckpoint(process.cwd())
-          if (result.success) {
-            addLog({ type: 'text', content: `Rolled back to checkpoint ${result.hash}. Working tree restored.` })
+          const subcmd = parts[1]
+          if (subcmd === 'confirm') {
+            const result = rollbackToCheckpoint(process.cwd())
+            if (result.success) {
+              addLog({ type: 'text', content: `Rolled back to checkpoint ${result.hash}. Working tree restored.` })
+            } else {
+              addLog({ type: 'text', content: 'Rollback failed. No checkpoint found.' })
+            }
           } else {
-            addLog({ type: 'text', content: 'No checkpoint found. Create a checkpoint first by running a tool that modifies files.' })
+            const preview = getRollbackPreview(process.cwd())
+            if (preview) {
+              addLog({ type: 'text', content: `⚠️  This will discard ALL changes since the checkpoint:\n${preview}\n\nType /rollback confirm to proceed.` })
+            } else {
+              addLog({ type: 'text', content: 'No checkpoint found or nothing to rollback.' })
+            }
           }
           setIsStreaming(false)
           return

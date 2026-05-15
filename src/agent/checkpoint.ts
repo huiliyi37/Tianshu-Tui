@@ -1,4 +1,7 @@
 import { execSync } from 'child_process'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 
 export interface Checkpoint {
   hash: string
@@ -6,20 +9,40 @@ export interface Checkpoint {
   message: string
 }
 
-/** Create a git commit checkpoint before agent starts modifying files. */
+interface CheckpointData {
+  hash: string
+  timestamp: number
+  label: string
+  cwd: string
+}
+
+const RIVET_DIR = join(homedir(), '.rivet')
+const CHECKPOINT_FILE = join(RIVET_DIR, 'checkpoint.json')
+
+function loadCheckpointData(): CheckpointData | null {
+  if (!existsSync(CHECKPOINT_FILE)) return null
+  try {
+    return JSON.parse(readFileSync(CHECKPOINT_FILE, 'utf-8')) as CheckpointData
+  } catch {
+    return null
+  }
+}
+
+/** Create a checkpoint by recording the current HEAD hash. Does NOT stage or commit files. */
 export function createCheckpoint(cwd: string, label?: string): Checkpoint | null {
   try {
-    // Stage all current changes first
-    execSync('git add -A', { cwd, timeout: 10000, stdio: 'ignore' })
-
-    const msg = label ? `rivet-checkpoint: ${label}` : 'rivet-checkpoint'
-    execSync(`git commit --allow-empty -m "${msg}"`, {
-      cwd, timeout: 10000, stdio: 'ignore',
-    })
-
     const hash = execSync('git rev-parse HEAD', {
       cwd, timeout: 5000, encoding: 'utf-8',
     }).trim()
+
+    mkdirSync(RIVET_DIR, { recursive: true })
+    const msg = label ?? 'checkpoint'
+    writeFileSync(CHECKPOINT_FILE, JSON.stringify({
+      hash,
+      timestamp: Date.now(),
+      label: msg,
+      cwd,
+    }))
 
     return { hash, timestamp: Date.now(), message: msg }
   } catch {
@@ -27,79 +50,76 @@ export function createCheckpoint(cwd: string, label?: string): Checkpoint | null
   }
 }
 
-/** Roll back to the last rivet checkpoint commit. */
-export function rollbackToCheckpoint(cwd: string): { success: boolean; hash?: string } {
-  try {
-    // Find the last rivet-checkpoint commit
-    const hash = execSync(
-      'git log --oneline -1 --grep="rivet-checkpoint" --format="%H"',
-      { cwd, timeout: 5000, encoding: 'utf-8' },
-    ).trim()
+/** Preview what a rollback would discard. Returns null if no checkpoint or nothing to lose. */
+export function getRollbackPreview(cwd: string): string | null {
+  const data = loadCheckpointData()
+  if (!data) return null
 
-    if (!hash) {
-      return { success: false }
+  try {
+    const parts: string[] = []
+    parts.push(`Checkpoint: ${data.hash.slice(0, 8)} (${new Date(data.timestamp).toLocaleString()})`)
+
+    // Committed changes since checkpoint
+    const diff = execSync(`git diff --stat ${data.hash} HEAD`, {
+      cwd, timeout: 5000, encoding: 'utf-8',
+    }).trim()
+    if (diff) {
+      parts.push(`\nCommitted changes:\n${diff}`)
     }
 
-    execSync(`git reset --hard ${hash}`, {
+    // Unstaged/staged changes (not yet committed)
+    const unstaged = execSync('git diff --stat', {
+      cwd, timeout: 5000, encoding: 'utf-8',
+    }).trim()
+    if (unstaged) {
+      parts.push(`\nUnstaged changes:\n${unstaged}`)
+    }
+
+    const staged = execSync('git diff --cached --stat', {
+      cwd, timeout: 5000, encoding: 'utf-8',
+    }).trim()
+    if (staged) {
+      parts.push(`\nStaged changes:\n${staged}`)
+    }
+
+    // Untracked files
+    const untracked = execSync('git ls-files --others --exclude-standard', {
+      cwd, timeout: 5000, encoding: 'utf-8',
+    }).trim()
+    if (untracked) {
+      const files = untracked.split('\n').slice(0, 20)
+      parts.push(`\nUntracked files to remove:\n${files.join('\n')}${untracked.split('\n').length > 20 ? '\n... (more)' : ''}`)
+    }
+
+    if (!diff && !unstaged && !staged && !untracked) return null
+
+    return parts.join('\n')
+  } catch {
+    return null
+  }
+}
+
+/** Roll back to the last checkpoint. DESTRUCTIVE — call getRollbackPreview first. */
+export function rollbackToCheckpoint(cwd: string): { success: boolean; hash?: string } {
+  const data = loadCheckpointData()
+  if (!data) return { success: false }
+
+  try {
+    execSync(`git reset --hard ${data.hash}`, {
       cwd, timeout: 10000, stdio: 'ignore',
     })
-
-    // Clean untracked files created after checkpoint
     execSync('git clean -fd', {
       cwd, timeout: 10000, stdio: 'ignore',
     })
-
-    return { success: true, hash: hash.slice(0, 7) }
+    return { success: true, hash: data.hash.slice(0, 7) }
   } catch {
     return { success: false }
   }
 }
 
 /** List all rivet checkpoint commits. */
-export function listCheckpoints(cwd: string): Checkpoint[] {
-  try {
-    const output = execSync(
-      'git log --oneline --grep="rivet-checkpoint" --format="%H %ct %s"',
-      { cwd, timeout: 5000, encoding: 'utf-8' },
-    ).trim()
-
-    if (!output) return []
-
-    return output.split('\n').map(line => {
-      const [hash, timestamp, ...rest] = line.split(' ')
-      return {
-        hash: hash!.slice(0, 7),
-        timestamp: parseInt(timestamp!, 10) * 1000,
-        message: rest.join(' '),
-      }
-    })
-  } catch {
-    return []
-  }
-}
-
-/**
- * Remove all rivet checkpoint commits by soft-resetting to before the first one.
- * Called on clean exit after successful task completion.
- */
-export function cleanupCheckpoints(cwd: string): void {
-  try {
-    // Find the commit before the first checkpoint
-    const firstCheckpoint = execSync(
-      'git log --oneline --grep="rivet-checkpoint" --format="%H" | tail -1',
-      { cwd, timeout: 5000, encoding: 'utf-8' },
-    ).trim()
-
-    if (!firstCheckpoint) return
-
-    // Reset to before first checkpoint, keeping working tree changes
-    execSync(`git reset --soft ${firstCheckpoint}^`, {
-      cwd, timeout: 10000, stdio: 'ignore',
-    })
-
-    // Unstage everything
-    execSync('git reset', { cwd, timeout: 5000, stdio: 'ignore' })
-  } catch {
-    // Best effort cleanup
-  }
+export function listCheckpoints(_cwd: string): Checkpoint[] {
+  const data = loadCheckpointData()
+  if (!data) return []
+  return [{ hash: data.hash.slice(0, 7), timestamp: data.timestamp, message: data.label }]
 }
