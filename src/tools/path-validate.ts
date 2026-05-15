@@ -1,4 +1,4 @@
-import { resolve, normalize } from 'path'
+import { resolve, normalize, sep } from 'path'
 
 /**
  * Validate that a file path resolves within the project directory.
@@ -9,8 +9,8 @@ export function validatePath(cwd: string, filePath: string): string {
   const resolved = resolve(cwd, filePath)
   const normalized = normalize(resolved)
 
-  // Must be within the project directory
-  if (!normalized.startsWith(cwd)) {
+  // Must be within cwd: either equals cwd exactly, or starts with cwd + separator
+  if (normalized !== cwd && !normalized.startsWith(cwd + sep)) {
     throw new Error(`Path escapes project directory: ${filePath}`)
   }
 

@@ -1,15 +1,20 @@
 import type { ApiClient, StreamCallbacks } from '../api/client.js'
-import type { ContentBlock, Usage } from '../api/types.js'
+import type { ContentBlock, Message, Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
 import { ToolRegistry } from '../tools/registry.js'
 import type { ToolCallParams } from '../tools/types.js'
 import { SessionContext } from './context.js'
+import { shouldAutoCompact, estimateTokens } from '../compact/index.js'
+import { microCompact } from '../compact/micro.js'
+import type { CompactionConfig } from '../compact/constants.js'
 
 export interface AgentConfig {
   client: ApiClient
   promptEngine: PromptEngine
   toolRegistry: ToolRegistry
   maxTurns: number
+  contextWindow: number
+  compact: CompactionConfig
 }
 
 export interface AgentCallbacks {
@@ -43,6 +48,13 @@ export class AgentLoop {
     this.abortController?.abort()
   }
 
+  private compactMessages(
+    messages: Message[],
+    tokenCount: number,
+  ): { messages: Message[] } {
+    return microCompact(messages, this.config.contextWindow, tokenCount)
+  }
+
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     this.session.addUserMessage(userInput)
@@ -52,6 +64,15 @@ export class AgentLoop {
         if (this.abortController.signal.aborted) {
           callbacks.onAbort()
           return
+        }
+
+        // Check compaction before building request to prevent context overflow
+        const messages = this.session.getMessages()
+        const decision = shouldAutoCompact(messages, this.config.compact)
+        if (decision.shouldCompact) {
+          const tokenCount = estimateTokens(messages)
+          const { messages: compacted } = this.compactMessages(messages, tokenCount)
+          this.session.replaceMessages(compacted)
         }
 
         const request = this.config.promptEngine.buildRequest(this.session.getMessages())

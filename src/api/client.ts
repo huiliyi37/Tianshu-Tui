@@ -9,6 +9,8 @@ export interface ClientConfig {
   thinking: 'enabled' | 'disabled'
   reasoningEffort?: string
   unsupported: string[]
+  /** Optional function to normalize usage fields from provider-specific format to standard Usage */
+  mapUsage?: (raw: Record<string, unknown>) => Partial<Usage>
 }
 
 export interface StreamCallbacks {
@@ -251,7 +253,9 @@ export class ApiClient {
 
               case 'message_delta': {
                 const stopReason = data.delta_stop_reason ?? ''
-                callbacks.onStopReason(stopReason, data.usage ?? {})
+                const rawUsage = data.usage ?? {}
+                const usage = this.config.mapUsage ? this.config.mapUsage(rawUsage) : rawUsage
+                callbacks.onStopReason(stopReason, usage)
                 break
               }
 

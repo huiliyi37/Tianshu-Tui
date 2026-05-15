@@ -8,12 +8,12 @@ interface DeepSeekRawUsage {
   prompt_cache_miss_tokens?: number
 }
 
-export function mapDeepSeekUsage(raw: DeepSeekRawUsage): Usage {
+export function mapDeepSeekUsage(raw: Record<string, unknown>): Usage {
   return {
-    input_tokens: raw.prompt_tokens,
-    output_tokens: raw.completion_tokens,
-    cache_read_input_tokens: raw.prompt_cache_hit_tokens ?? 0,
-    cache_creation_input_tokens: raw.prompt_cache_miss_tokens ?? 0,
+    input_tokens: (raw.prompt_tokens ?? 0) as number,
+    output_tokens: (raw.completion_tokens ?? 0) as number,
+    cache_read_input_tokens: (raw.prompt_cache_hit_tokens ?? 0) as number,
+    cache_creation_input_tokens: (raw.prompt_cache_miss_tokens ?? 0) as number,
   }
 }
 
@@ -38,6 +38,7 @@ export function createDeepSeekClient(config: DeepSeekClientConfig): ApiClient {
     thinking: 'enabled',
     reasoningEffort: config.reasoningEffort ?? 'high',
     unsupported: DEEPSEEK_UNSUPPORTED,
+    mapUsage: mapDeepSeekUsage,
   }
 
   return new ApiClient(clientConfig)

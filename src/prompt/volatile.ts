@@ -17,7 +17,14 @@ function readOpenCodeMd(cwd: string): string | undefined {
   return undefined
 }
 
+let gitStatusCache: { value: string | undefined; timestamp: number } | null = null
+const GIT_CACHE_TTL_MS = 30_000 // 30 seconds
+
 function getGitStatus(): string | undefined {
+  if (gitStatusCache && Date.now() - gitStatusCache.timestamp < GIT_CACHE_TTL_MS) {
+    return gitStatusCache.value
+  }
+
   try {
     const branch = execSync('git branch --show-current', {
       encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
@@ -26,8 +33,11 @@ function getGitStatus(): string | undefined {
       encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
     if (!branch && !status) return undefined
-    return `Current branch: ${branch}\nStatus:\n${status || '(clean)'}`
+    const result = `Current branch: ${branch}\nStatus:\n${status || '(clean)'}`
+    gitStatusCache = { value: result, timestamp: Date.now() }
+    return result
   } catch {
+    gitStatusCache = { value: undefined, timestamp: Date.now() }
     return undefined
   }
 }

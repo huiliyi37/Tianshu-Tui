@@ -64,10 +64,9 @@ export function buildSystemPrompt(ctx: StaticPromptContext): string {
     .replace('{cwd}', ctx.cwd)
     .replace('{os}', `${os.type()} ${os.release()}`)
 
-  // Append tool definitions in fixed sorted order — part of the cache anchor
+  // Append tool definitions (already sorted by ToolRegistry)
   if (ctx.tools.length > 0) {
     const toolSection = ctx.tools
-      .sort((a, b) => a.name.localeCompare(b.name))
       .map(t => `- **${t.name}**: ${t.description}`)
       .join('\n')
     prompt += `\n\n## Available Tools\n\n${toolSection}`

@@ -31,6 +31,11 @@ export class SessionContext {
     this.state.turnCount++
   }
 
+  /** Replace all messages (used after compaction) */
+  replaceMessages(messages: Message[]): void {
+    this.state.messages = messages
+  }
+
   /** Add an assistant message with structured content blocks */
   addAssistantBlocks(blocks: ContentBlock[]): void {
     this.state.messages.push({ role: 'assistant', content: blocks })

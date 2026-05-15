@@ -56,7 +56,14 @@ async function main() {
   // Agent + session
   const session = new SessionContext()
   const agent = new AgentLoop(
-    { client, promptEngine, toolRegistry, maxTurns: config.agent.maxTurns },
+    {
+      client,
+      promptEngine,
+      toolRegistry,
+      maxTurns: config.agent.maxTurns,
+      contextWindow: model.contextWindow,
+      compact: config.compact,
+    },
     session,
     cwd,
   )

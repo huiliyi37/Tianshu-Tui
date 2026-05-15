@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { Box } from 'ink'
+import { Box, Text, useInput } from 'ink'
 import { StatusBar } from './status-bar.js'
 import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
@@ -7,6 +7,13 @@ import { ThinkingCollapser } from './thinking.js'
 import { ToolCard } from './tool-card.js'
 import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
+
+interface PendingApproval {
+  id: string
+  name: string
+  input: Record<string, unknown>
+  resolve: (approved: boolean) => void
+}
 
 interface AppProps {
   agent: AgentLoop
@@ -32,6 +39,7 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const logRef = useRef<LogEntry[]>([])
   const streamBufferRef = useRef('')
   const streamFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -103,12 +111,24 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
         addLog({ type: 'text', content: '[Aborted]' })
         setIsStreaming(false)
       },
-      onApprovalRequired: async () => {
-        // No approval UI yet — auto-deny all approval requests
-        return Promise.resolve(false)
+      onApprovalRequired: async (id, name, input) => {
+        return new Promise<boolean>((resolve) => {
+          setPendingApproval({ id, name, input, resolve })
+        })
       },
     })
   }, [agent, session, addLog])
+
+  useInput((_input, key) => {
+    if (!pendingApproval) return
+    if (key.return || _input.toLowerCase() === 'y') {
+      pendingApproval.resolve(true)
+      setPendingApproval(null)
+    } else if (_input.toLowerCase() === 'n') {
+      pendingApproval.resolve(false)
+      setPendingApproval(null)
+    }
+  })
 
   const currentTokens = session.getTotalUsage().input_tokens
 
@@ -121,6 +141,12 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
         currentTokens={currentTokens}
         maxTokens={maxTokens}
       />
+      {pendingApproval && (
+        <Box paddingX={2} borderStyle="single" borderColor="yellow">
+          <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
+          <Text> [y/n] </Text>
+        </Box>
+      )}
       <Box flexDirection="column" flexGrow={1}>
         {logs.map((log, i) => {
           if (log.type === 'tool') {

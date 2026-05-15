@@ -55,7 +55,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
     registry.register(READ_FILE_TOOL)
 
     const client = mockClient([makeTextBlock('Hello! How can I help?')])
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5 }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
 
     const texts: string[] = []
     let completeCount = 0
@@ -97,7 +97,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as ApiClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5 }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
 
     const toolUses: string[] = []
     const toolResults: string[] = []
@@ -133,7 +133,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as ApiClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 3 }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 3, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
 
     await agent.run('loop test', {
       onTextDelta: () => {},
@@ -164,7 +164,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as ApiClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 20 }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 20, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
 
     let aborted = false
     const runPromise = agent.run('abort test', {
@@ -202,7 +202,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as ApiClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5 }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
 
     const toolInputs: Record<string, unknown>[] = []
 
@@ -242,7 +242,7 @@ describe('AgentLoop — error handling', () => {
       }),
     } as unknown as ApiClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5 }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
 
     const errors: string[] = []
 
