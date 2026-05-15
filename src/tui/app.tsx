@@ -52,6 +52,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const thinkingFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dirtyToolIdsRef = useRef<Set<string>>(new Set())
+  const toolNamesRef = useRef<Map<string, string>>(new Map())
+  const rollbackTokenRef = useRef<string | null>(null)
 
   // Session recovery: check for previous sessions on mount
   useEffect(() => {
@@ -108,11 +110,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setStreamingText('')
     setStreamingThinking('')
 
-    // Reset stream buffer
     streamBufferRef.current = ''
     thinkingBufferRef.current = ''
     toolOutputAccumRef.current.clear()
     dirtyToolIdsRef.current.clear()
+    toolNamesRef.current.clear()
 
     for (const ref of [streamFlushRef, thinkingFlushRef, toolFlushRef]) {
       if (ref.current) {
@@ -180,11 +182,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           return
         }
 
-        case '/verbose':
-          setVerbose(v => !v)
-          addLog({ type: 'text', content: verbose ? 'Verbose mode: off (show 20 lines)' : 'Verbose mode: on (show 200 lines)' })
+        case '/verbose': {
+          const nextVerbose = !verbose
+          setVerbose(nextVerbose)
+          addLog({ type: 'text', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' })
           setIsStreaming(false)
           return
+        }
 
         case '/debug': {
           const subcmd = parts[1]
@@ -210,18 +214,20 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         case '/rollback': {
           const subcmd = parts[1]
           if (subcmd === 'confirm') {
-            const result = await rollbackToCheckpoint(process.cwd())
+            const result = await rollbackToCheckpoint(process.cwd(), rollbackTokenRef.current ?? undefined)
+            rollbackTokenRef.current = null
             if (result.success) {
-              addLog({ type: 'text', content: `Rolled back to checkpoint ${result.hash}. Working tree restored.` })
+              addLog({ type: 'text', content: `Rolled back to checkpoint ${result.hash}. Agent-owned changes reverted.` })
             } else {
-              addLog({ type: 'text', content: 'Rollback failed. No checkpoint found.' })
+              addLog({ type: 'text', content: 'Rollback failed. No valid checkpoint or confirmation token.' })
             }
           } else {
             const preview = await getRollbackPreview(process.cwd())
             if (preview) {
-              addLog({ type: 'text', content: `⚠️  This will discard ALL changes since the checkpoint:\n${preview}\n\nType /rollback confirm to proceed.` })
+              rollbackTokenRef.current = preview.confirmationToken
+              addLog({ type: 'text', content: `⚠️  Agent-owned changes to revert:\n${preview.text}\n\nType /rollback confirm to proceed.` })
             } else {
-              addLog({ type: 'text', content: 'No checkpoint found or nothing to rollback.' })
+              addLog({ type: 'text', content: 'No agent-owned changes to rollback.' })
             }
           }
           setIsStreaming(false)
@@ -261,9 +267,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const p = new SessionPersist(targetId)
           const msgs = p.load()
           session.replaceMessages(msgs)
-          // Trigger full re-render
           addLog({ type: 'text', content: `Restored session ${targetId.slice(0, 8)}... (${msgs.length} messages)` })
-          // Redraw: clear logs and reload from messages
           logRef.current = []
           setLogs([])
           setIsStreaming(false)
@@ -276,12 +280,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     const scheduleToolFlush = (id: string, name: string) => {
       dirtyToolIdsRef.current.add(id)
+      toolNamesRef.current.set(id, name)
       if (!toolFlushRef.current) {
         toolFlushRef.current = setTimeout(() => {
           for (const dirtyId of dirtyToolIdsRef.current) {
             const accumulated = toolOutputAccumRef.current.get(dirtyId)
+            const toolName = toolNamesRef.current.get(dirtyId) ?? 'tool'
             if (accumulated !== undefined) {
-              updateLogEntry(dirtyId, name, summarizeToolOutput(accumulated, verbose ? 200 : 24))
+              updateLogEntry(dirtyId, toolName, summarizeToolOutput(accumulated, verbose ? 200 : 24))
             }
           }
           dirtyToolIdsRef.current.clear()
@@ -297,7 +303,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           streamFlushRef.current = setTimeout(() => {
             setStreamingText(streamBufferRef.current)
             streamFlushRef.current = null
-          }, 50) // 50ms batch = ~20fps
+          }, 50)
         }
       },
       onThinkingDelta: (thinking) => {
@@ -314,13 +320,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       },
       onToolResult: (id, name, result, isError, rawPath) => {
         if (isError === undefined) {
-          // Intermediate streaming chunk: accumulate and schedule batched flush
           const prev = toolOutputAccumRef.current.get(id) || ''
           toolOutputAccumRef.current.set(id, prev + result)
           scheduleToolFlush(id, name)
         } else {
-          // Final result: clear accumulation, update directly
           toolOutputAccumRef.current.delete(id)
+          toolNamesRef.current.delete(id)
           updateLogEntry(id, name, result, isError, rawPath)
         }
       },
@@ -328,7 +333,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         addLog({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` })
       },
       onTurnComplete: (_usage, turnNumber) => {
-        // Flush any remaining buffered text
         if (streamFlushRef.current) {
           clearTimeout(streamFlushRef.current)
           streamFlushRef.current = null
@@ -340,7 +344,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         streamBufferRef.current = ''
         setStreamingText('')
 
-        // Flush thinking buffer
         if (thinkingFlushRef.current) {
           clearTimeout(thinkingFlushRef.current)
           thinkingFlushRef.current = null
@@ -348,7 +351,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setStreamingThinking(thinkingBufferRef.current)
         thinkingBufferRef.current = ''
 
-        // Flush tool output buffer
         if (toolFlushRef.current) {
           clearTimeout(toolFlushRef.current)
           toolFlushRef.current = null
@@ -358,13 +360,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
 
-        // Cost: ¥1/M input, ¥4/M output, cache hits at 1/10 (DeepSeek V4, promo until 5/31)
         const usage = session.getTotalUsage()
         const normalInput = usage.input_tokens - usage.cache_read_input_tokens
         const estimatedCost = (normalInput * 1 + usage.cache_read_input_tokens * 0.1 + usage.output_tokens * 4) / 1_000_000
         setCost(estimatedCost)
 
-        // Cache miss diagnostic
         session.recordTurnCache(turnNumber, usage)
         const drift = agent.getDebugInfo().drift
         const diag = diagnoseCacheMiss(

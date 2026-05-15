@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { execSync } from 'child_process'
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -9,6 +9,7 @@ import {
   getRollbackPreview,
   rollbackToCheckpoint,
   listCheckpoints,
+  recordAgentTouchedFile,
 } from '../checkpoint.js'
 
 function makeTempGitRepo(): string {
@@ -79,7 +80,7 @@ describe('checkpoint module', () => {
       }
     })
 
-    it('returns null when no changes since checkpoint', async () => {
+    it('returns null when no agent-owned changes', async () => {
       const repo = makeTempGitRepo()
       try {
         await createCheckpoint(repo, 'auto')
@@ -90,47 +91,17 @@ describe('checkpoint module', () => {
       }
     })
 
-    it('returns preview text when there are changes since checkpoint', async () => {
+    it('returns preview with confirmation token for agent files', async () => {
       const repo = makeTempGitRepo()
       try {
         await createCheckpoint(repo, 'auto')
-        writeFileSync(join(repo, 'changed.txt'), 'new content')
-        execSync('git add .', { cwd: repo })
-        execSync('git commit -m "post-checkpoint change"', { cwd: repo })
+        recordAgentTouchedFile(repo, 'agent-created.txt')
+        writeFileSync(join(repo, 'agent-created.txt'), 'agent work')
 
         const preview = await getRollbackPreview(repo)
         assert.ok(preview)
-        assert.ok(preview.includes('Committed changes'))
-        assert.ok(preview.includes('changed.txt'))
-      } finally {
-        cleanupRepo(repo)
-      }
-    })
-
-    it('reports unstaged changes in preview', async () => {
-      const repo = makeTempGitRepo()
-      try {
-        await createCheckpoint(repo, 'auto')
-        writeFileSync(join(repo, 'initial.txt'), 'modified')
-
-        const preview = await getRollbackPreview(repo)
-        assert.ok(preview)
-        assert.ok(preview.includes('Unstaged changes'))
-      } finally {
-        cleanupRepo(repo)
-      }
-    })
-
-    it('reports untracked files in preview', async () => {
-      const repo = makeTempGitRepo()
-      try {
-        await createCheckpoint(repo, 'auto')
-        writeFileSync(join(repo, 'untracked.txt'), 'new file')
-
-        const preview = await getRollbackPreview(repo)
-        assert.ok(preview)
-        assert.ok(preview.includes('Untracked files'))
-        assert.ok(preview.includes('untracked.txt'))
+        assert.ok(preview.confirmationToken)
+        assert.ok(preview.text.includes('agent-created.txt'))
       } finally {
         cleanupRepo(repo)
       }
@@ -148,35 +119,74 @@ describe('checkpoint module', () => {
       }
     })
 
-    it('rolls back to checkpoint and reports success', async () => {
+    it('requires confirmation token for rollback', async () => {
       const repo = makeTempGitRepo()
       try {
-        const cp = await createCheckpoint(repo, 'auto')
-        assert.ok(cp)
-
-        writeFileSync(join(repo, 'post.txt'), 'should be removed')
-        execSync('git add .', { cwd: repo })
-        execSync('git commit -m "post-checkpoint"', { cwd: repo })
-
+        await createCheckpoint(repo, 'auto')
+        recordAgentTouchedFile(repo, 'agent-created.txt')
+        writeFileSync(join(repo, 'agent-created.txt'), 'agent work')
         const result = await rollbackToCheckpoint(repo)
-        assert.equal(result.success, true)
-        assert.equal(result.hash, cp.hash.slice(0, 7))
-        assert.ok(!existsSync(join(repo, 'post.txt')))
-        assert.ok(existsSync(join(repo, 'initial.txt')))
+        assert.equal(result.success, false)
       } finally {
         cleanupRepo(repo)
       }
     })
 
-    it('removes untracked files during rollback', async () => {
+    it('does not remove pre-existing unstaged changes during rollback', async () => {
+      const repo = makeTempGitRepo()
+      try {
+        writeFileSync(join(repo, 'user-work.txt'), 'user work before agent')
+        const cp = await createCheckpoint(repo, 'auto')
+        assert.ok(cp)
+
+        recordAgentTouchedFile(repo, 'agent-created.txt')
+        writeFileSync(join(repo, 'agent-created.txt'), 'agent work')
+
+        const preview = await getRollbackPreview(repo)
+        assert.ok(preview)
+        const result = await rollbackToCheckpoint(repo, preview.confirmationToken)
+
+        assert.equal(result.success, true)
+        assert.ok(existsSync(join(repo, 'user-work.txt')))
+        assert.ok(!existsSync(join(repo, 'agent-created.txt')))
+      } finally {
+        cleanupRepo(repo)
+      }
+    })
+
+    it('restores tracked files to checkpoint state', async () => {
+      const repo = makeTempGitRepo()
+      try {
+        writeFileSync(join(repo, 'tracked.txt'), 'original')
+        execSync('git add tracked.txt', { cwd: repo })
+        execSync('git commit -m "add tracked"', { cwd: repo })
+
+        const cp = await createCheckpoint(repo, 'auto')
+        assert.ok(cp)
+
+        recordAgentTouchedFile(repo, 'tracked.txt')
+        writeFileSync(join(repo, 'tracked.txt'), 'modified by agent')
+
+        const preview = await getRollbackPreview(repo)
+        assert.ok(preview)
+        const result = await rollbackToCheckpoint(repo, preview.confirmationToken)
+
+        assert.equal(result.success, true)
+        assert.equal(readFileSync(join(repo, 'tracked.txt'), 'utf-8'), 'original')
+      } finally {
+        cleanupRepo(repo)
+      }
+    })
+
+    it('rejects wrong confirmation token', async () => {
       const repo = makeTempGitRepo()
       try {
         await createCheckpoint(repo, 'auto')
-        writeFileSync(join(repo, 'orphan.txt'), 'untracked')
+        recordAgentTouchedFile(repo, 'agent-file.txt')
+        writeFileSync(join(repo, 'agent-file.txt'), 'data')
 
-        const result = await rollbackToCheckpoint(repo)
-        assert.equal(result.success, true)
-        assert.ok(!existsSync(join(repo, 'orphan.txt')))
+        const result = await rollbackToCheckpoint(repo, 'wrong-token')
+        assert.equal(result.success, false)
       } finally {
         cleanupRepo(repo)
       }

@@ -8,7 +8,7 @@ import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import { EvidenceTracker } from './evidence.js'
-import { createCheckpoint } from './checkpoint.js'
+import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyTestRun } from './failure-classifier.js'
 
 export interface AgentConfig {
@@ -99,7 +99,6 @@ export class AgentLoop {
           return
         }
 
-        // Check compaction before building request to prevent context overflow
         const messages = this.session.getMessages()
         const decision = shouldAutoCompact(messages, this.config.compact, this.session.getEstimatedTokens())
         if (decision.shouldCompact) {
@@ -140,12 +139,10 @@ export class AgentLoop {
           return
         }
 
-        // Add assistant message with all collected blocks
         if (collectedBlocks.length > 0) {
           this.session.addAssistantBlocks(collectedBlocks)
         }
 
-        // If there are tool_use blocks, execute them and continue the loop
         if (toolUses.length > 0) {
           const toolResults: ContentBlock[] = []
 
@@ -159,7 +156,6 @@ export class AgentLoop {
               },
             }
             try {
-              // Check if this tool requires user approval
               if (this.config.toolRegistry.needsApproval(tu.name, params)) {
                 const approved = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
                 if (!approved) {
@@ -175,17 +171,19 @@ export class AgentLoop {
                 }
               }
 
-              // Auto-create checkpoint before first modifying operation each turn
               if ((tu.name === 'write_file' || tu.name === 'edit_file') && !checkpointCreatedThisTurn) {
                 const cp = await createCheckpoint(this.cwd, 'auto')
                 checkpointCreatedThisTurn = true
                 if (cp) callbacks.onCheckpoint?.(cp.hash)
               }
 
+              if ((tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
+                recordAgentTouchedFile(this.cwd, tu.input.file_path)
+              }
+
               const result = await this.config.toolRegistry.execute(tu.name, params)
               callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false, result.rawPath)
 
-              // Track evidence for final badge
               if (tu.name === 'read_file' && !result.isError) {
                 this.evidence.trackFileRead(tu.input.file_path as string)
               } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !result.isError) {
@@ -197,7 +195,6 @@ export class AgentLoop {
                 const failed = fm ? parseInt(fm[1]!, 10) : 0
                 this.evidence.trackTestResult(passed, failed)
               } else if (tu.name === 'run_tests' && result.isError) {
-                // Classify failure and inject hint into result
                 const failures = classifyTestRun(result.content)
                 if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
                   result.content += `\n\nDiagnosis: ${failures[0]!.suggestion}`
@@ -222,14 +219,11 @@ export class AgentLoop {
             }
           }
 
-          // Inject tool results as user message for next LLM turn
           this.session.addToolResults(toolResults)
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
-          // Continue loop — next iteration sends messages with tool_results
           continue
         }
 
-        // No tool_use blocks — conversation complete
         const badge = this.evidence.buildBadge()
         if (badge) callbacks.onTextDelta('\n' + badge)
         callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
