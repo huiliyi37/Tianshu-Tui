@@ -234,7 +234,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           for (const dirtyId of dirtyToolIdsRef.current) {
             const accumulated = toolOutputAccumRef.current.get(dirtyId)
             if (accumulated !== undefined) {
-              updateLogEntry(dirtyId, name, summarizeToolOutput(accumulated, 24))
+              updateLogEntry(dirtyId, name, summarizeToolOutput(accumulated, verbose ? 200 : 24))
             }
           }
           dirtyToolIdsRef.current.clear()
@@ -274,7 +274,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         } else {
           // Final result: clear accumulation, update with summarized output
           toolOutputAccumRef.current.delete(id)
-          updateLogEntry(id, name, summarizeToolOutput(result, 24), isError)
+          updateLogEntry(id, name, summarizeToolOutput(result, verbose ? 200 : 24), isError)
         }
       },
       onTurnComplete: (_usage) => {
