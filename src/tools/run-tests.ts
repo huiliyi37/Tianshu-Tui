@@ -1,8 +1,7 @@
 import { spawn } from 'child_process'
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Tool, ToolCallParams } from './types.js'
-import type { VerificationMetadata } from './types.js'
+import type { Tool, ToolCallParams, VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
 
