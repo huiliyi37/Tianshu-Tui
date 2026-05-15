@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import React from 'react'
 
 import {
   CockpitRail,
@@ -12,17 +13,21 @@ import {
   PANELS,
   PANEL_LABELS,
 } from '../index.js'
-import type { Panel } from '../types.js'
+import type { Panel, CockpitContextLayerView } from '../types.js'
+
+function render(component: any, props: any) {
+  return React.createElement(component, props)
+}
 
 describe('Cockpit barrel exports', () => {
-  it('exports all panel components as functions', () => {
-    assert.equal(typeof CockpitRail, 'function')
-    assert.equal(typeof TracePanel, 'function')
-    assert.equal(typeof VerificationPanel, 'function')
-    assert.equal(typeof ContextPanel, 'function')
-    assert.equal(typeof SafetyPanel, 'function')
-    assert.equal(typeof ModelPanel, 'function')
-    assert.equal(typeof ApprovalRiskCard, 'function')
+  it('exports all panel components as memo objects with type function', () => {
+    assert.equal(typeof CockpitRail.type, 'function')
+    assert.equal(typeof TracePanel.type, 'function')
+    assert.equal(typeof VerificationPanel.type, 'function')
+    assert.equal(typeof ContextPanel.type, 'function')
+    assert.equal(typeof SafetyPanel.type, 'function')
+    assert.equal(typeof ModelPanel.type, 'function')
+    assert.equal(typeof ApprovalRiskCard.type, 'function')
   })
 })
 
@@ -42,7 +47,7 @@ describe('Cockpit types', () => {
 describe('CockpitRail renders', () => {
   it('renders without error for each panel', () => {
     for (const panel of PANELS) {
-      const el = CockpitRail({ activePanel: panel, onSelect: () => {} })
+      const el = render(CockpitRail, { activePanel: panel, onSelect: () => {} })
       assert.ok(el != null, `CockpitRail returned null for panel ${panel}`)
     }
   })
@@ -50,12 +55,12 @@ describe('CockpitRail renders', () => {
 
 describe('TracePanel renders', () => {
   it('renders with empty events', () => {
-    const el = TracePanel({ events: [] })
+    const el = render(TracePanel, { events: [] })
     assert.ok(el != null)
   })
 
   it('renders with events', () => {
-    const el = TracePanel({
+    const el = render(TracePanel, {
       events: [
         { id: '1', turn: 1, kind: 'tool', name: 'read_file', status: 'passed', durationMs: 120 },
         { id: '2', turn: 1, kind: 'tool', name: 'edit_file', status: 'running' },
@@ -67,12 +72,12 @@ describe('TracePanel renders', () => {
 
 describe('VerificationPanel renders', () => {
   it('renders with empty verifications', () => {
-    const el = VerificationPanel({ filesRead: 0, filesModified: 0, verifications: [] })
+    const el = render(VerificationPanel, { filesRead: 0, filesModified: 0, verifications: [] })
     assert.ok(el != null)
   })
 
   it('renders with data', () => {
-    const el = VerificationPanel({
+    const el = render(VerificationPanel, {
       filesRead: 5,
       filesModified: 2,
       verifications: [
@@ -86,7 +91,7 @@ describe('VerificationPanel renders', () => {
 
 describe('ContextPanel renders', () => {
   it('renders with basic props', () => {
-    const el = ContextPanel({
+    const el = render(ContextPanel, {
       estimatedTokens: 50000,
       maxTokens: 200000,
       rounds: 5,
@@ -98,7 +103,7 @@ describe('ContextPanel renders', () => {
   })
 
   it('renders with compact events', () => {
-    const el = ContextPanel({
+    const el = render(ContextPanel, {
       estimatedTokens: 180000,
       maxTokens: 200000,
       rounds: 12,
@@ -115,7 +120,7 @@ describe('ContextPanel renders', () => {
 
 describe('SafetyPanel renders', () => {
   it('renders with no risk', () => {
-    const el = SafetyPanel({
+    const el = render(SafetyPanel, {
       doomLoopLevel: 'none',
       riskLevel: 'none',
       riskReasons: [],
@@ -125,7 +130,7 @@ describe('SafetyPanel renders', () => {
   })
 
   it('renders with high risk and reasons', () => {
-    const el = SafetyPanel({
+    const el = render(SafetyPanel, {
       doomLoopLevel: 'warn',
       riskLevel: 'high',
       riskReasons: ['repeated edit pattern', 'no verification'],
@@ -137,7 +142,7 @@ describe('SafetyPanel renders', () => {
 
 describe('ModelPanel renders', () => {
   it('renders with model data', () => {
-    const el = ModelPanel({
+    const el = render(ModelPanel, {
       model: 'deepseek-v4',
       cacheHitRate: 0.85,
       inputTokens: 120000,
@@ -152,12 +157,36 @@ describe('ModelPanel renders', () => {
 
 describe('ApprovalRiskCard renders', () => {
   it('returns null when level is none', () => {
-    const el = ApprovalRiskCard({ level: 'none', reasons: [] })
+    const el = ApprovalRiskCard.type({ level: 'none', reasons: [] })
     assert.equal(el, null)
   })
 
   it('renders with risk level', () => {
-    const el = ApprovalRiskCard({ level: 'high', reasons: ['destructive command'] })
+    const el = render(ApprovalRiskCard, { level: 'high', reasons: ['destructive command'] })
     assert.ok(el != null)
+  })
+})
+
+describe('ContextPanel layers', () => {
+  it('renders context layers when provided', () => {
+    const layers: CockpitContextLayerView[] = [
+      { id: 'system', label: 'Stable System Prompt', stability: 'stable', channel: 'system', fingerprint: 'included', digest: 'sha256:a', tokenEstimate: 100 },
+      { id: 'session-memory', label: 'Session Memory', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'included', digest: 'sha256:b', tokenEstimate: 40 },
+    ]
+    const el = ContextPanel.type({
+      estimatedTokens: 50000,
+      maxTokens: 200000,
+      rounds: 5,
+      compactionState: 'healthy',
+      brokenRounds: 0,
+      compactEvents: [],
+      layers,
+    })
+    assert.ok(el != null)
+    const tree = JSON.stringify(el)
+    assert.ok(tree.includes('Stable System Prompt'), 'should contain layer label')
+    assert.ok(tree.includes('Session Memory'), 'should contain second layer label')
+    assert.ok(tree.includes('Context layers'), 'should contain section header')
+    assert.ok(tree.includes('fingerprint'), 'should contain fingerprint info')
   })
 })

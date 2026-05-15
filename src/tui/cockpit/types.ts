@@ -10,3 +10,13 @@ export const PANEL_LABELS: Record<Panel, string> = {
   safety: 'Safety',
   model: 'Model',
 }
+
+export interface CockpitContextLayerView {
+  id: string
+  label: string
+  stability: string
+  channel: string
+  fingerprint: string
+  digest: string
+  tokenEstimate: number
+}

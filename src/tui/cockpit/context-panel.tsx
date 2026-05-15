@@ -2,6 +2,7 @@ import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { getTheme } from '../theme.js'
 import { contextBar } from '../summary-bar.js'
+import type { CockpitContextLayerView } from './types.js'
 
 export interface CompactEvent {
   turn: number
@@ -17,6 +18,7 @@ export interface ContextPanelProps {
   compactionState: string
   brokenRounds: number
   compactEvents: CompactEvent[]
+  layers?: CockpitContextLayerView[]
 }
 
 function compactionColor(state: string, theme: ReturnType<typeof getTheme>): string {
@@ -26,7 +28,7 @@ function compactionColor(state: string, theme: ReturnType<typeof getTheme>): str
 }
 
 export const ContextPanel = memo(function ContextPanel({
-  estimatedTokens, maxTokens, rounds, compactionState, brokenRounds, compactEvents,
+  estimatedTokens, maxTokens, rounds, compactionState, brokenRounds, compactEvents, layers,
 }: ContextPanelProps) {
   const theme = getTheme()
   const pct = maxTokens > 0 ? estimatedTokens / maxTokens : 0
@@ -52,6 +54,16 @@ export const ContextPanel = memo(function ContextPanel({
           t{e.turn} tier{e.tier}: {Math.round(e.beforeTokens / 1000)}k→{Math.round(e.afterTokens / 1000)}k
         </Text>
       ))}
+      {layers && layers.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="cyan">Context layers</Text>
+          {layers.map(layer => (
+            <Text key={layer.id} color={theme.dim}>
+              {layer.label} · {layer.stability} · fingerprint:{layer.fingerprint} · {layer.tokenEstimate}t
+            </Text>
+          ))}
+        </Box>
+      )}
     </Box>
   )
 })
