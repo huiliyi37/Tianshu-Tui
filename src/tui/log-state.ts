@@ -1,9 +1,10 @@
 export interface LogEntry {
-  type: 'text' | 'tool'
+  type: 'text' | 'tool' | 'checkpoint' | 'evidence'
   id?: string
   content: string
   toolName?: string
   isError?: boolean
+  rawPath?: string
 }
 
 export function appendLog(logs: LogEntry[], entry: LogEntry): LogEntry[] {
@@ -20,6 +21,7 @@ export function updateToolLog(
   toolName: string,
   content: string,
   isError?: boolean,
+  rawPath?: string,
 ): LogEntry[] {
   let idx = -1
   for (let i = logs.length - 1; i >= 0; i--) {
@@ -30,12 +32,12 @@ export function updateToolLog(
     }
   }
   if (idx === -1) {
-    return [...logs, { type: 'tool', id, toolName, content, isError }]
+    return [...logs, { type: 'tool', id, toolName, content, isError, rawPath }]
   }
 
   return logs.map((entry, index) => {
     if (index !== idx) return entry
-    return { type: 'tool', id, toolName: entry.toolName ?? toolName, content, isError: isError ?? entry.isError }
+    return { type: 'tool', id, toolName: entry.toolName ?? toolName, content, isError: isError ?? entry.isError, rawPath: rawPath ?? entry.rawPath }
   })
 }
 

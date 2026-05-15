@@ -18,6 +18,7 @@ describe('TUI log state helpers', () => {
       toolName: 'bash',
       content: 'done',
       isError: false,
+      rawPath: undefined,
     })
   })
 
@@ -30,6 +31,7 @@ describe('TUI log state helpers', () => {
       toolName: 'bash',
       content: 'done',
       isError: false,
+      rawPath: undefined,
     }])
   })
 

@@ -8,9 +8,10 @@ interface ToolCardProps {
   isError?: boolean
   isStreaming?: boolean
   verbose?: boolean
+  rawPath?: string
 }
 
-export function ToolCard({ name, result, isError, isStreaming, verbose }: ToolCardProps) {
+export function ToolCard({ name, result, isError, isStreaming, verbose, rawPath }: ToolCardProps) {
   const limit = verbose ? 200 : MAX_COLLAPSED_LINES
   const lines = result.split('\n')
   const isLong = lines.length > limit
@@ -30,7 +31,10 @@ export function ToolCard({ name, result, isError, isStreaming, verbose }: ToolCa
       </Text>
       <Text>{displayLines.join('\n')}</Text>
       {truncated > 0 && (
-        <Text dimColor>... {truncated} more lines</Text>
+        <Text dimColor>... {truncated} more lines{rawPath ? ` [raw: ${rawPath}]` : ''}</Text>
+      )}
+      {truncated === 0 && rawPath && (
+        <Text dimColor>[raw: {rawPath}]</Text>
       )}
     </Box>
   )
