@@ -13,12 +13,12 @@ npm install && npm run build
 
 # Set API key (pick one method)
 export DEEPSEEK_API_KEY=sk-xxx          # via env
-opencode config set-key deepseek sk-xxx # via CLI (saved to ~/.opencode/config.json)
+rivet config set-key deepseek sk-xxx # via CLI (saved to ~/.rivet/config.json)
 
 # Start
 node dist/main.js
 # or after npm install -g:
-opencode
+rivet
 ```
 
 ## Architecture
@@ -29,7 +29,7 @@ src/
 ├── agent/
 │   ├── loop.ts           Agent loop: LLM call → tool execution → repeat
 │   ├── context.ts        Session state: messages, usage, turn count
-│   └── session-persist.ts JSONL session persistence (~/.opencode/sessions/)
+│   └── session-persist.ts JSONL session persistence (~/.rivet/sessions/)
 ├── api/
 │   ├── client.ts         Streaming API client with retry (exp backoff 1s/2s/4s)
 │   ├── deepseek.ts       DeepSeek V4 provider: dual-format usage mapping
@@ -58,7 +58,7 @@ src/
 ├── config/
 │   ├── schema.ts         Zod config schema (provider, agent, compact, cache)
 │   ├── default.ts        Default config: DeepSeek V4 Pro/Flash
-│   └── manager.ts        CLI config manager (opencode config <command>)
+│   └── manager.ts        CLI config manager (rivet config <command>)
 └── tui/
     ├── app.tsx            Main app: slash commands, approval UI, render batching
     ├── input.tsx          Input bar (disabled during streaming/approval)
@@ -123,30 +123,30 @@ DeepSeek's prefix cache matches on complete prefix, so the frozen system prompt 
 
 ```bash
 # List providers and API key status
-opencode config providers
+rivet config providers
 
-# Set API key (saved to ~/.opencode/config.json)
-opencode config set-key deepseek sk-your-key-here
+# Set API key (saved to ~/.rivet/config.json)
+rivet config set-key deepseek sk-your-key-here
 
 # Or use an environment variable instead
-opencode config set-key-env deepseek DEEPSEEK_API_KEY
+rivet config set-key-env deepseek DEEPSEEK_API_KEY
 
 # Add a new model to a provider
-opencode config add-model deepseek deepseek-v4-flash 1000000 64000
+rivet config add-model deepseek deepseek-v4-flash 1000000 64000
 
 # Remove a model
-opencode config remove-model deepseek old-model-id
+rivet config remove-model deepseek old-model-id
 
 # Switch default provider
-opencode config set-default deepseek
+rivet config set-default deepseek
 
 # Show full config
-opencode config show
+rivet config show
 ```
 
 ### Manual config file
 
-Place `~/.opencode/config.json` (optional, uses defaults if missing):
+Place `~/.rivet/config.json` (optional, uses defaults if missing):
 
 ```json
 {

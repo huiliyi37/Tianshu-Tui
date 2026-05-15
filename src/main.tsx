@@ -37,7 +37,7 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
 }
 
 function loadConfig(): Config {
-  const configPath = join(homedir(), '.opencode', 'config.json')
+  const configPath = join(homedir(), '.rivet', 'config.json')
 
   if (existsSync(configPath)) {
     try {
@@ -53,7 +53,7 @@ function loadConfig(): Config {
 }
 
 function getOrCreateSessionId(): string {
-  const dir = join(homedir(), '.opencode')
+  const dir = join(homedir(), '.rivet')
   const idFile = join(dir, 'session-id.txt')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })

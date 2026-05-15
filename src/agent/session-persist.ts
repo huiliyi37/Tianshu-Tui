@@ -4,7 +4,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import type { Message } from '../api/types.js'
 
-const SESSION_DIR = join(homedir(), '.opencode', 'sessions')
+const SESSION_DIR = join(homedir(), '.rivet', 'sessions')
 
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) {

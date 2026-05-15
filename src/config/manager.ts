@@ -4,7 +4,7 @@ import { join } from 'path'
 import { configSchema, type Config, type ProviderConfig, type ModelConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 
-const CONFIG_DIR = join(homedir(), '.opencode')
+const CONFIG_DIR = join(homedir(), '.rivet')
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 function ensureConfigDir(): void {
@@ -158,7 +158,7 @@ export function runConfigCLI(args: string[]): void {
         const providerName = args[1]
         const key = args[2]
         if (!providerName || !key) {
-          console.error('Usage: opencode config set-key <provider> <api-key>')
+          console.error('Usage: rivet config set-key <provider> <api-key>')
           process.exit(1)
         }
         setApiKey(providerName, key)
@@ -170,7 +170,7 @@ export function runConfigCLI(args: string[]): void {
         const providerName = args[1]
         const envVar = args[2]
         if (!providerName || !envVar) {
-          console.error('Usage: opencode config set-key-env <provider> <ENV_VAR>')
+          console.error('Usage: rivet config set-key-env <provider> <ENV_VAR>')
           process.exit(1)
         }
         setApiKeyEnv(providerName, envVar)
@@ -181,7 +181,7 @@ export function runConfigCLI(args: string[]): void {
       case 'set-default': {
         const providerName = args[1]
         if (!providerName) {
-          console.error('Usage: opencode config set-default <provider>')
+          console.error('Usage: rivet config set-default <provider>')
           process.exit(1)
         }
         setDefaultProvider(providerName)
@@ -195,7 +195,7 @@ export function runConfigCLI(args: string[]): void {
         const contextWindow = parseInt(args[3] ?? '1000000')
         const maxTokens = parseInt(args[4] ?? '64000')
         if (!providerName || !modelId) {
-          console.error('Usage: opencode config add-model <provider> <model-id> [context-window] [max-tokens]')
+          console.error('Usage: rivet config add-model <provider> <model-id> [context-window] [max-tokens]')
           process.exit(1)
         }
         addModel(providerName, { id: modelId, contextWindow, maxTokens })
@@ -207,7 +207,7 @@ export function runConfigCLI(args: string[]): void {
         const providerName = args[1]
         const modelId = args[2]
         if (!providerName || !modelId) {
-          console.error('Usage: opencode config remove-model <provider> <model-id>')
+          console.error('Usage: rivet config remove-model <provider> <model-id>')
           process.exit(1)
         }
         removeModel(providerName, modelId)
@@ -218,7 +218,7 @@ export function runConfigCLI(args: string[]): void {
       default:
         console.log(`Rivet Config Manager
 
-Usage: opencode config <command>
+Usage: rivet config <command>
 
 Commands:
   show                Show full config (JSON)
@@ -230,10 +230,10 @@ Commands:
   remove-model <p> <id> Remove model from provider
 
 Examples:
-  opencode config providers
-  opencode config set-key deepseek sk-xxx
-  opencode config set-key-env deepseek DEEPSEEK_API_KEY
-  opencode config add-model deepseek deepseek-v4-flash 1000000 64000`)
+  rivet config providers
+  rivet config set-key deepseek sk-xxx
+  rivet config set-key-env deepseek DEEPSEEK_API_KEY
+  rivet config add-model deepseek deepseek-v4-flash 1000000 64000`)
     }
   } catch (err) {
     console.error(`Error: ${(err as Error).message}`)

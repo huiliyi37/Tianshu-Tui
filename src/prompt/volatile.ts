@@ -4,7 +4,7 @@ import { execSync } from 'child_process'
 
 export interface VolatileContext {
   cwd: string
-  opencodeMd?: string
+  rivetMd?: string
   gitStatus?: string
   workingSet?: string[]
 }
@@ -46,7 +46,7 @@ function getGitStatus(): string | undefined {
 export function buildVolatileBlock(ctx: VolatileContext): string {
   const parts: string[] = []
 
-  const md = ctx.opencodeMd ?? readRivetMd(ctx.cwd)
+  const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)
   if (md) {
     parts.push(`## Project Instructions\n\n${md}`)
   }
