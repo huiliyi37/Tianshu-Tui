@@ -72,12 +72,16 @@ function normalizeToolResultPairs(messages: Message[]): Message[] {
 
 export class PromptEngine {
   private systemPrompt: string
+  private volatileBlock: string
   private fingerprint: PrefixFingerprint
   private config: PromptEngineConfig
 
   constructor(config: PromptEngineConfig) {
     this.config = config
     this.systemPrompt = buildSystemPrompt(config.staticCtx)
+    // Freeze the volatile block at construction time — this keeps the prefix
+    // stable across turns even if git status or .rivet.md changes.
+    this.volatileBlock = buildVolatileBlock(config.volatileCtx)
     // Freeze the prefix fingerprint at construction time — this is the cache anchor
     this.fingerprint = computeFingerprint(this.systemPrompt, config.staticCtx.tools)
   }
@@ -88,20 +92,26 @@ export class PromptEngine {
    * consistent prefix structure every turn, which is crucial for DeepSeek since
    * it ignores cache_control: ephemeral on system blocks.
    *
+   * Only the LAST user text message gets a fresh volatile context block.
+   * Historical messages pass through unchanged — this preserves the literal
+   * prefix that DeepSeek cached on previous turns.
+   *
    * Turn 1: [system, user(<context>), user("hello")]
    * Turn 2: [system, user(<context>), user("hello"), assistant, user(<context>), user("read")]
+   *
+   * The <context> blocks for turn 1 are identical across both requests because
+   * they come from the stored message history, not re-generated.
    *
    * User messages with ContentBlock[] (tool results) pass through unchanged.
    */
   buildRequest(messages: Message[]): MessageRequest {
-    const volatileBlock = buildVolatileBlock(this.config.volatileCtx)
     const result: Message[] = []
 
     for (const msg of normalizeToolResultPairs(messages)) {
-      if (msg.role === 'user' && typeof msg.content === 'string' && volatileBlock) {
+      if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         // Prepend volatile context as independent user message before user input.
         // This keeps the prefix structure identical across turns.
-        result.push({ role: 'user', content: volatileBlock })
+        result.push({ role: 'user', content: this.volatileBlock })
       }
       result.push(msg)
     }
