@@ -40,12 +40,15 @@ src/
 │   ├── engine.ts         PromptEngine: frozen system prompt + volatile context
 │   ├── static.ts         System prompt builder (~3,800 tokens with tools)
 │   ├── volatile.ts       Volatile context: .rivet.md, git status (30s cache)
+│   ├── volatile-git.ts   Non-blocking git status: stale cache + async refresh
 │   └── fingerprint.ts    SHA-256 fingerprint for cache drift detection
 ├── tools/
 │   ├── bash.ts           Shell execution (spawn), live output streaming
 │   ├── edit.ts           Search-and-replace with uniqueness check
 │   ├── read-file.ts      File reading with offset/limit, .gitignore filter
 │   ├── write-file.ts     File creation/overwrite
+│   ├── grep.ts           Pattern search (ripgrep first, native fallback)
+│   ├── glob.ts           File discovery with **/*/?/{a,b} support
 │   ├── registry.ts       Tool registration, approval gating
 │   ├── gitignore.ts      .gitignore parser + default ignore patterns
 │   ├── process-tracker.ts Child process tracker (killAll on abort)
@@ -103,10 +106,14 @@ DeepSeek's prefix cache matches on complete prefix, so the frozen system prompt 
 
 - **Prefix cache optimization** — Frozen system prompt + structured message ordering
 - **Streaming TUI** — Ink 6 (React for CLI), 50ms render batching (~20fps)
-- **4 builtin tools** — bash (spawn + live output), edit_file, read_file, write_file
+- **6 builtin tools** — bash, edit_file, read_file, write_file, grep (pattern search), glob (file discovery)
+- **Non-blocking git status** — Stale cache + async refresh, no event loop blocking
 - **Approval workflow** — y/n confirmation for dangerous operations
 - **Session persistence** — JSONL append, resume on restart, compact on exit
-- **Auto-compaction** — Triggers at 800K tokens, preserves recent messages
+- **Auto-compaction** — Triggers at 800K tokens, LLM summarization with micro-compact fallback
+- **Smart compact** — LLM-based conversation summarization preserves context across long sessions
+- **Incremental token accounting** — O(1) per-turn token estimates via session-level tracking
+- **Render batching** — 50ms batched flush for text, thinking, and tool output (~20fps)
 - **Provider abstraction** — ProviderCapabilities for multi-provider support
 - **Dual-format usage** — Reads both DeepSeek native and Anthropic compat fields
 - **Truncated JSON recovery** — Recovers partial tool_use JSON from streaming
