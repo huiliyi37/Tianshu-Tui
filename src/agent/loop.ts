@@ -18,6 +18,7 @@ import type { CompactCircuitBreakerState } from '../context/types.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
+import { extractTaskState } from './task-state.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
@@ -422,6 +423,13 @@ export class AgentLoop {
           }
 
           this.session.addToolResults(toolResults)
+
+          // Extract task-state and inject into volatile context (after warmup turns)
+          if (this.session.getTurnCount() > 3) {
+            const taskState = extractTaskState(this.trajectory.getEntries(), this.streamedText)
+            this.config.promptEngine.setTaskProgress(taskState)
+          }
+
           this.refreshLedger()
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
           continue

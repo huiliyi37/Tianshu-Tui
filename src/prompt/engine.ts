@@ -1,6 +1,7 @@
 import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import { buildVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+import type { TaskState } from '../agent/task-state.js'
 import {
   computeFingerprint,
   detectDrift,
@@ -75,6 +76,7 @@ export class PromptEngine {
   private volatileBlock: string
   private fingerprint: PrefixFingerprint
   private config: PromptEngineConfig
+  private taskProgress?: TaskState
 
   constructor(config: PromptEngineConfig) {
     this.config = config
@@ -122,7 +124,7 @@ export class PromptEngine {
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         if (i === lastUserTextIdx && toolHistory && toolHistory.length > 0) {
           // Fresh volatile block with tool history for the latest turn
-          const freshBlock = buildVolatileBlock({ ...this.config.volatileCtx, toolHistory })
+          const freshBlock = buildVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress })
           result.push({ role: 'user', content: freshBlock })
         } else {
           // Frozen volatile block for historical turns — preserves prefix cache
@@ -158,5 +160,9 @@ export class PromptEngine {
 
   updateSessionMemory(block: string): void {
     this.config.volatileCtx.sessionMemoryBlock = block
+  }
+
+  setTaskProgress(state: TaskState): void {
+    this.taskProgress = state
   }
 }
