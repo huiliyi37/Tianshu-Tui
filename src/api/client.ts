@@ -109,7 +109,6 @@ function extractToolJsonFromText(text: string): { name: string; input: Record<st
   return null
 }
 
-const RETRYABLE_STATUSES = new Set([429, 502, 503, 529])
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
 

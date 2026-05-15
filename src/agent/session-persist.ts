@@ -1,5 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs'
-import { join, dirname } from 'path'
+import { appendFile } from 'fs/promises'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs'
+import { join } from 'path'
 import { homedir } from 'os'
 import type { Message } from '../api/types.js'
 
@@ -20,9 +21,9 @@ export class SessionPersist {
   }
 
   /** Append a single message to the session file */
-  append(message: Message): void {
+  async append(message: Message): Promise<void> {
     const line = JSON.stringify(message) + '\n'
-    appendFileSync(this.filePath, line)
+    await appendFile(this.filePath, line)
   }
 
   /** Load all messages from the session file */
@@ -56,7 +57,6 @@ export class SessionPersist {
   static listSessions(): string[] {
     ensureDir(SESSION_DIR)
     try {
-      const { readdirSync } = require('fs')
       return readdirSync(SESSION_DIR)
         .filter((f: string) => f.endsWith('.jsonl'))
         .map((f: string) => f.replace('.jsonl', ''))

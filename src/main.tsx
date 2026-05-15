@@ -19,13 +19,27 @@ import { configSchema } from './config/schema.js'
 import { DEFAULT_CONFIG } from './config/default.js'
 import type { Config } from './config/schema.js'
 
+function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...target }
+  for (const key of Object.keys(source)) {
+    const sv = source[key]
+    const tv = target[key]
+    if (sv && typeof sv === 'object' && !Array.isArray(sv) && tv && typeof tv === 'object' && !Array.isArray(tv)) {
+      result[key] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>)
+    } else {
+      result[key] = sv
+    }
+  }
+  return result
+}
+
 function loadConfig(): Config {
   const configPath = join(homedir(), '.opencode', 'config.json')
 
   if (existsSync(configPath)) {
     try {
       const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
-      const merged = { ...DEFAULT_CONFIG, ...raw }
+      const merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, raw as Record<string, unknown>)
       return configSchema.parse(merged)
     } catch (err) {
       console.error('Config file error, using defaults:', (err as Error).message)
