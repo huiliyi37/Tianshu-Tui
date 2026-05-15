@@ -36,6 +36,7 @@ export interface AgentConfig {
   transcriptPath?: string
   getSessionMemoryState?: () => import('../context/types.js').LedgerSessionMemoryState | undefined
   hooks?: HookRegistry
+  fileHistory?: import('./file-history.js').FileHistory
 }
 
 export interface AgentCallbacks {
@@ -319,6 +320,10 @@ export class AgentLoop {
 
               if ((tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
                 recordAgentTouchedFile(this.cwd, tu.input.file_path)
+              }
+
+              if (this.config.fileHistory && (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
+                await this.config.fileHistory.trackEdit(tu.input.file_path, tu.id)
               }
 
               // Prewarm cache fast-path for read_file
