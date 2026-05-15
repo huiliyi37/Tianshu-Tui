@@ -9,6 +9,7 @@ import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
+import { appendLog, summarizeToolOutput, updateToolLog, visibleLogs, type LogEntry } from './log-state.js'
 
 interface PendingApproval {
   id: string
@@ -29,14 +30,6 @@ interface AppProps {
   initialInput?: string
 }
 
-interface LogEntry {
-  type: 'text' | 'tool'
-  id?: string
-  content: string
-  toolName?: string
-  isError?: boolean
-}
-
 const MAX_VISIBLE_LOGS = 50
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput }: AppProps) {
@@ -53,6 +46,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const streamBufferRef = useRef('')
   const streamFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolOutputAccumRef = useRef<Map<string, string>>(new Map())
+  const thinkingBufferRef = useRef('')
+  const thinkingFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const toolFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dirtyToolIdsRef = useRef<Set<string>>(new Set())
 
   // Session recovery: check for previous sessions on mount
   useEffect(() => {
@@ -95,26 +92,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   })
 
   const addLog = useCallback((entry: LogEntry) => {
-    logRef.current = [...logRef.current, entry]
-    setLogs(logRef.current.slice(-MAX_VISIBLE_LOGS))
+    logRef.current = appendLog(logRef.current, entry)
+    setLogs(visibleLogs(logRef.current, MAX_VISIBLE_LOGS))
   }, [])
 
-  const updateLogEntry = useCallback((id: string, content: string, isError?: boolean) => {
-    let idx = -1
-    for (let i = logRef.current.length - 1; i >= 0; i--) {
-      const entry = logRef.current[i]
-      if (entry?.id === id && entry?.type === 'tool') {
-        idx = i
-        break
-      }
-    }
-    if (idx >= 0) {
-      const updated = [...logRef.current]
-      const prev = updated[idx]!
-      updated[idx] = { type: 'tool' as const, id, content, toolName: prev.toolName, isError: isError ?? prev.isError }
-      logRef.current = updated
-      setLogs(logRef.current.slice(-MAX_VISIBLE_LOGS))
-    }
+  const updateLogEntry = useCallback((id: string, toolName: string, content: string, isError?: boolean) => {
+    logRef.current = updateToolLog(logRef.current, id, toolName, content, isError)
+    setLogs(visibleLogs(logRef.current, MAX_VISIBLE_LOGS))
   }, [])
 
   const handleSubmit = useCallback(async (userInput: string) => {
@@ -124,10 +108,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     // Reset stream buffer
     streamBufferRef.current = ''
+    thinkingBufferRef.current = ''
     toolOutputAccumRef.current.clear()
-    if (streamFlushRef.current) {
-      clearTimeout(streamFlushRef.current)
-      streamFlushRef.current = null
+    dirtyToolIdsRef.current.clear()
+
+    for (const ref of [streamFlushRef, thinkingFlushRef, toolFlushRef]) {
+      if (ref.current) {
+        clearTimeout(ref.current)
+        ref.current = null
+      }
     }
 
     // Slash command routing
@@ -238,6 +227,22 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     addLog({ type: 'text', content: `> ${userInput}` })
 
+    const scheduleToolFlush = (id: string, name: string) => {
+      dirtyToolIdsRef.current.add(id)
+      if (!toolFlushRef.current) {
+        toolFlushRef.current = setTimeout(() => {
+          for (const dirtyId of dirtyToolIdsRef.current) {
+            const accumulated = toolOutputAccumRef.current.get(dirtyId)
+            if (accumulated !== undefined) {
+              updateLogEntry(dirtyId, name, summarizeToolOutput(accumulated, 24))
+            }
+          }
+          dirtyToolIdsRef.current.clear()
+          toolFlushRef.current = null
+        }, 50)
+      }
+    }
+
     await agent.run(userInput, {
       onTextDelta: (text) => {
         streamBufferRef.current += text
@@ -249,22 +254,27 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
       },
       onThinkingDelta: (thinking) => {
-        setStreamingThinking(thinking)
+        thinkingBufferRef.current += thinking
+        if (!thinkingFlushRef.current) {
+          thinkingFlushRef.current = setTimeout(() => {
+            setStreamingThinking(thinkingBufferRef.current)
+            thinkingFlushRef.current = null
+          }, 50)
+        }
       },
       onToolUse: (id, name) => {
         addLog({ type: 'tool', id, content: `Calling ${name}...`, toolName: name })
       },
       onToolResult: (id, name, result, isError) => {
         if (isError === undefined) {
-          // Intermediate streaming chunk
+          // Intermediate streaming chunk: accumulate and schedule batched flush
           const prev = toolOutputAccumRef.current.get(id) || ''
-          const accumulated = prev + result
-          toolOutputAccumRef.current.set(id, accumulated)
-          updateLogEntry(id, accumulated)
+          toolOutputAccumRef.current.set(id, prev + result)
+          scheduleToolFlush(id, name)
         } else {
-          // Final result
+          // Final result: clear accumulation, update with summarized output
           toolOutputAccumRef.current.delete(id)
-          addLog({ type: 'tool', id, content: result, toolName: name, isError })
+          updateLogEntry(id, name, summarizeToolOutput(result, 24), isError)
         }
       },
       onTurnComplete: (_usage) => {
@@ -279,7 +289,22 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         streamBufferRef.current = ''
         setStreamingText('')
-        setStreamingThinking('')
+
+        // Flush thinking buffer
+        if (thinkingFlushRef.current) {
+          clearTimeout(thinkingFlushRef.current)
+          thinkingFlushRef.current = null
+        }
+        setStreamingThinking(thinkingBufferRef.current)
+        thinkingBufferRef.current = ''
+
+        // Flush tool output buffer
+        if (toolFlushRef.current) {
+          clearTimeout(toolFlushRef.current)
+          toolFlushRef.current = null
+        }
+        dirtyToolIdsRef.current.clear()
+
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
 
