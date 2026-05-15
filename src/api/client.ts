@@ -1,6 +1,17 @@
 import type { MessageRequest, ContentBlock, Usage } from './types.js'
 import { SSEParser } from './sse.js'
 
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly retryAfterMs?: number,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 export interface ClientConfig {
   baseUrl: string
   apiKey: string
@@ -128,14 +139,14 @@ async function withRetry<T>(
       if (signal?.aborted) throw err
 
       // Don't retry on 4xx (except 429)
-      const statusMatch = lastError.message.match(/API error (\d+)/)
-      const status = statusMatch ? parseInt(statusMatch[1]!) : null
+      const apiErr = lastError instanceof ApiError ? lastError : null
+      const status = apiErr?.status ?? null
       if (status && status >= 400 && status < 500 && status !== 429) {
         throw err
       }
 
       if (attempt < MAX_RETRIES) {
-        const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
+        const delay = apiErr?.retryAfterMs ?? BASE_DELAY_MS * Math.pow(2, attempt - 1)
         await new Promise(resolve => setTimeout(resolve, delay))
       }
     }
@@ -181,7 +192,15 @@ export class ApiClient {
       }).then(async (res) => {
         if (!res.ok) {
           const errorBody = await res.text().catch(() => '')
-          throw new Error(`API error ${res.status}: ${errorBody}`)
+          let retryAfterMs: number | undefined
+          if (res.status === 429) {
+            const retryAfter = res.headers.get('retry-after')
+            if (retryAfter) {
+              const parsed = parseFloat(retryAfter)
+              retryAfterMs = isNaN(parsed) ? undefined : parsed * 1000
+            }
+          }
+          throw new ApiError(`API error ${res.status}: ${errorBody}`, res.status, retryAfterMs)
         }
         return res
       }),

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { StatusBar } from './status-bar.js'
 import { InputBar } from './input.js'
@@ -46,10 +46,45 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
+  const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
   const logRef = useRef<LogEntry[]>([])
   const streamBufferRef = useRef('')
   const streamFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolOutputAccumRef = useRef<Map<string, string>>(new Map())
+
+  // Session recovery: check for previous sessions on mount
+  useEffect(() => {
+    const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
+    if (sessions.length > 0) {
+      setSessionPrompt('waiting')
+    }
+  }, [currentSessionId])
+
+  useInput((_input, _key) => {
+    // Session recovery prompt
+    if (sessionPrompt === 'waiting') {
+      const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
+      if (_input === 'r' && sessions.length > 0) {
+        const p = new SessionPersist(sessions[0]!)
+        const msgs = p.load()
+        session.replaceMessages(msgs)
+        addLog({ type: 'text', content: `Restored session ${sessions[0]!.slice(0, 8)}... (${msgs.length} messages)` })
+      }
+      setSessionPrompt('done')
+      return
+    }
+
+    // Tool approval
+    if (!pendingApproval) return
+    if (_input.toLowerCase() === 'y') {
+      pendingApproval.resolve(true)
+      setPendingApproval(null)
+    } else if (_input.toLowerCase() === 'n') {
+      pendingApproval.resolve(false)
+      setPendingApproval(null)
+    }
+  })
+
   const addLog = useCallback((entry: LogEntry) => {
     logRef.current = [...logRef.current, entry]
     setLogs(logRef.current.slice(-MAX_VISIBLE_LOGS))
@@ -253,18 +288,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     })
   }, [agent, session, addLog, model, maxTokens, availableModels, onModelSwitch, currentSessionId])
 
-  useInput((_input, _key) => {
-    if (!pendingApproval) return
-    // Only accept explicit y/n — never Enter (prevents accidental approval)
-    if (_input.toLowerCase() === 'y') {
-      pendingApproval.resolve(true)
-      setPendingApproval(null)
-    } else if (_input.toLowerCase() === 'n') {
-      pendingApproval.resolve(false)
-      setPendingApproval(null)
-    }
-  })
-
   const currentTokens = session.getTotalUsage().input_tokens
 
   return (
@@ -280,6 +303,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         <Box paddingX={2} borderStyle="single" borderColor="yellow">
           <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
           <Text> [y/n] </Text>
+        </Box>
+      )}
+      {sessionPrompt === 'waiting' && (
+        <Box paddingX={2} borderStyle="single" borderColor="cyan">
+          <Text bold color="cyan">Previous session found.</Text>
+          <Text> Press <Text bold>r</Text> to restore, any other key to start fresh </Text>
         </Box>
       )}
       <Box flexDirection="column" flexGrow={1}>

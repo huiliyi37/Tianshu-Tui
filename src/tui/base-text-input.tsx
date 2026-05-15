@@ -33,10 +33,20 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
   useInput((input, key) => {
     if (disabled) return
 
-    // Enter — submit
+    // Enter — submit (Alt/Option+Enter inserts newline instead)
     if (key.return) {
+      if (key.meta) {
+        insertAtCursor('\n')
+        return
+      }
       onSubmit(value)
       setCursorPos(0)
+      return
+    }
+
+    // Ctrl+N — insert newline (fallback for terminals where Alt+Enter = Enter)
+    if (key.ctrl && input === 'n') {
+      insertAtCursor('\n')
       return
     }
 
