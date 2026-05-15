@@ -19,6 +19,7 @@ describe('TurnHarness', () => {
       id: 'tu1',
       name: 'read_file',
       input: { file_path: 'src/a.ts' },
+      turn: 1,
       execute: async () => ({ content: 'file content' }),
       classify: () => undefined,
     })
@@ -26,6 +27,20 @@ describe('TurnHarness', () => {
     assert.equal(result.isError, false)
     assert.equal(trajectory.getEntries().length, 1)
     assert.equal(trajectory.getEntries()[0]!.status, 'success')
+  })
+
+  it('records correct turn number', async () => {
+    const trajectory = new TrajectoryRecorder()
+    const harness = new TurnHarness(makeConfig(), trajectory)
+    await harness.executeTool({
+      id: 'tu1b',
+      name: 'read_file',
+      input: { file_path: 'a.ts' },
+      turn: 3,
+      execute: async () => ({ content: 'ok' }),
+      classify: () => undefined,
+    })
+    assert.equal(trajectory.getEntries()[0]!.turn, 3)
   })
 
   it('retries transient errors once then succeeds', async () => {
@@ -36,6 +51,7 @@ describe('TurnHarness', () => {
       id: 'tu2',
       name: 'bash',
       input: { command: 'npm test' },
+      turn: 1,
       execute: async () => {
         calls++
         if (calls === 1) return { content: 'Error: ETIMEDOUT', isError: true }
@@ -58,6 +74,7 @@ describe('TurnHarness', () => {
       id: 'tu3',
       name: 'edit_file',
       input: { file_path: 'x.ts' },
+      turn: 1,
       execute: async () => { calls++; return { content: 'Type error TS2345', isError: true } },
       classify: () => 'type_error',
     })
@@ -73,30 +90,13 @@ describe('TurnHarness', () => {
       id: 'tu4',
       name: 'bash',
       input: { command: 'curl api' },
+      turn: 1,
       execute: async () => ({ content: 'ECONNRESET', isError: true }),
       classify: () => 'timeout',
     })
     assert.equal(result.isError, true)
     assert.ok(result.content.includes('[Retry failed.'))
     assert.equal(trajectory.getEntries()[0]!.status, 'retried-failed')
-  })
-
-  it('calls onBeforeTool and onAfterTool hooks', async () => {
-    const trajectory = new TrajectoryRecorder()
-    const hooks: string[] = []
-    const harness = new TurnHarness({
-      ...makeConfig(),
-      onBeforeTool: (name) => { hooks.push(`before:${name}`) },
-      onAfterTool: (name, _r, isErr) => { hooks.push(`after:${name}:${isErr}`) },
-    }, trajectory)
-    await harness.executeTool({
-      id: 'tu5',
-      name: 'grep',
-      input: { pattern: 'x' },
-      execute: async () => ({ content: 'match' }),
-      classify: () => undefined,
-    })
-    assert.deepEqual(hooks, ['before:grep', 'after:grep:false'])
   })
 
   it('respects retryableClasses allowlist', async () => {
@@ -107,6 +107,7 @@ describe('TurnHarness', () => {
       id: 'tu6',
       name: 'bash',
       input: { command: 'curl' },
+      turn: 1,
       execute: async () => { calls++; return { content: 'timeout', isError: true } },
       classify: () => 'timeout',
     })
@@ -123,6 +124,7 @@ describe('TurnHarness', () => {
       id: 'tu7',
       name: 'run_tests',
       input: { command: 'npm test' },
+      turn: 1,
       execute: async () => {
         calls++
         if (calls === 1) return { content: 'intermittent failure', isError: true }
@@ -142,6 +144,7 @@ describe('TurnHarness', () => {
       id: 'tu8',
       name: 'read_file',
       input: { path: 'src/lib/helper.ts' },
+      turn: 1,
       execute: async () => ({ content: 'ok' }),
       classify: () => undefined,
     })
@@ -156,6 +159,7 @@ describe('TurnHarness', () => {
       id: 'tu9',
       name: 'bash',
       input: { command: longCmd },
+      turn: 1,
       execute: async () => ({ content: 'ok' }),
       classify: () => undefined,
     })

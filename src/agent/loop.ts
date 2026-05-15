@@ -350,11 +350,15 @@ export class AgentLoop {
                 id: tu.id,
                 name: tu.name,
                 input: tu.input,
+                turn,
                 execute: async () => {
                   // Prewarm cache fast-path for read_file
                   if (tu.name === 'read_file' && typeof tu.input.file_path === 'string') {
                     const cached = this.prewarm.get(tu.input.file_path)
-                    if (cached) return { content: cached }
+                    if (cached) {
+                      rawToolResult = { content: cached }
+                      return { content: cached }
+                    }
                   }
                   const r = await this.config.toolRegistry.execute(tu.name, params)
                   rawToolResult = r

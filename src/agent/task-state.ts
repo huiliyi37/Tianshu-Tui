@@ -6,7 +6,7 @@ export interface TaskState {
   remaining: string[]
 }
 
-const NEXT_STEP_RE = /(?:next|then|after that|接下来|然后)[^.。]*(?:[.。]|$)/gi
+const NEXT_STEP_RE = /(?:next|then|after that|i will|step \d|接下来|然后|下一步)[^.。]*(?:[.。]|$)/gi
 
 export function extractTaskState(entries: TrajectoryEntry[], lastModelText: string): TaskState {
   if (entries.length === 0) return { completed: [], current: 'starting', remaining: [] }
