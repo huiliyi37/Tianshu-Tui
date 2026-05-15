@@ -18,6 +18,7 @@ export interface ClientConfig {
   model: string
   maxTokens: number
   thinking: 'enabled' | 'disabled'
+  thinkingBudget?: number
   reasoningEffort?: string
   unsupported: string[]
   /** Optional function to normalize usage fields from provider-specific format to standard Usage */
@@ -164,7 +165,7 @@ export class ApiClient {
       delete (req as Record<string, unknown>)[field]
     }
     if (this.config.thinking === 'enabled') {
-      ;(req as Record<string, unknown>)['thinking'] = { type: 'enabled', budget_tokens: 16000 }
+      ;(req as Record<string, unknown>)['thinking'] = { type: 'enabled', budget_tokens: this.config.thinkingBudget ?? 16000 }
       if (this.config.reasoningEffort) {
         ;(req as Record<string, unknown>)['reasoning_effort'] = this.config.reasoningEffort
       }

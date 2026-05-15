@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { Text } from 'ink'
 import { useInput } from 'ink'
 
@@ -8,11 +8,14 @@ interface BaseTextInputProps {
   onSubmit: (value: string) => void
   disabled?: boolean
   placeholder?: string
+  history?: string[]
 }
 
-export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder }: BaseTextInputProps) {
+export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder, history }: BaseTextInputProps) {
   const [cursorPos, setCursorPos] = useState(0)
   const [cursorShown, setCursorShown] = useState(true)
+  const historyIndexRef = useRef(-1)
+  const savedInputRef = useRef('')
 
   React.useEffect(() => {
     if (disabled) return
@@ -32,6 +35,35 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
 
   useInput((input, key) => {
     if (disabled) return
+
+    // History navigation — Up/Down arrows
+    if (key.upArrow && history && history.length > 0) {
+      if (historyIndexRef.current < history.length - 1) {
+        if (historyIndexRef.current === -1) savedInputRef.current = value
+        historyIndexRef.current++
+        const entry = history[historyIndexRef.current]!
+        onChange(entry)
+        setCursorPos(entry.length)
+      }
+      return
+    }
+    if (key.downArrow) {
+      if (historyIndexRef.current >= 0) {
+        historyIndexRef.current--
+        const restored = historyIndexRef.current === -1
+          ? savedInputRef.current
+          : history![historyIndexRef.current]!
+        onChange(restored)
+        setCursorPos(restored.length)
+      }
+      return
+    }
+
+    // Reset history index on any other key
+    if (historyIndexRef.current !== -1) {
+      historyIndexRef.current = -1
+      savedInputRef.current = ''
+    }
 
     // Enter — submit (Alt/Option+Enter inserts newline instead)
     if (key.return) {

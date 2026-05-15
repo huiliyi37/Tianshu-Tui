@@ -7,13 +7,15 @@ interface ToolCardProps {
   result: string
   isError?: boolean
   isStreaming?: boolean
+  verbose?: boolean
 }
 
-export function ToolCard({ name, result, isError, isStreaming }: ToolCardProps) {
+export function ToolCard({ name, result, isError, isStreaming, verbose }: ToolCardProps) {
+  const limit = verbose ? 200 : MAX_COLLAPSED_LINES
   const lines = result.split('\n')
-  const isLong = lines.length > MAX_COLLAPSED_LINES
-  const displayLines = isLong ? lines.slice(0, MAX_COLLAPSED_LINES) : lines
-  const truncated = isLong ? lines.length - MAX_COLLAPSED_LINES : 0
+  const isLong = lines.length > limit
+  const displayLines = isLong ? lines.slice(0, limit) : lines
+  const truncated = isLong ? lines.length - limit : 0
 
   return (
     <Box

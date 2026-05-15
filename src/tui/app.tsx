@@ -26,6 +26,7 @@ interface AppProps {
   availableModels: Array<{ id: string; alias: string }>
   onModelSwitch: (modelId: string) => void
   currentSessionId: string
+  initialInput?: string
 }
 
 interface LogEntry {
@@ -38,7 +39,7 @@ interface LogEntry {
 
 const MAX_VISIBLE_LOGS = 50
 
-export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput }: AppProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
@@ -47,6 +48,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [cacheHitRate, setCacheHitRate] = useState(0)
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
+  const [verbose, setVerbose] = useState(false)
   const logRef = useRef<LogEntry[]>([])
   const streamBufferRef = useRef('')
   const streamFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -59,6 +61,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       setSessionPrompt('waiting')
     }
   }, [currentSessionId])
+
+  // Auto-submit piped stdin
+  useEffect(() => {
+    if (initialInput) {
+      handleSubmit(initialInput)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useInput((_input, _key) => {
     // Session recovery prompt
@@ -134,6 +143,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /quit — Exit
 /compact — Compact conversation context
 /model [name|list] — Show or switch model
+/verbose — Toggle verbose tool output
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session` })
@@ -175,6 +185,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           setIsStreaming(false)
           return
         }
+
+        case '/verbose':
+          setVerbose(v => !v)
+          addLog({ type: 'text', content: verbose ? 'Verbose mode: off (show 20 lines)' : 'Verbose mode: on (show 200 lines)' })
+          setIsStreaming(false)
+          return
 
         case '/clear':
           logRef.current = []
@@ -314,7 +330,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       <Box flexDirection="column" flexGrow={1}>
         {logs.map((log, i) => {
           if (log.type === 'tool') {
-            return <ToolCard key={`${log.id ?? i}`} name={log.toolName ?? ''} result={log.content} isError={log.isError} />
+            return <ToolCard key={`${log.id ?? i}`} name={log.toolName ?? ''} result={log.content} isError={log.isError} verbose={verbose} />
           }
           return <StreamOutput key={i} text={log.content} isStreaming={false} />
         })}

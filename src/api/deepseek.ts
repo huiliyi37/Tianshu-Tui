@@ -17,6 +17,7 @@ export interface DeepSeekClientConfig {
   model: string
   reasoningEffort?: string
   maxTokens?: number
+  thinkingBudget?: number
 }
 
 /**
@@ -34,6 +35,7 @@ export function createClient(
     model: config.model,
     maxTokens: config.maxTokens ?? 64000,
     thinking: capabilities.supportsThinking ? 'enabled' : 'disabled',
+    thinkingBudget: config.thinkingBudget,
     reasoningEffort: capabilities.effortFormat === 'none' ? undefined : (config.reasoningEffort ?? 'high'),
     unsupported: capabilities.stripParams,
     mapUsage: capabilities.mapUsage,

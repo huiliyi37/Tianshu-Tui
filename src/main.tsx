@@ -70,12 +70,16 @@ function getOrCreateSessionId(): string {
 // Module-level shutdown callback — set by Root component, called by signal handlers
 let shutdownCallback: (() => void) | null = null
 
+// Module-level initial input (from pipe stdin)
+let _pipedInput: string | undefined
+
 function gracefulShutdown() {
   shutdownCallback?.()
   process.exit(0)
 }
 
 function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: string; config: Config }) {
+  const initialInput = _pipedInput
   const cwd = process.cwd()
 
   // Stable singletons — created once, never change
@@ -116,6 +120,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       model: currentModel.id,
       reasoningEffort: currentModel.reasoningEffort,
       maxTokens: currentModel.maxTokens,
+      thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),
     })
     return new AgentLoop(
       {
@@ -157,7 +162,18 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     currentSessionId: sessionId,
     availableModels,
     onModelSwitch: handleModelSwitch,
+    initialInput,
   })
+}
+
+/** Read piped stdin (non-TTY only) as initial input */
+function readPipedStdin(): string | undefined {
+  if (process.stdin.isTTY) return undefined
+  try {
+    return readFileSync('/dev/stdin', 'utf-8').trim()
+  } catch {
+    return undefined
+  }
 }
 
 async function main() {
@@ -232,6 +248,7 @@ async function main() {
     process.exit(1)
   }
 
+  _pipedInput = readPipedStdin()
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config })),
   )
