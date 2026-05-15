@@ -46,4 +46,8 @@ export const DEFAULT_CONFIG: Config = {
     minSystemTokens: 256,
     showHitRate: true,
   },
+  mcp: {
+    enabled: true,
+    servers: {},
+  },
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { mcpConfigSchema, type McpConfig } from '../mcp/config.js'
 
 export const modelConfigSchema = z.object({
   id: z.string(),
@@ -46,6 +47,7 @@ export const configSchema = z.object({
   agent: agentSchema.default({}),
   compact: compactSchema.default({}),
   cache: cacheSchema.default({}),
+  mcp: mcpConfigSchema.default({}),
 })
 
 export type Config = {
@@ -53,6 +55,7 @@ export type Config = {
   agent: AgentConfig
   compact: CompactConfig
   cache: CacheConfig
+  mcp: McpConfig
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
