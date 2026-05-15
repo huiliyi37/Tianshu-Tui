@@ -40,6 +40,7 @@
     "test": "tsx --test src/**/__tests__/*.test.ts"
   },
   "dependencies": {
+    "gradient-string": "^2.0.2",
     "ink": "^6.8.0",
     "react": "^19.2.6",
     "zod": "^3.24.0"

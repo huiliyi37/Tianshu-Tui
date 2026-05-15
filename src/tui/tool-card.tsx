@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink'
 import { memo, useMemo } from 'react'
+import { getTheme } from './theme.js'
 
 const MAX_COLLAPSED_LINES = 8
 
@@ -19,6 +20,7 @@ function compactPath(rawPath: string | undefined): string {
 }
 
 export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath }: ToolCardProps) {
+  const theme = getTheme()
   const limit = verbose ? 200 : MAX_COLLAPSED_LINES
   const { displayText, truncated } = useMemo(() => {
     const lines = result.split('\n')
@@ -30,11 +32,11 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
     }
   }, [result, limit])
 
-  const titleColor = isError ? 'red' : 'cyan'
+  const borderColor = isError ? theme.error : theme.toolColor(name)
 
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={0}>
-      <Text bold color={titleColor}>
+      <Text bold color={borderColor}>
         ── {name} ──{isStreaming ? ' …' : ''}
         {truncated > 0 && <Text dimColor> {truncated} lines hidden</Text>}
       </Text>

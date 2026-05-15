@@ -1,11 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Box, Text, useInput, Static } from 'ink'
+import gradient from 'gradient-string'
 import { StatusBar } from './status-bar.js'
 import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
 import { ThinkingCollapser } from './thinking.js'
 import { ToolCard } from './tool-card.js'
 import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
+import { SummaryBar, type SummaryState } from './summary-bar.js'
+import { PhaseTracker } from './phase-tracker.js'
+import { getTheme } from './theme.js'
 import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
@@ -76,6 +80,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const autoSafeRef = useRef(true)
   const setVerbose = useCallback((v: boolean) => { verboseRef.current = v; _setVerbose(v) }, [])
   const setAutoSafe = useCallback((v: boolean) => { autoSafeRef.current = v; _setAutoSafe(v) }, [])
+
+  const phaseTracker = useRef(new PhaseTracker())
+  const [summaryState, setSummaryState] = useState<SummaryState>({
+    task: '', phase: 'idle', stepCount: 0, totalSteps: 0,
+    contextPct: 0, elapsedMs: 0, lastAction: null, risk: 'none',
+  })
+  const [cockpitExpanded, setCockpitExpanded] = useState(false)
 
   // Push a completed entry to terminal scrollback
   const pushStatic = useCallback((entry: LogEntry) => {
@@ -149,6 +160,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
   }, [currentSessionId])
 
+  // Startup banner
+  useEffect(() => {
+    const banner = gradient(['#00ffcc', '#7b2fff'])('◆ R I V E T')
+    pushStatic(createLogEntry({ type: 'text', content: banner }))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-submit piped stdin
   useEffect(() => {
     if (initialInput) {
@@ -199,6 +216,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     toolCallTracker.current.clear()
     setToolCallsDisplay([])
 
+    const taskDesc = userInput.length > 30 ? userInput.slice(0, 29) + '…' : userInput
+    phaseTracker.current = new PhaseTracker()
+    setSummaryState({ task: taskDesc, phase: 'idle', stepCount: 0, totalSteps: 0, contextPct: session.getEstimatedTokens() / maxTokens, elapsedMs: 0, lastAction: null, risk: 'none' })
+
     for (const ref of [streamTimer, thinkTimer, toolTimer]) {
       if (ref.current) {
         clearTimeout(ref.current)
@@ -228,7 +249,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /rollback — Preview changes since last checkpoint (/rollback confirm to execute)
 /context — Show context ledger health, tokens, rounds, and compact events
 /evidence — Show last turn evidence summary
-/auto — Toggle auto-approve (current: ${autoSafeRef.current ? 'auto-safe' : 'manual'})` }))
+/auto — Toggle auto-approve (current: ${autoSafeRef.current ? 'auto-safe' : 'manual'})
+/cockpit — Toggle expanded cockpit panel` }))
           setIsStreaming(false)
           return
 
@@ -252,6 +274,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             createdAt: Date.now(),
           })
           pushStatic(createLogEntry({ type: 'text', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` }))
+          setSummaryState(prev => ({ ...prev, compactEvent: { beforeTokens: estimateTokens(msgs), afterTokens: estimateTokens(compacted) } }))
+          setTimeout(() => setSummaryState(prev => ({ ...prev, compactEvent: null })), 5000)
           setIsStreaming(false)
           setCacheHitRate(session.getCacheHitRate())
           return
@@ -416,6 +440,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           setIsStreaming(false)
           return
         }
+
+        case '/cockpit': {
+          setCockpitExpanded(prev => !prev)
+          if (!cockpitExpanded) {
+            pushStatic(createLogEntry({ type: 'text', content: 'Cockpit panel expanded. Type /cockpit again to collapse.' }))
+          }
+          setIsStreaming(false)
+          return
+        }
       }
     }
 
@@ -438,18 +471,24 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       onToolUse: (id, name, input) => {
         toolNames.current.set(id, name)
 
-        // Track thinking time up to this point
         if (thinkStartRef.current > 0) {
           thinkTimeRef.current = Date.now() - thinkStartRef.current
           thinkStartRef.current = 0
         }
 
-        // Add to live tools
         setLiveTools(prev => [...prev, createLogEntry({ type: 'tool', id, content: 'Running...', toolName: name })])
 
-        // Update agent status
         toolCallTracker.current.set(id, { id, name, label: toolLabel(name, input), done: false, error: false })
         setToolCallsDisplay([...toolCallTracker.current.values()])
+
+        phaseTracker.current.onToolUse(name)
+        setSummaryState(prev => ({
+          ...prev,
+          phase: phaseTracker.current.current(),
+          stepCount: phaseTracker.current.stepCount(),
+          contextPct: session.getEstimatedTokens() / maxTokens,
+          elapsedMs: Date.now() - streamStartRef.current,
+        }))
       },
       onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {
         if (isError === undefined) {
@@ -483,6 +522,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           tcEntry.error = !!isError
           setToolCallsDisplay([...toolCallTracker.current.values()])
         }
+
+        const target = name
+        phaseTracker.current.onToolResult(name, target, !!isError)
+        const risk = (name === 'bash' && !autoSafeRef.current) ? 'medium' as const : 'none' as const
+        setSummaryState(prev => ({
+          ...prev,
+          lastAction: phaseTracker.current.lastAction(),
+          risk,
+          elapsedMs: Date.now() - streamStartRef.current,
+          approvalNeeded: null,
+        }))
       },
       onCheckpoint: (hash) => {
         pushStatic(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
@@ -530,6 +580,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
+        phaseTracker.current.onTurnComplete()
+        setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current }))
 
         const usage = session.getTotalUsage()
         const normalInput = usage.input_tokens - usage.cache_read_input_tokens
@@ -557,6 +609,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setIsStreaming(false)
       },
       onApprovalRequired: async (id, name, input) => {
+        setSummaryState(prev => ({ ...prev, approvalNeeded: { tool: name, target: String(input?.path ?? input?.command ?? name) } }))
         return new Promise<boolean>((resolve) => {
           setPendingApproval({ id, name, input, resolve })
         })
@@ -582,6 +635,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           contextHealth={session.getContextLedger()?.tokenBudget.compactionState ?? 'healthy'}
           apiSafe={(session.getContextLedger()?.apiInvariantStatus.brokenRounds ?? 0) === 0}
         />
+        {isStreaming && !cockpitExpanded && <SummaryBar state={summaryState} />}
+        {cockpitExpanded && (
+          <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor={getTheme().primary}>
+            <Text color={getTheme().primary} bold>─── COCKPIT ───</Text>
+            <Text>Phase: <Text bold>{summaryState.phase}</Text> ({summaryState.stepCount} steps) │ Context: <Text color={getTheme().contextColor(summaryState.contextPct)}>{Math.round(summaryState.contextPct * 100)}%</Text> │ Cost: <Text dimColor>¥{cost.toFixed(4)}</Text></Text>
+            <Text>Last: {summaryState.lastAction ? `${summaryState.lastAction.tool} ${summaryState.lastAction.target} → ${summaryState.lastAction.success ? '✓' : '✗'}` : 'none'} │ Turns: {session.getTurnCount()}</Text>
+            <Text>Risk: <Text color={summaryState.risk === 'high' ? getTheme().error : getTheme().dim}>{summaryState.risk}</Text> │ Cache: <Text color={getTheme().success}>{(cacheHitRate * 100).toFixed(1)}%</Text></Text>
+          </Box>
+        )}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">Previous session found.</Text>
