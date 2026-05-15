@@ -25,6 +25,7 @@ interface AppProps {
   maxTokens: number
   availableModels: Array<{ id: string; alias: string }>
   onModelSwitch: (modelId: string) => void
+  currentSessionId: string
 }
 
 interface LogEntry {
@@ -37,7 +38,7 @@ interface LogEntry {
 
 const MAX_VISIBLE_LOGS = 50
 
-export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId }: AppProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
@@ -98,7 +99,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /quit — Exit
 /compact — Compact conversation context
 /model [name|list] — Show or switch model
-/clear — Clear screen (visual only)` })
+/clear — Clear screen (visual only)
+/sessions — List all saved sessions
+/resume <number> — Restore a saved session` })
           setIsStreaming(false)
           return
 
@@ -143,6 +146,42 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           setLogs([])
           setIsStreaming(false)
           return
+
+        case '/sessions': {
+          const sessions = SessionPersist.listSessions()
+          if (sessions.length === 0) {
+            addLog({ type: 'text', content: 'No saved sessions.' })
+          } else {
+            const list = sessions.map((id, i) => {
+              const marker = id === currentSessionId ? ' ← current' : ''
+              return `${i + 1}. ${id.slice(0, 8)}...${marker}`
+            }).join('\n')
+            addLog({ type: 'text', content: `Saved sessions:\n${list}\n\n/resume <number> to restore` })
+          }
+          setIsStreaming(false)
+          return
+        }
+
+        case '/resume': {
+          const sessions = SessionPersist.listSessions()
+          const idx = parseInt(parts[1] ?? '', 10) - 1
+          if (isNaN(idx) || idx < 0 || idx >= sessions.length) {
+            addLog({ type: 'text', content: `Invalid session number. Use /sessions to see available sessions.` })
+            setIsStreaming(false)
+            return
+          }
+          const targetId = sessions[idx]!
+          const p = new SessionPersist(targetId)
+          const msgs = p.load()
+          session.replaceMessages(msgs)
+          // Trigger full re-render
+          addLog({ type: 'text', content: `Restored session ${targetId.slice(0, 8)}... (${msgs.length} messages)` })
+          // Redraw: clear logs and reload from messages
+          logRef.current = []
+          setLogs([])
+          setIsStreaming(false)
+          return
+        }
       }
     }
 
@@ -212,7 +251,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         })
       },
     })
-  }, [agent, session, addLog, model, maxTokens, availableModels, onModelSwitch])
+  }, [agent, session, addLog, model, maxTokens, availableModels, onModelSwitch, currentSessionId])
 
   useInput((_input, _key) => {
     if (!pendingApproval) return

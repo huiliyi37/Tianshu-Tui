@@ -2,7 +2,9 @@ export { microCompact, estimateTokens } from './micro.js'
 export {
   shouldAutoCompact,
   buildSummaryPrompt,
+  smartCompact,
   type CompactionDecision,
+  type CompactResult,
 } from './auto.js'
 export type { CompactionConfig } from './constants.js'
 export {

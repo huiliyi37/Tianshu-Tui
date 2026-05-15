@@ -1,3 +1,4 @@
+import type { ApiClient } from '../api/client.js'
 import type { Message } from '../api/types.js'
 import {
   MIN_SUMMARIZE_MESSAGES,
@@ -5,8 +6,10 @@ import {
   SUMMARY_INPUT_HEAD_CHARS,
   SUMMARY_INPUT_TAIL_CHARS,
   LARGE_CONTEXT_WINDOW_TOKENS,
+  KEEP_RECENT_MESSAGES,
+  COMPACTION_SUMMARY_MAX_TOKENS,
 } from './constants.js'
-import { estimateTokens } from './micro.js'
+import { microCompact, estimateTokens } from './micro.js'
 import type { CompactionConfig } from './constants.js'
 
 export interface CompactionDecision {
@@ -94,4 +97,70 @@ ${history}
 </conversation>
 
 Provide a concise summary (${wordLimit} words max):`
+}
+
+export interface CompactResult {
+  summary: string
+  messages: Message[]
+  truncatedCount: number
+}
+
+/**
+ * Smart compact: send old messages to an LLM for summarization,
+ * then replace them with a compact boundary containing the summary.
+ *
+ * Falls back to microCompact (truncation) on any LLM failure.
+ */
+export async function smartCompact(
+  client: ApiClient,
+  messages: Message[],
+  tokenCount: number,
+  contextWindow: number,
+  compactModel: string,
+): Promise<CompactResult> {
+  if (messages.length <= KEEP_RECENT_MESSAGES) {
+    return { summary: '', messages, truncatedCount: 0 }
+  }
+
+  const keepMessages = messages.slice(-KEEP_RECENT_MESSAGES)
+  const oldMessages = messages.slice(0, -KEEP_RECENT_MESSAGES)
+
+  // Build summary prompt from old messages
+  const summaryPrompt = buildSummaryPrompt(oldMessages, tokenCount)
+
+  // Call LLM for summary
+  let summary = ''
+  try {
+    await client.stream(
+      {
+        model: compactModel,
+        messages: [{ role: 'user', content: summaryPrompt }],
+        max_tokens: COMPACTION_SUMMARY_MAX_TOKENS,
+        stream: true,
+      },
+      {
+        onTextDelta: (t) => { summary += t },
+        onThinkingDelta: () => {},
+        onContentBlock: () => {},
+        onStopReason: () => {},
+        onError: () => {},
+      },
+    )
+  } catch {
+    // Fall back to microCompact on LLM failure
+    const { messages: truncated, truncated: removedCount } = microCompact(messages, contextWindow, tokenCount)
+    return { summary: '', messages: truncated, truncatedCount: removedCount }
+  }
+
+  // Build compacted messages: summary as context + recent messages
+  const compactMessage: Message = {
+    role: 'user',
+    content: `<compact-summary>\nPrevious conversation summary:\n${summary}\n</compact-summary>`,
+  }
+
+  return {
+    summary,
+    messages: [compactMessage, ...keepMessages],
+    truncatedCount: oldMessages.length,
+  }
 }

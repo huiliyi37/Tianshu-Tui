@@ -4,7 +4,7 @@ import { PromptEngine } from '../prompt/engine.js'
 import { ToolRegistry } from '../tools/registry.js'
 import type { ToolCallParams } from '../tools/types.js'
 import { SessionContext } from './context.js'
-import { shouldAutoCompact } from '../compact/index.js'
+import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
 

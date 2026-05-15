@@ -79,8 +79,9 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 
   const [session] = useState(() => new SessionContext())
 
+  const [sessionId] = useState(() => getOrCreateSessionId())
+
   const [persist] = useState(() => {
-    const sessionId = getOrCreateSessionId()
     const p = new SessionPersist(sessionId)
     const existingMessages = p.load()
     if (existingMessages.length > 0) {
@@ -132,6 +133,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     persist,
     model: currentModel.alias ?? currentModel.id,
     maxTokens: currentModel.contextWindow,
+    currentSessionId: sessionId,
     availableModels,
     onModelSwitch: handleModelSwitch,
   })

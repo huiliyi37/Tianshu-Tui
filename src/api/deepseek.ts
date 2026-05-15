@@ -1,5 +1,6 @@
 import { ApiClient, type ClientConfig } from './client.js'
 import type { Usage } from './types.js'
+import { DEEPSEEK_CAPABILITIES, type ProviderCapabilities } from './provider.js'
 
 export function mapDeepSeekUsage(raw: Record<string, unknown>): Usage {
   return {
@@ -11,11 +12,6 @@ export function mapDeepSeekUsage(raw: Record<string, unknown>): Usage {
   }
 }
 
-const DEEPSEEK_UNSUPPORTED = [
-  'computer_use',
-  'prompt_caching_budget_tokens',
-]
-
 export interface DeepSeekClientConfig {
   apiKey: string
   model: string
@@ -23,17 +19,37 @@ export interface DeepSeekClientConfig {
   maxTokens?: number
 }
 
-export function createDeepSeekClient(config: DeepSeekClientConfig): ApiClient {
+/**
+ * Generic factory: create an ApiClient for any provider described by a
+ * ProviderCapabilities object.  This is the preferred entry-point when
+ * adding new providers.
+ */
+export function createClient(
+  config: DeepSeekClientConfig,
+  capabilities: ProviderCapabilities,
+): ApiClient {
   const clientConfig: ClientConfig = {
     baseUrl: 'https://api.deepseek.com/anthropic',
     apiKey: config.apiKey,
     model: config.model,
     maxTokens: config.maxTokens ?? 64000,
-    thinking: 'enabled',
-    reasoningEffort: config.reasoningEffort ?? 'high',
-    unsupported: DEEPSEEK_UNSUPPORTED,
-    mapUsage: mapDeepSeekUsage,
+    thinking: capabilities.supportsThinking ? 'enabled' : 'disabled',
+    reasoningEffort: capabilities.effortFormat === 'none' ? undefined : (config.reasoningEffort ?? 'high'),
+    unsupported: capabilities.stripParams,
+    mapUsage: capabilities.mapUsage,
   }
 
   return new ApiClient(clientConfig)
+}
+
+/**
+ * Backward-compatible convenience wrapper that creates a client with
+ * DeepSeek-specific capabilities.  Existing callers (e.g. main.tsx) can
+ * continue using this without changes.
+ */
+export function createDeepSeekClient(config: DeepSeekClientConfig): ApiClient {
+  return createClient(config, {
+    ...DEEPSEEK_CAPABILITIES,
+    mapUsage: mapDeepSeekUsage,
+  })
 }
