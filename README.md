@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.2 complete — 84 source files, ~25,600 LOC, 186 tests passing. Capability Reliability Layer: safe rollback, path boundaries, verification engine, repo intelligence, model routing, failure samples.
+P2.4 Phase 1 complete — 93 source files, ~9,600 LOC, 197 tests passing. Subagent orchestration: typed work orders, headless worker sessions, tool allowlist. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -29,7 +29,14 @@ src/
 ├── agent/
 │   ├── loop.ts           Agent loop: LLM call → tool execution → repeat
 │   ├── context.ts        Session state: messages, usage, turn count
-│   └── session-persist.ts JSONL session persistence (~/.rivet/sessions/)
+│   ├── session-persist.ts JSONL session persistence (~/.rivet/sessions/)
+│   ├── checkpoint.ts     Per-project git checkpoint + rollback v2 (agent-owned files only)
+│   ├── evidence.ts       File tracking + test result badge
+│   ├── failure-classifier.ts  Test failure categorization + fix suggestions
+│   ├── verification.ts   VerificationState: passed/failed/blocked tracking
+│   ├── work-order.ts     WorkOrder/WorkerResult types + zod schemas
+│   ├── worker-session.ts Headless WorkerSession with independent context
+│   └── worker-prompts.ts Decomposition + result-aggregation prompts
 ├── api/
 │   ├── client.ts         Streaming API client with retry (exp backoff 1s/2s/4s)
 │   ├── deepseek.ts       DeepSeek V4 provider: dual-format usage mapping
@@ -38,19 +45,31 @@ src/
 │   └── types.ts          Message, ContentBlock, Usage, ToolDefinition types
 ├── prompt/
 │   ├── engine.ts         PromptEngine: frozen system prompt + volatile context
-│   ├── static.ts         System prompt builder (~3,800 tokens with tools)
+│   ├── static.ts         System prompt builder with 天枢 persona
 │   ├── volatile.ts       Volatile context: .rivet.md, git status (30s cache)
 │   ├── volatile-git.ts   Non-blocking git status: stale cache + async refresh
 │   ├── fingerprint.ts    SHA-256 fingerprint for cache drift detection
 │   └── cache-diagnostic.ts  Cache miss reason analysis (5 categories)
+├── model/
+│   └── capability.ts     ModelCapabilityCard + recommendModelForTask scoring
+├── repo/
+│   ├── symbol-index.ts   Regex-based symbol extraction
+│   ├── import-graph.ts   Relative import edge graph
+│   └── context-bundle.ts Task context assembly (symbols + tests + risks)
 ├── tools/
 │   ├── bash.ts           Shell execution (spawn), live output streaming
 │   ├── edit.ts           Search-and-replace with uniqueness check
-│   ├── read-file.ts      File reading with offset/limit, .gitignore filter
+│   ├── read-file.ts      File reading with offset/limit, .gitignore filter, three-layer output
 │   ├── write-file.ts     File creation/overwrite
 │   ├── grep.ts           Pattern search (ripgrep first, native fallback)
 │   ├── glob.ts           File discovery with **/*/?/{a,b} support
-│   ├── registry.ts       Tool registration, approval gating
+│   ├── diff.ts           Git diff with three-layer output
+│   ├── run-tests.ts      Test runner with framework detection + parsing
+│   ├── inspect-project.ts Project summary: language, framework, scripts
+│   ├── repo-map.ts       Annotated file tree with entry/test/config markers
+│   ├── related-tests.ts  Test file inference for source paths
+│   ├── output-store.ts   Three-layer: raw→disk, compressed→LLM, summary→TUI
+│   ├── registry.ts       Tool registration, approval gating, allowlist filtering
 │   ├── gitignore.ts      .gitignore parser + default ignore patterns
 │   ├── process-tracker.ts Child process tracker (killAll on abort)
 │   ├── path-validate.ts  Path traversal protection
@@ -59,17 +78,22 @@ src/
 │   ├── micro.ts          Truncation compaction (keep recent N messages)
 │   ├── auto.ts           Auto-compaction decision (800K threshold, 500K floor)
 │   └── constants.ts      Compaction thresholds per context window size
+├── failures/
+│   └── sample.ts         Redacted failure sample library for testing
 ├── config/
 │   ├── schema.ts         Zod config schema (provider, agent, compact, cache)
 │   ├── default.ts        Default config: DeepSeek V4 Pro/Flash
 │   └── manager.ts        CLI config manager (rivet config <command>)
 └── tui/
-    ├── app.tsx            Main app: slash commands, approval UI, render batching
-    ├── input.tsx          Input bar (disabled during streaming/approval)
-    ├── status-bar.tsx     Model, cache hit rate, cost, token count
-    ├── stream.tsx         Streaming text output
-    ├── thinking.tsx       Thinking block with collapse
-    ├── tool-card.tsx      Tool execution display (auto-folds >20 lines)
+    ├── app.tsx            Main app: slash commands, approval UI, live tool output
+    ├── input.tsx          Input bar with cursor, history, Ctrl+A/E/W/U
+    ├── base-text-input.tsx Full-featured text input with history nav
+    ├── status-bar.tsx     Model, cache hit rate, cost, token bar (memoized)
+    ├── stream.tsx         Streaming text output (memoized)
+    ├── thinking.tsx       Thinking block with Tab expand/collapse
+    ├── tool-card.tsx      Tool execution display with rawPath links (memoized)
+    ├── log-state.ts       Log entry types, state management, output summarization
+    ├── history.ts         Command history persistence
     └── error-boundary.tsx React error boundary (catch without crash)
 ```
 
@@ -142,6 +166,10 @@ The prompt is split into 4 layers for maximum cache stability:
 - **Graceful shutdown** — SIGINT/SIGTERM → abort agent + persist session + kill children
 - **ErrorBoundary** — React errors caught without crashing the process
 - **Config validation** — Zod schema with deep merge over defaults
+- **Subagent orchestration** — Typed WorkOrder/WorkerResult, headless WorkerSession, tool allowlist enforcement (P2.4 Phase 1)
+- **天枢 persona** — "Don't Guess — Verify" workflow, design-doc-first, TDD guidance
+- **Three-layer read_file** — Raw persistence + model compression + line-numbered TUI preview (50 lines)
+- **Live tool output** — Batched streaming display (50ms flush), no more silent tool execution
 - **Safe rollback** — Checkpoint v2: only reverts agent-owned files, protects user pre-existing changes, confirmation token gating
 - **Path boundary enforcement** — glob/grep/diff reject `..` traversal and absolute paths outside project
 - **Symlink cycle protection** — realpath + visited set prevents infinite directory traversal
@@ -326,19 +354,22 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (186)
+npm run test                   # Run all tests (197)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
 
 ## Design Documents
 
-- `docs/optimization-design-v2.md` — Full optimization review and fix recommendations
+- `docs/superpowers/specs/2026-05-16-rivet-subagent-orchestration-design.md` — Subagent orchestration: Cache-first Bounded Coordinator design
+- `docs/superpowers/plans/2026-05-16-rivet-subagent-orchestration-implementation.md` — Phase 1-4 implementation plan
+- `docs/superpowers/specs/2026-05-15-rivet-p2-3-harness-cockpit-design.md` — P2.3 Harness Cockpit design
+- `docs/superpowers/plans/2026-05-15-rivet-p2-3-harness-cockpit-implementation.md` — P2.3 implementation plan
+- `docs/superpowers/plans/2026-05-15-rivet-p2-2-capability-reliability-layer.md` — P2.2 Capability Reliability Layer plan
 - `docs/superpowers/specs/2026-05-15-rivet-open-model-terminal-agent-direction-design.md` — Strategic direction: Trust Cockpit + Open Model Capability Lab
 - `docs/superpowers/plans/2026-05-15-rivet-dev-capability-phase3.md` — Phase 3 implementation plan
 - `docs/superpowers/plans/2026-05-15-rivet-p2.1-remaining.md` — P2.1 remaining tasks + execution record
 - `docs/superpowers/plans/2026-05-15-rivet-performance-optimization.md` — Performance optimization plan
-- `docs/superpowers/specs/2026-05-15-rivet-p2-1-performance-dev-capability-optimization.md` — P2.1 performance & dev capability spec
 - `docs/analysis/2026-05-15-handoff.md` — Full project handoff document with validation records
 
 ## License

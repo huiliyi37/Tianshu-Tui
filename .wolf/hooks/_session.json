@@ -88,8 +88,8 @@
       "first_read": "2026-05-15T16:50:18.070Z"
     },
     "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx": {
-      "count": 10,
-      "tokens": 4920,
+      "count": 11,
+      "tokens": 4872,
       "first_read": "2026-05-15T16:55:41.132Z"
     },
     "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/stream.tsx": {
@@ -98,17 +98,17 @@
       "first_read": "2026-05-15T16:55:49.921Z"
     },
     "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/tool-card.tsx": {
-      "count": 1,
-      "tokens": 137,
+      "count": 2,
+      "tokens": 320,
       "first_read": "2026-05-15T16:55:50.215Z"
     },
     "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/thinking.tsx": {
-      "count": 1,
+      "count": 2,
       "tokens": 242,
       "first_read": "2026-05-15T16:55:50.805Z"
     },
     "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/log-state.ts": {
-      "count": 1,
+      "count": 2,
       "tokens": 0,
       "first_read": "2026-05-15T16:55:58.111Z"
     },
@@ -151,6 +151,11 @@
       "count": 1,
       "tokens": 0,
       "first_read": "2026-05-15T17:35:47.797Z"
+    },
+    "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/status-bar.tsx": {
+      "count": 1,
+      "tokens": 245,
+      "first_read": "2026-05-15T17:37:37.577Z"
     }
   },
   "files_written": [
@@ -320,9 +325,9 @@
     "src/agent/loop.ts": 5,
     "src/config/schema.ts": 1
   },
-  "anatomy_hits": 19,
+  "anatomy_hits": 20,
   "anatomy_misses": 8,
-  "repeated_reads_warned": 17,
+  "repeated_reads_warned": 21,
   "cerebrum_warnings": 0,
-  "stop_count": 9
+  "stop_count": 10
 }
