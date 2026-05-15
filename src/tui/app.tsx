@@ -9,6 +9,7 @@ import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
+import { rollbackToCheckpoint } from '../agent/checkpoint.js'
 import { appendLog, summarizeToolOutput, updateToolLog, visibleLogs, type LogEntry } from './log-state.js'
 
 interface PendingApproval {
@@ -136,7 +137,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /debug [prompt|fingerprint|cache] — Debug prefix cache and prompt
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
-/resume <number> — Restore a saved session` })
+/resume <number> — Restore a saved session
+/rollback — Undo all changes since last checkpoint` })
           setIsStreaming(false)
           return
 
@@ -198,6 +200,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             addLog({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${cost.toFixed(4)}` })
           } else {
             addLog({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache]' })
+          }
+          setIsStreaming(false)
+          return
+        }
+
+        case '/rollback': {
+          const result = rollbackToCheckpoint(process.cwd())
+          if (result.success) {
+            addLog({ type: 'text', content: `Rolled back to checkpoint ${result.hash}. Working tree restored.` })
+          } else {
+            addLog({ type: 'text', content: 'No checkpoint found. Create a checkpoint first by running a tool that modifies files.' })
           }
           setIsStreaming(false)
           return

@@ -31,10 +31,16 @@ Example: "The bug is in src/api/client.ts:162"
 - Prefer absolute paths over cd when possible.
 - Never skip git hooks (--no-verify, --no-gpg-sign) unless the user explicitly asks.
 
-## Search Strategy
+## Project Understanding
+- Use inspect_project to get a quick overview: language, framework, scripts, entry points.
+- Use repo_map to see the file tree with annotated entry/test/config files.
 - Use glob to find files by name pattern before reading.
 - Use grep to search file contents for symbols or keywords.
-- Check imports and dependencies to understand module relationships.
+
+## Development Loop
+- Use diff to check what changed before and after edits.
+- Use run_tests to verify changes pass. Read and diagnose failures before retrying.
+- Never skip the verify step after making changes.
 
 ## Output Rules
 - Be concise. Get to the point quickly.

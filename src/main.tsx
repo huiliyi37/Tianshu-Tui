@@ -17,6 +17,10 @@ import { BASH_TOOL } from './tools/bash.js'
 import { EDIT_FILE_TOOL } from './tools/edit.js'
 import { GREP_TOOL } from './tools/grep.js'
 import { GLOB_TOOL } from './tools/glob.js'
+import { DIFF_TOOL } from './tools/diff.js'
+import { RUN_TESTS_TOOL } from './tools/run-tests.js'
+import { INSPECT_PROJECT_TOOL } from './tools/inspect-project.js'
+import { REPO_MAP_TOOL } from './tools/repo-map.js'
 import { createDeepSeekClient } from './api/deepseek.js'
 import { killAll } from './tools/process-tracker.js'
 import { configSchema } from './config/schema.js'
@@ -93,6 +97,10 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     reg.register(EDIT_FILE_TOOL)
     reg.register(GREP_TOOL)
     reg.register(GLOB_TOOL)
+    reg.register(DIFF_TOOL)
+    reg.register(RUN_TESTS_TOOL)
+    reg.register(INSPECT_PROJECT_TOOL)
+    reg.register(REPO_MAP_TOOL)
     return reg
   })
 

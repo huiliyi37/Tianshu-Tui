@@ -58,11 +58,11 @@ function parseOutput(raw: string, runner: string): ParsedResult {
   }
 
   if (runner === 'node-test') {
-    const totalMatch = raw.match(/#\s+tests\s+(\d+)/)
-    const failMatch = raw.match(/#\s+fail\s+(\d+)/)
-    const skipMatch = raw.match(/#\s+skip\s+(\d+)/)
-    const passMatch = raw.match(/#\s+pass\s+(\d+)/)
-    const durMatch = raw.match(/#\s+duration\s+([\d.]+m?s)/)
+    const totalMatch = raw.match(/[ℹ#]\s+tests\s+(\d+)/)
+    const failMatch = raw.match(/[ℹ#]\s+fail\s+(\d+)/)
+    const skipMatch = raw.match(/[ℹ#]\s+skip\s+(\d+)/)
+    const passMatch = raw.match(/[ℹ#]\s+pass\s+(\d+)/)
+    const durMatch = raw.match(/[ℹ#]\s+duration\s+([\d.]+m?s)/)
     const total = asNum(totalMatch?.[1])
     const fails = asNum(failMatch?.[1])
     const skips = asNum(skipMatch?.[1])
