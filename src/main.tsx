@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { render } from 'ink'
-import { createElement } from 'react'
+import { createElement, useState, useMemo, useCallback } from 'react'
 import { App } from './tui/app.js'
 import { AgentLoop } from './agent/loop.js'
 import { SessionContext } from './agent/context.js'
@@ -17,7 +17,7 @@ import { EDIT_FILE_TOOL } from './tools/edit.js'
 import { createDeepSeekClient } from './api/deepseek.js'
 import { configSchema } from './config/schema.js'
 import { DEFAULT_CONFIG } from './config/default.js'
-import type { Config } from './config/schema.js'
+import type { Config, ProviderConfig } from './config/schema.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target }
@@ -64,6 +64,79 @@ function getOrCreateSessionId(): string {
   return id
 }
 
+function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: string; config: Config }) {
+  const cwd = process.cwd()
+
+  // Stable singletons — created once, never change
+  const [toolRegistry] = useState(() => {
+    const reg = new ToolRegistry()
+    reg.register(READ_FILE_TOOL)
+    reg.register(WRITE_FILE_TOOL)
+    reg.register(BASH_TOOL)
+    reg.register(EDIT_FILE_TOOL)
+    return reg
+  })
+
+  const [session] = useState(() => new SessionContext())
+
+  const [persist] = useState(() => {
+    const sessionId = getOrCreateSessionId()
+    const p = new SessionPersist(sessionId)
+    const existingMessages = p.load()
+    if (existingMessages.length > 0) {
+      session.loadMessages(existingMessages)
+    }
+    return p
+  })
+
+  // Switchable model — changing this recreates client + promptEngine + agent
+  const [currentModel, setCurrentModel] = useState(() => provider.models[0]!)
+
+  const agent = useMemo(() => {
+    const promptEngine = new PromptEngine({
+      model: currentModel.id,
+      maxTokens: currentModel.maxTokens,
+      staticCtx: { cwd, tools: toolRegistry.getDefinitions() },
+      volatileCtx: { cwd },
+    })
+    const client = createDeepSeekClient({
+      apiKey,
+      model: currentModel.id,
+      reasoningEffort: currentModel.reasoningEffort,
+      maxTokens: currentModel.maxTokens,
+    })
+    return new AgentLoop(
+      {
+        client,
+        promptEngine,
+        toolRegistry,
+        maxTurns: config.agent.maxTurns,
+        contextWindow: currentModel.contextWindow,
+        compact: config.compact,
+      },
+      session,
+      cwd,
+    )
+  }, [currentModel])
+
+  const availableModels = provider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id }))
+
+  const handleModelSwitch = useCallback((modelId: string) => {
+    const found = provider.models.find(m => m.id === modelId || m.alias === modelId)
+    if (found) setCurrentModel(found)
+  }, [provider.models])
+
+  return createElement(App, {
+    agent,
+    session,
+    persist,
+    model: currentModel.alias ?? currentModel.id,
+    maxTokens: currentModel.contextWindow,
+    availableModels,
+    onModelSwitch: handleModelSwitch,
+  })
+}
+
 async function main() {
   const config = loadConfig()
   const provider = config.provider.providers[config.provider.default]
@@ -78,62 +151,8 @@ async function main() {
     process.exit(1)
   }
 
-  const model = provider.models[0]!
-  const cwd = process.cwd()
-
-  // Tools
-  const toolRegistry = new ToolRegistry()
-  toolRegistry.register(READ_FILE_TOOL)
-  toolRegistry.register(WRITE_FILE_TOOL)
-  toolRegistry.register(BASH_TOOL)
-  toolRegistry.register(EDIT_FILE_TOOL)
-
-  // Prompt engine (system prompt frozen here → cache anchor)
-  const promptEngine = new PromptEngine({
-    model: model.id,
-    maxTokens: model.maxTokens,
-    staticCtx: { cwd, tools: toolRegistry.getDefinitions() },
-    volatileCtx: { cwd },
-  })
-
-  // API client
-  const client = createDeepSeekClient({
-    apiKey,
-    model: model.id,
-    reasoningEffort: model.reasoningEffort,
-    maxTokens: model.maxTokens,
-  })
-
-  // Agent + session
-  const session = new SessionContext()
-  const sessionId = getOrCreateSessionId()
-  const persist = new SessionPersist(sessionId)
-  const existingMessages = persist.load()
-  if (existingMessages.length > 0) {
-    session.loadMessages(existingMessages)
-  }
-  const agent = new AgentLoop(
-    {
-      client,
-      promptEngine,
-      toolRegistry,
-      maxTurns: config.agent.maxTurns,
-      contextWindow: model.contextWindow,
-      compact: config.compact,
-    },
-    session,
-    cwd,
-  )
-
-  // Render TUI
   const { waitUntilExit } = render(
-    createElement(App, {
-      agent,
-      session,
-      persist,
-      model: model.alias ?? model.id,
-      maxTokens: model.contextWindow,
-    }),
+    createElement(Root, { provider, apiKey, config }),
   )
 
   await waitUntilExit()
