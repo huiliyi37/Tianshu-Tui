@@ -8,6 +8,7 @@ import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import { EvidenceTracker } from './evidence.js'
+import { createCheckpoint } from './checkpoint.js'
 
 export interface AgentConfig {
   client: ApiClient
@@ -24,11 +25,12 @@ export interface AgentCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
   onToolUse: (id: string, name: string, input: Record<string, unknown>) => void
-  onToolResult: (id: string, name: string, result: string, isError?: boolean) => void
+  onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string) => void
   onTurnComplete: (usage: Partial<Usage>, turnNumber: number) => void
   onError: (error: Error) => void
   onAbort: () => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<boolean>
+  onCheckpoint?: (hash: string) => void
 }
 
 function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id: string; name: string } {
@@ -87,6 +89,7 @@ export class AgentLoop {
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     this.session.addUserMessage(userInput)
+    let checkpointCreatedThisTurn = false
 
     try {
       for (let turn = 0; turn < this.config.maxTurns; turn++) {
@@ -101,6 +104,7 @@ export class AgentLoop {
         if (decision.shouldCompact) {
           const { messages: compacted } = await this.compactMessages(messages, decision.tokenCount)
           this.session.replaceMessages(compacted)
+          this.session.markCompacted(turn)
         }
 
         const request = this.config.promptEngine.buildRequest(this.session.getMessages())
@@ -168,6 +172,12 @@ export class AgentLoop {
                   })
                   continue
                 }
+              }
+
+              // Auto-create checkpoint before first modifying operation each turn
+              if ((tu.name === 'write_file' || tu.name === 'edit_file') && !checkpointCreatedThisTurn) {
+                createCheckpoint(this.cwd, 'auto')
+                checkpointCreatedThisTurn = true
               }
 
               const result = await this.config.toolRegistry.execute(tu.name, params)

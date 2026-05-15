@@ -11,6 +11,7 @@ import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { appendLog, summarizeToolOutput, updateToolLog, visibleLogs, type LogEntry } from './log-state.js'
+import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 
 interface PendingApproval {
   id: string
@@ -197,7 +198,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             const usage = session.getTotalUsage()
             const hitRate = cacheHitRate
             const totalCached = usage.cache_read_input_tokens + usage.cache_creation_input_tokens
-            addLog({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${cost.toFixed(4)}` })
+            addLog({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` })
           } else {
             addLog({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache]' })
           }
@@ -323,7 +324,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           updateLogEntry(id, name, result, isError)
         }
       },
-      onTurnComplete: (_usage) => {
+      onTurnComplete: (_usage, turnNumber) => {
         // Flush any remaining buffered text
         if (streamFlushRef.current) {
           clearTimeout(streamFlushRef.current)
@@ -354,10 +355,24 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
 
-        // Cost estimate: ¥1/1M input_tokens, ¥4/1M output_tokens (DeepSeek V4 rough)
+        // Cost: ¥1/M input, ¥4/M output, cache hits at 1/10 (DeepSeek V4, promo until 5/31)
         const usage = session.getTotalUsage()
-        const estimatedCost = (usage.input_tokens * 1 + usage.output_tokens * 4) / 1_000_000
+        const normalInput = usage.input_tokens - usage.cache_read_input_tokens
+        const estimatedCost = (normalInput * 1 + usage.cache_read_input_tokens * 0.1 + usage.output_tokens * 4) / 1_000_000
         setCost(estimatedCost)
+
+        // Cache miss diagnostic
+        session.recordTurnCache(turnNumber, usage)
+        const drift = agent.getDebugInfo().drift
+        const diag = diagnoseCacheMiss(
+          session.getCacheHistory(),
+          turnNumber,
+          drift,
+          session.wasCompactedAt(turnNumber),
+        )
+        if (diag && diag.severity !== 'info') {
+          addLog({ type: 'text', content: `${diag.severity === 'error' ? '⚠️' : '💡'} ${diag.message}` })
+        }
       },
       onError: (error) => {
         addLog({ type: 'text', content: `Error: ${error.message}`, isError: true })

@@ -8,6 +8,14 @@ export const EMPTY_USAGE: Usage = {
   cache_creation_input_tokens: 0,
 }
 
+export interface TurnCacheSnapshot {
+  turn: number
+  cacheRead: number
+  cacheCreation: number
+  inputTokens: number
+  outputTokens: number
+}
+
 export interface SessionState {
   messages: Message[]
   totalUsage: Usage
@@ -17,6 +25,8 @@ export interface SessionState {
   filesRead: Set<string>
   filesModified: Set<string>
   testResults: Array<{ passed: number; failed: number }>
+  turnCacheHistory: TurnCacheSnapshot[]
+  compactedAtTurns: Set<number>
 }
 
 export class SessionContext {
@@ -32,6 +42,8 @@ export class SessionContext {
       filesRead: new Set(),
       filesModified: new Set(),
       testResults: [],
+      turnCacheHistory: [],
+      compactedAtTurns: new Set(),
     }
   }
 
@@ -120,6 +132,28 @@ export class SessionContext {
 
   getTestResults(): Array<{ passed: number; failed: number }> {
     return this.state.testResults
+  }
+
+  recordTurnCache(turn: number, usage: Usage): void {
+    this.state.turnCacheHistory.push({
+      turn,
+      cacheRead: usage.cache_read_input_tokens,
+      cacheCreation: usage.cache_creation_input_tokens,
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+    })
+  }
+
+  markCompacted(turn: number): void {
+    this.state.compactedAtTurns.add(turn)
+  }
+
+  wasCompactedAt(turn: number): boolean {
+    return this.state.compactedAtTurns.has(turn)
+  }
+
+  getCacheHistory(): TurnCacheSnapshot[] {
+    return this.state.turnCacheHistory
   }
 
   getElapsedMs(): number {

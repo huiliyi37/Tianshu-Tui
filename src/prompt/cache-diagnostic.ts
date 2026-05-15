@@ -1,0 +1,87 @@
+import type { TurnCacheSnapshot } from '../agent/context.js'
+import type { DriftEvent } from './fingerprint.js'
+
+export type CacheMissReason =
+  | 'first_turn'
+  | 'prefix_drift'
+  | 'compaction'
+  | 'normal_growth'
+  | 'cache_eviction'
+  | 'no_data'
+
+export interface CacheDiagnostic {
+  reason: CacheMissReason
+  message: string
+  severity: 'info' | 'warn' | 'error'
+  turnHitRate: number
+}
+
+export function diagnoseCacheMiss(
+  history: TurnCacheSnapshot[],
+  currentTurn: number,
+  drift: DriftEvent | null,
+  wasCompacted: boolean,
+): CacheDiagnostic | null {
+  if (history.length === 0) return null
+
+  const current = history[history.length - 1]!
+
+  // First turn — no cache to hit
+  if (history.length === 1) {
+    return {
+      reason: 'first_turn',
+      message: 'First turn — building prefix cache',
+      severity: 'info',
+      turnHitRate: 0,
+    }
+  }
+
+  const prev = history[history.length - 2]!
+
+  // Compute per-turn deltas
+  const turnRead = current.cacheRead - prev.cacheRead
+  const turnCreation = current.cacheCreation - prev.cacheCreation
+  const turnTotal = turnRead + turnCreation
+  const turnHitRate = turnTotal > 0 ? turnRead / turnTotal : 1
+
+  // High hit rate — nothing to explain
+  if (turnHitRate >= 0.8) return null
+
+  // Check fingerprint drift first — this invalidates the entire prefix
+  if (drift) {
+    return {
+      reason: 'prefix_drift',
+      message: `Cache drift: ${drift.systemChanged ? 'system prompt' : ''}${drift.systemChanged && drift.toolsChanged ? ' + ' : ''}${drift.toolsChanged ? 'tool definitions' : ''} changed — prefix invalidated`,
+      severity: 'error',
+      turnHitRate,
+    }
+  }
+
+  // Check if compaction happened this turn
+  if (wasCompacted) {
+    return {
+      reason: 'compaction',
+      message: 'Compaction ran — message history restructured, partial cache miss expected',
+      severity: 'warn',
+      turnHitRate,
+    }
+  }
+
+  // Low hit rate with no obvious cause — likely cache eviction from long context
+  if (turnHitRate < 0.4) {
+    return {
+      reason: 'cache_eviction',
+      message: `Low cache hit (${(turnHitRate * 100).toFixed(0)}%) — prefix may have been evicted from cache due to context length`,
+      severity: 'warn',
+      turnHitRate,
+    }
+  }
+
+  // Moderate miss — normal new messages growing
+  return {
+    reason: 'normal_growth',
+    message: `Cache hit ${(turnHitRate * 100).toFixed(0)}% — new messages partially outside cached prefix`,
+    severity: 'info',
+    turnHitRate,
+  }
+}

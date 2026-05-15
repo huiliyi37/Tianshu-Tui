@@ -18,18 +18,22 @@ export const StatusBar = memo(function StatusBar({ model, cacheHitRate, totalCos
   const hitPct = (cacheHitRate * 100).toFixed(1)
   const usagePct = ((currentTokens / maxTokens) * 100).toFixed(0)
   const bar = tokenBar(currentTokens, maxTokens)
-  const color = currentTokens / maxTokens > 0.8 ? 'red' : currentTokens / maxTokens > 0.5 ? 'yellow' : 'green'
+  const usageColor = currentTokens / maxTokens > 0.8 ? 'red' : currentTokens / maxTokens > 0.5 ? 'yellow' : 'green'
+  const cacheColor = cacheHitRate === 0 ? 'gray' : cacheHitRate >= 0.8 ? 'green' : cacheHitRate >= 0.4 ? 'yellow' : 'red'
 
   return (
     <Box flexDirection="row" justifyContent="space-between" paddingX={1} borderStyle="single" borderColor="gray">
       <Box gap={1}>
         <Text bold color="cyan">{model}</Text>
+        <Text color={cacheColor}>
+          cache:{hitPct}%
+        </Text>
         <Text dimColor>
-          cache:{hitPct}% | ¥{totalCost}
+          ¥{totalCost}
         </Text>
       </Box>
       <Box gap={1}>
-        <Text color={color}>{bar}</Text>
+        <Text color={usageColor}>{bar}</Text>
         <Text dimColor>
           {currentTokens.toLocaleString()}/{maxTokens.toLocaleString()} ({usagePct}%)
         </Text>
