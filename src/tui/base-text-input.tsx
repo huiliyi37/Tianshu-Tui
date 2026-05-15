@@ -59,17 +59,12 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       return
     }
 
-    // Backspace / Delete
+    // Backspace / Delete — macOS backspace sends \x7f which Ink maps to key.delete,
+    // so treat both as backward delete.
     if (key.backspace || key.delete) {
-      if (key.delete || key.meta) {
-        // Delete forward (or word-delete)
-        onChange(value.slice(0, cursorPos) + value.slice(cursorPos + 1))
-      } else {
-        // Backspace
-        if (cursorPos > 0) {
-          onChange(value.slice(0, cursorPos - 1) + value.slice(cursorPos))
-          setCursorPos(prev => prev - 1)
-        }
+      if (cursorPos > 0) {
+        onChange(value.slice(0, cursorPos - 1) + value.slice(cursorPos))
+        setCursorPos(prev => prev - 1)
       }
       return
     }
