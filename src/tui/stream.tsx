@@ -1,11 +1,12 @@
 import { Box, Text } from 'ink'
+import { memo } from 'react'
 
 interface StreamOutputProps {
   text: string
   isStreaming: boolean
 }
 
-export function StreamOutput({ text, isStreaming }: StreamOutputProps) {
+export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: StreamOutputProps) {
   if (!text && !isStreaming) return null
 
   return (
@@ -14,4 +15,4 @@ export function StreamOutput({ text, isStreaming }: StreamOutputProps) {
       {isStreaming && <Text dimColor>▊</Text>}
     </Box>
   )
-}
+})

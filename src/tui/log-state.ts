@@ -35,6 +35,12 @@ export function updateToolLog(
     return [...logs, { type: 'tool', id, toolName, content, isError, rawPath }]
   }
 
+  const existing = logs[idx]!
+  // Skip update if content unchanged — prevents unnecessary React reconciliation
+  if (existing.content === content && existing.isError === isError && existing.rawPath === rawPath) {
+    return logs
+  }
+
   return logs.map((entry, index) => {
     if (index !== idx) return entry
     return { type: 'tool', id, toolName: entry.toolName ?? toolName, content, isError: isError ?? entry.isError, rawPath: rawPath ?? entry.rawPath }

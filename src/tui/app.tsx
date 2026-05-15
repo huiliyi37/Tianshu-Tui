@@ -10,7 +10,7 @@ import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
-import { appendLog, summarizeToolOutput, updateToolLog, visibleLogs, type LogEntry } from './log-state.js'
+import { appendLog, updateToolLog, visibleLogs, type LogEntry } from './log-state.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 
 interface PendingApproval {
@@ -32,7 +32,7 @@ interface AppProps {
   initialInput?: string
 }
 
-const MAX_VISIBLE_LOGS = 50
+const MAX_VISIBLE_LOGS = 30
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput }: AppProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -44,16 +44,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
   const [verbose, setVerbose] = useState(false)
+  const [autoSafe, setAutoSafe] = useState(true)
   const logRef = useRef<LogEntry[]>([])
   const streamBufferRef = useRef('')
   const streamFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const toolOutputAccumRef = useRef<Map<string, string>>(new Map())
   const thinkingBufferRef = useRef('')
   const thinkingFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const rollbackTokenRef = useRef<string | null>(null)
+  const toolOutputAccumRef = useRef<Map<string, string>>(new Map())
   const toolFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dirtyToolIdsRef = useRef<Set<string>>(new Set())
   const toolNamesRef = useRef<Map<string, string>>(new Map())
-  const rollbackTokenRef = useRef<string | null>(null)
 
   // Session recovery: check for previous sessions on mount
   useEffect(() => {
@@ -142,7 +143,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
 /rollback — Preview changes since last checkpoint (/rollback confirm to execute)
-/evidence — Show last turn evidence summary` })
+/evidence — Show last turn evidence summary
+/auto — Toggle auto-approve (current: ${autoSafe ? 'auto-safe' : 'manual'})` })
           setIsStreaming(false)
           return
 
@@ -186,6 +188,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const nextVerbose = !verbose
           setVerbose(nextVerbose)
           addLog({ type: 'text', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' })
+          setIsStreaming(false)
+          return
+        }
+
+        case '/auto': {
+          const next = !autoSafe
+          setAutoSafe(next)
+          agent.setApprovalMode(next ? 'auto-safe' : 'manual')
+          addLog({ type: 'text', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' })
           setIsStreaming(false)
           return
         }
@@ -278,24 +289,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     addLog({ type: 'text', content: `> ${userInput}` })
 
-    const scheduleToolFlush = (id: string, name: string) => {
-      dirtyToolIdsRef.current.add(id)
-      toolNamesRef.current.set(id, name)
-      if (!toolFlushRef.current) {
-        toolFlushRef.current = setTimeout(() => {
-          for (const dirtyId of dirtyToolIdsRef.current) {
-            const accumulated = toolOutputAccumRef.current.get(dirtyId)
-            const toolName = toolNamesRef.current.get(dirtyId) ?? 'tool'
-            if (accumulated !== undefined) {
-              updateLogEntry(dirtyId, toolName, summarizeToolOutput(accumulated, verbose ? 200 : 24))
-            }
-          }
-          dirtyToolIdsRef.current.clear()
-          toolFlushRef.current = null
-        }, 50)
-      }
-    }
-
     await agent.run(userInput, {
       onTextDelta: (text) => {
         streamBufferRef.current += text
@@ -316,18 +309,38 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
       },
       onToolUse: (id, name) => {
-        addLog({ type: 'tool', id, content: `Calling ${name}...`, toolName: name })
+        toolNamesRef.current.set(id, name)
+        addLog({ type: 'tool', id, content: 'Running...', toolName: name })
       },
       onToolResult: (id, name, result, isError, rawPath) => {
+        // Intermediate streaming chunks: batch at 50ms for smooth live display.
+        // Final result: isError is defined, flush immediately.
         if (isError === undefined) {
-          const prev = toolOutputAccumRef.current.get(id) || ''
-          toolOutputAccumRef.current.set(id, prev + result)
-          scheduleToolFlush(id, name)
-        } else {
-          toolOutputAccumRef.current.delete(id)
-          toolNamesRef.current.delete(id)
-          updateLogEntry(id, name, result, isError, rawPath)
+          toolOutputAccumRef.current.set(id, (toolOutputAccumRef.current.get(id) ?? '') + result)
+          dirtyToolIdsRef.current.add(id)
+          if (!toolFlushRef.current) {
+            toolFlushRef.current = setTimeout(() => {
+              for (const tid of dirtyToolIdsRef.current) {
+                const accumulated = toolOutputAccumRef.current.get(tid)
+                if (accumulated !== undefined) {
+                  const tname = toolNamesRef.current.get(tid) ?? ''
+                  updateLogEntry(tid, tname, accumulated)
+                }
+              }
+              dirtyToolIdsRef.current.clear()
+              toolFlushRef.current = null
+            }, 50)
+          }
+          return
         }
+        // Final result — flush any pending chunks then show final output
+        if (toolFlushRef.current) {
+          clearTimeout(toolFlushRef.current)
+          toolFlushRef.current = null
+        }
+        dirtyToolIdsRef.current.delete(id)
+        toolOutputAccumRef.current.delete(id)
+        updateLogEntry(id, name, result, isError, rawPath)
       },
       onCheckpoint: (hash) => {
         addLog({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` })
@@ -356,6 +369,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           toolFlushRef.current = null
         }
         dirtyToolIdsRef.current.clear()
+        toolOutputAccumRef.current.clear()
 
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
@@ -396,7 +410,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const currentTokens = session.getTotalUsage().input_tokens
 
   return (
-    <Box flexDirection="column" height="100%">
+    <Box flexDirection="column" height={process.stdout.rows}>
       <StatusBar
         model={model}
         cacheHitRate={cacheHitRate}
@@ -404,19 +418,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         currentTokens={currentTokens}
         maxTokens={maxTokens}
       />
-      {pendingApproval && (
-        <Box paddingX={2} borderStyle="single" borderColor="yellow">
-          <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
-          <Text> [y/n] </Text>
-        </Box>
-      )}
       {sessionPrompt === 'waiting' && (
         <Box paddingX={2} borderStyle="single" borderColor="cyan">
           <Text bold color="cyan">Previous session found.</Text>
           <Text> Press <Text bold>r</Text> to restore, any other key to start fresh </Text>
         </Box>
       )}
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {logs.map((log, i) => {
           if (log.type === 'tool') {
             return <ToolCard key={`${log.id ?? i}`} name={log.toolName ?? ''} result={log.content} isError={log.isError} verbose={verbose} rawPath={log.rawPath} />
@@ -436,6 +444,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           <StreamOutput text={streamingText} isStreaming={isStreaming} />
         )}
       </Box>
+      {pendingApproval && (
+        <Box paddingX={2} borderStyle="single" borderColor="yellow">
+          <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
+          <Text> [y/n] </Text>
+        </Box>
+      )}
       <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} />
     </Box>
   )

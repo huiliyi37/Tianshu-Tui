@@ -28,7 +28,7 @@ export const DEEPSEEK_CAPABILITIES: ProviderCapabilities = {
   supportsCacheControl: false,
   stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
   hasToolJsonInContentBug: true,
-  effortFormat: 'none',
+  effortFormat: 'reasoning_effort',
 }
 
 export const DEFAULT_CAPABILITIES: ProviderCapabilities = {

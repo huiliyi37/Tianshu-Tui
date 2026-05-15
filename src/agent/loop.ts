@@ -11,6 +11,8 @@ import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyTestRun } from './failure-classifier.js'
 
+export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
+
 export interface AgentConfig {
   client: ApiClient
   promptEngine: PromptEngine
@@ -20,6 +22,7 @@ export interface AgentConfig {
   compact: CompactionConfig
   compactClient?: ApiClient
   compactModel?: string
+  approvalMode?: ApprovalMode
 }
 
 export interface AgentCallbacks {
@@ -54,6 +57,22 @@ export class AgentLoop {
 
   abort(): void {
     this.abortController?.abort()
+  }
+
+  setApprovalMode(mode: ApprovalMode): void {
+    this.config.approvalMode = mode
+  }
+
+  private isHighRisk(toolName: string, input: Record<string, unknown>): boolean {
+    const destructive = /\b(rm\s+-|git\s+reset\s+--hard|git\s+clean\s+-|push\s+--force|killall|pkill|drop\s+table)\b/i
+    if (toolName === 'bash') {
+      const cmd = typeof input.command === 'string' ? input.command : ''
+      return destructive.test(cmd)
+    }
+    if (toolName === 'rollback') return true
+    const targets = [input.file_path, input.path, input.target].filter((v): v is string => typeof v === 'string')
+    if (targets.some(t => t.startsWith('/') || t.split('/').includes('..'))) return true
+    return false
   }
 
   getDebugInfo() {
@@ -156,7 +175,17 @@ export class AgentLoop {
               },
             }
             try {
-              if (this.config.toolRegistry.needsApproval(tu.name, params)) {
+              const needsApproval = this.config.toolRegistry.needsApproval(tu.name, params)
+              const isHighRisk = needsApproval && this.isHighRisk(tu.name, tu.input)
+              const approvalMode = this.config.approvalMode ?? 'manual'
+
+              const shouldAsk = approvalMode === 'manual'
+                ? needsApproval
+                : approvalMode === 'auto-safe'
+                  ? isHighRisk
+                  : false // auto-accept: never ask
+
+              if (shouldAsk) {
                 const approved = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
                 if (!approved) {
                   const denyMsg = 'Tool execution denied: requires user approval'

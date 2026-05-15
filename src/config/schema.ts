@@ -20,7 +20,7 @@ export const providerSchema = z.object({
 })
 
 export const agentSchema = z.object({
-  approval: z.enum(['auto-accept', 'suggest', 'manual']).default('suggest'),
+  approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
 })

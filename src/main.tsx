@@ -134,7 +134,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       model: currentModel.id,
       reasoningEffort: currentModel.reasoningEffort,
       maxTokens: currentModel.maxTokens,
-      thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),
+      thinkingBudget: currentModel.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),
     })
 
     // Create a compact client for LLM-based summarization (auto-compaction)
@@ -157,6 +157,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
         compact: config.compact,
         compactClient,
         compactModel: compactModel?.id,
+        approvalMode: config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
       },
       session,
       cwd,
@@ -208,7 +209,7 @@ async function main() {
   const args = process.argv.slice(2)
 
   // --help / -h
-  if (args[0] === '--help' || args[0] === '-h' || args.length === 0) {
+  if (args[0] === '--help' || args[0] === '-h') {
     console.log(`
   Rivet | 铆钉 — coding agent for DeepSeek V4
 

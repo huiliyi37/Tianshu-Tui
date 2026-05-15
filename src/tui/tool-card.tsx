@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink'
+import { memo } from 'react'
 
-const MAX_COLLAPSED_LINES = 20
+const MAX_COLLAPSED_LINES = 12
 
 interface ToolCardProps {
   name: string
@@ -11,7 +12,7 @@ interface ToolCardProps {
   rawPath?: string
 }
 
-export function ToolCard({ name, result, isError, isStreaming, verbose, rawPath }: ToolCardProps) {
+export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath }: ToolCardProps) {
   const limit = verbose ? 200 : MAX_COLLAPSED_LINES
   const lines = result.split('\n')
   const isLong = lines.length > limit
@@ -38,4 +39,4 @@ export function ToolCard({ name, result, isError, isStreaming, verbose, rawPath 
       )}
     </Box>
   )
-}
+})
