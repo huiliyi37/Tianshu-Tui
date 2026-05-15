@@ -5,7 +5,7 @@ export interface Intent {
   value: string
 }
 
-const FILE_PATH_RE = /(?:^|\s)((?:src|test|tests|lib|packages)\/[\w./-]+\.(?:ts|tsx|js|json|md))/g
+const FILE_PATH_RE = /(?:^|\s)((?:src|test|tests|lib|packages|config|scripts|docs|bin|tools|prisma|\.github)\/[\w./-]+\.(?:ts|tsx|js|json|md|yml|yaml|toml))/g
 const TEST_FILE_RE = /(\S+\.test\.\w+)/g
 const COMMAND_RE = /(?:run|execute|check with)\s+(npm\s+\w+|tsc[^\n]*|npx[^\n]*)/gi
 const CODE_BLOCK_RE = /```[\s\S]*?```/g

@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, statSync } from 'fs'
 import { join } from 'path'
 import type { ApiClient, StreamCallbacks } from '../api/client.js'
 import type { ContentBlock, Message, Usage } from '../api/types.js'
@@ -57,6 +57,7 @@ export class AgentLoop {
   private recentToolHistory: ToolHistoryEntry[] = []
   private prewarm = new PrewarmCache()
   private streamedText = ''
+  private lastPrewarmAt = 0
 
   constructor(
     private config: AgentConfig,
@@ -91,6 +92,8 @@ export class AgentLoop {
         const fullPath = join(this.cwd, intent.value)
         if (existsSync(fullPath)) {
           try {
+            const stat = statSync(fullPath)
+            if (stat.size > 100_000) continue // skip files > 100KB
             const content = readFileSync(fullPath, 'utf-8')
             this.prewarm.set(intent.value, content)
           } catch { /* ignore unreadable files */ }
@@ -205,13 +208,15 @@ export class AgentLoop {
         }
 
         this.streamedText = ''
+        this.lastPrewarmAt = 0
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const collectedBlocks: ContentBlock[] = []
         let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
         const streamCallbacks: StreamCallbacks = {
           onTextDelta: (text) => {
             this.streamedText += text
-            if (this.streamedText.length % 500 < text.length) {
+            if (this.streamedText.length - this.lastPrewarmAt >= 500) {
+              this.lastPrewarmAt = this.streamedText.length
               this.maybePrewarm(this.streamedText)
             }
             callbacks.onTextDelta(text)
@@ -291,14 +296,6 @@ export class AgentLoop {
 
               if ((tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
                 recordAgentTouchedFile(this.cwd, tu.input.file_path)
-              }
-
-              // Speculative prewarm: check cache before read_file
-              if (tu.name === 'read_file' && typeof tu.input.file_path === 'string') {
-                const cached = this.prewarm.get(tu.input.file_path)
-                if (cached && !this.prewarm.get('__bypass__')) {
-                  // Cache hit — still execute normally for now (prewarm warms OS page cache)
-                }
               }
 
               const result = await this.config.toolRegistry.execute(tu.name, params)

@@ -44,4 +44,22 @@ describe('extractIntents', () => {
     const files = intents.filter(i => i.type === 'file')
     assert.equal(files.length, 1)
   })
+
+  it('extracts paths from config, scripts, docs, bin, tools directories', () => {
+    const text = 'Check config/default.toml, scripts/deploy.sh won\'t match but scripts/build.ts will, docs/README.md, bin/cli.ts, tools/analyze.ts'
+    const intents = extractIntents(text)
+    const files = intents.filter(i => i.type === 'file')
+    assert.ok(files.some(i => i.value === 'config/default.toml'))
+    assert.ok(files.some(i => i.value === 'scripts/build.ts'))
+    assert.ok(files.some(i => i.value === 'docs/README.md'))
+    assert.ok(files.some(i => i.value === 'bin/cli.ts'))
+    assert.ok(files.some(i => i.value === 'tools/analyze.ts'))
+  })
+
+  it('extracts yml and yaml file paths', () => {
+    const intents = extractIntents('Update .github/workflows/ci.yml and config/settings.yaml')
+    const files = intents.filter(i => i.type === 'file')
+    assert.ok(files.some(i => i.value.includes('.yml')))
+    assert.ok(files.some(i => i.value.includes('.yaml')))
+  })
 })
