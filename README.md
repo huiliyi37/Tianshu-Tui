@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 445 tests passing, typecheck clean. MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection. All prior features: subagent orchestration, adaptive model routing, TUI cockpit, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 449 tests passing, typecheck clean. Execution resilience layer (TurnHarness with retry + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection. All prior features: subagent orchestration, adaptive model routing, TUI cockpit, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -484,6 +484,15 @@ The undo system captures file snapshots before each modification:
 ### Worker Safety
 
 Worker sessions enforce a timeout budget (`timeoutMs` from the work order) — if a worker runs too long, it is automatically aborted via `AbortController`. The batch dispatch respects `maxWorkers` concurrency (chunked by the limit, not unbounded).
+
+### Execution Resilience
+
+The `TurnHarness` wraps all tool execution with automatic retry and trajectory recording:
+
+- **Transient retry**: Network errors (ECONNRESET, ETIMEDOUT, etc.) and flaky failures are automatically retried once. Non-transient errors (type errors, assertions) fail immediately.
+- **Trajectory recording**: Every tool execution is recorded with duration, status, and error class. Stats are exposed via `agent.getTrajectoryStats()` and reflected in the SummaryBar step count.
+- **Task-state injection**: After turn 3, `extractTaskState()` derives completed/current/remaining steps from the trajectory and model text. This is injected as `<task-progress>` in the volatile context block, giving the model implicit awareness of its own progress.
+- **Reflexion hint**: When a retried tool still fails, a hint is appended: `[Retry failed. Error class: X. This is a transient error — consider alternative approach.]`
 
 ### Session Memory
 

@@ -19,7 +19,7 @@ Key paths:
 - `src/main.tsx` — Entry point + CLI routing
 - `src/tui/` — Terminal UI (Ink 6 + React), SummaryBar, PhaseTracker, theme system
 - `src/api/` — SSE streaming client + provider abstraction
-- `src/agent/` — Agent loop + session management + sub-agent coordinator
+- `src/agent/` — Agent loop + session management + sub-agent coordinator + TurnHarness (retry/trajectory) + task-state extraction
 - `src/tools/` — bash, read_file, write_file, edit_file, git, todo, web_fetch, undo, delegate_task
 - `src/hooks/` — Agent hooks (PreToolUse/PostToolUse/Notification/SubagentStop)
 - `src/mcp/` — MCP client (Model Context Protocol) — config, wrapper, manager, tool discovery
