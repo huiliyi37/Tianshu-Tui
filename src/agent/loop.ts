@@ -7,6 +7,7 @@ import { SessionContext } from './context.js'
 import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
+import { EvidenceTracker } from './evidence.js'
 
 export interface AgentConfig {
   client: ApiClient
@@ -37,6 +38,7 @@ function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id:
 export class AgentLoop {
   private abortController: AbortController | null = null
   private cwd: string
+  private evidence: EvidenceTracker
 
   constructor(
     private config: AgentConfig,
@@ -44,6 +46,7 @@ export class AgentLoop {
     cwd?: string,
   ) {
     this.cwd = cwd ?? process.cwd()
+    this.evidence = new EvidenceTracker()
   }
 
   abort(): void {
@@ -168,7 +171,15 @@ export class AgentLoop {
               }
 
               const result = await this.config.toolRegistry.execute(tu.name, params)
-              callbacks.onToolResult(tu.id, tu.name, result.uiContent ?? result.content, result.isError ?? false)
+              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false)
+
+              // Track evidence for final badge
+              if (tu.name === 'read_file' && !result.isError) {
+                this.evidence.trackFileRead(tu.input.file_path as string)
+              } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !result.isError) {
+                this.evidence.trackFileModified(tu.input.file_path as string)
+              }
+
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: tu.id,
@@ -195,7 +206,10 @@ export class AgentLoop {
         }
 
         // No tool_use blocks — conversation complete
+        const badge = this.evidence.buildBadge()
+        if (badge) callbacks.onTextDelta('\n' + badge)
         callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
+        this.evidence.reset()
         break
       }
     } catch (err) {
