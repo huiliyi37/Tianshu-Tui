@@ -12,6 +12,10 @@ export class ToolRegistry {
     return this.tools.get(name)
   }
 
+  has(name: string): boolean {
+    return this.tools.has(name)
+  }
+
   getAll(): Tool[] {
     return Array.from(this.tools.values())
   }
@@ -35,4 +39,14 @@ export class ToolRegistry {
     if (!tool) return false
     return tool.requiresApproval(params)
   }
+}
+
+export function filterToolRegistry(source: ToolRegistry, allowedNames: readonly string[]): ToolRegistry {
+  const filtered = new ToolRegistry()
+  for (const name of allowedNames) {
+    const tool = source.get(name)
+    if (!tool) throw new Error(`Cannot allowlist unknown tool: ${name}`)
+    filtered.register(tool)
+  }
+  return filtered
 }

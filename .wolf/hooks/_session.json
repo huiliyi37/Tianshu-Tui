@@ -121,6 +121,36 @@
       "count": 1,
       "tokens": 1107,
       "first_read": "2026-05-15T17:01:15.021Z"
+    },
+    "/Users/banxia/app/openclaw-source/src/tui/tui.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-15T17:34:52.685Z"
+    },
+    "/Users/banxia/app/openclaw-source/src/tui/components/chat-log.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-15T17:35:04.218Z"
+    },
+    "/Users/banxia/app/openclaw-source/src/tui/components/assistant-message.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-15T17:35:11.448Z"
+    },
+    "/Users/banxia/app/openclaw-source/src/tui/components/tool-execution.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-15T17:35:24.275Z"
+    },
+    "/Users/banxia/app/openclaw-source/src/tui/tui-stream-assembler.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-15T17:35:36.106Z"
+    },
+    "/Users/banxia/app/openclaw-source/src/tui/tui-event-handlers.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-15T17:35:47.797Z"
     }
   },
   "files_written": [
@@ -291,7 +321,7 @@
     "src/config/schema.ts": 1
   },
   "anatomy_hits": 19,
-  "anatomy_misses": 2,
+  "anatomy_misses": 8,
   "repeated_reads_warned": 17,
   "cerebrum_warnings": 0,
   "stop_count": 9
