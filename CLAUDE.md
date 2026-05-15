@@ -17,9 +17,10 @@ See [README.md](README.md) for full architecture overview.
 
 Key paths:
 - `src/main.tsx` — Entry point + CLI routing
-- `src/tui/` — Terminal UI (Ink 6 + React), SummaryBar, PhaseTracker, theme system
+- `src/tui/` — Terminal UI (Ink 6 + React), SummaryBar, PhaseTracker, theme system, cockpit panels
+- `src/tui/cockpit/` — Multi-panel cockpit (TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, CockpitRail)
 - `src/api/` — SSE streaming client + provider abstraction
-- `src/agent/` — Agent loop + session management + sub-agent coordinator + TurnHarness (retry/trajectory) + task-state extraction
+- `src/agent/` — Agent loop + session management + sub-agent coordinator + TurnHarness (retry/trajectory) + task-state extraction + TraceStore + approval-risk
 - `src/tools/` — bash, read_file, write_file, edit_file, git, todo, web_fetch, undo, delegate_task
 - `src/hooks/` — Agent hooks (PreToolUse/PostToolUse/Notification/SubagentStop)
 - `src/mcp/` — MCP client (Model Context Protocol) — config, wrapper, manager, tool discovery
@@ -30,4 +31,4 @@ Key paths:
 
 ## Slash Commands
 
-`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/undo`, `/context`, `/evidence`, `/auto`, `/mcp`, `/cockpit`
+`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/undo`, `/context`, `/evidence`, `/auto`, `/mcp`, `/cockpit [summary|trace|verify|context|safety|model|off]`

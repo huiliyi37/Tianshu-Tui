@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 474 tests passing, typecheck clean. Attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), execution resilience layer (TurnHarness with retry + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection. All prior features: subagent orchestration, adaptive model routing, TUI cockpit, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 474 tests passing, typecheck clean. Multi-panel cockpit (6 panels + risk assessment + doom loop detection), execution resilience layer (TurnHarness with retry loop + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection with redirect-safe DNS validation. All prior features: subagent orchestration, adaptive model routing, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -46,7 +46,10 @@ src/
 │   ├── adaptive-routing.ts Per-profile per-model pass rate + latency scoring
 │   ├── intent-extractor.ts Intent classification from user input
 │   ├── prewarm.ts        Speculative pre-warming cache
-│   └── trace-store.ts    Structured event tracing
+│   ├── trace-store.ts    Structured event tracing (doom loop detection)
+│   ├── approval-risk.ts  Tool risk assessment (doom loop, path traversal, destructive commands)
+│   ├── turn-harness.ts   Retry loop + trajectory recording for tool execution
+│   └── task-state.ts     Task progress extraction from trajectory + model text
 ├── api/
 │   ├── client.ts         Streaming API client with retry (exp backoff 1s/2s/4s)
 │   ├── deepseek.ts       DeepSeek V4 provider: dual-format usage mapping
@@ -80,7 +83,7 @@ src/
 │   ├── run-tests.ts      Test runner with framework detection + parsing
 │   ├── git.ts            Structured git: status, diff_summary, commit (spawnSync, no shell injection)
 │   ├── todo.ts           Session-scoped task list with Zod validation
-│   ├── web-fetch.ts      URL fetch with HTML→Markdown, SSRF protection, 15s timeout
+│   ├── web-fetch.ts      URL fetch with HTML→Markdown, SSRF protection (redirect-safe), per-hop timeout
 │   ├── undo.ts           File-level undo via snapshot rewind (preview + confirm)
 │   ├── inspect-project.ts Project summary: language, framework, scripts
 │   ├── repo-map.ts       Annotated file tree with entry/test/config markers
@@ -130,7 +133,17 @@ src/
     ├── tool-card.tsx      Tool execution display with theme-colored borders
     ├── log-state.ts       Log entry types, state management, output summarization
     ├── history.ts         Command history persistence
-    └── error-boundary.tsx React error boundary (catch without crash)
+    ├── error-boundary.tsx React error boundary (catch without crash)
+    └── cockpit/           Multi-panel cockpit module
+        ├── types.ts       Panel type + PANELS + PANEL_LABELS
+        ├── rail.tsx       CockpitRail tab navigation
+        ├── trace-panel.tsx      TraceEvent visualization (color-coded status)
+        ├── verification-panel.tsx Evidence display (files read/modified, test results)
+        ├── context-panel.tsx    Context ledger details (token bar, rounds, compaction)
+        ├── safety-panel.tsx     Doom loop + risk assessment + fingerprint diversity
+        ├── model-panel.tsx      Model name, cache hit rate, token breakdown, cost
+        ├── approval-risk-card.tsx Inline risk card (color-coded border)
+        └── index.ts       Barrel export
 ```
 
 ### Data Flow
@@ -219,7 +232,7 @@ The prompt is split into 4 layers for maximum cache stability:
 - **Session memory** — Per-session sidecar that survives compaction; `/memory` CRUD
 - **Reactive compact** — Selects API-invariant rounds for compaction, preserves cache anchors
 - **Compact policy** — Progressive tier decision + circuit breaker (3 consecutive failures → skip)
-- **TUI cockpit** — SummaryBar (live phase, context%, last action, risk), PhaseTracker, `/cockpit` expanded mode
+- **TUI cockpit** — Multi-panel cockpit with 6 views (Summary, Trace, Verify, Context, Safety, Model), `/cockpit [panel]` sub-mode navigation, doom loop detection, risk assessment
 - **Theme system** — Truecolor palette (cyan/purple/green) with 256-color fallback, tool-specific border colors
 - **Gradient banner** — Startup banner with gradient-string
 - **XML protocol layer** — Volatile context uses structured XML tags for cache-stable injection
@@ -243,7 +256,7 @@ The prompt is split into 4 layers for maximum cache stability:
 - **Todo tracking** — Session-scoped task list with Zod validation; read/write actions, status icons, concurrency-safe
 - **Web fetch** — URL fetching with HTML→Markdown conversion, SSRF protection (private IP blocking), 15s timeout, 50K truncation
 - **File-level undo** — Per-file snapshot backup system; versioned backups in `~/.rivet/file-history/{sessionId}/`, preview + confirm workflow, orphaned backup cleanup
-- **SSRF protection** — DNS resolution + private IP detection (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80) before any HTTP fetch
+- **SSRF protection** — Per-hop DNS resolution + private IP detection (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80) validated on every redirect, max 5 hops
 
 ## Configuration
 
@@ -337,7 +350,7 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and are auto-discovered at sta
 | `/context` | Show context ledger: health, tokens, API round safety, compact events |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
-| `/cockpit` | Toggle expanded cockpit panel (Esc to collapse) |
+| `/cockpit [summary\|trace\|verify\|context\|safety\|model\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/mcp` | Show MCP server connection status |
 
 ## User Manual
@@ -399,7 +412,19 @@ During streaming, a live **SummaryBar** appears showing:
 - **Last action** — Shows which tool ran last and whether it succeeded
 - **Risk indicator** — `medium` when bash runs without auto-approve, otherwise `none`
 
-Type `/cockpit` to toggle the expanded cockpit panel with additional metrics (phase detail, turn count, cache hit rate). Press **Esc** to collapse.
+Type `/cockpit` to toggle the expanded cockpit panel, or `/cockpit <panel>` to open a specific view:
+
+| `/cockpit` sub-command | Panel | Shows |
+|---|---|---|
+| `summary` (default) | SummaryBar | Live phase, context%, last action, risk |
+| `trace` | TracePanel | Tool execution events with color-coded status and duration |
+| `verify` | VerificationPanel | Files read/modified counts, test result entries |
+| `context` | ContextPanel | Token bar, API rounds, compaction state, compact history |
+| `safety` | SafetyPanel | Doom loop level, risk level + reasons, fingerprint diversity |
+| `model` | ModelPanel | Model name, cache hit rate bar, token breakdown, cost |
+| `off` | — | Collapse cockpit |
+
+Press **Esc** to collapse the cockpit from any panel.
 
 ### Subagent Orchestration
 
@@ -466,9 +491,10 @@ Useful for multi-step tasks where the agent needs to track its own progress.
 The `web_fetch` tool retrieves web content:
 
 - URL validation (http/https only) and DNS resolution
-- **SSRF protection** — Blocks requests to private/reserved IPs (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80)
+- **SSRF protection** — Per-hop DNS + private IP blocking on every redirect (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80)
+- **Redirect-safe** — Manual redirect following with DNS validation at each hop (max 5 redirects)
 - HTML content is converted to Markdown (links, headings, code blocks preserved)
-- 15 second timeout, 50K character truncation limit
+- Per-hop 10s fetch timeout, 15s body read timeout, 50K character truncation limit
 - Requires user approval for all requests
 
 ### File-Level Undo
@@ -499,10 +525,12 @@ All three layers activate after turn 3 and are injected only in the fresh volati
 
 The `TurnHarness` wraps all tool execution with automatic retry and trajectory recording:
 
-- **Transient retry**: Network errors (ECONNRESET, ETIMEDOUT, etc.) and flaky failures are automatically retried once. Non-transient errors (type errors, assertions) fail immediately.
+- **Transient retry**: Network errors (ECONNRESET, ETIMEDOUT, etc.) and flaky failures are automatically retried up to `maxRetries` times (default: 2). Non-transient errors (type errors, assertions) fail immediately.
 - **Trajectory recording**: Every tool execution is recorded with duration, status, and error class. Stats are exposed via `agent.getTrajectoryStats()` and reflected in the SummaryBar step count.
+- **Doom loop detection**: Tool call fingerprints are tracked via `TraceStore`. When identical calls repeat 3+ times (warn) or 5+ times (blocked), the Safety panel flags it.
+- **Risk assessment**: `assessToolRisk()` evaluates doom loop level, path traversal, destructive commands, and write operations to produce a risk level (none/low/medium/high).
 - **Task-state injection**: After turn 3, `extractTaskState()` derives completed/current/remaining steps from the trajectory and model text. This is injected as `<task-progress>` in the volatile context block, giving the model implicit awareness of its own progress.
-- **Reflexion hint**: When a retried tool still fails, a hint is appended: `[Retry failed. Error class: X. This is a transient error — consider alternative approach.]`
+- **Retry hint**: When all retries fail, a hint is appended: `[All N retries failed. Error class: X. Consider alternative approach.]`
 
 ### Session Memory
 
@@ -536,7 +564,7 @@ Session memory survives across compaction. Use it to bookmark decisions or prefe
 | `/context` | Show context health, token sections, round diagnostics |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
-| `/cockpit` | Toggle expanded cockpit panel |
+| `/cockpit [summary\|trace\|verify\|context\|safety\|model\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/clear` | Clear screen |
 | `/exit` | Save session and exit |
 
@@ -592,7 +620,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (445)
+npm run test                   # Run all tests (474)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
