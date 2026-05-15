@@ -1,11 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Tool } from '../tools/types.js'
 import type { McpConfig, McpServerConfig } from './config.js'
 import type { McpConnectionState } from './types.js'
 import { createMcpToolWrapper } from './wrapper.js'
 
-interface McpToolDef {
+export interface McpToolDef {
   name: string
   description?: string
   inputSchema: {
@@ -35,10 +35,13 @@ export class McpManager {
     if (!this.config.enabled) return
 
     const entries = Object.entries(this.config.servers)
-    for (const [serverId, serverConfig] of entries) {
-      if (serverConfig.disabled) continue
-      await this.connectAndDiscover(serverId, serverConfig)
-    }
+      .filter(([, cfg]) => !cfg.disabled)
+
+    await Promise.allSettled(
+      entries.map(([serverId, serverConfig]) =>
+        this.connectAndDiscover(serverId, serverConfig),
+      ),
+    )
   }
 
   getAllTools(): Tool[] {
@@ -78,6 +81,9 @@ export class McpManager {
 
       const rivetTools = mcpTools.map(mcpDef => {
         const perToolCallFn = async (input: Record<string, unknown>) => {
+          if (!this.connections.has(serverId)) {
+            throw new Error(`MCP server "${serverId}" is disconnected`)
+          }
           const result = await server.client.callTool({ name: mcpDef.name, arguments: input })
           const textContent = (result.content as Array<{ type: string; text?: string }>)
             .filter((c): c is { type: 'text'; text: string } =>
@@ -107,9 +113,7 @@ export class McpManager {
     }
   }
 
-  /**
-   * Connect to an MCP server. Overridable for testing.
-   */
+  /** @internal Overridable for testing */
   async _connectServer(serverId: string, config?: McpServerConfig): Promise<ConnectedServer> {
     const cfg = config ?? this.config.servers[serverId]!
     const client = new Client(
@@ -134,9 +138,7 @@ export class McpManager {
     throw new Error(`Invalid MCP server config for ${serverId}`)
   }
 
-  /**
-   * Discover tools from a connected server. Overridable for testing.
-   */
+  /** @internal Overridable for testing */
   async _discoverTools(serverId: string, server?: ConnectedServer): Promise<McpToolDef[]> {
     const conn = server ?? this.connections.get(serverId)
     if (!conn) return []
@@ -147,21 +149,4 @@ export class McpManager {
       inputSchema: (t.inputSchema ?? { type: 'object' as const, properties: {} }) as McpToolDef['inputSchema'],
     }))
   }
-}
-
-/**
- * Build a safe default environment for spawned MCP processes.
- * Mirrors the SDK's getDefaultEnvironment but without importing it directly.
- */
-function getDefaultEnvironment(): Record<string, string> {
-  const env: Record<string, string> = {}
-  const inherited = [
-    'HOME', 'USER', 'LANG', 'TERM', 'PATH',
-    'NODE_ENV', 'SHELL', 'TMPDIR', 'TEMP', 'TMP',
-  ]
-  for (const key of inherited) {
-    const val = process.env[key]
-    if (val !== undefined) env[key] = val
-  }
-  return env
 }

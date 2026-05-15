@@ -4,7 +4,7 @@ export function mcpToolName(serverId: string, toolName: string): string {
   return `mcp__${serverId}__${toolName}`
 }
 
-const WRITE_TOOL_PATTERNS = /\b(write|create|update|delete|remove|push|post|put|patch|execute|run)\b/i
+const WRITE_TOOL_PATTERNS = /\b(write|create|update|delete|remove|push|post|put|patch|execute)\b/i
 
 interface McpToolDefinition {
   name: string

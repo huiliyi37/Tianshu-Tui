@@ -18,6 +18,7 @@ import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js
 import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { runResumePreflight } from '../context/resume-preflight.js'
+import type { McpManager } from '../mcp/manager.js'
 
 interface PendingApproval {
   id: string
@@ -36,6 +37,7 @@ interface AppProps {
   onModelSwitch: (modelId: string) => void
   currentSessionId: string
   initialInput?: string
+  mcpManagerRef: React.MutableRefObject<McpManager | null>
 }
 
 const STREAM_FLUSH_MS = 80
@@ -67,6 +69,7 @@ interface SlashHandlerContext {
   setIsStreaming: (v: boolean) => void
   setCacheHitRate: (v: number) => void
   setSummaryState: (v: SummaryState | ((prev: SummaryState) => SummaryState)) => void
+  mcpManagerRef: React.MutableRefObject<McpManager | null>
 }
 
 function handleSlashCommand(ctx: SlashHandlerContext): boolean {
@@ -175,12 +178,26 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
         const totalCached = usage.cache_read_input_tokens + usage.cache_creation_input_tokens
         pushStatic(createLogEntry({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${ctx.session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${ctx.cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
       } else if (subcmd === 'mcp') {
-        // Show MCP configuration status
-        const lines = ['MCP Configuration:']
-        lines.push('  Check startup logs for connection status.')
-        lines.push('  Use /debug mcp to view this summary.')
-        lines.push('  MCP tools available: see /debug prompt tool list.')
-        pushStatic(createLogEntry({ type: 'text', content: lines.join('\n') }))
+        const mgr = ctx.mcpManagerRef.current
+        if (!mgr) {
+          pushStatic(createLogEntry({ type: 'text', content: 'MCP not initialized (no servers configured or MCP disabled).' }))
+        } else {
+          const states = mgr.getStates()
+          const tools = mgr.getAllTools()
+          const lines = [`MCP Status (${states.length} server(s), ${tools.length} tool(s)):`]
+          for (const s of states) {
+            const detail = s.status === 'connected'
+              ? `connected — ${s.toolCount} tools`
+              : s.status === 'error'
+                ? `error: ${s.error}`
+                : s.status
+            lines.push(`  ${s.serverId}: ${detail}`)
+          }
+          if (tools.length > 0) {
+            lines.push('Tools: ' + tools.map(t => t.definition.name).join(', '))
+          }
+          pushStatic(createLogEntry({ type: 'text', content: lines.join('\n') }))
+        }
       } else {
         pushStatic(createLogEntry({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache|mcp]' }))
       }
@@ -313,7 +330,7 @@ function renderStaticEntry(entry: LogEntry, verbose: boolean) {
 
 // --- Main App ---
 
-export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput, mcpManagerRef }: AppProps) {
   const [staticItems, setStaticItems] = useState<LogEntry[]>([])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
 
@@ -508,6 +525,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         currentSessionId, cost, cacheHitRate, autoSafeRef, verboseRef,
         setVerbose, setAutoSafe, rollbackTokenRef, cockpitExpandedRef,
         setCockpitExpanded, pushStatic, setIsStreaming, setCacheHitRate, setSummaryState,
+        mcpManagerRef,
       }
       if (handleSlashCommand(slashCtx)) return
     }

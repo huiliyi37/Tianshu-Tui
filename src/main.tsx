@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { render } from 'ink'
-import { createElement, useState, useMemo, useCallback, useEffect } from 'react'
+import { createElement, useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { App } from './tui/app.js'
 import { ErrorBoundary } from './tui/error-boundary.js'
 import { AgentLoop } from './agent/loop.js'
@@ -109,6 +109,8 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 
   // MCP initialization — discovers tools from configured MCP servers and registers them
   const [, setMcpReady] = useState(false)
+  const [toolVersion, setToolVersion] = useState(0)
+  const mcpManagerRef = useRef<McpManager | null>(null)
 
   useEffect(() => {
     if (!config.mcp.enabled || Object.keys(config.mcp.servers).length === 0) {
@@ -118,6 +120,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 
     const mgr = new McpManager(config.mcp)
     _mcpManager = mgr
+    mcpManagerRef.current = mgr
 
     mgr.initialize().then(() => {
       const mcpTools = mgr.getAllTools()
@@ -125,6 +128,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
         toolRegistry.register(tool)
       }
       setMcpReady(true)
+      setToolVersion(v => v + 1)
 
       const states = mgr.getStates()
       const connected = states.filter(s => s.status === 'connected')
@@ -148,6 +152,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     return () => {
       mgr.shutdown().catch(() => {})
       _mcpManager = null
+      mcpManagerRef.current = null
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -251,7 +256,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       session,
       cwd,
     )
-  }, [currentModel])
+  }, [currentModel, toolVersion])
 
   const availableModels = provider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id }))
 
@@ -281,6 +286,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     availableModels,
     onModelSwitch: handleModelSwitch,
     initialInput,
+    mcpManagerRef,
   })
 }
 
