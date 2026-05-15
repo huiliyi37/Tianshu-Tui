@@ -18,6 +18,7 @@ import type { CompactCircuitBreakerState } from '../context/types.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyTestRun } from './failure-classifier.js'
+import type { HookRegistry } from '../hooks/registry.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -34,6 +35,7 @@ export interface AgentConfig {
   sessionId?: string
   transcriptPath?: string
   getSessionMemoryState?: () => import('../context/types.js').LedgerSessionMemoryState | undefined
+  hooks?: HookRegistry
 }
 
 export interface AgentCallbacks {
@@ -271,6 +273,19 @@ export class AgentLoop {
               },
             }
             try {
+              // PreToolUse hook — can modify input or block execution
+              const preHookResult = this.config.hooks?.firePreToolUse({ toolName: tu.name, input: tu.input as Record<string, unknown> }) ?? {}
+              if (preHookResult.block) {
+                const blockMsg = `Tool blocked by hook: ${preHookResult.reason ?? 'no reason given'}`
+                callbacks.onToolResult(tu.id, tu.name, blockMsg, true)
+                toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: blockMsg, is_error: true })
+                continue
+              }
+              if (preHookResult.input) {
+                tu.input = preHookResult.input
+                params.input = preHookResult.input
+              }
+
               const needsApproval = this.config.toolRegistry.needsApproval(tu.name, params)
               const isHighRisk = needsApproval && this.isHighRisk(tu.name, tu.input)
               const approvalMode = this.config.approvalMode ?? 'manual'
@@ -318,7 +333,17 @@ export class AgentLoop {
               } else {
                 result = await this.config.toolRegistry.execute(tu.name, params)
               }
-              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false, result.rawPath, result.uiContent)
+
+              // PostToolUse hook — can modify result
+              const postHookResult = this.config.hooks?.firePostToolUse({
+                toolName: tu.name,
+                input: tu.input as Record<string, unknown>,
+                result: result.content,
+                isError: result.isError ?? false,
+              }) ?? {}
+              const finalContent = postHookResult.result ?? result.content
+
+              callbacks.onToolResult(tu.id, tu.name, finalContent, result.isError ?? false, result.rawPath, result.uiContent)
 
               // Record tool history for volatile context injection
               this.recordToolHistory(tu.name, tu.input, result.isError ?? false, result.content)
@@ -347,7 +372,7 @@ export class AgentLoop {
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: tu.id,
-                content: result.content,
+                content: finalContent,
                 is_error: result.isError,
               })
             } catch (err) {
