@@ -41,12 +41,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "diff": "^9.0.0",
     "gradient-string": "^2.0.2",
     "ink": "^6.8.0",
     "react": "^19.2.6",
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@types/diff": "^7.0.2",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
     "tsup": "^8.4.0",
