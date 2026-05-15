@@ -34,17 +34,35 @@ interface AppProps {
   initialInput?: string
 }
 
-const MAX_VISIBLE_LOGS = 30
 const STREAM_FLUSH_MS = 80
 const THINKING_FLUSH_MS = 200
 const TOOL_FLUSH_MS = 120
 
+// Rows reserved for non-log UI elements
+const STATUS_BAR_ROWS = 3
+const INPUT_BAR_ROWS = 1
+const APPROVAL_PROMPT_ROWS = 3
+const AGENT_STATUS_BASE_ROWS = 2
+const STREAMING_ROWS = 2
+
+// Estimated rows per log entry (avg)
+const ROWS_PER_LOG = 3
+
 // --- Memoized sub-components ---
 
-const LogList = memo(function LogList({ logs, verbose }: { logs: LogEntry[]; verbose: boolean }) {
+const LogList = memo(function LogList({ logs, verbose, maxHeight }: { logs: LogEntry[]; verbose: boolean; maxHeight: number }) {
+  const maxLogs = Math.max(1, Math.floor(maxHeight / ROWS_PER_LOG))
+  const display = logs.slice(-maxLogs)
+  const hidden = logs.length - display.length
+
   return (
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
-      {logs.map(log => {
+      {hidden > 0 && (
+        <Box paddingX={1}>
+          <Text dimColor>↕ {hidden} earlier messages scrolled up</Text>
+        </Box>
+      )}
+      {display.map(log => {
         switch (log.type) {
           case 'tool':
             return <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isError={log.isError} verbose={verbose} rawPath={log.rawPath} />
@@ -124,7 +142,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const flushLogs = useCallback(() => {
     if (logDirty.current) {
       logDirty.current = false
-      setLogs(visibleLogs(logRef.current, MAX_VISIBLE_LOGS))
+      setLogs(visibleLogs(logRef.current, logRef.current.length))
     }
   }, [])
 
@@ -561,6 +579,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const termSize = useTerminalSize()
   const tokenEstimate = Math.floor(streamingText.length / 4)
 
+  // Calculate reserved rows for bottom UI elements
+  const bottomReserved =
+    STATUS_BAR_ROWS +
+    INPUT_BAR_ROWS +
+    (pendingApproval ? APPROVAL_PROMPT_ROWS : 0) +
+    (isStreaming ? STREAMING_ROWS + AGENT_STATUS_BASE_ROWS + Math.min(toolCallsDisplay.length, 6) : 0)
+
+  const logAreaHeight = Math.max(5, termSize.rows - bottomReserved)
+
   return (
     <Box flexDirection="column" height={termSize.rows}>
       <StatusBar
@@ -576,7 +603,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           <Text> Press <Text bold>r</Text> to restore, any other key to start fresh </Text>
         </Box>
       )}
-      <LogList logs={logs} verbose={verbose} />
+      <LogList logs={logs} verbose={verbose} maxHeight={logAreaHeight} />
       <StreamingPanel text={streamingText} thinking={streamingThinking} isStreaming={isStreaming} />
       <AgentStatus
         isStreaming={isStreaming}

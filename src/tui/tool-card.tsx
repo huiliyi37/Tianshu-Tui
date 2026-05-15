@@ -1,7 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo, useMemo } from 'react'
 
-const MAX_COLLAPSED_LINES = 12
+const MAX_COLLAPSED_LINES = 8
 
 interface ToolCardProps {
   name: string
@@ -10,6 +10,12 @@ interface ToolCardProps {
   isStreaming?: boolean
   verbose?: boolean
   rawPath?: string
+}
+
+function compactPath(rawPath: string | undefined): string {
+  if (!rawPath) return ''
+  const filename = rawPath.split('/').pop() ?? rawPath
+  return filename
 }
 
 export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath }: ToolCardProps) {
@@ -24,23 +30,20 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
     }
   }, [result, limit])
 
+  const titleColor = isError ? 'red' : 'cyan'
+
   return (
-    <Box
-      flexDirection="column"
-      paddingX={2}
-      marginBottom={1}
-      borderStyle="single"
-      borderColor={isError ? 'red' : 'gray'}
-    >
-      <Text bold color={isError ? 'red' : 'cyan'}>
-        ── {name} ──{isStreaming ? ' (running)' : ''}
+    <Box flexDirection="column" paddingX={1} marginBottom={0}>
+      <Text bold color={titleColor}>
+        ── {name} ──{isStreaming ? ' …' : ''}
+        {truncated > 0 && <Text dimColor> {truncated} lines hidden</Text>}
       </Text>
       <Text>{displayText}</Text>
       {truncated > 0 && (
-        <Text dimColor>... {truncated} more lines{rawPath ? ` [raw: ${rawPath}]` : ''}</Text>
+        <Text dimColor>  use /verbose to expand{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
       )}
       {truncated === 0 && rawPath && (
-        <Text dimColor>[raw: {rawPath}]</Text>
+        <Text dimColor>  raw: {compactPath(rawPath)}</Text>
       )}
     </Box>
   )
