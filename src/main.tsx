@@ -15,6 +15,8 @@ import { READ_FILE_TOOL } from './tools/read-file.js'
 import { WRITE_FILE_TOOL } from './tools/write-file.js'
 import { BASH_TOOL } from './tools/bash.js'
 import { EDIT_FILE_TOOL } from './tools/edit.js'
+import { GREP_TOOL } from './tools/grep.js'
+import { GLOB_TOOL } from './tools/glob.js'
 import { createDeepSeekClient } from './api/deepseek.js'
 import { killAll } from './tools/process-tracker.js'
 import { configSchema } from './config/schema.js'
@@ -89,6 +91,8 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     reg.register(WRITE_FILE_TOOL)
     reg.register(BASH_TOOL)
     reg.register(EDIT_FILE_TOOL)
+    reg.register(GREP_TOOL)
+    reg.register(GLOB_TOOL)
     return reg
   })
 
