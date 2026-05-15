@@ -65,7 +65,7 @@
 - 创建：`src/agent/work-order.ts`
 - 创建：`src/agent/__tests__/work-order.test.ts`
 
-- [ ] **步骤 1：编写失败的 contract/parser 测试**
+- [x] **步骤 1：编写失败的 contract/parser 测试**
 
 创建 `src/agent/__tests__/work-order.test.ts`：
 
@@ -169,7 +169,7 @@ describe('work-order contract', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -183,7 +183,7 @@ npm test -- src/agent/__tests__/work-order.test.ts
 Cannot find module '../work-order.js'
 ```
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 创建 `src/agent/work-order.ts`：
 
@@ -389,7 +389,7 @@ export function buildBlockedWorkerResult(order: WorkOrder, reason: string): Work
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -404,7 +404,7 @@ npm test -- src/agent/__tests__/work-order.test.ts
 # fail 0
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/work-order.ts src/agent/__tests__/work-order.test.ts
@@ -419,7 +419,7 @@ git commit -m "feat: add worker order contract"
 - 修改：`src/tools/registry.ts`
 - 创建：`src/tools/__tests__/registry-filter.test.ts`
 
-- [ ] **步骤 1：编写失败的 allowlist 测试**
+- [x] **步骤 1：编写失败的 allowlist 测试**
 
 创建 `src/tools/__tests__/registry-filter.test.ts`：
 
@@ -478,7 +478,7 @@ describe('filterToolRegistry', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -492,7 +492,7 @@ npm test -- src/tools/__tests__/registry-filter.test.ts
 The requested module '../registry.js' does not provide an export named 'filterToolRegistry'
 ```
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 修改 `src/tools/registry.ts`，保留现有 imports 和 class，增加 `has()` 方法与 `filterToolRegistry()`：
 
@@ -551,7 +551,7 @@ export function filterToolRegistry(source: ToolRegistry, allowedNames: readonly 
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -566,7 +566,7 @@ npm test -- src/tools/__tests__/registry-filter.test.ts
 # fail 0
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/tools/registry.ts src/tools/__tests__/registry-filter.test.ts
@@ -581,7 +581,7 @@ git commit -m "feat: add worker tool allowlist registry"
 - 创建：`src/agent/worker-prompts.ts`
 - 创建：`src/agent/__tests__/worker-prompts.test.ts`
 
-- [ ] **步骤 1：编写失败的 prompt/packet 测试**
+- [x] **步骤 1：编写失败的 prompt/packet 测试**
 
 创建 `src/agent/__tests__/worker-prompts.test.ts`：
 
@@ -655,7 +655,7 @@ describe('worker prompts', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -669,7 +669,7 @@ npm test -- src/agent/__tests__/worker-prompts.test.ts
 Cannot find module '../worker-prompts.js'
 ```
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 创建 `src/agent/worker-prompts.ts`：
 
@@ -743,7 +743,7 @@ export function buildPrimaryWorkerPacket(results: WorkerResult[]): string {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -758,7 +758,7 @@ npm test -- src/agent/__tests__/worker-prompts.test.ts
 # fail 0
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/worker-prompts.ts src/agent/__tests__/worker-prompts.test.ts
@@ -773,7 +773,7 @@ git commit -m "feat: add worker result prompts"
 - 创建：`src/agent/worker-session.ts`
 - 创建：`src/agent/__tests__/worker-session.test.ts`
 
-- [ ] **步骤 1：编写失败的 worker session 测试**
+- [x] **步骤 1：编写失败的 worker session 测试**
 
 创建 `src/agent/__tests__/worker-session.test.ts`：
 
@@ -938,7 +938,7 @@ describe('runWorkerSession', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -952,7 +952,7 @@ npm test -- src/agent/__tests__/worker-session.test.ts
 Cannot find module '../worker-session.js'
 ```
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 创建 `src/agent/worker-session.ts`：
 
@@ -1087,7 +1087,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -1102,7 +1102,7 @@ npm test -- src/agent/__tests__/worker-session.test.ts
 # fail 0
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/worker-session.ts src/agent/__tests__/worker-session.test.ts
@@ -1117,7 +1117,7 @@ git commit -m "feat: add headless worker sessions"
 - 创建：`src/agent/coordinator.ts`
 - 创建：`src/agent/__tests__/coordinator.test.ts`
 
-- [ ] **步骤 1：编写失败的 coordinator 测试**
+- [x] **步骤 1：编写失败的 coordinator 测试**
 
 创建 `src/agent/__tests__/coordinator.test.ts`：
 
@@ -1287,7 +1287,7 @@ describe('DelegationCoordinator', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -1301,7 +1301,7 @@ npm test -- src/agent/__tests__/coordinator.test.ts
 Cannot find module '../coordinator.js'
 ```
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 创建 `src/agent/coordinator.ts`：
 
@@ -1398,7 +1398,7 @@ export class DelegationCoordinator {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -1413,7 +1413,7 @@ npm test -- src/agent/__tests__/coordinator.test.ts
 # fail 0
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/coordinator.ts src/agent/__tests__/coordinator.test.ts
@@ -1430,7 +1430,7 @@ git commit -m "feat: add read-only delegation coordinator"
 - 创建：`src/tools/__tests__/default-registry.test.ts`
 - 创建：`src/tools/__tests__/delegate-task.test.ts`
 
-- [ ] **步骤 1：编写失败的 tool/registry 测试**
+- [x] **步骤 1：编写失败的 tool/registry 测试**
 
 创建 `src/tools/__tests__/default-registry.test.ts`：
 
@@ -1559,7 +1559,7 @@ describe('DELEGATE_TASK_TOOL', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -1573,7 +1573,7 @@ npm test -- src/tools/__tests__/default-registry.test.ts src/tools/__tests__/del
 Cannot find module '../default-registry.js'
 ```
 
-- [ ] **步骤 3：编写最少实现代码**
+- [x] **步骤 3：编写最少实现代码**
 
 创建 `src/tools/default-registry.ts`：
 
@@ -1676,7 +1676,7 @@ export function createDelegateTaskTool(coordinator: DelegateTaskCoordinator): To
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -1690,7 +1690,7 @@ npm test -- src/tools/__tests__/default-registry.test.ts src/tools/__tests__/del
 # fail 0
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/tools/default-registry.ts src/tools/delegate-task.ts src/tools/__tests__/default-registry.test.ts src/tools/__tests__/delegate-task.test.ts
@@ -1705,7 +1705,7 @@ git commit -m "feat: add delegate task tool"
 - 修改：`src/main.tsx`
 - 修改：`README.md`
 
-- [ ] **步骤 1：编写失败的 runtime wiring 保护测试**
+- [x] **步骤 1：编写失败的 runtime wiring 保护测试**
 
 先扩展 `src/tools/__tests__/default-registry.test.ts`，证明默认 registry 可以用于 worker base registry，同时 primary registry 可以添加 `delegate_task`：
 
@@ -1758,7 +1758,7 @@ describe('createDefaultToolRegistry', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -1768,7 +1768,7 @@ npm test -- src/tools/__tests__/default-registry.test.ts
 
 预期：当前可能 PASS，因为 Task 6 已满足这组断言；如果 PASS，继续步骤 3。这个步骤的作用是锁定 runtime wiring 约束：worker base registry 不包含 `delegate_task`，primary registry 才显式包含它。
 
-- [ ] **步骤 3：修改 main.tsx runtime 接线**
+- [x] **步骤 3：修改 main.tsx runtime 接线**
 
 在 `src/main.tsx` 中将手写 registry 注册替换为 `createDefaultToolRegistry()`，并在 primary registry 中添加 `delegate_task`。核心结构如下，按现有 `MainApp` 变量名合入，不改变 CLI 参数解析和 App props：
 
@@ -1877,7 +1877,7 @@ const agent = useMemo(() => {
 - `delegate_task` — Phase 1 read-only worker delegation. Runs a bounded headless worker with read-only tools and returns structured findings to the primary session.
 ```
 
-- [ ] **步骤 4：运行 typecheck 和目标测试验证通过**
+- [x] **步骤 4：运行 typecheck 和目标测试验证通过**
 
 运行：
 
@@ -1892,7 +1892,7 @@ npm test -- src/tools/__tests__/default-registry.test.ts src/tools/__tests__/del
 # fail 0
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/main.tsx README.md src/tools/__tests__/default-registry.test.ts
@@ -1908,7 +1908,7 @@ git commit -m "feat: wire delegate task into runtime"
 - 修改：`.wolf/memory.md`
 - 可选修改：`.wolf/buglog.json`，仅当实现过程中修复了失败测试、构建错误或用户报告问题。
 
-- [ ] **步骤 1：运行完整验证命令**
+- [x] **步骤 1：运行完整验证命令**
 
 运行：
 
@@ -1929,7 +1929,7 @@ tsc --noEmit
 # tsup build completes successfully
 ```
 
-- [ ] **步骤 2：运行 secret pattern 检查**
+- [x] **步骤 2：运行 secret pattern 检查**
 
 运行：
 
@@ -1939,7 +1939,7 @@ rg -n "sk-[A-Za-z0-9]" src docs .wolf
 
 预期：无真实 credential 命中。若命中 `sk-xxx` 示例占位，可保留；若命中真实 key，立即替换为占位、记录 `.wolf/buglog.json`，并提醒用户轮换密钥。
 
-- [ ] **步骤 3：确认 worker 只读边界**
+- [x] **步骤 3：确认 worker 只读边界**
 
 运行：
 
@@ -1955,7 +1955,7 @@ runWorkerSession uses independent SessionContext
 delegate_task returns structured worker packet
 ```
 
-- [ ] **步骤 4：更新 OpenWolf anatomy 和 memory**
+- [x] **步骤 4：更新 OpenWolf anatomy 和 memory**
 
 更新 `.wolf/anatomy.md`，新增本计划和新增源码/测试文件条目。至少包含：
 
@@ -1974,7 +1974,7 @@ delegate_task returns structured worker packet
 | HH:MM | completed P2.4 Phase 1 subagent delegation MVP | work-order.ts, worker-session.ts, coordinator.ts, delegate-task.ts, main.tsx | typecheck/test/build pass; delegate_task read-only worker wired | ~estimate |
 ```
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add .wolf/anatomy.md .wolf/memory.md
@@ -2008,3 +2008,26 @@ git commit -m "docs: record subagent delegation implementation"
 - 只读安全边界：任务 2、4、6、8 均有测试和验证。
 - Prefix cache：worker 不拼接自定义 system prompt；worker-specific 内容放入 user prompt，system prompt 仍由 `PromptEngine` 构造。
 - P2.3 边界：本计划不改 cockpit panels，只在 README 记录 `delegate_task` 的用户可见行为。
+
+---
+
+## 实施记录
+
+**状态：已完成** (2026-05-16)
+
+**Commits:**
+- `ec4d036` — feat(subagent): Phase 2 — WorkOrderQueue, CoordinatorState, aggregation policies
+- `2ce2408` — feat(subagent): Phase 3-4 — write workers, adaptive routing
+
+**实现范围：**
+- `work-order.ts` — WorkOrder/WorkerResult Zod schema, createReadOnlyWorkOrder, createWriteWorkOrder, parseWorkerResult, buildBlockedWorkerResult
+- `work-queue.ts` — WorkOrderQueue (priority queue, deduplication, dependency ordering, concurrency limit)
+- `coordinator-state.ts` — CoordinatorState (event tracking, failure budget, escalation)
+- `aggregation.ts` — aggregateResults (primary_decides, all_required, first_success, majority)
+- `coordinator.ts` — DelegationCoordinator (delegate, delegateBatch, shouldDelegateObjective)
+- 4 test files with comprehensive coverage
+
+**偏离计划的地方：**
+- Phase 1 和 Phase 2 合并实现（WorkOrder + WorkOrderQueue 一起交付）
+- `coordinator.ts` 依赖 `worker-prompts.ts` 和 `worker-session.ts`（已有模块）
+- `filterToolRegistry` 作为 ToolRegistry 的静态工具导出
