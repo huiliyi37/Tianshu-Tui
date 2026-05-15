@@ -215,3 +215,36 @@
 | Time | Action | File(s) | Outcome | ~Tokens |
 |------|--------|---------|---------|--------|
 | 01:48 | completed P2.4 Phase 1 subagent delegation MVP | work-order.ts, worker-session.ts, coordinator.ts, delegate-task.ts, default-registry.ts, main.tsx, registry.ts, README.md | typecheck/test/build pass (210 tests); delegate_task read-only worker wired to runtime | ~12000 |
+| 02:03 | Created docs/superpowers/validations/2026-05-16-subagent-phase1-validation.md | — | ~1469 |
+| 02:04 | Session end: 3 writes across 3 files (project_subagent-phase1-validation.md, MEMORY.md, 2026-05-16-subagent-phase1-validation.md) | 14 reads | ~17199 tok |
+| 02:20 | Created src/prompt/__tests__/engine.test.ts | — | ~690 |
+| 02:20 | Edited src/agent/__tests__/trace-store.test.ts | 9→10 lines | ~59 |
+| 02:20 | Edited src/agent/__tests__/trace-store.test.ts | expanded (+12 lines) | ~80 |
+| 02:20 | Edited src/agent/__tests__/trace-store.test.ts | 22→22 lines | ~160 |
+| 02:21 | Created src/tui/use-terminal-size.ts | — | ~108 |
+| 02:21 | Edited src/agent/trace-store.ts | 13→15 lines | ~96 |
+| 02:21 | Created src/tui/log-state.ts | — | ~556 |
+| 02:21 | Edited src/agent/trace-store.ts | modified startTraceEvent() | ~48 |
+| 02:21 | Edited src/prompt/engine.ts | inline fix | ~22 |
+| 02:21 | Created src/tui/tool-card.tsx | — | ~376 |
+| 02:22 | Edited src/prompt/engine.ts | added 6 condition(s) | ~512 |
+| 02:22 | Edited src/prompt/engine.ts | modified if() | ~42 |
+| 02:22 | Edited src/prompt/__tests__/engine.test.ts | 3→4 lines | ~51 |
+| 02:22 | Edited src/prompt/__tests__/engine.test.ts | 2→2 lines | ~68 |
+| 02:23 | Created src/tui/app.tsx | — | ~6206 |
+| 02:23 | Edited src/tui/log-state.ts | added nullish coalescing | ~191 |
+| 02:25 | Created src/tui/log-state.ts | — | ~586 |
+
+## Session: 2026-05-15 02:26
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 02:26 | Created src/tui/__tests__/log-state.test.ts | — | ~803 |
+| 02:27 | Session end: 1 writes across 1 files (log-state.test.ts) | 0 reads | ~803 tok |
+| 02:27 | Session end: 1 writes across 1 files (log-state.test.ts) | 0 reads | ~803 tok |
+| 02:29 | Session end: 1 writes across 1 files (log-state.test.ts) | 0 reads | ~803 tok |
+| 02:31 | Session end: 1 writes across 1 files (log-state.test.ts) | 0 reads | ~803 tok |
+| 02:35 | Edited src/tui/use-terminal-size.ts | added optional chaining | ~209 |
+| 02:35 | Created src/tui/__tests__/use-terminal-size.test.ts | — | ~113 |
+| 02:36 | fixed TUI maximum update depth on session re-entry | src/tui/use-terminal-size.ts, use-terminal-size.test.ts, .wolf/buglog.json | cached useSyncExternalStore snapshot reference; typecheck, 221 tests, build pass | ~700 |
+| 02:37 | Session end: 3 writes across 3 files (log-state.test.ts, use-terminal-size.ts, use-terminal-size.test.ts) | 5 reads | ~9204 tok |

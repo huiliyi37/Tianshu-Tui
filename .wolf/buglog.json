@@ -256,6 +256,105 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-15T17:39:44.659Z"
+    },
+    {
+      "id": "bug-017",
+      "timestamp": "2026-05-15T18:20:35.084Z",
+      "error_message": "Type error",
+      "file": "src/agent/__tests__/trace-store.test.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T18:20:35.084Z"
+    },
+    {
+      "id": "bug-018",
+      "timestamp": "2026-05-15T18:22:09.689Z",
+      "error_message": "Missing guard clause",
+      "file": "src/prompt/engine.ts",
+      "root_cause": "No early return/throw for edge case: message.role !== 'assistant' || !Array.isArray(message.conte",
+      "fix": "Added guard clause: if (message.role !== 'assistant' || !Array.i)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T18:22:09.689Z"
+    },
+    {
+      "id": "bug-019",
+      "timestamp": "2026-05-15T18:22:29.034Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/prompt/__tests__/engine.test.ts",
+      "root_cause": "Had 'user'",
+      "fix": "Changed to 'tool_result'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T18:22:29.034Z"
+    },
+    {
+      "id": "bug-020",
+      "timestamp": "2026-05-15T18:23:47.203Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/log-state.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T18:23:47.203Z"
+    },
+    {
+      "id": "bug-021",
+      "timestamp": "2026-05-15T18:35:19.934Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/use-terminal-size.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T18:35:19.934Z"
+    },
+    {
+      "id": "bug-022",
+      "timestamp": "2026-05-16T02:35:00+08:00",
+      "error_message": "Runtime error: Maximum update depth exceeded when re-entering a preserved Rivet TUI session.",
+      "file": "src/tui/use-terminal-size.ts",
+      "root_cause": "useSyncExternalStore getSnapshot returned a fresh object on every render even when terminal rows/columns were unchanged, so React repeatedly detected a changed external-store snapshot and re-rendered.",
+      "fix": "Cached the terminal-size snapshot object and return the same reference while rows/columns are unchanged; added a regression test for stable snapshot identity.",
+      "tags": [
+        "react",
+        "tui",
+        "useSyncExternalStore",
+        "session-resume"
+      ],
+      "related_bugs": [
+        "bug-021"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T02:35:00+08:00"
     }
   ]
 }

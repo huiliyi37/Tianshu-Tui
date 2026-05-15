@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T18:00:30.087Z
-> Files: 97 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T18:35:44.508Z
+> Files: 118 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -57,6 +57,10 @@
 - `2026-05-15-system-prompt-expansion-design.md` — OpenCode TUI System Prompt 架构优化 (~791 tok)
 - `2026-05-16-rivet-subagent-orchestration-design.md` — Rivet 主控模型子代理协同能力深度头脑风暴结果 (~7664 tok)
 
+## docs/superpowers/validations/
+
+- `2026-05-16-subagent-phase1-validation.md` — 子代理协同 Phase 1 — 自主执行验证报告 (~1377 tok)
+
 ## prompts/
 
 - `base.md` — Environment (~136 tok)
@@ -84,6 +88,7 @@
 - `evidence.ts` — Exports EvidenceState, EvidenceTracker (~483 tok)
 - `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~2909 tok)
 - `session-persist.ts` — Append a single message to the session file (~532 tok)
+- `trace-store.ts` — Exports TraceEventKind, TraceEventStatus, DoomLoopLevel, TraceEvent + 9 more (~718 tok)
 - `verification.ts` — Exports VerificationState, emptyVerificationState, addVerificationRun, summarizeVerification + 2 mor (~514 tok)
 - `work-order.ts` — WorkOrder/WorkerResult zod schemas, parseWorkerResult, buildBlockedWorkerResult (~6170 tok)
 - `worker-prompts.ts` — buildWorkerPrompt, buildWorkerRepairPrompt, buildPrimaryWorkerPacket (~2263 tok)
@@ -94,6 +99,7 @@
 - `checkpoint.test.ts` — makeTempGitRepo: cleanupRepo (~2001 tok)
 - `coordinator.test.ts` — DelegationCoordinator: budget gate, model routing, read-only registry tests (~5656 tok)
 - `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~2900 tok)
+- `trace-store.test.ts` — Declares TraceEvent (~604 tok)
 - `verification.test.ts` — Declares baseRun (~739 tok)
 - `work-order.test.ts` — WorkOrder contract, WorkerResult parsing, blocked result tests (~3189 tok)
 - `worker-prompts.test.ts` — Worker prompt/repair/packet construction tests (~2204 tok)
@@ -145,13 +151,14 @@
 
 ## src/prompt/
 
-- `engine.ts` — Build a request. Volatile context is injected as an independent user message (~785 tok)
+- `engine.ts` — Build a request. Volatile context is injected as an independent user message (~1301 tok)
 - `fingerprint.ts` — Exports PrefixFingerprint, DriftEvent, computeFingerprint, detectDrift (~400 tok)
 - `static.ts` — Exports StaticPromptContext, buildSystemPrompt (~780 tok)
 - `volatile.ts` — Build the volatile `<context>` block injected into the user message. (~563 tok)
 
 ## src/prompt/__tests__/
 
+- `engine.test.ts` — Declares makeEngine (~716 tok)
 - `fingerprint.test.ts` — Declares SAMPLE_TOOLS (~1599 tok)
 
 ## src/repo/
@@ -192,16 +199,23 @@
 - `grep.test.ts` — Exports helper (~1243 tok)
 - `output-store.test.ts` — Declares meta (~1015 tok)
 - `path-validate.test.ts` — Declares result (~621 tok)
-- `run-tests.test.ts` — makeParams: setupProject (~993 tok)
 - `registry-filter.test.ts` — filterToolRegistry: allowlist, unknown tool, isolation tests (~1819 tok)
+- `run-tests.test.ts` — makeParams: setupProject (~993 tok)
 
 ## src/tui/
 
-- `app.tsx` — MAX_VISIBLE_LOGS (~5897 tok)
+- `app.tsx` — MAX_VISIBLE_LOGS (~6206 tok)
 - `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
 - `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)
+- `log-state.ts` — Exports LogEntry, createLogEntry, appendLogInPlace, visibleLogs + 2 more (~586 tok)
 - `status-bar.tsx` — StatusBar (~245 tok)
 - `stream.tsx` — StreamOutput (~105 tok)
 - `thinking.tsx` — ThinkingCollapser — uses useState (~242 tok)
-- `tool-card.tsx` — MAX_COLLAPSED_LINES (~320 tok)
+- `tool-card.tsx` — MAX_COLLAPSED_LINES (~376 tok)
+- `use-terminal-size.ts` — Exports TerminalSizeSnapshot, getTerminalSizeSnapshot, useTerminalSize (~209 tok)
+
+## src/tui/__tests__/
+
+- `log-state.test.ts` — Declares LogEntry (~803 tok)
+- `use-terminal-size.test.ts` — Declares first (~113 tok)
