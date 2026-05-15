@@ -1,12 +1,13 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T17:39:44.629Z
-> Files: 96 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T18:00:30.087Z
+> Files: 97 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
-- `MEMORY.md` — Memory (~41 tok)
+- `MEMORY.md` — Memory (~101 tok)
 - `project_open_model_agent_goal.md` (~234 tok)
+- `project_subagent-phase1-validation.md` — 子代理协同 Phase 1 — 自主执行验证记录 (~487 tok)
 
 ## ./
 
@@ -79,16 +80,24 @@
 
 - `checkpoint.ts` — Create a checkpoint by recording the current HEAD hash and dirty worktree state. (~1577 tok)
 - `context.ts` — Replace all messages (used after compaction) (~689 tok)
+- `coordinator.ts` — Phase 1 DelegationCoordinator: budget gate, model routing, read-only worker dispatch (~2858 tok)
 - `evidence.ts` — Exports EvidenceState, EvidenceTracker (~483 tok)
 - `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~2909 tok)
 - `session-persist.ts` — Append a single message to the session file (~532 tok)
 - `verification.ts` — Exports VerificationState, emptyVerificationState, addVerificationRun, summarizeVerification + 2 mor (~514 tok)
+- `work-order.ts` — WorkOrder/WorkerResult zod schemas, parseWorkerResult, buildBlockedWorkerResult (~6170 tok)
+- `worker-prompts.ts` — buildWorkerPrompt, buildWorkerRepairPrompt, buildPrimaryWorkerPacket (~2263 tok)
+- `worker-session.ts` — Headless runWorkerSession: independent SessionContext, repair retry loop (~3544 tok)
 
 ## src/agent/__tests__/
 
 - `checkpoint.test.ts` — makeTempGitRepo: cleanupRepo (~2001 tok)
+- `coordinator.test.ts` — DelegationCoordinator: budget gate, model routing, read-only registry tests (~5656 tok)
 - `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~2900 tok)
 - `verification.test.ts` — Declares baseRun (~739 tok)
+- `work-order.test.ts` — WorkOrder contract, WorkerResult parsing, blocked result tests (~3189 tok)
+- `worker-prompts.test.ts` — Worker prompt/repair/packet construction tests (~2204 tok)
+- `worker-session.test.ts` — Headless worker isolation, repair retry, blocked result tests (~4974 tok)
 
 ## src/api/
 
@@ -158,6 +167,8 @@
 ## src/tools/
 
 - `bash.ts` — Exports BASH_TOOL (~1107 tok)
+- `default-registry.ts` — createDefaultToolRegistry: 8 core tools factory (~893 tok)
+- `delegate-task.ts` — createDelegateTaskTool: Phase 1 read-only worker delegation tool (~2416 tok)
 - `diff.ts` — Exports DIFF_TOOL (~1291 tok)
 - `edit.ts` — Exports EDIT_FILE_TOOL (~942 tok)
 - `glob.ts` — /*.ts") (~1317 tok)
@@ -173,6 +184,8 @@
 
 ## src/tools/__tests__/
 
+- `default-registry.test.ts` — Default registry: core tools, delegate_task exclusion tests (~1486 tok)
+- `delegate-task.test.ts` — Delegate task tool: input validation, coordinator call tests (~2492 tok)
 - `diff.test.ts` — makeParams: git (~887 tok)
 - `edit.test.ts` — TEST_DIR: makeParams (~832 tok)
 - `glob.test.ts` — /*.ts' })) (~1200 tok)
@@ -180,6 +193,7 @@
 - `output-store.test.ts` — Declares meta (~1015 tok)
 - `path-validate.test.ts` — Declares result (~621 tok)
 - `run-tests.test.ts` — makeParams: setupProject (~993 tok)
+- `registry-filter.test.ts` — filterToolRegistry: allowlist, unknown tool, isolation tests (~1819 tok)
 
 ## src/tui/
 
