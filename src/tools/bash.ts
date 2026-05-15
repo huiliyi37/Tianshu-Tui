@@ -1,4 +1,4 @@
-import { exec } from 'child_process'
+import { spawn } from 'child_process'
 import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent } from './truncation.js'
 
@@ -50,21 +50,58 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
     const timeout = (params.input.timeout as number) ?? 120_000
 
     return new Promise((resolve) => {
-      exec(command, {
+      const child = spawn('sh', ['-c', command], {
         cwd: params.cwd,
-        timeout,
-        maxBuffer: 10 * 1024 * 1024,
         env: { ...process.env },
-      }, (error, stdout, stderr) => {
-        if (error) {
-          const output = [stdout, stderr].filter(Boolean).join('\n')
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      child.stdout.on('data', (data: Buffer) => {
+        stdout += data.toString()
+        if (stdout.length > 100_000) {
+          stdout = stdout.slice(-80_000)
+        }
+      })
+
+      child.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString()
+        if (stderr.length > 100_000) {
+          stderr = stderr.slice(-80_000)
+        }
+      })
+
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM')
+        setTimeout(() => child.kill('SIGKILL'), 3000)
+        const output = stdout + (stderr ? '\n' + stderr : '')
+        resolve({
+          content: truncateContent(output || 'Command timed out', 12000, 6000, 4000),
+          isError: true,
+        })
+      }, timeout)
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        const output = stdout + (stderr ? '\n' + stderr : '')
+        if (code !== 0) {
           resolve({
-            content: truncateContent(output || error.message || 'Unknown error', 12000, 6000, 4000),
+            content: truncateContent(output || `Exit code: ${code}`, 12000, 6000, 4000),
             isError: true,
           })
         } else {
-          resolve({ content: truncateContent(stdout, 12000, 6000, 4000) })
+          resolve({ content: truncateContent(output, 12000, 6000, 4000) })
         }
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        resolve({
+          content: truncateContent(err.message, 12000, 6000, 4000),
+          isError: true,
+        })
       })
     })
   },

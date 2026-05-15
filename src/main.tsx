@@ -1,3 +1,6 @@
+import { readFileSync, existsSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 import { render } from 'ink'
 import { createElement } from 'react'
 import { App } from './tui/app.js'
@@ -12,9 +15,26 @@ import { EDIT_FILE_TOOL } from './tools/edit.js'
 import { createDeepSeekClient } from './api/deepseek.js'
 import { configSchema } from './config/schema.js'
 import { DEFAULT_CONFIG } from './config/default.js'
+import type { Config } from './config/schema.js'
+
+function loadConfig(): Config {
+  const configPath = join(homedir(), '.opencode', 'config.json')
+
+  if (existsSync(configPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
+      const merged = { ...DEFAULT_CONFIG, ...raw }
+      return configSchema.parse(merged)
+    } catch (err) {
+      console.error('Config file error, using defaults:', (err as Error).message)
+    }
+  }
+
+  return configSchema.parse(DEFAULT_CONFIG)
+}
 
 async function main() {
-  const config = configSchema.parse(DEFAULT_CONFIG)
+  const config = loadConfig()
   const provider = config.provider.providers[config.provider.default]
   if (!provider) {
     console.error(`Provider "${config.provider.default}" not configured`)

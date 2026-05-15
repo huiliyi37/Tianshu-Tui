@@ -97,6 +97,42 @@ function extractToolJsonFromText(text: string): { name: string; input: Record<st
   }
 }
 
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 529])
+const MAX_RETRIES = 3
+const BASE_DELAY_MS = 1000
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  let lastError: Error | null = null
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastError = err as Error
+
+      // Don't retry if aborted
+      if (signal?.aborted) throw err
+
+      // Don't retry on 4xx (except 429)
+      const statusMatch = lastError.message.match(/API error (\d+)/)
+      const status = statusMatch ? parseInt(statusMatch[1]!) : null
+      if (status && status >= 400 && status < 500 && status !== 429) {
+        throw err
+      }
+
+      if (attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+    }
+  }
+
+  throw lastError
+}
+
 export class ApiClient {
   constructor(private config: ClientConfig) {}
 
@@ -121,21 +157,25 @@ export class ApiClient {
   ): Promise<void> {
     const finalRequest = this.stripUnsupported({ ...request, stream: true })
 
-    const response = await fetch(`${this.config.baseUrl}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.config.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(finalRequest),
+    const response = await withRetry(
+      () => fetch(`${this.config.baseUrl}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.config.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(finalRequest),
+        signal,
+      }).then(async (res) => {
+        if (!res.ok) {
+          const errorBody = await res.text().catch(() => '')
+          throw new Error(`API error ${res.status}: ${errorBody}`)
+        }
+        return res
+      }),
       signal,
-    })
-
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '')
-      throw new Error(`API error ${response.status}: ${errorBody}`)
-    }
+    )
 
     const reader = response.body?.getReader()
     if (!reader) throw new Error('Response body is not readable')

@@ -7,6 +7,7 @@ import { ThinkingCollapser } from './thinking.js'
 import { ToolCard } from './tool-card.js'
 import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
+import { microCompact, estimateTokens } from '../compact/micro.js'
 
 interface PendingApproval {
   id: string
@@ -59,6 +60,51 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
     if (streamFlushRef.current) {
       clearTimeout(streamFlushRef.current)
       streamFlushRef.current = null
+    }
+
+    // Slash command routing
+    if (userInput.startsWith('/')) {
+      const parts = userInput.split(/\s+/)
+      const cmd = parts[0]!.toLowerCase()
+
+      switch (cmd) {
+        case '/help':
+          addLog({ type: 'text', content: `Available commands:
+/help — Show this help
+/exit — Exit OpenCode TUI
+/quit — Exit
+/compact — Compact conversation context
+/model — Show current model info
+/clear — Clear screen (visual only)` })
+          setIsStreaming(false)
+          return
+
+        case '/exit':
+        case '/quit':
+          addLog({ type: 'text', content: 'Goodbye!' })
+          process.exit(0)
+
+        case '/compact':
+          addLog({ type: 'text', content: 'Compacting conversation...' })
+          const msgs = session.getMessages()
+          const { messages: compacted, truncated } = microCompact(msgs, maxTokens, estimateTokens(msgs))
+          session.replaceMessages(compacted)
+          addLog({ type: 'text', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` })
+          setIsStreaming(false)
+          setCacheHitRate(session.getCacheHitRate())
+          return
+
+        case '/model':
+          addLog({ type: 'text', content: `Model: ${model}\nContext: ${maxTokens.toLocaleString()} tokens\nCost: ¥${cost.toFixed(4)}` })
+          setIsStreaming(false)
+          return
+
+        case '/clear':
+          logRef.current = []
+          setLogs([])
+          setIsStreaming(false)
+          return
+      }
     }
 
     addLog({ type: 'text', content: `> ${userInput}` })

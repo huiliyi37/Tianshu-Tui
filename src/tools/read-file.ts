@@ -24,8 +24,8 @@ Bad: re-reading the same file multiple times in one session without it being mod
       type: 'object',
       properties: {
         file_path: { type: 'string', description: 'Absolute path to the file' },
-        offset: { type: 'integer', description: 'Line number to start from (1-based)' },
-        limit: { type: 'integer', description: 'Number of lines to read' },
+        offset: { type: 'integer', description: 'Line number to start reading from (1-based)' },
+        limit: { type: 'integer', description: 'Maximum number of lines to read' },
       },
       required: ['file_path'],
     },
