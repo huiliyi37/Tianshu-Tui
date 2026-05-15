@@ -163,6 +163,57 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 async function main() {
   // CLI subcommand routing
   const args = process.argv.slice(2)
+
+  // --help / -h
+  if (args[0] === '--help' || args[0] === '-h' || args.length === 0) {
+    console.log(`
+  Rivet | 铆钉 — coding agent for DeepSeek V4
+
+  Usage:
+    rivet              Start interactive session
+    rivet config       Manage API keys and model configuration
+    rivet --help       Show this help
+    rivet --version    Show version
+
+  Commands:
+    config show              Show current configuration
+    config providers         List configured providers
+    config set-key <p> <k>   Set API key for provider <p>
+    config set-key-env <p>   Set API key from env var
+    config set-default <p>   Set default provider
+    config add-model <p>     Add a model to provider
+    config remove-model <p>  Remove a model from provider
+
+  Slash commands (inside session):
+    /help       Show available commands
+    /exit       Exit Rivet
+    /compact    Compact conversation context
+    /model      Switch model (v4-pro / v4-flash)
+    /sessions   List saved sessions
+    /resume     Restore a previous session
+    /clear      Clear screen
+
+  Multi-line input:
+    Alt+Enter   Insert newline
+    Ctrl+N      Insert newline (fallback)
+
+  Configuration:
+    Config file: ~/.rivet/config.json
+    Sessions:    ~/.rivet/sessions/
+
+  Environment:
+    DEEPSEEK_API_KEY   DeepSeek API key (required)
+`)
+    process.exit(0)
+  }
+
+  // --version
+  if (args[0] === '--version' || args[0] === '-v') {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'))
+    console.log(`rivet v${pkg.version}`)
+    process.exit(0)
+  }
+
   if (args[0] === 'config') {
     runConfigCLI(args.slice(1))
     return
