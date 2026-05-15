@@ -1,0 +1,165 @@
+{
+  "topic": "rivet-open-model-terminal-agent-direction",
+  "date": "2026-05-15",
+  "goal": "推广开源，并提高开源模型在终端开发代理中的能力上限，使 Rivet 的开发能力和高可用能力不弱于 Claude Code、opencode 等主流工具。",
+  "scoutFindings": [
+    {
+      "source": "local-code-scout",
+      "fragments": [
+        {
+          "text": "现有代码已经把 provider capabilities、prefix fingerprint、cache-hit 可视化、streaming callback、approval gate 和 session persistence 分成了独立模块。",
+          "fragmentType": "observation",
+          "tags": ["code-asset", "architecture"]
+        },
+        {
+          "text": "当前 ceiling limiter 是 DeepSeek-first、compaction 强绑定超长上下文、session persistence 仍是本地 JSONL 且缺少锁/同步/恢复日志。",
+          "fragmentType": "risk",
+          "tags": ["current-state", "reliability"]
+        },
+        {
+          "text": "非显然方向：把 prefix-cache-first 工作流做成核心 UX，而不是只做多模型聊天。",
+          "fragmentType": "mechanism",
+          "tags": ["cache", "product-direction"]
+        }
+      ]
+    },
+    {
+      "source": "adjacent-project-scout",
+      "fragments": [
+        {
+          "text": "Aider 证明 repo editing + git-native diff/commit/test loop 是成熟路径；Tabby 证明自托管/隐私部署有吸引力；ECA 证明协议化扩展强但配置成本高；Clay 证明 TUI workflow polish 有价值。",
+          "fragmentType": "observation",
+          "tags": ["adjacent-projects", "competitive"]
+        },
+        {
+          "text": "差异化空位是 trust cockpit：让 agent 意图、tool queue、diff、test status、rollback point 持续可见。",
+          "fragmentType": "mechanism",
+          "tags": ["differentiation", "ux"]
+        }
+      ]
+    },
+    {
+      "source": "unrelated-reliability-scout",
+      "fragments": [
+        {
+          "text": "航空 challenge-response checklist 可转译为 risky action preflight：branch、dirty files、target files、test command、rollback path 必须来自工具证据。",
+          "fragmentType": "analogy",
+          "tags": ["aviation", "preflight"]
+        },
+        {
+          "text": "SRE incident command 可转译为 planner/executor/verifier 角色分离，防止一个 agent 扩 scope、写代码、又自我批准。",
+          "fragmentType": "analogy",
+          "tags": ["sre", "role-boundary"]
+        },
+        {
+          "text": "数据库 quorum 可转译为 evidence quorum：高影响结论需要至少两类证据，例如代码搜索 + 测试输出。",
+          "fragmentType": "analogy",
+          "tags": ["database", "verification"]
+        }
+      ]
+    }
+  ],
+  "hypothesis": "Rivet 不应只做主流编码代理的复刻，而应成为面向开源模型的本地 repo editing trust cockpit：cache-first context、显式角色边界、evidence quorum、rollback checkpoint、open-provider capability routing。",
+  "assumptionAudit": [
+    {
+      "text": "开发者真的需要可见 trust cockpit，而不是只要更快编辑。",
+      "classification": "hypothesis",
+      "ifFalse": "控制台会变成仪式感 UI，需要改成默认隐形、按需展开。"
+    },
+    {
+      "text": "cache-first context 是用户可感知优势，而不是实现细节。",
+      "classification": "hypothesis",
+      "ifFalse": "cache hit 和 fingerprint 应作为内部指标，不应作为主定位。"
+    },
+    {
+      "text": "显式角色边界会提升结果，而不会明显拖慢用户。",
+      "classification": "hypothesis",
+      "ifFalse": "应做 adaptive roles，而不是固定 lanes。"
+    },
+    {
+      "text": "evidence quorum 可从可靠性领域迁移到编码任务。",
+      "classification": "convention",
+      "ifFalse": "需要避免两个弱检查制造假信心，改用任务相关的强证据。"
+    },
+    {
+      "text": "Rivet 仍会被用户按 Claude Code、opencode、Copilot 的 raw task success 比较。",
+      "classification": "hypothesis",
+      "ifFalse": "可转向纯成本/隐私/本地化，但目前不能假设用户会放弃能力对比。"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "V1",
+      "niche": "parity-baseline",
+      "oneLiner": "让开发者在已有 repo 中用 Rivet 完成与主流工具接近的多文件修改、测试、提交和恢复。"
+    },
+    {
+      "id": "V2",
+      "niche": "open-provider-lab",
+      "oneLiner": "让维护者用任务矩阵评估和路由开源/开放模型，知道哪个模型适合读代码、改代码、跑工具和总结。"
+    },
+    {
+      "id": "V3",
+      "niche": "trust-cockpit",
+      "oneLiner": "让开发者在高风险修改前看到计划、证据、工具队列、diff、测试和回滚点，再决定是否放行。"
+    },
+    {
+      "id": "V4",
+      "niche": "plugin-ecosystem-first",
+      "oneLiner": "让工具作者先围绕 Rivet 发布 provider、tool、hook、skill pack，用户按工作流组装自己的编码代理。"
+    }
+  ],
+  "selection": {
+    "extinctions": [
+      {
+        "candidateId": "V1",
+        "reason": "作为核心定位会变成 head-on clone，短期被 raw task success 和生态成熟度压制。",
+        "salvagedTraits": ["能力基线矩阵", "git-native safety rails", "常用工具覆盖"]
+      },
+      {
+        "candidateId": "V4",
+        "reason": "先做生态会在用户规模不足时变成空插件市场。",
+        "salvagedTraits": ["插件边界", "provider recipe", "skill pack 分发"]
+      }
+    ],
+    "survivors": [
+      {
+        "candidateId": "V3",
+        "advantage": "既回应高可用，又能把已有 cache/session/provider/approval 资产转成产品差异化。",
+        "rank": 1
+      },
+      {
+        "candidateId": "V2",
+        "advantage": "支撑开源模型能力上限，但更适合作为 V3 的评测和路由底座。",
+        "rank": 2
+      }
+    ]
+  },
+  "finalDirection": {
+    "name": "Trust Cockpit + Open Model Capability Lab",
+    "who": "使用开源/开放模型做真实 repo 修改的开发者、维护者、模型调优者和团队内部工具负责人。",
+    "where": "本地终端、真实 git repo、长会话、多文件修改、需要测试/回滚/审查的任务。",
+    "action": "输入开发目标后，Rivet 先生成可见计划和 preflight，再执行受限工具队列，持续展示证据、diff、测试和 cache/cost 状态。",
+    "outcome": "在不牺牲主流编码能力的前提下，把失败恢复时间、无证据成功声明、上下文成本和模型适配不确定性降下来。"
+  },
+  "implementationPhases": [
+    {
+      "phase": 1,
+      "action": "做 trust cockpit MVP：preflight checklist、action log、diff/checkpoint、evidence badge、cache/cost panel。",
+      "successCriteria": "10 个真实 repo 任务中，每个高风险动作都有证据来源和回滚路径，失败后可在 2 分钟内恢复。",
+      "exitCondition": "如果 cockpit 增加输入阻力，改成默认折叠，只在风险动作和失败时展开。"
+    },
+    {
+      "phase": 2,
+      "action": "做 open model capability lab：provider conformance tests、tool-use reliability eval、cache economics report、task routing。",
+      "successCriteria": "至少 3 个 provider/model 能跑同一任务矩阵，并输出可复现能力卡。",
+      "exitCondition": "如果用户不关心 provider 细节，只保留自动路由和失败解释。"
+    },
+    {
+      "phase": 3,
+      "action": "做社区分发：model recipe、workflow pack、benchmark issue 模板、失败样本库。",
+      "successCriteria": "外部贡献者能新增一个 provider recipe 或 workflow pack，不需要改核心代码。",
+      "exitCondition": "如果贡献门槛太高，先维护官方 packs，延后插件市场。"
+    }
+  ]
+}

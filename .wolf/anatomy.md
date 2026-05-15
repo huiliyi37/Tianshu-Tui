@@ -1,6 +1,6 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T17:13:53.315Z
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T17:39:44.629Z
 > Files: 96 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
@@ -183,7 +183,7 @@
 
 ## src/tui/
 
-- `app.tsx` — MAX_VISIBLE_LOGS (~4872 tok)
+- `app.tsx` — MAX_VISIBLE_LOGS (~5897 tok)
 - `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
 - `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)

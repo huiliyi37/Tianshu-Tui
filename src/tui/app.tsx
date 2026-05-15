@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { StatusBar } from './status-bar.js'
 import { InputBar } from './input.js'
@@ -10,7 +10,7 @@ import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
-import { appendLog, updateToolLog, visibleLogs, type LogEntry } from './log-state.js'
+import { appendLog, updateToolLog, summarizeToolOutput, visibleLogs, type LogEntry } from './log-state.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 
 interface PendingApproval {
@@ -33,6 +33,9 @@ interface AppProps {
 }
 
 const MAX_VISIBLE_LOGS = 30
+const STREAM_FLUSH_MS = 80
+const THINKING_FLUSH_MS = 200
+const TOOL_FLUSH_MS = 120
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput }: AppProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -46,17 +49,83 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [verbose, setVerbose] = useState(false)
   const [autoSafe, setAutoSafe] = useState(true)
   const logRef = useRef<LogEntry[]>([])
-  const streamBufferRef = useRef('')
-  const streamFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const thinkingBufferRef = useRef('')
-  const thinkingFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const rollbackTokenRef = useRef<string | null>(null)
-  const toolOutputAccumRef = useRef<Map<string, string>>(new Map())
-  const toolFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const dirtyToolIdsRef = useRef<Set<string>>(new Set())
-  const toolNamesRef = useRef<Map<string, string>>(new Map())
 
-  // Session recovery: check for previous sessions on mount
+  // Streaming buffers — mutated in place, flushed to React state on timer
+  const streamBuf = useRef('')
+  const thinkBuf = useRef('')
+  const lastFlushedStream = useRef('')
+  const lastFlushedThink = useRef('')
+  const streamTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Tool output accumulator
+  const toolAccum = useRef<Map<string, string>>(new Map())
+  const toolNames = useRef<Map<string, string>>(new Map())
+  const dirtyTools = useRef<Set<string>>(new Set())
+  const toolTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const rollbackTokenRef = useRef<string | null>(null)
+
+  // Batch multiple log mutations into a single React update
+  const logDirty = useRef(false)
+  const flushLogs = useCallback(() => {
+    if (logDirty.current) {
+      logDirty.current = false
+      setLogs(visibleLogs(logRef.current, MAX_VISIBLE_LOGS))
+    }
+  }, [])
+
+  const addLog = useCallback((entry: LogEntry) => {
+    logRef.current = appendLog(logRef.current, entry)
+    logDirty.current = true
+  }, [])
+
+  const updateLogEntry = useCallback((id: string, toolName: string, content: string, isError?: boolean, rawPath?: string) => {
+    const prev = logRef.current
+    logRef.current = updateToolLog(prev, id, toolName, content, isError, rawPath)
+    if (logRef.current !== prev) {
+      logDirty.current = true
+    }
+  }, [])
+
+  // Streaming flush helpers — only update React state if text actually changed
+  const flushStream = useCallback(() => {
+    streamTimer.current = null
+    if (streamBuf.current !== lastFlushedStream.current) {
+      lastFlushedStream.current = streamBuf.current
+      setStreamingText(streamBuf.current)
+    }
+  }, [])
+
+  const flushThink = useCallback(() => {
+    thinkTimer.current = null
+    if (thinkBuf.current !== lastFlushedThink.current) {
+      lastFlushedThink.current = thinkBuf.current
+      setStreamingThinking(thinkBuf.current)
+    }
+  }, [])
+
+  const flushTools = useCallback((verbose: boolean) => {
+    toolTimer.current = null
+    const limit = verbose ? 200 : 12
+    let changed = false
+    for (const tid of dirtyTools.current) {
+      const accumulated = toolAccum.current.get(tid)
+      if (accumulated !== undefined) {
+        const tname = toolNames.current.get(tid) ?? ''
+        const prev = logRef.current
+        logRef.current = updateToolLog(prev, tid, tname, summarizeToolOutput(accumulated, limit))
+        if (logRef.current !== prev) changed = true
+      }
+    }
+    dirtyTools.current.clear()
+    if (changed) {
+      logDirty.current = true
+      flushLogs()
+    }
+  }, [flushLogs])
+
+  // Session recovery
   useEffect(() => {
     const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
     if (sessions.length > 0) {
@@ -72,7 +141,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useInput((_input, _key) => {
-    // Session recovery prompt
     if (sessionPrompt === 'waiting') {
       const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
       if (_input === 'r' && sessions.length > 0) {
@@ -80,12 +148,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const msgs = p.load()
         session.replaceMessages(msgs)
         addLog({ type: 'text', content: `Restored session ${sessions[0]!.slice(0, 8)}... (${msgs.length} messages)` })
+        flushLogs()
       }
       setSessionPrompt('done')
       return
     }
 
-    // Tool approval
     if (!pendingApproval) return
     if (_input.toLowerCase() === 'y') {
       pendingApproval.resolve(true)
@@ -96,28 +164,20 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
   })
 
-  const addLog = useCallback((entry: LogEntry) => {
-    logRef.current = appendLog(logRef.current, entry)
-    setLogs(visibleLogs(logRef.current, MAX_VISIBLE_LOGS))
-  }, [])
-
-  const updateLogEntry = useCallback((id: string, toolName: string, content: string, isError?: boolean, rawPath?: string) => {
-    logRef.current = updateToolLog(logRef.current, id, toolName, content, isError, rawPath)
-    setLogs(visibleLogs(logRef.current, MAX_VISIBLE_LOGS))
-  }, [])
-
   const handleSubmit = useCallback(async (userInput: string) => {
     setIsStreaming(true)
     setStreamingText('')
     setStreamingThinking('')
 
-    streamBufferRef.current = ''
-    thinkingBufferRef.current = ''
-    toolOutputAccumRef.current.clear()
-    dirtyToolIdsRef.current.clear()
-    toolNamesRef.current.clear()
+    streamBuf.current = ''
+    thinkBuf.current = ''
+    lastFlushedStream.current = ''
+    lastFlushedThink.current = ''
+    toolAccum.current.clear()
+    dirtyTools.current.clear()
+    toolNames.current.clear()
 
-    for (const ref of [streamFlushRef, thinkingFlushRef, toolFlushRef]) {
+    for (const ref of [streamTimer, thinkTimer, toolTimer]) {
       if (ref.current) {
         clearTimeout(ref.current)
         ref.current = null
@@ -145,6 +205,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /rollback — Preview changes since last checkpoint (/rollback confirm to execute)
 /evidence — Show last turn evidence summary
 /auto — Toggle auto-approve (current: ${autoSafe ? 'auto-safe' : 'manual'})` })
+          flushLogs()
           setIsStreaming(false)
           return
 
@@ -152,6 +213,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         case '/quit':
           persist.compact(session.getMessages())
           addLog({ type: 'text', content: 'Session saved. Goodbye!' })
+          flushLogs()
           process.exit(0)
 
         case '/compact':
@@ -160,6 +222,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const { messages: compacted, truncated } = microCompact(msgs, maxTokens, estimateTokens(msgs))
           session.replaceMessages(compacted)
           addLog({ type: 'text', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` })
+          flushLogs()
           setIsStreaming(false)
           setCacheHitRate(session.getCacheHitRate())
           return
@@ -180,6 +243,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
               addLog({ type: 'text', content: `Model "${targetModel}" not found. Use /model list to see available models.` })
             }
           }
+          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -188,6 +252,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const nextVerbose = !verbose
           setVerbose(nextVerbose)
           addLog({ type: 'text', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' })
+          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -197,6 +262,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           setAutoSafe(next)
           agent.setApprovalMode(next ? 'auto-safe' : 'manual')
           addLog({ type: 'text', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' })
+          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -218,6 +284,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           } else {
             addLog({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache]' })
           }
+          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -241,6 +308,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
               addLog({ type: 'text', content: 'No agent-owned changes to rollback.' })
             }
           }
+          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -262,6 +330,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             }).join('\n')
             addLog({ type: 'text', content: `Saved sessions:\n${list}\n\n/resume <number> to restore` })
           }
+          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -271,6 +340,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const idx = parseInt(parts[1] ?? '', 10) - 1
           if (isNaN(idx) || idx < 0 || idx >= sessions.length) {
             addLog({ type: 'text', content: `Invalid session number. Use /sessions to see available sessions.` })
+            flushLogs()
             setIsStreaming(false)
             return
           }
@@ -280,6 +350,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           session.replaceMessages(msgs)
           addLog({ type: 'text', content: `Restored session ${targetId.slice(0, 8)}... (${msgs.length} messages)` })
           logRef.current = []
+          logDirty.current = false
           setLogs([])
           setIsStreaming(false)
           return
@@ -288,89 +359,78 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
 
     addLog({ type: 'text', content: `> ${userInput}` })
+    flushLogs()
 
     await agent.run(userInput, {
       onTextDelta: (text) => {
-        streamBufferRef.current += text
-        if (!streamFlushRef.current) {
-          streamFlushRef.current = setTimeout(() => {
-            setStreamingText(streamBufferRef.current)
-            streamFlushRef.current = null
-          }, 50)
+        streamBuf.current += text
+        if (!streamTimer.current) {
+          streamTimer.current = setTimeout(flushStream, STREAM_FLUSH_MS)
         }
       },
       onThinkingDelta: (thinking) => {
-        thinkingBufferRef.current += thinking
-        if (!thinkingFlushRef.current) {
-          thinkingFlushRef.current = setTimeout(() => {
-            setStreamingThinking(thinkingBufferRef.current)
-            thinkingFlushRef.current = null
-          }, 150)
+        thinkBuf.current += thinking
+        if (!thinkTimer.current) {
+          thinkTimer.current = setTimeout(flushThink, THINKING_FLUSH_MS)
         }
       },
       onToolUse: (id, name) => {
-        toolNamesRef.current.set(id, name)
+        toolNames.current.set(id, name)
         addLog({ type: 'tool', id, content: 'Running...', toolName: name })
+        flushLogs()
       },
-      onToolResult: (id, name, result, isError, rawPath, uiContent) => {
-        // Intermediate streaming chunks: batch at 50ms for smooth live display.
-        // Final result: isError is defined, flush immediately.
+      onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {
         if (isError === undefined) {
-          toolOutputAccumRef.current.set(id, (toolOutputAccumRef.current.get(id) ?? '') + result)
-          dirtyToolIdsRef.current.add(id)
-          if (!toolFlushRef.current) {
-            toolFlushRef.current = setTimeout(() => {
-              for (const tid of dirtyToolIdsRef.current) {
-                const accumulated = toolOutputAccumRef.current.get(tid)
-                if (accumulated !== undefined) {
-                  const tname = toolNamesRef.current.get(tid) ?? ''
-                  updateLogEntry(tid, tname, accumulated)
-                }
-              }
-              dirtyToolIdsRef.current.clear()
-              toolFlushRef.current = null
-            }, 50)
+          toolAccum.current.set(id, (toolAccum.current.get(id) ?? '') + result)
+          dirtyTools.current.add(id)
+          if (!toolTimer.current) {
+            toolTimer.current = setTimeout(() => flushTools(verbose), TOOL_FLUSH_MS)
           }
           return
         }
-        // Final result — flush any pending chunks then show final output
-        if (toolFlushRef.current) {
-          clearTimeout(toolFlushRef.current)
-          toolFlushRef.current = null
+        // Final result — cancel pending flush for this tool, write immediately
+        if (toolTimer.current) {
+          clearTimeout(toolTimer.current)
+          toolTimer.current = null
         }
-        dirtyToolIdsRef.current.delete(id)
-        toolOutputAccumRef.current.delete(id)
-        // Use uiContent for TUI display when available (e.g. read_file line-numbered preview)
+        dirtyTools.current.delete(id)
+        toolAccum.current.delete(id)
+        toolNames.current.delete(id)
         updateLogEntry(id, name, uiContent ?? result, isError, rawPath)
+        flushLogs()
       },
       onCheckpoint: (hash) => {
         addLog({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` })
+        flushLogs()
       },
       onTurnComplete: (_usage, turnNumber) => {
-        if (streamFlushRef.current) {
-          clearTimeout(streamFlushRef.current)
-          streamFlushRef.current = null
+        // Flush any remaining streaming buffers
+        if (streamTimer.current) {
+          clearTimeout(streamTimer.current)
+          streamTimer.current = null
         }
-        const finalText = streamBufferRef.current
+        const finalText = streamBuf.current
         if (finalText) {
           addLog({ type: 'text', content: finalText })
         }
-        streamBufferRef.current = ''
+        streamBuf.current = ''
+        lastFlushedStream.current = ''
         setStreamingText('')
 
-        if (thinkingFlushRef.current) {
-          clearTimeout(thinkingFlushRef.current)
-          thinkingFlushRef.current = null
+        if (thinkTimer.current) {
+          clearTimeout(thinkTimer.current)
+          thinkTimer.current = null
         }
-        setStreamingThinking(thinkingBufferRef.current)
-        thinkingBufferRef.current = ''
+        lastFlushedThink.current = thinkBuf.current
+        setStreamingThinking(thinkBuf.current)
+        thinkBuf.current = ''
 
-        if (toolFlushRef.current) {
-          clearTimeout(toolFlushRef.current)
-          toolFlushRef.current = null
+        if (toolTimer.current) {
+          clearTimeout(toolTimer.current)
+          toolTimer.current = null
         }
-        dirtyToolIdsRef.current.clear()
-        toolOutputAccumRef.current.clear()
+        dirtyTools.current.clear()
+        toolAccum.current.clear()
 
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
@@ -391,13 +451,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (diag && diag.severity !== 'info') {
           addLog({ type: 'text', content: `${diag.severity === 'error' ? '⚠️' : '💡'} ${diag.message}` })
         }
+        flushLogs()
       },
       onError: (error) => {
         addLog({ type: 'text', content: `Error: ${error.message}`, isError: true })
+        flushLogs()
         setIsStreaming(false)
       },
       onAbort: () => {
         addLog({ type: 'text', content: '[Aborted]' })
+        flushLogs()
         setIsStreaming(false)
       },
       onApprovalRequired: async (id, name, input) => {
@@ -406,12 +469,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         })
       },
     })
-  }, [agent, session, addLog, model, maxTokens, availableModels, onModelSwitch, currentSessionId])
+  }, [agent, session, addLog, flushLogs, flushStream, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId])
 
   const currentTokens = session.getTotalUsage().input_tokens
 
+  // Compute terminal height once for stable layout
+  const termHeight = useMemo(() => process.stdout.rows ?? 40, [])
+
   return (
-    <Box flexDirection="column" height={process.stdout.rows}>
+    <Box flexDirection="column" height={termHeight}>
       <StatusBar
         model={model}
         cacheHitRate={cacheHitRate}
@@ -426,17 +492,18 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         </Box>
       )}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {logs.map((log, i) => {
+        {logs.map((log) => {
           if (log.type === 'tool') {
-            return <ToolCard key={`${log.id ?? i}`} name={log.toolName ?? ''} result={log.content} isError={log.isError} verbose={verbose} rawPath={log.rawPath} />
+            return <ToolCard key={log.id ?? Math.random()} name={log.toolName ?? ''} result={log.content} isError={log.isError} verbose={verbose} rawPath={log.rawPath} />
           }
           if (log.type === 'checkpoint') {
-            return <Box key={i} paddingX={2}><Text dimColor color="yellow">⚑ {log.content}</Text></Box>
+            return <Box key={`cp-${log.content}`} paddingX={2}><Text dimColor color="yellow">⚑ {log.content}</Text></Box>
           }
           if (log.type === 'evidence') {
-            return <Box key={i} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{log.content}</Text></Box>
+            return <Box key={`ev-${log.content.slice(0, 20)}`} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{log.content}</Text></Box>
           }
-          return <StreamOutput key={i} text={log.content} isStreaming={false} />
+          // Use content hash prefix for stable keys on text entries
+          return <StreamOutput key={`txt-${log.content.length}-${log.content.slice(0, 40)}`} text={log.content} isStreaming={false} />
         })}
         {isStreaming && streamingThinking && (
           <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming} focused={isStreaming} />

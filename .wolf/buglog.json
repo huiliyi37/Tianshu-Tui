@@ -240,6 +240,22 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-15T17:12:38.852Z"
+    },
+    {
+      "id": "bug-016",
+      "timestamp": "2026-05-15T17:39:44.659Z",
+      "error_message": "CSS fix: onToolResult",
+      "file": "src/tui/app.tsx",
+      "root_cause": "onToolResult: (id, name, result, isError, rawPath, uiContent) => { → (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {",
+      "fix": "Changed onToolResult: (id, name, result, isError, rawPath, uiContent) => { → (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {",
+      "tags": [
+        "auto-detected",
+        "style-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T17:39:44.659Z"
     }
   ]
 }

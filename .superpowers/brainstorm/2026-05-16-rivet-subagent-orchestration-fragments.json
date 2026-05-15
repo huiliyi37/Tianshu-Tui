@@ -1,0 +1,179 @@
+{
+  "topic": "rivet-subagent-orchestration",
+  "date": "2026-05-16",
+  "userIntent": "Design Rivet primary-model task delegation and worker coordination before independent implementation and acceptance.",
+  "hypothesis": "Rivet should implement a cache-first bounded local coordinator: primary decomposes typed work orders, dispatches isolated headless workers, receives schema-valid result packets, and keeps final authority.",
+  "scoutFindings": [
+    {
+      "source": "runtime-code-scout",
+      "fragments": [
+        {
+          "text": "AgentCallbacks is the narrow lifecycle seam between AgentLoop and the outside world.",
+          "fragmentType": "mechanism",
+          "tags": ["AgentLoop", "callbacks", "runtime-seam"]
+        },
+        {
+          "text": "SessionContext is mutable and push-based; workers must not share primary session history.",
+          "fragmentType": "risk",
+          "tags": ["SessionContext", "isolation"]
+        },
+        {
+          "text": "Tool.isConcurrencySafe exists but is not used; coordinator can turn it into a real scheduler constraint.",
+          "fragmentType": "mechanism",
+          "tags": ["tools", "scheduler", "concurrency"]
+        },
+        {
+          "text": "EvidenceState and VerificationMetadata are reusable worker result facts.",
+          "fragmentType": "observation",
+          "tags": ["evidence", "verification", "result-packet"]
+        }
+      ]
+    },
+    {
+      "source": "external-open-coordinator-scout",
+      "fragments": [
+        {
+          "text": "Worktree pool maps bounded worker slots to isolated filesystem branches.",
+          "fragmentType": "mechanism",
+          "tags": ["worktree", "isolation", "pool"]
+        },
+        {
+          "text": "Schema-level tool filtering makes unavailable actions structurally impossible for a worker.",
+          "fragmentType": "mechanism",
+          "tags": ["tool-allowlist", "security"]
+        },
+        {
+          "text": "Fresh context per worker prevents cross-contamination and keeps result summaries bounded.",
+          "fragmentType": "mechanism",
+          "tags": ["context", "worker"]
+        },
+        {
+          "text": "Full swarm, federation, and vector learning are too heavy for current Rivet scope.",
+          "fragmentType": "risk",
+          "tags": ["scope", "swarm", "avoid"]
+        }
+      ]
+    },
+    {
+      "source": "random-adjacent-domain-scout",
+      "fragments": [
+        {
+          "text": "Erlang intensity/period failure budget escalates upward instead of retrying locally forever.",
+          "fragmentType": "mechanism",
+          "tags": ["supervision", "failure-budget"]
+        },
+        {
+          "text": "Kubernetes deduplicating WorkQueue merges repeated keys and keeps per-key execution serialized.",
+          "fragmentType": "mechanism",
+          "tags": ["workqueue", "dedupeKey"]
+        },
+        {
+          "text": "Behavior tree parallel threshold policies map to all_required, first_success, and majority aggregation.",
+          "fragmentType": "mechanism",
+          "tags": ["aggregation", "behavior-tree"]
+        },
+        {
+          "text": "Idempotent reconcile lets interrupted work resume by comparing desired and observed state.",
+          "fragmentType": "mechanism",
+          "tags": ["reconcile", "idempotency"]
+        }
+      ]
+    },
+    {
+      "source": "directed-falsification-scout",
+      "fragments": [
+        {
+          "text": "Prefix cache can become the design advantage if workers share system prompt and tool definitions.",
+          "fragmentType": "contradiction",
+          "tags": ["prefix-cache", "deepseek", "cost"]
+        },
+        {
+          "text": "Worker structured result packets are an assumption, not a current runtime feature.",
+          "fragmentType": "risk",
+          "tags": ["schema", "WorkerResult"]
+        },
+        {
+          "text": "Approval gate must be multiplexed by worker identity for asynchronous workers.",
+          "fragmentType": "risk",
+          "tags": ["approval", "TUI", "worker-id"]
+        },
+        {
+          "text": "Checkpoint semantics do not naturally extend to concurrent worker writes without per-worker isolation.",
+          "fragmentType": "risk",
+          "tags": ["checkpoint", "write-worker", "isolation"]
+        }
+      ]
+    }
+  ],
+  "candidates": [
+    {
+      "id": "V1",
+      "name": "External CLI worker orchestration",
+      "status": "downgraded",
+      "niche": "process/worktree/team style coordination",
+      "oneLiner": "Primary starts external worker processes in isolated environments and reads back summary files or stdout.",
+      "extinctionReason": "It improves external harness orchestration more than Rivet's own runtime capability.",
+      "salvagedTraits": ["worktree pool", "environment cleanup", "event relay"]
+    },
+    {
+      "id": "V2",
+      "name": "Headless AgentLoop worker pool",
+      "status": "survivor",
+      "niche": "built-in runtime coordinator",
+      "oneLiner": "Primary creates isolated headless worker sessions with tool allowlists and model routing, then aggregates schema-valid results.",
+      "advantage": "Directly covers decomposition, scheduler, communication, parallel execution, and model routing."
+    },
+    {
+      "id": "V3",
+      "name": "delegate_task tool",
+      "status": "absorbed",
+      "niche": "lowest-risk MVP",
+      "oneLiner": "Primary calls a delegation tool that performs a constrained model/research call and returns a structured packet.",
+      "advantage": "Good Phase 1 validation path for result schema and primary synthesis."
+    },
+    {
+      "id": "V4",
+      "name": "Shared blackboard self-organizing workers",
+      "status": "extinct",
+      "niche": "swarm/autonomous coordination",
+      "oneLiner": "Workers claim tasks and write findings to a shared blackboard until completion.",
+      "extinctionReason": "Weak stop conditions, authority diffusion, conflict governance, and excessive scope.",
+      "salvagedTraits": ["findings/artifacts/evidence fields", "parallel threshold policy", "RUNNING lifecycle state"]
+    }
+  ],
+  "finalCandidate": {
+    "id": "V2+V3",
+    "name": "Cache-first Bounded Coordinator",
+    "principles": [
+      "primary retains final authority",
+      "isolation before parallelism",
+      "structured work orders before smart dispatch",
+      "read-only workers before write workers",
+      "shared system prompt/tool definitions for prefix cache",
+      "worker lifecycle visible in cockpit",
+      "budget gate prevents over-orchestration"
+    ],
+    "phases": [
+      {
+        "phase": 1,
+        "name": "Delegation Contract + Read-only Scout MVP",
+        "successCriteria": "WorkOrder/WorkerResult schemas pass tests; isolated worker session cannot mutate primary session; read-only allowlist enforced."
+      },
+      {
+        "phase": 2,
+        "name": "Coordinator Queue + Cockpit Visibility",
+        "successCriteria": "WorkOrderQueue supports dedupe/dependencies/failure budget; cockpit shows worker status."
+      },
+      {
+        "phase": 3,
+        "name": "Isolated Write Workers + Verification Aggregation",
+        "successCriteria": "Worker patches are isolated, reviewable, discardable, and verified before application."
+      },
+      {
+        "phase": 4,
+        "name": "Adaptive Routing + Learning-lite",
+        "successCriteria": "Routing reasons are visible and based on model capability plus observed worker reliability."
+      }
+    ]
+  }
+}
