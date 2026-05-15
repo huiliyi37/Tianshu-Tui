@@ -23,7 +23,7 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
     <Box
       flexDirection="column"
       paddingX={2}
-      marginY={0}
+      marginBottom={1}
       borderStyle="single"
       borderColor={isError ? 'red' : 'gray'}
     >

@@ -29,7 +29,7 @@ export interface AgentCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
   onToolUse: (id: string, name: string, input: Record<string, unknown>) => void
-  onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string) => void
+  onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => void
   onTurnComplete: (usage: Partial<Usage>, turnNumber: number) => void
   onError: (error: Error) => void
   onAbort: () => void
@@ -211,7 +211,7 @@ export class AgentLoop {
               }
 
               const result = await this.config.toolRegistry.execute(tu.name, params)
-              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false, result.rawPath)
+              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false, result.rawPath, result.uiContent)
 
               if (tu.name === 'read_file' && !result.isError) {
                 this.evidence.trackFileRead(tu.input.file_path as string)

@@ -312,7 +312,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolNamesRef.current.set(id, name)
         addLog({ type: 'tool', id, content: 'Running...', toolName: name })
       },
-      onToolResult: (id, name, result, isError, rawPath) => {
+      onToolResult: (id, name, result, isError, rawPath, uiContent) => {
         // Intermediate streaming chunks: batch at 50ms for smooth live display.
         // Final result: isError is defined, flush immediately.
         if (isError === undefined) {
@@ -340,7 +340,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         dirtyToolIdsRef.current.delete(id)
         toolOutputAccumRef.current.delete(id)
-        updateLogEntry(id, name, result, isError, rawPath)
+        // Use uiContent for TUI display when available (e.g. read_file line-numbered preview)
+        updateLogEntry(id, name, uiContent ?? result, isError, rawPath)
       },
       onCheckpoint: (hash) => {
         addLog({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` })
@@ -419,7 +420,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         maxTokens={maxTokens}
       />
       {sessionPrompt === 'waiting' && (
-        <Box paddingX={2} borderStyle="single" borderColor="cyan">
+        <Box paddingX={2} marginBottom={1} borderStyle="single" borderColor="cyan">
           <Text bold color="cyan">Previous session found.</Text>
           <Text> Press <Text bold>r</Text> to restore, any other key to start fresh </Text>
         </Box>
@@ -433,7 +434,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             return <Box key={i} paddingX={2}><Text dimColor color="yellow">⚑ {log.content}</Text></Box>
           }
           if (log.type === 'evidence') {
-            return <Box key={i} paddingX={2} borderStyle="single" borderColor="green"><Text color="green">{log.content}</Text></Box>
+            return <Box key={i} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{log.content}</Text></Box>
           }
           return <StreamOutput key={i} text={log.content} isStreaming={false} />
         })}

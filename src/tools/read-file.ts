@@ -3,6 +3,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent } from './truncation.js'
 import { validatePath } from './path-validate.js'
 import { GitignoreFilter } from './gitignore.js'
+import { persistRawOutput } from './output-store.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
@@ -16,6 +17,31 @@ function getGitignoreFilter(cwd: string): GitignoreFilter {
   const filter = new GitignoreFilter(cwd)
   gitignoreCache.set(cwd, { filter, ts: Date.now() })
   return filter
+}
+
+const MODEL_MAX_CHARS = 8000
+const MODEL_HEAD_CHARS = 4000
+const MODEL_TAIL_CHARS = 2000
+
+/** TUI display: head + tail with line numbers, compact for large files. */
+function buildFileUiOutput(raw: string, maxLines: number): string {
+  const lines = raw.split('\n')
+  const totalLines = lines.length
+
+  if (totalLines <= maxLines) {
+    return lines.map((l, i) => `${String(i + 1).padStart(4, ' ')}│ ${l}`).join('\n')
+  }
+
+  const headLines = Math.ceil(maxLines * 0.6)
+  const tailLines = Math.floor(maxLines * 0.4)
+  const omitted = totalLines - headLines - tailLines
+
+  const head = lines.slice(0, headLines)
+    .map((l, i) => `${String(i + 1).padStart(4, ' ')}│ ${l}`)
+  const tail = lines.slice(-tailLines)
+    .map((l, i) => `${String(totalLines - tailLines + i + 1).padStart(4, ' ')}│ ${l}`)
+
+  return [...head, `  ... ${omitted} lines omitted ...`, ...tail].join('\n')
 }
 
 export const READ_FILE_TOOL: Tool = {
@@ -62,18 +88,32 @@ Bad: re-reading the same file multiple times in one session without it being mod
       return { content: `Error: File is gitignored (node_modules, build artifacts, etc.): ${filePath}`, isError: true }
     }
 
-    const content = readFileSync(filePath, 'utf-8')
-    let lines = content.split('\n')
+    const raw = readFileSync(filePath, 'utf-8')
+    let content = raw
     const offset = (params.input.offset as number) ?? 1
     const limit = params.input.limit as number | undefined
 
     if (offset > 1 || limit) {
+      const lines = content.split('\n')
       const startIdx = offset - 1
       const endIdx = limit ? startIdx + limit : undefined
-      lines = lines.slice(startIdx, endIdx)
+      content = lines.slice(startIdx, endIdx).join('\n')
     }
 
-    return { content: truncateContent(lines.join('\n'), 8000, 4000, 2000) }
+    // Persist full raw content so user can inspect large files via rawPath
+    const rawPath = await persistRawOutput(params.toolUseId, content)
+
+    // LLM gets char-capped head+tail for context efficiency
+    const modelContent = truncateContent(content, MODEL_MAX_CHARS, MODEL_HEAD_CHARS, MODEL_TAIL_CHARS)
+
+    // TUI gets line-numbered preview (50 lines)
+    const uiContent = buildFileUiOutput(content, 50)
+
+    return {
+      content: modelContent,
+      uiContent,
+      rawPath,
+    }
   },
 
   requiresApproval: () => false,
