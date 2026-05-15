@@ -1,0 +1,167 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import type { Tool } from '../tools/types.js'
+import type { McpConfig, McpServerConfig } from './config.js'
+import type { McpConnectionState } from './types.js'
+import { createMcpToolWrapper } from './wrapper.js'
+
+interface McpToolDef {
+  name: string
+  description?: string
+  inputSchema: {
+    type: 'object'
+    properties?: Record<string, unknown>
+    required?: string[]
+  }
+}
+
+export interface ConnectedServer {
+  client: Client
+  transport: { close(): Promise<void> }
+  serverId: string
+}
+
+export class McpManager {
+  private config: McpConfig
+  private connections: Map<string, ConnectedServer> = new Map()
+  private states: Map<string, McpConnectionState> = new Map()
+  private tools: Tool[] = []
+
+  constructor(config: McpConfig) {
+    this.config = config
+  }
+
+  async initialize(): Promise<void> {
+    if (!this.config.enabled) return
+
+    const entries = Object.entries(this.config.servers)
+    for (const [serverId, serverConfig] of entries) {
+      if (serverConfig.disabled) continue
+      await this.connectAndDiscover(serverId, serverConfig)
+    }
+  }
+
+  getAllTools(): Tool[] {
+    return this.tools
+  }
+
+  getStates(): McpConnectionState[] {
+    return Array.from(this.states.values())
+  }
+
+  async shutdown(): Promise<void> {
+    const closePromises = Array.from(this.connections.values()).map(async (conn) => {
+      try {
+        await conn.transport.close()
+      } catch {
+        // Best-effort close
+      }
+    })
+    await Promise.all(closePromises)
+    this.connections.clear()
+    this.states.clear()
+    this.tools = []
+  }
+
+  private async connectAndDiscover(serverId: string, serverConfig: McpServerConfig): Promise<void> {
+    this.states.set(serverId, {
+      serverId,
+      status: 'connecting',
+      toolCount: 0,
+    })
+
+    try {
+      const server = await this._connectServer(serverId, serverConfig)
+      this.connections.set(serverId, server)
+
+      const mcpTools = await this._discoverTools(serverId, server)
+
+      const rivetTools = mcpTools.map(mcpDef => {
+        const perToolCallFn = async (input: Record<string, unknown>) => {
+          const result = await server.client.callTool({ name: mcpDef.name, arguments: input })
+          const textContent = (result.content as Array<{ type: string; text?: string }>)
+            .filter((c): c is { type: 'text'; text: string } =>
+              c.type === 'text' && typeof c.text === 'string')
+          return {
+            content: textContent,
+            isError: result.isError as boolean | undefined,
+          }
+        }
+        return createMcpToolWrapper(serverId, mcpDef, perToolCallFn)
+      })
+
+      this.tools.push(...rivetTools)
+      this.states.set(serverId, {
+        serverId,
+        status: 'connected',
+        toolCount: mcpTools.length,
+        lastConnectedAt: Date.now(),
+      })
+    } catch (err) {
+      this.states.set(serverId, {
+        serverId,
+        status: 'error',
+        toolCount: 0,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  /**
+   * Connect to an MCP server. Overridable for testing.
+   */
+  async _connectServer(serverId: string, config?: McpServerConfig): Promise<ConnectedServer> {
+    const cfg = config ?? this.config.servers[serverId]!
+    const client = new Client(
+      { name: 'rivet', version: '0.1.0' },
+      { capabilities: {} },
+    )
+
+    if (cfg.command) {
+      const transport = new StdioClientTransport({
+        command: cfg.command,
+        args: cfg.args,
+        env: cfg.env ? { ...getDefaultEnvironment(), ...cfg.env } as Record<string, string> : undefined,
+        cwd: cfg.cwd,
+        stderr: 'pipe',
+      })
+      await client.connect(transport)
+      return { client, transport, serverId }
+    } else if (cfg.url) {
+      throw new Error(`SSE transport not yet implemented for server ${serverId}`)
+    }
+
+    throw new Error(`Invalid MCP server config for ${serverId}`)
+  }
+
+  /**
+   * Discover tools from a connected server. Overridable for testing.
+   */
+  async _discoverTools(serverId: string, server?: ConnectedServer): Promise<McpToolDef[]> {
+    const conn = server ?? this.connections.get(serverId)
+    if (!conn) return []
+    const result = await conn.client.listTools()
+    return result.tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: (t.inputSchema ?? { type: 'object' as const, properties: {} }) as McpToolDef['inputSchema'],
+    }))
+  }
+}
+
+/**
+ * Build a safe default environment for spawned MCP processes.
+ * Mirrors the SDK's getDefaultEnvironment but without importing it directly.
+ */
+function getDefaultEnvironment(): Record<string, string> {
+  const env: Record<string, string> = {}
+  const inherited = [
+    'HOME', 'USER', 'LANG', 'TERM', 'PATH',
+    'NODE_ENV', 'SHELL', 'TMPDIR', 'TEMP', 'TMP',
+  ]
+  for (const key of inherited) {
+    const val = process.env[key]
+    if (val !== undefined) env[key] = val
+  }
+  return env
+}
