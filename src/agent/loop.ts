@@ -142,7 +142,7 @@ export class AgentLoop {
               }
 
               const result = await this.config.toolRegistry.execute(tu.name, params)
-              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError)
+              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false)
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: tu.id,
