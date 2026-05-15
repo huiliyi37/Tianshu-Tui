@@ -4,6 +4,13 @@ import os from 'os'
 import { gitStatusCache } from './volatile-git.js'
 import type { ContextLedger } from '../context/types.js'
 
+export interface ToolHistoryEntry {
+  tool: string
+  target: string
+  status: 'success' | 'failed' | 'running'
+  error?: string
+}
+
 export interface VolatileContext {
   cwd: string
   rivetMd?: string
@@ -11,6 +18,7 @@ export interface VolatileContext {
   workingSet?: string[]
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
+  toolHistory?: ToolHistoryEntry[]
 }
 
 let rivetMdCache: { value: string | undefined; timestamp: number } | null = null
@@ -71,6 +79,15 @@ export function buildVolatileBlock(ctx: VolatileContext): string {
     const tokensAttr = ` tokens="${ctx.contextLedger.tokenBudget.estimatedTokens}"`
     const maxAttr = ` max_tokens="${ctx.contextLedger.tokenBudget.maxTokens}"`
     parts.push(`<context-ledger${healthAttr}${safeAttr}${tokensAttr}${maxAttr}${sections} />`)
+  }
+
+  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
+    const entries = ctx.toolHistory.map(e => {
+      const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
+      if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
+      return `  <tool-summary ${attrs.join(' ')} />`
+    }).join('\n')
+    parts.push(`<tool-history recent="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
   }
 
   if (ctx.sessionMemoryBlock) {

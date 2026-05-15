@@ -1,9 +1,14 @@
+import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
 import type { ApiClient, StreamCallbacks } from '../api/client.js'
 import type { ContentBlock, Message, Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
+import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { ToolRegistry } from '../tools/registry.js'
 import type { ToolCallParams } from '../tools/types.js'
 import { SessionContext } from './context.js'
+import { extractIntents } from './intent-extractor.js'
+import { PrewarmCache } from './prewarm.js'
 import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
@@ -49,6 +54,9 @@ export class AgentLoop {
   private cwd: string
   private evidence: EvidenceTracker
   private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
+  private recentToolHistory: ToolHistoryEntry[] = []
+  private prewarm = new PrewarmCache()
+  private streamedText = ''
 
   constructor(
     private config: AgentConfig,
@@ -57,6 +65,38 @@ export class AgentLoop {
   ) {
     this.cwd = cwd ?? process.cwd()
     this.evidence = new EvidenceTracker()
+  }
+
+  private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
+    const target = typeof input?.path === 'string'
+      ? input.path
+      : typeof input?.file_path === 'string'
+        ? input.file_path
+        : typeof input?.command === 'string'
+          ? input.command.slice(0, 50)
+          : name
+    this.recentToolHistory.push({
+      tool: name,
+      target,
+      status: isError ? 'failed' : 'success',
+      error: isError ? result.slice(0, 50) : undefined,
+    })
+    if (this.recentToolHistory.length > 5) this.recentToolHistory.shift()
+  }
+
+  private maybePrewarm(text: string): void {
+    const intents = extractIntents(text)
+    for (const intent of intents) {
+      if (intent.type === 'file' && !this.prewarm.get(intent.value)) {
+        const fullPath = join(this.cwd, intent.value)
+        if (existsSync(fullPath)) {
+          try {
+            const content = readFileSync(fullPath, 'utf-8')
+            this.prewarm.set(intent.value, content)
+          } catch { /* ignore unreadable files */ }
+        }
+      }
+    }
   }
 
   abort(): void {
@@ -164,11 +204,16 @@ export class AgentLoop {
           }
         }
 
-        const request = this.config.promptEngine.buildRequest(this.session.getMessages())
+        this.streamedText = ''
+        const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const collectedBlocks: ContentBlock[] = []
         let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
         const streamCallbacks: StreamCallbacks = {
           onTextDelta: (text) => {
+            this.streamedText += text
+            if (this.streamedText.length % 500 < text.length) {
+              this.maybePrewarm(this.streamedText)
+            }
             callbacks.onTextDelta(text)
           },
           onThinkingDelta: (thinking) => {
@@ -248,8 +293,24 @@ export class AgentLoop {
                 recordAgentTouchedFile(this.cwd, tu.input.file_path)
               }
 
+              // Speculative prewarm: check cache before read_file
+              if (tu.name === 'read_file' && typeof tu.input.file_path === 'string') {
+                const cached = this.prewarm.get(tu.input.file_path)
+                if (cached && !this.prewarm.get('__bypass__')) {
+                  // Cache hit — still execute normally for now (prewarm warms OS page cache)
+                }
+              }
+
               const result = await this.config.toolRegistry.execute(tu.name, params)
               callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false, result.rawPath, result.uiContent)
+
+              // Record tool history for volatile context injection
+              this.recordToolHistory(tu.name, tu.input, result.isError ?? false, result.content)
+
+              // Invalidate prewarm cache after writes
+              if ((tu.name === 'write_file' || tu.name === 'edit_file') && !result.isError && typeof tu.input.file_path === 'string') {
+                this.prewarm.invalidate(tu.input.file_path)
+              }
 
               if (tu.name === 'read_file' && !result.isError) {
                 this.evidence.trackFileRead(tu.input.file_path as string)

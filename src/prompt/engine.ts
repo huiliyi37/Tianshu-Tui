@@ -1,6 +1,6 @@
 import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
-import { buildVolatileBlock, type VolatileContext } from './volatile.js'
+import { buildVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import {
   computeFingerprint,
   detectDrift,
@@ -104,14 +104,30 @@ export class PromptEngine {
    *
    * User messages with ContentBlock[] (tool results) pass through unchanged.
    */
-  buildRequest(messages: Message[]): MessageRequest {
+  buildRequest(messages: Message[], toolHistory?: ToolHistoryEntry[]): MessageRequest {
     const result: Message[] = []
+    const normalized = normalizeToolResultPairs(messages)
 
-    for (const msg of normalizeToolResultPairs(messages)) {
+    // Find the last user text message index so we can inject fresh tool history there
+    let lastUserTextIdx = -1
+    for (let i = normalized.length - 1; i >= 0; i--) {
+      if (normalized[i]!.role === 'user' && typeof normalized[i]!.content === 'string') {
+        lastUserTextIdx = i
+        break
+      }
+    }
+
+    for (let i = 0; i < normalized.length; i++) {
+      const msg = normalized[i]!
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
-        // Prepend volatile context as independent user message before user input.
-        // This keeps the prefix structure identical across turns.
-        result.push({ role: 'user', content: this.volatileBlock })
+        if (i === lastUserTextIdx && toolHistory && toolHistory.length > 0) {
+          // Fresh volatile block with tool history for the latest turn
+          const freshBlock = buildVolatileBlock({ ...this.config.volatileCtx, toolHistory })
+          result.push({ role: 'user', content: freshBlock })
+        } else {
+          // Frozen volatile block for historical turns — preserves prefix cache
+          result.push({ role: 'user', content: this.volatileBlock })
+        }
       }
       result.push(msg)
     }

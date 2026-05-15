@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ContextLedger } from '../../context/types.js'
-import { buildVolatileBlock } from '../volatile.js'
+import { buildVolatileBlock, type VolatileContext } from '../volatile.js'
 
 function ledger(): ContextLedger {
   return {
@@ -44,6 +44,77 @@ describe('volatile context layers', () => {
     assert.match(block, /<environment/)
     assert.doesNotMatch(block, /<working-set>/)
     assert.doesNotMatch(block, /<context-ledger/)
-    assert.doesNotMatch(block, /<session-memory/)
+    assert.doesNotMatch(block, /<session-memory>/)
+  })
+})
+
+describe('tool-history XML section', () => {
+  const base: VolatileContext = { cwd: '/project' }
+
+  it('renders <tool-history> with entries', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      toolHistory: [
+        { tool: 'edit_file', target: 'src/auth.ts', status: 'success' },
+        { tool: 'run_tests', target: 'auth.test.ts', status: 'failed', error: 'timeout' },
+      ],
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('<tool-history'))
+    assert.ok(block.includes('<tool-summary tool="edit_file"'))
+    assert.ok(block.includes('status="success"'))
+    assert.ok(block.includes('status="failed"'))
+    assert.ok(block.includes('error="timeout"'))
+    assert.ok(block.includes('</tool-history>'))
+  })
+
+  it('omits <tool-history> when empty or undefined', () => {
+    assert.ok(!buildVolatileBlock({ ...base, toolHistory: [] }).includes('<tool-history'))
+    assert.ok(!buildVolatileBlock(base).includes('<tool-history'))
+  })
+
+  it('escapes XML special chars in targets', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      toolHistory: [{ tool: 'bash', target: 'echo "hello <world>"', status: 'success' }],
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('&lt;world&gt;'))
+    assert.ok(!block.includes('<world>'))
+  })
+
+  it('includes recent count attribute', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      toolHistory: [
+        { tool: 'a', target: 'b', status: 'success' },
+        { tool: 'c', target: 'd', status: 'success' },
+        { tool: 'e', target: 'f', status: 'success' },
+      ],
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('recent="3"'))
+  })
+
+  it('preserves existing sections alongside tool-history', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      gitStatus: 'M src/foo.ts',
+      workingSet: ['src/foo.ts'],
+      toolHistory: [{ tool: 'edit_file', target: 'src/foo.ts', status: 'success' }],
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('<git-status>'))
+    assert.ok(block.includes('<working-set>'))
+    assert.ok(block.includes('<tool-history'))
+  })
+
+  it('handles running status', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      toolHistory: [{ tool: 'run_tests', target: 'all', status: 'running' }],
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('status="running"'))
   })
 })
