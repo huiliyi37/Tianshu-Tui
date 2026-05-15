@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Phase 3 complete — 58 source files, ~12,000 LOC, 162 tests passing. Trust Cockpit MVP + Cache Diagnostics integrated.
+P2.2 complete — 84 source files, ~25,600 LOC, 186 tests passing. Capability Reliability Layer: safe rollback, path boundaries, verification engine, repo intelligence, model routing, failure samples.
 
 ## Quick Start
 
@@ -142,6 +142,16 @@ The prompt is split into 4 layers for maximum cache stability:
 - **Graceful shutdown** — SIGINT/SIGTERM → abort agent + persist session + kill children
 - **ErrorBoundary** — React errors caught without crashing the process
 - **Config validation** — Zod schema with deep merge over defaults
+- **Safe rollback** — Checkpoint v2: only reverts agent-owned files, protects user pre-existing changes, confirmation token gating
+- **Path boundary enforcement** — glob/grep/diff reject `..` traversal and absolute paths outside project
+- **Symlink cycle protection** — realpath + visited set prevents infinite directory traversal
+- **Search output caps** — Global max_results enforcement on grep (ripgrep streaming kill + native cap)
+- **Targeted test runs** — run_tests filter constructs safe argv (no sh -c), outputs VerificationMetadata
+- **Verification engine** — VerificationState tracks passed/failed/blocked, evidence badge uses buildFinalVerificationReport
+- **Repo intelligence** — symbol-index (regex-based), import-graph (relative edges), context-bundle (task context assembly)
+- **Model capability routing** — ModelCapabilityCard + recommendModelForTask scoring per task type
+- **Failure sample library** — createFailureSample with automatic secret redaction (sk-* patterns)
+- **Raw output path safety** — SHA-256 hashed filenames, no toolUseId in path
 
 ## Configuration
 
@@ -316,7 +326,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (162)
+npm run test                   # Run all tests (186)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
@@ -329,6 +339,7 @@ npm run dev                    # Watch mode
 - `docs/superpowers/plans/2026-05-15-rivet-p2.1-remaining.md` — P2.1 remaining tasks + execution record
 - `docs/superpowers/plans/2026-05-15-rivet-performance-optimization.md` — Performance optimization plan
 - `docs/superpowers/specs/2026-05-15-rivet-p2-1-performance-dev-capability-optimization.md` — P2.1 performance & dev capability spec
+- `docs/analysis/2026-05-15-handoff.md` — Full project handoff document with validation records
 
 ## License
 

@@ -42,3 +42,93 @@
 | 23:10 | P3 code review: 11 issues fixed | run-tests.ts, checkpoint.ts, loop.ts, diff.ts, inspect-project.ts, repo-map.ts, related-tests.ts | 3 CRITICAL (injection, execSync), 4 HIGH (dead code, evidence), 4 MEDIUM | ~5000 |
 | 23:30 | README user manual + docs update | README.md | Added User Manual section, prompt layering docs, cache tips | ~1000 |
 | 23:30 | design docs committed | docs/superpowers/ | P3 plan, direction design, P2.1 spec | ~500 |
+| 23:12 | Created docs/superpowers/plans/2026-05-15-rivet-p2-2-capability-reliability-layer.md | — | ~15738 |
+
+## Session: 2026-05-15 23:13
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-15 23:13
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-15 23:16
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:18 | Created src/tools/path-validate.ts | — | ~246 |
+| 23:18 | Created src/tools/glob.ts | — | ~1317 |
+| 23:18 | Created src/tools/path-validate.ts | — | ~241 |
+| 23:19 | Created src/tools/grep.ts | — | ~2330 |
+| 23:19 | Created src/tools/diff.ts | — | ~1291 |
+| 23:20 | Created src/tools/__tests__/glob.test.ts | — | ~1200 |
+| 23:20 | Created src/tools/__tests__/grep.test.ts | — | ~1243 |
+| 23:20 | Created src/tools/__tests__/diff.test.ts | — | ~887 |
+| 23:21 | Created src/tools/__tests__/path-validate.test.ts | — | ~621 |
+| 23:22 | Created src/compact/micro.ts | — | ~682 |
+| 23:22 | Created src/compact/__tests__/compact.test.ts | — | ~1646 |
+| 23:24 | Created src/agent/checkpoint.ts | — | ~1577 |
+| 23:24 | Created src/agent/loop.ts | — | ~2603 |
+| 23:25 | Session end: 13 writes across 12 files (path-validate.ts, glob.ts, grep.ts, diff.ts, glob.test.ts) | 15 reads | ~24450 tok |
+| 23:26 | Created src/tui/app.tsx | — | ~5160 |
+| 23:26 | Created src/agent/__tests__/checkpoint.test.ts | — | ~2001 |
+| 23:28 | Created src/tools/output-store.ts | — | ~794 |
+| 23:28 | Created src/tools/__tests__/output-store.test.ts | — | ~1015 |
+| 23:30 | Edited .gitignore | 1→2 lines | ~14 |
+| 23:31 | Created src/tools/types.ts | — | ~270 |
+| 23:32 | Created src/tools/run-tests.ts | — | ~3062 |
+| 23:33 | Created src/agent/verification.ts | — | ~514 |
+| 23:33 | Created src/agent/__tests__/verification.test.ts | — | ~739 |
+| 23:34 | Created src/tools/__tests__/run-tests.test.ts | — | ~999 |
+| 23:35 | Created src/tools/__tests__/run-tests.test.ts | — | ~993 |
+| 23:35 | Created src/agent/evidence.ts | — | ~774 |
+| 23:36 | Created src/agent/loop.ts | — | ~2559 |
+| 23:38 | Session end: 26 writes across 23 files (path-validate.ts, glob.ts, grep.ts, diff.ts, glob.test.ts) | 25 reads | ~46505 tok |
+| 23:40 | Created src/agent/evidence.ts | — | ~571 |
+| 23:41 | Edited src/tools/run-tests.ts | 2→1 lines | ~22 |
+| 23:41 | Created src/agent/evidence.ts | — | ~483 |
+| 23:42 | Session end: 29 writes across 23 files (path-validate.ts, glob.ts, grep.ts, diff.ts, glob.test.ts) | 26 reads | ~54122 tok |
+| 23:43 | Edited README.md | inline fix | ~53 |
+| 23:43 | Edited README.md | 3→3 lines | ~38 |
+
+## Session: 2026-05-15 23:43
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:43 | Edited README.md | 1→2 lines | ~61 |
+| 23:44 | Edited README.md | expanded (+10 lines) | ~302 |
+| 23:44 | Edited docs/analysis/2026-05-15-handoff.md | inline fix | ~14 |
+| 23:44 | Edited docs/analysis/2026-05-15-handoff.md | expanded (+14 lines) | ~367 |
+| 23:44 | Edited docs/analysis/2026-05-15-handoff.md | inline fix | ~39 |
+| 23:45 | Edited docs/analysis/2026-05-15-handoff.md | 2→5 lines | ~111 |
+| 23:45 | Edited docs/analysis/2026-05-15-handoff.md | expanded (+28 lines) | ~328 |
+| 23:45 | Edited docs/analysis/2026-05-15-handoff.md | 6→7 lines | ~108 |
+| 23:47 | Session end: 8 writes across 2 files (README.md, 2026-05-15-handoff.md) | 7 reads | ~4788 tok |
+
+## Session: P2.2 Full Implementation
+
+| Task | Action | Key Changes | Outcome |
+|------|--------|-------------|---------|
+| T1 | restore test baseline | tsx devDependency | 161/162 pass |
+| T2 | cwd boundary validation | validatePathSafe(), glob/grep/diff unified | 35 tests pass |
+| T3 | symlink cycle + caps | realpath+visited in glob/grep walkers | 35 tests pass |
+| T4 | checkpoint v2 | dirty snapshot, recordAgentTouchedFile, confirmation token, agent-only rollback | 13 tests pass |
+| T5 | microCompact fix | use passed estimatedTokens directly | 14 tests pass |
+| T6 | run_tests filter | safe argv (spawn, no sh -c), VerificationMetadata | 14 tests pass |
+| T7 | evidence failed/blocked | trackVerification + buildFinalVerificationReport wired into badge | 26 agent tests pass |
+| T8 | raw output + TUI | SHA-256 filenames, /verbose fix, toolNamesRef | 11 tests pass |
+| T9 | verification engine | buildFinalVerificationReport (scope/targeted/risks) | 7 tests pass |
+| T10 | repo intelligence | symbol-index, import-graph, context-bundle | 3 tests pass |
+| T11 | model routing | ModelCapabilityCard + recommendModelForTask | 2 tests pass |
+| T12 | failure samples | createFailureSample with sk-* redaction | 1 test pass |
+| CR | code review | removed dead code, merged imports, wired verification report | 186/186 pass |
+| Total | 11 commits, 35 files changed | +186 tests, 0 fail, typecheck clean, build success | |
+
+## Session: 2026-05-15 23:49
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:49 | Created docs/superpowers/specs/2026-05-15-rivet-p2-3-harness-cockpit-design.md | — | ~3540 |
+| 23:50 | Session end: 1 writes across 1 files (2026-05-15-rivet-p2-3-harness-cockpit-design.md) | 0 reads | ~3793 tok |

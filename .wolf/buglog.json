@@ -48,6 +48,54 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-15T21:05:00+08:00"
+    },
+    {
+      "id": "bug-004",
+      "timestamp": "2026-05-15T15:43:38.375Z",
+      "error_message": "Wrong reference: 162 should be 186",
+      "file": "README.md",
+      "root_cause": "Used \"162\" instead of \"186\"",
+      "fix": "Changed 162 → 186",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T15:43:38.375Z"
+    },
+    {
+      "id": "bug-005",
+      "timestamp": "2026-05-15T15:44:48.552Z",
+      "error_message": "Incorrect value in code",
+      "file": "docs/analysis/2026-05-15-handoff.md",
+      "root_cause": "Had `failure-classifier.ts`",
+      "fix": "Changed to `verification.ts`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T15:44:48.552Z"
+    },
+    {
+      "id": "bug-006",
+      "timestamp": "2026-05-15T15:45:18.876Z",
+      "error_message": "Significant refactor of ",
+      "file": "docs/analysis/2026-05-15-handoff.md",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 7→35 lines (3 removed) | Also: 2. **Trust Cockpit MVP** — Preflight checklist, ac; 3. **Open Model Capability Lab** — Provider confor",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-15T15:45:29.542Z"
     }
   ]
 }
