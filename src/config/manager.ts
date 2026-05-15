@@ -215,6 +215,96 @@ export function runConfigCLI(args: string[]): void {
         break
       }
 
+      case 'mcp': {
+        const subcmd = args[1]
+        if (subcmd === 'list') {
+          const cfg = loadConfig()
+          const servers = cfg.mcp?.servers ?? {}
+          const entries = Object.entries(servers)
+          if (entries.length === 0) {
+            console.log('No MCP servers configured.')
+          } else {
+            console.log('MCP servers:')
+            for (const [id, s] of entries) {
+              const type = s.command ? `stdio: ${s.command}` : `sse: ${s.url}`
+              const disabled = s.disabled ? ' (disabled)' : ''
+              console.log(`  ${id}: ${type}${disabled}`)
+            }
+          }
+        } else if (subcmd === 'add-stdio') {
+          const id = args[2]
+          const command = args[3]
+          const cmdArgs = args.slice(4)
+          if (!id || !command) {
+            console.error('Usage: rivet config mcp add-stdio <id> <command> [args...]')
+            process.exit(1)
+          }
+          const cfg = loadConfig()
+          cfg.mcp.servers[id] = { command, args: cmdArgs.length > 0 ? cmdArgs : undefined }
+          saveConfig(cfg)
+          console.log(`MCP server "${id}" added (stdio: ${command} ${cmdArgs.join(' ')}). Restart Rivet to connect.`)
+        } else if (subcmd === 'add-sse') {
+          const id = args[2]
+          const url = args[3]
+          if (!id || !url) {
+            console.error('Usage: rivet config mcp add-sse <id> <url>')
+            process.exit(1)
+          }
+          const cfg = loadConfig()
+          cfg.mcp.servers[id] = { url }
+          saveConfig(cfg)
+          console.log(`MCP server "${id}" added (sse: ${url}). Restart Rivet to connect.`)
+        } else if (subcmd === 'remove') {
+          const id = args[2]
+          if (!id) {
+            console.error('Usage: rivet config mcp remove <id>')
+            process.exit(1)
+          }
+          const cfg = loadConfig()
+          if (!cfg.mcp?.servers[id]) {
+            console.error(`MCP server "${id}" not found.`)
+            process.exit(1)
+          }
+          delete cfg.mcp.servers[id]
+          saveConfig(cfg)
+          console.log(`MCP server "${id}" removed. Restart Rivet to apply.`)
+        } else if (subcmd === 'enable' || subcmd === 'disable') {
+          const id = args[2]
+          if (!id) {
+            console.error(`Usage: rivet config mcp ${subcmd} <id>`)
+            process.exit(1)
+          }
+          const cfg = loadConfig()
+          const server = cfg.mcp?.servers[id]
+          if (!server) {
+            console.error(`MCP server "${id}" not found.`)
+            process.exit(1)
+          }
+          server.disabled = subcmd === 'disable' ? true : undefined
+          saveConfig(cfg)
+          console.log(`MCP server "${id}" ${subcmd}d. Restart Rivet to apply.`)
+        } else {
+          console.log(`MCP server management:
+
+Usage: rivet config mcp <command>
+
+Commands:
+  list                        List configured MCP servers
+  add-stdio <id> <cmd> [args...]  Add a stdio MCP server
+  add-sse <id> <url>          Add an SSE MCP server
+  remove <id>                 Remove an MCP server
+  enable <id>                 Enable an MCP server
+  disable <id>                Disable an MCP server (keeps config)
+
+Examples:
+  rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp
+  rivet config mcp add-sse ctx7 http://localhost:3001/sse
+  rivet config mcp list
+  rivet config mcp remove fs`)
+        }
+        break
+      }
+
       default:
         console.log(`Rivet Config Manager
 
@@ -228,12 +318,14 @@ Commands:
   set-default <p>     Set default provider
   add-model <p> <id>  Add model to provider
   remove-model <p> <id> Remove model from provider
+  mcp                 MCP server management
 
 Examples:
   rivet config providers
   rivet config set-key deepseek sk-xxx
   rivet config set-key-env deepseek DEEPSEEK_API_KEY
-  rivet config add-model deepseek deepseek-v4-flash 1000000 64000`)
+  rivet config add-model deepseek deepseek-v4-flash 1000000 64000
+  rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp`)
     }
   } catch (err) {
     console.error(`Error: ${(err as Error).message}`)
