@@ -505,7 +505,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     })
   }, [agent, session, pushStatic, flushStream, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe])
 
-  const currentTokens = session.getTotalUsage().input_tokens
+  const currentTokens = session.getEstimatedTokens()
   const tokenEstimate = Math.floor(streamingText.length / 4)
 
   return (
