@@ -2,8 +2,17 @@ import { spawn } from 'child_process'
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
+import type { VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
+
+interface TestCommand {
+  command: string
+  args: string[]
+  display: string
+  runner: string
+  scope: 'full' | 'targeted'
+}
 
 function detectTestCommand(cwd: string): { base: string; runner: string } {
   const pkgPath = join(cwd, 'package.json')
@@ -21,6 +30,35 @@ function detectTestCommand(cwd: string): { base: string; runner: string } {
   }
 
   return { base: 'npm test', runner: 'npm' }
+}
+
+function isTestFileFilter(filter: string): boolean {
+  return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(filter)
+}
+
+function buildTestCommand(cwd: string, filter?: string): TestCommand {
+  const { base, runner } = detectTestCommand(cwd)
+  if (!filter) {
+    return { command: 'npm', args: ['test'], display: 'npm test', runner, scope: 'full' }
+  }
+
+  const safeFilter = filter.replace(/[`$\\;"'|]/g, '')
+  if (runner === 'node-test' && isTestFileFilter(safeFilter)) {
+    if (base.includes('tsx')) {
+      return { command: 'npx', args: ['tsx', '--test', safeFilter], display: `npx tsx --test ${safeFilter}`, runner, scope: 'targeted' }
+    }
+    return { command: 'node', args: ['--test', safeFilter], display: `node --test ${safeFilter}`, runner, scope: 'targeted' }
+  }
+
+  if (runner === 'vitest') {
+    return { command: 'npx', args: ['vitest', 'run', safeFilter], display: `npx vitest run ${safeFilter}`, runner, scope: 'targeted' }
+  }
+
+  if (runner === 'jest') {
+    return { command: 'npx', args: ['jest', '--testPathPattern', safeFilter], display: `npx jest --testPathPattern ${safeFilter}`, runner, scope: 'targeted' }
+  }
+
+  return { command: 'npm', args: ['test', '--', safeFilter], display: `npm test -- ${safeFilter}`, runner, scope: 'targeted' }
 }
 
 interface ParsedResult {
@@ -88,9 +126,7 @@ function parseOutput(raw: string, runner: string): ParsedResult {
     if (durMatch) result.duration = durMatch[1] ?? ''
   }
 
-  // Extract failure details
   const failLines: Array<{ name: string; error: string }> = []
-  // Node 22 test runner: ✖ test_name (duration)
   const nodeTestFails = raw.matchAll(/✖\s+(.+?)(?:\s+\([\d.]+m?s\))?\n((?:  .*\n)*)/g)
   for (const m of nodeTestFails) {
     failLines.push({ name: (m[1] ?? '').trim(), error: (m[2] ?? '').trim() })
@@ -169,27 +205,10 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
     const filter = params.input.filter as string | undefined
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
-    const { base, runner } = detectTestCommand(params.cwd)
-
-    // Build safe argv array — no shell interpolation to prevent injection
-    const commandDisplay = filter ? `${base} ${filter}` : base
-    let argv = ['sh', '-c', base]
-    if (filter) {
-      // Validate filter: no shell metacharacters
-      const safeFilter = filter.replace(/[`$\\;"'|]/g, '')
-      if (runner === 'vitest') {
-        argv = ['sh', '-c', base, '--', safeFilter]
-      } else if (runner === 'jest') {
-        argv = ['sh', '-c', `${base} --testPathPattern`, '--', safeFilter]
-      } else if (runner === 'node-test') {
-        argv = ['sh', '-c', base, '--', safeFilter]
-      } else {
-        argv = ['sh', '-c', base, '--', safeFilter]
-      }
-    }
+    const testCommand = buildTestCommand(params.cwd, filter)
 
     return new Promise((resolve) => {
-      const child = track(spawn(argv[0]!, argv.slice(1), {
+      const child = track(spawn(testCommand.command, testCommand.args, {
         cwd: params.cwd,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -197,7 +216,6 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
 
       let stdout = ''
       let stderr = ''
-
       let onOutputBudget = 20_000
 
       child.stdout!.on('data', (data: Buffer) => {
@@ -226,17 +244,29 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         }
       })
 
+      const blockedVerification: VerificationMetadata = {
+        command: testCommand.display,
+        status: 'blocked',
+        scope: testCommand.scope,
+        exitCode: -1,
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: Date.now() - startTime,
+      }
+
       const timer = setTimeout(async () => {
         child.kill('SIGTERM')
         setTimeout(() => child.kill('SIGKILL'), 3000)
         const raw = stdout + (stderr ? '\n' + stderr : '')
-        const meta = { command: commandDisplay, exitCode: -1, durationMs: Date.now() - startTime }
+        const meta = { command: testCommand.display, exitCode: -1, durationMs: Date.now() - startTime }
         const rawPath = await persistRawOutput(params.toolUseId, raw)
         resolve({
           content: 'Tests timed out',
           uiContent: buildUiOutput(raw, meta),
           rawPath,
           isError: true,
+          verification: { ...blockedVerification, durationMs: Date.now() - startTime },
         })
       }, timeout)
 
@@ -246,17 +276,29 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         const durationMs = Date.now() - startTime
         const exitCode = code ?? 1
 
-        const parsed = parseOutput(raw, runner)
+        const parsed = parseOutput(raw, testCommand.runner)
         parsed.exitCode = exitCode
         const formatted = formatOutput(parsed)
         const truncated = truncateOutput(formatted)
         const rawPath = await persistRawOutput(params.toolUseId, raw)
-        const meta = { command: commandDisplay, exitCode, durationMs }
+        const meta = { command: testCommand.display, exitCode, durationMs }
+
+        const verification: VerificationMetadata = {
+          command: testCommand.display,
+          status: exitCode === 0 ? 'passed' : 'failed',
+          scope: testCommand.scope,
+          exitCode,
+          passed: parsed.passed,
+          failed: parsed.failed,
+          skipped: parsed.skipped,
+          durationMs,
+        }
 
         resolve({
           content: truncated,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
+          verification,
           isError: exitCode !== 0,
         })
       })
@@ -269,6 +311,7 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
           uiContent: err.message,
           rawPath,
           isError: true,
+          verification: { ...blockedVerification, durationMs: Date.now() - startTime },
         })
       })
     })

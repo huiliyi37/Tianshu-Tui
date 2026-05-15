@@ -43,7 +43,6 @@ describe('mixed', () => {
   it('fails', () => { assert.equal(1, 2) })
 })`
 
-    // Use direct file path instead of glob (sh -c may not expand **)
     passingDir = setupProject('tsx --test src/example.test.ts', passingTest)
     failingDir = setupProject('tsx --test src/example.test.ts', failingTest)
   })
@@ -57,7 +56,9 @@ describe('mixed', () => {
     const result = await RUN_TESTS_TOOL.execute(makeParams({}, passingDir))
     assert.equal(result.isError, false)
     assert.ok(result.content.includes('passed'))
-    assert.ok(result.content.includes('Exit code: 0'))
+    assert.ok(result.verification)
+    assert.equal(result.verification!.status, 'passed')
+    assert.equal(result.verification!.scope, 'full')
   })
 
   it('runs and reports success for passing tests', async () => {
@@ -67,19 +68,23 @@ describe('mixed', () => {
     assert.ok(!result.content.includes('FAILURES'))
   })
 
-  it('reports failure details for failing tests', async () => {
+  it('reports failure output for failing tests', async () => {
     const result = await RUN_TESTS_TOOL.execute(makeParams({}, failingDir))
-    // The test runner should produce output; exit code may vary by runner
     assert.ok(result.content.length > 0)
-    assert.ok(result.content.includes('fail') || result.content.includes('test'))
+    assert.ok(result.verification)
+    // verification metadata is always present
+    assert.ok(typeof result.verification!.passed === 'number')
+    assert.ok(typeof result.verification!.failed === 'number')
   })
 
-  it('filter restricts which tests run', async () => {
+  it('filter restricts which tests run with targeted scope', async () => {
     const result = await RUN_TESTS_TOOL.execute(
-      makeParams({ filter: 'example.test.ts' }, passingDir),
+      makeParams({ filter: 'src/example.test.ts' }, passingDir),
     )
     assert.equal(result.isError, false)
     assert.ok(result.content.includes('passed'))
+    assert.ok(result.verification)
+    assert.equal(result.verification!.scope, 'targeted')
   })
 
   it('requiresApproval returns false', () => {
