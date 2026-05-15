@@ -23,7 +23,6 @@ describe('diff tool', () => {
     git('init')
     git('config user.email "test@test.com"')
     git('config user.name "Test"')
-    // Create an initial commit so diff works
     writeFileSync(join(testDir, 'initial.txt'), 'initial')
     git('add initial.txt')
     git('commit -m "initial"')
@@ -74,8 +73,13 @@ describe('diff tool', () => {
     assert.ok(!result.isError)
     assert.ok(result.content.includes('a.ts'))
     assert.ok(result.content.includes('+aaa-modified'))
-    // b.ts changes should not appear
     assert.ok(!result.content.includes('bbb-modified'))
+  })
+
+  it('rejects path traversal outside cwd', async () => {
+    const result = await DIFF_TOOL.execute(makeParams({ path: '../outside.ts' }))
+    assert.equal(result.isError, true)
+    assert.match(result.content, /outside project directory/i)
   })
 
   it('requires no approval', () => {

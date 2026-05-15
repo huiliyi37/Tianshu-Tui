@@ -88,6 +88,39 @@ describe('GREP_TOOL', () => {
     assert.ok(result.content.includes('No matches found'))
   })
 
+  it('rejects parent directory traversal in search path', async () => {
+    const result = await GREP_TOOL.execute(makeParams({ pattern: 'secret', path: '..' }))
+    assert.equal(result.isError, true)
+    assert.match(result.content, /outside project directory/i)
+  })
+
+  it('rejects absolute paths outside cwd', async () => {
+    const result = await GREP_TOOL.execute(makeParams({ pattern: 'secret', path: tmpdir() }))
+    assert.equal(result.isError, true)
+    assert.match(result.content, /outside project directory/i)
+  })
+
+  it('enforces max_results globally', async () => {
+    const manyDir = mkdtempSync(join(tmpdir(), 'grep-many-'))
+    try {
+      mkdirSync(join(manyDir, 'src'), { recursive: true })
+      for (let i = 0; i < 5; i++) {
+        writeFileSync(join(manyDir, 'src', `f${i}.ts`), 'MATCH\nMATCH\nMATCH\n')
+      }
+
+      const result = await GREP_TOOL.execute({
+        input: { pattern: 'MATCH', path: 'src', max_results: 3, literal: true },
+        toolUseId: 'test',
+        cwd: manyDir,
+      })
+
+      const matches = result.content.split('\n').filter(line => line.includes('MATCH'))
+      assert.ok(matches.length <= 3, `expected <= 3 matches, got ${matches.length}`)
+    } finally {
+      rmSync(manyDir, { recursive: true, force: true })
+    }
+  })
+
   it('requiresApproval and isConcurrencySafe', () => {
     assert.equal(GREP_TOOL.requiresApproval(makeParams({ pattern: 'test' })), false)
     assert.equal(GREP_TOOL.isConcurrencySafe(), true)

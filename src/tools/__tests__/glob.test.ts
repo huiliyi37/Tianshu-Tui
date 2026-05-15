@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { GLOB_TOOL } from '../glob.js'
@@ -75,6 +75,38 @@ describe('GLOB_TOOL', () => {
     const result = await GLOB_TOOL.execute(makeParams({ pattern: '*.xyz' }))
     assert.equal(result.isError, undefined)
     assert.ok(result.content.includes('No files found'))
+  })
+
+  it('rejects parent directory traversal in search path', async () => {
+    const result = await GLOB_TOOL.execute(makeParams({ pattern: '*.ts', path: '..' }))
+    assert.equal(result.isError, true)
+    assert.match(result.content, /outside project directory/i)
+  })
+
+  it('rejects absolute paths outside cwd', async () => {
+    const result = await GLOB_TOOL.execute(makeParams({ pattern: '*.ts', path: tmpdir() }))
+    assert.equal(result.isError, true)
+    assert.match(result.content, /outside project directory/i)
+  })
+
+  it('does not follow symlink cycles', async () => {
+    const loopDir = mkdtempSync(join(tmpdir(), 'glob-loop-'))
+    try {
+      mkdirSync(join(loopDir, 'a'), { recursive: true })
+      writeFileSync(join(loopDir, 'a', 'file.ts'), '')
+      symlinkSync(loopDir, join(loopDir, 'a', 'loop'), 'dir')
+
+      const result = await GLOB_TOOL.execute({
+        input: { pattern: '**/*.ts' },
+        toolUseId: 'test',
+        cwd: loopDir,
+      })
+
+      assert.equal(result.isError, undefined)
+      assert.ok(result.content.includes('a/file.ts'))
+    } finally {
+      rmSync(loopDir, { recursive: true, force: true })
+    }
   })
 
   it('requiresApproval and isConcurrencySafe', () => {

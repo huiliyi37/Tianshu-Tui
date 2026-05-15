@@ -1,18 +1,34 @@
-import { resolve, normalize, sep } from 'path'
+import { isAbsolute, relative, resolve } from 'path'
 
-/**
- * Validate that a file path resolves within the project directory.
- * Returns the resolved absolute path.
- * Throws if the path escapes the project root.
- */
-export function validatePath(cwd: string, filePath: string): string {
-  const resolved = resolve(cwd, filePath)
-  const normalized = normalize(resolved)
+export interface ValidatedPath {
+  ok: true
+  path: string
+}
 
-  // Must be within cwd: either equals cwd exactly, or starts with cwd + separator
-  if (normalized !== cwd && !normalized.startsWith(cwd + sep)) {
-    throw new Error(`Path escapes project directory: ${filePath}`)
+export interface InvalidPath {
+  ok: false
+  error: string
+}
+
+export type PathValidationResult = ValidatedPath | InvalidPath
+
+export function validatePathSafe(cwd: string, inputPath: string): PathValidationResult {
+  const resolved = resolve(cwd, inputPath)
+  const rel = relative(cwd, resolved)
+
+  if (rel === '') {
+    return { ok: true, path: resolved }
   }
 
-  return normalized
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    return { ok: false, error: `Path outside project directory: ${inputPath}` }
+  }
+
+  return { ok: true, path: resolved }
+}
+
+export function validatePath(cwd: string, filePath: string): string {
+  const result = validatePathSafe(cwd, filePath)
+  if (!result.ok) throw new Error(result.error)
+  return result.path
 }

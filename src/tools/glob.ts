@@ -1,6 +1,7 @@
-import { readdirSync, existsSync, statSync } from 'fs'
-import { join, resolve, relative } from 'path'
+import { readdirSync, existsSync, lstatSync, realpathSync } from 'fs'
+import { join, relative } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
+import { validatePathSafe } from './path-validate.js'
 import { GitignoreFilter } from './gitignore.js'
 
 const EXCLUDE_DIRS = new Set([
@@ -52,26 +53,45 @@ function globToRegex(pattern: string): RegExp {
   return new RegExp(`^${regex}$`)
 }
 
-function walkDir(dir: string, results: string[], root: string, filter?: RegExp): void {
+function walkDir(
+  dir: string,
+  results: string[],
+  root: string,
+  filter: RegExp | undefined,
+  visited = new Set<string>(),
+): void {
   if (results.length >= MAX_RESULTS) return
+
+  let real: string
+  try {
+    real = realpathSync(dir)
+  } catch {
+    return
+  }
+  if (visited.has(real)) return
+  visited.add(real)
+
   let names: string[]
   try {
     names = readdirSync(dir)
   } catch {
     return
   }
+
   for (const name of names) {
     if (results.length >= MAX_RESULTS) return
     const fullPath = join(dir, name)
-    let s: ReturnType<typeof statSync>
+    let s: ReturnType<typeof lstatSync>
     try {
-      s = statSync(fullPath)
+      s = lstatSync(fullPath)
     } catch {
       continue
     }
+
+    if (s.isSymbolicLink()) continue
     if (s.isDirectory()) {
       if (EXCLUDE_DIRS.has(name)) continue
-      walkDir(fullPath, results, root, filter)
+      walkDir(fullPath, results, root, filter, visited)
     } else if (s.isFile()) {
       const rel = relative(root, fullPath)
       if (!filter || filter.test(rel)) {
@@ -115,15 +135,18 @@ Bad: glob(pattern="node_modules/**") (excluded by default)`,
 
   async execute(params: ToolCallParams) {
     const pattern = params.input.pattern as string
-    const searchRoot = params.input.path
-      ? resolve(params.cwd, params.input.path as string)
-      : params.cwd
+    const requestedRoot = params.input.path ? String(params.input.path) : '.'
+    const validated = validatePathSafe(params.cwd, requestedRoot)
+    if (!validated.ok) {
+      return { content: `Error: ${validated.error}`, isError: true }
+    }
+    const searchRoot = validated.path
 
     if (!existsSync(searchRoot)) {
       return { content: `Error: Directory not found: ${searchRoot}`, isError: true }
     }
     try {
-      const stat = statSync(searchRoot)
+      const stat = lstatSync(searchRoot)
       if (!stat.isDirectory()) {
         return { content: `Error: Not a directory: ${searchRoot}`, isError: true }
       }

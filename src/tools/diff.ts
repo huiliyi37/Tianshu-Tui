@@ -1,5 +1,7 @@
 import { spawn } from 'child_process'
+import { relative } from 'path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import { validatePathSafe } from './path-validate.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 
 const MAX_LINES_PER_FILE = 200
@@ -40,9 +42,11 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
     if (staged) args.push('--cached')
     args.push(`-U${contextLines}`)
     if (path) {
-      // Prevent path traversal outside cwd
-      const resolved = path.replace(/\.\.\//g, '').replace(/^\//, '')
-      args.push('--', resolved)
+      const validated = validatePathSafe(params.cwd, path)
+      if (!validated.ok) {
+        return { content: `Error: ${validated.error}`, isError: true }
+      }
+      args.push('--', relative(params.cwd, validated.path))
     }
 
     return new Promise((resolve) => {
