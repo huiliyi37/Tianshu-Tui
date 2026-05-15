@@ -1,12 +1,15 @@
 import type { Message } from '../api/types.js'
-import { KEEP_RECENT_MESSAGES } from './constants.js'
+import { KEEP_RECENT_MESSAGES, CACHE_ANCHOR_MESSAGES } from './constants.js'
 
 /**
  * MicroCompact: lightweight truncation without API calls.
  *
  * When total estimated tokens exceed the context window, truncate the
- * oldest messages while keeping the most recent KEEP_RECENT_MESSAGES.
- * This does NOT modify system prompt, so prefix cache stays intact.
+ * middle messages while keeping:
+ *   - First CACHE_ANCHOR_MESSAGES (cache anchor — preserves prefix structure)
+ *   - Last KEEP_RECENT_MESSAGES (recent context)
+ * This preserves [System][Tools][Volatile][User1][Asst1] in DeepSeek's
+ * prefix cache after compaction.
  *
  * Returns a new messages array (immutable) and the number of truncated messages.
  */
@@ -15,22 +18,32 @@ export function microCompact(
   contextWindow: number,
   estimatedTokens: number,
 ): { messages: Message[]; truncated: number } {
-  if (estimatedTokens <= contextWindow || messages.length <= KEEP_RECENT_MESSAGES) {
+  if (estimatedTokens <= contextWindow || messages.length <= KEEP_RECENT_MESSAGES + CACHE_ANCHOR_MESSAGES) {
     return { messages, truncated: 0 }
   }
 
   // Compute total tokens once, then subtract each removed message's tokens
-  // instead of re-scanning the entire array on every iteration.
-  // KEEP_RECENT_MESSAGES is the floor — never truncate below this.
+  const anchor = messages.slice(0, CACHE_ANCHOR_MESSAGES)
+  const recent = messages.slice(-KEEP_RECENT_MESSAGES)
+  const middle = messages.slice(CACHE_ANCHOR_MESSAGES, -KEEP_RECENT_MESSAGES)
+
   let totalTokens = estimateTokens(messages)
-  let sliceIdx = 0
-  const maxRemove = messages.length - KEEP_RECENT_MESSAGES
-  while (sliceIdx < maxRemove && totalTokens > contextWindow) {
-    totalTokens -= estimateMessageTokens(messages[sliceIdx]!)
-    sliceIdx++
+  // Subtract anchor and recent tokens — they're always kept
+  for (const m of anchor) totalTokens -= estimateMessageTokens(m)
+  for (const m of recent) totalTokens -= estimateMessageTokens(m)
+
+  // Remove from the START of middle (oldest first) until under budget
+  let removeCount = 0
+  while (removeCount < middle.length && totalTokens > contextWindow) {
+    totalTokens -= estimateMessageTokens(middle[removeCount]!)
+    removeCount++
   }
 
-  return { messages: messages.slice(sliceIdx), truncated: sliceIdx }
+  const keptMiddle = middle.slice(removeCount)
+  return {
+    messages: [...anchor, ...keptMiddle, ...recent],
+    truncated: removeCount,
+  }
 }
 
 /** Token estimation for a single message, accounting for CJK vs ASCII character density. */

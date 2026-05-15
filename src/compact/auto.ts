@@ -1,6 +1,7 @@
 import type { ApiClient } from '../api/client.js'
 import type { Message } from '../api/types.js'
 import {
+  CACHE_ANCHOR_MESSAGES,
   MIN_SUMMARIZE_MESSAGES,
   SUMMARY_INPUT_MAX_CHARS,
   SUMMARY_INPUT_HEAD_CHARS,
@@ -119,12 +120,13 @@ export async function smartCompact(
   contextWindow: number,
   compactModel: string,
 ): Promise<CompactResult> {
-  if (messages.length <= KEEP_RECENT_MESSAGES) {
+  if (messages.length <= KEEP_RECENT_MESSAGES + CACHE_ANCHOR_MESSAGES) {
     return { summary: '', messages, truncatedCount: 0 }
   }
 
+  const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
   const keepMessages = messages.slice(-KEEP_RECENT_MESSAGES)
-  const oldMessages = messages.slice(0, -KEEP_RECENT_MESSAGES)
+  const oldMessages = messages.slice(CACHE_ANCHOR_MESSAGES, -KEEP_RECENT_MESSAGES)
 
   // Build summary prompt from old messages
   const summaryPrompt = buildSummaryPrompt(oldMessages, tokenCount)
@@ -153,15 +155,19 @@ export async function smartCompact(
     return { summary: '', messages: truncated, truncatedCount: removedCount }
   }
 
-  // Build compacted messages: summary as context + recent messages
+  // Stable XML header for prefix cache: the opening tag and attributes
+  // are consistent across compactions, so DeepSeek can match the prefix
+  // on subsequent turns even after re-compaction.
   const compactMessage: Message = {
     role: 'user',
-    content: `<compact-summary>\nPrevious conversation summary:\n${summary}\n</compact-summary>`,
+    content: `<compact-summary turns-removed="${oldMessages.length}">
+${summary}
+</compact-summary>`,
   }
 
   return {
     summary,
-    messages: [compactMessage, ...keepMessages],
+    messages: [...anchorMessages, compactMessage, ...keepMessages],
     truncatedCount: oldMessages.length,
   }
 }

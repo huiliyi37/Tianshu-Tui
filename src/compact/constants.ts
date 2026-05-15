@@ -12,6 +12,12 @@ export const AUTO_COMPACT_THRESHOLD = 800_000
 /** Hard floor: never auto-compact below this token count */
 export const MINIMUM_AUTO_COMPACT_TOKENS = 500_000
 
+/** Number of messages to preserve at the start as cache anchor.
+ * Keeping the first 2 messages (initial user request + assistant response)
+ * preserves the prefix structure after compaction, so DeepSeek's prefix
+ * cache can still match [System][Tools][Volatile][User1][Asst1]. */
+export const CACHE_ANCHOR_MESSAGES = 2
+
 /** Number of most recent messages to keep during micro-compact */
 export const KEEP_RECENT_MESSAGES = 4
 
