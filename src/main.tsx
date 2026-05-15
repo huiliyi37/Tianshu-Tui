@@ -122,6 +122,17 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       maxTokens: currentModel.maxTokens,
       thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),
     })
+
+    // Create a compact client for LLM-based summarization (auto-compaction)
+    const compactModel = provider.models.find(m => m.id === config.compact.model || m.alias === config.compact.model)
+    const compactClient = compactModel ? createDeepSeekClient({
+      apiKey,
+      model: compactModel.id,
+      reasoningEffort: compactModel.reasoningEffort,
+      maxTokens: Math.min(2048, compactModel.maxTokens),
+      thinkingBudget: 1024,
+    }) : undefined
+
     return new AgentLoop(
       {
         client,
@@ -130,6 +141,8 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
         maxTurns: config.agent.maxTurns,
         contextWindow: currentModel.contextWindow,
         compact: config.compact,
+        compactClient,
+        compactModel: compactModel?.id,
       },
       session,
       cwd,

@@ -80,7 +80,7 @@ export class AgentLoop {
 
         // Check compaction before building request to prevent context overflow
         const messages = this.session.getMessages()
-        const decision = shouldAutoCompact(messages, this.config.compact)
+        const decision = shouldAutoCompact(messages, this.config.compact, this.session.getEstimatedTokens())
         if (decision.shouldCompact) {
           const { messages: compacted } = await this.compactMessages(messages, decision.tokenCount)
           this.session.replaceMessages(compacted)

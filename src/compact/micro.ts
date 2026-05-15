@@ -34,7 +34,7 @@ export function microCompact(
 }
 
 /** Token estimation for a single message, accounting for CJK vs ASCII character density. */
-function estimateMessageTokens(msg: Message): number {
+export function estimateMessageTokens(msg: Message): number {
   const content = typeof msg.content === 'string'
     ? msg.content
     : JSON.stringify(msg.content)

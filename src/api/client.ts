@@ -21,6 +21,8 @@ export interface ClientConfig {
   thinkingBudget?: number
   reasoningEffort?: string
   unsupported: string[]
+  /** Whether the provider has a known bug where tool JSON appears in text content */
+  hasToolJsonInContentBug: boolean
   /** Optional function to normalize usage fields from provider-specific format to standard Usage */
   mapUsage?: (raw: Record<string, unknown>) => Partial<Usage>
 }
@@ -124,6 +126,21 @@ function extractToolJsonFromText(text: string): { name: string; input: Record<st
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
 
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 async function withRetry<T>(
   fn: () => Promise<T>,
   signal?: AbortSignal,
@@ -148,7 +165,7 @@ async function withRetry<T>(
 
       if (attempt < MAX_RETRIES) {
         const delay = apiErr?.retryAfterMs ?? BASE_DELAY_MS * Math.pow(2, attempt - 1)
-        await new Promise(resolve => setTimeout(resolve, delay))
+        await abortableDelay(delay, signal)
       }
     }
   }
@@ -224,14 +241,16 @@ export class ApiClient {
         callbacks.onContentBlock({ type: 'text', text: textContent })
 
         // DeepSeek V4 bug: tool JSON may appear in text content
-        const extracted = extractToolJsonFromText(textContent)
-        if (extracted) {
-          callbacks.onContentBlock({
-            type: 'tool_use',
-            id: `fallback_${Date.now()}`,
-            name: extracted.name,
-            input: extracted.input,
-          })
+        if (this.config.hasToolJsonInContentBug) {
+          const extracted = extractToolJsonFromText(textContent)
+          if (extracted) {
+            callbacks.onContentBlock({
+              type: 'tool_use',
+              id: `fallback_${Date.now()}`,
+              name: extracted.name,
+              input: extracted.input,
+            })
+          }
         }
 
         textContent = ''

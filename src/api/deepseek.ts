@@ -38,6 +38,7 @@ export function createClient(
     thinkingBudget: config.thinkingBudget,
     reasoningEffort: capabilities.effortFormat === 'none' ? undefined : (config.reasoningEffort ?? 'high'),
     unsupported: capabilities.stripParams,
+    hasToolJsonInContentBug: capabilities.hasToolJsonInContentBug,
     mapUsage: capabilities.mapUsage,
   }
 

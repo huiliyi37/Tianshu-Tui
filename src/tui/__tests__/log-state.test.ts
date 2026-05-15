@@ -1,0 +1,60 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { appendLog, summarizeToolOutput, updateToolLog, visibleLogs, type LogEntry } from '../log-state.js'
+
+describe('TUI log state helpers', () => {
+  it('updates an existing tool log instead of appending a duplicate', () => {
+    const logs: LogEntry[] = [
+      { type: 'text', content: '> npm test' },
+      { type: 'tool', id: 'tool-1', toolName: 'bash', content: 'running' },
+    ]
+
+    const updated = updateToolLog(logs, 'tool-1', 'bash', 'done', false)
+
+    assert.equal(updated.length, 2)
+    assert.deepEqual(updated[1], {
+      type: 'tool',
+      id: 'tool-1',
+      toolName: 'bash',
+      content: 'done',
+      isError: false,
+    })
+  })
+
+  it('appends when no matching tool log exists', () => {
+    const updated = updateToolLog([], 'tool-1', 'bash', 'done', false)
+
+    assert.deepEqual(updated, [{
+      type: 'tool',
+      id: 'tool-1',
+      toolName: 'bash',
+      content: 'done',
+      isError: false,
+    }])
+  })
+
+  it('keeps only the visible tail of logs', () => {
+    const logs = Array.from({ length: 60 }, (_, i): LogEntry => ({ type: 'text', content: String(i) }))
+
+    assert.equal(visibleLogs(logs, 50).length, 50)
+    assert.equal(visibleLogs(logs, 50)[0]!.content, '10')
+  })
+
+  it('summarizes long tool output with head and tail', () => {
+    const output = Array.from({ length: 80 }, (_, i) => `line-${i}`).join('\n')
+    const summary = summarizeToolOutput(output, 20)
+
+    assert.ok(summary.includes('line-0'))
+    assert.ok(summary.includes('line-79'))
+    assert.ok(summary.includes('60 lines omitted'))
+  })
+
+  it('summarizes appended tool chunks before rendering', () => {
+    const first = 'a\n'.repeat(40)
+    const second = 'b\n'.repeat(40)
+    const summary = summarizeToolOutput(first + second, 24)
+
+    assert.ok(summary.split('\n').length <= 25)
+    assert.ok(summary.includes('lines omitted'))
+  })
+})
