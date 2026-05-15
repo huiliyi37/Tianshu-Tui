@@ -1,12 +1,6 @@
-import os from 'os'
 import type { ToolDefinition } from '../api/types.js'
 
 const BASE_PROMPT = `You are Rivet, an interactive CLI coding agent. You help users with software engineering tasks in the terminal.
-
-## Environment
-- Platform: {platform}
-- Working directory: {cwd}
-- OS: {os}
 
 ## Core Behavior
 1. Prefer editing existing files over creating new ones.
@@ -60,15 +54,11 @@ Example: "The bug is in src/api/client.ts:162"
 - Check git status before committing to see all changes.`
 
 export interface StaticPromptContext {
-  cwd: string
   tools: ToolDefinition[]
 }
 
 export function buildSystemPrompt(ctx: StaticPromptContext): string {
   let prompt = BASE_PROMPT
-    .replace('{platform}', process.platform)
-    .replace('{cwd}', ctx.cwd)
-    .replace('{os}', `${os.type()} ${os.release()}`)
 
   // Append tool definitions (already sorted by ToolRegistry)
   if (ctx.tools.length > 0) {

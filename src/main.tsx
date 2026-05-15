@@ -126,7 +126,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     const promptEngine = new PromptEngine({
       model: currentModel.id,
       maxTokens: currentModel.maxTokens,
-      staticCtx: { cwd, tools: toolRegistry.getDefinitions() },
+      staticCtx: { tools: toolRegistry.getDefinitions() },
       volatileCtx: { cwd },
     })
     const client = createDeepSeekClient({

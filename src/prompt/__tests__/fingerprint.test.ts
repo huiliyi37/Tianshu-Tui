@@ -139,7 +139,7 @@ describe('PromptEngine fingerprint integration', () => {
     const engine = new PromptEngine({
       model: 'deepseek-v4-pro',
       maxTokens: 1024,
-      staticCtx: { cwd: '/test', tools: SAMPLE_TOOLS },
+      staticCtx: { tools: SAMPLE_TOOLS },
       volatileCtx: { cwd: '/test' },
     })
 
@@ -156,7 +156,7 @@ describe('PromptEngine fingerprint integration', () => {
     const engine = new PromptEngine({
       model: 'test',
       maxTokens: 1024,
-      staticCtx: { cwd: '/test', tools: SAMPLE_TOOLS },
+      staticCtx: { tools: SAMPLE_TOOLS },
       volatileCtx: { cwd: '/test' },
     })
 
@@ -170,7 +170,7 @@ describe('PromptEngine fingerprint integration', () => {
     const engine = new PromptEngine({
       model: 'test',
       maxTokens: 1024,
-      staticCtx: { cwd: '/test', tools: SAMPLE_TOOLS },
+      staticCtx: { tools: SAMPLE_TOOLS },
       volatileCtx: { cwd: '/test' },
     })
 

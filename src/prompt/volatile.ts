@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
+import os from 'os'
 import { gitStatusCache } from './volatile-git.js'
 
 export interface VolatileContext {
@@ -32,6 +33,12 @@ function readRivetMd(cwd: string): string | undefined {
 /** Build the volatile `<context>` block injected into the user message. */
 export function buildVolatileBlock(ctx: VolatileContext): string {
   const parts: string[] = []
+
+  // Environment info (moved from L1 system prompt to L4 volatile for cache stability)
+  parts.push('## Environment\n'
+    + '- Platform: ' + process.platform + '\n'
+    + '- Working directory: ' + ctx.cwd + '\n'
+    + '- OS: ' + os.type() + ' ' + os.release())
 
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)
   if (md) {

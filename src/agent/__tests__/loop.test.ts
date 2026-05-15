@@ -43,7 +43,7 @@ function makeEngine() {
   return new PromptEngine({
     model: 'deepseek-v4-pro',
     maxTokens: 1024,
-    staticCtx: { cwd: '/test', tools: [READ_FILE_TOOL.definition] },
+    staticCtx: { tools: [READ_FILE_TOOL.definition] },
     volatileCtx: { cwd: '/test' },
   })
 }
