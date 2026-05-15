@@ -7,6 +7,8 @@ interface StatusBarProps {
   totalCost: string
   currentTokens: number
   maxTokens: number
+  contextHealth?: 'healthy' | 'warning' | 'compacting' | 'critical'
+  apiSafe?: boolean
 }
 
 function tokenBar(current: number, max: number, width = 10): string {
@@ -14,7 +16,7 @@ function tokenBar(current: number, max: number, width = 10): string {
   return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
-export const StatusBar = memo(function StatusBar({ model, cacheHitRate, totalCost, currentTokens, maxTokens }: StatusBarProps) {
+export const StatusBar = memo(function StatusBar({ model, cacheHitRate, totalCost, currentTokens, maxTokens, contextHealth = 'healthy', apiSafe = true }: StatusBarProps) {
   const hitPct = (cacheHitRate * 100).toFixed(1)
   const usagePct = ((currentTokens / maxTokens) * 100).toFixed(0)
   const bar = tokenBar(currentTokens, maxTokens)
@@ -27,6 +29,12 @@ export const StatusBar = memo(function StatusBar({ model, cacheHitRate, totalCos
         <Text bold color="cyan">{model}</Text>
         <Text color={cacheColor}>
           cache:{hitPct}%
+        </Text>
+        <Text color={contextHealth === 'critical' ? 'red' : contextHealth === 'compacting' ? 'yellow' : contextHealth === 'warning' ? 'yellow' : 'green'}>
+          ctx:{contextHealth}
+        </Text>
+        <Text color={apiSafe ? 'green' : 'red'}>
+          rounds:{apiSafe ? 'safe' : '!'}
         </Text>
         <Text dimColor>
           ¥{totalCost}

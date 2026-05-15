@@ -7,6 +7,8 @@ import { SessionContext } from './context.js'
 import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
+import { recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
+import type { CompactCircuitBreakerState } from '../context/types.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyTestRun } from './failure-classifier.js'
@@ -45,6 +47,7 @@ export class AgentLoop {
   private abortController: AbortController | null = null
   private cwd: string
   private evidence: EvidenceTracker
+  private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
 
   constructor(
     private config: AgentConfig,
@@ -119,11 +122,28 @@ export class AgentLoop {
         }
 
         const messages = this.session.getMessages()
-        const decision = shouldAutoCompact(messages, this.config.compact, this.session.getEstimatedTokens())
+        const estTokens = this.session.getEstimatedTokens()
+        const decision = shouldAutoCompact(messages, this.config.compact, estTokens)
         if (decision.shouldCompact) {
-          const { messages: compacted } = await this.compactMessages(messages, decision.tokenCount)
-          this.session.replaceMessages(compacted)
-          this.session.markCompacted(turn)
+          const beforeTokens = estTokens
+          try {
+            const { messages: compacted } = await this.compactMessages(messages, decision.tokenCount)
+            this.session.replaceMessages(compacted)
+            this.session.markCompacted(turn)
+            const afterTokens = this.session.getEstimatedTokens()
+            this.session.recordCompactEvent({
+              turn: this.session.getTurnCount(),
+              tier: 1,
+              reason: `auto compact: ${decision.reason}`,
+              beforeTokens,
+              afterTokens,
+              createdAt: Date.now(),
+            })
+            this.compactFailures = recordCompactSuccess(this.compactFailures)
+          } catch (err) {
+            this.compactFailures = recordCompactFailure(this.compactFailures, this.session.getTurnCount())
+            throw err
+          }
         }
 
         const request = this.config.promptEngine.buildRequest(this.session.getMessages())

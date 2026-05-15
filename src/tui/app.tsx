@@ -224,8 +224,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
-/memory [text] — Show or add session memory
+/memory [text] — Show or save session memory entries
 /rollback — Preview changes since last checkpoint (/rollback confirm to execute)
+/context — Show context ledger health, tokens, rounds, and compact events
 /evidence — Show last turn evidence summary
 /auto — Toggle auto-approve (current: ${autoSafeRef.current ? 'auto-safe' : 'manual'})` }))
           setIsStreaming(false)
@@ -242,6 +243,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const msgs = session.getMessages()
           const { messages: compacted, truncated } = microCompact(msgs, maxTokens, estimateTokens(msgs))
           session.replaceMessages(compacted)
+          session.recordCompactEvent({
+            turn: session.getTurnCount(),
+            tier: 1,
+            reason: 'manual /compact command',
+            beforeTokens: estimateTokens(msgs),
+            afterTokens: estimateTokens(compacted),
+            createdAt: Date.now(),
+          })
           pushStatic(createLogEntry({ type: 'text', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` }))
           setIsStreaming(false)
           setCacheHitRate(session.getCacheHitRate())
@@ -363,6 +372,31 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           if (preflight.repaired) {
             pushStatic(createLogEntry({ type: 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted} orphan tool call(s).` }))
           }
+          setIsStreaming(false)
+          return
+        }
+
+        case '/context': {
+          const ledger = session.getContextLedger()
+          if (!ledger) {
+            pushStatic(createLogEntry({ type: 'text', content: 'Context ledger not available yet. Send a message to build the first ledger snapshot.' }))
+            setIsStreaming(false)
+            return
+          }
+
+          const sections = ledger.tokenBudget
+          const diagnostics = ledger.apiInvariantStatus.brokenRounds === 0
+            ? 'API rounds: safe'
+            : `⚠ ${ledger.apiInvariantStatus.brokenRounds} broken rounds`
+          const compacts = session.getCompactEvents()
+          const compactStr = compacts.length === 0
+            ? 'No compact events.'
+            : compacts.slice(-5).map(e => `- turn ${e.turn}: tier ${e.tier}, ${e.beforeTokens}→${e.afterTokens}`).join('\n')
+
+          pushStatic(createLogEntry({
+            type: 'text',
+            content: `Context: ${sections.compactionState}\nTokens: ${sections.estimatedTokens.toLocaleString()}/${sections.maxTokens.toLocaleString()} (${Math.round(sections.estimatedTokens / sections.maxTokens * 100)}%)\nRounds: ${ledger.rounds.length}\n${diagnostics}\n\nCompaction:\n${compactStr}`,
+          }))
           setIsStreaming(false)
           return
         }
@@ -545,6 +579,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           totalCost={cost.toFixed(2)}
           currentTokens={currentTokens}
           maxTokens={maxTokens}
+          contextHealth={session.getContextLedger()?.tokenBudget.compactionState ?? 'healthy'}
+          apiSafe={session.getContextLedger()?.apiInvariantStatus.brokenRounds === 0}
         />
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
