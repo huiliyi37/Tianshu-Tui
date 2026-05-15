@@ -51,7 +51,7 @@ function globToRegex(pattern: string): RegExp {
   return new RegExp(`^${regex}$`)
 }
 
-function walkDir(dir: string, results: string[], root: string): void {
+function walkDir(dir: string, results: string[], root: string, filter?: RegExp): void {
   if (results.length >= MAX_RESULTS) return
   let names: string[]
   try {
@@ -70,9 +70,12 @@ function walkDir(dir: string, results: string[], root: string): void {
     }
     if (s.isDirectory()) {
       if (EXCLUDE_DIRS.has(name)) continue
-      walkDir(fullPath, results, root)
+      walkDir(fullPath, results, root, filter)
     } else if (s.isFile()) {
-      results.push(relative(root, fullPath))
+      const rel = relative(root, fullPath)
+      if (!filter || filter.test(rel)) {
+        results.push(rel)
+      }
     }
   }
 }
@@ -129,15 +132,11 @@ Bad: glob(pattern="node_modules/**") (excluded by default)`,
 
     const regex = globToRegex(pattern)
     const files: string[] = []
-    walkDir(searchRoot, files, searchRoot)
+    walkDir(searchRoot, files, searchRoot, regex)
 
     const matches = files
-      .filter((f) => regex.test(f))
       .sort()
-      .map((f) => {
-        const absPath = join(searchRoot, f)
-        return relative(params.cwd, absPath)
-      })
+      .map((f) => relative(params.cwd, join(searchRoot, f)))
 
     return {
       content: matches.length > 0 ? matches.join('\n') : 'No files found matching pattern',
