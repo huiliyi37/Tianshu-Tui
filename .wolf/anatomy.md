@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T11:15:57.991Z
-> Files: 58 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T12:42:33.827Z
+> Files: 61 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ./
 
@@ -25,6 +25,14 @@
 ## docs/
 
 - `optimization-design-v2.md` — OpenCode TUI 优化增补设计 (~4002 tok)
+
+## docs/analysis/
+
+- `2026-05-15-handoff.md` — Handoff: Rivet v0.1 Baseline — 2026-05-15 (~760 tok)
+
+## docs/superpowers/plans/
+
+- `2026-05-15-rivet-performance-optimization.md` — Rivet 性能优化与 Claude Code 对标实现计划 (~10205 tok)
 
 ## docs/superpowers/specs/
 
@@ -118,6 +126,7 @@
 
 - `app.tsx` — MAX_VISIBLE_LOGS — renders map — uses useState, useRef, useCallback (~3142 tok)
 - `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
+- `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)
 - `status-bar.tsx` — StatusBar (~245 tok)
 - `stream.tsx` — StreamOutput (~105 tok)

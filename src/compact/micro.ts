@@ -19,16 +19,46 @@ export function microCompact(
     return { messages, truncated: 0 }
   }
 
-  // Iteratively remove oldest messages until under context window.
+  // Compute total tokens once, then subtract each removed message's tokens
+  // instead of re-scanning the entire array on every iteration.
   // KEEP_RECENT_MESSAGES is the floor — never truncate below this.
-  let removed = 0
-  const kept = [...messages]
-  while (kept.length > KEEP_RECENT_MESSAGES && estimateTokens(kept) > contextWindow) {
-    kept.shift()
-    removed++
+  let totalTokens = estimateTokens(messages)
+  let sliceIdx = 0
+  const maxRemove = messages.length - KEEP_RECENT_MESSAGES
+  while (sliceIdx < maxRemove && totalTokens > contextWindow) {
+    totalTokens -= estimateMessageTokens(messages[sliceIdx]!)
+    sliceIdx++
   }
 
-  return { messages: kept, truncated: removed }
+  return { messages: messages.slice(sliceIdx), truncated: sliceIdx }
+}
+
+/** Token estimation for a single message, accounting for CJK vs ASCII character density. */
+function estimateMessageTokens(msg: Message): number {
+  const content = typeof msg.content === 'string'
+    ? msg.content
+    : JSON.stringify(msg.content)
+
+  // Count CJK characters separately — they're ~2 tokens each, but
+  // BPE on mixed text averages to ~1.5 chars per token.
+  let asciiChars = 0
+  let cjkChars = 0
+  for (const ch of content) {
+    const code = ch.codePointAt(0) ?? 0
+    if (
+      (code >= 0x4E00 && code <= 0x9FFF) ||  // CJK Unified Ideographs
+      (code >= 0x3400 && code <= 0x4DBF) ||  // CJK Extension A
+      (code >= 0x20000 && code <= 0x2A6DF) || // CJK Extension B
+      (code >= 0x3040 && code <= 0x309F) ||  // Hiragana
+      (code >= 0x30A0 && code <= 0x30FF) ||  // Katakana
+      (code >= 0xAC00 && code <= 0xD7AF)     // Hangul
+    ) {
+      cjkChars++
+    } else {
+      asciiChars++
+    }
+  }
+  return Math.ceil(asciiChars / 4) + Math.ceil(cjkChars / 1.5)
 }
 
 /** Token estimation accounting for CJK vs ASCII character density.
@@ -40,30 +70,7 @@ export function microCompact(
 export function estimateTokens(messages: Message[]): number {
   let total = 0
   for (const msg of messages) {
-    const content = typeof msg.content === 'string'
-      ? msg.content
-      : JSON.stringify(msg.content)
-
-    // Count CJK characters separately — they're ~2 tokens each, but
-    // BPE on mixed text averages to ~1.5 chars per token.
-    let asciiChars = 0
-    let cjkChars = 0
-    for (const ch of content) {
-      const code = ch.codePointAt(0) ?? 0
-      if (
-        (code >= 0x4E00 && code <= 0x9FFF) ||  // CJK Unified Ideographs
-        (code >= 0x3400 && code <= 0x4DBF) ||  // CJK Extension A
-        (code >= 0x20000 && code <= 0x2A6DF) || // CJK Extension B
-        (code >= 0x3040 && code <= 0x309F) ||  // Hiragana
-        (code >= 0x30A0 && code <= 0x30FF) ||  // Katakana
-        (code >= 0xAC00 && code <= 0xD7AF)     // Hangul
-      ) {
-        cjkChars++
-      } else {
-        asciiChars++
-      }
-    }
-    total += Math.ceil(asciiChars / 4) + Math.ceil(cjkChars / 1.5)
+    total += estimateMessageTokens(msg)
   }
   return total
 }

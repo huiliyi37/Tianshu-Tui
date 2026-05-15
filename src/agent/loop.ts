@@ -4,7 +4,7 @@ import { PromptEngine } from '../prompt/engine.js'
 import { ToolRegistry } from '../tools/registry.js'
 import type { ToolCallParams } from '../tools/types.js'
 import { SessionContext } from './context.js'
-import { shouldAutoCompact } from '../compact/index.js'
+import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
 
@@ -15,6 +15,8 @@ export interface AgentConfig {
   maxTurns: number
   contextWindow: number
   compact: CompactionConfig
+  compactClient?: ApiClient
+  compactModel?: string
 }
 
 export interface AgentCallbacks {
@@ -48,21 +50,20 @@ export class AgentLoop {
     this.abortController?.abort()
   }
 
-  /**
-   * Compact messages when context window pressure is high.
-   *
-   * Currently uses microCompact (truncation). When a compact-model client
-   * is added to AgentConfig, switch to smartCompact for LLM-based summarization:
-   *
-   *   const { messages } = await smartCompact(
-   *     this.config.client, messages, tokenCount,
-   *     this.config.contextWindow, this.config.compact.model,
-   *   )
-   */
-  private compactMessages(
+  private async compactMessages(
     messages: Message[],
     tokenCount: number,
-  ): { messages: Message[] } {
+  ): Promise<{ messages: Message[] }> {
+    if (this.config.compactClient && this.config.compactModel) {
+      const result = await smartCompact(
+        this.config.compactClient,
+        messages,
+        tokenCount,
+        this.config.contextWindow,
+        this.config.compactModel,
+      )
+      return { messages: result.messages }
+    }
     return microCompact(messages, this.config.contextWindow, tokenCount)
   }
 
@@ -81,7 +82,7 @@ export class AgentLoop {
         const messages = this.session.getMessages()
         const decision = shouldAutoCompact(messages, this.config.compact)
         if (decision.shouldCompact) {
-          const { messages: compacted } = this.compactMessages(messages, decision.tokenCount)
+          const { messages: compacted } = await this.compactMessages(messages, decision.tokenCount)
           this.session.replaceMessages(compacted)
         }
 

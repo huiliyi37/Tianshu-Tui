@@ -1,4 +1,37 @@
 {
   "version": 1,
-  "bugs": []
+  "bugs": [
+    {
+      "id": "bug-001",
+      "timestamp": "2026-05-15T12:26:27.543Z",
+      "error_message": "Documentation exposed a real DeepSeek API key in the handoff validation table.",
+      "file": "docs/analysis/2026-05-15-handoff.md",
+      "root_cause": "A live credential was copied into project documentation instead of using a placeholder.",
+      "fix": "Replaced the API key value with sk-xxx placeholder and removed secret fragments from generated OpenWolf logs.",
+      "tags": [
+        "security",
+        "secret",
+        "documentation"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T12:26:27.543Z"
+    },
+    {
+      "id": "bug-002",
+      "timestamp": "2026-05-15T20:33:00+08:00",
+      "error_message": "npm test fails with: sh: tsx: command not found",
+      "file": "package.json",
+      "root_cause": "The test script invokes tsx, but tsx is not listed in devDependencies and is not available in the local environment.",
+      "fix": "Not fixed in this audit; recommended adding tsx as a devDependency or changing the test runner command.",
+      "tags": [
+        "test",
+        "dependency",
+        "tooling"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T20:33:00+08:00"
+    }
+  ]
 }

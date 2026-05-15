@@ -4,6 +4,20 @@ import { truncateContent } from './truncation.js'
 import { validatePath } from './path-validate.js'
 import { GitignoreFilter } from './gitignore.js'
 
+// Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
+const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
+const GITIGNORE_CACHE_TTL = 60_000 // 60 seconds
+
+function getGitignoreFilter(cwd: string): GitignoreFilter {
+  const cached = gitignoreCache.get(cwd)
+  if (cached && Date.now() - cached.ts < GITIGNORE_CACHE_TTL) {
+    return cached.filter
+  }
+  const filter = new GitignoreFilter(cwd)
+  gitignoreCache.set(cwd, { filter, ts: Date.now() })
+  return filter
+}
+
 export const READ_FILE_TOOL: Tool = {
   definition: {
     name: 'read_file',
@@ -43,7 +57,7 @@ Bad: re-reading the same file multiple times in one session without it being mod
       return { content: `Error: File not found: ${filePath}`, isError: true }
     }
 
-    const filter = new GitignoreFilter(params.cwd)
+    const filter = getGitignoreFilter(params.cwd)
     if (filter.isIgnored(params.cwd, filePath)) {
       return { content: `Error: File is gitignored (node_modules, build artifacts, etc.): ${filePath}`, isError: true }
     }

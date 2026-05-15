@@ -9,11 +9,23 @@ export interface VolatileContext {
   workingSet?: string[]
 }
 
+let rivetMdCache: { value: string | undefined; timestamp: number } | null = null
+const RIVET_MD_CACHE_TTL_MS = 30_000 // 30 seconds
+
 function readRivetMd(cwd: string): string | undefined {
+  if (rivetMdCache && Date.now() - rivetMdCache.timestamp < RIVET_MD_CACHE_TTL_MS) {
+    return rivetMdCache.value
+  }
+
   const path = join(cwd, '.rivet.md')
   try {
-    if (existsSync(path)) return readFileSync(path, 'utf-8')
+    if (existsSync(path)) {
+      const value = readFileSync(path, 'utf-8')
+      rivetMdCache = { value, timestamp: Date.now() }
+      return value
+    }
   } catch { /* ignore */ }
+  rivetMdCache = { value: undefined, timestamp: Date.now() }
   return undefined
 }
 

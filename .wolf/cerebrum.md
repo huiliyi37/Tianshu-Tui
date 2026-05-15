@@ -17,6 +17,7 @@
 
 <!-- Mistakes made and corrected. Each entry prevents the same mistake recurring. -->
 <!-- Format: [YYYY-MM-DD] Description of what went wrong and what to do instead. -->
+- [2026-05-15] Do not paste real API keys or credential fragments into handoff docs, bug logs, memory logs, or summaries; always use placeholders and verify with secret-pattern search after sanitizing.
 
 ## Decision Log
 
