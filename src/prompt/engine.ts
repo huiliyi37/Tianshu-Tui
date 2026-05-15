@@ -77,6 +77,8 @@ export class PromptEngine {
   private fingerprint: PrefixFingerprint
   private config: PromptEngineConfig
   private taskProgress?: TaskState
+  private behaviorMirror?: string | null
+  private decisions?: string[]
 
   constructor(config: PromptEngineConfig) {
     this.config = config
@@ -124,7 +126,7 @@ export class PromptEngine {
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         if (i === lastUserTextIdx && toolHistory && toolHistory.length > 0) {
           // Fresh volatile block with tool history for the latest turn
-          const freshBlock = buildVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress })
+          const freshBlock = buildVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, decisions: this.decisions })
           result.push({ role: 'user', content: freshBlock })
         } else {
           // Frozen volatile block for historical turns — preserves prefix cache
@@ -164,5 +166,13 @@ export class PromptEngine {
 
   setTaskProgress(state: TaskState): void {
     this.taskProgress = state
+  }
+
+  setBehaviorMirror(mirror: string | null): void {
+    this.behaviorMirror = mirror
+  }
+
+  setDecisions(decisions: string[]): void {
+    this.decisions = decisions
   }
 }

@@ -19,9 +19,13 @@ import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { extractTaskState } from './task-state.js'
+import { detectMirror } from './behavior-mirror.js'
+import { extractDecisions } from './decision-anchor.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
+import { createTraceStore, startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, type TraceStore } from './trace-store.js'
+import { getDoomLoopLevel } from './trace-store.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -67,7 +71,9 @@ export class AgentLoop {
   private prewarm = new PrewarmCache()
   private streamedText = ''
   private lastPrewarmAt = 0
+  private decisions: string[] = []
   private trajectory = new TrajectoryRecorder()
+  private traceStore: TraceStore
   private harness: TurnHarness
 
   constructor(
@@ -77,8 +83,9 @@ export class AgentLoop {
   ) {
     this.cwd = cwd ?? process.cwd()
     this.evidence = new EvidenceTracker()
+    this.traceStore = createTraceStore()
     this.harness = new TurnHarness(
-      { maxRetries: 1, retryableClasses: ['timeout', 'flaky'] },
+      { maxRetries: 2, retryableClasses: ['timeout', 'flaky'] },
       this.trajectory,
     )
   }
@@ -137,6 +144,12 @@ export class AgentLoop {
     this.trajectory.reset()
   }
 
+  getTraceStore(): TraceStore { return this.traceStore }
+
+  getEvidenceState() { return this.evidence.getState() }
+
+  getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
+
   private isHighRisk(toolName: string, input: Record<string, unknown>): boolean {
     const destructive = /\b(rm\s+-|git\s+reset\s+--hard|git\s+clean\s+-|push\s+--force|killall|pkill|drop\s+table)\b/i
     if (toolName === 'bash') {
@@ -194,6 +207,8 @@ export class AgentLoop {
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     this.trajectory.reset()
+    this.decisions = []
+    this.traceStore = createTraceStore()
     this.session.addUserMessage(userInput)
     let checkpointCreatedThisTurn = false
 
@@ -345,6 +360,15 @@ export class AgentLoop {
               }
 
               // Execute via TurnHarness (retry + trajectory recording)
+              const traceId = tu.id
+              this.traceStore = startTraceEvent(this.traceStore, {
+                id: traceId,
+                turn,
+                kind: 'tool',
+                name: tu.name,
+                startedAt: Date.now(),
+                summary: JSON.stringify(tu.input).slice(0, 60),
+              })
               let rawToolResult: import('../tools/types.js').ToolResult | undefined
               const harnessResult = await this.harness.executeTool({
                 id: tu.id,
@@ -376,6 +400,14 @@ export class AgentLoop {
               }) ?? {}
               const finalContent = postHookResult.result ?? harnessResult.content
 
+              this.traceStore = finishTraceEvent(this.traceStore, traceId, {
+                status: harnessResult.isError ? 'failed' : 'passed',
+                endedAt: Date.now(),
+                summary: harnessResult.content.slice(0, 100),
+              })
+              const fp = fingerprintToolCall(tu.name, tu.input, harnessResult.isError ? 'error' : 'success')
+              this.traceStore = recordToolFingerprint(this.traceStore, fp)
+
               callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError, rawToolResult?.rawPath, rawToolResult?.uiContent)
 
               // Record tool history for volatile context injection
@@ -390,7 +422,7 @@ export class AgentLoop {
                 this.evidence.trackFileRead(tu.input.file_path as string)
               } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
                 this.evidence.trackFileModified(tu.input.file_path as string)
-              } else if (tu.name === 'run_tests' && !harnessResult.isError && rawToolResult) {
+              } else if (tu.name === 'run_tests' && rawToolResult) {
                 if (rawToolResult.verification) {
                   this.evidence.trackVerification(rawToolResult.verification)
                 }
@@ -434,10 +466,24 @@ export class AgentLoop {
             this.config.promptEngine.setTaskProgress(taskState)
           }
 
+          // Behavior mirror detection (after warmup turns)
+          const mirror = this.session.getTurnCount() > 3
+            ? detectMirror(this.trajectory.getEntries())
+            : null
+          this.config.promptEngine.setBehaviorMirror(mirror)
+
           this.refreshLedger()
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
           continue
         }
+
+        // Extract decisions from model output
+        const newDecisions = extractDecisions(this.streamedText)
+        for (const d of newDecisions) {
+          if (!this.decisions.includes(d)) this.decisions.push(d)
+        }
+        if (this.decisions.length > 3) this.decisions = this.decisions.slice(-3)
+        this.config.promptEngine.setDecisions(this.decisions)
 
         const badge = this.evidence.buildBadge()
         if (badge) callbacks.onTextDelta('\n' + badge)
