@@ -30,12 +30,13 @@ export interface CompactionDecision {
 export function shouldAutoCompact(
   messages: Message[],
   config: CompactionConfig,
+  estimatedTokenCount?: number,
 ): CompactionDecision {
   if (!config.enabled) {
     return { shouldCompact: false, reason: 'disabled', tokenCount: 0 }
   }
 
-  const tokenCount = estimateTokens(messages)
+  const tokenCount = estimatedTokenCount ?? estimateTokens(messages)
 
   if (tokenCount < config.autoFloor) {
     return { shouldCompact: false, reason: 'below_floor', tokenCount }
