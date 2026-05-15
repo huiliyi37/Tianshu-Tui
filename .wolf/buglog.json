@@ -32,6 +32,22 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-15T20:33:00+08:00"
+    },
+    {
+      "id": "bug-003",
+      "timestamp": "2026-05-15T21:05:00+08:00",
+      "error_message": "OpenWolf cerebrum edit failed because the replacement snippet omitted part of the existing description line.",
+      "file": ".wolf/cerebrum.md",
+      "root_cause": "The edit used an old_string that did not include the full current description text, so the exact replacement could not match.",
+      "fix": "Retried with the exact existing description line and successfully added the strategic-goal learning.",
+      "tags": [
+        "tooling",
+        "memory",
+        "edit"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T21:05:00+08:00"
     }
   ]
 }

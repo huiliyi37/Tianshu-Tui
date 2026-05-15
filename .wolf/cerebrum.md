@@ -12,6 +12,7 @@
 
 - **Project:** opencode-tui
 - **Description:** A terminal coding agent powered by DeepSeek V4, with prefix cache optimization for the 1M context window. Ink 6 + React TUI, streaming responses, tool execution loop.
+- **Strategic goal:** Promote open source and raise open/open-source model capability in terminal coding agents, aiming for developer capability and high availability comparable to Claude Code and opencode.
 
 ## Do-Not-Repeat
 
