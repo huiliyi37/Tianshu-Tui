@@ -1,0 +1,42 @@
+# ~/.opencode/config.toml
+# OpenCode TUI configuration
+
+[provider]
+default = "deepseek"
+
+[provider.deepseek]
+name = "deepseek"
+base_url = "https://api.deepseek.com/anthropic"
+api_key = "sk-xxx"                                         # or set DEEPSEEK_API_KEY env var
+thinking = "enabled"
+max_tokens = 64000
+
+[[provider.deepseek.models]]
+id = "deepseek-v4-pro"
+alias = "v4-pro"
+contextWindow = 1_000_000
+maxTokens = 64000
+reasoningEffort = "max"
+
+[[provider.deepseek.models]]
+id = "deepseek-v4-flash"
+alias = "v4-flash"
+contextWindow = 1_000_000
+maxTokens = 64000
+reasoningEffort = "high"
+
+[agent]
+approval = "suggest"
+maxTurns = 50
+mode = "code"
+
+[compact]
+enabled = true
+autoThreshold = 800_000
+autoFloor = 500_000
+model = "deepseek-v4-flash"
+
+[cache]
+enabled = true
+minSystemTokens = 256
+showHitRate = true

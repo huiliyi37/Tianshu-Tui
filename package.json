@@ -1,0 +1,27 @@
+{
+  "name": "opencode-tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "opencode": "./dist/main.js"
+  },
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/**/__tests__/*.test.ts"
+  },
+  "dependencies": {
+    "ink": "^6.8.0",
+    "react": "^19.2.6",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,54 @@
+import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
+import { execSync } from 'child_process'
+
+export interface VolatileContext {
+  cwd: string
+  opencodeMd?: string
+  gitStatus?: string
+  workingSet?: string[]
+}
+
+function readOpenCodeMd(cwd: string): string | undefined {
+  const path = join(cwd, '.opencode.md')
+  try {
+    if (existsSync(path)) return readFileSync(path, 'utf-8')
+  } catch { /* ignore */ }
+  return undefined
+}
+
+function getGitStatus(): string | undefined {
+  try {
+    const branch = execSync('git branch --show-current', {
+      encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    const status = execSync('git status --short', {
+      encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    if (!branch && !status) return undefined
+    return `Current branch: ${branch}\nStatus:\n${status || '(clean)'}`
+  } catch {
+    return undefined
+  }
+}
+
+/** Build the volatile `<context>` block injected into the user message. */
+export function buildVolatileBlock(ctx: VolatileContext): string {
+  const parts: string[] = []
+
+  const md = ctx.opencodeMd ?? readOpenCodeMd(ctx.cwd)
+  if (md) {
+    parts.push(`## Project Instructions\n\n${md}`)
+  }
+
+  const git = ctx.gitStatus ?? getGitStatus()
+  if (git) {
+    parts.push(`## Git Status\n\n${git}`)
+  }
+
+  if (ctx.workingSet && ctx.workingSet.length > 0) {
+    parts.push(`## Working Set\n\n${ctx.workingSet.join('\n')}`)
+  }
+
+  return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''
+}
