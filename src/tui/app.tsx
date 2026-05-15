@@ -5,6 +5,7 @@ import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
 import { ThinkingCollapser } from './thinking.js'
 import { ToolCard } from './tool-card.js'
+import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
 import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
@@ -94,6 +95,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const setAutoSafe = useCallback((v: boolean) => { autoSafeRef.current = v; _setAutoSafe(v) }, [])
 
   const logRef = useRef<LogEntry[]>([])
+
+  // Agent status tracking
+  const streamStartRef = useRef(0)
+  const thinkStartRef = useRef(0)
+  const thinkTimeRef = useRef(0)
+  const toolCallTracker = useRef<Map<string, ToolCallItem>>(new Map())
+  const [toolCallsDisplay, setToolCallsDisplay] = useState<ToolCallItem[]>([])
 
   // Streaming buffers — mutated in place, flushed to React state on timer
   const streamBuf = useRef('')
@@ -221,6 +229,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     toolAccum.current.clear()
     dirtyTools.current.clear()
     toolNames.current.clear()
+
+    // Reset agent status tracking
+    streamStartRef.current = Date.now()
+    thinkStartRef.current = 0
+    thinkTimeRef.current = 0
+    toolCallTracker.current.clear()
+    setToolCallsDisplay([])
 
     for (const ref of [streamTimer, thinkTimer, toolTimer]) {
       if (ref.current) {
@@ -415,14 +430,26 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
       },
       onThinkingDelta: (thinking) => {
+        if (thinkStartRef.current === 0) thinkStartRef.current = Date.now()
         thinkBuf.current += thinking
         if (!thinkTimer.current) {
           thinkTimer.current = setTimeout(flushThink, THINKING_FLUSH_MS)
         }
       },
-      onToolUse: (id, name) => {
+      onToolUse: (id, name, input) => {
         toolNames.current.set(id, name)
         addLog(createLogEntry({ type: 'tool', id, content: 'Running...', toolName: name }))
+
+        // Track thinking time up to this point
+        if (thinkStartRef.current > 0) {
+          thinkTimeRef.current = Date.now() - thinkStartRef.current
+          thinkStartRef.current = 0
+        }
+
+        // Update agent status tool call list
+        toolCallTracker.current.set(id, { id, name, label: toolLabel(name, input), done: false, error: false })
+        setToolCallsDisplay([...toolCallTracker.current.values()])
+
         flushLogs()
       },
       onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {
@@ -443,6 +470,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolAccum.current.delete(id)
         toolNames.current.delete(id)
         updateLogEntry(id, name, uiContent ?? result, isError, rawPath)
+
+        // Update agent status
+        const tcEntry = toolCallTracker.current.get(id)
+        if (tcEntry) {
+          tcEntry.done = true
+          tcEntry.error = !!isError
+          setToolCallsDisplay([...toolCallTracker.current.values()])
+        }
+
         flushLogs()
       },
       onCheckpoint: (hash) => {
@@ -453,6 +489,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Flush any remaining buffered tool output before clearing
         if (dirtyTools.current.size > 0) {
           flushTools()
+        }
+
+        // Finalize thinking time
+        if (thinkStartRef.current > 0) {
+          thinkTimeRef.current = Date.now() - thinkStartRef.current
+          thinkStartRef.current = 0
         }
 
         // Flush any remaining streaming buffers
@@ -517,6 +559,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const currentTokens = session.getTotalUsage().input_tokens
   const termSize = useTerminalSize()
+  const tokenEstimate = Math.floor(streamingText.length / 4)
 
   return (
     <Box flexDirection="column" height={termSize.rows}>
@@ -535,6 +578,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       )}
       <LogList logs={logs} verbose={verbose} />
       <StreamingPanel text={streamingText} thinking={streamingThinking} isStreaming={isStreaming} />
+      <AgentStatus
+        isStreaming={isStreaming}
+        startMs={streamStartRef.current || Date.now()}
+        tokenEstimate={tokenEstimate}
+        thinkingTime={thinkTimeRef.current}
+        tools={toolCallsDisplay}
+      />
       {pendingApproval && (
         <Box paddingX={2} borderStyle="single" borderColor="yellow">
           <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
