@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.4 Phase 1 complete — 97 source files, ~10,200 LOC, 210 tests passing. Subagent orchestration: typed work orders, headless worker sessions, tool allowlist, delegate_task tool wired to runtime. 天枢 persona with design-doc-first workflow.
+P2.4 Phase 4 complete — 353 tests passing, typecheck clean. Subagent orchestration with write workers, adaptive model routing, TUI cockpit, progressive context engine, and theme system. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -26,6 +26,7 @@ rivet
 ```
 src/
 ├── main.tsx              Entry: CLI routing → config → tools → prompt engine → agent → TUI
+├── validation.ts         Shared input validation (sessionId regex)
 ├── agent/
 │   ├── loop.ts           Agent loop: LLM call → tool execution → repeat
 │   ├── context.ts        Session state: messages, usage, turn count
@@ -35,9 +36,16 @@ src/
 │   ├── failure-classifier.ts  Test failure categorization + fix suggestions
 │   ├── verification.ts   VerificationState: passed/failed/blocked tracking
 │   ├── work-order.ts     WorkOrder/WorkerResult types + zod schemas
+│   ├── work-queue.ts     Priority queue with dedupe + dependency blocking
 │   ├── worker-session.ts Headless WorkerSession with independent context
 │   ├── worker-prompts.ts Decomposition + result-aggregation prompts
-│   └── coordinator.ts    DelegationCoordinator: budget gate, model routing
+│   ├── coordinator.ts    DelegationCoordinator: budget gate, model routing, batch dispatch
+│   ├── coordinator-state.ts Lifecycle event tracking + failure budget
+│   ├── aggregation.ts    4 aggregation policies (primary_decides, all_required, etc.)
+│   ├── adaptive-routing.ts Per-profile per-model pass rate + latency scoring
+│   ├── intent-extractor.ts Intent classification from user input
+│   ├── prewarm.ts        Speculative pre-warming cache
+│   └── trace-store.ts    Structured event tracing
 ├── api/
 │   ├── client.ts         Streaming API client with retry (exp backoff 1s/2s/4s)
 │   ├── deepseek.ts       DeepSeek V4 provider: dual-format usage mapping
@@ -45,9 +53,9 @@ src/
 │   ├── sse.ts            SSE parser with id/retry field support
 │   └── types.ts          Message, ContentBlock, Usage, ToolDefinition types
 ├── prompt/
-│   ├── engine.ts         PromptEngine: frozen system prompt + volatile context
+│   ├── engine.ts         PromptEngine: frozen system prompt + volatile context + XML protocol
 │   ├── static.ts         System prompt builder with 天枢 persona
-│   ├── volatile.ts       Volatile context: .rivet.md, git status (30s cache)
+│   ├── volatile.ts       Volatile context: .rivet.md, git status, ledger, session memory
 │   ├── volatile-git.ts   Non-blocking git status: stale cache + async refresh
 │   ├── fingerprint.ts    SHA-256 fingerprint for cache drift detection
 │   └── cache-diagnostic.ts  Cache miss reason analysis (5 categories)
@@ -78,9 +86,18 @@ src/
 │   ├── path-validate.ts  Path traversal protection
 │   └── truncation.ts     Output truncation (head + tail)
 ├── compact/
-│   ├── micro.ts          Truncation compaction (keep recent N messages)
-│   ├── auto.ts           Auto-compaction decision (800K threshold, 500K floor)
+│   ├── micro.ts          Micro-compact: round-safe truncation with early-return optimization
+│   ├── auto.ts           Smart compact: reactive round selection + boundary message
 │   └── constants.ts      Compaction thresholds per context window size
+├── context/
+│   ├── rounds.ts         API round grouping + invariant validation
+│   ├── ledger.ts         Context Ledger with health levels
+│   ├── resume-preflight.ts Repair broken message histories
+│   ├── session-memory.ts Per-session memory sidecar
+│   ├── compact-policy.ts Progressive compaction policy + circuit breaker
+│   ├── reactive-compact.ts Compact round selection + boundary message
+│   ├── microcompact.ts   Microcompact tool results (preserve API rounds)
+│   └── types.ts          Context health, budget, session memory types
 ├── failures/
 │   └── sample.ts         Redacted failure sample library for testing
 ├── config/
@@ -88,13 +105,16 @@ src/
 │   ├── default.ts        Default config: DeepSeek V4 Pro/Flash
 │   └── manager.ts        CLI config manager (rivet config <command>)
 └── tui/
-    ├── app.tsx            Main app: slash commands, approval UI, live tool output
+    ├── app.tsx            Main app: slash commands, approval UI, cockpit, live tool output
     ├── input.tsx          Input bar with cursor, history, Ctrl+A/E/W/U
     ├── base-text-input.tsx Full-featured text input with history nav
-    ├── status-bar.tsx     Model, cache hit rate, cost, token bar (memoized)
+    ├── status-bar.tsx     Model, cache hit rate, cost, token bar, theme colors
+    ├── summary-bar.tsx    Live 3-line cockpit: phase, context%, last action, risk
+    ├── phase-tracker.ts   Tool→phase state machine (searching/coding/testing/…)
+    ├── theme.ts           Truecolor/fallback color palette with tool-specific colors
     ├── stream.tsx         Streaming text output (memoized)
     ├── thinking.tsx       Thinking block with Tab expand/collapse
-    ├── tool-card.tsx      Tool execution display with rawPath links (memoized)
+    ├── tool-card.tsx      Tool execution display with theme-colored borders
     ├── log-state.ts       Log entry types, state management, output summarization
     ├── history.ts         Command history persistence
     └── error-boundary.tsx React error boundary (catch without crash)
@@ -169,7 +189,22 @@ The prompt is split into 4 layers for maximum cache stability:
 - **Graceful shutdown** — SIGINT/SIGTERM → abort agent + persist session + kill children
 - **ErrorBoundary** — React errors caught without crashing the process
 - **Config validation** — Zod schema with deep merge over defaults
-- **Subagent orchestration** — Typed WorkOrder/WorkerResult, headless WorkerSession, tool allowlist enforcement (P2.4 Phase 1)
+- **Subagent orchestration** — Typed WorkOrder/WorkerResult, headless WorkerSession, tool allowlist enforcement, batch dispatch with aggregation
+- **Write-capable workers** — Patcher profile with edit_file, write_file, bash, run_tests; patchSummary in results
+- **Adaptive model routing** — Per-profile per-model pass rate + latency composite scoring, history-capped at 100 entries
+- **Work order queue** — Priority queue with dedupeKey guard, dependency blocking, max concurrency control
+- **Aggregation policies** — primary_decides, all_required, first_success, majority vote
+- **Coordinator state** — Lifecycle events (queued/running/passed/failed/blocked/escalated), failure budget escalation
+- **Progressive context engine** — API round grouping, context ledger with health levels, resume preflight repair
+- **Session memory** — Per-session sidecar that survives compaction; `/memory` CRUD
+- **Reactive compact** — Selects API-invariant rounds for compaction, preserves cache anchors
+- **Compact policy** — Progressive tier decision + circuit breaker (3 consecutive failures → skip)
+- **TUI cockpit** — SummaryBar (live phase, context%, last action, risk), PhaseTracker, `/cockpit` expanded mode
+- **Theme system** — Truecolor palette (cyan/purple/green) with 256-color fallback, tool-specific border colors
+- **Gradient banner** — Startup banner with gradient-string
+- **XML protocol layer** — Volatile context uses structured XML tags for cache-stable injection
+- **Speculative pre-warming** — Intent-based prompt pre-warming cache
+- **Input validation** — Shared sessionId regex in `src/validation.ts`, path boundary enforcement
 - **天枢 persona** — "Don't Guess — Verify" workflow, design-doc-first, TDD guidance
 - **Three-layer read_file** — Raw persistence + model compression + line-numbered TUI preview (50 lines)
 - **Live tool output** — Batched streaming display (50ms flush), no more silent tool execution
@@ -251,6 +286,7 @@ Place `~/.rivet/config.json` (optional, uses defaults if missing):
 | `/context` | Show context ledger: health, tokens, API round safety, compact events |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
+| `/cockpit` | Toggle expanded cockpit panel (phase tracker + live metrics) |
 
 ## User Manual
 
@@ -298,7 +334,48 @@ Rivet tracks context health in real time. The status bar shows:
 - **`rounds:safe`** / **`rounds:!`** — whether all API message rounds pass invariant checks
 - **`/context`** — detailed view: token sections, round diagnostics, compact history
 
-Session memory (`/memory`) stores per-session notes that survive across compaction. Use it to bookmark decisions or preferences within a session.
+During streaming, a live **SummaryBar** appears showing:
+
+```
+◆ search for routing → searching │ ▓▓░░░ 45% │ 12s
+├ last: read_file loop.ts → ✓
+└ step 3 │ risk: none
+```
+
+- **Phase tracker** — Maps tool names to phases: searching (read/grep/glob), coding (edit/write), testing (run_tests), running (bash)
+- **Context bar** — Visual token usage with color coding (cyan → yellow → red)
+- **Last action** — Shows which tool ran last and whether it succeeded
+- **Risk indicator** — `medium` when bash runs without auto-approve, otherwise `none`
+
+Type `/cockpit` to toggle the expanded cockpit panel with additional metrics (phase detail, turn count, cache hit rate).
+
+### Subagent Orchestration
+
+Rivet can delegate sub-tasks to independent worker sessions:
+
+- **Work orders** — Typed objectives (code_search, review, verify, patch_proposal) with budget constraints
+- **Tool isolation** — Read-only workers (read_file, glob, grep, diff) or write workers (adds edit_file, write_file, bash, run_tests)
+- **Adaptive routing** — Workers track per-model pass rate and latency; best model is auto-selected for each profile
+- **Batch dispatch** — Multiple work orders run concurrently with aggregation (majority vote, all_required, first_success, or primary_decides)
+- **Coordinator state** — Lifecycle events tracked with failure budget escalation (3 consecutive failures triggers escalation)
+
+### Progressive Context Engine
+
+The context engine manages long conversations safely:
+
+- **API round grouping** — Messages are grouped into assistant+user rounds and validated for API compliance
+- **Context ledger** — Tracks token budget, health state, API invariant status, and compact events per turn
+- **Resume preflight** — When restoring a session, broken rounds are detected and synthetic tool results are inserted to restore API compliance
+- **Reactive compact** — Compaction selects only API-invariant rounds, preserving cache anchors and recent context
+- **Compact policy** — Progressive tier decision with circuit breaker: 3 consecutive compaction failures disables auto-compact
+
+### Session Memory
+
+Session memory survives across compaction. Use it to bookmark decisions or preferences:
+
+- `/memory` — List all entries for the current session
+- `/memory Always use pnpm for this project` — Save a note
+- Memory entries are included in the volatile context block sent to the model
 
 ### Slash Commands Quick Reference
 
@@ -320,6 +397,7 @@ Session memory (`/memory`) stores per-session notes that survive across compacti
 | `/context` | Show context health, token sections, round diagnostics |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
+| `/cockpit` | Toggle expanded cockpit panel |
 | `/clear` | Clear screen |
 | `/exit` | Save session and exit |
 
@@ -375,7 +453,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (197)
+npm run test                   # Run all tests (353)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
