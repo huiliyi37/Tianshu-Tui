@@ -6,6 +6,7 @@ export const DEFAULT_CONFIG: Config = {
     providers: {
       deepseek: {
         name: 'deepseek',
+        apiKeyEnv: 'DEEPSEEK_API_KEY',
         baseUrl: 'https://api.deepseek.com/anthropic',
         thinking: 'enabled',
         maxTokens: 64000,
