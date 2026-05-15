@@ -160,6 +160,7 @@ export async function smartCompact(
     anchorMessages: CACHE_ANCHOR_MESSAGES,
     recentMessages: KEEP_RECENT_MESSAGES,
   })
+  // selectedRounds may be empty (nothing to compact); ?. handles the undefined case
   const firstRound = selectedRounds[0]
   const lastRound = selectedRounds[selectedRounds.length - 1]
   const compactMessage = createCompactBoundaryMessage({

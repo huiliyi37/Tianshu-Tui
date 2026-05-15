@@ -6,6 +6,7 @@ import type { Message } from '../api/types.js'
 import type { SessionMetadata } from '../context/types.js'
 import type { SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
 import { appendSessionMemory, buildSessionMemoryBlock, loadSessionMemory } from '../context/session-memory.js'
+import { assertValidSessionId } from '../validation.js'
 
 const SESSION_DIR = join(homedir(), '.rivet', 'sessions')
 
@@ -21,7 +22,7 @@ export class SessionPersist {
   private sessionId: string
 
   constructor(sessionId: string) {
-    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) throw new Error(`Invalid sessionId: ${sessionId}`)
+    assertValidSessionId(sessionId)
     ensureDir(SESSION_DIR)
     this.sessionId = sessionId
     this.filePath = join(SESSION_DIR, `${sessionId}.jsonl`)

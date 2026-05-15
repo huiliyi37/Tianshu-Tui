@@ -1,6 +1,8 @@
 import type { WorkerProfile } from './work-order.js'
 
 const MAX_HISTORY = 100
+/** 1 second of avgLatencyMs penalizes 0.1 points of passRate in the composite score */
+const LATENCY_PENALTY_DIVISOR = 10_000
 
 interface WorkerOutcome {
   passed: boolean
@@ -48,7 +50,7 @@ export class AdaptiveRouter {
     for (const model of candidates) {
       const score = this.getScore(profile, model)
       if (!score) continue
-      const composite = score.passRate - (score.avgLatencyMs / 10000)
+      const composite = score.passRate - (score.avgLatencyMs / LATENCY_PENALTY_DIVISOR)
       if (composite > bestScore) {
         bestScore = composite
         best = model

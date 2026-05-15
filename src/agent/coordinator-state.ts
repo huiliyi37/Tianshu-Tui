@@ -8,6 +8,7 @@ export interface WorkerEvent {
 }
 
 export interface CoordinatorSummary {
+  /** Cumulative event counts — each completed work order increments queued, running, AND its terminal status */
   queued: number
   running: number
   passed: number

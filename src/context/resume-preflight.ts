@@ -22,7 +22,10 @@ export function runResumePreflight(messages: Message[]): ResumePreflightReport {
   const repaired = [...messages]
   let inserted = 0
 
-  // Walk rounds in reverse so insertion indices stay stable
+  // Walk rounds in reverse so insertion indices stay stable.
+  // Rounds from groupIntoRounds are non-overlapping with strictly increasing
+  // startMessageIndex, so reverse iteration guarantees each splice shifts
+  // only lower-indexed positions that we've already processed.
   const brokenRounds = [...rounds]
     .filter(r => r.apiInvariant === 'broken' && r.hasToolUse)
     .reverse()
