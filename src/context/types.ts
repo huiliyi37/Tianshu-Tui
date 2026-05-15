@@ -1,0 +1,113 @@
+import type { Message } from '../api/types.js'
+
+// ─── Health & Budget ──────────────────────────────────────────
+
+export type ContextHealthLevel = 'healthy' | 'watch' | 'compact' | 'critical'
+
+export type CompactionState = 'healthy' | 'warning' | 'compacting' | 'critical'
+
+export interface ContextBudget {
+  estimatedTokens: number
+  maxTokens: number
+  warningThreshold: number
+  compactionState: CompactionState
+}
+
+// ─── API Round ────────────────────────────────────────────────
+
+export type ApiInvariant = 'ok' | 'repaired' | 'broken'
+
+export interface ApiRound {
+  id: string
+  startMessageIndex: number
+  endMessageIndex: number
+  turnNumber: number
+  hasToolUse: boolean
+  hasToolResult: boolean
+  tokenEstimate: number
+  compactableTokenEstimate: number
+  apiInvariant: ApiInvariant
+}
+
+export interface ApiInvariantStatus {
+  totalRounds: number
+  okRounds: number
+  repairedRounds: number
+  brokenRounds: number
+  orphanToolUse: string[]
+  orphanToolResult: string[]
+}
+
+// ─── Context Ledger ───────────────────────────────────────────
+
+export interface CompactedSpan {
+  id: string
+  strategy: 'micro' | 'session_memory' | 'reactive' | 'emergency'
+  startRoundIndex: number
+  endRoundIndex: number
+  tokenBefore: number
+  tokenAfter: number
+  summaryPath?: string
+  rawTranscriptPath: string
+  createdAt: number
+}
+
+export interface ContextAnchor {
+  kind: 'decision' | 'error' | 'user_preference' | 'pending_task' | 'file' | 'verification'
+  text: string
+  sourceRoundIndex: number
+  salience: number
+}
+
+export interface WorkingSetEntry {
+  path: string
+  status: 'read' | 'modified' | 'error' | 'pending'
+  lastRoundIndex: number
+}
+
+export interface SessionMemoryState {
+  path: string
+  lastSummarizedRoundIndex: number
+  lastUpdatedAt: number
+  digest: string
+  stale: boolean
+  tokenEstimate: number
+}
+
+export interface ContextLedger {
+  sessionId: string
+  transcriptPath: string
+  rounds: ApiRound[]
+  anchors: ContextAnchor[]
+  workingSet: WorkingSetEntry[]
+  compactedSpans: CompactedSpan[]
+  sessionMemory: SessionMemoryState | null
+  tokenBudget: ContextBudget
+  apiInvariantStatus: ApiInvariantStatus
+}
+
+// ─── Resume Preflight ─────────────────────────────────────────
+
+export interface ResumePreflightReport {
+  messageCount: number
+  roundCount: number
+  invariant: ApiInvariantStatus
+  repaired: boolean
+  syntheticResultsInserted: number
+  orphanToolResultIds: string[]
+  messages: Message[]
+}
+
+// ─── Microcompact ─────────────────────────────────────────────
+
+export interface MicrocompactOptions {
+  keepRecentRounds?: number
+  minContentLength?: number
+}
+
+export interface MicrocompactResult {
+  messages: Message[]
+  compactedCount: number
+  tokensSaved: number
+  compactedRoundIds: string[]
+}
