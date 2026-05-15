@@ -478,3 +478,96 @@ export function applyMicrocompact(
     messages: result.messages,
   }
 }
+
+// ─── Resume Preflight ─────────────────────────────────────────
+
+export interface ResumePreflightReport {
+  /** Total messages loaded */
+  messageCount: number
+  /** Total rounds detected */
+  roundCount: number
+  /** API invariant summary */
+  invariant: ApiInvariantStatus
+  /** Whether repair was needed */
+  repaired: boolean
+  /** Number of synthetic tool_results inserted for orphan tool_use */
+  syntheticResultsInserted: number
+  /** Orphan tool_result refs that were kept as-is */
+  orphanToolResultIds: string[]
+  /** The repaired messages (if repair was needed) */
+  messages: Message[]
+}
+
+/**
+ * Run preflight validation on loaded session messages.
+ *
+ * Detects orphan tool_use/tool_result pairs and repairs them:
+ *   - Orphan tool_use → inserts a synthetic tool_result (is_error=true)
+ *   - Orphan tool_result → kept as-is, recorded for awareness
+ *
+ * This runs BEFORE PromptEngine.normalizeToolResultPairs(),
+ * giving explicit diagnostics rather than silent normalization.
+ */
+export function runResumePreflight(messages: Message[]): ResumePreflightReport {
+  const rounds = groupIntoRounds(messages)
+  const invariant = computeInvariantStatus(rounds)
+
+  if (!invariant.orphanToolUse.length) {
+    return {
+      messageCount: messages.length,
+      roundCount: rounds.length,
+      invariant,
+      repaired: false,
+      syntheticResultsInserted: 0,
+      orphanToolResultIds: invariant.orphanToolResult,
+      messages,
+    }
+  }
+
+  // Repair: insert synthetic tool_results for orphan tool_use rounds
+  const repaired = [...messages]
+  let inserted = 0
+  const orphanToolUseIds = new Set<string>()
+
+  // Collect orphan tool_use IDs from broken rounds
+  for (const round of rounds) {
+    if (round.apiInvariant === 'broken' && round.hasToolUse) {
+      // Extract tool_use IDs from the assistant message in this round
+      const asstMsg = messages[round.startMessageIndex]
+      if (asstMsg && asstMsg.role === 'assistant' && typeof asstMsg.content !== 'string') {
+        for (const block of asstMsg.content) {
+          if (block.type === 'tool_use') {
+            orphanToolUseIds.add(block.id)
+          }
+        }
+      }
+    }
+  }
+
+  // Build synthetic tool_results
+  if (orphanToolUseIds.size > 0) {
+    const syntheticResults = [...orphanToolUseIds].map(id => ({
+      type: 'tool_result' as const,
+      tool_use_id: id,
+      content: 'Tool result unavailable: recovered from interrupted tool execution.',
+      is_error: true,
+    }))
+
+    // Insert after the last message
+    repaired.push({ role: 'user', content: syntheticResults })
+    inserted = syntheticResults.length
+  }
+
+  const newRounds = groupIntoRounds(repaired)
+  const newInvariant = computeInvariantStatus(newRounds)
+
+  return {
+    messageCount: messages.length,
+    roundCount: rounds.length,
+    invariant: newInvariant,
+    repaired: true,
+    syntheticResultsInserted: inserted,
+    orphanToolResultIds: newInvariant.orphanToolResult,
+    messages: repaired,
+  }
+}
