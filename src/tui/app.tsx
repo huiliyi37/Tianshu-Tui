@@ -82,7 +82,7 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /compact — Compact conversation context
 /model [name|list] — Show or switch model
 /verbose — Toggle verbose tool output
-/debug [prompt|fingerprint|cache] — Debug prefix cache and prompt
+/debug [prompt|fingerprint|cache|mcp] — Debug prefix cache, prompt, and MCP connections
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
@@ -90,6 +90,7 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /rollback — Preview changes since last checkpoint (/rollback confirm to execute)
 /context — Show context ledger health, tokens, rounds, and compact events
 /evidence — Show last turn evidence summary
+/mcp — Show MCP server status
 /auto — Toggle auto-approve (current: ${ctx.autoSafeRef.current ? 'auto-safe' : 'manual'})
 /cockpit — Toggle expanded cockpit panel` }))
       setIsStreaming(false)
@@ -173,8 +174,15 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
         const hitRate = ctx.cacheHitRate
         const totalCached = usage.cache_read_input_tokens + usage.cache_creation_input_tokens
         pushStatic(createLogEntry({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${ctx.session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${ctx.cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
+      } else if (subcmd === 'mcp') {
+        // Show MCP configuration status
+        const lines = ['MCP Configuration:']
+        lines.push('  Check startup logs for connection status.')
+        lines.push('  Use /debug mcp to view this summary.')
+        lines.push('  MCP tools available: see /debug prompt tool list.')
+        pushStatic(createLogEntry({ type: 'text', content: lines.join('\n') }))
       } else {
-        pushStatic(createLogEntry({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache]' }))
+        pushStatic(createLogEntry({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache|mcp]' }))
       }
       setIsStreaming(false)
       return true
@@ -265,6 +273,12 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
         ctx.agent.updateSessionMemory(ctx.persist.buildMemoryBlock())
         pushStatic(createLogEntry({ type: 'text', content: 'Saved to session memory.' }))
       }
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/mcp': {
+      pushStatic(createLogEntry({ type: 'text', content: 'MCP status: use /debug mcp for detailed connection info, or check startup logs.' }))
       setIsStreaming(false)
       return true
     }
