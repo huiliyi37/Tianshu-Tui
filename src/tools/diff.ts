@@ -1,0 +1,116 @@
+import { spawn } from 'child_process'
+import type { Tool, ToolCallParams, ToolResult } from './types.js'
+
+const MAX_LINES_PER_FILE = 200
+const MAX_TOTAL_CHARS = 8000
+
+export const DIFF_TOOL: Tool = {
+  definition: {
+    name: 'diff',
+    description: `Show git diff for working tree changes.
+
+### Usage
+- Use diff to see what files have changed before committing
+- Use diff before editing to understand current state
+- Use diff after editing to verify changes are correct
+- Results are truncated per file (200 lines max)
+
+### Examples
+Good: diff() — show all unstaged changes
+Good: diff(staged=true) — show staged changes
+Good: diff(path="src/api/client.ts") — show diff for one file`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        staged: { type: 'boolean', description: 'Show staged changes (--cached)' },
+        path: { type: 'string', description: 'Filter to specific file or directory' },
+        context_lines: { type: 'integer', description: 'Lines of context (default: 3)' },
+      },
+    },
+  },
+
+  async execute(params: ToolCallParams): Promise<ToolResult> {
+    const staged = (params.input.staged as boolean) ?? false
+    const path = params.input.path as string | undefined
+    const contextLines = (params.input.context_lines as number) ?? 3
+
+    const args = ['diff']
+    if (staged) args.push('--cached')
+    args.push(`-U${contextLines}`)
+    if (path) args.push('--', path)
+
+    return new Promise((resolve) => {
+      const child = spawn('git', args, {
+        cwd: params.cwd,
+        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      child.stdout!.on('data', (data: Buffer) => {
+        stdout += data.toString()
+      })
+
+      child.stderr!.on('data', (data: Buffer) => {
+        stderr += data.toString()
+      })
+
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM')
+        resolve({ content: 'Error: git diff timed out', isError: true })
+      }, 30_000)
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (stderr.trim()) {
+          resolve({ content: `Error: ${stderr.trim()}`, isError: true })
+          return
+        }
+        if (!stdout.trim()) {
+          resolve({ content: 'No changes.' })
+          return
+        }
+        resolve({ content: truncateDiff(stdout) })
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        resolve({ content: `Error: ${err.message}`, isError: true })
+      })
+    })
+  },
+
+  requiresApproval: () => false,
+  isConcurrencySafe: () => true,
+  isEnabled: () => true,
+}
+
+function truncateDiff(output: string): string {
+  const files = splitByFile(output)
+  const truncated = files.map(file => {
+    const lines = file.split('\n')
+    if (lines.length <= MAX_LINES_PER_FILE) return file
+    const head = lines.slice(0, MAX_LINES_PER_FILE).join('\n')
+    return `${head}\n... (truncated, ${lines.length - MAX_LINES_PER_FILE} more lines)`
+  })
+  const result = truncated.join('\n')
+  if (result.length <= MAX_TOTAL_CHARS) return result
+  return result.slice(0, MAX_TOTAL_CHARS) + '\n... (truncated)'
+}
+
+function splitByFile(output: string): string[] {
+  const files: string[] = []
+  let current = ''
+  for (const line of output.split('\n')) {
+    if (line.startsWith('diff --git') && current) {
+      files.push(current)
+      current = line
+    } else {
+      current += (current ? '\n' : '') + line
+    }
+  }
+  if (current) files.push(current)
+  return files
+}
