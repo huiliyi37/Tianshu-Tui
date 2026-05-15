@@ -3,6 +3,7 @@ import { join } from 'path'
 import os from 'os'
 import { gitStatusCache } from './volatile-git.js'
 import type { ContextLedger } from '../context/types.js'
+import type { TaskState } from '../agent/task-state.js'
 
 export interface ToolHistoryEntry {
   tool: string
@@ -19,6 +20,7 @@ export interface VolatileContext {
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
   toolHistory?: ToolHistoryEntry[]
+  taskProgress?: TaskState
 }
 
 let rivetMdCache: { value: string | undefined; timestamp: number } | null = null
@@ -88,6 +90,14 @@ export function buildVolatileBlock(ctx: VolatileContext): string {
       return `  <tool-summary ${attrs.join(' ')} />`
     }).join('\n')
     parts.push(`<tool-history recent="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
+  }
+
+  if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
+    const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
+    const remaining = ctx.taskProgress.remaining.length > 0
+      ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
+      : ''
+    parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
   }
 
   if (ctx.sessionMemoryBlock) {
