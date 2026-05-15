@@ -12,17 +12,29 @@ describe('output-store', () => {
     const rawDir = join(tmpdir(), 'rivet-raw')
 
     afterEach(() => {
-      // Clean up test files
       try {
-        const testFile = join(rawDir, 'test-id.raw')
-        if (existsSync(testFile)) rmSync(testFile)
+        const files = ['test-id', '../escape'].map(id => {
+          const hash = require('node:crypto').createHash('sha256').update(id).digest('hex').slice(0, 24)
+          return join(rawDir, `${hash}.raw`)
+        })
+        for (const f of files) {
+          if (existsSync(f)) rmSync(f)
+        }
       } catch { /* ignore */ }
     })
 
     it('writes raw output to file and returns path', async () => {
       const path = await persistRawOutput('test-id', 'hello world')
       assert.ok(existsSync(path))
-      assert.ok(path.endsWith('test-id.raw'))
+      assert.ok(path.endsWith('.raw'))
+      assert.ok(path.includes('rivet-raw'))
+    })
+
+    it('does not use toolUseId directly as a file path', async () => {
+      const rawPath = await persistRawOutput('../escape', 'secret')
+      assert.ok(rawPath.includes('rivet-raw'))
+      assert.ok(!rawPath.includes('..'))
+      assert.ok(rawPath.endsWith('.raw'))
     })
   })
 

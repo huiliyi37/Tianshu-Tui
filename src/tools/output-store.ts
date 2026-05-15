@@ -1,4 +1,5 @@
 import { writeFile, mkdir, readdir, unlink, stat } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -14,9 +15,14 @@ export interface ToolOutputMeta {
   durationMs: number
 }
 
+function safeRawFileName(id: string): string {
+  const hash = createHash('sha256').update(id || randomUUID()).digest('hex').slice(0, 24)
+  return `${hash}.raw`
+}
+
 export async function persistRawOutput(id: string, raw: string): Promise<string> {
   await mkdir(RAW_DIR, { recursive: true })
-  const filePath = join(RAW_DIR, `${id}.raw`)
+  const filePath = join(RAW_DIR, safeRawFileName(id))
   await writeFile(filePath, raw, 'utf-8')
 
   persistCount++
