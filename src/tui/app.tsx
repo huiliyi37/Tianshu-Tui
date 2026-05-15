@@ -119,9 +119,10 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
     })
   }, [agent, session, addLog])
 
-  useInput((_input, key) => {
+  useInput((_input, _key) => {
     if (!pendingApproval) return
-    if (key.return || _input.toLowerCase() === 'y') {
+    // Only accept explicit y/n — never Enter (prevents accidental approval)
+    if (_input.toLowerCase() === 'y') {
       pendingApproval.resolve(true)
       setPendingApproval(null)
     } else if (_input.toLowerCase() === 'n') {
@@ -161,7 +162,7 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
           <StreamOutput text={streamingText} isStreaming={isStreaming} />
         )}
       </Box>
-      <InputBar onSubmit={handleSubmit} disabled={isStreaming} />
+      <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} />
     </Box>
   )
 }

@@ -4,7 +4,7 @@ import { PromptEngine } from '../prompt/engine.js'
 import { ToolRegistry } from '../tools/registry.js'
 import type { ToolCallParams } from '../tools/types.js'
 import { SessionContext } from './context.js'
-import { shouldAutoCompact, estimateTokens } from '../compact/index.js'
+import { shouldAutoCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
 
@@ -70,8 +70,7 @@ export class AgentLoop {
         const messages = this.session.getMessages()
         const decision = shouldAutoCompact(messages, this.config.compact)
         if (decision.shouldCompact) {
-          const tokenCount = estimateTokens(messages)
-          const { messages: compacted } = this.compactMessages(messages, tokenCount)
+          const { messages: compacted } = this.compactMessages(messages, decision.tokenCount)
           this.session.replaceMessages(compacted)
         }
 
