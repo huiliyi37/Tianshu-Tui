@@ -98,8 +98,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setLogs(visibleLogs(logRef.current, MAX_VISIBLE_LOGS))
   }, [])
 
-  const updateLogEntry = useCallback((id: string, toolName: string, content: string, isError?: boolean) => {
-    logRef.current = updateToolLog(logRef.current, id, toolName, content, isError)
+  const updateLogEntry = useCallback((id: string, toolName: string, content: string, isError?: boolean, rawPath?: string) => {
+    logRef.current = updateToolLog(logRef.current, id, toolName, content, isError, rawPath)
     setLogs(visibleLogs(logRef.current, MAX_VISIBLE_LOGS))
   }, [])
 
@@ -139,7 +139,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
-/rollback — Preview changes since last checkpoint (/rollback confirm to execute)` })
+/rollback — Preview changes since last checkpoint (/rollback confirm to execute)
+/evidence — Show last turn evidence summary` })
           setIsStreaming(false)
           return
 
@@ -209,14 +210,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         case '/rollback': {
           const subcmd = parts[1]
           if (subcmd === 'confirm') {
-            const result = rollbackToCheckpoint(process.cwd())
+            const result = await rollbackToCheckpoint(process.cwd())
             if (result.success) {
               addLog({ type: 'text', content: `Rolled back to checkpoint ${result.hash}. Working tree restored.` })
             } else {
               addLog({ type: 'text', content: 'Rollback failed. No checkpoint found.' })
             }
           } else {
-            const preview = getRollbackPreview(process.cwd())
+            const preview = await getRollbackPreview(process.cwd())
             if (preview) {
               addLog({ type: 'text', content: `⚠️  This will discard ALL changes since the checkpoint:\n${preview}\n\nType /rollback confirm to proceed.` })
             } else {
@@ -311,7 +312,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       onToolUse: (id, name) => {
         addLog({ type: 'tool', id, content: `Calling ${name}...`, toolName: name })
       },
-      onToolResult: (id, name, result, isError) => {
+      onToolResult: (id, name, result, isError, rawPath) => {
         if (isError === undefined) {
           // Intermediate streaming chunk: accumulate and schedule batched flush
           const prev = toolOutputAccumRef.current.get(id) || ''
@@ -319,10 +320,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           scheduleToolFlush(id, name)
         } else {
           // Final result: clear accumulation, update directly
-          // loop.ts already routes uiContent for tools that provide it
           toolOutputAccumRef.current.delete(id)
-          updateLogEntry(id, name, result, isError)
+          updateLogEntry(id, name, result, isError, rawPath)
         }
+      },
+      onCheckpoint: (hash) => {
+        addLog({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` })
       },
       onTurnComplete: (_usage, turnNumber) => {
         // Flush any remaining buffered text
@@ -416,7 +419,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       <Box flexDirection="column" flexGrow={1}>
         {logs.map((log, i) => {
           if (log.type === 'tool') {
-            return <ToolCard key={`${log.id ?? i}`} name={log.toolName ?? ''} result={log.content} isError={log.isError} verbose={verbose} />
+            return <ToolCard key={`${log.id ?? i}`} name={log.toolName ?? ''} result={log.content} isError={log.isError} verbose={verbose} rawPath={log.rawPath} />
+          }
+          if (log.type === 'checkpoint') {
+            return <Box key={i} paddingX={2}><Text dimColor color="yellow">⚑ {log.content}</Text></Box>
+          }
+          if (log.type === 'evidence') {
+            return <Box key={i} paddingX={2} borderStyle="single" borderColor="green"><Text color="green">{log.content}</Text></Box>
           }
           return <StreamOutput key={i} text={log.content} isStreaming={false} />
         })}

@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
+import { persistRawOutput, buildUiOutput } from './output-store.js'
 
 function detectTestCommand(cwd: string): { base: string; runner: string } {
   const pkgPath = join(cwd, 'package.json')
@@ -170,21 +171,25 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
     const startTime = Date.now()
     const { base, runner } = detectTestCommand(params.cwd)
 
-    let command = base
+    // Build safe argv array — no shell interpolation to prevent injection
+    const commandDisplay = filter ? `${base} ${filter}` : base
+    let argv = ['sh', '-c', base]
     if (filter) {
+      // Validate filter: no shell metacharacters
+      const safeFilter = filter.replace(/[`$\\;"'|]/g, '')
       if (runner === 'vitest') {
-        command = `${base} "${filter}"`
+        argv = ['sh', '-c', base, '--', safeFilter]
       } else if (runner === 'jest') {
-        command = `${base} --testPathPattern="${filter}"`
+        argv = ['sh', '-c', `${base} --testPathPattern`, '--', safeFilter]
       } else if (runner === 'node-test') {
-        command = `${base} ${filter}`
+        argv = ['sh', '-c', base, '--', safeFilter]
       } else {
-        command = `${base} -- ${filter}`
+        argv = ['sh', '-c', base, '--', safeFilter]
       }
     }
 
     return new Promise((resolve) => {
-      const child = track(spawn('sh', ['-c', command], {
+      const child = track(spawn(argv[0]!, argv.slice(1), {
         cwd: params.cwd,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -193,10 +198,16 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
       let stdout = ''
       let stderr = ''
 
+      let onOutputBudget = 20_000
+
       child.stdout!.on('data', (data: Buffer) => {
         const text = data.toString()
         stdout += text
-        params.onOutput?.(text)
+        if (onOutputBudget > 0) {
+          const chunk = text.slice(0, onOutputBudget)
+          onOutputBudget -= chunk.length
+          params.onOutput?.(chunk)
+        }
         if (stdout.length > 100_000) {
           stdout = stdout.slice(-80_000)
         }
@@ -205,47 +216,60 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
       child.stderr!.on('data', (data: Buffer) => {
         const text = data.toString()
         stderr += text
-        params.onOutput?.(text)
+        if (onOutputBudget > 0) {
+          const chunk = text.slice(0, onOutputBudget)
+          onOutputBudget -= chunk.length
+          params.onOutput?.(chunk)
+        }
         if (stderr.length > 100_000) {
           stderr = stderr.slice(-80_000)
         }
       })
 
-      const buildResult = (code: number, isTimeout = false) => {
+      const timer = setTimeout(async () => {
+        child.kill('SIGTERM')
+        setTimeout(() => child.kill('SIGKILL'), 3000)
+        const raw = stdout + (stderr ? '\n' + stderr : '')
+        const meta = { command: commandDisplay, exitCode: -1, durationMs: Date.now() - startTime }
+        const rawPath = await persistRawOutput(params.toolUseId, raw)
+        resolve({
+          content: 'Tests timed out',
+          uiContent: buildUiOutput(raw, meta),
+          rawPath,
+          isError: true,
+        })
+      }, timeout)
+
+      child.on('close', async (code) => {
+        clearTimeout(timer)
         const raw = stdout + (stderr ? '\n' + stderr : '')
         const durationMs = Date.now() - startTime
-        const exitCode = isTimeout ? -1 : code
-        if (isTimeout) {
-          return {
-            content: 'Tests timed out',
-            isError: true,
-          }
-        }
+        const exitCode = code ?? 1
 
         const parsed = parseOutput(raw, runner)
         parsed.exitCode = exitCode
         const formatted = formatOutput(parsed)
+        const truncated = truncateOutput(formatted)
+        const rawPath = await persistRawOutput(params.toolUseId, raw)
+        const meta = { command: commandDisplay, exitCode, durationMs }
 
-        return {
-          content: truncateOutput(formatted),
+        resolve({
+          content: truncated,
+          uiContent: buildUiOutput(raw, meta),
+          rawPath,
           isError: exitCode !== 0,
-        }
-      }
-
-      const timer = setTimeout(() => {
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 3000)
-        resolve(buildResult(0, true))
-      }, timeout)
-
-      child.on('close', (code) => {
-        clearTimeout(timer)
-        resolve(buildResult(code ?? 1))
+        })
       })
 
-      child.on('error', (err) => {
+      child.on('error', async (err) => {
         clearTimeout(timer)
-        resolve({ content: err.message, isError: true })
+        const rawPath = await persistRawOutput(params.toolUseId, err.message)
+        resolve({
+          content: err.message,
+          uiContent: err.message,
+          rawPath,
+          isError: true,
+        })
       })
     })
   },

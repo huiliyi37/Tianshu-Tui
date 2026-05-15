@@ -20,9 +20,7 @@ const CONFIG_FILES = new Set([
 ])
 
 function isTestFile(name: string): boolean {
-  return name.endsWith('.test.ts') || name.endsWith('.test.tsx')
-    || name.endsWith('.spec.ts') || name.endsWith('.spec.tsx')
-    || name.endsWith('.test.js') || name.endsWith('.spec.js')
+  return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name)
 }
 
 function isDocFile(name: string): boolean {

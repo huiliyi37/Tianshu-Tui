@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 
 const MAX_LINES_PER_FILE = 200
 const MAX_TOTAL_CHARS = 8000
@@ -33,11 +34,16 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
     const staged = (params.input.staged as boolean) ?? false
     const path = params.input.path as string | undefined
     const contextLines = (params.input.context_lines as number) ?? 3
+    const startTime = Date.now()
 
     const args = ['diff']
     if (staged) args.push('--cached')
     args.push(`-U${contextLines}`)
-    if (path) args.push('--', path)
+    if (path) {
+      // Prevent path traversal outside cwd
+      const resolved = path.replace(/\.\.\//g, '').replace(/^\//, '')
+      args.push('--', resolved)
+    }
 
     return new Promise((resolve) => {
       const child = spawn('git', args, {
@@ -57,27 +63,37 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
         stderr += data.toString()
       })
 
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         child.kill('SIGTERM')
-        resolve({ content: 'Error: git diff timed out', isError: true })
+        const rawPath = await persistRawOutput(params.toolUseId, 'git diff timed out')
+        resolve({ content: 'Error: git diff timed out', rawPath, isError: true })
       }, 30_000)
 
-      child.on('close', (code) => {
+      child.on('close', async (code) => {
         clearTimeout(timer)
         if (stderr.trim()) {
-          resolve({ content: `Error: ${stderr.trim()}`, isError: true })
+          const rawPath = await persistRawOutput(params.toolUseId, stderr.trim())
+          resolve({ content: `Error: ${stderr.trim()}`, rawPath, isError: true })
           return
         }
         if (!stdout.trim()) {
           resolve({ content: 'No changes.' })
           return
         }
-        resolve({ content: truncateDiff(stdout) })
+        const durationMs = Date.now() - startTime
+        const meta = { command: 'git diff', exitCode: code ?? 0, durationMs }
+        const rawPath = await persistRawOutput(params.toolUseId, stdout)
+        resolve({
+          content: buildModelOutput(truncateDiff(stdout), meta),
+          uiContent: buildUiOutput(stdout, meta),
+          rawPath,
+        })
       })
 
-      child.on('error', (err) => {
+      child.on('error', async (err) => {
         clearTimeout(timer)
-        resolve({ content: `Error: ${err.message}`, isError: true })
+        const rawPath = await persistRawOutput(params.toolUseId, err.message)
+        resolve({ content: `Error: ${err.message}`, rawPath, isError: true })
       })
     })
   },

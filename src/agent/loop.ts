@@ -9,6 +9,7 @@ import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint } from './checkpoint.js'
+import { classifyTestRun } from './failure-classifier.js'
 
 export interface AgentConfig {
   client: ApiClient
@@ -176,18 +177,31 @@ export class AgentLoop {
 
               // Auto-create checkpoint before first modifying operation each turn
               if ((tu.name === 'write_file' || tu.name === 'edit_file') && !checkpointCreatedThisTurn) {
-                createCheckpoint(this.cwd, 'auto')
+                const cp = await createCheckpoint(this.cwd, 'auto')
                 checkpointCreatedThisTurn = true
+                if (cp) callbacks.onCheckpoint?.(cp.hash)
               }
 
               const result = await this.config.toolRegistry.execute(tu.name, params)
-              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false)
+              callbacks.onToolResult(tu.id, tu.name, result.content, result.isError ?? false, result.rawPath)
 
               // Track evidence for final badge
               if (tu.name === 'read_file' && !result.isError) {
                 this.evidence.trackFileRead(tu.input.file_path as string)
               } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !result.isError) {
                 this.evidence.trackFileModified(tu.input.file_path as string)
+              } else if (tu.name === 'run_tests' && !result.isError) {
+                const m = result.content.match(/(\d+) passed/)
+                const passed = m ? parseInt(m[1]!, 10) : 0
+                const fm = result.content.match(/(\d+) failed/)
+                const failed = fm ? parseInt(fm[1]!, 10) : 0
+                this.evidence.trackTestResult(passed, failed)
+              } else if (tu.name === 'run_tests' && result.isError) {
+                // Classify failure and inject hint into result
+                const failures = classifyTestRun(result.content)
+                if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
+                  result.content += `\n\nDiagnosis: ${failures[0]!.suggestion}`
+                }
               }
 
               toolResults.push({

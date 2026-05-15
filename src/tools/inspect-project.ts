@@ -113,10 +113,13 @@ function findEntryFiles(cwd: string): string[] {
   return entries
 }
 
+const MAX_TEST_FILES = 50
+
 function findTestFiles(cwd: string): string[] {
   const files: string[] = []
 
   function walk(dir: string): void {
+    if (files.length >= MAX_TEST_FILES) return
     let names: string[]
     try {
       names = readdirSync(dir)
@@ -135,6 +138,7 @@ function findTestFiles(cwd: string): string[] {
         if (EXCLUDE_DIRS.has(name)) continue
         walk(fullPath)
       } else if (s.isFile()) {
+        if (files.length >= MAX_TEST_FILES) return
         if (name.includes('.test.') || name.includes('.spec.') || name === '__tests__') {
           files.push(relative(cwd, fullPath))
         }

@@ -97,7 +97,12 @@ Good: related_tests(file="src/api/client.ts") — find tests for API client`,
   },
 
   async execute(params: ToolCallParams) {
-    const file = params.input.file as string
+    let file = params.input.file as string
+
+    // Reject absolute paths — only relative paths within cwd allowed
+    if (file.startsWith('/') || file.includes('..')) {
+      return { content: 'Error: file path must be relative to project directory.', isError: true }
+    }
 
     if (isTestFile(file)) {
       const sources = findSourceForTest(file, params.cwd)
