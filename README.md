@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 474 tests passing, typecheck clean. Multi-panel cockpit (6 panels + risk assessment + doom loop detection), execution resilience layer (TurnHarness with retry loop + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection with redirect-safe DNS validation. All prior features: subagent orchestration, adaptive model routing, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 483 tests passing, typecheck clean. Attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (6 panels + risk assessment + doom loop detection), execution resilience layer (TurnHarness with retry loop + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection with redirect-safe DNS validation. All prior features: subagent orchestration, adaptive model routing, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 

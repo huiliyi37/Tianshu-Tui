@@ -118,3 +118,99 @@ describe('tool-history XML section', () => {
     assert.ok(block.includes('status="running"'))
   })
 })
+
+describe('recent-commits XML section', () => {
+  const base: VolatileContext = { cwd: '/project' }
+
+  it('splits git status into <git-status> and <recent-commits>', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      gitStatus: 'M src/main.ts\nRecent commits:\na1b2c3d feat: add feature\nd4e5f6a fix: bug',
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('<git-status>'))
+    assert.ok(block.includes('M src/main.ts'))
+    assert.ok(block.includes('<recent-commits>'))
+    assert.ok(block.includes('a1b2c3d feat: add feature'))
+    assert.ok(!block.includes('Recent commits:'))
+  })
+
+  it('renders only <git-status> when no commits section', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      gitStatus: 'M src/main.ts\n?? new-file.ts',
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('<git-status>'))
+    assert.ok(!block.includes('<recent-commits>'))
+  })
+
+  it('escapes XML in commit messages', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      gitStatus: 'Recent commits:\nabc fix: <script>alert(1)</script>',
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('&lt;script&gt;'))
+    assert.ok(!block.includes('<script>'))
+  })
+})
+
+describe('behavior-mirror XML section', () => {
+  const base: VolatileContext = { cwd: '/project' }
+
+  it('renders <behavior-mirror> when provided', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      behaviorMirror: 'You have edited auth.ts 3 times. What is the root cause?',
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('<behavior-mirror>'))
+    assert.ok(block.includes('auth.ts 3 times'))
+    assert.ok(block.includes('</behavior-mirror>'))
+  })
+
+  it('omits when null or undefined', () => {
+    assert.ok(!buildVolatileBlock({ ...base, behaviorMirror: null }).includes('<behavior-mirror>'))
+    assert.ok(!buildVolatileBlock(base).includes('<behavior-mirror>'))
+  })
+
+  it('escapes XML in mirror text', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      behaviorMirror: 'Error: "type" is not assignable to <T>',
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('&lt;T&gt;'))
+    assert.ok(block.includes('&quot;type&quot;'))
+  })
+})
+
+describe('decisions XML section', () => {
+  const base: VolatileContext = { cwd: '/project' }
+
+  it('renders <decisions> with entries', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      decisions: ['use middleware pattern for auth', 'split loop into harness + orchestrator'],
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('<decisions recent="2">'))
+    assert.ok(block.includes('<decision>use middleware pattern for auth</decision>'))
+    assert.ok(block.includes('</decisions>'))
+  })
+
+  it('omits when empty or undefined', () => {
+    assert.ok(!buildVolatileBlock({ ...base, decisions: [] }).includes('<decisions>'))
+    assert.ok(!buildVolatileBlock(base).includes('<decisions>'))
+  })
+
+  it('escapes XML in decision text', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      decisions: ['use <Strategy> pattern'],
+    }
+    const block = buildVolatileBlock(ctx)
+    assert.ok(block.includes('&lt;Strategy&gt;'))
+  })
+})
