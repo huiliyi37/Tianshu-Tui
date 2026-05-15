@@ -60,14 +60,18 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
       let stderr = ''
 
       child.stdout.on('data', (data: Buffer) => {
-        stdout += data.toString()
+        const text = data.toString()
+        stdout += text
+        params.onOutput?.(text)
         if (stdout.length > 100_000) {
           stdout = stdout.slice(-80_000)
         }
       })
 
       child.stderr.on('data', (data: Buffer) => {
-        stderr += data.toString()
+        const text = data.toString()
+        stderr += text
+        params.onOutput?.(text)
         if (stderr.length > 100_000) {
           stderr = stderr.slice(-80_000)
         }

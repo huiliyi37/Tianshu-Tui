@@ -1,11 +1,13 @@
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 import { render } from 'ink'
 import { createElement } from 'react'
 import { App } from './tui/app.js'
 import { AgentLoop } from './agent/loop.js'
 import { SessionContext } from './agent/context.js'
+import { SessionPersist } from './agent/session-persist.js'
 import { PromptEngine } from './prompt/engine.js'
 import { ToolRegistry } from './tools/registry.js'
 import { READ_FILE_TOOL } from './tools/read-file.js'
@@ -31,6 +33,21 @@ function loadConfig(): Config {
   }
 
   return configSchema.parse(DEFAULT_CONFIG)
+}
+
+function getOrCreateSessionId(): string {
+  const dir = join(homedir(), '.opencode')
+  const idFile = join(dir, 'session-id.txt')
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  if (existsSync(idFile)) {
+    const id = readFileSync(idFile, 'utf-8').trim()
+    if (id) return id
+  }
+  const id = randomUUID()
+  writeFileSync(idFile, id)
+  return id
 }
 
 async function main() {
@@ -75,6 +92,12 @@ async function main() {
 
   // Agent + session
   const session = new SessionContext()
+  const sessionId = getOrCreateSessionId()
+  const persist = new SessionPersist(sessionId)
+  const existingMessages = persist.load()
+  if (existingMessages.length > 0) {
+    session.loadMessages(existingMessages)
+  }
   const agent = new AgentLoop(
     {
       client,
@@ -93,6 +116,7 @@ async function main() {
     createElement(App, {
       agent,
       session,
+      persist,
       model: model.alias ?? model.id,
       maxTokens: model.contextWindow,
     }),

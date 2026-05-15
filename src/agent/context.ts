@@ -36,6 +36,12 @@ export class SessionContext {
     this.state.messages = messages
   }
 
+  /** Load messages from a persisted session (used on startup recovery) */
+  loadMessages(messages: Message[]): void {
+    this.state.messages = messages
+    this.state.turnCount = messages.filter(m => m.role === 'user' && typeof m.content === 'string').length
+  }
+
   /** Add an assistant message with structured content blocks */
   addAssistantBlocks(blocks: ContentBlock[]): void {
     this.state.messages.push({ role: 'assistant', content: blocks })

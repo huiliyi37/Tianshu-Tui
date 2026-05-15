@@ -7,6 +7,7 @@ import { ThinkingCollapser } from './thinking.js'
 import { ToolCard } from './tool-card.js'
 import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
+import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 
 interface PendingApproval {
@@ -19,6 +20,7 @@ interface PendingApproval {
 interface AppProps {
   agent: AgentLoop
   session: SessionContext
+  persist: SessionPersist
   model: string
   maxTokens: number
 }
@@ -33,7 +35,7 @@ interface LogEntry {
 
 const MAX_VISIBLE_LOGS = 50
 
-export function App({ agent, session, model, maxTokens }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens }: AppProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
@@ -44,10 +46,28 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
   const logRef = useRef<LogEntry[]>([])
   const streamBufferRef = useRef('')
   const streamFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
+  const toolOutputAccumRef = useRef<Map<string, string>>(new Map())
   const addLog = useCallback((entry: LogEntry) => {
     logRef.current = [...logRef.current, entry]
     setLogs(logRef.current.slice(-MAX_VISIBLE_LOGS))
+  }, [])
+
+  const updateLogEntry = useCallback((id: string, content: string, isError?: boolean) => {
+    let idx = -1
+    for (let i = logRef.current.length - 1; i >= 0; i--) {
+      const entry = logRef.current[i]
+      if (entry?.id === id && entry?.type === 'tool') {
+        idx = i
+        break
+      }
+    }
+    if (idx >= 0) {
+      const updated = [...logRef.current]
+      const prev = updated[idx]!
+      updated[idx] = { type: 'tool' as const, id, content, toolName: prev.toolName, isError: isError ?? prev.isError }
+      logRef.current = updated
+      setLogs(logRef.current.slice(-MAX_VISIBLE_LOGS))
+    }
   }, [])
 
   const handleSubmit = useCallback(async (userInput: string) => {
@@ -57,6 +77,7 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
 
     // Reset stream buffer
     streamBufferRef.current = ''
+    toolOutputAccumRef.current.clear()
     if (streamFlushRef.current) {
       clearTimeout(streamFlushRef.current)
       streamFlushRef.current = null
@@ -81,7 +102,8 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
 
         case '/exit':
         case '/quit':
-          addLog({ type: 'text', content: 'Goodbye!' })
+          persist.compact(session.getMessages())
+          addLog({ type: 'text', content: 'Session saved. Goodbye!' })
           process.exit(0)
 
         case '/compact':
@@ -126,7 +148,17 @@ export function App({ agent, session, model, maxTokens }: AppProps) {
         addLog({ type: 'tool', id, content: `Calling ${name}...`, toolName: name })
       },
       onToolResult: (id, name, result, isError) => {
-        addLog({ type: 'tool', id, content: result, toolName: name, isError })
+        if (isError === undefined) {
+          // Intermediate streaming chunk
+          const prev = toolOutputAccumRef.current.get(id) || ''
+          const accumulated = prev + result
+          toolOutputAccumRef.current.set(id, accumulated)
+          updateLogEntry(id, accumulated)
+        } else {
+          // Final result
+          toolOutputAccumRef.current.delete(id)
+          addLog({ type: 'tool', id, content: result, toolName: name, isError })
+        }
       },
       onTurnComplete: (_usage) => {
         // Flush any remaining buffered text

@@ -116,7 +116,14 @@ export class AgentLoop {
           const toolResults: ContentBlock[] = []
 
           for (const tu of toolUses) {
-            const params: ToolCallParams = { input: tu.input, toolUseId: tu.id, cwd: this.cwd }
+            const params: ToolCallParams = {
+              input: tu.input,
+              toolUseId: tu.id,
+              cwd: this.cwd,
+              onOutput: (chunk) => {
+                callbacks.onToolResult(tu.id, tu.name, chunk)
+              },
+            }
             try {
               // Check if this tool requires user approval
               if (this.config.toolRegistry.needsApproval(tu.name, params)) {

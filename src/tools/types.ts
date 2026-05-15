@@ -4,6 +4,7 @@ export interface ToolCallParams {
   input: Record<string, unknown>
   toolUseId: string
   cwd: string
+  onOutput?: (chunk: string) => void
 }
 
 export interface ToolResult {

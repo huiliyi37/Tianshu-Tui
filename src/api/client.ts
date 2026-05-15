@@ -84,17 +84,29 @@ function recoverTruncatedJSON(raw: string): Record<string, unknown> {
 
 /** DeepSeek V4 known bug: tool call JSON may appear in text content */
 function extractToolJsonFromText(text: string): { name: string; input: Record<string, unknown> } | null {
-  // Match {"name": "tool_name", ... "input": {...}} pattern
-  const match = text.match(/\{\s*"name"\s*:\s*"(\w+)"[\s\S]*?"input"\s*:\s*(\{[\s\S]*?\})[\s\S]*\}/)
-  if (!match) return null
-
-  try {
-    const name = match[1]!
-    const input = JSON.parse(match[2]!) as Record<string, unknown>
-    return { name, input }
-  } catch {
-    return null
+  // Strategy 1: Try to find a JSON object with "name" and "input" keys via JSON.parse
+  const jsonRe = /\{[\s\S]*?"name"[\s\S]*?"input"[\s\S]*?\}/g
+  let match: RegExpExecArray | null
+  while ((match = jsonRe.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(match[0])
+      if (parsed.name && typeof parsed.name === 'string' && parsed.input && typeof parsed.input === 'object') {
+        return { name: parsed.name, input: parsed.input }
+      }
+    } catch { /* try next match */ }
   }
+
+  // Strategy 2: Tight regex for common DeepSeek patterns
+  // Match {"name": "tool_name", ... "input": {...}} with only whitespace/allowed keys between
+  const strictRe = /\{\s*"name"\s*:\s*"(\w+)"\s*,\s*"input"\s*:\s*(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})/
+  const strictMatch = text.match(strictRe)
+  if (strictMatch) {
+    try {
+      return { name: strictMatch[1]!, input: JSON.parse(strictMatch[2]!) as Record<string, unknown> }
+    } catch { /* fall through */ }
+  }
+
+  return null
 }
 
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 529])
