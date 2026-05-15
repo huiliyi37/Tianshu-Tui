@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 449 tests passing, typecheck clean. Execution resilience layer (TurnHarness with retry + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection. All prior features: subagent orchestration, adaptive model routing, TUI cockpit, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 474 tests passing, typecheck clean. Attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), execution resilience layer (TurnHarness with retry + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection. All prior features: subagent orchestration, adaptive model routing, TUI cockpit, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -484,6 +484,16 @@ The undo system captures file snapshots before each modification:
 ### Worker Safety
 
 Worker sessions enforce a timeout budget (`timeoutMs` from the work order) — if a worker runs too long, it is automatically aborted via `AbortController`. The batch dispatch respects `maxWorkers` concurrency (chunked by the limit, not unbounded).
+
+### Attention Anchor Dispersal
+
+Three-layer passive context injection prevents attention collapse during complex tasks:
+
+- **Layer 1 — Recent commits**: `git log --oneline -5` injected as `<recent-commits>` in volatile context, giving the model awareness of recent project activity.
+- **Layer 2 — Behavior mirror**: Detects repetition anti-patterns (same error recurring, same file edited 3+ times, edits without verification). Injected as `<behavior-mirror>` questions that prompt the model to reconsider its approach.
+- **Layer 3 — Decision anchors**: Extracts decision statements from model output ("I'll use...", "approach:", "方案是"). Injected as `<decisions>` so the model can reference and build on its own prior choices across turns.
+
+All three layers activate after turn 3 and are injected only in the fresh volatile block (not frozen prefix).
 
 ### Execution Resilience
 
