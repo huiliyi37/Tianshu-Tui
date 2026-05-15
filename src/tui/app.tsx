@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect, memo } from 'react'
-import { Box, Text, useInput } from 'ink'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { Box, Text, useInput, Static } from 'ink'
 import { StatusBar } from './status-bar.js'
 import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
@@ -11,9 +11,8 @@ import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
-import { createLogEntry, appendLogInPlace, updateToolLog, summarizeToolOutput, visibleLogs, type LogEntry } from './log-state.js'
+import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
-import { useTerminalSize } from './use-terminal-size.js'
 
 interface PendingApproval {
   id: string
@@ -38,63 +37,30 @@ const STREAM_FLUSH_MS = 80
 const THINKING_FLUSH_MS = 200
 const TOOL_FLUSH_MS = 120
 
-// Rows reserved for non-log UI elements
-const STATUS_BAR_ROWS = 3
-const INPUT_BAR_ROWS = 1
-const APPROVAL_PROMPT_ROWS = 3
-const AGENT_STATUS_BASE_ROWS = 2
-const STREAMING_ROWS = 2
+// --- Static entry renderer ---
 
-// Estimated rows per log entry (avg)
-const ROWS_PER_LOG = 3
-
-// --- Memoized sub-components ---
-
-const LogList = memo(function LogList({ logs, verbose, maxHeight }: { logs: LogEntry[]; verbose: boolean; maxHeight: number }) {
-  const maxLogs = Math.max(1, Math.floor(maxHeight / ROWS_PER_LOG))
-  const display = logs.slice(-maxLogs)
-  const hidden = logs.length - display.length
-
-  return (
-    <Box flexDirection="column" flexGrow={1} overflow="hidden">
-      {hidden > 0 && (
-        <Box paddingX={1}>
-          <Text dimColor>↕ {hidden} earlier messages scrolled up</Text>
-        </Box>
-      )}
-      {display.map(log => {
-        switch (log.type) {
-          case 'tool':
-            return <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isError={log.isError} verbose={verbose} rawPath={log.rawPath} />
-          case 'checkpoint':
-            return <Box key={log.id} paddingX={2}><Text dimColor color="yellow">⚑ {log.content}</Text></Box>
-          case 'evidence':
-            return <Box key={log.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{log.content}</Text></Box>
-          default:
-            return <StreamOutput key={log.id} text={log.content} isStreaming={false} />
-        }
-      })}
-    </Box>
-  )
-})
-
-const StreamingPanel = memo(function StreamingPanel({ text, thinking, isStreaming }: { text: string; thinking: string; isStreaming: boolean }) {
-  return (
-    <>
-      {isStreaming && thinking && (
-        <ThinkingCollapser thinking={thinking} isStreaming={isStreaming} focused={isStreaming} />
-      )}
-      {isStreaming && (
-        <StreamOutput text={text} isStreaming={isStreaming} />
-      )}
-    </>
-  )
-})
+function renderStaticEntry(entry: LogEntry, verbose: boolean) {
+  switch (entry.type) {
+    case 'tool':
+      return <ToolCard key={entry.id} name={entry.toolName ?? ''} result={entry.content} isError={entry.isError} verbose={verbose} rawPath={entry.rawPath} />
+    case 'checkpoint':
+      return <Box key={entry.id} paddingX={2}><Text dimColor color="yellow">⚑ {entry.content}</Text></Box>
+    case 'evidence':
+      return <Box key={entry.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{entry.content}</Text></Box>
+    default:
+      return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
+  }
+}
 
 // --- Main App ---
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput }: AppProps) {
-  const [logs, setLogs] = useState<LogEntry[]>([])
+  // Completed entries — written to terminal scrollback via <Static>
+  const [staticItems, setStaticItems] = useState<LogEntry[]>([])
+
+  // Active tool entries — displayed in live area while streaming
+  const [liveTools, setLiveTools] = useState<LogEntry[]>([])
+
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -103,16 +69,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
 
-  // State + ref pairs for values used inside async callbacks
   const [verbose, _setVerbose] = useState(false)
   const [, _setAutoSafe] = useState(true)
   const verboseRef = useRef(false)
   const autoSafeRef = useRef(true)
-
   const setVerbose = useCallback((v: boolean) => { verboseRef.current = v; _setVerbose(v) }, [])
   const setAutoSafe = useCallback((v: boolean) => { autoSafeRef.current = v; _setAutoSafe(v) }, [])
 
-  const logRef = useRef<LogEntry[]>([])
+  // Push a completed entry to terminal scrollback
+  const pushStatic = useCallback((entry: LogEntry) => {
+    setStaticItems(prev => [...prev, entry])
+  }, [])
 
   // Agent status tracking
   const streamStartRef = useRef(0)
@@ -121,7 +88,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const toolCallTracker = useRef<Map<string, ToolCallItem>>(new Map())
   const [toolCallsDisplay, setToolCallsDisplay] = useState<ToolCallItem[]>([])
 
-  // Streaming buffers — mutated in place, flushed to React state on timer
+  // Streaming buffers
   const streamBuf = useRef('')
   const thinkBuf = useRef('')
   const lastFlushedStream = useRef('')
@@ -129,7 +96,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const streamTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Tool output accumulator
+  // Tool output accumulator (for streaming tools)
   const toolAccum = useRef<Map<string, string>>(new Map())
   const toolNames = useRef<Map<string, string>>(new Map())
   const dirtyTools = useRef<Set<string>>(new Set())
@@ -137,29 +104,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const rollbackTokenRef = useRef<string | null>(null)
 
-  // Batch multiple log mutations into a single React update
-  const logDirty = useRef(false)
-  const flushLogs = useCallback(() => {
-    if (logDirty.current) {
-      logDirty.current = false
-      setLogs(visibleLogs(logRef.current, logRef.current.length))
-    }
-  }, [])
-
-  const addLog = useCallback((entry: LogEntry) => {
-    appendLogInPlace(logRef.current, entry)
-    logDirty.current = true
-  }, [])
-
-  const updateLogEntry = useCallback((id: string, toolName: string, content: string, isError?: boolean, rawPath?: string) => {
-    const prev = logRef.current
-    logRef.current = updateToolLog(prev, id, toolName, content, isError, rawPath)
-    if (logRef.current !== prev) {
-      logDirty.current = true
-    }
-  }, [])
-
-  // Streaming flush helpers — only update React state if text actually changed
+  // Streaming flush helpers
   const flushStream = useCallback(() => {
     streamTimer.current = null
     if (streamBuf.current !== lastFlushedStream.current) {
@@ -178,23 +123,22 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const flushTools = useCallback(() => {
     toolTimer.current = null
-    const limit = verboseRef.current ? 200 : 12
-    let changed = false
+    const limit = verboseRef.current ? 200 : 8
+    const updates = new Map<string, string>()
     for (const tid of dirtyTools.current) {
       const accumulated = toolAccum.current.get(tid)
       if (accumulated !== undefined) {
-        const tname = toolNames.current.get(tid) ?? ''
-        const prev = logRef.current
-        logRef.current = updateToolLog(prev, tid, tname, summarizeToolOutput(accumulated, limit))
-        if (logRef.current !== prev) changed = true
+        updates.set(tid, summarizeToolOutput(accumulated, limit))
       }
     }
     dirtyTools.current.clear()
-    if (changed) {
-      logDirty.current = true
-      flushLogs()
+    if (updates.size > 0) {
+      setLiveTools(prev => prev.map(e => {
+        const newContent = updates.get(e.id)
+        return newContent ? { ...e, content: newContent } : e
+      }))
     }
-  }, [flushLogs])
+  }, [])
 
   // Session recovery
   useEffect(() => {
@@ -218,8 +162,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const p = new SessionPersist(sessions[0]!)
         const msgs = p.load()
         session.replaceMessages(msgs)
-        addLog(createLogEntry({ type: 'text', content: `Restored session ${sessions[0]!.slice(0, 8)}... (${msgs.length} messages)` }))
-        flushLogs()
+        pushStatic(createLogEntry({ type: 'text', content: `Restored session ${sessions[0]!.slice(0, 8)}... (${msgs.length} messages)` }))
       }
       setSessionPrompt('done')
       return
@@ -239,6 +182,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setIsStreaming(true)
     setStreamingText('')
     setStreamingThinking('')
+    setLiveTools([])
 
     streamBuf.current = ''
     thinkBuf.current = ''
@@ -248,7 +192,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     dirtyTools.current.clear()
     toolNames.current.clear()
 
-    // Reset agent status tracking
     streamStartRef.current = Date.now()
     thinkStartRef.current = 0
     thinkTimeRef.current = 0
@@ -269,7 +212,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
       switch (cmd) {
         case '/help':
-          addLog(createLogEntry({ type: 'text', content: `Available commands:
+          pushStatic(createLogEntry({ type: 'text', content: `Available commands:
 /help — Show this help
 /exit — Exit Rivet
 /quit — Exit
@@ -283,24 +226,21 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 /rollback — Preview changes since last checkpoint (/rollback confirm to execute)
 /evidence — Show last turn evidence summary
 /auto — Toggle auto-approve (current: ${autoSafeRef.current ? 'auto-safe' : 'manual'})` }))
-          flushLogs()
           setIsStreaming(false)
           return
 
         case '/exit':
         case '/quit':
           persist.compact(session.getMessages())
-          addLog(createLogEntry({ type: 'text', content: 'Session saved. Goodbye!' }))
-          flushLogs()
+          pushStatic(createLogEntry({ type: 'text', content: 'Session saved. Goodbye!' }))
           process.exit(0)
 
         case '/compact':
-          addLog(createLogEntry({ type: 'text', content: 'Compacting conversation...' }))
+          pushStatic(createLogEntry({ type: 'text', content: 'Compacting conversation...' }))
           const msgs = session.getMessages()
           const { messages: compacted, truncated } = microCompact(msgs, maxTokens, estimateTokens(msgs))
           session.replaceMessages(compacted)
-          addLog(createLogEntry({ type: 'text', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` }))
-          flushLogs()
+          pushStatic(createLogEntry({ type: 'text', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` }))
           setIsStreaming(false)
           setCacheHitRate(session.getCacheHitRate())
           return
@@ -311,17 +251,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             const list = availableModels.map(m =>
               `  ${m.alias} (${m.id})${m.alias === model ? ' ← current' : ''}`
             ).join('\n')
-            addLog(createLogEntry({ type: 'text', content: `Available models:\n${list}\n\nCurrent: ${model}\nContext: ${maxTokens.toLocaleString()} tokens\nCost: ¥${cost.toFixed(4)}` }))
+            pushStatic(createLogEntry({ type: 'text', content: `Available models:\n${list}\n\nCurrent: ${model}\nContext: ${maxTokens.toLocaleString()} tokens\nCost: ¥${cost.toFixed(4)}` }))
           } else {
             const found = availableModels.find(m => m.alias === targetModel || m.id === targetModel)
             if (found) {
               onModelSwitch(found.id)
-              addLog(createLogEntry({ type: 'text', content: `Switched to ${found.alias} (${found.id})` }))
+              pushStatic(createLogEntry({ type: 'text', content: `Switched to ${found.alias} (${found.id})` }))
             } else {
-              addLog(createLogEntry({ type: 'text', content: `Model "${targetModel}" not found. Use /model list to see available models.` }))
+              pushStatic(createLogEntry({ type: 'text', content: `Model "${targetModel}" not found. Use /model list to see available models.` }))
             }
           }
-          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -329,8 +268,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         case '/verbose': {
           const nextVerbose = !verboseRef.current
           setVerbose(nextVerbose)
-          addLog(createLogEntry({ type: 'text', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' }))
-          flushLogs()
+          pushStatic(createLogEntry({ type: 'text', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' }))
           setIsStreaming(false)
           return
         }
@@ -339,8 +277,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const next = !autoSafeRef.current
           setAutoSafe(next)
           agent.setApprovalMode(next ? 'auto-safe' : 'manual')
-          addLog(createLogEntry({ type: 'text', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
-          flushLogs()
+          pushStatic(createLogEntry({ type: 'text', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
           setIsStreaming(false)
           return
         }
@@ -349,20 +286,19 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const subcmd = parts[1]
           const info = agent.getDebugInfo()
           if (subcmd === 'prompt') {
-            addLog(createLogEntry({ type: 'text', content: `System prompt (${info.systemPromptLength} chars):\n${info.systemPromptPreview}\n\nTools (${info.toolCount}): ${info.toolNames.join(', ')}` }))
+            pushStatic(createLogEntry({ type: 'text', content: `System prompt (${info.systemPromptLength} chars):\n${info.systemPromptPreview}\n\nTools (${info.toolCount}): ${info.toolNames.join(', ')}` }))
           } else if (subcmd === 'fingerprint') {
             const fp = info.fingerprint
             const drift = info.drift
-            addLog(createLogEntry({ type: 'text', content: `Fingerprint:\n  system:  ${fp.systemSha256.slice(0, 16)}...\n  tools:   ${fp.toolsSha256.slice(0, 16)}...\n  combined: ${fp.combinedSha256.slice(0, 16)}...\n\nDrift: ${drift ? drift.message : 'none (cache stable)'}` }))
+            pushStatic(createLogEntry({ type: 'text', content: `Fingerprint:\n  system:  ${fp.systemSha256.slice(0, 16)}...\n  tools:   ${fp.toolsSha256.slice(0, 16)}...\n  combined: ${fp.combinedSha256.slice(0, 16)}...\n\nDrift: ${drift ? drift.message : 'none (cache stable)'}` }))
           } else if (subcmd === 'cache') {
             const usage = session.getTotalUsage()
             const hitRate = cacheHitRate
             const totalCached = usage.cache_read_input_tokens + usage.cache_creation_input_tokens
-            addLog(createLogEntry({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
+            pushStatic(createLogEntry({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
           } else {
-            addLog(createLogEntry({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache]' }))
+            pushStatic(createLogEntry({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache]' }))
           }
-          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -372,44 +308,35 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           if (subcmd === 'confirm') {
             const result = await rollbackToCheckpoint(process.cwd(), rollbackTokenRef.current ?? undefined)
             rollbackTokenRef.current = null
-            if (result.success) {
-              addLog(createLogEntry({ type: 'text', content: `Rolled back to checkpoint ${result.hash}. Agent-owned changes reverted.` }))
-            } else {
-              addLog(createLogEntry({ type: 'text', content: 'Rollback failed. No valid checkpoint or confirmation token.' }))
-            }
+            pushStatic(createLogEntry({ type: 'text', content: result.success ? `Rolled back to checkpoint ${result.hash}. Agent-owned changes reverted.` : 'Rollback failed. No valid checkpoint or confirmation token.' }))
           } else {
             const preview = await getRollbackPreview(process.cwd())
             if (preview) {
               rollbackTokenRef.current = preview.confirmationToken
-              addLog(createLogEntry({ type: 'text', content: `⚠️  Agent-owned changes to revert:\n${preview.text}\n\nType /rollback confirm to proceed.` }))
+              pushStatic(createLogEntry({ type: 'text', content: `⚠️  Agent-owned changes to revert:\n${preview.text}\n\nType /rollback confirm to proceed.` }))
             } else {
-              addLog(createLogEntry({ type: 'text', content: 'No agent-owned changes to rollback.' }))
+              pushStatic(createLogEntry({ type: 'text', content: 'No agent-owned changes to rollback.' }))
             }
           }
-          flushLogs()
           setIsStreaming(false)
           return
         }
 
         case '/clear':
-          logRef.current = []
-          logDirty.current = false
-          setLogs([])
           setIsStreaming(false)
           return
 
         case '/sessions': {
           const sessions = SessionPersist.listSessions()
           if (sessions.length === 0) {
-            addLog(createLogEntry({ type: 'text', content: 'No saved sessions.' }))
+            pushStatic(createLogEntry({ type: 'text', content: 'No saved sessions.' }))
           } else {
             const list = sessions.map((id, i) => {
               const marker = id === currentSessionId ? ' ← current' : ''
               return `${i + 1}. ${id.slice(0, 8)}...${marker}`
             }).join('\n')
-            addLog(createLogEntry({ type: 'text', content: `Saved sessions:\n${list}\n\n/resume <number> to restore` }))
+            pushStatic(createLogEntry({ type: 'text', content: `Saved sessions:\n${list}\n\n/resume <number> to restore` }))
           }
-          flushLogs()
           setIsStreaming(false)
           return
         }
@@ -418,8 +345,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const sessions = SessionPersist.listSessions()
           const idx = parseInt(parts[1] ?? '', 10) - 1
           if (isNaN(idx) || idx < 0 || idx >= sessions.length) {
-            addLog(createLogEntry({ type: 'text', content: `Invalid session number. Use /sessions to see available sessions.` }))
-            flushLogs()
+            pushStatic(createLogEntry({ type: 'text', content: `Invalid session number. Use /sessions to see available sessions.` }))
             setIsStreaming(false)
             return
           }
@@ -427,18 +353,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const p = new SessionPersist(targetId)
           const msgs = p.load()
           session.replaceMessages(msgs)
-          addLog(createLogEntry({ type: 'text', content: `Restored session ${targetId.slice(0, 8)}... (${msgs.length} messages)` }))
-          logRef.current = []
-          logDirty.current = false
-          setLogs([])
+          pushStatic(createLogEntry({ type: 'text', content: `Restored session ${targetId.slice(0, 8)}... (${msgs.length} messages)` }))
           setIsStreaming(false)
           return
         }
       }
     }
 
-    addLog(createLogEntry({ type: 'text', content: `> ${userInput}` }))
-    flushLogs()
+    pushStatic(createLogEntry({ type: 'text', content: `> ${userInput}` }))
 
     await agent.run(userInput, {
       onTextDelta: (text) => {
@@ -456,7 +378,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       },
       onToolUse: (id, name, input) => {
         toolNames.current.set(id, name)
-        addLog(createLogEntry({ type: 'tool', id, content: 'Running...', toolName: name }))
 
         // Track thinking time up to this point
         if (thinkStartRef.current > 0) {
@@ -464,14 +385,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           thinkStartRef.current = 0
         }
 
-        // Update agent status tool call list
+        // Add to live tools
+        setLiveTools(prev => [...prev, createLogEntry({ type: 'tool', id, content: 'Running...', toolName: name })])
+
+        // Update agent status
         toolCallTracker.current.set(id, { id, name, label: toolLabel(name, input), done: false, error: false })
         setToolCallsDisplay([...toolCallTracker.current.values()])
-
-        flushLogs()
       },
       onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {
         if (isError === undefined) {
+          // Streaming chunk — accumulate and schedule flush to live tools
           toolAccum.current.set(id, (toolAccum.current.get(id) ?? '') + result)
           dirtyTools.current.add(id)
           if (!toolTimer.current) {
@@ -479,7 +402,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           }
           return
         }
-        // Final result — cancel pending flush for this tool, write immediately
+
+        // Final result — flush any pending chunks, then commit to static
         if (toolTimer.current) {
           clearTimeout(toolTimer.current)
           toolTimer.current = null
@@ -487,7 +411,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         dirtyTools.current.delete(id)
         toolAccum.current.delete(id)
         toolNames.current.delete(id)
-        updateLogEntry(id, name, uiContent ?? result, isError, rawPath)
+
+        // Remove from live tools, push completed to static
+        const finalContent = uiContent ?? result
+        setLiveTools(prev => prev.filter(e => e.id !== id))
+        pushStatic(createLogEntry({ type: 'tool', id, toolName: name, content: finalContent, isError, rawPath }))
 
         // Update agent status
         const tcEntry = toolCallTracker.current.get(id)
@@ -496,15 +424,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           tcEntry.error = !!isError
           setToolCallsDisplay([...toolCallTracker.current.values()])
         }
-
-        flushLogs()
       },
       onCheckpoint: (hash) => {
-        addLog(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
-        flushLogs()
+        pushStatic(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
       },
       onTurnComplete: (_usage, turnNumber) => {
-        // Flush any remaining buffered tool output before clearing
+        // Flush any remaining buffered tool output
         if (dirtyTools.current.size > 0) {
           flushTools()
         }
@@ -515,14 +440,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           thinkStartRef.current = 0
         }
 
-        // Flush any remaining streaming buffers
+        // Flush remaining streaming text to static
         if (streamTimer.current) {
           clearTimeout(streamTimer.current)
           streamTimer.current = null
         }
         const finalText = streamBuf.current
         if (finalText) {
-          addLog(createLogEntry({ type: 'text', content: finalText }))
+          pushStatic(createLogEntry({ type: 'text', content: finalText }))
         }
         streamBuf.current = ''
         lastFlushedStream.current = ''
@@ -535,6 +460,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         lastFlushedThink.current = thinkBuf.current
         setStreamingThinking(thinkBuf.current)
         thinkBuf.current = ''
+
+        // Move any remaining live tools to static (shouldn't normally happen)
+        setLiveTools(prev => {
+          for (const entry of prev) {
+            pushStatic(entry)
+          }
+          return []
+        })
 
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
@@ -553,18 +486,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           session.wasCompactedAt(turnNumber),
         )
         if (diag && diag.severity !== 'info') {
-          addLog(createLogEntry({ type: 'text', content: `${diag.severity === 'error' ? '⚠️' : '💡'} ${diag.message}` }))
+          pushStatic(createLogEntry({ type: 'text', content: `${diag.severity === 'error' ? '⚠️' : '💡'} ${diag.message}` }))
         }
-        flushLogs()
       },
       onError: (error) => {
-        addLog(createLogEntry({ type: 'text', content: `Error: ${error.message}` }))
-        flushLogs()
+        pushStatic(createLogEntry({ type: 'text', content: `Error: ${error.message}` }))
         setIsStreaming(false)
       },
       onAbort: () => {
-        addLog(createLogEntry({ type: 'text', content: '[Aborted]' }))
-        flushLogs()
+        pushStatic(createLogEntry({ type: 'text', content: '[Aborted]' }))
         setIsStreaming(false)
       },
       onApprovalRequired: async (id, name, input) => {
@@ -573,52 +503,52 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         })
       },
     })
-  }, [agent, session, addLog, flushLogs, flushStream, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe])
+  }, [agent, session, pushStatic, flushStream, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe])
 
   const currentTokens = session.getTotalUsage().input_tokens
-  const termSize = useTerminalSize()
   const tokenEstimate = Math.floor(streamingText.length / 4)
 
-  // Calculate reserved rows for bottom UI elements
-  const bottomReserved =
-    STATUS_BAR_ROWS +
-    INPUT_BAR_ROWS +
-    (pendingApproval ? APPROVAL_PROMPT_ROWS : 0) +
-    (isStreaming ? STREAMING_ROWS + AGENT_STATUS_BASE_ROWS + Math.min(toolCallsDisplay.length, 6) : 0)
-
-  const logAreaHeight = Math.max(5, termSize.rows - bottomReserved)
-
   return (
-    <Box flexDirection="column" height={termSize.rows}>
-      <StatusBar
-        model={model}
-        cacheHitRate={cacheHitRate}
-        totalCost={cost.toFixed(2)}
-        currentTokens={currentTokens}
-        maxTokens={maxTokens}
-      />
-      {sessionPrompt === 'waiting' && (
-        <Box paddingX={2} marginBottom={1} borderStyle="single" borderColor="cyan">
-          <Text bold color="cyan">Previous session found.</Text>
-          <Text> Press <Text bold>r</Text> to restore, any other key to start fresh </Text>
-        </Box>
-      )}
-      <LogList logs={logs} verbose={verbose} maxHeight={logAreaHeight} />
-      <StreamingPanel text={streamingText} thinking={streamingThinking} isStreaming={isStreaming} />
-      <AgentStatus
-        isStreaming={isStreaming}
-        startMs={streamStartRef.current || Date.now()}
-        tokenEstimate={tokenEstimate}
-        thinkingTime={thinkTimeRef.current}
-        tools={toolCallsDisplay}
-      />
-      {pendingApproval && (
-        <Box paddingX={2} borderStyle="single" borderColor="yellow">
-          <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
-          <Text> [y/n] </Text>
-        </Box>
-      )}
-      <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} />
-    </Box>
+    <>
+      <Static items={staticItems}>
+        {(item) => renderStaticEntry(item, verbose)}
+      </Static>
+      <Box flexDirection="column">
+        <StatusBar
+          model={model}
+          cacheHitRate={cacheHitRate}
+          totalCost={cost.toFixed(2)}
+          currentTokens={currentTokens}
+          maxTokens={maxTokens}
+        />
+        {sessionPrompt === 'waiting' && (
+          <Box paddingX={2} borderStyle="single" borderColor="cyan">
+            <Text bold color="cyan">Previous session found.</Text>
+            <Text> Press <Text bold>r</Text> to restore, any other key to start fresh </Text>
+          </Box>
+        )}
+        {liveTools.map(log => (
+          <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} />
+        ))}
+        {(streamingText || isStreaming) && (
+          <StreamOutput text={streamingText} isStreaming={isStreaming} />
+        )}
+        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={false} />
+        <AgentStatus
+          isStreaming={isStreaming}
+          startMs={streamStartRef.current || Date.now()}
+          tokenEstimate={tokenEstimate}
+          thinkingTime={thinkTimeRef.current}
+          tools={toolCallsDisplay}
+        />
+        {pendingApproval && (
+          <Box paddingX={2} borderStyle="single" borderColor="yellow">
+            <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
+            <Text> [y/n] </Text>
+          </Box>
+        )}
+        <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} />
+      </Box>
+    </>
   )
 }
