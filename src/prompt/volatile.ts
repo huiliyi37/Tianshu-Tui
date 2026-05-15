@@ -64,7 +64,16 @@ export function buildVolatileBlock(ctx: VolatileContext): string {
 
   const git = ctx.gitStatus ?? gitStatusCache.get(ctx.cwd)
   if (git) {
-    parts.push(`<git-status>\n${escapeXml(git)}\n</git-status>`)
+    const lines = git.split('\n')
+    const commitIdx = lines.findIndex(l => l.startsWith('Recent commits:'))
+    if (commitIdx >= 0) {
+      const statusPart = lines.slice(0, commitIdx).join('\n').trim()
+      const commitsPart = lines.slice(commitIdx + 1).join('\n').trim()
+      if (statusPart) parts.push(`<git-status>\n${escapeXml(statusPart)}\n</git-status>`)
+      if (commitsPart) parts.push(`<recent-commits>\n${escapeXml(commitsPart)}\n</recent-commits>`)
+    } else {
+      parts.push(`<git-status>\n${escapeXml(git)}\n</git-status>`)
+    }
   }
 
   if (ctx.workingSet && ctx.workingSet.length > 0) {
