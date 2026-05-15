@@ -23,6 +23,8 @@ interface AppProps {
   persist: SessionPersist
   model: string
   maxTokens: number
+  availableModels: Array<{ id: string; alias: string }>
+  onModelSwitch: (modelId: string) => void
 }
 
 interface LogEntry {
@@ -35,7 +37,7 @@ interface LogEntry {
 
 const MAX_VISIBLE_LOGS = 50
 
-export function App({ agent, session, persist, model, maxTokens }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch }: AppProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
@@ -95,7 +97,7 @@ export function App({ agent, session, persist, model, maxTokens }: AppProps) {
 /exit — Exit OpenCode TUI
 /quit — Exit
 /compact — Compact conversation context
-/model — Show current model info
+/model [name|list] — Show or switch model
 /clear — Clear screen (visual only)` })
           setIsStreaming(false)
           return
@@ -116,10 +118,25 @@ export function App({ agent, session, persist, model, maxTokens }: AppProps) {
           setCacheHitRate(session.getCacheHitRate())
           return
 
-        case '/model':
-          addLog({ type: 'text', content: `Model: ${model}\nContext: ${maxTokens.toLocaleString()} tokens\nCost: ¥${cost.toFixed(4)}` })
+        case '/model': {
+          const targetModel = parts[1]
+          if (!targetModel || targetModel === 'list') {
+            const list = availableModels.map(m =>
+              `  ${m.alias} (${m.id})${m.alias === model ? ' ← current' : ''}`
+            ).join('\n')
+            addLog({ type: 'text', content: `Available models:\n${list}\n\nCurrent: ${model}\nContext: ${maxTokens.toLocaleString()} tokens\nCost: ¥${cost.toFixed(4)}` })
+          } else {
+            const found = availableModels.find(m => m.alias === targetModel || m.id === targetModel)
+            if (found) {
+              onModelSwitch(found.id)
+              addLog({ type: 'text', content: `Switched to ${found.alias} (${found.id})` })
+            } else {
+              addLog({ type: 'text', content: `Model "${targetModel}" not found. Use /model list to see available models.` })
+            }
+          }
           setIsStreaming(false)
           return
+        }
 
         case '/clear':
           logRef.current = []
@@ -195,7 +212,7 @@ export function App({ agent, session, persist, model, maxTokens }: AppProps) {
         })
       },
     })
-  }, [agent, session, addLog])
+  }, [agent, session, addLog, model, maxTokens, availableModels, onModelSwitch])
 
   useInput((_input, _key) => {
     if (!pendingApproval) return
