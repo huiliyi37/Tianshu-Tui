@@ -188,16 +188,15 @@ export class AgentLoop {
                 this.evidence.trackFileRead(tu.input.file_path as string)
               } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !result.isError) {
                 this.evidence.trackFileModified(tu.input.file_path as string)
-              } else if (tu.name === 'run_tests' && !result.isError) {
-                const m = result.content.match(/(\d+) passed/)
-                const passed = m ? parseInt(m[1]!, 10) : 0
-                const fm = result.content.match(/(\d+) failed/)
-                const failed = fm ? parseInt(fm[1]!, 10) : 0
-                this.evidence.trackTestResult(passed, failed)
-              } else if (tu.name === 'run_tests' && result.isError) {
-                const failures = classifyTestRun(result.content)
-                if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
-                  result.content += `\n\nDiagnosis: ${failures[0]!.suggestion}`
+              } else if (tu.name === 'run_tests') {
+                if (result.verification) {
+                  this.evidence.trackVerification(result.verification)
+                }
+                if (result.verification && result.verification.status !== 'passed') {
+                  const failures = classifyTestRun(result.content)
+                  if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
+                    result.content += `\n\nDiagnosis: ${failures[0]!.suggestion}`
+                  }
                 }
               }
 
