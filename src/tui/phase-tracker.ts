@@ -15,8 +15,9 @@ export class PhaseTracker {
   stepCount(): number { return this.steps }
   lastAction(): LastAction | null { return this.last }
 
-  onToolUse(toolName: string): void {
+  onToolUse(toolName: string, target?: string): void {
     this.steps++
+    this._pendingTarget = target ?? toolName
     switch (toolName) {
       case 'edit_file': case 'write_file':
         this.phase = 'coding'; break
@@ -28,15 +29,19 @@ export class PhaseTracker {
         this.phase = 'running'; break
       case 'delegate_task':
         this.phase = 'delegating'; break
+      default: break
     }
   }
 
-  onToolResult(toolName: string, target: string, isError: boolean): void {
-    this.last = { tool: toolName, target, success: !isError }
+  onToolResult(toolName: string, isError: boolean): void {
+    this.last = { tool: toolName, target: this._pendingTarget ?? toolName, success: !isError }
+    this._pendingTarget = undefined
   }
 
   onTurnComplete(): void {
     this.phase = 'idle'
     this.steps = 0
   }
+
+  private _pendingTarget?: string
 }

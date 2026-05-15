@@ -63,15 +63,24 @@ describe('PhaseTracker', () => {
     assert.equal(pt.stepCount(), 0)
   })
 
-  it('records last action', () => {
+  it('records last action with target from onToolUse', () => {
     const pt = new PhaseTracker()
-    pt.onToolResult('edit_file', 'src/auth.ts', false)
+    pt.onToolUse('edit_file', 'src/auth.ts')
+    pt.onToolResult('edit_file', false)
     assert.deepEqual(pt.lastAction(), { tool: 'edit_file', target: 'src/auth.ts', success: true })
   })
 
   it('records last action failure', () => {
     const pt = new PhaseTracker()
-    pt.onToolResult('run_tests', 'auth.test.ts', true)
+    pt.onToolUse('run_tests', 'auth.test.ts')
+    pt.onToolResult('run_tests', true)
     assert.deepEqual(pt.lastAction(), { tool: 'run_tests', target: 'auth.test.ts', success: false })
+  })
+
+  it('falls back to tool name when no target provided', () => {
+    const pt = new PhaseTracker()
+    pt.onToolUse('edit_file')
+    pt.onToolResult('edit_file', false)
+    assert.deepEqual(pt.lastAction(), { tool: 'edit_file', target: 'edit_file', success: true })
   })
 })

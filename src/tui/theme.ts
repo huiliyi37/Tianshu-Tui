@@ -11,46 +11,54 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-function makeToolColorMap(self: { primary: string; secondary: string; success: string; warning: string; dim: string }) {
-  return (name: string): string => {
-    switch (name) {
-      case 'bash': case 'grep': case 'glob': return self.primary
-      case 'edit_file': case 'write_file': return self.secondary
-      case 'run_tests': return self.success
-      case 'delegate_task': return self.warning
-      default: return self.dim
-    }
-  }
-}
-
-function makeContextColor(self: { primary: string; warning: string; error: string }) {
-  return (pct: number): string => {
-    if (pct >= 0.8) return self.error
-    if (pct >= 0.6) return self.warning
-    return self.primary
-  }
-}
-
-const TRUECOLOR: RivetTheme = {
+const TRUECOLOR_COLORS = {
   primary: '#00ffcc',
   secondary: '#7b2fff',
   success: '#00ff88',
   warning: '#ffaa00',
   error: '#ff3333',
   dim: '#4a4a6a',
-  toolColor: makeToolColorMap({ primary: '#00ffcc', secondary: '#7b2fff', success: '#00ff88', warning: '#ffaa00', dim: '#4a4a6a' }),
-  contextColor: makeContextColor({ primary: '#00ffcc', warning: '#ffaa00', error: '#ff3333' }),
 }
 
-const FALLBACK: RivetTheme = {
+const FALLBACK_COLORS = {
   primary: 'cyan',
   secondary: 'magenta',
   success: 'green',
   warning: 'yellow',
   error: 'red',
   dim: 'gray',
-  toolColor: makeToolColorMap({ primary: 'cyan', secondary: 'magenta', success: 'green', warning: 'yellow', dim: 'gray' }),
-  contextColor: makeContextColor({ primary: 'cyan', warning: 'yellow', error: 'red' }),
+}
+
+function makeToolColor(c: typeof TRUECOLOR_COLORS) {
+  return (name: string): string => {
+    switch (name) {
+      case 'bash': case 'grep': case 'glob': return c.primary
+      case 'edit_file': case 'write_file': return c.secondary
+      case 'run_tests': return c.success
+      case 'delegate_task': return c.warning
+      default: return c.dim
+    }
+  }
+}
+
+function makeContextColor(c: Pick<typeof TRUECOLOR_COLORS, 'primary' | 'warning' | 'error'>) {
+  return (pct: number): string => {
+    if (pct >= 0.8) return c.error
+    if (pct >= 0.6) return c.warning
+    return c.primary
+  }
+}
+
+const TRUECOLOR: RivetTheme = {
+  ...TRUECOLOR_COLORS,
+  toolColor: makeToolColor(TRUECOLOR_COLORS),
+  contextColor: makeContextColor(TRUECOLOR_COLORS),
+}
+
+const FALLBACK: RivetTheme = {
+  ...FALLBACK_COLORS,
+  toolColor: makeToolColor(FALLBACK_COLORS),
+  contextColor: makeContextColor(FALLBACK_COLORS),
 }
 
 export function getTheme(colorLevel?: number): RivetTheme {
