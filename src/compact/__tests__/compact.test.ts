@@ -6,11 +6,12 @@ import type { CompactionConfig } from '../constants.js'
 
 function msg(role: 'user' | 'assistant', content: string) {
   return { role, content }
+
 }
 
 describe('estimateTokens', () => {
   it('estimates tokens (~4 chars per token)', () => {
-    assert.equal(estimateTokens([msg('user', 'hello world')]), 3)  // 11/4 = 3
+    assert.equal(estimateTokens([msg('user', 'hello world')]), 3)
     assert.equal(estimateTokens([msg('user', '')]), 0)
   })
 
@@ -19,7 +20,6 @@ describe('estimateTokens', () => {
       msg('user', 'hello world'),
       msg('assistant', 'hi there'),
     ]
-    // 11/4=3 + 8/4=2 = 5
     assert.equal(estimateTokens(messages), 5)
   })
 })
@@ -32,10 +32,7 @@ describe('microCompact', () => {
     assert.equal(result.messages.length, 2)
   })
 
-  it('truncates old messages iteratively to fit context window', () => {
-    // Each message ~25 tokens (100/4=25). Total 200 tokens. Context window = 60 tokens.
-    // estimateTokens recomputes: 200 tokens > 60 → truncates until ≤ 60 tokens.
-    // 4 messages × 25 = 100 tokens still > 60 → only keeps last 4 (the floor).
+  it('uses full token budget including anchor and recent messages', () => {
     const bigMsg = 'x'.repeat(100)
     const messages = [
       msg('user', bigMsg), msg('assistant', bigMsg),
@@ -43,9 +40,28 @@ describe('microCompact', () => {
       msg('user', bigMsg), msg('assistant', bigMsg),
       msg('user', bigMsg), msg('assistant', bigMsg),
     ]
+
+    // estimatedTokens=500 > contextWindow=160, so truncation needed
+    const result = microCompact(messages, 160, 500)
+    const after = estimateTokens(result.messages)
+    assert.ok(after <= 160 || result.truncated === 2, `after=${after} truncated=${result.truncated}`)
+  })
+
+  it('preserves anchor and recent, truncates middle only', () => {
+    const bigMsg = 'x'.repeat(100)
+    const messages = [
+      msg('user', bigMsg), msg('assistant', bigMsg),
+      msg('user', bigMsg), msg('assistant', bigMsg),
+      msg('user', bigMsg), msg('assistant', bigMsg),
+      msg('user', bigMsg), msg('assistant', bigMsg),
+    ]
+
+    // With estimatedTokens=500 and contextWindow=60, middle gets truncated
     const result = microCompact(messages, 60, 500)
-    assert.ok(result.truncated >= 4, `expected >= 4 truncated, got ${result.truncated}`)
-    assert.equal(result.messages.length, 4) // hits KEEP_RECENT_MESSAGES floor
+    assert.equal(result.truncated, 2)
+    assert.equal(result.messages.length, 6)
+    assert.deepEqual(result.messages.slice(0, 2), messages.slice(0, 2))
+    assert.deepEqual(result.messages.slice(-4), messages.slice(-4))
   })
 
   it('does not truncate when too few messages', () => {
@@ -78,8 +94,7 @@ describe('shouldAutoCompact', () => {
   })
 
   it('returns below_threshold when between floor and threshold', () => {
-    // ~750K tokens → above floor (500K) but below threshold (800K)
-    const bigMsg = 'x'.repeat(250_000 * 4) // ~250K tokens per msg
+    const bigMsg = 'x'.repeat(250_000 * 4)
     const messages = [msg('user', bigMsg), msg('assistant', bigMsg), msg('user', bigMsg)]
     const decision = shouldAutoCompact(messages, config)
     assert.equal(decision.shouldCompact, false)
@@ -87,7 +102,6 @@ describe('shouldAutoCompact', () => {
   })
 
   it('returns not_enough_messages when under 6 messages', () => {
-    // Each msg ~250K tokens → total 1M → above threshold (800K). But only 4 msgs < 6
     const bigMsg = 'x'.repeat(250_000 * 4)
     const messages = [
       msg('user', bigMsg), msg('assistant', bigMsg),
@@ -99,7 +113,6 @@ describe('shouldAutoCompact', () => {
   })
 
   it('triggers compaction when all conditions met', () => {
-    // 6 messages, each ~200K tokens → total 1.2M tokens → above threshold
     const bigMsg = 'x'.repeat(200_000 * 4)
     const messages = [
       msg('user', bigMsg), msg('assistant', bigMsg),
@@ -124,7 +137,7 @@ describe('buildSummaryPrompt', () => {
     assert.ok(prompt.includes('Summarize the following conversation'))
     assert.ok(prompt.includes('Fix the login bug'))
     assert.ok(prompt.includes('auth.ts'))
-    assert.ok(prompt.includes('500 words')) // standard mode
+    assert.ok(prompt.includes('500 words'))
   })
 
   it('uses large context limits when token count > 500K', () => {
@@ -143,7 +156,6 @@ describe('buildSummaryPrompt', () => {
       msg('assistant', longMsg),
     ]
     const prompt = buildSummaryPrompt(messages, 50_000)
-    // Should be under SUMMARY_INPUT_MAX_CHARS (24K) + instruction overhead
     assert.ok(prompt.length < 30_000)
   })
 })
