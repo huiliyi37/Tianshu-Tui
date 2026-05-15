@@ -95,7 +95,8 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /evidence — Show last turn evidence summary
 /mcp — Show MCP server status
 /auto — Toggle auto-approve (current: ${ctx.autoSafeRef.current ? 'auto-safe' : 'manual'})
-/cockpit — Toggle expanded cockpit panel` }))
+/cockpit — Toggle expanded cockpit panel
+Ctrl+C — Interrupt current turn (press twice to exit)` }))
       setIsStreaming(false)
       return true
 
@@ -381,6 +382,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const toolTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const rollbackTokenRef = useRef<string | null>(null)
+  const lastCtrlCRef = useRef(0)
 
   // Tool target tracking for SummaryBar
   const toolTargetMap = useRef<Map<string, string>>(new Map())
@@ -439,6 +441,25 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useInput((_input, _key) => {
+    // Ctrl+C — soft interrupt or exit
+    if (_input === '\x03') {
+      if (pendingApproval) {
+        pendingApproval.resolve(false)
+        setPendingApproval(null)
+      }
+      if (isStreaming) {
+        agent.abort()
+        lastCtrlCRef.current = Date.now()
+        return
+      }
+      if (lastCtrlCRef.current && Date.now() - lastCtrlCRef.current < 2000) {
+        process.exit(0)
+      }
+      lastCtrlCRef.current = Date.now()
+      pushStatic(createLogEntry({ type: 'text', content: '(Ctrl+C again to exit)' }))
+      return
+    }
+
     if (_key.escape && cockpitExpanded) {
       setCockpitExpanded(false)
       return
@@ -680,7 +701,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setIsStreaming(false)
       },
       onAbort: () => {
-        pushStatic(createLogEntry({ type: 'text', content: '[Aborted]' }))
+        pushStatic(createLogEntry({ type: 'text', content: '⏹ Interrupted.' }))
         setIsStreaming(false)
       },
       onApprovalRequired: async (id, name, input) => {

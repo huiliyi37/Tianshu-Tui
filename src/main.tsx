@@ -376,6 +376,7 @@ async function main() {
   _pipedInput = readPipedStdin()
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config })),
+    { exitOnCtrlC: false },
   )
 
   process.on('SIGINT', gracefulShutdown)
