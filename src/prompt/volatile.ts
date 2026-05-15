@@ -21,6 +21,8 @@ export interface VolatileContext {
   sessionMemoryBlock?: string
   toolHistory?: ToolHistoryEntry[]
   taskProgress?: TaskState
+  behaviorMirror?: string | null
+  decisions?: string[]
 }
 
 let rivetMdCache: { value: string | undefined; timestamp: number } | null = null
@@ -107,6 +109,15 @@ export function buildVolatileBlock(ctx: VolatileContext): string {
       ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
       : ''
     parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
+  }
+
+  if (ctx.behaviorMirror) {
+    parts.push(`<behavior-mirror>\n${escapeXml(ctx.behaviorMirror)}\n</behavior-mirror>`)
+  }
+
+  if (ctx.decisions && ctx.decisions.length > 0) {
+    const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
+    parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
   }
 
   if (ctx.sessionMemoryBlock) {
