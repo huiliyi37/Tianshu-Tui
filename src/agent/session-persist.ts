@@ -4,7 +4,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import type { Message } from '../api/types.js'
 import type { SessionMetadata } from '../context/types.js'
-import type { SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
+import type { LedgerSessionMemoryState, SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
 import { appendSessionMemory, buildSessionMemoryBlock, loadSessionMemory } from '../context/session-memory.js'
 import { assertValidSessionId } from '../validation.js'
 
@@ -85,6 +85,20 @@ export class SessionPersist {
 
   buildMemoryBlock(): string {
     return buildSessionMemoryBlock(this.loadMemory())
+  }
+
+  getSessionMemoryState(): LedgerSessionMemoryState | undefined {
+    const memory = this.loadMemory()
+    if (memory.entries.length === 0) return undefined
+    const block = buildSessionMemoryBlock(memory)
+    return {
+      path: join(join(homedir(), '.rivet', 'sessions'), `${this.sessionId}.memory.json`),
+      lastSummarizedRoundIndex: -1,
+      lastUpdatedAt: memory.entries[memory.entries.length - 1]?.createdAt ?? Date.now(),
+      digest: block.length > 200 ? block.slice(0, 197) + '...' : block,
+      stale: false,
+      tokenEstimate: block.length,
+    }
   }
 
   /** List all session files */

@@ -6,10 +6,28 @@ export interface LastAction {
   success: boolean
 }
 
+function toolPhase(toolName: string): Phase {
+  switch (toolName) {
+    case 'edit_file': case 'write_file':
+      return 'coding'
+    case 'run_tests':
+      return 'testing'
+    case 'read_file': case 'grep': case 'glob': case 'diff':
+      return 'searching'
+    case 'bash':
+      return 'running'
+    case 'delegate_task':
+      return 'delegating'
+    default: return 'idle'
+  }
+}
+
 export class PhaseTracker {
   private phase: Phase = 'idle'
   private steps = 0
   private last: LastAction | null = null
+  private pendingPhase: Phase = 'idle'
+  private pendingCount = 0
 
   current(): Phase { return this.phase }
   stepCount(): number { return this.steps }
@@ -18,18 +36,17 @@ export class PhaseTracker {
   onToolUse(toolName: string, target?: string): void {
     this.steps++
     this._pendingTarget = target ?? toolName
-    switch (toolName) {
-      case 'edit_file': case 'write_file':
-        this.phase = 'coding'; break
-      case 'run_tests':
-        this.phase = 'testing'; break
-      case 'read_file': case 'grep': case 'glob': case 'diff':
-        this.phase = 'searching'; break
-      case 'bash':
-        this.phase = 'running'; break
-      case 'delegate_task':
-        this.phase = 'delegating'; break
-      default: break
+    const candidate = toolPhase(toolName)
+    if (candidate === 'idle') return
+
+    if (candidate === this.pendingPhase) {
+      this.pendingCount++
+      if (this.pendingCount >= 2) {
+        this.phase = candidate
+      }
+    } else {
+      this.pendingPhase = candidate
+      this.pendingCount = 1
     }
   }
 
@@ -40,6 +57,8 @@ export class PhaseTracker {
 
   onTurnComplete(): void {
     this.phase = 'idle'
+    this.pendingPhase = 'idle'
+    this.pendingCount = 0
     this.steps = 0
   }
 

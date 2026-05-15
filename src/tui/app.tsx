@@ -325,6 +325,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   })
   const [cockpitExpanded, setCockpitExpanded] = useState(false)
   const cockpitExpandedRef = useRef(false)
+  useEffect(() => { cockpitExpandedRef.current = cockpitExpanded }, [cockpitExpanded])
 
   const pushStatic = useCallback((entry: LogEntry) => {
     setStaticItems(prev => [...prev, entry])
@@ -407,6 +408,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useInput((_input, _key) => {
+    if (_key.escape && cockpitExpanded) {
+      setCockpitExpanded(false)
+      return
+    }
     if (sessionPrompt === 'waiting') {
       const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
       if (_input === 'r' && sessions.length > 0) {

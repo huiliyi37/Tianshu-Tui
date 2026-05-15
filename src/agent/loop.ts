@@ -31,6 +31,9 @@ export interface AgentConfig {
   compactClient?: ApiClient
   compactModel?: string
   approvalMode?: ApprovalMode
+  sessionId?: string
+  transcriptPath?: string
+  getSessionMemoryState?: () => import('../context/types.js').LedgerSessionMemoryState | undefined
 }
 
 export interface AgentCallbacks {
@@ -159,10 +162,11 @@ export class AgentLoop {
 
   private refreshLedger(): void {
     const ledger = createContextLedger(
-      'session',
-      '',
+      this.config.sessionId ?? 'session',
+      this.config.transcriptPath ?? '',
       this.session.getMessages(),
       this.config.contextWindow,
+      this.config.getSessionMemoryState?.(),
     )
     this.session.setContextLedger(ledger)
   }

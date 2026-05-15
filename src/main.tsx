@@ -197,6 +197,8 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
         compactClient,
         compactModel: compactModel?.id,
         approvalMode: config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
+        sessionId,
+        getSessionMemoryState: () => persist.getSessionMemoryState(),
       },
       session,
       cwd,

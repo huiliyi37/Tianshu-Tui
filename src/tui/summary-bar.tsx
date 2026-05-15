@@ -73,7 +73,7 @@ export const SummaryBar = memo(function SummaryBar({ state }: { state: SummarySt
         <Text color={theme.primary}>{state.phase}</Text>
         {state.totalSteps > 0 && <Text dimColor> ({state.stepCount}/{state.totalSteps})</Text>}
         <Text color={theme.dim}> │ </Text>
-        <Text color={ctxColor}>{contextBar(state.contextPct)} {Math.round(state.contextPct * 100)}%</Text>
+        <Text color={ctxColor} bold={state.contextPct >= 0.95}>{contextBar(state.contextPct)} {Math.round(state.contextPct * 100)}%</Text>
         <Text color={theme.dim}> │ </Text>
         <Text dimColor>{formatElapsed(state.elapsedMs)}</Text>
       </Text>
