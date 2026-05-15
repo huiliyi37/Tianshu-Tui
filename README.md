@@ -4,21 +4,28 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Baseline v0.1 — 36 source files, ~9,000 LOC, 32 tests passing.
+Baseline v0.1 — 44 source files, ~9,400 LOC, 67 tests passing.
 
 ## Quick Start
 
 ```bash
 npm install && npm run build
-export DEEPSEEK_API_KEY=sk-xxx
+
+# Set API key (pick one method)
+export DEEPSEEK_API_KEY=sk-xxx          # via env
+opencode config set-key deepseek sk-xxx # via CLI (saved to ~/.opencode/config.json)
+
+# Start
 node dist/main.js
+# or after npm install -g:
+opencode
 ```
 
 ## Architecture
 
 ```
 src/
-├── main.tsx              Entry: config → tools → prompt engine → agent → TUI
+├── main.tsx              Entry: CLI routing → config → tools → prompt engine → agent → TUI
 ├── agent/
 │   ├── loop.ts           Agent loop: LLM call → tool execution → repeat
 │   ├── context.ts        Session state: messages, usage, turn count
@@ -26,6 +33,7 @@ src/
 ├── api/
 │   ├── client.ts         Streaming API client with retry (exp backoff 1s/2s/4s)
 │   ├── deepseek.ts       DeepSeek V4 provider: dual-format usage mapping
+│   ├── provider.ts       ProviderCapabilities abstraction (thinking, cache, effort)
 │   ├── sse.ts            SSE parser with id/retry field support
 │   └── types.ts          Message, ContentBlock, Usage, ToolDefinition types
 ├── prompt/
@@ -36,24 +44,29 @@ src/
 ├── tools/
 │   ├── bash.ts           Shell execution (spawn), live output streaming
 │   ├── edit.ts           Search-and-replace with uniqueness check
-│   ├── read-file.ts      File reading with offset/limit
+│   ├── read-file.ts      File reading with offset/limit, .gitignore filter
 │   ├── write-file.ts     File creation/overwrite
 │   ├── registry.ts       Tool registration, approval gating
-│   └── path-validate.ts  Path traversal protection
+│   ├── gitignore.ts      .gitignore parser + default ignore patterns
+│   ├── process-tracker.ts Child process tracker (killAll on abort)
+│   ├── path-validate.ts  Path traversal protection
+│   └── truncation.ts     Output truncation (head + tail)
 ├── compact/
 │   ├── micro.ts          Truncation compaction (keep recent N messages)
 │   ├── auto.ts           Auto-compaction decision (800K threshold, 500K floor)
 │   └── constants.ts      Compaction thresholds per context window size
 ├── config/
 │   ├── schema.ts         Zod config schema (provider, agent, compact, cache)
-│   └── default.ts        Default config: DeepSeek V4 Pro/Flash
+│   ├── default.ts        Default config: DeepSeek V4 Pro/Flash
+│   └── manager.ts        CLI config manager (opencode config <command>)
 └── tui/
     ├── app.tsx            Main app: slash commands, approval UI, render batching
     ├── input.tsx          Input bar (disabled during streaming/approval)
     ├── status-bar.tsx     Model, cache hit rate, cost, token count
     ├── stream.tsx         Streaming text output
     ├── thinking.tsx       Thinking block with collapse
-    └── tool-card.tsx      Tool execution display
+    ├── tool-card.tsx      Tool execution display (auto-folds >20 lines)
+    └── error-boundary.tsx React error boundary (catch without crash)
 ```
 
 ### Data Flow
@@ -71,6 +84,7 @@ User input → App.handleSubmit
        Tool execution (if tool_use blocks)
          → approval check → spawn/exec → result
          → live output streaming via onOutput callback
+         → child process tracked (killAll on SIGINT/SIGTERM)
        Loop until no tool_use or maxTurns reached
 ```
 
@@ -93,12 +107,44 @@ DeepSeek's prefix cache matches on complete prefix, so the frozen system prompt 
 - **Approval workflow** — y/n confirmation for dangerous operations
 - **Session persistence** — JSONL append, resume on restart, compact on exit
 - **Auto-compaction** — Triggers at 800K tokens, preserves recent messages
+- **Provider abstraction** — ProviderCapabilities for multi-provider support
 - **Dual-format usage** — Reads both DeepSeek native and Anthropic compat fields
 - **Truncated JSON recovery** — Recovers partial tool_use JSON from streaming
 - **Slash commands** — /help /exit /compact /model /clear
+- **Config CLI** — Manage API keys, providers, models from terminal
+- **.gitignore filter** — Skips node_modules, .git, build artifacts
+- **Graceful shutdown** — SIGINT/SIGTERM → abort agent + persist session + kill children
+- **ErrorBoundary** — React errors caught without crashing the process
 - **Config validation** — Zod schema with deep merge over defaults
 
 ## Configuration
+
+### Using the CLI (recommended)
+
+```bash
+# List providers and API key status
+opencode config providers
+
+# Set API key (saved to ~/.opencode/config.json)
+opencode config set-key deepseek sk-your-key-here
+
+# Or use an environment variable instead
+opencode config set-key-env deepseek DEEPSEEK_API_KEY
+
+# Add a new model to a provider
+opencode config add-model deepseek deepseek-v4-flash 1000000 64000
+
+# Remove a model
+opencode config remove-model deepseek old-model-id
+
+# Switch default provider
+opencode config set-default deepseek
+
+# Show full config
+opencode config show
+```
+
+### Manual config file
 
 Place `~/.opencode/config.json` (optional, uses defaults if missing):
 
@@ -120,11 +166,21 @@ Place `~/.opencode/config.json` (optional, uses defaults if missing):
 }
 ```
 
+## Slash Commands (in TUI)
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/exit` `/quit` | Save session and exit |
+| `/compact` | Compact conversation context now |
+| `/model` | Show current model info and cost |
+| `/clear` | Clear screen (visual only) |
+
 ## Development
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (32)
+npm run test                   # Run all tests (67)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
