@@ -2,14 +2,14 @@
   "version": 1,
   "created_at": "2026-05-15T11:15:57.947Z",
   "lifetime": {
-    "total_tokens_estimated": 44805,
-    "total_reads": 61,
-    "total_writes": 1,
+    "total_tokens_estimated": 109414,
+    "total_reads": 124,
+    "total_writes": 14,
     "total_sessions": 2,
-    "anatomy_hits": 44,
-    "anatomy_misses": 3,
+    "anatomy_hits": 77,
+    "anatomy_misses": 9,
     "repeated_reads_blocked": 13,
-    "estimated_savings_vs_bare_cli": 18327
+    "estimated_savings_vs_bare_cli": 24927
   },
   "sessions": [
     {
@@ -398,6 +398,500 @@
         "writes_count": 1,
         "repeated_reads_blocked": 13,
         "anatomy_lookups": 44
+      }
+    },
+    {
+      "id": "session-2026-05-15-2045",
+      "started": "2026-05-15T12:45:19.949Z",
+      "ended": "2026-05-15T13:04:32.196Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/manager.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/default.ts",
+          "tokens_estimated": 298,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/client.ts",
+          "tokens_estimated": 3020,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/edit.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts",
+          "tokens_estimated": 532,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/auto.ts",
+          "tokens_estimated": 1486,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts",
+          "tokens_estimated": 1107,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/registry.ts",
+          "tokens_estimated": 304,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/schema.ts",
+          "tokens_estimated": 584,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/provider.ts",
+          "tokens_estimated": 456,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx",
+          "tokens_estimated": 3142,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/context.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts",
+          "tokens_estimated": 1990,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts",
+          "tokens_estimated": 785,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/micro.ts",
+          "tokens_estimated": 685,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/static.ts",
+          "tokens_estimated": 780,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/sse.ts",
+          "tokens_estimated": 602,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/path-validate.ts",
+          "tokens_estimated": 174,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/.superpowers/brainstorm/2026-05-15-rivet-open-model-terminal-agent-fragments.json",
+          "tokens_estimated": 1635,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-15-rivet-open-model-terminal-agent-direction-design.md",
+          "tokens_estimated": 2672,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/project_open_model_agent_goal.md",
+          "tokens_estimated": 245,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md",
+          "tokens_estimated": 46,
+          "action": "create"
+        }
+      ],
+      "totals": {
+        "input_tokens_estimated": 15945,
+        "output_tokens_estimated": 4598,
+        "reads_count": 21,
+        "writes_count": 4,
+        "repeated_reads_blocked": 0,
+        "anatomy_lookups": 11
+      }
+    },
+    {
+      "id": "session-2026-05-15-2045",
+      "started": "2026-05-15T12:45:19.949Z",
+      "ended": "2026-05-15T13:15:00.682Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/manager.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/default.ts",
+          "tokens_estimated": 298,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/client.ts",
+          "tokens_estimated": 3020,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/edit.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts",
+          "tokens_estimated": 532,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/auto.ts",
+          "tokens_estimated": 1486,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts",
+          "tokens_estimated": 1107,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/registry.ts",
+          "tokens_estimated": 304,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/schema.ts",
+          "tokens_estimated": 584,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/provider.ts",
+          "tokens_estimated": 456,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx",
+          "tokens_estimated": 3142,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/context.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts",
+          "tokens_estimated": 1990,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts",
+          "tokens_estimated": 785,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/micro.ts",
+          "tokens_estimated": 685,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/static.ts",
+          "tokens_estimated": 780,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/sse.ts",
+          "tokens_estimated": 602,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/path-validate.ts",
+          "tokens_estimated": 174,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/.superpowers/brainstorm/2026-05-15-rivet-open-model-terminal-agent-fragments.json",
+          "tokens_estimated": 1635,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-15-rivet-open-model-terminal-agent-direction-design.md",
+          "tokens_estimated": 2672,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/project_open_model_agent_goal.md",
+          "tokens_estimated": 245,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md",
+          "tokens_estimated": 46,
+          "action": "create"
+        }
+      ],
+      "totals": {
+        "input_tokens_estimated": 15945,
+        "output_tokens_estimated": 4598,
+        "reads_count": 21,
+        "writes_count": 4,
+        "repeated_reads_blocked": 0,
+        "anatomy_lookups": 11
+      }
+    },
+    {
+      "id": "session-2026-05-15-2045",
+      "started": "2026-05-15T12:45:19.949Z",
+      "ended": "2026-05-15T13:18:13.546Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/manager.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/default.ts",
+          "tokens_estimated": 298,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/client.ts",
+          "tokens_estimated": 3020,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/edit.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts",
+          "tokens_estimated": 532,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/auto.ts",
+          "tokens_estimated": 1486,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts",
+          "tokens_estimated": 1107,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/registry.ts",
+          "tokens_estimated": 304,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/schema.ts",
+          "tokens_estimated": 584,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/provider.ts",
+          "tokens_estimated": 456,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx",
+          "tokens_estimated": 3142,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/context.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts",
+          "tokens_estimated": 1990,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts",
+          "tokens_estimated": 785,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/micro.ts",
+          "tokens_estimated": 685,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/static.ts",
+          "tokens_estimated": 780,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/sse.ts",
+          "tokens_estimated": 602,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools/path-validate.ts",
+          "tokens_estimated": 174,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/.superpowers/brainstorm/2026-05-15-rivet-open-model-terminal-agent-fragments.json",
+          "tokens_estimated": 1635,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-15-rivet-open-model-terminal-agent-direction-design.md",
+          "tokens_estimated": 2672,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/project_open_model_agent_goal.md",
+          "tokens_estimated": 245,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md",
+          "tokens_estimated": 46,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-15-rivet-p2-1-performance-dev-capability-optimization.md",
+          "tokens_estimated": 2980,
+          "action": "create"
+        }
+      ],
+      "totals": {
+        "input_tokens_estimated": 15945,
+        "output_tokens_estimated": 7578,
+        "reads_count": 21,
+        "writes_count": 5,
+        "repeated_reads_blocked": 0,
+        "anatomy_lookups": 11
       }
     }
   ],

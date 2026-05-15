@@ -14,6 +14,9 @@ export interface SessionState {
   turnCount: number
   startTime: number
   estimatedTokens: number
+  filesRead: Set<string>
+  filesModified: Set<string>
+  testResults: Array<{ passed: number; failed: number }>
 }
 
 export class SessionContext {
@@ -26,6 +29,9 @@ export class SessionContext {
       turnCount: 0,
       startTime: Date.now(),
       estimatedTokens: 0,
+      filesRead: new Set(),
+      filesModified: new Set(),
+      testResults: [],
     }
   }
 
@@ -90,6 +96,30 @@ export class SessionContext {
 
   getEstimatedTokens(): number {
     return this.state.estimatedTokens
+  }
+
+  trackFileRead(path: string): void {
+    this.state.filesRead.add(path)
+  }
+
+  trackFileModified(path: string): void {
+    this.state.filesModified.add(path)
+  }
+
+  trackTestResult(passed: number, failed: number): void {
+    this.state.testResults.push({ passed, failed })
+  }
+
+  getFilesRead(): string[] {
+    return [...this.state.filesRead].sort()
+  }
+
+  getFilesModified(): string[] {
+    return [...this.state.filesModified].sort()
+  }
+
+  getTestResults(): Array<{ passed: number; failed: number }> {
+    return this.state.testResults
   }
 
   getElapsedMs(): number {

@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T13:03:02.603Z
-> Files: 65 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T13:17:54.389Z
+> Files: 66 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -46,6 +46,7 @@
 ## docs/superpowers/specs/
 
 - `2026-05-15-rivet-open-model-terminal-agent-direction-design.md` — Rivet 开源模型终端代理方向深度头脑风暴结果 (~2338 tok)
+- `2026-05-15-rivet-p2-1-performance-dev-capability-optimization.md` — P2.1：Rivet 性能层与开发能力层优化建议 (~2607 tok)
 - `2026-05-15-system-prompt-expansion-design.md` — OpenCode TUI System Prompt 架构优化 (~791 tok)
 
 ## prompts/
