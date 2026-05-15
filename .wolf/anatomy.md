@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T15:49:31.338Z
-> Files: 89 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-15T17:13:53.315Z
+> Files: 96 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -30,6 +30,8 @@
 ## .superpowers/brainstorm/
 
 - `2026-05-15-rivet-open-model-terminal-agent-fragments.json` (~1635 tok)
+- `2026-05-16-rivet-subagent-orchestration-fragments.json` — Rivet subagent orchestration brainstorm fragments (~2146 tok)
+- `2026-05-16-rivet-subagent-orchestration-fragments.json` (~2146 tok)
 
 ## docs/
 
@@ -42,7 +44,9 @@
 ## docs/superpowers/plans/
 
 - `2026-05-15-rivet-p2-2-capability-reliability-layer.md` — Rivet P2.2 Capability Reliability Layer 实现计划 (~14754 tok)
+- `2026-05-15-rivet-p2-3-harness-cockpit-implementation.md` — Rivet P2.3 Harness Cockpit TUI 实现计划 (~13437 tok)
 - `2026-05-15-rivet-performance-optimization.md` — Rivet 性能优化与 Claude Code 对标实现计划 (~10205 tok)
+- `2026-05-16-rivet-subagent-orchestration-implementation.md` — Rivet 子代理协同 Phase 1 实现计划 (~14672 tok)
 
 ## docs/superpowers/specs/
 
@@ -50,6 +54,7 @@
 - `2026-05-15-rivet-p2-1-performance-dev-capability-optimization.md` — P2.1：Rivet 性能层与开发能力层优化建议 (~2607 tok)
 - `2026-05-15-rivet-p2-3-harness-cockpit-design.md` — Rivet P2.3 Harness Cockpit TUI 设计 (~3319 tok)
 - `2026-05-15-system-prompt-expansion-design.md` — OpenCode TUI System Prompt 架构优化 (~791 tok)
+- `2026-05-16-rivet-subagent-orchestration-design.md` — Rivet 主控模型子代理协同能力深度头脑风暴结果 (~7664 tok)
 
 ## prompts/
 
@@ -68,14 +73,14 @@
 
 ## src/
 
-- `main.tsx` — deepMerge — uses useState, useMemo, useCallback (~1501 tok)
+- `main.tsx` — Read piped stdin (non-TTY only) as initial input (~2700 tok)
 
 ## src/agent/
 
 - `checkpoint.ts` — Create a checkpoint by recording the current HEAD hash and dirty worktree state. (~1577 tok)
 - `context.ts` — Replace all messages (used after compaction) (~689 tok)
 - `evidence.ts` — Exports EvidenceState, EvidenceTracker (~483 tok)
-- `loop.ts` — Exports AgentConfig, AgentCallbacks, AgentLoop (~2559 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~2909 tok)
 - `session-persist.ts` — Append a single message to the session file (~532 tok)
 - `verification.ts` — Exports VerificationState, emptyVerificationState, addVerificationRun, summarizeVerification + 2 mor (~514 tok)
 
@@ -89,7 +94,7 @@
 
 - `client.ts` — Optional function to normalize usage fields from provider-specific format to standard Usage (~3020 tok)
 - `deepseek.ts` — Generic factory: create an ApiClient for any provider described by a (~572 tok)
-- `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~456 tok)
+- `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~459 tok)
 - `sse.ts` — Exports SSEEvent, SSEParser (~602 tok)
 - `types.ts` — Exports ContentBlockText, ContentBlockThinking, ContentBlockToolUse, ContentBlockToolResult + 7 more (~552 tok)
 
@@ -111,7 +116,23 @@
 ## src/config/
 
 - `default.ts` — Exports DEFAULT_CONFIG (~298 tok)
-- `schema.ts` — Zod schemas: modelConfigSchema, providerSchema, agentSchema, compactSchema + 2 more (~584 tok)
+- `schema.ts` — Zod schemas: modelConfigSchema, providerSchema, agentSchema, compactSchema + 2 more (~588 tok)
+
+## src/failures/
+
+- `sample.ts` — Exports createFailureSample, redactSecrets (~200 tok)
+
+## src/failures/__tests__/
+
+- `sample.test.ts` — Declares sample (~300 tok)
+
+## src/model/
+
+- `capability.ts` — Exports ModelCapabilityCard, recommendModelForTask (~400 tok)
+
+## src/model/__tests__/
+
+- `capability.test.ts` — Declares card (~250 tok)
 
 ## src/prompt/
 
@@ -123,6 +144,16 @@
 ## src/prompt/__tests__/
 
 - `fingerprint.test.ts` — Declares SAMPLE_TOOLS (~1599 tok)
+
+## src/repo/
+
+- `context-bundle.ts` — Exports buildContextBundle (~350 tok)
+- `import-graph.ts` — Exports buildImportGraph (~300 tok)
+- `symbol-index.ts` — Exports buildSymbolIndex (~400 tok)
+
+## src/repo/__tests__/
+
+- `symbol-index.test.ts` — Declares idx (~250 tok)
 
 ## src/tools/
 
@@ -150,39 +181,13 @@
 - `path-validate.test.ts` — Declares result (~621 tok)
 - `run-tests.test.ts` — makeParams: setupProject (~993 tok)
 
-## src/failures/
-
-- `sample.ts` — Exports createFailureSample, redactSecrets (~200 tok)
-
-## src/failures/__tests__/
-
-- `sample.test.ts` — Declares sample (~300 tok)
-
-## src/model/
-
-- `capability.ts` — Exports ModelCapabilityCard, recommendModelForTask (~400 tok)
-
-## src/model/__tests__/
-
-- `capability.test.ts` — Declares card (~250 tok)
-
-## src/repo/
-
-- `context-bundle.ts` — Exports buildContextBundle (~350 tok)
-- `import-graph.ts` — Exports buildImportGraph (~300 tok)
-- `symbol-index.ts` — Exports buildSymbolIndex (~400 tok)
-
-## src/repo/__tests__/
-
-- `symbol-index.test.ts` — Declares idx (~250 tok)
-
 ## src/tui/
 
-- `app.tsx` — MAX_VISIBLE_LOGS (~5160 tok)
+- `app.tsx` — MAX_VISIBLE_LOGS (~4872 tok)
 - `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
 - `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)
 - `status-bar.tsx` — StatusBar (~245 tok)
 - `stream.tsx` — StreamOutput (~105 tok)
 - `thinking.tsx` — ThinkingCollapser — uses useState (~242 tok)
-- `tool-card.tsx` — ToolCard (~137 tok)
+- `tool-card.tsx` — MAX_COLLAPSED_LINES (~320 tok)

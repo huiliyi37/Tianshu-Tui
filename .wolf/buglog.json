@@ -96,6 +96,150 @@
       "related_bugs": [],
       "occurrences": 2,
       "last_seen": "2026-05-15T15:45:29.542Z"
+    },
+    {
+      "id": "bug-007",
+      "timestamp": "2026-05-15T16:49:03.006Z",
+      "error_message": "CSS fix: thinkingBudget",
+      "file": "src/main.tsx",
+      "root_cause": "thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)), → currentModel.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),",
+      "fix": "Changed thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)), → currentModel.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),",
+      "tags": [
+        "auto-detected",
+        "style-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T16:49:03.006Z"
+    },
+    {
+      "id": "bug-008",
+      "timestamp": "2026-05-15T16:56:50.169Z",
+      "error_message": "Wrong reference: 100 should be process",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Used \"100\" instead of \"process\"",
+      "fix": "Changed 100 → process",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T16:56:50.169Z"
+    },
+    {
+      "id": "bug-009",
+      "timestamp": "2026-05-15T16:58:18.177Z",
+      "error_message": "Type error",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T16:58:18.177Z"
+    },
+    {
+      "id": "bug-010",
+      "timestamp": "2026-05-15T17:01:58.211Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T17:01:58.211Z"
+    },
+    {
+      "id": "bug-011",
+      "timestamp": "2026-05-15T17:02:18.804Z",
+      "error_message": "Missing guard clause",
+      "file": "src/agent/loop.ts",
+      "root_cause": "No early return/throw for edge case: toolName === 'bash'",
+      "fix": "Added guard clause: if (toolName === 'bash')",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T17:02:18.804Z"
+    },
+    {
+      "id": "bug-012",
+      "timestamp": "2026-05-15T17:03:03.560Z",
+      "error_message": "Type error",
+      "file": "src/main.tsx",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T17:03:03.560Z"
+    },
+    {
+      "id": "bug-013",
+      "timestamp": "2026-05-15T17:04:09.784Z",
+      "error_message": "Type error",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T17:04:09.784Z"
+    },
+    {
+      "id": "bug-014",
+      "timestamp": "2026-05-15T17:12:29.019Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "17 lines replaced/restructured",
+      "fix": "Rewrote 21→3 lines (17 removed) | Also: const toolOutputAccumRef = useRef<Map<string, stri; const toolFlushRef = useRef<ReturnType<typeof setT | Also: toolOutputAccumRef.current.clear(); dirtyToolIdsRef.current.clear() | Also: if (toolFlushRef.current) {; clearTimeout(toolFlushRef.current)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 4,
+      "last_seen": "2026-05-15T17:13:53.328Z"
+    },
+    {
+      "id": "bug-015",
+      "timestamp": "2026-05-15T17:12:38.852Z",
+      "error_message": "Missing guard clause",
+      "file": "src/tui/app.tsx",
+      "root_cause": "No early return/throw for edge case: isError === undefined",
+      "fix": "Added guard clause: if (isError === undefined)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-15T17:12:38.852Z"
     }
   ]
 }
