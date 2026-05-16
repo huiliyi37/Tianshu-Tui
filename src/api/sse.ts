@@ -28,8 +28,10 @@ export class SSEParser {
       const line = this.buffer.slice(0, idx).replace(/\r$/, '')
       this.buffer = this.buffer.slice(idx + 1)
 
-      if (line.startsWith('event: ')) {
-        this.eventBuffer = line.slice(7)
+      if (line.startsWith('event:') || line.startsWith('event: ')) {
+        this.eventBuffer = line.startsWith('event: ')
+          ? line.slice(7)
+          : line.slice(6).replace(/^[ \t]+/, '')
       } else if (line.startsWith('data:')) {
         // Handle both "data:value" and "data: value"
         const dataContent = line.slice(5).replace(/^[ \t]+/, '')
