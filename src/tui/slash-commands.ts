@@ -99,7 +99,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     case '/quit':
       ctx.persist.compact(ctx.session.getMessages())
       pushStatic(createLogEntry({ type: 'system', content: 'Session saved. Goodbye!' }))
-      process.exit(0)
+      process.emit('SIGINT')
 
     case '/compact':
       pushStatic(createLogEntry({ type: 'system', content: 'Compacting conversation...' }))
@@ -247,7 +247,13 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
 
     case '/resume': {
       const sessions = SessionPersist.listSessions()
-      const idx = parseInt(parts[1] ?? '', 10) - 1
+      const arg = parts[1]
+      if (!arg || !/^\d+$/.test(arg)) {
+        pushStatic(createLogEntry({ type: 'system', content: `Invalid session number. Use /sessions to see available sessions.` }))
+        setIsStreaming(false)
+        return true
+      }
+      const idx = parseInt(arg, 10) - 1
       if (isNaN(idx) || idx < 0 || idx >= sessions.length) {
         pushStatic(createLogEntry({ type: 'system', content: `Invalid session number. Use /sessions to see available sessions.` }))
         setIsStreaming(false)

@@ -93,7 +93,11 @@ let _sessionIdRef: string | null = null
 // Module-level MCP manager reference — initialized in Root, shut down on exit
 let _mcpManager: McpManager | null = null
 
+let isShuttingDown = false
+
 function gracefulShutdown() {
+  if (isShuttingDown) return
+  isShuttingDown = true
   shutdownCallback?.()
   if (process.stdin.isTTY && process.stdin.setRawMode) {
     process.stdin.setRawMode(false)

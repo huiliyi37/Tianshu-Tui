@@ -7,6 +7,13 @@ interface ThinkingCollapserProps {
   focused?: boolean
 }
 
+const MAX_THINKING_DISPLAY = 50_000
+
+function truncateThinking(text: string): string {
+  if (text.length <= MAX_THINKING_DISPLAY) return text
+  return text.slice(0, MAX_THINKING_DISPLAY) + `\n... (${text.length - MAX_THINKING_DISPLAY} more characters)`
+}
+
 export function ThinkingCollapser({ thinking, isStreaming, focused }: ThinkingCollapserProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -25,7 +32,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused }: ThinkingCo
       </Text>
       {expanded && (
         <Box paddingLeft={2} borderStyle="single" borderColor="gray">
-          <Text dimColor>{thinking}</Text>
+          <Text dimColor>{truncateThinking(thinking)}</Text>
         </Box>
       )}
     </Box>

@@ -76,17 +76,26 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
     setCursorPos(prev => Math.min(prev, value.length))
   }, [value.length])
 
+  const MAX_INPUT_LENGTH = 100_000
+
   const insertAtCursor = useCallback((insertion: string) => {
     const normalized = insertion.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-    onChange(value.slice(0, cursorPos) + normalized + value.slice(cursorPos))
-    setCursorPos(prev => prev + normalized.length)
+    const available = MAX_INPUT_LENGTH - value.length
+    if (available <= 0) return
+    const truncated = normalized.slice(0, available)
+    onChange(value.slice(0, cursorPos) + truncated + value.slice(cursorPos))
+    setCursorPos(prev => prev + truncated.length)
   }, [value, cursorPos, onChange])
+
+  const MAX_PASTE_LENGTH = 50_000
 
   const flushPasteBuffer = useCallback(() => {
     if (pasteBufferRef.current) {
       const normalized = pasteBufferRef.current.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-      onChange(value.slice(0, cursorPos) + normalized + value.slice(cursorPos))
-      setCursorPos(prev => prev + normalized.length)
+      const available = MAX_INPUT_LENGTH - value.length
+      const truncated = available > 0 ? normalized.slice(0, Math.min(available, MAX_PASTE_LENGTH)) : ''
+      onChange(value.slice(0, cursorPos) + truncated + value.slice(cursorPos))
+      setCursorPos(prev => prev + truncated.length)
       pasteBufferRef.current = ''
     }
     isPastingRef.current = false
@@ -108,7 +117,9 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       return
     }
     if (isPastingRef.current) {
-      pasteBufferRef.current += input
+      if (pasteBufferRef.current.length < MAX_PASTE_LENGTH) {
+        pasteBufferRef.current += input
+      }
       return
     }
 
