@@ -11,6 +11,7 @@ export interface PrefixFingerprint {
 export interface DriftEvent {
   systemChanged: boolean
   toolsChanged: boolean
+  stableVolatileChanged: boolean
   message: string
 }
 
@@ -54,11 +55,13 @@ export function detectDrift(
 
   const systemChanged = baseline.systemSha256 !== current.systemSha256
   const toolsChanged = baseline.toolsSha256 !== current.toolsSha256
+  const stableVolatileChanged = baseline.stableVolatileSha256 !== current.stableVolatileSha256
 
   const parts: string[] = []
   if (systemChanged) parts.push('system prompt')
   if (toolsChanged) parts.push('tool definitions')
+  if (stableVolatileChanged) parts.push('stable volatile context')
   const message = `Prefix cache drift detected: ${parts.join(' and ')} changed`
 
-  return { systemChanged, toolsChanged, message }
+  return { systemChanged, toolsChanged, stableVolatileChanged, message }
 }

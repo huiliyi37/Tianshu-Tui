@@ -144,7 +144,20 @@ describe('detectDrift', () => {
     assert.ok(drift)
     assert.equal(drift.systemChanged, true)
     assert.equal(drift.toolsChanged, true)
+    assert.equal(drift.stableVolatileChanged, false)
     assert.ok(drift.message.includes('system prompt') && drift.message.includes('tool definitions'))
+  })
+
+  it('detects stable volatile drift', () => {
+    const base = computeFingerprint('system', SAMPLE_TOOLS, '<session>A</session>')
+    const current = computeFingerprint('system', SAMPLE_TOOLS, '<session>B</session>')
+    const drift = detectDrift(base, current)
+
+    assert.ok(drift)
+    assert.equal(drift.systemChanged, false)
+    assert.equal(drift.toolsChanged, false)
+    assert.equal(drift.stableVolatileChanged, true)
+    assert.ok(drift.message.includes('stable volatile context'))
   })
 })
 

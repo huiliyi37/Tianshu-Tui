@@ -49,9 +49,13 @@ export function diagnoseCacheMiss(
 
   // Check fingerprint drift first — this invalidates the entire prefix
   if (drift) {
+    const parts: string[] = []
+    if (drift.systemChanged) parts.push('system prompt')
+    if (drift.toolsChanged) parts.push('tool definitions')
+    if (drift.stableVolatileChanged) parts.push('stable volatile context')
     return {
       reason: 'prefix_drift',
-      message: `Cache drift: ${drift.systemChanged ? 'system prompt' : ''}${drift.systemChanged && drift.toolsChanged ? ' + ' : ''}${drift.toolsChanged ? 'tool definitions' : ''} changed — prefix invalidated`,
+      message: `Cache drift: ${parts.join(' + ')} changed — prefix invalidated`,
       severity: 'error',
       turnHitRate,
     }
