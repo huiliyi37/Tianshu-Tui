@@ -7,6 +7,7 @@ import { createElement, useState, useMemo, useCallback, useEffect, useRef } from
 import { App } from './tui/app.js'
 import { ErrorBoundary } from './tui/error-boundary.js'
 import { AgentLoop } from './agent/loop.js'
+import { createAgentConfig } from './agent/create-agent-config.js'
 import { SessionContext } from './agent/context.js'
 import { SessionPersist } from './agent/session-persist.js'
 import { FileHistory } from './agent/file-history.js'
@@ -25,6 +26,7 @@ import { configSchema } from './config/schema.js'
 import { DEFAULT_CONFIG } from './config/default.js'
 import { runConfigCLI } from './config/manager.js'
 import { McpManager } from './mcp/manager.js'
+import { loadProjectRules } from './context/rules-loader.js'
 import type { Config, ProviderConfig } from './config/schema.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
@@ -195,6 +197,9 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   const [claimStore] = useState(() => {
     const store = persist.createClaimStore()
     persist.injectDurableClaims(store)
+    for (const rule of loadProjectRules(process.cwd(), 'project')) {
+      store.propose(rule)
+    }
     return store
   })
 
@@ -205,32 +210,21 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   const [currentModel, setCurrentModel] = useState(() => provider.models[0]!)
 
   const agent = useMemo(() => {
-    const promptEngine = new PromptEngine({
-      model: currentModel.id,
-      maxTokens: currentModel.maxTokens,
-      staticCtx: { tools: toolRegistry.getDefinitions() },
-      volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
-    })
-    const client = createDeepSeekClient({
+    const compactModelSpec = provider.models.find(m => m.id === config.compact.model || m.alias === config.compact.model)
+
+    const agentCfg = createAgentConfig({
       apiKey,
-      model: currentModel.id,
-      reasoningEffort: currentModel.reasoningEffort,
-      maxTokens: currentModel.maxTokens,
-      thinkingBudget: currentModel.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),
+      model: { id: currentModel.id, maxTokens: currentModel.maxTokens, contextWindow: currentModel.contextWindow, reasoningEffort: currentModel.reasoningEffort },
+      cwd,
+      compact: config.compact,
+      sessionId,
+      toolDefinitions: toolRegistry.getDefinitions(),
+      compactModel: compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort } : undefined,
+      sessionMemoryBlock: persist.buildMemoryBlock(),
+      approvalMode: config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
     })
 
-    // Create a compact client for LLM-based summarization (auto-compaction)
-    const compactModel = provider.models.find(m => m.id === config.compact.model || m.alias === config.compact.model)
-    const compactClient = compactModel ? createDeepSeekClient({
-      apiKey,
-      model: compactModel.id,
-      reasoningEffort: compactModel.reasoningEffort,
-      maxTokens: Math.min(2048, compactModel.maxTokens),
-      thinkingBudget: 1024,
-    }) : undefined
-
-    // --- P2.4: DelegationCoordinator ---
-    // Phase 1 uses a single model card; recommendModelForTask trivially picks it.
+    // --- DelegationCoordinator ---
     const modelCards: ModelCapabilityCard[] = [{
       model: currentModel.id,
       toolUseReliability: 0.8,
@@ -278,18 +272,10 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 
     return new AgentLoop(
       {
-        client,
-        promptEngine,
+        ...agentCfg,
         toolRegistry,
         maxTurns: config.agent.maxTurns,
-        contextWindow: currentModel.contextWindow,
-        compact: config.compact,
-        compactClient,
-        compactModel: compactModel?.id,
-        approvalMode: config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
-        sessionId,
         getSessionMemoryState: () => persist.getSessionMemoryState(),
-        autoReasoning: true,
         lspEnabled: true,
         fileHistory,
         contextClaimStore: claimStore,
@@ -461,34 +447,35 @@ async function main() {
     if (!key) { console.error('API key not configured'); process.exit(1) }
 
     const model = prov.models[0]!
+    const compactModelSpec = prov.models.find(m => m.id === cfg.compact.model || m.alias === cfg.compact.model)
     const sessionId = randomUUID()
     const persist = new SessionPersist(sessionId)
     const claimStore = persist.createClaimStore()
     persist.injectDurableClaims(claimStore)
+    const fileHistory = new FileHistory(join(homedir(), '.rivet', 'sessions', sessionId, 'backups'), sessionId)
 
     const result = await runGoalLoop({
       goal: parsed.goal,
       budget: parsed.budget ?? 100,
       createAgent: () => {
         const toolRegistry = createDefaultToolRegistry()
-        const client = createDeepSeekClient({
+
+        const agentCfg = createAgentConfig({
           apiKey: key,
-          model: model.id,
-          reasoningEffort: model.reasoningEffort,
-          maxTokens: model.maxTokens,
-          thinkingBudget: model.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(model.contextWindow * 0.02)),
-        })
-        const promptEngine = new PromptEngine({
-          model: model.id,
-          maxTokens: model.maxTokens,
-          staticCtx: { tools: toolRegistry.getDefinitions() },
-          volatileCtx: { cwd: process.cwd() },
+          model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
+          cwd: process.cwd(),
+          compact: cfg.compact,
+          sessionId,
+          toolDefinitions: toolRegistry.getDefinitions(),
+          compactModel: compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort } : undefined,
+          sessionMemoryBlock: persist.buildMemoryBlock(),
+          approvalMode: 'auto-accept',
         })
 
         const goalCoordinator = new DelegationCoordinator({
           baseToolRegistry: toolRegistry,
           modelCards: [{ model: model.id, toolUseReliability: 0.8, jsonStability: 0.8, editSuccessRate: 0.7, testRepairRate: 0.6, contextWindow: model.contextWindow, cacheEconomics: 'strong', recommendedTasks: ['code_search'] }],
-          maxWorkers: 2,
+          maxWorkers: 3,
           runtimeFactory: (order, card, workerRegistry) => ({
             order,
             client: createDeepSeekClient({ apiKey: key, model: card.model, reasoningEffort: undefined, maxTokens: Math.min(4096, card.contextWindow), thinkingBudget: 4096 }),
@@ -509,16 +496,12 @@ async function main() {
 
         const session = new SessionContext()
         return new AgentLoop({
-          client,
-          promptEngine,
+          ...agentCfg,
           toolRegistry,
           maxTurns: 25,
-          contextWindow: model.contextWindow,
-          compact: cfg.compact,
-          approvalMode: 'auto-accept',
-          sessionId,
           contextClaimStore: claimStore,
-          autoReasoning: true,
+          getSessionMemoryState: () => persist.getSessionMemoryState(),
+          fileHistory,
         }, session, process.cwd())
       },
       checkGoalAchieved: (text: string) => {

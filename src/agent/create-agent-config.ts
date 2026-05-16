@@ -8,7 +8,7 @@ export interface ModelSpec {
   id: string
   maxTokens: number
   contextWindow: number
-  reasoningEffort?: 'max' | 'high' | 'medium' | 'low'
+  reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | 'max'
 }
 
 export interface AgentConfigInput {
