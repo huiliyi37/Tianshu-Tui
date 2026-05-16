@@ -213,6 +213,16 @@ The prompt is split into 6 logical layers with explicit stability contracts. Phy
 
 Layers L1-L4 form the stable volatile block (frozen at construction, participates in `PrefixFingerprint.stableVolatileSha256`). Layers L5-L6 are injected only into the latest turn's volatile context, never polluting the cached prefix. `PromptEngine.getContextLayerReport()` exposes per-layer stability, channel, fingerprint policy, and token estimates for diagnostics.
 
+### Cache Safety
+
+Rivet uses several local caches to improve DeepSeek prefix-cache behavior and reduce repeated filesystem work. Cache layers must not bypass tool security boundaries:
+
+- `read_file` and speculative prewarm share the same path validation and gitignore filtering (`readFilePayload`).
+- Prewarm cache keys are canonical absolute paths and are invalidated after `edit_file` / `write_file`.
+- Prewarm is used only for full-file reads; ranged reads with `offset` or `limit` execute the normal tool path.
+- `.rivet.md` and git status caches are scoped by cwd.
+- Prefix fingerprints include system prompt, tool definitions, and stable volatile context.
+
 ## Features
 
 - **Prefix cache optimization** — Frozen system prompt + structured message ordering

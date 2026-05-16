@@ -1,6 +1,6 @@
 # Rivet Cache Safety Layer 实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [x]`）语法来跟踪进度。
 
 **目标：** 修复 Rivet 当前 prewarm / volatile / prompt fingerprint 缓存边界问题，确保缓存不绕过文件安全校验、不返回 stale 内容、不隐形打穿 prefix cache。
 
@@ -48,7 +48,7 @@
 - 修改：`src/tools/read-file.ts`
 - 测试：`src/tools/__tests__/read-file.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `src/tools/__tests__/read-file.test.ts` 增加以下测试。如果文件不存在，创建该测试文件并保留现有测试风格：
 
@@ -107,7 +107,7 @@ describe('readFilePayload', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -121,7 +121,7 @@ npm test -- src/tools/__tests__/read-file.test.ts
 The requested module '../read-file.js' does not provide an export named 'readFilePayload'
 ```
 
-- [ ] **步骤 3：实现共享 helper**
+- [x] **步骤 3：实现共享 helper**
 
 修改 `src/tools/read-file.ts`，在 `READ_FILE_TOOL` 前加入：
 
@@ -196,7 +196,7 @@ async execute(params: ToolCallParams) {
 },
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -206,7 +206,7 @@ npm test -- src/tools/__tests__/read-file.test.ts
 
 预期：PASS。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/tools/read-file.ts src/tools/__tests__/read-file.test.ts
@@ -222,7 +222,7 @@ git commit -m "fix(read-file): centralize safe file payload construction"
 - 修改：`src/agent/prewarm.ts`
 - 测试：`src/agent/__tests__/prewarm-file.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 创建 `src/agent/__tests__/prewarm-file.test.ts`：
 
@@ -282,7 +282,7 @@ describe('canUsePrewarmForRead', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -296,7 +296,7 @@ npm test -- src/agent/__tests__/prewarm-file.test.ts
 Cannot find module '../prewarm-file.js'
 ```
 
-- [ ] **步骤 3：实现 prewarm 文件 helper**
+- [x] **步骤 3：实现 prewarm 文件 helper**
 
 创建 `src/agent/prewarm-file.ts`：
 
@@ -389,7 +389,7 @@ export class PrewarmCache {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -399,7 +399,7 @@ npm test -- src/agent/__tests__/prewarm-file.test.ts
 
 预期：PASS。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/prewarm.ts src/agent/prewarm-file.ts src/agent/__tests__/prewarm-file.test.ts
@@ -414,7 +414,7 @@ git commit -m "fix(agent): make prewarm cache use safe canonical file reads"
 - 修改：`src/agent/loop.ts:103-118,354-365,384-387`
 - 测试：`src/agent/__tests__/loop.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `src/agent/__tests__/loop.test.ts` 增加测试。测试使用 mock client 先输出包含安全文件路径的文本触发 prewarm，再发出 `read_file` tool_use，断言 tool registry 没被调用且返回缓存内容；再增加 offset 读测试，断言不会使用缓存。
 
@@ -495,7 +495,7 @@ it('does not use prewarm cache for read_file with offset or limit', async () => 
 
 Use existing test helpers in `loop.test.ts`; if helper names differ, adapt only the wrapper calls, not the assertions.
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -505,7 +505,7 @@ npm test -- src/agent/__tests__/loop.test.ts
 
 预期：第一个测试 FAIL，`executeCalls` 为 1 或 cache content 不返回；第二个测试可能 PASS/FAIL，取决于当前 cache key 是否命中。
 
-- [ ] **步骤 3：修改 AgentLoop 接线**
+- [x] **步骤 3：修改 AgentLoop 接线**
 
 在 `src/agent/loop.ts` 顶部新增 import：
 
@@ -559,7 +559,7 @@ if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isEr
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -569,7 +569,7 @@ npm test -- src/agent/__tests__/loop.test.ts src/agent/__tests__/prewarm-file.te
 
 预期：PASS。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/loop.ts src/agent/__tests__/loop.test.ts
@@ -585,7 +585,7 @@ git commit -m "fix(agent): enforce safe prewarm cache hits in AgentLoop"
 - 修改：`src/prompt/volatile-git.ts:29-59`
 - 测试：`src/prompt/__tests__/volatile-cache.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 创建 `src/prompt/__tests__/volatile-cache.test.ts`：
 
@@ -634,7 +634,7 @@ describe('volatile local caches', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -644,7 +644,7 @@ npm test -- src/prompt/__tests__/volatile-cache.test.ts
 
 预期：FAIL，第二个 cwd 读到第一个 cwd 的 cache 值。
 
-- [ ] **步骤 3：实现 per-cwd cache**
+- [x] **步骤 3：实现 per-cwd cache**
 
 修改 `src/prompt/volatile.ts`：
 
@@ -716,7 +716,7 @@ Update existing callers/tests of `prime()` to pass cwd explicitly:
 gitStatusCache.prime(cwd, status)
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -728,7 +728,7 @@ If `volatile-git.test.ts` does not exist, run only `volatile-cache.test.ts`.
 
 预期：PASS。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/prompt/volatile.ts src/prompt/volatile-git.ts src/prompt/__tests__/volatile-cache.test.ts src/prompt/__tests__/volatile-git.test.ts
@@ -744,7 +744,7 @@ git commit -m "fix(prompt): isolate volatile caches by cwd"
 - 修改：`src/prompt/engine.ts`
 - 测试：`src/prompt/__tests__/engine.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在 `src/prompt/__tests__/engine.test.ts` 增加：
 
@@ -790,7 +790,7 @@ it('injects tool history only into the latest volatile block', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：
 
@@ -800,7 +800,7 @@ npm test -- src/prompt/__tests__/engine.test.ts
 
 预期：第一个新增测试 FAIL，因为 fingerprint 当前不包含 volatile block。
 
-- [ ] **步骤 3：扩展 fingerprint 类型与计算**
+- [x] **步骤 3：扩展 fingerprint 类型与计算**
 
 修改 `src/prompt/fingerprint.ts`：
 
@@ -857,7 +857,7 @@ this.fingerprint = computeFingerprint(this.systemPrompt, config.staticCtx.tools,
 const current = computeFingerprint(this.systemPrompt, this.config.staticCtx.tools, this.volatileBlock)
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：
 
@@ -867,7 +867,7 @@ npm test -- src/prompt/__tests__/engine.test.ts
 
 预期：PASS。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/prompt/fingerprint.ts src/prompt/engine.ts src/prompt/__tests__/engine.test.ts
@@ -881,7 +881,7 @@ git commit -m "fix(prompt): include stable volatile context in prefix fingerprin
 **文件：**
 - 修改：`README.md`
 
-- [ ] **步骤 1：更新 README cache safety 说明**
+- [x] **步骤 1：更新 README cache safety 说明**
 
 在 README 的 prompt/cache 架构章节加入：
 
@@ -905,7 +905,7 @@ npm run build
 ```
 ```
 
-- [ ] **步骤 2：运行完整验证**
+- [x] **步骤 2：运行完整验证**
 
 运行：
 
@@ -917,7 +917,7 @@ npm run build
 
 预期：全部 PASS。
 
-- [ ] **步骤 3：检查 diff 中无真实 secrets**
+- [x] **步骤 3：检查 diff 中无真实 secrets**
 
 运行：
 
@@ -932,7 +932,7 @@ git diff -- src docs README.md | grep -Ei "sk-[a-zA-Z0-9]|api[_-]?key\s*=|passwo
 - `git diff --check` 无输出。
 - secret grep 无真实密钥命中。文档中出现 `API key` 字样可以接受，但不能出现真实 key 或 token 片段。
 
-- [ ] **步骤 4：Commit**
+- [x] **步骤 4：Commit**
 
 ```bash
 git add README.md
