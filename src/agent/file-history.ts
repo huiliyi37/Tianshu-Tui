@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { diffLines } from 'diff'
 import { dirname, join } from 'node:path'
@@ -167,5 +167,37 @@ export class FileHistory {
 
   getLatestSnapshotId(): string | undefined {
     return this.snapshots.at(-1)?.messageId
+  }
+
+  async cleanupOrphans(): Promise<number> {
+    const sessionDir = join(this.backupDir, this.sessionId)
+    let dirEntries: string[]
+    try {
+      dirEntries = await readdir(sessionDir)
+    } catch {
+      return 0
+    }
+
+    const referencedBackups = new Set<string>()
+    for (const snapshot of this.snapshots) {
+      for (const backup of Object.values(snapshot.trackedFileBackups)) {
+        if (backup.backupFileName) {
+          referencedBackups.add(backup.backupFileName)
+        }
+      }
+    }
+
+    let removed = 0
+    for (const entry of dirEntries) {
+      if (!referencedBackups.has(entry)) {
+        try {
+          await unlink(join(sessionDir, entry))
+          removed++
+        } catch {
+          // File already gone or permission issue — skip
+        }
+      }
+    }
+    return removed
   }
 }

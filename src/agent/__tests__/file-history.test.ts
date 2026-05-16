@@ -78,4 +78,23 @@ describe('FileHistory', () => {
     await history.trackEdit(file, 'msg_1')
     assert.equal(history.hasSnapshot('msg_1'), true)
   })
+
+  it('cleanupOrphans removes unreferenced backup files', async () => {
+    const file = join(TMP, 'a.txt')
+    writeFileSync(file, 'v1')
+    await history.trackEdit(file, 'msg_1')
+
+    const sessionDir = join(BACKUP, 'test-session')
+    writeFileSync(join(sessionDir, 'orphan_file'), 'orphan content')
+
+    const { readdirSync } = await import('node:fs')
+    const beforeClean = readdirSync(sessionDir)
+    assert.ok(beforeClean.includes('orphan_file'))
+
+    const removed = await history.cleanupOrphans()
+    assert.ok(removed >= 1)
+
+    const afterClean = readdirSync(sessionDir)
+    assert.ok(!afterClean.includes('orphan_file'))
+  })
 })
