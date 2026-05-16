@@ -10,9 +10,11 @@ const RESULT_SHAPE = `{
   "artifacts": [
     { "kind": "note | patch | test_command | risk | question", "title": "short title", "content": "artifact content" }
   ],
+  "patchSummary": "optional: describe all changes made",
   "changedFiles": [],
   "risks": [],
-  "nextActions": []
+  "nextActions": [],
+  "evidenceStatus": "verified | failed | blocked | unverified"
 }`
 
 export function buildWorkerPrompt(order: WorkOrder): string {
@@ -27,6 +29,7 @@ export function buildWorkerPrompt(order: WorkOrder): string {
     `Allowed tools: ${order.allowedTools.join(', ')}`,
     `Disallowed tools: ${order.disallowedTools.join(', ')}`,
     'Do not call disallowed tools. Do not claim that files were changed.',
+    'If you changed files and did not run relevant verification, evidenceStatus must be "unverified".',
     'Return exactly one JSON object and no prose outside the object.',
     'The JSON object must match this shape:',
     RESULT_SHAPE,
@@ -57,6 +60,7 @@ export function buildPrimaryWorkerPacket(results: WorkerResult[]): string {
     changedFiles: result.changedFiles,
     risks: result.risks,
     nextActions: result.nextActions,
+    evidenceStatus: result.evidenceStatus,
   }))
 
   return [

@@ -45,6 +45,23 @@ describe('worker prompts', () => {
     assert.ok(prompt.includes('wo_1'))
   })
 
+  it('includes evidence fields in worker prompt contract', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_evidence',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Find routing seams.',
+      scope: { files: ['src/main.tsx'] },
+    })
+
+    const prompt = buildWorkerPrompt(order)
+
+    assert.ok(prompt.includes('changedFiles'))
+    assert.ok(prompt.includes('evidenceStatus'))
+    assert.ok(prompt.includes('unverified'))
+  })
+
   it('builds a compact primary packet from worker results', () => {
     const packet = buildPrimaryWorkerPacket([
       {
