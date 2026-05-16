@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 10 + ECF Phase 5 complete — 1030 tests passing, typecheck clean. Claim extractor, durable cross-session claims, antibody immunity, conflict detection, approval-risk boost, project rules, claim budget cap, recall tool with positive feedback loop, claim export/import, tool-pipeline + turn-end extraction (loop.ts 815→493). Evolutionary Context Fabric fully operational.
+Wave 12 (Session HA) + ECF Phase 5 complete — 926+ tests passing, typecheck clean. BlockStreamWriter semantic streaming, turn-level crash recovery snapshots, HistoryReplayBridge visual session restore, PromptQueue submission serialization, SessionEviction auto-cleanup. Evolutionary Context Fabric fully operational.
 
 ## Quick Start
 
@@ -32,7 +32,7 @@ src/
 ├── agent/
 │   ├── loop.ts           Agent loop: LLM call → tool execution → repeat
 │   ├── context.ts        Session state: messages, usage, turn count
-│   ├── session-persist.ts JSONL session persistence (~/.rivet/sessions/)
+│   ├── session-persist.ts JSONL session persistence + turn snapshots + eviction (~/.rivet/sessions/)
 │   ├── checkpoint.ts     Per-project git checkpoint + rollback v2 (agent-owned files only)
 │   ├── file-history.ts   Per-file snapshot backup + rewind (undo backbone)
 │   ├── evidence.ts       File tracking + test result badge + impacted files/tests
@@ -154,6 +154,8 @@ src/
     ├── phase-tracker.ts   Tool→phase state machine (searching/coding/testing/…)
     ├── theme.ts           Truecolor/fallback color palette with tool-specific colors
     ├── stream.tsx         Streaming text output (memoized)
+    ├── block-stream-writer.ts Semantic break-point streaming (paragraph/newline/space boundaries)
+    ├── history-replay.ts  Session history visual replay bridge (Message[] → LogEntry[])
     ├── thinking.tsx       Thinking block with Tab expand/collapse
     ├── tool-card.tsx      Tool execution display with theme-colored borders
     ├── log-state.ts       Log entry types, state management, output summarization

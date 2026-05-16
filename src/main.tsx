@@ -10,6 +10,7 @@ import { AgentLoop } from './agent/loop.js'
 import { createAgentConfig } from './agent/create-agent-config.js'
 import { SessionContext } from './agent/context.js'
 import { SessionPersist } from './agent/session-persist.js'
+import { evictOldSessions } from './agent/session-persist.js'
 import { FileHistory } from './agent/file-history.js'
 import { persistFileHistory } from './agent/file-history-persist.js'
 import { PromptEngine } from './prompt/engine.js'
@@ -179,6 +180,9 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   const [session] = useState(() => new SessionContext())
 
   const [sessionId] = useState(() => getOrCreateSessionId())
+
+  // Evict old session files to stay within the session limit
+  useState(() => { evictOldSessions(sessionId) })
 
   const [fileHistory] = useState(() => {
     const fh = new FileHistory(persist.getBackupDir(), sessionId)

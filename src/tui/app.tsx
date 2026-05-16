@@ -16,7 +16,6 @@ import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.js'
-import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import type { McpManager } from '../mcp/manager.js'
 import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, McpPanel } from './cockpit/index.js'
 import { buildCockpitSnapshot } from './cockpit/state.js'
@@ -29,6 +28,8 @@ import { homedir } from 'node:os'
 import { CommandPalette, getPaletteCommands } from './command-palette.js'
 import { openInEditor } from './external-editor.js'
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from './slash-commands.js'
+import { BlockStreamWriter } from './block-stream-writer.js'
+import { replayMessagesToLogEntries } from './history-replay.js'
 
 interface PendingApproval {
   id: string
@@ -51,7 +52,6 @@ interface AppProps {
   claimStoreRef: React.MutableRefObject<import('../context/claim-store.js').ContextClaimStore | null>
 }
 
-const STREAM_FLUSH_MS = 80
 const THINKING_FLUSH_MS = 200
 const TOOL_FLUSH_MS = 120
 
@@ -101,7 +101,7 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
       {panel === 'verify' && <VerificationPanel filesRead={snap.verification.filesRead} filesModified={snap.verification.filesModified} verifications={snap.verification.runs} deliveryStatus={snap.verification.deliveryStatus} impactedFiles={snap.verification.impactedFiles} impactedTests={snap.verification.impactedTests} />}
       {panel === 'context' && snap.context && <ContextPanel estimatedTokens={snap.context.estimatedTokens} maxTokens={snap.context.maxTokens} rounds={snap.context.rounds} compactionState={snap.context.compactionState} brokenRounds={snap.context.brokenRounds} compactEvents={compactEvents.map(e => ({ turn: e.turn, tier: e.tier, beforeTokens: e.beforeTokens, afterTokens: e.afterTokens }))} layers={snap.context.layers} />}
       {panel === 'safety' && <SafetyPanel doomLoopLevel={snap.safety.doomLoopLevel} riskLevel={snap.safety.riskLevel} riskReasons={snap.safety.riskReasons} suggestedAction={snap.safety.suggestedAction} recentFingerprints={snap.safety.recentFingerprints} />}
-      {panel === 'model' && <ModelPanel model={snap.model.name} cacheHitRate={snap.model.cacheHitRate} inputTokens={snap.model.inputTokens} outputTokens={snap.model.outputTokens} cacheReadTokens={snap.model.cacheReadTokens} cacheWriteTokens={snap.model.cacheWriteTokens} cost={snap.model.cost} routingReason={snap.model.routingReason ?? undefined} />}
+      {panel === 'model' && <ModelPanel model={snap.model.name} cacheHitRate={snap.model.cacheHitRate} inputTokens={snap.model.inputTokens} outputTokens={snap.model.outputTokens} cacheReadTokens={snap.model.cacheReadTokens} cacheWriteTokens={snap.model.cacheWriteTokens} cost={snap.model.cost} routingReason={snap.model.routingReason ?? undefined} perTurnHitRate={snap.model.perTurnHitRate} prewarmHits={snap.model.prewarmHits} prewarmMisses={snap.model.prewarmMisses} prewarmHitRate={snap.model.prewarmHitRate} cacheDiagnostic={snap.model.cacheDiagnostic} />}
       {panel === 'mcp' && <McpPanel servers={snap.mcp.servers} totalTools={snap.mcp.totalTools} connectedServers={snap.mcp.connectedServers} />}
     </Box>
   )
@@ -154,9 +154,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const streamBuf = useRef('')
   const thinkBuf = useRef('')
-  const lastFlushedStream = useRef('')
   const lastFlushedThink = useRef('')
-  const streamTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const blockWriterRef = useRef<BlockStreamWriter | null>(null)
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toolAccum = useRef<Map<string, string>>(new Map())
@@ -180,13 +179,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     return tokenHistoryRef.current
   }, [])
 
-  const flushStream = useCallback(() => {
-    streamTimer.current = null
-    if (streamBuf.current !== lastFlushedStream.current) {
-      lastFlushedStream.current = streamBuf.current
-      setStreamingText(streamBuf.current)
-    }
-  }, [])
+  const promptQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   const flushThink = useCallback(() => {
     thinkTimer.current = null
@@ -261,10 +254,18 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     if (sessionPrompt === 'waiting') {
       const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
       if (_input === 'r' && sessions.length > 0) {
-        const p = new SessionPersist(sessions[0]!)
+        const id = sessions[0]!
+        const p = new SessionPersist(id)
         const msgs = p.load()
-        session.replaceMessages(msgs)
-        pushStatic(createLogEntry({ type: 'text', content: `Restored session ${sessions[0]!.slice(0, 8)}... (${msgs.length} messages)` }))
+        session.loadMessages(msgs)
+        const { entries, toolCount, turnCount } = replayMessagesToLogEntries(msgs)
+        for (const entry of entries) {
+          pushStatic(entry)
+        }
+        const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
+        setCacheHitRate(session.getCacheHitRate())
+        setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
+        pushStatic(createLogEntry({ type: 'text', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools)` }))
       }
       setSessionPrompt('done')
       return
@@ -292,7 +293,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
   })
 
-  const handleSubmit = useCallback(async (userInput: string) => {
+  const handleSubmit = useCallback((userInput: string) => {
+    const run = async () => {
     setIsStreaming(true)
     setStreamingText('')
     setStreamingThinking('')
@@ -300,12 +302,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     streamBuf.current = ''
     thinkBuf.current = ''
-    lastFlushedStream.current = ''
     lastFlushedThink.current = ''
     toolAccum.current.clear()
     dirtyTools.current.clear()
     toolNames.current.clear()
     toolTargetMap.current.clear()
+
+    blockWriterRef.current = new BlockStreamWriter({}, (text) => {
+      streamBuf.current += text
+      setStreamingText(streamBuf.current)
+    })
 
     streamStartRef.current = Date.now()
     thinkStartRef.current = 0
@@ -318,7 +324,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     phaseTracker.current = new PhaseTracker()
     setSummaryState({ task: taskDesc, phase: 'idle', stepCount: 0, totalSteps: 0, contextPct: initPct, elapsedMs: 0, lastAction: null, risk: 'none', tokenHistory: pushTokenHistory(initPct) })
 
-    for (const ref of [streamTimer, thinkTimer, toolTimer]) {
+    for (const ref of [thinkTimer, toolTimer]) {
       if (ref.current) {
         clearTimeout(ref.current)
         ref.current = null
@@ -363,10 +369,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     await agent.run(promptInput, {
       onTextDelta: (text) => {
-        streamBuf.current += text
-        if (!streamTimer.current) {
-          streamTimer.current = setTimeout(flushStream, STREAM_FLUSH_MS)
-        }
+        blockWriterRef.current?.push(text)
       },
       onThinkingDelta: (thinking) => {
         if (thinkStartRef.current === 0) thinkStartRef.current = Date.now()
@@ -459,16 +462,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           thinkStartRef.current = 0
         }
 
-        if (streamTimer.current) {
-          clearTimeout(streamTimer.current)
-          streamTimer.current = null
+        const writer = blockWriterRef.current
+        if (writer) {
+          writer.flush()
+          blockWriterRef.current = null
         }
         const finalText = streamBuf.current
         if (finalText) {
           pushStatic(createLogEntry({ type: 'text', content: finalText }))
         }
         streamBuf.current = ''
-        lastFlushedStream.current = ''
         setStreamingText('')
 
         if (thinkTimer.current) {
@@ -497,17 +500,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const estimatedCost = (normalInput * 1 + usage.cache_read_input_tokens * 0.1 + usage.output_tokens * 4) / 1_000_000
         setCost(estimatedCost)
 
-        session.recordTurnCache(turnNumber, usage)
-        const drift = agent.getDebugInfo().drift
-        const diag = diagnoseCacheMiss(
-          session.getCacheHistory(),
-          turnNumber,
-          drift,
-          session.wasCompactedAt(turnNumber),
-        )
-        if (diag && diag.severity !== 'info') {
-          pushStatic(createLogEntry({ type: 'text', content: `${diag.severity === 'error' ? '⚠️' : '💡'} ${diag.message}` }))
-        }
       },
       onError: (error) => {
         pushStatic(createLogEntry({ type: 'text', content: `Error: ${error.message}` }))
@@ -525,7 +517,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         })
       },
     })
-  }, [agent, session, pushStatic, flushStream, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+    } // end run
+
+    promptQueueRef.current = promptQueueRef.current
+      .then(run)
+      .catch((err: Error) => {
+        pushStatic(createLogEntry({ type: 'text', content: `Queue error: ${err.message}` }))
+        setIsStreaming(false)
+      })
+  }, [agent, session, pushStatic, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   const currentTokens = session.getEstimatedTokens()
   const tokenEstimate = Math.floor(streamingText.length / 4)

@@ -4,9 +4,11 @@ import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { ToolRegistry } from '../tools/registry.js'
 import { SessionContext } from './context.js'
+import { SessionPersist } from './session-persist.js'
 import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
-import { buildPrewarmValue } from './prewarm-file.js'
+import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
+import { batchPrewarm, buildPrewarmValue } from './prewarm-file.js'
 import { smartCompact } from '../compact/index.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 import { CACHE_ANCHOR_MESSAGES, type CompactionConfig } from '../compact/constants.js'
@@ -85,9 +87,10 @@ export class AgentLoop {
   private evidence: EvidenceTracker
   private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
   private recentToolHistory: ToolHistoryEntry[] = []
-  private prewarm = new PrewarmCache()
+  private prewarm = new PrewarmCache(60_000, 50)
   private streamedText = ''
   private lastPrewarmAt = 0
+  private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
   private decisions: string[] = []
   private trajectory = new TrajectoryRecorder()
@@ -138,10 +141,17 @@ export class AgentLoop {
       if (intent.type !== 'file') continue
       const value = buildPrewarmValue(this.cwd, intent.value)
       if (!value) continue
-      if (!this.prewarm.get(value.canonicalPath)) {
+      if (!this.prewarm.has(value.canonicalPath)) {
         this.prewarm.set(value.canonicalPath, value)
       }
     }
+  }
+
+  private async prewarmRecentReads(): Promise<void> {
+    const paths = this.recentToolHistory
+      .filter(entry => entry.tool === 'read_file' && entry.status === 'success')
+      .map(entry => entry.target)
+    await batchPrewarm(this.cwd, paths, this.prewarm)
   }
 
   abort(): void {
@@ -173,6 +183,25 @@ export class AgentLoop {
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
 
   getLatestRisk(): import('./approval-risk.js').RiskAssessment { return this.latestRisk }
+
+  getPrewarmStats(): { hits: number; misses: number; hitRate: number } { return this.prewarm.stats() }
+
+  getCacheDiagnostic(): string | null { return this.lastCacheDiagnostic }
+
+  private refreshCacheDiagnostic(turn: number): void {
+    const hitRate = this.session.getLatestTurnHitRate()
+    if (hitRate !== null && hitRate < 0.8) {
+      const diagnostic = diagnoseCacheMiss(
+        this.session.getCacheHistory(),
+        this.session.getTurnCount(),
+        this.config.promptEngine.checkDrift(),
+        this.session.wasCompactedAt(turn),
+      )
+      this.lastCacheDiagnostic = diagnostic?.message ?? null
+      return
+    }
+    this.lastCacheDiagnostic = null
+  }
 
   getLedger() { return this.session.getContextLedger() }
 
@@ -313,6 +342,17 @@ export class AgentLoop {
     this.refreshLedger()
   }
 
+  private recordTurnSnapshot(): void {
+    if (!this.config.sessionId) return
+    const persist = new SessionPersist(this.config.sessionId)
+    persist.appendTurnSnapshot({
+      turn: this.session.getTurnCount(),
+      timestamp: Date.now(),
+      messageCount: this.session.getMessages().length,
+      estimatedTokens: this.session.getEstimatedTokens(),
+    })
+  }
+
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     this.trajectory.reset()
@@ -367,6 +407,7 @@ export class AgentLoop {
 
         this.streamedText = ''
         this.lastPrewarmAt = 0
+        await this.prewarmRecentReads()
 
         // Pass 5: adaptive repair hint injection
         const repairHint = this.repairHintTracker.getHint()
@@ -398,6 +439,14 @@ export class AgentLoop {
           },
           onStopReason: (_reason, usage) => {
             this.session.addUsage(usage)
+            if (usage.cache_read_input_tokens !== undefined || usage.cache_creation_input_tokens !== undefined) {
+              this.session.recordTurnCache(turn, {
+                input_tokens: usage.input_tokens ?? 0,
+                output_tokens: usage.output_tokens ?? 0,
+                cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+                cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+              })
+            }
           },
           onError: (error) => {
             callbacks.onError(error)
@@ -462,6 +511,8 @@ export class AgentLoop {
           })
           this.decisions = turnEndResult.decisions
           this.refreshLedger()
+          this.refreshCacheDiagnostic(turn)
+          this.recordTurnSnapshot()
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
           continue
         }
@@ -478,6 +529,8 @@ export class AgentLoop {
         this.decisions = finalResult.decisions
         if (finalResult.badge) callbacks.onTextDelta('\n' + finalResult.badge)
         this.refreshLedger()
+        this.refreshCacheDiagnostic(turn)
+        this.recordTurnSnapshot()
         callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
         this.evidence.reset()
         break

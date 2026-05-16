@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-05-17 — Wave 12: Session High Availability
+
+### Added — BlockStreamWriter
+- **Semantic break-point streaming** replaces fixed 80ms setTimeout flush
+- Respects paragraph (\n\n) > newline (\n) > space boundaries within configurable char thresholds (min 300, max 800)
+- Idle timeout (1200ms) force-flushes remaining buffer
+- Ordered block emission via serialized enqueue
+
+### Added — TurnSnapshot
+- Turn-level JSONL snapshots appended on every turn completion for crash recovery
+- `loadLastSnapshot()` reads last valid snapshot, skipping corrupted lines
+- `loadUpToTurn(n)` loads messages up to a specific turn for targeted recovery
+
+### Added — HistoryReplayBridge
+- `replayMessagesToLogEntries()` converts persisted Message[] into visual LogEntry[]
+- Restored sessions render through full pipeline (tool cards, structured output, error flags)
+- Session restore now shows turn count + tool count instead of raw message count
+
+### Added — PromptQueue
+- Promise chain serialization prevents concurrent `handleSubmit` race conditions
+- Error recovery: catch guarantees `setIsStreaming(false)` to restore UI state
+
+### Added — SessionEviction
+- Automatic LRU eviction caps sessions at 50 (oldest removed first)
+- Cleans all related files (.jsonl, .meta.json, .snapshots.jsonl, .memory.json, .claims.jsonl)
+- Runs on every new session creation
+
+### Inspired By
+- Qwen Code: BlockStreamer (semantic streaming), Session snapshots, HistoryReplayer
+- OpenCode: session-cache (LRU eviction), terminal-writer (batch scheduling)
+
+---
+
 ## 2026-05-17 — Wave 9/10 + ECF Phase 5
 
 ### Fixed — Wave 9 Defect Fixes

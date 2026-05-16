@@ -1,5 +1,5 @@
 import { appendFile } from 'fs/promises'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { Message } from '../api/types.js'
@@ -21,6 +21,7 @@ function ensureDir(dir: string): void {
 export class SessionPersist {
   private filePath: string
   private metadataPath: string
+  private snapshotPath: string
   private sessionId: string
 
   constructor(sessionId: string) {
@@ -29,6 +30,7 @@ export class SessionPersist {
     this.sessionId = sessionId
     this.filePath = join(SESSION_DIR, `${sessionId}.jsonl`)
     this.metadataPath = join(SESSION_DIR, `${sessionId}.meta.json`)
+    this.snapshotPath = join(SESSION_DIR, `${sessionId}.snapshots.jsonl`)
   }
 
   getBackupDir(): string {
@@ -63,6 +65,38 @@ export class SessionPersist {
   /** Delete the session file */
   delete(): void {
     try { unlinkSync(this.filePath) } catch { /* ignore */ }
+  }
+
+  appendTurnSnapshot(snapshot: { turn: number; timestamp: number; messageCount: number; estimatedTokens: number }): void {
+    const line = JSON.stringify(snapshot) + '\n'
+    try {
+      appendFileSync(this.snapshotPath, line)
+    } catch {
+      // Ignore write failures — snapshots are best-effort
+    }
+  }
+
+  loadLastSnapshot(): { turn: number; timestamp: number; messageCount: number; estimatedTokens: number } | null {
+    if (!existsSync(this.snapshotPath)) return null
+    try {
+      const lines = readFileSync(this.snapshotPath, 'utf-8').trim().split('\n')
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try { return JSON.parse(lines[i]!) } catch { continue }
+      }
+    } catch { /* ignore */ }
+    return null
+  }
+
+  loadUpToTurn(turn: number): Message[] {
+    const messages = this.load()
+    let currentTurn = 0
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i]!.role === 'user' && typeof messages[i]!.content === 'string') {
+        currentTurn++
+        if (currentTurn === turn) return messages.slice(0, i + 1)
+      }
+    }
+    return messages
   }
 
   /** Get the session file path */
@@ -154,4 +188,39 @@ export class SessionPersist {
       return []
     }
   }
+}
+
+const MAX_SESSIONS = 50
+
+export function evictOldSessions(keepSessionId: string): string[] {
+  return evictOldSessionsInternal(SESSION_DIR, keepSessionId, MAX_SESSIONS)
+}
+
+export function evictOldSessionsInternal(dir: string, keepSessionId: string, limit: number): string[] {
+  ensureDir(dir)
+  let sessions: string[]
+  try {
+    sessions = readdirSync(dir)
+      .filter((f: string) => f.endsWith('.jsonl'))
+      .map((f: string) => f.replace('.jsonl', ''))
+  } catch {
+    return []
+  }
+
+  if (sessions.length <= limit) return []
+
+  const sorted = [...sessions].sort()
+  const toEvict = sorted
+    .filter(id => id !== keepSessionId)
+    .slice(0, sessions.length - limit)
+
+  for (const id of toEvict) {
+    try { unlinkSync(join(dir, `${id}.jsonl`)) } catch { /* ignore */ }
+    try { unlinkSync(join(dir, `${id}.meta.json`)) } catch { /* ignore */ }
+    try { unlinkSync(join(dir, `${id}.snapshots.jsonl`)) } catch { /* ignore */ }
+    try { unlinkSync(join(dir, `${id}.memory.json`)) } catch { /* ignore */ }
+    try { unlinkSync(join(dir, `${id}.claims.jsonl`)) } catch { /* ignore */ }
+  }
+
+  return toEvict
 }
