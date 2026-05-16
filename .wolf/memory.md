@@ -1224,3 +1224,210 @@
 | 01:18 | Session end: 7 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 1 reads | ~7536 tok |
 | 01:19 | Edited src/agent/__tests__/tool-pipeline.test.ts | inline fix | ~15 |
 | 01:19 | Session end: 8 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 1 reads | ~7551 tok |
+| 01:19 | Session end: 8 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 1 reads | ~7551 tok |
+| 01:19 | Edited src/agent/__tests__/tool-pipeline.test.ts | 3→3 lines | ~53 |
+| 01:19 | Edited src/agent/__tests__/tool-pipeline.test.ts | inline fix | ~17 |
+| 01:20 | Session end: 10 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 1 reads | ~7621 tok |
+| 01:22 | Session end: 10 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 4 reads | ~9659 tok |
+| 01:23 | Session end: 10 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 4 reads | ~9659 tok |
+| 01:26 | Session end: 10 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 7 reads | ~20091 tok |
+| 01:27 | Edited src/agent/tool-pipeline.ts | modified if() | ~236 |
+| 01:28 | Session end: 11 writes across 7 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 7 reads | ~20327 tok |
+| 01:29 | Session end: 11 writes across 7 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 7 reads | ~20327 tok |
+| 01:31 | Created docs/superpowers/specs/2026-05-17-recall-feedback-design.md | — | ~425 |
+| 01:32 | Session end: 12 writes across 8 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 7 reads | ~20783 tok |
+| 01:32 | Created docs/superpowers/plans/2026-05-17-rivet-ecf-phase5-recall-feedback.md | — | ~2886 |
+
+## Session: 2026-05-16 01:33
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 01:35 | Edited src/context/__tests__/claim-store.test.ts | expanded (+59 lines) | ~556 |
+| 01:36 | Edited src/context/claim-store.ts | added 1 condition(s) | ~160 |
+| 01:36 | Edited src/context/claim-store.ts | 4→5 lines | ~145 |
+| 01:36 | Edited src/context/claim-store.ts | added 3 condition(s) | ~214 |
+| 01:36 | Created src/tools/recall.ts | — | ~720 |
+| 01:37 | Edited src/tools/__tests__/recall.test.ts | inline fix | ~20 |
+| 01:37 | Edited src/tools/__tests__/recall.test.ts | expanded (+55 lines) | ~632 |
+| 01:37 | Edited src/main.tsx | CSS: getTurn | ~36 |
+| 01:37 | Session end: 8 writes across 5 files (claim-store.test.ts, claim-store.ts, recall.ts, recall.test.ts, main.tsx) | 10 reads | ~33728 tok |
+| 01:38 | Session end: 8 writes across 5 files (claim-store.test.ts, claim-store.ts, recall.ts, recall.test.ts, main.tsx) | 10 reads | ~33728 tok |
+| 01:39 | Session end: 8 writes across 5 files (claim-store.test.ts, claim-store.ts, recall.ts, recall.test.ts, main.tsx) | 10 reads | ~33728 tok |
+| 01:41 | Session end: 8 writes across 5 files (claim-store.test.ts, claim-store.ts, recall.ts, recall.test.ts, main.tsx) | 18 reads | ~43592 tok |
+| 01:41 | Session end: 8 writes across 5 files (claim-store.test.ts, claim-store.ts, recall.ts, recall.test.ts, main.tsx) | 18 reads | ~43592 tok |
+| 01:42 | Session end: 8 writes across 5 files (claim-store.test.ts, claim-store.ts, recall.ts, recall.test.ts, main.tsx) | 18 reads | ~43592 tok |
+| 01:43 | Edited README.md | inline fix | ~100 |
+| 01:43 | Edited CHANGELOG.md | added error handling | ~596 |
+| 01:43 | Created docs/superpowers/specs/2026-05-17-wave11-cache-perf-design.md | — | ~638 |
+| 01:43 | Session end: 11 writes across 8 files (claim-store.test.ts, claim-store.ts, recall.ts, recall.test.ts, main.tsx) | 20 reads | ~63857 tok |
+| 01:43 | Created docs/superpowers/plans/2026-05-17-wave11-cache-perf.md | — | ~286 |
+| 01:46 | Edited docs/superpowers/plans/2026-05-17-wave11-cache-perf.md | added optional chaining | ~3483 |
+| 01:47 | Session end: 13 writes across 9 files (claim-store.test.ts, claim-store.ts, recall.ts, recall.test.ts, main.tsx) | 24 reads | ~74194 tok |
+
+## Session: 2026-05-16 01:48
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 01:49
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 01:52
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 01:57
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 02:01
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 02:02
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 02:03 | Created docs/superpowers/specs/2026-05-17-multi-provider-integration-design.md | — | ~2283 |
+| 02:03 | Session end: 1 writes across 1 files (2026-05-17-multi-provider-integration-design.md) | 0 reads | ~2446 tok |
+
+## Session: 2026-05-16 02:08
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 02:13
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 02:14 | Created docs/superpowers/specs/2026-05-17-multi-provider-integration-design.md | — | ~2157 |
+| 02:14 | Session end: 1 writes across 1 files (2026-05-17-multi-provider-integration-design.md) | 1 reads | ~4452 tok |
+| 02:15 | Session end: 1 writes across 1 files (2026-05-17-multi-provider-integration-design.md) | 4 reads | ~10570 tok |
+| 02:17 | Created docs/superpowers/specs/2026-05-17-multi-provider-integration-design.md | — | ~3211 |
+| 02:17 | Session end: 2 writes across 1 files (2026-05-17-multi-provider-integration-design.md) | 10 reads | ~22061 tok |
+
+## 2026-05-17 Session High Availability 竞品分析
+
+### 竞品来源
+- **Qwen Code**: BlockStreamer (语义断点流式), Session (pendingPromptCompletion, captureHistorySnapshot, rewindToTurn, bounded concurrency), HistoryReplayer (统一 emitter 保证 live/replay 一致)
+- **OpenCode**: session-cache (40 limit LRU eviction), session-prefetch (15s TTL + inflight 去重), session-trim (时间窗口裁剪), terminal.tsx (LocalPTY buffer/scrollY/cursor 持久化), terminal-writer (microtask 批量合并写入), EventV2 事件溯源
+
+### 关键差距（已识别）
+1. 流式渲染无语义断点 → BlockStreamWriter 方案
+2. 无会话快照/turn 级恢复 → TurnSnapshot 方案
+3. 恢复时无渲染管线 → HistoryReplayBridge 方案
+4. 无提交串行化 → PromptQueue 方案
+5. 无会话淘汰策略 → SessionEviction 方案
+
+### 产出文档
+- docs/superpowers/specs/2026-05-17-session-high-availability-brainstorm.md (头脑风暴背景)
+- docs/superpowers/specs/2026-05-17-session-high-availability-design.md (设计文档)
+- docs/superpowers/plans/2026-05-17-session-high-availability.md (实施计划, 8 个任务)
+| 02:19 | Session end: 2 writes across 1 files (2026-05-17-multi-provider-integration-design.md) | 10 reads | ~22061 tok |
+
+## Session: 2026-05-16 02:19
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 02:20
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 02:23 | Edited src/agent/session-persist.ts | inline fix | ~32 |
+| 02:23 | Edited src/agent/session-persist.ts | modified constructor() | ~130 |
+| 02:24 | Created src/tui/history-replay.ts | — | ~412 |
+| 02:24 | Edited src/agent/session-persist.ts | added 3 condition(s) | ~359 |
+| 02:24 | Created src/tui/__tests__/history-replay.test.ts | — | ~751 |
+| 02:24 | Edited src/agent/__tests__/session-persist.test.ts | 6→6 lines | ~91 |
+| 02:24 | Edited src/tui/history-replay.ts | modified if() | ~39 |
+| 02:24 | Edited src/agent/__tests__/session-persist.test.ts | expanded (+56 lines) | ~748 |
+| 02:24 | Edited src/agent/__tests__/session-persist.test.ts | "snapshotPath" → "corrupted\n" | ~23 |
+| 02:25 | Edited src/agent/__tests__/session-persist.test.ts | inline fix | ~23 |
+| 02:25 | Edited src/agent/__tests__/session-persist.test.ts | 10→10 lines | ~82 |
+| 02:25 | Session end: 11 writes across 4 files (session-persist.ts, history-replay.ts, history-replay.test.ts, session-persist.test.ts) | 10 reads | ~15665 tok |
+| 02:27 | Session end: 11 writes across 4 files (session-persist.ts, history-replay.ts, history-replay.test.ts, session-persist.test.ts) | 16 reads | ~20586 tok |
+| 02:32 | Edited src/tui/app.tsx | added 2 import(s) | ~66 |
+| 02:32 | Edited src/tui/app.tsx | 2→1 lines | ~9 |
+| 02:32 | Edited src/tui/app.tsx | 6→5 lines | ~67 |
+| 02:32 | Edited src/tui/app.tsx | setStreamingText() → resolve() | ~31 |
+| 02:32 | Edited src/tui/app.tsx | 8→12 lines | ~103 |
+| 02:32 | Edited src/tui/app.tsx | inline fix | ~14 |
+| 02:32 | Edited src/tui/app.tsx | added optional chaining | ~24 |
+| 02:33 | Edited src/tui/app.tsx | clearTimeout() → flush() | ~102 |
+
+## Session: 2026-05-16 02:33
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 02:33 | Edited src/tui/app.tsx | CSS: contextPct, tokenHistory | ~210 |
+| 02:33 | Edited src/tui/app.tsx | modified for() | ~372 |
+| 02:33 | Edited src/tui/app.tsx | added error handling | ~128 |
+
+## Session: 2026-05-16 02:33
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 02:36 | Edited src/agent/loop.ts | added 1 import(s) | ~29 |
+| 02:37 | Edited src/agent/loop.ts | 4→5 lines | ~73 |
+| 02:37 | Session end: 2 writes across 1 files (loop.ts) | 20 reads | ~30734 tok |
+| 02:37 | Edited src/agent/loop.ts | 5→6 lines | ~92 |
+| 02:37 | Edited src/agent/loop.ts | added 1 condition(s) | ~137 |
+| 02:37 | Session end: 4 writes across 1 files (loop.ts) | 22 reads | ~33715 tok |
+| 02:39 | Edited src/agent/session-persist.ts | added 1 condition(s) | ~403 |
+| 02:39 | Edited src/agent/__tests__/session-persist.test.ts | inline fix | ~24 |
+| 02:39 | Edited src/agent/__tests__/session-persist.test.ts | inline fix | ~23 |
+| 02:39 | Created docs/superpowers/specs/2026-05-17-multi-provider-integration-design.md | — | ~4657 |
+| 02:40 | Edited src/agent/__tests__/session-persist.test.ts | modified for() | ~428 |
+| 02:40 | Edited src/main.tsx | added 1 import(s) | ~35 |
+| 02:40 | Edited src/main.tsx | 1→4 lines | ~50 |
+| 02:40 | Session end: 11 writes across 5 files (loop.ts, session-persist.ts, session-persist.test.ts, 2026-05-17-multi-provider-integration-design.md, main.tsx) | 30 reads | ~47812 tok |
+| 02:42 | Edited README.md | inline fix | ~85 |
+| 02:43 | Edited README.md | inline fix | ~27 |
+| 02:43 | Edited README.md | 2→4 lines | ~84 |
+| 02:43 | Created docs/superpowers/plans/2026-05-17-multi-provider-phase1.md | — | ~4639 |
+| 02:44 | Edited CHANGELOG.md | added error handling | ~422 |
+| 02:44 | Session end: 16 writes across 8 files (loop.ts, session-persist.ts, session-persist.test.ts, 2026-05-17-multi-provider-integration-design.md, main.tsx) | 33 reads | ~76645 tok |
+| 02:44 | Session end: 16 writes across 8 files (loop.ts, session-persist.ts, session-persist.test.ts, 2026-05-17-multi-provider-integration-design.md, main.tsx) | 33 reads | ~76645 tok |
+
+## Session: 2026-05-16 02:45
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-17 Wave 11 reviewer fixes
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 03:10 | Added regression tests | context.test.ts, loop.test.ts, tool-pipeline.test.ts | Covered 0/0 cache hit semantics, diagnostic clearing, and tool result truncation paths | ~1200 |
+| 03:12 | Fixed cache-hit semantics | src/agent/context.ts | 0/0 turn cache counters now return null so diagnostics clear instead of warning falsely | ~80 |
+| 03:13 | Simplified prewarm batch write | src/agent/prewarm-file.ts | Removed unnecessary async Promise.all wrapper around synchronous cache.set calls | ~80 |
+
+## 2026-05-17 Session HA (Wave 12) — 已交付
+
+### 提交 c5f09a1
+- BlockStreamWriter: 语义断点流式 (min 300 / max 800 chars, idle 1200ms)
+- TurnSnapshot: turn 级 JSONL 快照, appendFileSync 同步落盘
+- HistoryReplayBridge: Message[] → LogEntry[] 走渲染管线恢复
+- PromptQueue: Promise chain 串行化 handleSubmit
+- SessionEviction: LRU 50 上限淘汰
+
+### 关键设计决策
+- enqueue 同步非异步: Rivet onBlock 是 React setState, 异步 .then() 会导致 fire-and-forget flush 丢数据
+- 竞品参照: Qwen Code BlockStreamer/Session/HistoryReplayer, OpenCode session-cache/prefetch/trim/terminal-writer
+
+### Code Review 结论 (APPROVE)
+- 0 CRITICAL, 0 HIGH, 4 MEDIUM, 3 LOW
+- MEDIUM: streamBuf 双写路径、每 turn new SessionPersist、useState 初始化器副作用、排序策略依赖 UUIDv7
+| 02:56 | Created ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/reference_rivet-codebase-index.md | — | ~1246 |
+| 02:56 | Edited ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md | 1→2 lines | ~75 |
+| 02:58 | Session end: 2 writes across 2 files (reference_rivet-codebase-index.md, MEMORY.md) | 34 reads | ~47757 tok |
+| 02:59 | Session end: 2 writes across 2 files (reference_rivet-codebase-index.md, MEMORY.md) | 34 reads | ~47757 tok |
+| 03:03 | Session end: 2 writes across 2 files (reference_rivet-codebase-index.md, MEMORY.md) | 35 reads | ~48203 tok |
+| 03:03 | Session end: 2 writes across 2 files (reference_rivet-codebase-index.md, MEMORY.md) | 35 reads | ~48203 tok |
+| 03:04 | Created docs/codebase-index.md | — | ~2907 |

@@ -1,23 +1,24 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T17:19:00.137Z
-> Files: 303 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T19:04:50.266Z
+> Files: 313 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
-- `MEMORY.md` — Memory (~101 tok)
+- `MEMORY.md` — Memory (~281 tok)
 - `project_open_model_agent_goal.md` (~234 tok)
 - `project_subagent-phase1-validation.md` — 子代理协同 Phase 1 — 自主执行验证记录 (~487 tok)
+- `reference_rivet-codebase-index.md` — Rivet Codebase Module Map (~1188 tok)
 
 ## ./
 
 - `.gitignore` — Git ignore rules (~23 tok)
-- `CHANGELOG.md` — Changelog (~5241 tok)
+- `CHANGELOG.md` — Changelog (~6162 tok)
 - `CLAUDE.md` — Rivet (~310 tok)
 - `config.example.toml` — ~/.opencode/config.toml (~232 tok)
 - `package-lock.json` — npm lock file (~19981 tok)
 - `package.json` — Node.js package manifest (~164 tok)
-- `README.md` — Project documentation (~13595 tok)
+- `README.md` — Project documentation (~13658 tok)
 - `tsconfig.json` — TypeScript configuration (~153 tok)
 - `tsup.config.ts` (~65 tok)
 
@@ -66,6 +67,7 @@
 
 ## docs/
 
+- `codebase-index.md` — Rivet Codebase Index (~2725 tok)
 - `optimization-design-v2.md` — OpenCode TUI 优化增补设计 (~4002 tok)
 
 ## docs/analysis/
@@ -95,8 +97,11 @@
 - `2026-05-16-rivet-wave6-goal-loop.md` — Wave 6: Goal Loop 实施计划 (~3900 tok)
 - `2026-05-16-rivet-wave8-context-fabric-phase2.md` — Wave 8: Context Fabric Phase 2 — Claim 自动提取 + TTL + 晋升 实施计划 (~4816 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5642 tok)
+- `2026-05-17-multi-provider-phase1.md` — Multi-Provider Integration Phase 1 实现计划 (~4349 tok)
+- `2026-05-17-rivet-ecf-phase5-recall-feedback.md` — ECF Phase 5: Recall 正反馈 + Claim 质量信号 实现计划 (~2705 tok)
 - `2026-05-17-rivet-wave9-defect-fixes.md` — Wave 9: 内部缺陷修复 + 结构优化 实施计划 (~4239 tok)
 - `2026-05-17-wave10-test-loop-split.md` — Wave 10: 测试补强 + loop.ts 拆分 实施计划 (~10180 tok)
+- `2026-05-17-wave11-cache-perf.md` — Wave 11: Cache 效率 + Token 节约 实现计划 (~3516 tok)
 
 ## docs/superpowers/specs/
 
@@ -114,7 +119,10 @@
 - `2026-05-16-rivet-progressive-context-engine-design.md` — Rivet Progressive Context Engine 方案设计 (~3845 tok)
 - `2026-05-16-rivet-subagent-orchestration-design.md` — Rivet 主控模型子代理协同能力深度头脑风暴结果 (~7664 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-design.md` — Rivet XML Protocol Layer + Speculative Pre-warming 设计 (~2060 tok)
+- `2026-05-17-multi-provider-integration-design.md` — Multi-Provider Integration: Design (v2 — Deep Brainstorm) (~4366 tok)
+- `2026-05-17-recall-feedback-design.md` — ECF Phase 5: Recall 正反馈 + Claim 质量信号 (~399 tok)
 - `2026-05-17-wave10-test-loop-split-design.md` — Wave 10: 测试补强 + loop.ts 拆分 设计规格 (~857 tok)
+- `2026-05-17-wave11-cache-perf-design.md` — Wave 11: 性能优化 — Cache 效率 + Token 节约 (~598 tok)
 
 ## docs/superpowers/status/
 
@@ -143,7 +151,7 @@
 
 - `goal-loop.ts` — Exports GoalLoopAgent, GoalLoopConfig, GoalLoopResult, runGoalLoop (~874 tok)
 - `headless.ts` — Exports HeadlessCliArgs, HeadlessJsonOutput, HeadlessRunResult, HeadlessAgent + 3 more (~1052 tok)
-- `main.tsx` — Read piped stdin (non-TTY only) as initial in (~6052 tok)
+- `main.tsx` — deepMerge (~6122 tok)
 - `validation.ts` — Exports isValidSessionId, assertValidSessionId (~78 tok)
 
 ## src/__tests__/
@@ -178,16 +186,16 @@
 - `impact-hint.ts` — Exports ImpactHint, generateImpactHint (~764 tok)
 - `import-graph.ts` — Exports ImportGraph, buildImportGraph, getReverseDeps, invalidateFile (~1122 tok)
 - `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~5321 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~5942 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
 - `repair-hint.ts` — Exports RepairHintTracker (~368 tok)
 - `repair-passes.ts` — Exports fourHorsemenPass, fixAutoLinks, semanticRepairPass (~1019 tok)
 - `repair-pipeline.ts` — Exports RepairContext, RepairResult, RepairPass, RepairTelemetryEntry + 2 more (~346 tok)
 - `retry-policy.ts` — Exports RetryPolicyInput, RetryPolicyDecision, shouldRetryToolFailure (~428 tok)
-- `session-persist.ts` — Append a single message to the session file (~1474 tok)
+- `session-persist.ts` — Append a single message to the session file (~2144 tok)
 - `strategy-shift.ts` — Exports TrajectorySummary, suggestStrategyShift (~103 tok)
 - `task-state.ts` — Exports TaskState, extractTaskState (~326 tok)
-- `tool-pipeline.ts` — Exports ToolPipelineDeps, ToolExecResult, executeToolUse (~4330 tok)
+- `tool-pipeline.ts` — Exports ToolPipelineDeps, ToolExecResult, executeToolUse (~4371 tok)
 - `trace-store.ts` — Exports TraceEventKind, TraceEventStatus, DoomLoopLevel, TraceEvent + 9 more (~718 tok)
 - `trajectory.ts` — Exports TrajectoryEntry, TrajectoryRecorder (~312 tok)
 - `turn-end.ts` — Exports TurnEndDeps, TurnEndResult, processTurnEnd (~781 tok)
@@ -219,9 +227,9 @@
 - `prewarm.test.ts` — API routes: GET (9 endpoints) (~443 tok)
 - `repair-pipeline.test.ts` — --- Pipeline skeleton tests --- (~1683 tok)
 - `retry-policy.test.ts` — Declares result (~457 tok)
-- `session-persist.test.ts` — Declares persist (~521 tok)
+- `session-persist.test.ts` — Declares persist (~1578 tok)
 - `task-state.test.ts` — Declares entries (~563 tok)
-- `tool-pipeline.test.ts` — ToolPipelineDeps: makeDeps (~1106 tok)
+- `tool-pipeline.test.ts` — ToolPipelineDeps: makeDeps (~1116 tok)
 - `trace-store.test.ts` — Declares TraceEvent (~604 tok)
 - `trajectory.test.ts` — Declares tr (~518 tok)
 - `turn-end.test.ts` — TurnEndDeps: makeDeps (~667 tok)
@@ -271,7 +279,7 @@
 - `claim-budget.ts` — Exports MAX_ACTIVE_CLAIMS, selectEvictionCandidates (~176 tok)
 - `claim-export.ts` — Exports ClaimExportData, exportDurableClaims, importClaims (~434 tok)
 - `claim-extractor.ts` — Exports ToolResultContext, ClaimExtractionMeta, extractClaimsFromToolResult (~1456 tok)
-- `claim-store.ts` — Exports ContextClaimEvent, ClaimFilter, ClaimUseInput, ContextClaimStore (~2388 tok)
+- `claim-store.ts` — Exports ContextClaimEvent, ClaimFilter, ClaimUseInput, ContextClaimStore (~2626 tok)
 - `claims.ts` — Exports ContextClaimKind, ContextClaimScope, ContextClaimStatus, EvidenceKind + 12 more (~1509 tok)
 - `conflict-detect.ts` — Exports ClaimConflict, detectConflicts (~415 tok)
 - `ledger.ts` — Exports createContextLedger (~359 tok)
@@ -291,7 +299,7 @@
 - `claim-budget.test.ts` — Declares claim (~648 tok)
 - `claim-export.test.ts` — Declares proposal (~995 tok)
 - `claim-extractor.test.ts` — Exports MAX_RETRIES, TIMEOUT, PORT, X (~1731 tok)
-- `claim-store.test.ts` — tempDir: proposal (~2706 tok)
+- `claim-store.test.ts` — tempDir: proposal (~3232 tok)
 - `claims.test.ts` — Declares ContextClaim (~1870 tok)
 - `conflict-detect.test.ts` — Declares claim (~747 tok)
 - `ledger.test.ts` — userText: assistantText (~440 tok)
@@ -386,7 +394,7 @@
 - `output-store.ts` — Exports ToolOutputMeta, persistRawOutput, buildModelOutput, buildUiOutput (~794 tok)
 - `path-validate.ts` — Exports ValidatedPath, InvalidPath, PathValidationResult, validatePathSafe, validatePath (~241 tok)
 - `read-file.ts` — Exports READ_FILE_TOOL (~654 tok)
-- `recall.ts` — Exports createRecallTool (~609 tok)
+- `recall.ts` — Exports RecallContext, createRecallTool (~720 tok)
 - `registry.ts` — Exports ToolRegistry (~304 tok)
 - `run-tests.ts` — Exports RUN_TESTS_TOOL (~3052 tok)
 - `todo.ts` — Zod schemas: todoItemSchema, todoActionSchema (~880 tok)
@@ -407,7 +415,7 @@
 - `grep.test.ts` — Exports helper (~1243 tok)
 - `output-store.test.ts` — Declares meta (~1015 tok)
 - `path-validate.test.ts` — Declares result (~621 tok)
-- `recall.test.ts` — Declares proposal (~930 tok)
+- `recall.test.ts` — RecallContext: proposal (~1516 tok)
 - `registry-filter.test.ts` — filterToolRegistry: allowlist, unknown tool, isolation tests (~1819 tok)
 - `run-tests.test.ts` — makeParams: setupProject (~993 tok)
 - `todo.test.ts` — Declares result (~596 tok)
@@ -417,8 +425,9 @@
 ## src/tui/
 
 - `agent-status.tsx` — MAX_VISIBLE_ITEMS (~1232 tok)
-- `app.tsx` — STREAM_FLUSH_MS (~7074 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~7134 tok)
 - `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
+- `history-replay.ts` — Exports ReplayResult, replayMessagesToLogEntries (~428 tok)
 - `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)
 - `log-state.ts` — Exports LogEntry, createLogEntry, appendLogInPlace, visibleLogs + 2 more (~586 tok)
@@ -434,6 +443,7 @@
 
 ## src/tui/__tests__/
 
+- `history-replay.test.ts` — Declares result (~751 tok)
 - `log-state.test.ts` — Declares LogEntry (~803 tok)
 - `phase-tracker.test.ts` — Declares pt (~1177 tok)
 - `slash-commands.test.ts` — SlashHandlerContext: makeCtx (~682 tok)

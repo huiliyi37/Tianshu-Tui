@@ -55,7 +55,7 @@
       "error_message": "Wrong reference: 162 should be 186",
       "file": "README.md",
       "root_cause": "Used \"162\" instead of \"186\"",
-      "fix": "Changed 162 → 186",
+      "fix": "Changed 162 \u2192 186",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -87,7 +87,7 @@
       "error_message": "Significant refactor of ",
       "file": "docs/analysis/2026-05-15-handoff.md",
       "root_cause": "3 lines replaced/restructured",
-      "fix": "Rewrote 7→35 lines (3 removed) | Also: 2. **Trust Cockpit MVP** — Preflight checklist, ac; 3. **Open Model Capability Lab** — Provider confor",
+      "fix": "Rewrote 7\u219235 lines (3 removed) | Also: 2. **Trust Cockpit MVP** \u2014 Preflight checklist, ac; 3. **Open Model Capability Lab** \u2014 Provider confor",
       "tags": [
         "auto-detected",
         "refactor",
@@ -102,8 +102,8 @@
       "timestamp": "2026-05-15T16:49:03.006Z",
       "error_message": "CSS fix: thinkingBudget",
       "file": "src/main.tsx",
-      "root_cause": "thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)), → currentModel.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),",
-      "fix": "Changed thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)), → currentModel.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),",
+      "root_cause": "thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)), \u2192 currentModel.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),",
+      "fix": "Changed thinkingBudget: Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)), \u2192 currentModel.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(currentModel.contextWindow * 0.02)),",
       "tags": [
         "auto-detected",
         "style-fix",
@@ -119,7 +119,7 @@
       "error_message": "Wrong reference: 100 should be process",
       "file": "src/tui/app.tsx",
       "root_cause": "Used \"100\" instead of \"process\"",
-      "fix": "Changed 100 → process",
+      "fix": "Changed 100 \u2192 process",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -215,7 +215,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/tui/app.tsx",
       "root_cause": "17 lines replaced/restructured",
-      "fix": "Rewrote 21→3 lines (17 removed) | Also: const toolOutputAccumRef = useRef<Map<string, stri; const toolFlushRef = useRef<ReturnType<typeof setT | Also: toolOutputAccumRef.current.clear(); dirtyToolIdsRef.current.clear() | Also: if (toolFlushRef.current) {; clearTimeout(toolFlushRef.current)",
+      "fix": "Rewrote 21\u21923 lines (17 removed) | Also: const toolOutputAccumRef = useRef<Map<string, stri; const toolFlushRef = useRef<ReturnType<typeof setT | Also: toolOutputAccumRef.current.clear(); dirtyToolIdsRef.current.clear() | Also: if (toolFlushRef.current) {; clearTimeout(toolFlushRef.current)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -246,8 +246,8 @@
       "timestamp": "2026-05-15T17:39:44.659Z",
       "error_message": "CSS fix: onToolResult",
       "file": "src/tui/app.tsx",
-      "root_cause": "onToolResult: (id, name, result, isError, rawPath, uiContent) => { → (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {",
-      "fix": "Changed onToolResult: (id, name, result, isError, rawPath, uiContent) => { → (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {",
+      "root_cause": "onToolResult: (id, name, result, isError, rawPath, uiContent) => { \u2192 (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {",
+      "fix": "Changed onToolResult: (id, name, result, isError, rawPath, uiContent) => { \u2192 (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {",
       "tags": [
         "auto-detected",
         "style-fix",
@@ -362,7 +362,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/prompt/engine.ts",
       "root_cause": "4 lines replaced/restructured",
-      "fix": "Rewrote 17→34 lines (4 removed)",
+      "fix": "Rewrote 17\u219234 lines (4 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -394,7 +394,7 @@
       "error_message": "Wrong reference: volatileBlock should be this",
       "file": "src/prompt/engine.ts",
       "root_cause": "Used \"volatileBlock\" instead of \"this\"",
-      "fix": "Changed volatileBlock → this",
+      "fix": "Changed volatileBlock \u2192 this",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -410,7 +410,7 @@
       "error_message": "Wrong reference: getTotalUsage should be getEstimatedTokens",
       "file": "src/tui/app.tsx",
       "root_cause": "Used \"getTotalUsage\" instead of \"getEstimatedTokens\"",
-      "fix": "Changed getTotalUsage → getEstimatedTokens",
+      "fix": "Changed getTotalUsage \u2192 getEstimatedTokens",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -458,7 +458,7 @@
       "error_message": "Wrong reference: SessionMemoryState should be LedgerSessionMemoryState",
       "file": "src/context/types.ts",
       "root_cause": "Used \"SessionMemoryState\" instead of \"LedgerSessionMemoryState\"",
-      "fix": "Changed SessionMemoryState → LedgerSessionMemoryState",
+      "fix": "Changed SessionMemoryState \u2192 LedgerSessionMemoryState",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -489,8 +489,8 @@
       "timestamp": "2026-05-15T19:59:22.364Z",
       "error_message": "CSS fix: type",
       "file": "src/tui/app.tsx",
-      "root_cause": "type: 'text', content: `Restored session ${targetId.slice(0, 8) → 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted",
-      "fix": "Changed type: 'text', content: `Restored session ${targetId.slice(0, 8) → 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted",
+      "root_cause": "type: 'text', content: `Restored session ${targetId.slice(0, 8) \u2192 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted",
+      "fix": "Changed type: 'text', content: `Restored session ${targetId.slice(0, 8) \u2192 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted",
       "tags": [
         "auto-detected",
         "style-fix",
@@ -506,7 +506,7 @@
       "error_message": "Wrong reference: StatusBarProps should be contextHealth",
       "file": "src/tui/status-bar.tsx",
       "root_cause": "Used \"StatusBarProps\" instead of \"contextHealth\"",
-      "fix": "Changed StatusBarProps → contextHealth",
+      "fix": "Changed StatusBarProps \u2192 contextHealth",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -537,7 +537,7 @@
       "timestamp": "2026-05-15T20:03:19.223Z",
       "error_message": "Missing error handling in unknown",
       "file": "src/agent/loop.ts",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
       "fix": "Added try/catch block",
       "tags": [
         "auto-detected",
@@ -682,7 +682,7 @@
       "error_message": "Wrong reference: decision should be estTokens",
       "file": "src/agent/loop.ts",
       "root_cause": "Used \"decision\" instead of \"estTokens\"",
-      "fix": "Changed decision → estTokens",
+      "fix": "Changed decision \u2192 estTokens",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -714,7 +714,7 @@
       "error_message": "Significant refactor of ",
       "file": "README.md",
       "root_cause": "4 lines replaced/restructured",
-      "fix": "Rewrote 8→20 lines (4 removed)",
+      "fix": "Rewrote 8\u219220 lines (4 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -746,7 +746,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/tui/app.tsx",
       "root_cause": "3 lines replaced/restructured",
-      "fix": "Rewrote 16→22 lines (3 removed)",
+      "fix": "Rewrote 16\u219222 lines (3 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -809,7 +809,7 @@
       "timestamp": "2026-05-15T20:33:04.166Z",
       "error_message": "Missing await",
       "file": "src/agent/__tests__/coordinator.test.ts",
-      "root_cause": "Async call without await — returned Promise instead of value",
+      "root_cause": "Async call without await \u2014 returned Promise instead of value",
       "fix": "Added await to async call",
       "tags": [
         "auto-detected",
@@ -826,7 +826,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/agent/__tests__/coordinator.test.ts",
       "root_cause": "2 lines replaced/restructured",
-      "fix": "Rewrote 7→7 lines (2 removed)",
+      "fix": "Rewrote 7\u21927 lines (2 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -873,7 +873,7 @@
       "timestamp": "2026-05-15T20:37:36.147Z",
       "error_message": "Missing error handling in extractIntents",
       "file": "docs/superpowers/plans/2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
       "fix": "Added try/catch block",
       "tags": [
         "auto-detected",
@@ -906,7 +906,7 @@
       "error_message": "Wrong reference: 10000 should be LATENCY_PENALTY_DIVISOR",
       "file": "src/agent/adaptive-routing.ts",
       "root_cause": "Used \"10000\" instead of \"LATENCY_PENALTY_DIVISOR\"",
-      "fix": "Changed 10000 → LATENCY_PENALTY_DIVISOR",
+      "fix": "Changed 10000 \u2192 LATENCY_PENALTY_DIVISOR",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -938,7 +938,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/prompt/engine.ts",
       "root_cause": "4 lines replaced/restructured",
-      "fix": "Rewrote 11→27 lines (4 removed)",
+      "fix": "Rewrote 11\u219227 lines (4 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -953,7 +953,7 @@
       "timestamp": "2026-05-15T20:49:22.876Z",
       "error_message": "Missing error handling in unknown",
       "file": "src/agent/loop.ts",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
       "fix": "Added try/catch block",
       "tags": [
         "auto-detected",
@@ -970,7 +970,7 @@
       "error_message": "Significant refactor of ",
       "file": "CLAUDE.md",
       "root_cause": "4 lines replaced/restructured",
-      "fix": "Rewrote 9→14 lines (4 removed)",
+      "fix": "Rewrote 9\u219214 lines (4 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -986,7 +986,7 @@
       "error_message": "Wrong reference: decisions should be strategyShift",
       "file": "src/prompt/engine.ts",
       "root_cause": "Used \"decisions\" instead of \"strategyShift\"",
-      "fix": "Changed decisions → strategyShift",
+      "fix": "Changed decisions \u2192 strategyShift",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -1033,8 +1033,8 @@
       "timestamp": "2026-05-16T04:10:02.272Z",
       "error_message": "Missing error handling in fixAutoLinks",
       "file": "docs/superpowers/plans/2026-05-16-multi-pass-repair-pipeline.md",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
-      "fix": "Added try/catch block | Also: ## 任务 3：Pass 2 — Schema Gate (在 client.ts 中拦截); **文件：**",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
+      "fix": "Added try/catch block | Also: ## \u4efb\u52a1 3\uff1aPass 2 \u2014 Schema Gate (\u5728 client.ts \u4e2d\u62e6\u622a); **\u6587\u4ef6\uff1a**",
       "tags": [
         "auto-detected",
         "error-handling",
@@ -1098,7 +1098,7 @@
       "error_message": "Wrong reference: decisions should be repairHint",
       "file": "src/prompt/engine.ts",
       "root_cause": "Used \"decisions\" instead of \"repairHint\"",
-      "fix": "Changed decisions → repairHint",
+      "fix": "Changed decisions \u2192 repairHint",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -1114,7 +1114,7 @@
       "error_message": "Wrong reference: return should be statSync",
       "file": "src/agent/import-graph.ts",
       "root_cause": "Used \"return\" instead of \"statSync\"",
-      "fix": "Changed return → statSync",
+      "fix": "Changed return \u2192 statSync",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -1146,7 +1146,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/mcp/wrapper.ts",
       "root_cause": "2 lines replaced/restructured",
-      "fix": "Rewrote 19→23 lines (2 removed)",
+      "fix": "Rewrote 19\u219223 lines (2 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -1162,7 +1162,7 @@
       "error_message": "Wrong reference: ModelPanelProps should be routingReason",
       "file": "src/tui/cockpit/model-panel.tsx",
       "root_cause": "Used \"ModelPanelProps\" instead of \"routingReason\"",
-      "fix": "Changed ModelPanelProps → routingReason",
+      "fix": "Changed ModelPanelProps \u2192 routingReason",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -1178,7 +1178,7 @@
       "error_message": "Wrong reference: VerificationPanelProps should be impactedFiles",
       "file": "src/tui/cockpit/verification-panel.tsx",
       "root_cause": "Used \"VerificationPanelProps\" instead of \"impactedFiles\"",
-      "fix": "Changed VerificationPanelProps → impactedFiles",
+      "fix": "Changed VerificationPanelProps \u2192 impactedFiles",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -1242,7 +1242,7 @@
       "error_message": "Incorrect value in code",
       "file": "src/mcp/__tests__/wrapper.test.ts",
       "root_cause": "Had 'Echo: hello'",
-      "fix": "Changed to 'Echo: hello\\n[MCP: test · read-only]'",
+      "fix": "Changed to 'Echo: hello\\n[MCP: test \u00b7 read-only]'",
       "tags": [
         "auto-detected",
         "wrong-value",
@@ -1274,7 +1274,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/agent/turn-harness.ts",
       "root_cause": "6 lines replaced/restructured",
-      "fix": "Rewrote 18→23 lines (6 removed)",
+      "fix": "Rewrote 18\u219223 lines (6 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -1337,7 +1337,7 @@
       "timestamp": "2026-05-16T04:49:22.634Z",
       "error_message": "Missing error handling in unknown",
       "file": "src/agent/loop.ts",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
       "fix": "Added try/catch block",
       "tags": [
         "auto-detected",
@@ -1370,7 +1370,7 @@
       "error_message": "Significant refactor of ",
       "file": "docs/superpowers/specs/2026-05-16-rivet-core-business-gap-review.md",
       "root_cause": "11 lines replaced/restructured",
-      "fix": "Rewrote 13→13 lines (11 removed) | Also: 1. Cache Safety / Context Layer        已单独安排; 2. Tool Safety + Verification Evidence P0",
+      "fix": "Rewrote 13\u219213 lines (11 removed) | Also: 1. Cache Safety / Context Layer        \u5df2\u5355\u72ec\u5b89\u6392; 2. Tool Safety + Verification Evidence P0",
       "tags": [
         "auto-detected",
         "refactor",
@@ -1450,7 +1450,7 @@
       "error_message": "Significant refactor of ",
       "file": "README.md",
       "root_cause": "2 lines replaced/restructured",
-      "fix": "Rewrote 5→6 lines (2 removed) | Also: ├── types.ts       Panel type + PANELS + PANEL_LAB; ├── rail.tsx       CockpitRail tab navigation | Also: - **Evidence delivery gate** — `DeliveryVerificati; - **Repo intelligence** — symbol-index (regex-base | Also: | `summary` (default) | SummaryBar | Live phase, c; | `verify` | VerificationPanel | Files read/modifi",
+      "fix": "Rewrote 5\u21926 lines (2 removed) | Also: \u251c\u2500\u2500 types.ts       Panel type + PANELS + PANEL_LAB; \u251c\u2500\u2500 rail.tsx       CockpitRail tab navigation | Also: - **Evidence delivery gate** \u2014 `DeliveryVerificati; - **Repo intelligence** \u2014 symbol-index (regex-base | Also: | `summary` (default) | SummaryBar | Live phase, c; | `verify` | VerificationPanel | Files read/modifi",
       "tags": [
         "auto-detected",
         "refactor",
@@ -1514,7 +1514,7 @@
       "error_message": "Wrong reference: 510 should be 620",
       "file": "README.md",
       "root_cause": "Used \"510\" instead of \"620\"",
-      "fix": "Changed 510 → 620",
+      "fix": "Changed 510 \u2192 620",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -1545,7 +1545,7 @@
       "timestamp": "2026-05-16T12:16:30.846Z",
       "error_message": "Missing error handling in unknown",
       "file": "src/tui/app.tsx",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
       "fix": "Added try/catch block",
       "tags": [
         "auto-detected",
@@ -1641,7 +1641,7 @@
       "timestamp": "2026-05-16T12:58:32.242Z",
       "error_message": "Missing await",
       "file": "src/agent/__tests__/loop.test.ts",
-      "root_cause": "Async call without await — returned Promise instead of value",
+      "root_cause": "Async call without await \u2014 returned Promise instead of value",
       "fix": "Added await to async call",
       "tags": [
         "auto-detected",
@@ -1844,7 +1844,7 @@
       "error_message": "Wrong reference: false should be true",
       "file": ".omc/prd.json",
       "root_cause": "Used \"false\" instead of \"true\"",
-      "fix": "Changed false → true",
+      "fix": "Changed false \u2192 true",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -1860,7 +1860,7 @@
       "error_message": "Wrong reference: 855 should be 755",
       "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
       "root_cause": "Used \"855\" instead of \"755\"",
-      "fix": "Changed 855 → 755",
+      "fix": "Changed 855 \u2192 755",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -1892,7 +1892,7 @@
       "error_message": "Wrong reference: true should be false",
       "file": "src/tools/delegate-task.ts",
       "root_cause": "Used \"true\" instead of \"false\"",
-      "fix": "Changed true → false",
+      "fix": "Changed true \u2192 false",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2068,7 +2068,7 @@
       "error_message": "Wrong reference: sources should be claimCounts",
       "file": "src/tui/cockpit/state.ts",
       "root_cause": "Used \"sources\" instead of \"claimCounts\"",
-      "fix": "Changed sources → claimCounts",
+      "fix": "Changed sources \u2192 claimCounts",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2164,7 +2164,7 @@
       "error_message": "Wrong reference: AppProps should be claimStoreRef",
       "file": "src/tui/app.tsx",
       "root_cause": "Used \"AppProps\" instead of \"claimStoreRef\"",
-      "fix": "Changed AppProps → claimStoreRef",
+      "fix": "Changed AppProps \u2192 claimStoreRef",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2180,7 +2180,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/context/claim-store.ts",
       "root_cause": "2 lines replaced/restructured",
-      "fix": "Rewrote 44→60 lines (2 removed)",
+      "fix": "Rewrote 44\u219260 lines (2 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -2196,7 +2196,7 @@
       "error_message": "Wrong reference: overrides should be claimStoreRef",
       "file": "src/tui/__tests__/slash-commands.test.ts",
       "root_cause": "Used \"overrides\" instead of \"claimStoreRef\"",
-      "fix": "Changed overrides → claimStoreRef",
+      "fix": "Changed overrides \u2192 claimStoreRef",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2212,7 +2212,7 @@
       "error_message": "Wrong reference: false should be true",
       "file": ".omc/prd.json",
       "root_cause": "Used \"false\" instead of \"true\"",
-      "fix": "Changed false → true",
+      "fix": "Changed false \u2192 true",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2324,7 +2324,7 @@
       "error_message": "Wrong operator: !== should be ===",
       "file": "src/context/promotion.ts",
       "root_cause": "Used \"!==\" instead of \"===\"",
-      "fix": "Changed operator !== → ===",
+      "fix": "Changed operator !== \u2192 ===",
       "tags": [
         "auto-detected",
         "operator-fix",
@@ -2339,7 +2339,7 @@
       "timestamp": "2026-05-16T15:31:00.629Z",
       "error_message": "Missing error handling in unknown",
       "file": "src/context/claim-store.ts",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
       "fix": "Added try/catch block",
       "tags": [
         "auto-detected",
@@ -2419,7 +2419,7 @@
       "timestamp": "2026-05-16T15:34:46.967Z",
       "error_message": "Missing await",
       "file": "src/agent/__tests__/loop.test.ts",
-      "root_cause": "Async call without await — returned Promise instead of value",
+      "root_cause": "Async call without await \u2014 returned Promise instead of value",
       "fix": "Added await to async call",
       "tags": [
         "auto-detected",
@@ -2436,7 +2436,7 @@
       "error_message": "Wrong reference: parameters should be input_schema",
       "file": "src/agent/__tests__/loop.test.ts",
       "root_cause": "Used \"parameters\" instead of \"input_schema\"",
-      "fix": "Changed parameters → input_schema",
+      "fix": "Changed parameters \u2192 input_schema",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2484,7 +2484,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/main.tsx",
       "root_cause": "13 lines replaced/restructured",
-      "fix": "Rewrote 18→5 lines (13 removed) | Also: const durableClaims = persist.loadPreviousDurableC; for (const claim of durableClaims) {",
+      "fix": "Rewrote 18\u21925 lines (13 removed) | Also: const durableClaims = persist.loadPreviousDurableC; for (const claim of durableClaims) {",
       "tags": [
         "auto-detected",
         "refactor",
@@ -2500,7 +2500,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/tools/delegate-task.ts",
       "root_cause": "3 lines replaced/restructured",
-      "fix": "Rewrote 18→29 lines (3 removed)",
+      "fix": "Rewrote 18\u219229 lines (3 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -2548,7 +2548,7 @@
       "error_message": "Wrong reference: 859 should be 825",
       "file": "README.md",
       "root_cause": "Used \"859\" instead of \"825\"",
-      "fix": "Changed 859 → 825",
+      "fix": "Changed 859 \u2192 825",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2564,7 +2564,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/agent/loop.ts",
       "root_cause": "9 lines replaced/restructured",
-      "fix": "Rewrote 19→7 lines (9 removed)",
+      "fix": "Rewrote 19\u21927 lines (9 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -2596,7 +2596,7 @@
       "error_message": "Wrong operator: && should be !==",
       "file": "src/agent/loop.ts",
       "root_cause": "Used \"&&\" instead of \"!==\"",
-      "fix": "Changed operator && → !==",
+      "fix": "Changed operator && \u2192 !==",
       "tags": [
         "auto-detected",
         "operator-fix",
@@ -2628,7 +2628,7 @@
       "error_message": "Significant refactor of ",
       "file": "CHANGELOG.md",
       "root_cause": "15 lines replaced/restructured",
-      "fix": "Rewrote 40→49 lines (15 removed)",
+      "fix": "Rewrote 40\u219249 lines (15 removed)",
       "tags": [
         "auto-detected",
         "refactor",
@@ -2643,7 +2643,7 @@
       "timestamp": "2026-05-16T16:21:24.040Z",
       "error_message": "Missing await",
       "file": "src/server/__tests__/server.test.ts",
-      "root_cause": "Async call without await — returned Promise instead of value",
+      "root_cause": "Async call without await \u2014 returned Promise instead of value",
       "fix": "Added await to async call",
       "tags": [
         "auto-detected",
@@ -2675,8 +2675,8 @@
       "timestamp": "2026-05-16T16:32:47.029Z",
       "error_message": "CSS fix: compact, compactModel, contextWindow",
       "file": "src/main.tsx",
-      "root_cause": "compact: config.compact, → { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash'; compactModel: compactModel?.id, → compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort; contextWindow: currentModel.contextWindow, → card.contextWindow,",
-      "fix": "Changed compact: config.compact, → { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash'; compactModel: compactModel?.id, → compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort; contextWindow: currentModel.contextWindow, → card.contextWindow,",
+      "root_cause": "compact: config.compact, \u2192 { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash'; compactModel: compactModel?.id, \u2192 compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort; contextWindow: currentModel.contextWindow, \u2192 card.contextWindow,",
+      "fix": "Changed compact: config.compact, \u2192 { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash'; compactModel: compactModel?.id, \u2192 compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort; contextWindow: currentModel.contextWindow, \u2192 card.contextWindow,",
       "tags": [
         "auto-detected",
         "style-fix",
@@ -2724,7 +2724,7 @@
       "error_message": "Wrong reference: sessionId should be _sessionId",
       "file": "src/context/rules-loader.ts",
       "root_cause": "Used \"sessionId\" instead of \"_sessionId\"",
-      "fix": "Changed sessionId → _sessionId",
+      "fix": "Changed sessionId \u2192 _sessionId",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2755,7 +2755,7 @@
       "timestamp": "2026-05-16T16:38:29.488Z",
       "error_message": "Missing await",
       "file": "src/tui/slash-commands.ts",
-      "root_cause": "Async call without await — returned Promise instead of value",
+      "root_cause": "Async call without await \u2014 returned Promise instead of value",
       "fix": "Added await to async call",
       "tags": [
         "auto-detected",
@@ -2788,7 +2788,7 @@
       "error_message": "Wrong reference: 831 should be 856",
       "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
       "root_cause": "Used \"831\" instead of \"856\"",
-      "fix": "Changed 831 → 856",
+      "fix": "Changed 831 \u2192 856",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2819,7 +2819,7 @@
       "timestamp": "2026-05-16T16:49:13.324Z",
       "error_message": "Missing error handling in loadProjectRules",
       "file": "src/context/rules-loader.ts",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
       "fix": "Added try/catch block",
       "tags": [
         "auto-detected",
@@ -2836,7 +2836,7 @@
       "error_message": "Wrong reference: _sessionId should be ClaimProposal",
       "file": "src/context/rules-loader.ts",
       "root_cause": "Used \"_sessionId\" instead of \"ClaimProposal\"",
-      "fix": "Changed _sessionId → ClaimProposal",
+      "fix": "Changed _sessionId \u2192 ClaimProposal",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2851,8 +2851,8 @@
       "timestamp": "2026-05-16T17:07:57.156Z",
       "error_message": "Missing error handling in function",
       "file": "docs/superpowers/plans/2026-05-17-wave10-test-loop-split.md",
-      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
-      "fix": "Added try/catch block | Also: ## 任务 4：提取 tool-pipeline.ts; **文件：**",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
+      "fix": "Added try/catch block | Also: ## \u4efb\u52a1 4\uff1a\u63d0\u53d6 tool-pipeline.ts; **\u6587\u4ef6\uff1a**",
       "tags": [
         "auto-detected",
         "error-handling",
@@ -2884,7 +2884,7 @@
       "error_message": "Significant refactor of ",
       "file": "src/agent/loop.ts",
       "root_cause": "277 lines replaced/restructured",
-      "fix": "Rewrote 376→66 lines (277 removed) | Also: import type { ToolCallParams } from '../tools/type; import { buildPrewarmValue, canUsePrewarmForRead }",
+      "fix": "Rewrote 376\u219266 lines (277 removed) | Also: import type { ToolCallParams } from '../tools/type; import { buildPrewarmValue, canUsePrewarmForRead }",
       "tags": [
         "auto-detected",
         "refactor",
@@ -2900,7 +2900,7 @@
       "error_message": "Wrong reference: Phase should be 4B",
       "file": "CHANGELOG.md",
       "root_cause": "Used \"Phase\" instead of \"4B\"",
-      "fix": "Changed Phase → 4B",
+      "fix": "Changed Phase \u2192 4B",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2916,7 +2916,7 @@
       "error_message": "Wrong reference: 856 should be 878",
       "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
       "root_cause": "Used \"856\" instead of \"878\"",
-      "fix": "Changed 856 → 878",
+      "fix": "Changed 856 \u2192 878",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2948,7 +2948,7 @@
       "error_message": "Wrong reference: undefined should be false",
       "file": "src/agent/__tests__/tool-pipeline.test.ts",
       "root_cause": "Used \"undefined\" instead of \"false\"",
-      "fix": "Changed undefined → false",
+      "fix": "Changed undefined \u2192 false",
       "tags": [
         "auto-detected",
         "wrong-reference",
@@ -2957,6 +2957,313 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-16T17:19:00.156Z"
+    },
+    {
+      "id": "bug-185",
+      "timestamp": "2026-05-16T17:19:52.557Z",
+      "error_message": "Type error",
+      "file": "src/agent/__tests__/tool-pipeline.test.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation | Also: assert.equal((result.toolResult as any).is_error, true)",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T17:19:58.325Z"
+    },
+    {
+      "id": "bug-186",
+      "timestamp": "2026-05-16T17:36:03.626Z",
+      "error_message": "Missing guard clause",
+      "file": "src/context/claim-store.ts",
+      "root_cause": "No early return/throw for edge case: !claim",
+      "fix": "Added guard clause: if (!claim)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:36:03.626Z"
+    },
+    {
+      "id": "bug-187",
+      "timestamp": "2026-05-16T17:37:19.435Z",
+      "error_message": "Missing await",
+      "file": "src/tools/__tests__/recall.test.ts",
+      "root_cause": "Async call without await \u2014 returned Promise instead of value",
+      "fix": "Added await to async call",
+      "tags": [
+        "auto-detected",
+        "async-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:37:19.435Z"
+    },
+    {
+      "id": "bug-188",
+      "timestamp": "2026-05-16T17:37:36.734Z",
+      "error_message": "Type error",
+      "file": "src/main.tsx",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:37:36.734Z"
+    },
+    {
+      "id": "bug-189",
+      "timestamp": "2026-05-16T17:43:27.912Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "CHANGELOG.md",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:43:27.912Z"
+    },
+    {
+      "id": "bug-190",
+      "timestamp": "2026-05-16T17:46:30.600Z",
+      "error_message": "Null/undefined access in ",
+      "file": "docs/superpowers/plans/2026-05-17-wave11-cache-perf.md",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:46:30.600Z"
+    },
+    {
+      "id": "bug-191",
+      "timestamp": "2026-05-16T18:24:04.546Z",
+      "error_message": "Missing guard clause",
+      "file": "src/agent/session-persist.ts",
+      "root_cause": "No early return/throw for edge case: !existsSync(this.snapshotPath",
+      "fix": "Added guard clause: if (!existsSync(this.snapshotPath)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:24:04.546Z"
+    },
+    {
+      "id": "bug-192",
+      "timestamp": "2026-05-16T18:24:33.626Z",
+      "error_message": "Wrong reference: toolCount should be tool_use",
+      "file": "src/tui/history-replay.ts",
+      "root_cause": "Used \"toolCount\" instead of \"tool_use\"",
+      "fix": "Changed toolCount \u2192 tool_use",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:24:33.626Z"
+    },
+    {
+      "id": "bug-193",
+      "timestamp": "2026-05-16T18:24:45.328Z",
+      "error_message": "Missing await",
+      "file": "src/agent/__tests__/session-persist.test.ts",
+      "root_cause": "Async call without await \u2014 returned Promise instead of value",
+      "fix": "Added await to async call",
+      "tags": [
+        "auto-detected",
+        "async-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:24:45.328Z"
+    },
+    {
+      "id": "bug-194",
+      "timestamp": "2026-05-16T18:24:59.616Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/__tests__/session-persist.test.ts",
+      "root_cause": "Had 'snapshotPath'",
+      "fix": "Changed to 'corrupted\\n'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:24:59.616Z"
+    },
+    {
+      "id": "bug-195",
+      "timestamp": "2026-05-16T18:32:28.811Z",
+      "error_message": "Wrong operator: !== should be >>",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Used \"!==\" instead of \">>\"",
+      "fix": "Changed operator !== \u2192 >>",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:32:28.811Z"
+    },
+    {
+      "id": "bug-196",
+      "timestamp": "2026-05-16T18:32:55.680Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:32:55.680Z"
+    },
+    {
+      "id": "bug-197",
+      "timestamp": "2026-05-16T18:33:13.685Z",
+      "error_message": "CSS fix: type",
+      "file": "src/tui/app.tsx",
+      "root_cause": "type: 'text', content: `Restored session ${sessions[0]!.slice(0, 8) \u2192 'text', content: `Restored session ${id.slice(0, 8)",
+      "fix": "Changed type: 'text', content: `Restored session ${sessions[0]!.slice(0, 8) \u2192 'text', content: `Restored session ${id.slice(0, 8)",
+      "tags": [
+        "auto-detected",
+        "style-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:33:13.685Z"
+    },
+    {
+      "id": "bug-198",
+      "timestamp": "2026-05-16T18:33:49.475Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:33:49.475Z"
+    },
+    {
+      "id": "bug-199",
+      "timestamp": "2026-05-16T18:37:34.292Z",
+      "error_message": "Missing guard clause",
+      "file": "src/agent/loop.ts",
+      "root_cause": "No early return/throw for edge case: !this.config.sessionId",
+      "fix": "Added guard clause: if (!this.config.sessionId)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:37:34.292Z"
+    },
+    {
+      "id": "bug-200",
+      "timestamp": "2026-05-16T18:39:34.997Z",
+      "error_message": "Missing guard clause",
+      "file": "src/agent/session-persist.ts",
+      "root_cause": "No early return/throw for edge case: sessions.length <= limit",
+      "fix": "Added guard clause: if (sessions.length <= limit)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:39:34.997Z"
+    },
+    {
+      "id": "bug-201",
+      "timestamp": "2026-05-16T18:44:04.030Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "CHANGELOG.md",
+      "root_cause": "Code path had no error handling \u2014 exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:44:04.030Z"
+    },
+    {
+      "id": "bug-202",
+      "timestamp": "2026-05-16T18:51:26.286648Z",
+      "error_message": "Wave 11 cache diagnostics falsely warned when latest turn cache counters were 0/0",
+      "file": "src/agent/context.ts",
+      "root_cause": "getLatestTurnHitRate() returned 0 when cacheRead + cacheCreation was 0, so AgentLoop treated unavailable cache telemetry as a low hit rate.",
+      "fix": "Return null for 0/0 turn cache snapshots and added context plus AgentLoop regression tests for unavailable counters clearing diagnostics.",
+      "tags": [
+        "cache",
+        "diagnostic",
+        "wave11",
+        "test"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T18:51:26.286648Z"
+    }
+  ]
+}
+{
+  "timestamp": "2026-05-17T14:30:00Z",
+  "source": "code-review-wave12",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "block-stream-writer.ts:enqueue",
+      "note": "同步 enqueue 是正确的：Rivet 的 onBlock 是 React setState，异步 .then() 在 fire-and-forget flush 场景下会丢数据",
+      "tags": ["design-decision", "block-stream-writer"]
+    },
+    {
+      "severity": "medium",
+      "location": "loop.ts:345-354 recordTurnSnapshot",
+      "note": "每 turn 创建 new SessionPersist 实例，可缓存但开销极小",
+      "tags": ["perf", "turn-snapshot"]
     }
   ]
 }

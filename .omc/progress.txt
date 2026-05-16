@@ -1,0 +1,69 @@
+# Wave 5: Trust Infrastructure — Progress Log
+## Started: 2026-05-16
+
+### Iteration 1 — Exploration
+- ACF branch already merged (commit 23e46f5) — Task 2 from original plan skipped
+- /context handler already exists in app.tsx:293-316 — only /context pin extension needed
+- AgentLoop missing addAnchor() and getLedger() public methods — added for /context pin
+- FileHistory has no serialize/deserialize — implemented persistence layer
+
+### W5-001: Register dormant tools + wire AgentConfig (COMPLETE)
+- Added imports + register() calls for INSPECT_PROJECT_TOOL, REPO_MAP_TOOL, RELATED_TESTS_TOOL in default-registry.ts
+- Passed autoReasoning: true, lspEnabled: true to AgentLoop in main.tsx
+- 743 tests pass, no new type errors
+
+### W5-002: FileHistory persistence (COMPLETE)
+- Created src/agent/file-history-persist.ts with persistFileHistory() and loadFileHistory()
+- Generic type parameter <T> for compatibility with FileHistory's FileSnapshot type
+- Ring-buffer GC: entries.slice(-maxSnapshots) when over limit
+- Corrupt JSON returns [] instead of throwing
+- Created src/__tests__/file-history-persist.test.ts — 4 tests pass
+
+### W5-003: Wire FileHistory + undo tool (COMPLETE)
+- Added module-level _fileHistoryRef in main.tsx
+- Created FileHistory instance with backupDir: ~/.rivet/sessions/{sessionId}/backups
+- Registered createUndoTool(() => _fileHistoryRef ?? undefined) in tool registry
+- Passed fileHistory to AgentLoop config
+- Added persistFileHistory call in gracefulShutdown callback
+- Added getAllSnapshots() method to FileHistory
+
+### W5-004: addAnchor + getLedger on AgentLoop (COMPLETE)
+- Added private userAnchors: ContextAnchor[] to AgentLoop
+- Added getLedger() → session.getContextLedger()
+- Added addAnchor(kind, text) → pushes to userAnchors
+- Updated createContextLedger to accept optional extraAnchors parameter
+- Updated refreshLedger() to pass userAnchors to createContextLedger
+
+### W5-005: /context pin + /undo slash commands (COMPLETE)
+- Extended /context handler to support "pin <text>" subcommand
+- Added anchor list display to /context output
+- Added /undo handler: list history + /undo <n> selective rewind
+- Added getFileHistory() to AgentLoop for /undo access
+
+### W5-006: Integration tests (COMPLETE)
+- Created src/__tests__/wave5-integration.test.ts — 6 tests
+- Covers: tool registration, persist round-trip, FileHistory creation, context anchors
+
+## Final Status
+- 743 tests pass, 0 fail
+- npx tsc --noEmit: 3 pre-existing errors (headless.test.ts streamJson), 0 new
+- 6/6 stories complete
+
+## Wave 11: Cache efficiency + token savings — Ralph run
+- PRD refined into 5 concrete stories from docs/superpowers/plans/2026-05-17-wave11-cache-perf.md.
+- Known execution risk: src/tui/app.tsx already records cache diagnostics; AgentLoop migration must avoid double-counting.
+
+
+### Wave 11: Cache efficiency + token savings — implementation complete
+- W11-001: Added SessionContext.getLatestTurnHitRate(), AgentLoop.getPrewarmStats(), cockpit snapshot/model panel cache fields, and moved turn cache snapshot recording into AgentLoop.onStopReason.
+- W11-002: Added AgentLoop cache diagnostic state, low-hit-rate refresh logic, cockpit cacheDiagnostic projection, and removed duplicate TUI app-level cache diagnostic/recording.
+- W11-003: Added truncateToolResult() head/tail truncation and wired it into ToolPipeline normal results plus run_tests diagnosis early return.
+- W11-004: Expanded AgentLoop prewarm cache to 60s/50 entries and changed PrewarmCache eviction to LRU with get() recency refresh.
+- W11-005: Added batchPrewarm() and AgentLoop turn-start prewarming from recent successful read_file tool history without async streaming callback churn.
+- Verification: targeted Wave 11 + loop tests passed (81 tests, 0 fail); typecheck passed after migrating two existing vitest-style tests to node:test.
+
+### Wave 11 reviewer rejection fixes
+- Added regression coverage for unavailable 0/0 turn cache counters, AgentLoop diagnostic storage/clearing, and ToolPipeline truncation on normal plus run_tests diagnosis results.
+- Fixed SessionContext.getLatestTurnHitRate() so a turn with no cache read/write counters returns null instead of a false 0% hit rate.
+- Simplified batchPrewarm() to a synchronous cache.set loop after the reviewer noted the previous async wrapper was unnecessary.
+- Verification: focused context, loop, tool-pipeline, and prewarm-file suites pass; npx tsc --noEmit --skipLibCheck passed.

@@ -1,0 +1,74 @@
+{
+  "title": "Wave 11: Cache efficiency + token savings",
+  "source": "docs/superpowers/plans/2026-05-17-wave11-cache-perf.md",
+  "stories": [
+    {
+      "id": "W11-001",
+      "title": "Expose per-turn cache metrics and prewarm stats in cockpit model panel",
+      "priority": 1,
+      "passes": true,
+      "acceptanceCriteria": [
+        "SessionContext exposes getLatestTurnHitRate() returning null with no snapshots and last-turn cacheRead/(cacheRead+cacheCreation) otherwise.",
+        "AgentLoop exposes getPrewarmStats() returning PrewarmCache hits, misses, and hitRate.",
+        "AgentLoop records turn cache snapshots from onStopReason usage instead of relying on TUI-only accounting.",
+        "CockpitSnapshot.model includes perTurnHitRate, prewarmHits, prewarmMisses, prewarmHitRate, and cacheDiagnostic fields.",
+        "ModelPanel renders per-turn cache hit rate and prewarm hit summary when provided.",
+        "Targeted context/cockpit tests pass."
+      ]
+    },
+    {
+      "id": "W11-002",
+      "title": "Auto-trigger cache diagnostics on low per-turn hit rate",
+      "priority": 2,
+      "passes": true,
+      "acceptanceCriteria": [
+        "AgentLoop stores a latest cache diagnostic message when latest turn hit rate is below 0.8.",
+        "AgentLoop clears the cache diagnostic when latest turn hit rate is at least 0.8 or unavailable.",
+        "CockpitSnapshot.model.cacheDiagnostic reads from AgentLoop.getCacheDiagnostic().",
+        "ModelPanel renders cacheDiagnostic visibly when it is non-null.",
+        "Existing TUI app-level cache diagnostic path is removed or made non-duplicating so turn cache is not double-counted.",
+        "Targeted loop/cockpit tests pass."
+      ]
+    },
+    {
+      "id": "W11-003",
+      "title": "Truncate oversized tool results with head and tail preservation",
+      "priority": 3,
+      "passes": true,
+      "acceptanceCriteria": [
+        "A new truncateToolResult(content, maxTokens) returns content unchanged when under budget.",
+        "truncateToolResult shortens oversized content and includes a truncated marker with removed character count.",
+        "truncateToolResult preserves the content head and tail.",
+        "executeToolUse applies truncation to normal tool results using compactThresholds(contextWindow).toolResultMaxTokens.",
+        "executeToolUse also applies truncation to the run_tests diagnosis early-return path.",
+        "Targeted truncation and tool-pipeline tests pass."
+      ]
+    },
+    {
+      "id": "W11-004",
+      "title": "Expand prewarm cache and make eviction LRU",
+      "priority": 4,
+      "passes": true,
+      "acceptanceCriteria": [
+        "PrewarmCache.get() refreshes access recency for live entries.",
+        "PrewarmCache.set() evicts the least recently used entry when maxEntries is exceeded.",
+        "AgentLoop default prewarm cache uses 60s TTL and 50 entries.",
+        "Prewarm tests cover LRU eviction and recency refresh behavior.",
+        "Targeted prewarm tests pass."
+      ]
+    },
+    {
+      "id": "W11-005",
+      "title": "Prewarm recently read files at turn start without async streaming churn",
+      "priority": 5,
+      "passes": true,
+      "acceptanceCriteria": [
+        "AgentLoop prewarms cache entries from recent successful read_file tool history at turn start.",
+        "Prewarm-from-history avoids recaching entries already present in PrewarmCache.",
+        "Implementation does not convert streaming text callbacks to async or introduce unawaited Promise.all behavior.",
+        "Tests verify recent read_file history populates prewarm cache for later read_file reuse.",
+        "Targeted prewarm/loop tests pass."
+      ]
+    }
+  ]
+}
