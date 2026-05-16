@@ -749,3 +749,137 @@
 | 13:02 | Session end: 39 writes across 10 files (2026-05-16-rivet-core-capability-ledger.md, 2026-05-16-rivet-core-business-gap-review.md, execution-guidance.test.ts, README.md, execution-guidance.ts) | 20 reads | ~60595 tok |
 | 13:02 | Created src/agent/worker-evidence.ts | — | ~385 |
 | 13:03 | Edited src/agent/aggregation.ts | modified aggregateResults() | ~388 |
+| 19:43 | Edited CHANGELOG.md | 69→67 lines | ~1373 |
+| 19:44 | Edited README.md | 5→1 lines | ~514 |
+| 19:45 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | 5→1 lines | ~31 |
+| 19:45 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | 5→1 lines | ~163 |
+| 19:47 | Session end: 45 writes across 13 files (2026-05-16-rivet-core-capability-ledger.md, 2026-05-16-rivet-core-business-gap-review.md, execution-guidance.test.ts, README.md, execution-guidance.ts) | 21 reads | ~63843 tok |
+| 19:50 | Session end: 45 writes across 13 files (2026-05-16-rivet-core-capability-ledger.md, 2026-05-16-rivet-core-business-gap-review.md, execution-guidance.test.ts, README.md, execution-guidance.ts) | 21 reads | ~69324 tok |
+
+## Session: 2026-05-16 19:55
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 20:00 | Created .omc/prd.json | — | ~1015 |
+| 20:01 | Created .omc/progress.txt | — | ~136 |
+| 20:01 | Edited src/tools/default-registry.ts | added 3 import(s) | ~203 |
+| 20:01 | Edited src/tools/default-registry.ts | 3→6 lines | ~69 |
+| 20:02 | Edited src/main.tsx | CSS: autoReasoning, lspEnabled | ~66 |
+| 20:02 | Session end: 5 writes across 4 files (prd.json, progress.txt, default-registry.ts, main.tsx) | 21 reads | ~27770 tok |
+| 20:03 | Session end: 5 writes across 4 files (prd.json, progress.txt, default-registry.ts, main.tsx) | 40 reads | ~35245 tok |
+| 20:03 | Edited .omc/prd.json | 4→4 lines | ~40 |
+| 20:04 | Session end: 6 writes across 4 files (prd.json, progress.txt, default-registry.ts, main.tsx) | 42 reads | ~38353 tok |
+| 20:04 | Created src/__tests__/file-history-persist.test.ts | — | ~533 |
+| 20:04 | Created src/agent/file-history-persist.ts | — | ~233 |
+| 20:05 | Session end: 8 writes across 6 files (prd.json, progress.txt, default-registry.ts, main.tsx, file-history-persist.test.ts) | 44 reads | ~40040 tok |
+| 20:05 | Edited src/__tests__/file-history-persist.test.ts | inline fix | ~16 |
+| 20:05 | Edited src/__tests__/file-history-persist.test.ts | inline fix | ~14 |
+| 20:05 | Edited src/__tests__/file-history-persist.test.ts | 7→6 lines | ~66 |
+| 20:06 | Edited .omc/prd.json | 4→4 lines | ~41 |
+| 20:07 | Edited src/main.tsx | added 3 import(s) | ~171 |
+| 20:08 | Edited src/main.tsx | CSS: _fileHistoryRef | ~87 |
+| 20:08 | Edited src/main.tsx | added nullish coalescing | ~90 |
+| 20:08 | Edited src/main.tsx | expanded (+6 lines) | ~82 |
+| 20:09 | Edited src/main.tsx | 2→3 lines | ~22 |
+| 20:09 | Edited src/main.tsx | inline fix | ~14 |
+| 20:09 | Edited src/main.tsx | added 1 condition(s) | ~150 |
+| 20:10 | Edited src/agent/file-history.ts | modified hasSnapshot() | ~79 |
+| 20:10 | Created src/agent/file-history-persist.ts | — | ~239 |
+| 20:12 | Created .superpowers/brainstorm/2026-05-16-rivet-evolutionary-tui-memory-fragments.json | — | ~2062 |
+| 20:12 | Edited src/agent/loop.ts | inline fix | ~24 |
+| 20:12 | Edited src/agent/loop.ts | 2→3 lines | ~43 |
+| 20:12 | Edited src/agent/loop.ts | modified getLatestRisk() | ~90 |
+| 20:13 | Edited src/context/ledger.ts | modified createContextLedger() | ~96 |
+| 20:13 | Edited src/context/ledger.ts | inline fix | ~31 |
+| 20:13 | Edited src/agent/loop.ts | modified refreshLedger() | ~98 |
+| 20:13 | Edited .omc/prd.json | 4→4 lines | ~37 |
+| 20:13 | Edited .omc/prd.json | 4→4 lines | ~39 |
+| 20:14 | Edited src/agent/loop.ts | modified addAnchor() | ~63 |
+| 20:15 | Edited src/tui/app.tsx | CSS: Pinned, Usage, Anchors | ~528 |
+| 20:16 | Edited src/tui/app.tsx | added error handling | ~739 |
+| 20:16 | Edited .omc/prd.json | 4→4 lines | ~37 |
+| 20:18 | Created src/__tests__/wave5-integration.test.ts | — | ~930 |
+| 20:19 | Edited .omc/prd.json | 4→9 lines | ~91 |
+| 20:20 | Created docs/superpowers/specs/2026-05-16-rivet-evolutionary-tui-memory-design.md | — | ~6121 |
+| 20:20 | Created .omc/progress.txt | — | ~675 |
+
+## Session: 2026-05-16 20:23
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 20:23 | Edited src/agent/loop.ts | modified addAnchor() | ~49 |
+| 20:24 | Session end: 1 writes across 1 files (loop.ts) | 0 reads | ~49 tok |
+| 20:25 | Session end: 1 writes across 1 files (loop.ts) | 3 reads | ~686 tok |
+| 20:32 | Session end: 1 writes across 1 files (loop.ts) | 3 reads | ~686 tok |
+| 20:37 | Created docs/superpowers/plans/2026-05-16-rivet-wave6-goal-loop.md | — | ~4160 |
+| 20:37 | Session end: 2 writes across 2 files (loop.ts, 2026-05-16-rivet-wave6-goal-loop.md) | 6 reads | ~17636 tok |
+| 20:41 | Created docs/superpowers/plans/2026-05-16-rivet-evolutionary-context-fabric-phase1.md | — | ~10215 |
+
+## 2026-05-16 — Evolutionary Context Fabric Phase 1 plan
+- Wrote implementation plan `docs/superpowers/plans/2026-05-16-rivet-evolutionary-context-fabric-phase1.md`.
+- Phase 1 scope: user input anchors become evidence-backed `ContextClaim`s, persist through JSONL events, and project active claims only into latest-turn prompt context.
+- Guardrail: SQLite/vector retrieval/worker semantic merge are intentionally outside Phase 1 to protect cache boundaries and keep the first slice testable.
+| 20:42 | Created .omc/prd.json | — | ~720 |
+| 20:42 | Session end: 4 writes across 4 files (loop.ts, 2026-05-16-rivet-wave6-goal-loop.md, 2026-05-16-rivet-evolutionary-context-fabric-phase1.md, prd.json) | 12 reads | ~38286 tok |
+| 20:43 | Edited src/__tests__/headless.test.ts | expanded (+14 lines) | ~177 |
+| 20:43 | Edited src/headless.ts | 6→8 lines | ~42 |
+| 20:43 | Edited src/headless.ts | added 1 condition(s) | ~210 |
+| 20:44 | Edited src/__tests__/headless.test.ts | 11→11 lines | ~152 |
+| 20:44 | Edited src/__tests__/headless.test.ts | 11→12 lines | ~105 |
+| 20:44 | Edited src/__tests__/headless.test.ts | 10→11 lines | ~101 |
+| 20:45 | Edited src/__tests__/headless.test.ts | 9→10 lines | ~72 |
+| 20:45 | Created src/context/__tests__/claims.test.ts | — | ~1130 |
+| 20:46 | Edited .omc/prd.json | 4→4 lines | ~41 |
+| 20:46 | Created src/__tests__/goal-loop.test.ts | — | ~638 |
+| 20:46 | Created src/context/claims.ts | — | ~1436 |
+| 20:47 | Created src/goal-loop.ts | — | ~746 |
+| 20:48 | Created src/context/__tests__/claim-store.test.ts | — | ~1062 |
+| 20:48 | Created src/__tests__/goal-loop.test.ts | — | ~632 |
+| 20:50 | Created src/context/claim-store.ts | — | ~1363 |
+| 20:50 | Edited .omc/prd.json | 4→4 lines | ~43 |
+| 20:51 | Edited src/main.tsx | 5→6 lines | ~77 |
+| 20:51 | Edited src/main.tsx | added nullish coalescing | ~777 |
+| 20:52 | Edited src/prompt/volatile.ts | 16→17 lines | ~128 |
+| 20:52 | Edited src/prompt/volatile.ts | modified buildStableVolatileBlock() | ~106 |
+| 20:52 | Edited src/prompt/volatile.ts | added 1 condition(s) | ~43 |
+
+## 2026-05-16 — Evolutionary Context Fabric core claim layer
+- Implemented `src/context/claims.ts` for defeasible `ContextClaim` records, anchor-derived claim proposals, prompt eligibility filtering, and escaped active-claim XML projection.
+- Implemented `src/context/claim-store.ts` as a local JSONL append-only claim event store with deterministic replay into current claim state.
+- Added focused tests for claim conversion, stale/quarantined prompt exclusion, JSONL replay, invalid JSONL line isolation, and prompt consumer recording.
+- Verified core layer with `npm test -- src/context/__tests__/claims.test.ts src/context/__tests__/claim-store.test.ts` and `npm run typecheck`.
+| 20:53 | Edited src/prompt/engine.ts | modified updateSessionMemory() | ~59 |
+| 20:53 | Edited src/prompt/engine.ts | modified if() | ~184 |
+| 20:53 | Created src/goal-loop.ts | — | ~874 |
+| 20:53 | Edited src/prompt/__tests__/volatile.test.ts | expanded (+16 lines) | ~275 |
+| 20:54 | Created src/__tests__/goal-loop-integration.test.ts | — | ~773 |
+| 20:54 | Edited src/prompt/__tests__/engine.test.ts | expanded (+42 lines) | ~606 |
+| 20:54 | Edited src/agent/session-persist.ts | added 1 import(s) | ~182 |
+| 20:55 | Edited .omc/prd.json | 4→4 lines | ~35 |
+| 20:55 | Edited .omc/prd.json | 4→4 lines | ~40 |
+| 20:55 | Edited src/agent/session-persist.ts | modified getSessionMemoryState() | ~210 |
+| 20:55 | Edited src/context/__tests__/claim-store.test.ts | added 1 import(s) | ~108 |
+| 20:55 | Edited src/context/__tests__/claim-store.test.ts | expanded (+7 lines) | ~143 |
+| 20:56 | Session end: 37 writes across 19 files (loop.ts, 2026-05-16-rivet-wave6-goal-loop.md, 2026-05-16-rivet-evolutionary-context-fabric-phase1.md, prd.json, headless.test.ts) | 26 reads | ~76040 tok |
+| 20:57 | Edited src/agent/loop.ts | added 3 import(s) | ~863 |
+| 20:57 | Edited src/agent/loop.ts | 23→24 lines | ~226 |
+| 20:57 | Edited src/agent/loop.ts | 2→3 lines | ~42 |
+| 20:57 | Edited src/agent/loop.ts | added 2 condition(s) | ~385 |
+| 20:57 | Edited src/agent/loop.ts | 5→6 lines | ~65 |
+| 20:57 | Edited src/agent/loop.ts | 2→3 lines | ~53 |
+| 20:58 | Edited src/agent/__tests__/loop.test.ts | added 4 import(s) | ~181 |
+| 20:58 | Edited src/agent/__tests__/loop.test.ts | added 1 condition(s) | ~746 |
+| 20:59 | Edited src/main.tsx | modified if() | ~84 |
+| 20:59 | Edited src/main.tsx | CSS: contextClaimStore | ~176 |
+
+## 2026-05-16 — Evolutionary Context Fabric Phase 1 runtime wiring
+- Wired Phase 1 active claims into prompt runtime: `VolatileContext.activeClaimsBlock` is excluded from stable context and included only in latest-turn context.
+- `AgentLoop` now derives session-scoped claim proposals from user constraint anchors, persists them through `ContextClaimStore`, and refreshes active claim projection before request construction.
+- Main TUI runtime creates one claim store per session via `SessionPersist.createClaimStore()` and injects it into the primary `AgentLoop`; worker loops remain intentionally excluded.
+- Verified with focused Phase 1 runtime tests, full `npm test`, `npm run typecheck`, and `npm run build`.
+
+## Session: 2026-05-16 21:06
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+- [2026-05-16T13:19:25.496143Z] Phase 1 final review fixes: semantic session-scoped claim identity, idempotent duplicate proposals, typed active-claim prompt rendering, and `--goal` claim-store wiring.

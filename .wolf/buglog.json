@@ -1523,6 +1523,172 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-16T05:01:28.703Z"
+    },
+    {
+      "id": "bug-096",
+      "timestamp": "2026-05-16T12:08:45.191Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/main.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T12:08:45.191Z"
+    },
+    {
+      "id": "bug-097",
+      "timestamp": "2026-05-16T12:16:30.846Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T12:16:30.846Z"
+    },
+    {
+      "id": "bug-098",
+      "timestamp": "2026-05-16T12:51:49.880Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/main.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T12:51:49.880Z"
+    },
+    {
+      "id": "bug-099",
+      "timestamp": "2026-05-16T12:52:49.169Z",
+      "error_message": "Wrong condition in logic",
+      "file": "src/prompt/volatile.ts",
+      "root_cause": "Condition was: if (ctx.sessionMemoryBlock)",
+      "fix": "Changed to: if (ctx.activeClaimsBlock)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T12:52:49.169Z"
+    },
+    {
+      "id": "bug-100",
+      "timestamp": "2026-05-16T12:52:59.547085Z",
+      "error_message": "TDD RED: claim model and claim store tests failed because new Phase 1 modules did not exist yet.",
+      "file": "src/context/__tests__/claims.test.ts; src/context/__tests__/claim-store.test.ts",
+      "root_cause": "Phase 1 tests intentionally referenced new modules before implementation to prove the RED state.",
+      "fix": "Created src/context/claims.ts and src/context/claim-store.ts with deterministic claim projection and JSONL event replay.",
+      "tags": [
+        "tdd",
+        "context",
+        "claims"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T12:52:59.547085Z"
+    },
+    {
+      "id": "bug-101",
+      "timestamp": "2026-05-16T12:54:23.222Z",
+      "error_message": "Type error",
+      "file": "src/prompt/__tests__/engine.test.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T12:54:23.222Z"
+    },
+    {
+      "id": "bug-102",
+      "timestamp": "2026-05-16T12:57:43.307Z",
+      "error_message": "Missing guard clause",
+      "file": "src/agent/loop.ts",
+      "root_cause": "No early return/throw for edge case: !this.config.contextClaimStore || !this.config.sessionId",
+      "fix": "Added guard clause: if (!this.config.contextClaimStore || !this.)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T12:57:43.307Z"
+    },
+    {
+      "id": "bug-103",
+      "timestamp": "2026-05-16T12:58:32.242Z",
+      "error_message": "Missing await",
+      "file": "src/agent/__tests__/loop.test.ts",
+      "root_cause": "Async call without await — returned Promise instead of value",
+      "fix": "Added await to async call",
+      "tags": [
+        "auto-detected",
+        "async-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T12:58:32.242Z"
+    },
+    {
+      "id": "bug-104",
+      "timestamp": "2026-05-16T13:02:30.552614Z",
+      "error_message": "Runtime wiring initially left Phase 1 claim imports and helpers partially connected, producing TypeScript unused-symbol diagnostics.",
+      "file": "src/agent/loop.ts; src/main.tsx; src/prompt/engine.ts; src/agent/__tests__/loop.test.ts",
+      "root_cause": "Runtime claim projection changes were introduced incrementally, leaving imports/helpers before their call sites and a mock typing assertion before final integration.",
+      "fix": "Connected recordUserInputClaims and refreshActiveClaims in AgentLoop, injected contextClaimStore in main runtime, removed unused imports/variables, and corrected the loop test mock cast.",
+      "tags": [
+        "typecheck",
+        "context",
+        "claims",
+        "runtime"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T13:02:30.552614Z"
+    },
+    {
+      "id": "bug-105",
+      "timestamp": "2026-05-16T13:19:25.496143Z",
+      "error_message": "Final Phase 1 review found duplicate semantic claims could grow unbounded/reset projection, active claims used a raw XML prompt boundary, and --goal agents lacked a claim store.",
+      "file": "src/context/claims.ts; src/context/claim-store.ts; src/prompt/volatile.ts; src/prompt/engine.ts; src/agent/loop.ts; src/main.tsx",
+      "root_cause": "Initial Phase 1 wiring keyed claim IDs by event-specific source/evidence data, exposed active-claim prompt projection as a raw string, and only injected ContextClaimStore in the interactive TUI runtime.",
+      "fix": "Made claim IDs semantic/session-scoped, made duplicate proposals idempotent and replay-safe, changed prompt active-claim projection to typed ContextClaim rendering, and passed SessionPersist.createClaimStore() into autonomous --goal AgentLoop creation.",
+      "tags": [
+        "context",
+        "claims",
+        "prompt-safety",
+        "goal-loop",
+        "review"
+      ],
+      "related_bugs": [
+        "bug-100",
+        "bug-104"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T13:19:25.496143Z"
     }
   ]
 }

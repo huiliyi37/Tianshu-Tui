@@ -4,6 +4,7 @@ import os from 'os'
 import { gitStatusCache } from './volatile-git.js'
 import type { ContextLedger } from '../context/types.js'
 import type { TaskState } from '../agent/task-state.js'
+import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
 
 export interface ToolHistoryEntry {
   tool: string
@@ -19,6 +20,7 @@ export interface VolatileContext {
   workingSet?: string[]
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
+  activeClaims?: ContextClaim[]
   toolHistory?: ToolHistoryEntry[]
   taskProgress?: TaskState
   behaviorMirror?: string | null
@@ -58,10 +60,11 @@ function escapeXml(text: string): string {
     .replaceAll('"', '&quot;')
 }
 
-/** Build stable volatile block — excludes per-turn dynamic sections. */
+/** Build stable volatile block — excludes per-turn dynamic sections and active claims. */
 export function buildStableVolatileBlock(ctx: VolatileContext): string {
   return buildVolatileBlockInternal({
     ...ctx,
+    activeClaims: undefined,
     toolHistory: undefined,
     taskProgress: undefined,
     behaviorMirror: undefined,
@@ -151,6 +154,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   if (ctx.decisions && ctx.decisions.length > 0) {
     const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
     parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
+  }
+
+  if (ctx.activeClaims && ctx.activeClaims.length > 0) {
+    parts.push(renderActiveClaimsBlock(ctx.activeClaims))
   }
 
   if (ctx.sessionMemoryBlock) {

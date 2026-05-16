@@ -6,6 +6,7 @@ import type { Message } from '../api/types.js'
 import type { SessionMetadata } from '../context/types.js'
 import type { LedgerSessionMemoryState, SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
 import { appendSessionMemory, buildSessionMemoryBlock, loadSessionMemory } from '../context/session-memory.js'
+import { ContextClaimStore } from '../context/claim-store.js'
 import { assertValidSessionId } from '../validation.js'
 
 const SESSION_DIR = join(homedir(), '.rivet', 'sessions')
@@ -99,6 +100,11 @@ export class SessionPersist {
       stale: false,
       tokenEstimate: block.length,
     }
+  }
+
+  /** Create a claim store for the current session. */
+  createClaimStore(): ContextClaimStore {
+    return new ContextClaimStore(SESSION_DIR, this.sessionId)
   }
 
   /** List all session files */

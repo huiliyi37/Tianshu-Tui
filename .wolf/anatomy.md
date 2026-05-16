@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T05:03:01.657Z
-> Files: 242 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T12:59:18.033Z
+> Files: 261 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -12,11 +12,12 @@
 ## ./
 
 - `.gitignore` — Git ignore rules (~23 tok)
+- `CHANGELOG.md` — Changelog (~2736 tok)
 - `CLAUDE.md` — Rivet (~310 tok)
 - `config.example.toml` — ~/.opencode/config.toml (~232 tok)
 - `package-lock.json` — npm lock file (~19981 tok)
 - `package.json` — Node.js package manifest (~164 tok)
-- `README.md` — Project documentation (~11283 tok)
+- `README.md` — Project documentation (~13222 tok)
 - `tsconfig.json` — TypeScript configuration (~153 tok)
 - `tsup.config.ts` (~65 tok)
 
@@ -28,9 +29,15 @@
 
 - `openwolf.md` (~313 tok)
 
+## .omc/
+
+- `prd.json` (~719 tok)
+- `progress.txt` — Wave 5: Trust Infrastructure — Progress Log (~633 tok)
+
 ## .superpowers/brainstorm/
 
 - `2026-05-15-rivet-open-model-terminal-agent-fragments.json` (~1635 tok)
+- `2026-05-16-rivet-evolutionary-tui-memory-fragments.json` — Declares spine (~2062 tok)
 - `2026-05-16-rivet-execution-resilience-layer-fragments.json` — Declares exists (~1500 tok)
 - `2026-05-16-rivet-glanceable-cockpit-techstyle-fragments.json` (~1123 tok)
 - `2026-05-16-rivet-multi-pass-repair-pipeline-fragments.json` (~1282 tok)
@@ -38,6 +45,12 @@
 - `2026-05-16-rivet-subagent-orchestration-fragments.json` — Rivet subagent orchestration brainstorm fragments (~2146 tok)
 - `2026-05-16-rivet-subagent-orchestration-fragments.json` (~2146 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-fragments.json` (~1213 tok)
+
+## Evolutionary Context Fabric Phase 1 Implementation
+
+
+## Planned Evolutionary Context Fabric Phase 1
+
 
 ## docs/
 
@@ -55,6 +68,7 @@
 - `2026-05-15-rivet-performance-optimization.md` — Rivet 性能优化与 Claude Code 对标实现计划 (~10205 tok)
 - `2026-05-16-multi-pass-repair-pipeline.md` — Multi-Pass Repair Pipeline 实现计划 (~6966 tok)
 - `2026-05-16-rivet-cockpit-capability-ledger.md` — Rivet Cockpit + Capability Ledger 实现计划 (~3995 tok)
+- `2026-05-16-rivet-evolutionary-context-fabric-phase1.md` — Evolutionary Context Fabric Phase 1 实现计划 (~9576 tok)
 - `2026-05-16-rivet-execution-resilience-layer-implementation.md` — Execution Resilience Layer 实现计划 (~6873 tok)
 - `2026-05-16-rivet-execution-trust-closure-implementation.md` — Rivet Execution Trust Closure 实现计划 (~10006 tok)
 - `2026-05-16-rivet-gap-closing-hooks-git-todo-webfetch-undo.md` — Rivet 差距弥补：Hooks / Git / Todo / WebFetch / Undo 实现计划 (~11245 tok)
@@ -62,6 +76,7 @@
 - `2026-05-16-rivet-mcp-client-implementation.md` — Rivet MCP Client 实现计划 (~7790 tok)
 - `2026-05-16-rivet-progressive-context-engine-implementation.md` — Rivet Progressive Context Engine 实现计划 (~18102 tok)
 - `2026-05-16-rivet-subagent-orchestration-implementation.md` — Rivet 子代理协同 Phase 1 实现计划 (~14921 tok)
+- `2026-05-16-rivet-wave6-goal-loop.md` — Wave 6: Goal Loop 实施计划 (~3900 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5642 tok)
 
 ## docs/superpowers/specs/
@@ -71,6 +86,7 @@
 - `2026-05-15-rivet-p2-3-harness-cockpit-design.md` — Rivet P2.3 Harness Cockpit TUI 设计 (~3319 tok)
 - `2026-05-15-system-prompt-expansion-design.md` — OpenCode TUI System Prompt 架构优化 (~791 tok)
 - `2026-05-16-rivet-core-business-gap-review.md` — Rivet 非 Context 核心业务缺口审查与修复路线 (~1906 tok)
+- `2026-05-16-rivet-evolutionary-tui-memory-design.md` — Rivet Evolutionary TUI Memory 深度头脑风暴结果 (~5738 tok)
 - `2026-05-16-rivet-execution-resilience-layer-design.md` — Rivet Execution Resilience Layer 设计 (~1696 tok)
 - `2026-05-16-rivet-execution-trust-closure-design.md` — Rivet Execution Trust Closure 设计 (~1804 tok)
 - `2026-05-16-rivet-glanceable-cockpit-techstyle-design.md` — Rivet Glanceable Cockpit + 科技风视觉层 设计 (~1897 tok)
@@ -82,7 +98,7 @@
 
 ## docs/superpowers/status/
 
-- `2026-05-16-rivet-core-capability-ledger.md` — Rivet Core Capability Ledger (~1809 tok)
+- `2026-05-16-rivet-core-capability-ledger.md` — Rivet Core Capability Ledger (~2615 tok)
 
 ## docs/superpowers/validations/
 
@@ -105,8 +121,18 @@
 
 ## src/
 
-- `main.tsx` — Read piped stdin (non-TTY only) as initial input (~3766 tok)
+- `goal-loop.ts` — Exports GoalLoopAgent, GoalLoopConfig, GoalLoopResult, runGoalLoop (~874 tok)
+- `headless.ts` — Exports HeadlessCliArgs, HeadlessJsonOutput, HeadlessRunResult, HeadlessAgent + 3 more (~1052 tok)
+- `main.tsx` — Read piped stdin (non-TTY only) as initial input (~5198 tok)
 - `validation.ts` — Exports isValidSessionId, assertValidSessionId (~78 tok)
+
+## src/__tests__/
+
+- `file-history-persist.test.ts` — Declares snapshots (~529 tok)
+- `goal-loop-integration.test.ts` — Declares result (~773 tok)
+- `goal-loop.test.ts` — Declares GoalLoopConfig (~632 tok)
+- `headless.test.ts` — Declares result (~840 tok)
+- `wave5-integration.test.ts` — Declares reg (~930 tok)
 
 ## src/agent/
 
@@ -121,17 +147,18 @@
 - `evidence.ts` — Exports DeliveryVerificationStatus, EvidenceState, EvidenceTracker (~1160 tok)
 - `execution-guidance.ts` — Exports GuidanceTrajectoryEntry, ExecutionGuidanceInput, ExecutionGuidance, buildExecutionGuidance (~1292 tok)
 - `failure-classifier.ts` — Classify all failures found in a test run output (~1162 tok)
-- `file-history.ts` — Exports FileBackup, FileSnapshot, DiffStats, FileHistory (~1525 tok)
+- `file-history-persist.ts` — Exports FileSnapshot, HistoryEntry, persistFileHistory, loadFileHistory (~239 tok)
+- `file-history.ts` — Exports FileBackup, FileSnapshot, DiffStats, FileHistory (~1780 tok)
 - `impact-hint.ts` — Exports ImpactHint, generateImpactHint (~764 tok)
 - `import-graph.ts` — Exports ImportGraph, buildImportGraph, getReverseDeps, invalidateFile (~1122 tok)
 - `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~7276 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~8990 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
 - `repair-hint.ts` — Exports RepairHintTracker (~368 tok)
 - `repair-passes.ts` — Exports fourHorsemenPass, fixAutoLinks, semanticRepairPass (~1019 tok)
 - `repair-pipeline.ts` — Exports RepairContext, RepairResult, RepairPass, RepairTelemetryEntry + 2 more (~346 tok)
 - `retry-policy.ts` — Exports RetryPolicyInput, RetryPolicyDecision, shouldRetryToolFailure (~428 tok)
-- `session-persist.ts` — Append a single message to the session file (~1064 tok)
+- `session-persist.ts` — Append a single message to the session file (~1129 tok)
 - `strategy-shift.ts` — Exports TrajectorySummary, suggestStrategyShift (~103 tok)
 - `task-state.ts` — Exports TaskState, extractTaskState (~326 tok)
 - `trace-store.ts` — Exports TraceEventKind, TraceEventStatus, DoomLoopLevel, TraceEvent + 9 more (~718 tok)
@@ -160,7 +187,7 @@
 - `impact-hint.test.ts` — Exports a, b, mod (~524 tok)
 - `intent-extractor.test.ts` — Declares Intent (~812 tok)
 - `loop-evidence.test.ts` — Captures a snapshot of evidence state during onTurnComplete, before the loop resets the same object (~3445 tok)
-- `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~2900 tok)
+- `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~4456 tok)
 - `prewarm.test.ts` — API routes: GET (9 endpoints) (~443 tok)
 - `repair-pipeline.test.ts` — --- Pipeline skeleton tests --- (~1683 tok)
 - `retry-policy.test.ts` — Declares result (~457 tok)
@@ -207,7 +234,9 @@
 
 ## src/context/
 
-- `ledger.ts` — Exports createContextLedger (~340 tok)
+- `claim-store.ts` — Exports ContextClaimEvent, ClaimFilter, ClaimUseInput, ContextClaimStore (~1363 tok)
+- `claims.ts` — Exports ContextClaimKind, ContextClaimScope, ContextClaimStatus, EvidenceKind + 11 more (~1436 tok)
+- `ledger.ts` — Exports createContextLedger (~359 tok)
 - `microcompact.ts` — Exports microcompactToolResults, applyMicrocompact (~926 tok)
 - `reactive-compact.ts` — Exports ReactiveRoundSelectionOptions, CompactBoundaryInput, selectReactiveCompactRounds, createComp (~384 tok)
 - `resume-preflight.ts` — Exports runResumePreflight (~682 tok)
@@ -218,6 +247,8 @@
 
 ## src/context/__tests__/
 
+- `claim-store.test.ts` — tempDir: proposal (~1153 tok)
+- `claims.test.ts` — Declares ContextClaim (~1130 tok)
 - `ledger.test.ts` — userText: assistantText (~440 tok)
 - `microcompact.test.ts` — userText: assistantText, assistantWithBlocks, userWithBlocks + 4 more (~1539 tok)
 - `resume-preflight.test.ts` — userText: assistantText, assistantWithBlocks, userWithBlocks + 4 more (~1321 tok)
@@ -268,17 +299,17 @@
 
 ## src/prompt/
 
-- `engine.ts` — Build a request. Volatile context is injected as an independent user message (~2476 tok)
+- `engine.ts` — Build a request. Volatile context is injected as an independent user message (~2504 tok)
 - `fingerprint.ts` — Exports PrefixFingerprint, DriftEvent, computeFingerprint, detectDrift (~400 tok)
 - `static.ts` — Exports StaticPromptContext, buildSystemPrompt (~946 tok)
-- `volatile.ts` — Build stable volatile block — excludes per-turn dynamic sections. (~1652 tok)
+- `volatile.ts` — Build stable volatile block — excludes per-turn dynamic sections and active claims. (~1705 tok)
 
 ## src/prompt/__tests__/
 
-- `engine.test.ts` — Declares makeEngine (~917 tok)
+- `engine.test.ts` — Declares makeEngine (~1794 tok)
 - `fingerprint.test.ts` — Declares SAMPLE_TOOLS (~1599 tok)
 - `static.test.ts` — Declares prompt (~748 tok)
-- `volatile.test.ts` — VolatileContext: ledger (~1221 tok)
+- `volatile.test.ts` — VolatileContext: ledger (~2961 tok)
 
 ## src/repo/
 
@@ -293,7 +324,7 @@
 ## src/tools/
 
 - `bash.ts` — Exports BASH_TOOL (~1107 tok)
-- `default-registry.ts` — Exports createDefaultToolRegistry (~318 tok)
+- `default-registry.ts` — Exports createDefaultToolRegistry (~398 tok)
 - `delegate-task.ts` — createDelegateTaskTool: Phase 1 read-only worker delegation tool (~2416 tok)
 - `diff.ts` — Exports DIFF_TOOL (~1291 tok)
 - `edit.ts` — Exports EDIT_FILE_TOOL (~942 tok)
@@ -332,7 +363,7 @@
 ## src/tui/
 
 - `agent-status.tsx` — MAX_VISIBLE_ITEMS (~1232 tok)
-- `app.tsx` — STREAM_FLUSH_MS (~9942 tok)
+- `app.tsx` — STREAM_FLUSH_MS (~11645 tok)
 - `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
 - `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)
@@ -373,3 +404,18 @@
 ## src/types/
 
 - `gradient-string.d.ts` — Gradient: gradient, gradient (~69 tok)
+
+## Evolutionary Context Fabric Phase 1 Runtime
+
+- `src/prompt/volatile.ts` — Adds latest-turn active claim projection while keeping stable volatile context cache-safe.
+- `src/prompt/engine.ts` — Refreshes latest-turn volatile context so active claims and updated session memory are visible immediately.
+- `src/agent/loop.ts` — Seeds claims from user constraint anchors and refreshes active-claim prompt projection before LLM requests.
+- `src/agent/session-persist.ts` — Creates session-scoped `ContextClaimStore` files under `~/.rivet/sessions/`.
+
+## Evolutionary Context Fabric Phase 1 Final Review Fixes
+
+- `src/context/claims.ts` — Claim IDs are semantic within a session: kind + scope + normalized text + session id, not event/evidence IDs.
+- `src/context/claim-store.ts` — `propose()` is idempotent for an existing semantic claim and replay ignores duplicate `claim_proposed` events instead of resetting projection state.
+- `src/prompt/volatile.ts` — Active claims are accepted as typed `ContextClaim[]` and rendered at the prompt boundary, preserving XML escaping.
+- `src/prompt/engine.ts` — `updateActiveClaims()` accepts typed claims, removing raw active-claim XML from runtime callers.
+- `src/main.tsx` — Autonomous `--goal` agents reuse a session-scoped `ContextClaimStore`, matching TUI runtime claim persistence/projection.

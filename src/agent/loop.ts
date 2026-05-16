@@ -15,6 +15,9 @@ import { CACHE_ANCHOR_MESSAGES, type CompactionConfig } from '../compact/constan
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import { createContextLedger } from '../context/ledger.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
+import { AnchorRegistry } from '../context/anchor-registry.js'
+import { claimProposalFromAnchor } from '../context/claims.js'
+import type { ContextClaimStore } from '../context/claim-store.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
@@ -65,6 +68,7 @@ export interface AgentConfig {
   reasoningEffort?: import('./auto-reasoning.js').ReasoningEffort
   lspEnabled?: boolean
   permissions?: PermissionConfig
+  contextClaimStore?: ContextClaimStore
 }
 
 export interface AgentCallbacks {
@@ -102,6 +106,7 @@ export class AgentLoop {
   private routingMetrics = new RoutingMetricsCollector()
   private importGraph: ImportGraph | null = null
   private userAnchors: ContextAnchor[] = []
+  private anchorRegistry = new AnchorRegistry(2_000)
 
   constructor(
     private config: AgentConfig,
@@ -228,6 +233,36 @@ export class AgentLoop {
     this.session.setContextLedger(ledger)
   }
 
+  private recordUserInputClaims(userInput: string): void {
+    if (!this.config.contextClaimStore || !this.config.sessionId) return
+
+    const before = this.anchorRegistry.getAnchors().length
+    const turn = this.session.getTurnCount()
+    this.anchorRegistry.processUserMessage(userInput, turn)
+    const anchors = this.anchorRegistry.getAnchors().slice(before)
+    const createdAt = Date.now()
+
+    for (const anchor of anchors) {
+      const proposal = claimProposalFromAnchor(anchor, {
+        actor: 'user',
+        sessionId: this.config.sessionId,
+        turn,
+        eventId: `turn-${turn}:user-input`,
+        createdAt,
+      })
+      this.config.contextClaimStore.propose(proposal)
+    }
+  }
+
+  private refreshActiveClaims(): void {
+    if (!this.config.contextClaimStore) {
+      this.config.promptEngine.updateActiveClaims([])
+      return
+    }
+
+    this.config.promptEngine.updateActiveClaims(this.config.contextClaimStore.listActiveClaims())
+  }
+
 
   private enforceContextCeiling(): void {
     const ceiling = this.config.contextWindow * 0.95
@@ -272,6 +307,7 @@ export class AgentLoop {
     this.trajectory.reset()
     this.decisions = []
     this.traceStore = createTraceStore()
+    this.recordUserInputClaims(userInput)
     this.session.addUserMessage(userInput)
 
     if (this.config.autoReasoning) {
@@ -326,6 +362,7 @@ export class AgentLoop {
         this.config.promptEngine.setRepairHint(repairHint)
 
         this.enforceContextCeiling()
+        this.refreshActiveClaims()
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const collectedBlocks: ContentBlock[] = []
         let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []

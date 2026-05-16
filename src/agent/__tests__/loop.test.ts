@@ -1,10 +1,14 @@
 import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { AgentLoop } from '../loop.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
 import { READ_FILE_TOOL } from '../../tools/read-file.js'
+import { ContextClaimStore } from '../../context/claim-store.js'
 import type { ApiClient, StreamCallbacks } from '../../api/client.js'
 import type { ContentBlock } from '../../api/types.js'
 
@@ -346,5 +350,64 @@ describe('AgentLoop — compact policy', () => {
     assert.equal(messages[1]?.content, 'anchor assistant')
     assert.match(String(messages[2]?.content), /<checkpoint-resume>/)
     assert.ok(session.getEstimatedTokens() <= 128_000 * 0.95)
+  })
+})
+
+describe('AgentLoop — active claims projection', () => {
+  it('promotes user constraint anchors into active claim prompt context', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    const engine = makeEngine()
+    const claimDir = mkdtempSync(join(tmpdir(), 'rivet-loop-claims-'))
+    const claimStore = new ContextClaimStore(claimDir, 'session-123')
+
+    let called = false
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        if (!called) {
+          called = true
+          // Capture the request for inspection
+          cb.onContentBlock(makeTextBlock('done'))
+          cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+          return
+        }
+        cb.onContentBlock(makeTextBlock('done'))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({
+      client,
+      promptEngine: engine,
+      toolRegistry: registry,
+      maxTurns: 1,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      sessionId: 'session-123',
+      contextClaimStore: claimStore,
+    }, session, '/test')
+
+    await agent.run('CRITICAL: always run tests before saying done', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onError: (error) => { throw error },
+      onAbort: () => {},
+      onTurnComplete: () => {},
+      onApprovalRequired: async () => true,
+    })
+
+    // Verify the claim store recorded the claim
+    const activeClaims = claimStore.listActiveClaims()
+    assert.equal(activeClaims.length, 1)
+
+    // Verify the request context contains active claims
+    const streamMock = client.stream as unknown as ReturnType<typeof mock.fn>
+    const callArgs = streamMock.mock.calls[0]!.arguments[0] as { messages: Array<{ role: string; content: string }> }
+    const requestText = callArgs.messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n')
+
+    assert.match(requestText, /<active-claims count="1">/)
+    assert.match(requestText, /always run tests before saying done/)
   })
 })

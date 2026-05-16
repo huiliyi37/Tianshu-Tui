@@ -12,9 +12,8 @@ import { SessionPersist } from './agent/session-persist.js'
 import { FileHistory } from './agent/file-history.js'
 import { persistFileHistory } from './agent/file-history-persist.js'
 import { PromptEngine } from './prompt/engine.js'
-import { ToolRegistry } from './tools/registry.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
-import { createDelegateTaskTool, type DelegateTaskCoordinator } from './tools/delegate-task.js'
+import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { createDeepSeekClient } from './api/deepseek.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
@@ -178,6 +177,8 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     return p
   })
 
+  const [claimStore] = useState(() => persist.createClaimStore())
+
   // Switchable model — changing this recreates client + promptEngine + agent
   const [currentModel, setCurrentModel] = useState(() => provider.models[0]!)
 
@@ -264,6 +265,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
         autoReasoning: true,
         lspEnabled: true,
         fileHistory,
+        contextClaimStore: claimStore,
       },
       session,
       cwd,
@@ -429,6 +431,8 @@ async function main() {
 
     const model = prov.models[0]!
     const sessionId = randomUUID()
+    const persist = new SessionPersist(sessionId)
+    const claimStore = persist.createClaimStore()
 
     const result = await runGoalLoop({
       goal: parsed.goal,
@@ -458,6 +462,7 @@ async function main() {
           compact: cfg.compact,
           approvalMode: 'auto-accept',
           sessionId,
+          contextClaimStore: claimStore,
           autoReasoning: true,
         }, session, process.cwd())
       },
@@ -491,9 +496,6 @@ async function main() {
   }
 
   _pipedInput = readPipedStdin()
-
-  // Composable CLI: if stdout is not TTY, force JSON output
-  const pipeJson = !process.stdout.isTTY
 
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config })),

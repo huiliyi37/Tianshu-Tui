@@ -265,3 +265,34 @@ describe('stable/latest volatile split', () => {
     assert.equal(buildVolatileBlock(ctx), buildLatestTurnVolatileBlock(ctx))
   })
 })
+
+describe('active claims volatile context', () => {
+  it('active claims are excluded from stable volatile block and included in latest turn block', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      activeClaims: [{
+        id: 'c1',
+        kind: 'user_constraint',
+        scope: 'session',
+        status: 'active',
+        text: 'Prefer <tests> first',
+        confidence: 0.9,
+        fitness: 5,
+        source: { actor: 'user', sessionId: 'session-123', turn: 1, eventId: 'e1' },
+        evidence: [{ id: 'e1', kind: 'user_message', summary: 'Prefer tests first', createdAt: 1 }],
+        counterevidence: [],
+        consumers: [],
+        createdAt: 1,
+        lastUsedAt: 1,
+        tags: ['anchor'],
+      }],
+    }
+
+    const stable = buildStableVolatileBlock(ctx)
+    const latest = buildLatestTurnVolatileBlock(ctx)
+
+    assert.doesNotMatch(stable, /active-claims/)
+    assert.match(latest, /<active-claims count="1">/)
+    assert.match(latest, /Prefer &lt;tests&gt; first/)
+  })
+})

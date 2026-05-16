@@ -128,3 +128,60 @@ describe('PromptEngine context layer report', () => {
     assert.deepEqual(report.layers.map(l => l.id), ['system', 'tools'])
   })
 })
+
+describe('PromptEngine active claims projection', () => {
+  it('updated active claims appear in the latest turn request without entering historical stable context', () => {
+    const engine = new PromptEngine({
+      model: 'deepseek-test',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+
+    engine.updateActiveClaims([{
+      id: 'c1',
+      kind: 'user_constraint',
+      scope: 'session',
+      status: 'active',
+      text: 'Run tests before claiming done',
+      confidence: 0.9,
+      fitness: 5,
+      source: { actor: 'user', sessionId: 'session-123', turn: 1, eventId: 'e1' },
+      evidence: [{ id: 'e1', kind: 'user_message', summary: 'Run tests before claiming done', createdAt: 1 }],
+      counterevidence: [],
+      consumers: [],
+      createdAt: 1,
+      lastUsedAt: 1,
+      tags: ['anchor'],
+    }])
+
+    const request = engine.buildRequest([
+      { role: 'user', content: 'first turn' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second turn' },
+    ])
+
+    const contextMessages = request.messages.filter(message => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<context>'))
+
+    assert.equal(contextMessages.length, 2)
+    assert.doesNotMatch(contextMessages[0]!.content as string, /active-claims/)
+    assert.match(contextMessages[1]!.content as string, /Run tests before claiming done/)
+  })
+
+  it('updated session memory appears in the latest turn request', () => {
+    const engine = new PromptEngine({
+      model: 'deepseek-test',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+
+    engine.updateSessionMemory('<session-memory session_id="s1">\n<entry id="m1" created_at="1" source="manual">Use JSONL first</entry>\n</session-memory>')
+
+    const request = engine.buildRequest([{ role: 'user', content: 'remember this' }])
+    const context = request.messages[0]!.content as string
+
+    assert.match(context, /<session-memory session_id="s1">/)
+    assert.match(context, /Use JSONL first/)
+  })
+})

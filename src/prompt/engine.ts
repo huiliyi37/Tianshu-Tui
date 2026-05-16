@@ -1,7 +1,8 @@
 import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
-import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import type { TaskState } from '../agent/task-state.js'
+import type { ContextClaim } from '../context/claims.js'
 import {
   computeFingerprint,
   detectDrift,
@@ -135,8 +136,8 @@ export class PromptEngine {
     for (let i = 0; i < normalized.length; i++) {
       const msg = normalized[i]!
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
-        if (i === lastUserTextIdx && toolHistory && toolHistory.length > 0) {
-          // Fresh volatile block with tool history for the latest turn
+        if (i === lastUserTextIdx) {
+          // Fresh volatile block with tool history, active claims, and dynamic sections for the latest turn
           const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, decisions: this.decisions })
           result.push({ role: 'user', content: freshBlock })
         } else {
@@ -173,6 +174,10 @@ export class PromptEngine {
 
   updateSessionMemory(block: string): void {
     this.config.volatileCtx.sessionMemoryBlock = block
+  }
+
+  updateActiveClaims(claims: ContextClaim[]): void {
+    this.config.volatileCtx.activeClaims = claims
   }
 
   setTaskProgress(state: TaskState): void {

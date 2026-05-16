@@ -1,0 +1,142 @@
+{
+  "topic": "rivet-evolutionary-tui-memory",
+  "date": "2026-05-16",
+  "user_intent": "Design a cross-domain, open-source-ready memory system for Rivet's terminal coding agent TUI so the running model becomes stronger over time.",
+  "scouts": [
+    {
+      "id": "code-cartography",
+      "type": "project-code",
+      "findings": [
+        "Context type spine already exists: anchors, compacted spans, session sidecar entries, token budget, working set, and context ledger.",
+        "AnchorRegistry, proactive injection, PersistentStore, and recall tool exist but are not wired into the production runtime.",
+        "Session sidecar entries support manual, compact, and resume sources, but production writes only manual entries.",
+        "Worker sessions start with empty context and return results through coordinator aggregation, so parent constraints and durable facts do not propagate yet."
+      ]
+    },
+    {
+      "id": "open-implementations",
+      "type": "ecosystem",
+      "findings": [
+        "Aider shows the value of readable, diffable history files.",
+        "OpenHands shows event-sourced sessions with replay and lazy loading.",
+        "Kiro separates persistent resources, session context, and on-demand knowledge bases.",
+        "Cursor keeps project rules read-only to the model.",
+        "Goose records structured security findings and user allow/deny decisions.",
+        "Claude Code re-attaches recently-read files after compaction and keeps large raw outputs on disk with previews."
+      ]
+    },
+    {
+      "id": "random-domains",
+      "type": "cross-domain",
+      "findings": [
+        "Synaptic tagging suggests a two-phase path from temporary salience to durable consolidation.",
+        "Belady-style cache replacement suggests retaining items likely to be reused, not merely recent items.",
+        "CRDT causal clocks suggest deterministic merge metadata for distributed observations, but not automatic truth resolution.",
+        "Kafka-style append-only logs with keyed compaction suggest retaining latest state per topic while preserving audit order.",
+        "Incident postmortems suggest retained claims need provenance chains and downstream consumers."
+      ]
+    },
+    {
+      "id": "docs-standards",
+      "type": "technical-practice",
+      "findings": [
+        "Single-file SQLite with WAL is a practical local-first foundation for TypeScript CLI storage.",
+        "Append-only event rows plus projection tables give auditability and bounded current views.",
+        "sqlite-vec can add same-file vector retrieval later, but scalar and full-text search should ship first.",
+        "Structured prompt blocks, input/output separation, and schema validation are required prompt safety boundaries.",
+        "Privacy-safe retention needs session-scoped defaults, export/import, path redaction, optional encryption, and retention windows."
+      ]
+    },
+    {
+      "id": "contrarian-premises",
+      "type": "assumption-attack",
+      "findings": [
+        "Evidence-backed facts can still be stale, scoped, or wrong, so durable entries must remain defeasible claims.",
+        "Event sourcing should start narrow, for derived context decisions, not all runtime state.",
+        "Local-first truth fragments across machines unless global IDs and export/import are designed first.",
+        "XML should be one projection renderer, not the canonical storage format.",
+        "The TUI should show anomalies by default, not every lineage edge.",
+        "Semantic merge needs conflict journals and adjudication, not blind CRDT convergence.",
+        "Quality budgets matter as much as token budgets: contradictions, stale evidence, and unverified promotions must be visible."
+      ]
+    }
+  ],
+  "synthesis_hypothesis": "Rivet should evolve from a session sidecar into a local-first, evidence-backed context organism: temporary anchors become claims, claims survive only through provenance and reuse, projections feed cache-safe prompt layers, and the TUI shows only the mutations, conflicts, and stale facts that need human attention.",
+  "variation_candidates": [
+    {
+      "id": "V1",
+      "niche": "manual steering",
+      "one_liner": "A developer records project rules and session notes through explicit commands, and Rivet injects the selected notes into each prompt with a visible budget."
+    },
+    {
+      "id": "V2",
+      "niche": "event replay",
+      "one_liner": "Rivet writes every context-relevant action into a local append-only log, then folds that log into replayable session and project views."
+    },
+    {
+      "id": "V3",
+      "niche": "evidence-backed evolution",
+      "one_liner": "Rivet turns user constraints, tool outcomes, file observations, and verification results into claims that compete for promotion, decay, or quarantine before entering prompt context."
+    },
+    {
+      "id": "V4",
+      "niche": "multi-worker population",
+      "one_liner": "Subagents produce claim proposals with evidence, the coordinator merges compatible observations, and conflicts are surfaced for adjudication instead of silently becoming truth."
+    },
+    {
+      "id": "V5",
+      "niche": "immune memory",
+      "one_liner": "Rivet remembers failure patterns, prompt-injection findings, unsafe tool trajectories, and stale assumptions as antibodies that block repeated mistakes."
+    }
+  ],
+  "selection": {
+    "extinct_as_primary": [
+      {
+        "candidate": "V1",
+        "reason": "Manual notes alone do not produce model improvement unless the user curates everything.",
+        "salvaged_traits": ["human override", "readable export", "read-only project steering"]
+      },
+      {
+        "candidate": "V2",
+        "reason": "Replayability alone does not decide which claims are true or useful.",
+        "salvaged_traits": ["append-only audit", "projection tables", "session export/import"]
+      },
+      {
+        "candidate": "V4",
+        "reason": "Semantic facts cannot be resolved by blind CRDT merge without creating false certainty.",
+        "salvaged_traits": ["actor IDs", "conflict journal", "worker claim proposals"]
+      }
+    ],
+    "survivors": [
+      {
+        "candidate": "V3",
+        "rank": 1,
+        "advantage": "It directly improves next-turn model behavior while preserving safety through provenance and quality gates."
+      },
+      {
+        "candidate": "V5",
+        "rank": 2,
+        "advantage": "It converts failures and attacks into protective context, which is the fastest visible improvement for a coding agent."
+      }
+    ]
+  },
+  "final_design": {
+    "name": "Evolutionary Context Fabric",
+    "core_loop": [
+      "observe",
+      "tag",
+      "validate",
+      "promote_or_quarantine",
+      "project",
+      "use",
+      "revalidate"
+    ],
+    "first_phase": [
+      "Wire AnchorRegistry into runtime as ephemeral claim seeds.",
+      "Create a narrow local ContextStore for claim events and projections.",
+      "Register read-only recall and memory inspection commands.",
+      "Inject promoted claims through a provider-rendered context projection.",
+      "Show stale, conflicted, and unevidenced promotions in the TUI instead of dumping full lineage."
+    ]
+  }
+}
