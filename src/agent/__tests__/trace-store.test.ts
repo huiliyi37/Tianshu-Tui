@@ -7,6 +7,7 @@ import {
   recordTraceEvent,
   getDoomLoopLevel,
   fingerprintToolCall,
+  recordToolFingerprint,
   type TraceEvent,
   type TraceEventStartInput,
 } from '../trace-store.js'
@@ -71,9 +72,19 @@ describe('trace-store', () => {
 
   it('detects repeated tool call fingerprints', () => {
     const fp = fingerprintToolCall('read_file', { file_path: 'src/a.ts' }, 'passed')
-    const fingerprints = [fp, fp, fp]
+    const fingerprints = [fp, fp]
 
     assert.equal(getDoomLoopLevel(fingerprints), 'warn')
-    assert.equal(getDoomLoopLevel([...fingerprints, fp, fp]), 'blocked')
+    assert.equal(getDoomLoopLevel([...fingerprints, fp]), 'blocked')
+  })
+
+  it('marks repeated failed tool fingerprints as blocked doom loop', () => {
+    let store = createTraceStore()
+    const fp = fingerprintToolCall('bash', { command: 'npm test' }, 'error')
+    store = recordToolFingerprint(store, fp)
+    store = recordToolFingerprint(store, fp)
+    store = recordToolFingerprint(store, fp)
+
+    assert.equal(getDoomLoopLevel(store.toolFingerprints), 'blocked')
   })
 })

@@ -88,7 +88,7 @@ export function getDoomLoopLevel(fingerprints: string[]): DoomLoopLevel {
   const counts = new Map<string, number>()
   for (const fp of fingerprints) counts.set(fp, (counts.get(fp) ?? 0) + 1)
   const max = Math.max(0, ...counts.values())
-  if (max >= 5) return 'blocked'
-  if (max >= 3) return 'warn'
+  if (max >= 3) return 'blocked'
+  if (max >= 2) return 'warn'
   return 'none'
 }

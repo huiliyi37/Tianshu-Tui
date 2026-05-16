@@ -72,6 +72,7 @@ export class AgentLoop {
   private prewarm = new PrewarmCache()
   private streamedText = ''
   private lastPrewarmAt = 0
+  private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
   private decisions: string[] = []
   private trajectory = new TrajectoryRecorder()
   private traceStore: TraceStore
@@ -152,6 +153,8 @@ export class AgentLoop {
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }
 
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
+
+  getLatestRisk(): import('./approval-risk.js').RiskAssessment { return this.latestRisk }
 
   getDebugInfo() {
     const fp = this.config.promptEngine.getFingerprint()
@@ -311,8 +314,23 @@ export class AgentLoop {
                 params.input = preHookResult.input
               }
 
+              // Doom-loop block: prevent repeated identical failures
+              const doomLevel = this.getDoomLoopLevel()
+              if (doomLevel === 'blocked') {
+                const msg = 'Tool execution blocked: repeated identical failures detected. Change strategy before retrying.'
+                callbacks.onToolResult(tu.id, tu.name, msg, true)
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: tu.id,
+                  content: msg,
+                  is_error: true,
+                })
+                continue
+              }
+
               const needsApproval = this.config.toolRegistry.needsApproval(tu.name, params)
               const risk = assessToolRisk(tu.name, tu.input, this.getDoomLoopLevel())
+              this.latestRisk = risk
               const isHighRisk = risk.level === 'high'
               const approvalMode = this.config.approvalMode ?? 'manual'
 
