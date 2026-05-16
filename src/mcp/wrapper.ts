@@ -1,4 +1,5 @@
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
+import { classifyMcpError } from './failure-classifier.js'
 
 export function mcpToolName(serverId: string, toolName: string): string {
   return `mcp__${serverId}__${toolName}`
@@ -51,13 +52,17 @@ export function createMcpToolWrapper(
           .map(c => c.text)
         const content = textParts.join('\n') || '(no text content)'
 
+        const annotation = `[MCP: ${serverId} · ${needsApproval ? 'write-capable' : 'read-only'}]`
+
         return {
-          content,
+          content: result.isError ? `${annotation} · tool error\n${content}` : `${content}\n${annotation}`,
           ...(result.isError ? { isError: true } : {}),
         }
       } catch (err) {
+        const classified = classifyMcpError(err)
+        const annotation = `[MCP: ${serverId} · ${needsApproval ? 'write-capable' : 'read-only'} · error: ${classified.class} · ${classified.suggestion}]`
         return {
-          content: `MCP tool error (${rivetName}): ${err instanceof Error ? err.message : String(err)}`,
+          content: `MCP tool error (${rivetName}): ${err instanceof Error ? err.message : String(err)}\n${annotation}`,
           isError: true,
         }
       }

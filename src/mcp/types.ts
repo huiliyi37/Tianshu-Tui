@@ -4,4 +4,6 @@ export interface McpConnectionState {
   toolCount: number
   error?: string
   lastConnectedAt?: number
+  lastErrorClass?: string
+  lastErrorAt?: number
 }

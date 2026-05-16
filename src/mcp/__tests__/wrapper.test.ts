@@ -51,7 +51,7 @@ describe('createMcpToolWrapper', () => {
       toolUseId: 'tu_1',
       cwd: '/tmp',
     })
-    assert.equal(result.content, 'Echo: hello')
+    assert.equal(result.content, 'Echo: hello\n[MCP: test · read-only]')
     assert.equal(result.isError, undefined)
   })
 

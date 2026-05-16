@@ -36,8 +36,8 @@ describe('Cockpit barrel exports', () => {
 })
 
 describe('Cockpit types', () => {
-  it('PANELS contains all six panel names', () => {
-    assert.deepStrictEqual(PANELS, ['summary', 'trace', 'verify', 'context', 'safety', 'model'])
+  it('PANELS contains all seven panel names', () => {
+    assert.deepStrictEqual(PANELS, ['summary', 'trace', 'verify', 'context', 'safety', 'model', 'mcp'])
   })
 
   it('PANEL_LABELS maps every panel to a non-empty label', () => {
