@@ -24,6 +24,7 @@ import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { createAntibodyProposal } from '../context/antibody.js'
 import { detectConflicts } from '../context/conflict-detect.js'
+import { selectEvictionCandidates } from '../context/claim-budget.js'
 import { extractTaskState } from './task-state.js'
 import { detectMirror } from './behavior-mirror.js'
 import { extractDecisions } from './decision-anchor.js'
@@ -275,6 +276,13 @@ export class AgentLoop {
         usedAt,
       })
     }
+
+    // Budget eviction: mark excess low-value claims as stale
+    const toEvict = selectEvictionCandidates(this.config.contextClaimStore.listActiveClaims())
+    for (const c of toEvict) {
+      this.config.contextClaimStore.updateClaimStatus(c.id, 'stale', 'budget eviction')
+    }
+
     this.config.promptEngine.updateActiveClaims(this.config.contextClaimStore.listActiveClaims())
   }
 

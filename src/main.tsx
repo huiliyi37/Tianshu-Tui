@@ -452,6 +452,9 @@ async function main() {
     const persist = new SessionPersist(sessionId)
     const claimStore = persist.createClaimStore()
     persist.injectDurableClaims(claimStore)
+    for (const rule of loadProjectRules(process.cwd(), 'project')) {
+      claimStore.propose(rule)
+    }
     const fileHistory = new FileHistory(join(homedir(), '.rivet', 'sessions', sessionId, 'backups'), sessionId)
 
     const result = await runGoalLoop({
