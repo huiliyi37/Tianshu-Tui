@@ -169,6 +169,43 @@ describe('TurnHarness', () => {
     assert.equal(trajectory.getEntries()[0]!.target, 'src/lib/helper.ts')
   })
 
+  it('treats maxRetries as retry attempts after the first execution', async () => {
+    const trajectory = new TrajectoryRecorder()
+    const harness = new TurnHarness(makeConfig({ maxRetries: 2, retryableClasses: ['timeout'] }), trajectory)
+    let attempts = 0
+    const result = await harness.executeTool({
+      id: 'tu_retry',
+      name: 'bash',
+      input: { command: 'npm test' },
+      turn: 1,
+      execute: async () => {
+        attempts++
+        return { content: attempts < 3 ? 'Command timed out' : 'ok', isError: attempts < 3 }
+      },
+      classify: content => content.includes('timed out') ? 'timeout' : undefined,
+    })
+    assert.equal(attempts, 3) // 1 initial + 2 retries
+    assert.equal(result.isError, false)
+    assert.equal(result.retried, true)
+  })
+
+  it('does not retry failures whose class is not in retryableClasses', async () => {
+    const trajectory = new TrajectoryRecorder()
+    const harness = new TurnHarness(makeConfig({ maxRetries: 2, retryableClasses: ['timeout'] }), trajectory)
+    let attempts = 0
+    const result = await harness.executeTool({
+      id: 'tu_noretry',
+      name: 'bash',
+      input: { command: 'npm test' },
+      turn: 1,
+      execute: async () => { attempts++; return { content: 'intermittent failure', isError: true } },
+      classify: () => 'flaky',
+    })
+    assert.equal(attempts, 1) // flaky is transient but not in retryableClasses
+    assert.equal(result.isError, true)
+    assert.equal(result.retried, false)
+  })
+
   it('truncates command target to 50 chars', async () => {
     const trajectory = new TrajectoryRecorder()
     const harness = new TurnHarness(makeConfig(), trajectory)
