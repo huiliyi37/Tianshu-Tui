@@ -17,6 +17,8 @@ interface AgentStatusProps {
   tools: ToolCallItem[]
 }
 
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
 const MAX_VISIBLE_ITEMS = 8
 
 function formatDuration(ms: number): string {
@@ -79,17 +81,19 @@ function toolLabel(name: string, input: Record<string, unknown>): string {
 export { toolLabel }
 
 export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tokenEstimate, thinkingTime, tools }: AgentStatusProps) {
-  const [now, setNow] = useState(Date.now())
+  const [tick, setTick] = useState(0)
 
   useEffect(() => {
     if (!isStreaming) return
-    const id = setInterval(() => setNow(Date.now()), 1000)
+    const id = setInterval(() => setTick(t => t + 1), 120)
     return () => clearInterval(id)
   }, [isStreaming])
 
   if (!isStreaming) return null
 
+  const now = Date.now()
   const elapsed = now - startMs
+  const spinner = SPINNER_FRAMES[tick % SPINNER_FRAMES.length]!
   const isThinking = thinkingTime > 0 && tools.length === 0
   const phase = phaseLabel(tools, isThinking)
 
@@ -106,7 +110,7 @@ export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tok
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
-        <Text bold color="cyan">{phase}</Text>
+        <Text bold color="cyan">{spinner} {phase}</Text>
         <Text dimColor> ({parts.join(' · ')})</Text>
       </Box>
       {visible.length > 0 && (
