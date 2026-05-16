@@ -1,45 +1,54 @@
 # Changelog
 
-## 2026-05-16 — Wave 8 Context Fabric Phase 2 + Evolutionary Context Fabric Phase 2
+## 2026-05-16 — Wave 8 + Evolutionary Context Fabric Phase 2 + Phase 3
 
 ### Added — Wave 8 Context Fabric Phase 2
 - **Claim Extractor** (`src/context/claim-extractor.ts`) — Automatic claim extraction from tool results:
-  - `read_file` → `file_observation` claim (30min TTL)
+  - `read_file` → `file_observation` claim (30min TTL, deduplicated by path)
   - `run_tests` failure → `failure_pattern` claim (2h TTL)
   - `run_tests` success → `verification_fact` claim (1h TTL)
-  - `bash` security output → `security_finding` claim (4h TTL)
+  - `bash` security output → `security_finding` claim (4h TTL, requires isError)
   - Skip list: grep, glob, diff, inspect_project, repo_map, related_tests, recall (too noisy)
-- **AgentLoop wiring** — Claim extraction runs after every tool result; `promoteEligibleClaims()` at turn end
+- **AgentLoop wiring** — Claim extraction runs after every tool result; `promoteEligibleClaims()` in `refreshActiveClaims()`
 - **Durable promotion** — `durable_candidate → durable` after 5 unique consumers + 10 minutes age (was only `active → durable_candidate`)
 - **Cross-session durable claims** — `ContextClaimStore.loadDurableClaims()` static method reads durable claims from previous session JSONL; `SessionPersist.injectDurableClaims()` injects with 0.9 confidence decay on startup/resume
 - **Claim budget cap** — `MAX_PROMPT_CLAIMS=20` caps `renderActiveClaimsBlock()` output, sorted by fitness descending
 
 ### Added — Evolutionary Context Fabric Phase 2
 - **Claim lifecycle** — `markClaimsStaleForFile()` marks file-evidence claims stale on write; `promoteEligibleClaims()` batch promotion; `getStatusCounts()` status histogram
-- **Antibody claims** — Failure-pattern claims boost `approval-risk` for repeat failures; `antibodyClaim()` predicate checks kind + tool match
-- **Conflict detection** — `detectConflicts()` finds contradictory file-evidence claims; marks older claim as `conflicted`
-- **Slash commands** — `/context antibodies` shows antibody claims; `/context conflicts` shows conflicted claims
 - **Consumer deduplication** — `evaluatePromotion` gates use unique consumer IDs (prevents inflation from repeated `recordClaimUsed`)
+
+### Added — Evolutionary Context Fabric Phase 3
+- **Antibody generation** (`src/context/antibody.ts`) — `createAntibodyProposal()` converts `ClassifiedFailure` into `failure_pattern` ClaimProposal; retryable failures get fitness=2, non-retryable get fitness=5; 4-hour TTL
+- **Conflict detection** (`src/context/conflict-detect.ts`) — `detectConflicts()` finds contradictory file-evidence claims on same path; excludes semantically identical text; marks older claim as `conflicted`
+- **AgentLoop antibody wiring** — Tool error → `classifyFailure` → `createAntibodyProposal` → `claimStore.propose()` for all classifiable (non-unknown) failures
+- **AgentLoop conflict wiring** — After new `file_observation` proposals, `detectConflicts()` marks older same-path claims `conflicted`; guarded by `lastConflictCheckCount` to skip when no new claims
+- **Approval-risk antibody boost** — `assessToolRisk()` accepts optional 4th param `antibodies: ContextClaim[]`; when antibody evidence mentions the same tool name, risk bumps from `none` to `low`
+- **Worker finding evidence** — `delegate_task` claim proposals include `evidence[0].path` from `changedFiles[0]`; confidence mapped: high→0.85, medium→0.7, low→0.55
+- **TUI slash commands** — `/context antibodies` lists active failure_pattern claims; `/context conflicts` lists conflicted claims
+- **File observation dedup** — `extractClaimsFromToolResult` accepts `existingFileObservations` set; same file path → skip duplicate claim
 
 ### Changed
 - `src/context/promotion.ts` — `evaluatePromotion()` now handles both `active → durable_candidate` and `durable_candidate → durable`
 - `src/agent/session-persist.ts` — Added `loadPreviousDurableClaims()` and `injectDurableClaims()` methods
-- `src/agent/loop.ts` — Wired `extractClaimsFromToolResult` + antibody generation + conflict detection
+- `src/agent/loop.ts` — Wired antibody generation, conflict detection, file observation dedup, and antibody injection into `assessToolRisk`
+- `src/agent/approval-risk.ts` — `assessToolRisk()` signature extended with optional `antibodies` parameter (backward-compatible default `[]`)
+- `src/tools/delegate-task.ts` — Worker finding claims include file evidence path and confidence-based fitness
 - `src/context/claim-store.ts` — Added `loadDurableClaims()` static method; incremental projection from previous session
 
 ### Fixed
 - **DRY violation** — Duplicated durable claim injection in main.tsx extracted to `SessionPersist.injectDurableClaims()`
-- **Duplicate promotion call** — Removed `promoteEligibleClaims()` from `refreshActiveClaims()` (only called at turn end now)
-- **Lazy conflict detection** — `detectConflicts()` only runs after new `file_observation` proposals, not every turn
+- **Duplicate promotion call** — Removed duplicate `promoteEligibleClaims()` at turn end; single call in `refreshActiveClaims()`
+- **Lazy conflict detection** — `detectConflicts()` only runs when new `file_observation` proposals appear and claim count changed
+- **Conflict text dedup** — Claims with identical normalized text no longer flagged as conflicts (e.g. repeated reads of same file)
+- **Security finding false positives** — `bash` + security keywords now requires `isError: true`; clean `npm audit` output skipped
 - **Enriched file_observation text** — Claims now include extracted export/function/class names (up to 8 symbols), e.g. `config.ts (42L): MAX_RETRIES, TIMEOUT, loadConfig`
-- **Antibody TTL** — Antibody claims now expire after 4 hours; previously never expired
-- **File observation dedup** — `extractClaimsFromToolResult` accepts optional `existingFileObservations` set to skip already-observed paths
-- **Clean npm audit** — Security extraction now correctly skips when `found 0 vulnerabilities`
+- **Antibody TTL** — Antibody claims expire after 4 hours; previously never expired
 
 ### Verified
-- 825 tests pass, 0 fail
+- 831 tests pass, 0 fail
 - npm run typecheck clean
-- All 11 Wave 8 acceptance criteria verified
+- All 8 ECF Phase 3 acceptance criteria verified
 
 ## 2026-05-16 — Wave 5 Trust Infrastructure + Wave 6 Goal Loop + Wave 7 Sub-Agent Wiring
 
