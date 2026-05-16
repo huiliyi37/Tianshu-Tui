@@ -1,6 +1,7 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { TODO_TOOL, getTodos, setTodos } from '../todo.js'
+import { TodoStore } from '../todo-store.js'
 
 describe('TODO_TOOL', () => {
   beforeEach(() => {
@@ -71,5 +72,33 @@ describe('TODO_TOOL', () => {
 
   it('is concurrency safe', () => {
     assert.equal(TODO_TOOL.isConcurrencySafe(), true)
+  })
+})
+
+describe('TodoStore', () => {
+  it('isolates state between stores', () => {
+    const store1 = new TodoStore()
+    const store2 = new TodoStore()
+
+    store1.write([{ id: '1', content: 'Task A', status: 'pending' }])
+    store2.write([{ id: '2', content: 'Task B', status: 'in_progress' }])
+
+    assert.equal(store1.read().length, 1)
+    assert.equal(store1.read()[0]!.content, 'Task A')
+    assert.equal(store2.read().length, 1)
+    assert.equal(store2.read()[0]!.content, 'Task B')
+  })
+
+  it('returns empty array for new store', () => {
+    const store = new TodoStore()
+    assert.deepEqual(store.read(), [])
+  })
+
+  it('write replaces entire list', () => {
+    const store = new TodoStore()
+    store.write([{ id: '1', content: 'Old', status: 'completed' }])
+    store.write([{ id: '2', content: 'New', status: 'pending' }])
+    assert.equal(store.read().length, 1)
+    assert.equal(store.read()[0]!.content, 'New')
   })
 })
