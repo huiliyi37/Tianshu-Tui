@@ -156,6 +156,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const [isThinkingActive, setIsThinkingActive] = useState(false)
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
   const [cacheStatus, setCacheStatus] = useState<import('./status-bar.js').CacheStatus>('healthy')
@@ -374,6 +375,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     let userInput = _userInput
     const run = async () => {
     setIsStreaming(true)
+    setIsThinkingActive(false)
     setStreamingText('')
     setStreamingThinking('')
     setLiveTools([])
@@ -474,7 +476,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         blockWriterRef.current?.push(text)
       },
       onThinkingDelta: (thinking) => {
-        if (thinkStartRef.current === 0) thinkStartRef.current = Date.now()
+        if (thinkStartRef.current === 0) {
+          thinkStartRef.current = Date.now()
+          setIsThinkingActive(true)
+        }
         thinkBuf.current += thinking
         if (!thinkTimer.current) {
           thinkTimer.current = setTimeout(flushThink, THINKING_FLUSH_MS)
@@ -482,6 +487,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       },
       onToolUse: (id, name, input) => {
         toolNames.current.set(id, name)
+        setIsThinkingActive(false)
 
         const target = typeof input?.file_path === 'string' ? input.file_path
           : typeof input?.path === 'string' ? input.path
@@ -711,6 +717,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           startMs={streamStartRef.current || Date.now()}
           tokenEstimate={tokenEstimate}
           thinkingTime={thinkTimeRef.current}
+          hasActiveThinking={isThinkingActive}
           tools={toolCallsDisplay}
         />
         {pendingApproval && (

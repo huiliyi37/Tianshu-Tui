@@ -15,6 +15,7 @@ interface AgentStatusProps {
   startMs: number
   tokenEstimate: number
   thinkingTime: number
+  hasActiveThinking: boolean
   tools: ToolCallItem[]
 }
 
@@ -98,7 +99,7 @@ function toolLabel(name: string, input: Record<string, unknown>): string {
 
 export { toolLabel }
 
-export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tokenEstimate, thinkingTime, tools }: AgentStatusProps) {
+export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tokenEstimate, thinkingTime, hasActiveThinking, tools }: AgentStatusProps) {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
@@ -113,7 +114,7 @@ export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tok
   const now = Date.now()
   const elapsed = now - startMs
   const spinner = SPINNER_FRAMES[tick % SPINNER_FRAMES.length]!
-  const isThinking = thinkingTime > 0 && tools.length === 0
+  const isThinking = (thinkingTime > 0 || hasActiveThinking) && tools.length === 0
   const phase = phaseLabel(tools, isThinking)
 
   const parts: string[] = [formatDuration(elapsed)]

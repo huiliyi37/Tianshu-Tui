@@ -3,6 +3,10 @@ import { VimState as VimStateClass, processVimKey } from './vim-mode.js'
 import { Text } from 'ink'
 import { useInput } from 'ink'
 
+// Bracketed paste markers (after Ink strips leading \x1b)
+const PASTE_START = '[200~'
+const PASTE_END = '[201~'
+
 interface BaseTextInputProps {
   value: string
   onChange: (value: string) => void
@@ -13,12 +17,53 @@ interface BaseTextInputProps {
   vimEnabled?: boolean
 }
 
+/** Get line/column info from a flat cursor position in a multi-line string */
+function getLineCol(text: string, pos: number): { line: number; col: number } {
+  let line = 0
+  let col = 0
+  for (let i = 0; i < pos && i < text.length; i++) {
+    if (text[i] === '\n') {
+      line++
+      col = 0
+    } else {
+      col++
+    }
+  }
+  return { line, col }
+}
+
+/** Get flat position from line/column */
+function posFromLineCol(lines: string[], line: number, col: number): number {
+  let pos = 0
+  for (let i = 0; i < line && i < lines.length; i++) {
+    pos += (lines[i]?.length ?? 0) + 1 // +1 for \n
+  }
+  if (line < lines.length) {
+    pos += Math.min(col, lines[line]!.length)
+  }
+  return pos
+}
+
 export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder, history, vimEnabled }: BaseTextInputProps) {
   const [cursorPos, setCursorPos] = useState(0)
   const [cursorShown, setCursorShown] = useState(true)
   const historyIndexRef = useRef(-1)
   const savedInputRef = useRef('')
   const vimRef = useRef(new VimStateClass())
+
+  // Bracketed paste state
+  const isPastingRef = useRef(false)
+  const pasteBufferRef = useRef('')
+  // Rapid-return detection for terminals without bracketed paste
+  const lastInputTimeRef = useRef(0)
+
+  // Enable bracketed paste mode
+  React.useEffect(() => {
+    process.stdout.write('\x1b[?2004h')
+    return () => {
+      process.stdout.write('\x1b[?2004l')
+    }
+  }, [])
 
   React.useEffect(() => {
     if (disabled) return
@@ -32,25 +77,72 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
   }, [value.length])
 
   const insertAtCursor = useCallback((insertion: string) => {
-    onChange(value.slice(0, cursorPos) + insertion + value.slice(cursorPos))
-    setCursorPos(prev => prev + insertion.length)
+    const normalized = insertion.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    onChange(value.slice(0, cursorPos) + normalized + value.slice(cursorPos))
+    setCursorPos(prev => prev + normalized.length)
   }, [value, cursorPos, onChange])
+
+  const flushPasteBuffer = useCallback(() => {
+    if (pasteBufferRef.current) {
+      const normalized = pasteBufferRef.current.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      onChange(value.slice(0, cursorPos) + normalized + value.slice(cursorPos))
+      setCursorPos(prev => prev + normalized.length)
+      pasteBufferRef.current = ''
+    }
+    isPastingRef.current = false
+  }, [value, cursorPos, onChange])
+
+  const hasMultipleLines = value.includes('\n')
 
   useInput((input, key) => {
     if (disabled) return
 
-    // History navigation — Up/Down arrows
-    if (key.upArrow && history && history.length > 0) {
-      if (historyIndexRef.current < history.length - 1) {
-        if (historyIndexRef.current === -1) savedInputRef.current = value
-        historyIndexRef.current++
-        const entry = history[historyIndexRef.current]!
-        onChange(entry)
-        setCursorPos(entry.length)
+    // Bracketed paste handling
+    if (input === PASTE_START) {
+      isPastingRef.current = true
+      pasteBufferRef.current = ''
+      return
+    }
+    if (input === PASTE_END) {
+      flushPasteBuffer()
+      return
+    }
+    if (isPastingRef.current) {
+      pasteBufferRef.current += input
+      return
+    }
+
+    // Multi-line navigation — Up/Down arrows move between lines
+    if (key.upArrow) {
+      if (hasMultipleLines) {
+        const lines = value.split('\n')
+        const { line, col } = getLineCol(value, cursorPos)
+        if (line > 0) {
+          setCursorPos(posFromLineCol(lines, line - 1, col))
+        }
+        return
+      }
+      if (history && history.length > 0) {
+        if (historyIndexRef.current < history.length - 1) {
+          if (historyIndexRef.current === -1) savedInputRef.current = value
+          historyIndexRef.current++
+          const entry = history[historyIndexRef.current]!
+          onChange(entry)
+          setCursorPos(entry.length)
+        }
+        return
       }
       return
     }
     if (key.downArrow) {
+      if (hasMultipleLines) {
+        const lines = value.split('\n')
+        const { line, col } = getLineCol(value, cursorPos)
+        if (line < lines.length - 1) {
+          setCursorPos(posFromLineCol(lines, line + 1, col))
+        }
+        return
+      }
       if (historyIndexRef.current >= 0) {
         historyIndexRef.current--
         const restored = historyIndexRef.current === -1
@@ -69,15 +161,25 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
     }
 
     // Enter — submit (Alt/Option+Enter inserts newline instead)
+    // Rapid-return fallback: if Enter comes <50ms after last input, treat as paste newline
     if (key.return) {
       if (key.meta) {
         insertAtCursor('\n')
+        return
+      }
+      const now = Date.now()
+      if (now - lastInputTimeRef.current < 50 && hasMultipleLines) {
+        insertAtCursor('\n')
+        lastInputTimeRef.current = now
         return
       }
       onSubmit(value)
       setCursorPos(0)
       return
     }
+
+    // Track input timing for rapid-return detection
+    lastInputTimeRef.current = Date.now()
 
     // Ctrl+N — insert newline (fallback for terminals where Alt+Enter = Enter)
     if (key.ctrl && input === 'n') {
@@ -94,13 +196,26 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       setCursorPos(prev => Math.min(value.length, prev + 1))
       return
     }
-    // Home/End
+    // Home — move to start of current line
     if (key.home || (key.ctrl && input === 'a')) {
-      setCursorPos(0)
+      if (hasMultipleLines) {
+        const { line } = getLineCol(value, cursorPos)
+        const lines = value.split('\n')
+        setCursorPos(posFromLineCol(lines, line, 0))
+      } else {
+        setCursorPos(0)
+      }
       return
     }
+    // End — move to end of current line
     if (key.end || (key.ctrl && input === 'e')) {
-      setCursorPos(value.length)
+      if (hasMultipleLines) {
+        const { line } = getLineCol(value, cursorPos)
+        const lines = value.split('\n')
+        setCursorPos(posFromLineCol(lines, line, lines[line]!.length))
+      } else {
+        setCursorPos(value.length)
+      }
       return
     }
 
@@ -114,10 +229,18 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       return
     }
 
-    // Ctrl+U — clear line
+    // Ctrl+U — clear current line
     if (key.ctrl && (input === 'u' || input === 'U')) {
-      onChange('')
-      setCursorPos(0)
+      if (hasMultipleLines) {
+        const { line } = getLineCol(value, cursorPos)
+        const lines = value.split('\n')
+        const lineStart = posFromLineCol(lines, line, 0)
+        onChange(value.slice(0, lineStart) + value.slice(cursorPos))
+        setCursorPos(lineStart)
+      } else {
+        onChange('')
+        setCursorPos(0)
+      }
       return
     }
 
@@ -138,9 +261,11 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
     }
   })
 
+  // Render cursor: show visible symbol when on \n
   const before = value.slice(0, cursorPos)
-  const at = value[cursorPos] ?? ' '
-  const after = value.slice(cursorPos + 1)
+  const rawAt = value[cursorPos]
+  const at = rawAt === '\n' ? '↵' : (rawAt ?? ' ')
+  const after = rawAt === '\n' ? value.slice(cursorPos + 1) : value.slice(cursorPos + 1)
 
   return (
     <Text>
