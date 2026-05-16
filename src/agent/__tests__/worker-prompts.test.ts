@@ -56,6 +56,7 @@ describe('worker prompts', () => {
         changedFiles: [],
         risks: [],
         nextActions: ['Wire coordinator near main'],
+        evidenceStatus: 'verified',
       },
     ])
 

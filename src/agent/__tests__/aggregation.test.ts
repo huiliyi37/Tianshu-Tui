@@ -13,6 +13,7 @@ function result(id: string, status: WorkerResult['status'], confidence?: 'low' |
     changedFiles: [],
     risks: [],
     nextActions: [],
+    evidenceStatus: status === 'passed' ? 'verified' : 'unverified',
   }
 }
 

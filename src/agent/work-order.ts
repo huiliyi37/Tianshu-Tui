@@ -104,6 +104,7 @@ export const workerResultSchema = z.object({
   changedFiles: z.array(z.string()),
   risks: z.array(z.string()),
   nextActions: z.array(z.string()),
+  evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified']).default('unverified'),
 })
 
 export type WorkerResult = z.infer<typeof workerResultSchema>
@@ -229,5 +230,6 @@ export function buildBlockedWorkerResult(order: WorkOrder, reason: string): Work
     changedFiles: [],
     risks: ['Worker did not return schema-valid JSON'],
     nextActions: ['Primary should continue without trusting this worker result'],
+    evidenceStatus: 'blocked',
   }
 }

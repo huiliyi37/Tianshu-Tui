@@ -129,4 +129,49 @@ describe('work-order contract', () => {
     assert.equal(result.patchSummary, 'Changed null check on line 42.')
     assert.deepEqual(result.changedFiles, ['src/agent/coordinator.ts'])
   })
+
+  it('validates worker result evidence fields', () => {
+    const result = parseWorkerResult(JSON.stringify({
+      workOrderId: 'wo_1',
+      status: 'passed',
+      summary: 'Implemented retry policy',
+      findings: [],
+      artifacts: [],
+      changedFiles: ['src/agent/turn-harness.ts'],
+      risks: [],
+      nextActions: [],
+      evidenceStatus: 'verified',
+    }), 'wo_1')
+
+    assert.equal(result.evidenceStatus, 'verified')
+  })
+
+  it('defaults evidenceStatus to unverified when omitted', () => {
+    const result = parseWorkerResult(JSON.stringify({
+      workOrderId: 'wo_1',
+      status: 'passed',
+      summary: 'Read-only scan complete.',
+      findings: [],
+      artifacts: [],
+      changedFiles: [],
+      risks: [],
+      nextActions: [],
+    }), 'wo_1')
+
+    assert.equal(result.evidenceStatus, 'unverified')
+  })
+
+  it('includes evidenceStatus in blocked worker result', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_blocked',
+      parentTurnId: 'turn_1',
+      kind: 'review',
+      profile: 'reviewer',
+      objective: 'Review risk.',
+      scope: {},
+    })
+
+    const result = buildBlockedWorkerResult(order, 'Parse error')
+    assert.equal(result.evidenceStatus, 'blocked')
+  })
 })

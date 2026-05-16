@@ -66,6 +66,7 @@ function resultFor(id: string): WorkerResult {
     changedFiles: [],
     risks: [],
     nextActions: [],
+    evidenceStatus: 'verified',
   }
 }
 

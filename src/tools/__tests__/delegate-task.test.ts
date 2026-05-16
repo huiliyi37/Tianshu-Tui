@@ -16,6 +16,7 @@ function makeRun(): CoordinatorRun {
       changedFiles: [],
       risks: [],
       nextActions: [],
+      evidenceStatus: 'verified',
     }],
     packet: '<worker_results>packet</worker_results>',
   }
