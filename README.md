@@ -741,7 +741,10 @@ npm run dev                    # Watch mode
 - `docs/superpowers/plans/2026-05-15-rivet-performance-optimization.md` — Performance optimization plan
 - `docs/analysis/2026-05-15-handoff.md` — Full project handoff document with validation records
 - `docs/superpowers/plans/2026-05-16-rivet-gap-closing-hardening.md` — Gap closing hardening plan (hooks isolation, git log/stash, turndown, TodoStore, undo cleanup)
-- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (13 Verified)
+- `docs/superpowers/specs/2026-05-16-rivet-pastel-aesthetic-performance-memory-design.md` — Pastel theme + render perf + memory safety design (deep-brainstorm)
+- `docs/superpowers/plans/2026-05-16-rivet-render-perf-memory-bounded-visual-polish.md` — Rendering perf + memory bounds + visual polish implementation plan (7 tasks)
+- `docs/analysis/2026-05-16-pastel-theme-render-perf-memory-visual-polish.md` — Work record: pastel theme, ring buffer, bounded collections, sparkline, spinner
+- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (14 Verified)
 
 ## License
 

@@ -1,6 +1,6 @@
 # Rivet Core Capability Ledger
 
-> Last updated: 2026-05-16. Based on actual plan checkbox status + test/typecheck/build verification. Updated after gap closing hardening (684 tests, typecheck clean).
+> Last updated: 2026-05-16. Based on actual plan checkbox status + test/typecheck/build verification. After pastel theme + render perf + memory bounds session (684 tests, typecheck clean).
 
 ## Status Definitions
 
@@ -23,6 +23,7 @@
 | Execution Resilience Layer | **Verified** | `specs/...-execution-resilience-layer-design.md` | `plans/...-execution-resilience-layer-implementation.md` | `src/agent/turn-harness.ts`, `src/agent/trace-store.ts` | Plan 37/37 checked, 612 tests pass | None | — |
 | Cockpit Observability | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-cockpit-capability-ledger.md` | `src/tui/cockpit/*`, `src/tui/cockpit/state.ts`, `src/tui/cockpit/mcp-panel.tsx` | Unified CockpitSnapshot aggregator, panel status indicators, MCP panel, 620 tests pass | None | — |
 | Cockpit Techstyle | **MVP** | `specs/...-glanceable-cockpit-techstyle-design.md` | `plans/...-glanceable-cockpit-techstyle-implementation.md` | `src/tui/cockpit/*`, `src/tui/summary-bar.tsx` | Plan 42/43 (preamble only unchecked) | — | — |
+| Pastel Theme + Render Perf + Memory Safety | **Verified** | `specs/...-pastel-aesthetic-performance-memory-design.md` | `plans/...-render-perf-memory-bounded-visual-polish.md` | `src/tui/theme.ts`, `src/tui/ring-buffer.ts`, `src/tui/summary-bar.tsx`, `src/tui/agent-status.tsx`, `src/agent/context.ts` | 7 tasks complete, 15 new tests, code review fixes, 684 tests pass | `pushStatic` O(n) items copy (capped at 500) | — |
 | MCP Integration | **Verified** | `specs/...-p2-model-mcp-repo-intel-design.md` | `plans/...-mcp-client-implementation.md` | `src/mcp/*`, `src/mcp/failure-classifier.ts`, `src/tui/cockpit/mcp-panel.tsx` | Failure classifier (5 error classes), cockpit MCP panel, error annotations on tool results, 620 tests pass | Not yet in unified ToolSafetyPolicy | MCP safety integration |
 | Model Routing | **Verified** | `specs/...-p2-model-mcp-repo-intel-design.md` | — | `src/model/capability.ts`, `src/model/task-inferrer.ts`, `src/model/routing-metrics.ts`, `src/agent/loop.ts` | TaskInferrer + per-turn routing integrated into AgentLoop, routing reason in volatile context, 620 tests pass | Verification feedback not yet wired back to metrics | — |
 | Repo Intelligence | **Verified** | `specs/...-p2-model-mcp-repo-intel-design.md` | — | `src/agent/import-graph.ts`, `src/agent/impact-hint.ts`, `src/agent/loop.ts` | Lightweight import graph + impact hint injected after edits, impacted files/tests in evidence badge, 620 tests pass | Graph rebuild is synchronous | Background build optimization |
@@ -41,7 +42,7 @@
 
 ## Summary
 
-- **Verified**: 13 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing)
+- **Verified**: 14 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety)
 - **MVP**: 1 capability (Cockpit Techstyle)
 - **Planned**: 4 capabilities with unexecuted plans
 - **Designed**: 2 capabilities (CTCL Migration, Open Source Strategy)
