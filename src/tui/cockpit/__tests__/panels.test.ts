@@ -13,7 +13,7 @@ import {
   PANELS,
   PANEL_LABELS,
 } from '../index.js'
-import type { CockpitContextLayerView } from '../types.js'
+import type { CockpitContextLayerView, Panel } from '../types.js'
 
 function render(component: any, props: any) {
   return React.createElement(component, props)
@@ -51,7 +51,8 @@ describe('Cockpit types', () => {
 describe('CockpitRail renders', () => {
   it('renders without error for each panel', () => {
     for (const panel of PANELS) {
-      const el = render(CockpitRail, { activePanel: panel, onSelect: () => {} })
+      const allIdle = Object.fromEntries(PANELS.map(p => [p, 'idle' as const])) as Record<Panel, import('../types.js').PanelStatus>
+      const el = render(CockpitRail, { activePanel: panel, panelStatuses: allIdle, onSelect: () => {} })
       assert.ok(el != null, `CockpitRail returned null for panel ${panel}`)
     }
   })
