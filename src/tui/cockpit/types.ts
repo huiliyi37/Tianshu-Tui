@@ -20,3 +20,21 @@ export interface CockpitContextLayerView {
   digest: string
   tokenEstimate: number
 }
+
+export interface CockpitRiskView {
+  level: 'none' | 'low' | 'medium' | 'high'
+  reasons: string[]
+  suggestedAction: string
+}
+
+export interface CockpitVerificationRunView {
+  command: string
+  status: 'passed' | 'failed' | 'blocked'
+  scope: string
+  target?: string
+}
+
+export interface CockpitVerificationState {
+  deliveryStatus: 'verified' | 'failed' | 'blocked' | 'unverified'
+  runs: CockpitVerificationRunView[]
+}

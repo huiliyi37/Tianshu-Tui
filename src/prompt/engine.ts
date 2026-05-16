@@ -1,6 +1,6 @@
 import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
-import { buildVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import type { TaskState } from '../agent/task-state.js'
 import {
   computeFingerprint,
@@ -8,8 +8,9 @@ import {
   type PrefixFingerprint,
   type DriftEvent,
 } from './fingerprint.js'
+import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
 
-export type { PrefixFingerprint, DriftEvent }
+export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
 
 export interface PromptEngineConfig {
   model: string
@@ -79,15 +80,21 @@ export class PromptEngine {
   private taskProgress?: TaskState
   private behaviorMirror?: string | null
   private decisions?: string[]
+  private contextLayerReportData: ContextLayerReport
 
   constructor(config: PromptEngineConfig) {
     this.config = config
     this.systemPrompt = buildSystemPrompt(config.staticCtx)
-    // Freeze the volatile block at construction time — this keeps the prefix
-    // stable across turns even if git status or .rivet.md changes.
-    this.volatileBlock = buildVolatileBlock(config.volatileCtx)
-    // Freeze the prefix fingerprint at construction time — this is the cache anchor
-    this.fingerprint = computeFingerprint(this.systemPrompt, config.staticCtx.tools)
+    this.volatileBlock = buildStableVolatileBlock(config.volatileCtx)
+    this.fingerprint = computeFingerprint(this.systemPrompt, config.staticCtx.tools, this.volatileBlock)
+    this.contextLayerReportData = createContextLayerReport([
+      createContextLayer({ id: 'system', label: 'Stable System Prompt', stability: 'stable', channel: 'system', fingerprint: 'included', content: this.systemPrompt }),
+      createContextLayer({ id: 'tools', label: 'Tool Definitions', stability: 'stable', channel: 'tools', fingerprint: 'included', content: JSON.stringify(config.staticCtx.tools) }),
+      ...(config.volatileCtx.rivetMd ? [createContextLayer({ id: 'project-instructions', label: 'Project Instructions', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'included', content: config.volatileCtx.rivetMd })] : []),
+      ...(config.volatileCtx.gitStatus ? [createContextLayer({ id: 'git-status', label: 'Git Status', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'included', content: config.volatileCtx.gitStatus })] : []),
+      ...(config.volatileCtx.sessionMemoryBlock ? [createContextLayer({ id: 'session-memory', label: 'Session Memory', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'included', content: config.volatileCtx.sessionMemoryBlock })] : []),
+      ...(config.volatileCtx.workingSet && config.volatileCtx.workingSet.length > 0 ? [createContextLayer({ id: 'working-set', label: 'Working Set', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'partial', content: config.volatileCtx.workingSet.join('\n') })] : []),
+    ])
   }
 
   /**
@@ -126,7 +133,7 @@ export class PromptEngine {
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         if (i === lastUserTextIdx && toolHistory && toolHistory.length > 0) {
           // Fresh volatile block with tool history for the latest turn
-          const freshBlock = buildVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, decisions: this.decisions })
+          const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, decisions: this.decisions })
           result.push({ role: 'user', content: freshBlock })
         } else {
           // Frozen volatile block for historical turns — preserves prefix cache
@@ -152,7 +159,7 @@ export class PromptEngine {
   }
 
   checkDrift(): DriftEvent | null {
-    const current = computeFingerprint(this.systemPrompt, this.config.staticCtx.tools)
+    const current = computeFingerprint(this.systemPrompt, this.config.staticCtx.tools, this.volatileBlock)
     return detectDrift(this.fingerprint, current)
   }
 
@@ -174,5 +181,9 @@ export class PromptEngine {
 
   setDecisions(decisions: string[]): void {
     this.decisions = decisions
+  }
+
+  getContextLayerReport(): ContextLayerReport {
+    return this.contextLayerReportData
   }
 }

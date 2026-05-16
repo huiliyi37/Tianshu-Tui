@@ -3,12 +3,13 @@ export type RiskLevel = 'none' | 'low' | 'medium' | 'high'
 export interface RiskAssessment {
   level: RiskLevel
   reasons: string[]
+  suggestedAction: string
 }
 
 export function assessToolRisk(
   toolName: string,
   input: Record<string, unknown>,
-  doomLoopLevel: 'none' | 'warn' | 'blocked',
+  doomLoopLevel: 'none' | 'warn' | 'blocked' = 'none',
 ): RiskAssessment {
   const reasons: string[] = []
   let level: RiskLevel = 'none'
@@ -25,16 +26,21 @@ export function assessToolRisk(
   // Path traversal
   const targets = [input.file_path, input.path, input.target].filter((v): v is string => typeof v === 'string')
   if (targets.some(t => t.startsWith('/') || t.split('/').includes('..'))) {
-    reasons.push('Path traversal risk')
+    reasons.push('absolute path target')
     level = level === 'high' ? 'high' : 'medium'
   }
 
   // Destructive commands
   if (toolName === 'bash') {
     const cmd = typeof input.command === 'string' ? input.command : ''
-    const destructive = /\b(rm\s+-|git\s+reset\s+--hard|git\s+clean\s+-|push\s+--force|killall|pkill|drop\s+table)\b/i
+    const destructive = /\b(rm\s+-|git\s+reset\s+--hard|git\s+clean\s+-|killall|pkill|drop\s+table)\b/i
+    const forcePush = /\bgit\s+push\b[^\n]*\s--force(?:-with-lease)?\b/i
     if (destructive.test(cmd)) {
-      reasons.push('Destructive command detected')
+      reasons.push('destructive shell command')
+      level = 'high'
+    }
+    if (forcePush.test(cmd)) {
+      reasons.push('force push can overwrite shared remote history')
       level = 'high'
     }
     if (cmd.includes('curl') && cmd.includes('|')) {
@@ -48,11 +54,17 @@ export function assessToolRisk(
     level = level === 'none' ? 'low' : level
   }
 
-  // Rollback is always high risk
-  if (toolName === 'rollback') {
-    reasons.push('Rollback operation')
+  // Rollback/undo is always high risk
+  if (toolName === 'rollback' || toolName === 'undo') {
+    reasons.push('state rollback changes working tree')
     level = 'high'
   }
 
-  return { level, reasons }
+  const suggestedAction = level === 'high'
+    ? 'Require explicit user approval before execution.'
+    : level === 'medium'
+      ? 'Show risk context and proceed only in auto-safe/manual modes.'
+      : 'No additional approval required.'
+
+  return { level, reasons, suggestedAction }
 }

@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { getTheme } from '../theme.js'
+import type { DeliveryVerificationStatus } from '../../agent/evidence.js'
 
 export interface VerificationEntry {
   tool: string
@@ -12,6 +13,7 @@ export interface VerificationPanelProps {
   filesRead: number
   filesModified: number
   verifications: VerificationEntry[]
+  deliveryStatus?: DeliveryVerificationStatus
 }
 
 function statusIcon(status: string): string {
@@ -26,8 +28,15 @@ function statusColor(status: string, theme: ReturnType<typeof getTheme>): string
   return theme.warning
 }
 
+function deliveryColor(status: DeliveryVerificationStatus, theme: ReturnType<typeof getTheme>): string {
+  if (status === 'verified') return theme.success
+  if (status === 'failed') return theme.error
+  if (status === 'blocked') return theme.warning
+  return theme.dim
+}
+
 export const VerificationPanel = memo(function VerificationPanel({
-  filesRead, filesModified, verifications,
+  filesRead, filesModified, verifications, deliveryStatus,
 }: VerificationPanelProps) {
   const theme = getTheme()
 
@@ -40,6 +49,12 @@ export const VerificationPanel = memo(function VerificationPanel({
         <Text color={theme.dim}> │ Modified: </Text>
         <Text color={theme.secondary}>{filesModified}</Text>
       </Text>
+      {deliveryStatus && (
+        <Text>
+          <Text color={theme.dim}>Delivery: </Text>
+          <Text color={deliveryColor(deliveryStatus, theme)} bold>{deliveryStatus}</Text>
+        </Text>
+      )}
       {verifications.map((v, i) => (
         <Text key={i}>
           <Text color={statusColor(v.status, theme)}>{statusIcon(v.status)}</Text>
@@ -47,7 +62,7 @@ export const VerificationPanel = memo(function VerificationPanel({
           <Text>{v.tool} │ {v.summary}</Text>
         </Text>
       ))}
-      {verifications.length === 0 && <Text dimColor>No verification data</Text>}
+      {verifications.length === 0 && !deliveryStatus && <Text dimColor>No verification data</Text>}
     </Box>
   )
 })

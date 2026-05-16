@@ -13,21 +13,25 @@ import {
   PANELS,
   PANEL_LABELS,
 } from '../index.js'
-import type { Panel, CockpitContextLayerView } from '../types.js'
+import type { CockpitContextLayerView } from '../types.js'
 
 function render(component: any, props: any) {
   return React.createElement(component, props)
 }
 
+function innerFn(component: any): Function {
+  return (component as any).type
+}
+
 describe('Cockpit barrel exports', () => {
   it('exports all panel components as memo objects with type function', () => {
-    assert.equal(typeof CockpitRail.type, 'function')
-    assert.equal(typeof TracePanel.type, 'function')
-    assert.equal(typeof VerificationPanel.type, 'function')
-    assert.equal(typeof ContextPanel.type, 'function')
-    assert.equal(typeof SafetyPanel.type, 'function')
-    assert.equal(typeof ModelPanel.type, 'function')
-    assert.equal(typeof ApprovalRiskCard.type, 'function')
+    assert.equal(typeof innerFn(CockpitRail), 'function')
+    assert.equal(typeof innerFn(TracePanel), 'function')
+    assert.equal(typeof innerFn(VerificationPanel), 'function')
+    assert.equal(typeof innerFn(ContextPanel), 'function')
+    assert.equal(typeof innerFn(SafetyPanel), 'function')
+    assert.equal(typeof innerFn(ModelPanel), 'function')
+    assert.equal(typeof innerFn(ApprovalRiskCard), 'function')
   })
 })
 
@@ -87,6 +91,18 @@ describe('VerificationPanel renders', () => {
     })
     assert.ok(el != null)
   })
+
+  it('renders delivery status', () => {
+    const el = innerFn(VerificationPanel)({
+      filesRead: 3,
+      filesModified: 1,
+      verifications: [{ tool: 'npm test', status: 'blocked', summary: 'blocked' }],
+      deliveryStatus: 'blocked',
+    })
+    const tree = JSON.stringify(el)
+    assert.ok(tree.includes('blocked'))
+    assert.ok(tree.includes('Delivery'))
+  })
 })
 
 describe('ContextPanel renders', () => {
@@ -138,6 +154,19 @@ describe('SafetyPanel renders', () => {
     })
     assert.ok(el != null)
   })
+
+  it('renders suggestedAction when risk is high', () => {
+    const el = innerFn(SafetyPanel)({
+      doomLoopLevel: 'none',
+      riskLevel: 'high',
+      riskReasons: ['force push can overwrite shared remote history'],
+      suggestedAction: 'Require explicit user approval before execution.',
+      recentFingerprints: 3,
+    })
+    const tree = JSON.stringify(el)
+    assert.ok(tree.includes('force push'))
+    assert.ok(tree.includes('approval'))
+  })
 })
 
 describe('ModelPanel renders', () => {
@@ -157,7 +186,7 @@ describe('ModelPanel renders', () => {
 
 describe('ApprovalRiskCard renders', () => {
   it('returns null when level is none', () => {
-    const el = ApprovalRiskCard.type({ level: 'none', reasons: [] })
+    const el = innerFn(ApprovalRiskCard)({ level: 'none', reasons: [] })
     assert.equal(el, null)
   })
 
@@ -173,7 +202,7 @@ describe('ContextPanel layers', () => {
       { id: 'system', label: 'Stable System Prompt', stability: 'stable', channel: 'system', fingerprint: 'included', digest: 'sha256:a', tokenEstimate: 100 },
       { id: 'session-memory', label: 'Session Memory', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'included', digest: 'sha256:b', tokenEstimate: 40 },
     ]
-    const el = ContextPanel.type({
+    const el = innerFn(ContextPanel)({
       estimatedTokens: 50000,
       maxTokens: 200000,
       rounds: 5,

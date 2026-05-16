@@ -62,6 +62,22 @@ describe('computeFingerprint', () => {
     assert.equal(fp1.toolsSha256, fp2.toolsSha256)
   })
 
+  it('includes stable volatile context in combined fingerprint', () => {
+    const a = computeFingerprint('system', [], '<context><session>A</session></context>')
+    const b = computeFingerprint('system', [], '<context><session>B</session></context>')
+    assert.notEqual(a.combinedSha256, b.combinedSha256)
+    assert.notEqual(a.stableVolatileSha256, b.stableVolatileSha256)
+    assert.equal(a.systemSha256, b.systemSha256)
+    assert.equal(a.toolsSha256, b.toolsSha256)
+  })
+
+  it('defaults stableVolatile to empty string when not provided', () => {
+    const a = computeFingerprint('system', [])
+    const b = computeFingerprint('system', [], '')
+    assert.equal(a.combinedSha256, b.combinedSha256)
+    assert.equal(a.stableVolatileSha256, b.stableVolatileSha256)
+  })
+
   it('detects tool description changes', () => {
     const fp1 = computeFingerprint('system', SAMPLE_TOOLS)
     const modified = SAMPLE_TOOLS.map(tool => tool.name === 'bash'
@@ -146,6 +162,7 @@ describe('PromptEngine fingerprint integration', () => {
     const fp = engine.getFingerprint()
     assert.ok(fp.systemSha256)
     assert.ok(fp.toolsSha256)
+    assert.ok(fp.stableVolatileSha256)
     assert.ok(fp.combinedSha256)
     assert.equal(fp.systemSha256.length, 64)
   })

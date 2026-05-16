@@ -86,3 +86,45 @@ describe('PromptEngine message normalization', () => {
     assert.equal(invariant.brokenRounds, 0, `Expected 0 broken rounds, got ${invariant.brokenRounds}`)
   })
 })
+
+describe('PromptEngine context layer report', () => {
+  it('reports context layers with channels and fingerprint policy', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1000,
+      staticCtx: { tools: [] },
+      volatileCtx: {
+        cwd: '/repo',
+        rivetMd: 'Use TDD.',
+        gitStatus: 'M src/main.tsx',
+        sessionMemoryBlock: '<session-memory><entry>decision</entry></session-memory>',
+        workingSet: ['src/prompt/engine.ts'],
+      },
+    })
+
+    const report = engine.getContextLayerReport()
+    assert.deepEqual(report.layers.map(l => l.id), [
+      'system',
+      'tools',
+      'project-instructions',
+      'git-status',
+      'session-memory',
+      'working-set',
+    ])
+    assert.ok(report.fingerprintIncluded.some(l => l.id === 'system'))
+    assert.ok(report.fingerprintIncluded.some(l => l.id === 'session-memory'))
+    assert.equal(report.dynamicLayers.length, 0)
+  })
+
+  it('omits layers with no content', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1000,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+
+    const report = engine.getContextLayerReport()
+    assert.deepEqual(report.layers.map(l => l.id), ['system', 'tools'])
+  })
+})

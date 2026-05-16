@@ -4,6 +4,7 @@ import type { ToolDefinition } from '../api/types.js'
 export interface PrefixFingerprint {
   systemSha256: string
   toolsSha256: string
+  stableVolatileSha256: string
   combinedSha256: string
 }
 
@@ -31,6 +32,7 @@ function stableStringify(value: unknown): string {
 export function computeFingerprint(
   systemText: string,
   tools: ToolDefinition[] | undefined,
+  stableVolatileBlock = '',
 ): PrefixFingerprint {
   const systemSha256 = sha256(systemText)
 
@@ -38,9 +40,10 @@ export function computeFingerprint(
     ? sha256(stableStringify([...tools].sort((a, b) => a.name.localeCompare(b.name))))
     : sha256('')
 
-  const combinedSha256 = sha256(`${systemSha256}:${toolsSha256}`)
+  const stableVolatileSha256 = sha256(stableVolatileBlock)
+  const combinedSha256 = sha256(`${systemSha256}:${toolsSha256}:${stableVolatileSha256}`)
 
-  return { systemSha256, toolsSha256, combinedSha256 }
+  return { systemSha256, toolsSha256, stableVolatileSha256, combinedSha256 }
 }
 
 export function detectDrift(

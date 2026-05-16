@@ -256,6 +256,8 @@ Layers L1-L4 form the stable volatile block (frozen at construction, participate
 - **Search output caps** — Global max_results enforcement on grep (ripgrep streaming kill + native cap)
 - **Targeted test runs** — run_tests filter constructs safe argv (no sh -c), outputs VerificationMetadata
 - **Verification engine** — VerificationState tracks passed/failed/blocked, evidence badge uses buildFinalVerificationReport
+- **Tool safety policy** — Unified `assessToolRisk` evaluates destructive commands, force push, path traversal, rollback/undo; outputs structured `RiskAssessment` with reasons and suggestedAction; feeds approval prompts, hooks, and cockpit safety panel
+- **Evidence delivery gate** — `DeliveryVerificationStatus` (verified/failed/blocked/unverified) computed from EvidenceTracker state; badge surfaces unverified-change warnings when no relevant verification ran after edits
 - **Repo intelligence** — symbol-index (regex-based), import-graph (relative edges), context-bundle (task context assembly)
 - **Model capability routing** — ModelCapabilityCard + recommendModelForTask scoring per task type
 - **Failure sample library** — createFailureSample with automatic secret redaction (sk-* patterns)

@@ -26,6 +26,7 @@ import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
 import { createTraceStore, startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel } from './trace-store.js'
+import { assessToolRisk } from './approval-risk.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -149,18 +150,6 @@ export class AgentLoop {
   getEvidenceState() { return this.evidence.getState() }
 
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
-
-  private isHighRisk(toolName: string, input: Record<string, unknown>): boolean {
-    const destructive = /\b(rm\s+-|git\s+reset\s+--hard|git\s+clean\s+-|push\s+--force|killall|pkill|drop\s+table)\b/i
-    if (toolName === 'bash') {
-      const cmd = typeof input.command === 'string' ? input.command : ''
-      return destructive.test(cmd)
-    }
-    if (toolName === 'rollback') return true
-    const targets = [input.file_path, input.path, input.target].filter((v): v is string => typeof v === 'string')
-    if (targets.some(t => t.startsWith('/') || t.split('/').includes('..'))) return true
-    return false
-  }
 
   getDebugInfo() {
     const fp = this.config.promptEngine.getFingerprint()
@@ -321,7 +310,8 @@ export class AgentLoop {
               }
 
               const needsApproval = this.config.toolRegistry.needsApproval(tu.name, params)
-              const isHighRisk = needsApproval && this.isHighRisk(tu.name, tu.input)
+              const risk = assessToolRisk(tu.name, tu.input, this.getDoomLoopLevel())
+              const isHighRisk = risk.level === 'high'
               const approvalMode = this.config.approvalMode ?? 'manual'
 
               const shouldAsk = approvalMode === 'manual'

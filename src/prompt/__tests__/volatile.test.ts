@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ContextLedger } from '../../context/types.js'
-import { buildVolatileBlock, type VolatileContext } from '../volatile.js'
+import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext } from '../volatile.js'
 
 function ledger(): ContextLedger {
   return {
@@ -212,5 +212,45 @@ describe('decisions XML section', () => {
     }
     const block = buildVolatileBlock(ctx)
     assert.ok(block.includes('&lt;Strategy&gt;'))
+  })
+})
+
+describe('stable/latest volatile split', () => {
+  it('keeps dynamic sections out of stable block', () => {
+    const stable = buildStableVolatileBlock({
+      cwd: '/repo',
+      sessionMemoryBlock: '<session-memory><entry>remember</entry></session-memory>',
+      toolHistory: [{ tool: 'read_file', target: 'src/a.ts', status: 'success' }],
+      taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'] },
+      behaviorMirror: 'repeated edits',
+      decisions: ['use middleware'],
+    })
+    assert.ok(stable.includes('<session-memory>'))
+    assert.equal(stable.includes('<tool-history'), false)
+    assert.equal(stable.includes('<task-progress'), false)
+    assert.equal(stable.includes('<behavior-mirror'), false)
+    assert.equal(stable.includes('<decisions'), false)
+  })
+
+  it('includes dynamic sections in latest block', () => {
+    const latest = buildLatestTurnVolatileBlock({
+      cwd: '/repo',
+      toolHistory: [{ tool: 'read_file', target: 'src/a.ts', status: 'success' }],
+      taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'] },
+      behaviorMirror: 'repeated edits',
+      decisions: ['use middleware'],
+    })
+    assert.ok(latest.includes('<tool-history'))
+    assert.ok(latest.includes('<task-progress'))
+    assert.ok(latest.includes('<behavior-mirror'))
+    assert.ok(latest.includes('<decisions'))
+  })
+
+  it('buildVolatileBlock aliases buildLatestTurnVolatileBlock', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      toolHistory: [{ tool: 'bash', target: 'npm test', status: 'success' }],
+    }
+    assert.equal(buildVolatileBlock(ctx), buildLatestTurnVolatileBlock(ctx))
   })
 })

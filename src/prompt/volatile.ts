@@ -53,8 +53,28 @@ function escapeXml(text: string): string {
     .replaceAll('"', '&quot;')
 }
 
-/** Build the volatile `<context>` block injected into the user message. */
+/** Build stable volatile block — excludes per-turn dynamic sections. */
+export function buildStableVolatileBlock(ctx: VolatileContext): string {
+  return buildVolatileBlockInternal({
+    ...ctx,
+    toolHistory: undefined,
+    taskProgress: undefined,
+    behaviorMirror: undefined,
+    decisions: undefined,
+  })
+}
+
+/** Build latest-turn volatile block — includes all sections. */
+export function buildLatestTurnVolatileBlock(ctx: VolatileContext): string {
+  return buildVolatileBlockInternal(ctx)
+}
+
+/** Backward-compatible alias for buildLatestTurnVolatileBlock. */
 export function buildVolatileBlock(ctx: VolatileContext): string {
+  return buildLatestTurnVolatileBlock(ctx)
+}
+
+function buildVolatileBlockInternal(ctx: VolatileContext): string {
   const parts: string[] = []
 
   parts.push(`<environment platform="${process.platform}" cwd="${escapeXml(ctx.cwd)}" os="${escapeXml(`${os.type()} ${os.release()}`)}" />`)

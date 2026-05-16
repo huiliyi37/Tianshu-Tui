@@ -6,6 +6,7 @@ export interface SafetyPanelProps {
   doomLoopLevel: 'none' | 'warn' | 'blocked'
   riskLevel: 'none' | 'low' | 'medium' | 'high'
   riskReasons: string[]
+  suggestedAction?: string
   recentFingerprints: number
 }
 
@@ -23,7 +24,7 @@ function riskColor(level: string, theme: ReturnType<typeof getTheme>): string {
 }
 
 export const SafetyPanel = memo(function SafetyPanel({
-  doomLoopLevel, riskLevel, riskReasons, recentFingerprints,
+  doomLoopLevel, riskLevel, riskReasons, suggestedAction, recentFingerprints,
 }: SafetyPanelProps) {
   const theme = getTheme()
 
@@ -45,6 +46,9 @@ export const SafetyPanel = memo(function SafetyPanel({
       {riskReasons.map((r, i) => (
         <Text key={i} color={theme.warning}>• {r}</Text>
       ))}
+      {suggestedAction && riskLevel !== 'none' && riskLevel !== 'low' && (
+        <Text color={theme.dim} italic>{suggestedAction}</Text>
+      )}
       <Text>
         <Text color={theme.dim}>Fingerprint diversity: </Text>
         <Text color={theme.secondary}>{recentFingerprints} unique</Text>

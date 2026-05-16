@@ -7,6 +7,7 @@ describe('assessToolRisk', () => {
     const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'none')
     assert.equal(result.level, 'none')
     assert.deepEqual(result.reasons, [])
+    assert.match(result.suggestedAction, /no additional/i)
   })
 
   it('returns medium when doom loop level is warn', () => {
@@ -19,24 +20,38 @@ describe('assessToolRisk', () => {
     const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'blocked')
     assert.equal(result.level, 'high')
     assert.ok(result.reasons.some(r => r.includes('doom loop')))
+    assert.match(result.suggestedAction, /approval/i)
   })
 
-  it('detects path traversal with absolute path', () => {
-    const result = assessToolRisk('read_file', { file_path: '/etc/passwd' }, 'none')
+  it('flags destructive shell commands with reason and suggested action', () => {
+    const result = assessToolRisk('bash', { command: 'git reset --hard HEAD~1' }, 'none')
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+    assert.match(result.suggestedAction, /approval/i)
+  })
+
+  it('flags force push as high risk', () => {
+    const result = assessToolRisk('bash', { command: 'git push --force origin main' }, 'none')
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('force push')))
+  })
+
+  it('flags absolute path writes as medium risk', () => {
+    const result = assessToolRisk('write_file', { file_path: '/tmp/outside.txt', content: 'x' }, 'none')
     assert.equal(result.level, 'medium')
-    assert.ok(result.reasons.some(r => r.includes('Path traversal')))
+    assert.ok(result.reasons.some(r => r.includes('absolute path')))
+  })
+
+  it('treats safe read_file as low risk (no reasons)', () => {
+    const result = assessToolRisk('read_file', { file_path: 'src/main.tsx' })
+    assert.equal(result.level, 'none')
+    assert.deepEqual(result.reasons, [])
   })
 
   it('detects path traversal with .. components', () => {
     const result = assessToolRisk('read_file', { file_path: '../../../etc/shadow' }, 'none')
     assert.equal(result.level, 'medium')
-    assert.ok(result.reasons.some(r => r.includes('Path traversal')))
-  })
-
-  it('detects destructive bash commands', () => {
-    const result = assessToolRisk('bash', { command: 'rm -rf /tmp/build' }, 'none')
-    assert.equal(result.level, 'high')
-    assert.ok(result.reasons.some(r => r.includes('Destructive')))
+    assert.ok(result.reasons.some(r => r.includes('absolute path')))
   })
 
   it('detects pipe from network', () => {
@@ -58,7 +73,13 @@ describe('assessToolRisk', () => {
   it('returns high for rollback tool', () => {
     const result = assessToolRisk('rollback', { target: 'HEAD~1' }, 'none')
     assert.equal(result.level, 'high')
-    assert.ok(result.reasons.some(r => r.includes('Rollback')))
+    assert.ok(result.reasons.some(r => r.includes('rollback')))
+  })
+
+  it('returns high for undo tool', () => {
+    const result = assessToolRisk('undo', { file_path: 'src/a.ts' }, 'none')
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('rollback')))
   })
 
   it('elevates write_file to medium when combined with doom loop warn', () => {
@@ -74,7 +95,13 @@ describe('assessToolRisk', () => {
   it('returns high for destructive command even with doom loop warn', () => {
     const result = assessToolRisk('bash', { command: 'rm -rf /' }, 'warn')
     assert.equal(result.level, 'high')
-    assert.ok(result.reasons.some(r => r.includes('Destructive')))
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
     assert.ok(result.reasons.some(r => r.includes('doom loop')))
+  })
+
+  it('defaults doomLoopLevel to none when not provided', () => {
+    const result = assessToolRisk('bash', { command: 'ls' })
+    assert.equal(result.level, 'none')
+    assert.deepEqual(result.reasons, [])
   })
 })
