@@ -223,6 +223,21 @@ Rivet uses several local caches to improve DeepSeek prefix-cache behavior and re
 - `.rivet.md` and git status caches are scoped by cwd.
 - Prefix fingerprints include system prompt, tool definitions, and stable volatile context.
 
+### Multi-Session Isolation
+
+Each Rivet TUI launch generates a unique session ID (UUID v4). Session files, checkpoints, and memory are scoped to this ID, so multiple TUI instances can run in parallel without interfering:
+
+- Session JSONL: `~/.rivet/sessions/<sessionId>.jsonl` — unique per launch
+- Checkpoints: `~/.rivet/checkpoint-<sessionId>.json` — unique per launch
+- Checkpoint index: `~/.rivet/checkpoint-index-<cwd-slug>.json` — shared, lists all sessions with checkpoints for a directory
+- Rollback: `/rollback` operates on the current session's checkpoint; legacy cwd-scoped checkpoints are used as fallback
+
+For maximum isolation (separate git working trees), use git worktrees:
+```bash
+git worktree add ../project-feature-a feature-a
+cd ../project-feature-a && rivet
+```
+
 ## Features
 
 - **Prefix cache optimization** — Frozen system prompt + structured message ordering
