@@ -64,11 +64,28 @@ function phaseLabel(tools: ToolCallItem[], isThinking: boolean): string {
   }
 }
 
+function pathBasename(value: unknown): string {
+  return String(value ?? '').replace(/^.*[\/]/, '')
+}
+
+function formatInputValue(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value)
+  return String(value)
+}
+
+function readFileDetail(input: Record<string, unknown>): string {
+  const details = Object.entries(input)
+    .filter(([key]) => key !== 'file_path')
+    .map(([key, value]) => `${key}=${formatInputValue(value)}`)
+
+  return details.length > 0 ? ` · ${truncate(details.join(' '), 60)}` : ''
+}
+
 function toolLabel(name: string, input: Record<string, unknown>): string {
   switch (name) {
-    case 'read_file': return `read ${truncate(String(input.file_path ?? '').replace(/^.*[\/]/, ''), 45)}`
-    case 'write_file': return `write ${truncate(String(input.file_path ?? '').replace(/^.*[\/]/, ''), 45)}`
-    case 'edit_file': return `edit ${truncate(String(input.file_path ?? '').replace(/^.*[\/]/, ''), 45)}`
+    case 'read_file': return `read ${truncate(pathBasename(input.file_path), 45)}${readFileDetail(input)}`
+    case 'write_file': return `write ${truncate(pathBasename(input.file_path), 45)}`
+    case 'edit_file': return `edit ${truncate(pathBasename(input.file_path), 45)}`
     case 'bash': return truncate(String(input.command ?? '').split('\n')[0] ?? '', 55)
     case 'grep': return `grep ${truncate(String(input.pattern ?? ''), 35)}`
     case 'glob': return `glob ${truncate(String(input.pattern ?? ''), 35)}`
