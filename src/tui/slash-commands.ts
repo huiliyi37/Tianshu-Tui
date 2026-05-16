@@ -14,6 +14,7 @@ import { PANEL_LABELS, type Panel } from './cockpit/types.js'
 import type { SummaryState } from './summary-bar.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimStatus } from '../context/claims.js'
+import { loadProjectRules } from '../context/rules-loader.js'
 
 export interface SlashHandlerContext {
   parts: string[]
@@ -328,6 +329,24 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         }
         const lines = conflicted.map(c => `  [${c.id.slice(0, 8)}] ${c.text.slice(0, 80)}`)
         pushStatic(createLogEntry({ type: 'text', content: `Conflicts (${conflicted.length}):\n${lines.join('\n')}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (args === 'reload') {
+        const store = ctx.claimStoreRef.current
+        if (!store) {
+          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          setIsStreaming(false)
+          return true
+        }
+        const proposals = loadProjectRules(process.cwd(), 'project')
+        let loaded = 0
+        for (const p of proposals) {
+          store.propose(p)
+          loaded++
+        }
+        pushStatic(createLogEntry({ type: 'text', content: `Reloaded ${loaded} project rules from .rivet/rules/` }))
         setIsStreaming(false)
         return true
       }
