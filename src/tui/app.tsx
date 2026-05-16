@@ -258,10 +258,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
     dirtyTools.current.clear()
     if (updates.size > 0) {
-      setLiveTools(prev => prev.map(e => {
+      const updated = liveToolsRef.current.map(e => {
         const newContent = updates.get(e.id)
         return newContent ? { ...e, content: newContent } : e
-      }))
+      })
+      liveToolsRef.current = updated
+      setLiveTools(updated)
     }
   }, [])
 
@@ -647,10 +649,31 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
       },
       onError: (error) => {
+        // Clean up stale timers and writer on error
+        if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
+        if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
+        blockWriterRef.current?.flush()
+        blockWriterRef.current = null
+        streamBuf.current = ''
+        setStreamingText('')
+        thinkBuf.current = ''
+        setStreamingThinking('')
+        liveToolsRef.current = []
+        setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: `Error: ${error.message}`, isError: true }))
         setIsStreaming(false)
       },
       onAbort: () => {
+        if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
+        if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
+        blockWriterRef.current?.flush()
+        blockWriterRef.current = null
+        streamBuf.current = ''
+        setStreamingText('')
+        thinkBuf.current = ''
+        setStreamingThinking('')
+        liveToolsRef.current = []
+        setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
         setIsStreaming(false)
       },
