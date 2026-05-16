@@ -508,7 +508,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, [currentSessionId])
 
   useEffect(() => {
-    const banner = gradient(['#00ffcc', '#7b2fff'])('◆ R I V E T')
+    const t = getTheme()
+    const banner = gradient([t.primary, t.secondary])('◆ R I V E T')
     pushStatic(createLogEntry({ type: 'text', content: banner }))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
