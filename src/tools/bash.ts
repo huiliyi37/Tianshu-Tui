@@ -3,7 +3,19 @@ import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 
-const DANGEROUS_PATTERNS = ['git push', 'rm -rf', 'git reset --hard', 'sudo', 'chmod 777']
+const DANGEROUS_PATTERNS: RegExp[] = [
+  /\brm\s+-/,                                    // rm -rf, rm -r, etc.
+  /\bgit\s+push\b[^\n]*\s--force/,               // git push --force / --force-with-lease
+  /\bgit\s+reset\s+--hard/,                       // git reset --hard
+  /\bsudo\b/,                                     // sudo
+  /\bchmod\s+(777|666)\b/,                        // chmod 777 / 666
+  /\bkillall\b/,                                  // killall
+  /\bpkill\b/,                                    // pkill (not pgrep)
+  /\bcurl\b.*\|\s*(sh|bash|zsh|fish)\b/,         // curl | sh
+  /\bwget\b.*\|\s*(sh|bash|zsh|fish)\b/,         // wget | sh
+  /\beval\s+["']/,                                // eval "..."
+  /\beval\s+\$/,                                  // eval $(...)
+]
 
 export const BASH_TOOL: Tool = {
   definition: {
@@ -113,8 +125,8 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
   },
 
   requiresApproval(params: ToolCallParams): boolean {
-    const command = (params.input.command as string).toLowerCase()
-    return DANGEROUS_PATTERNS.some(d => command.includes(d))
+    const command = params.input.command as string
+    return DANGEROUS_PATTERNS.some(pattern => pattern.test(command))
   },
 
   isConcurrencySafe: () => false,
