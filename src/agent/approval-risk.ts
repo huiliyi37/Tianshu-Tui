@@ -1,5 +1,6 @@
 import { isIP } from 'node:net'
 import { evaluateMcpPolicy } from '../mcp/policy.js'
+import type { ContextClaim } from '../context/claims.js'
 
 export type RiskLevel = 'none' | 'low' | 'medium' | 'high'
 
@@ -13,6 +14,7 @@ export function assessToolRisk(
   toolName: string,
   input: Record<string, unknown>,
   doomLoopLevel: 'none' | 'warn' | 'blocked' = 'none',
+  antibodies: ContextClaim[] = [],
 ): RiskAssessment {
   const reasons: string[] = []
   let level: RiskLevel = 'none'
@@ -105,6 +107,16 @@ export function assessToolRisk(
     if (policy.capability === 'write' || policy.capability === 'execute') {
       reasons.push('MCP write-capable tool')
       level = level === 'high' ? 'high' : 'medium'
+    }
+  }
+
+  // Antibody boost: raise risk if a failure_pattern claim's evidence mentions this tool
+  for (const ab of antibodies) {
+    const evidenceSummary = ab.evidence[0]?.summary ?? ''
+    if (evidenceSummary.includes(toolName)) {
+      reasons.push(`antibody match: ${ab.text.slice(0, 60)}`)
+      if (level === 'none') level = 'low'
+      break
     }
   }
 

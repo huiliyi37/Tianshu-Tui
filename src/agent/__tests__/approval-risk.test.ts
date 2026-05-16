@@ -1,6 +1,26 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { assessToolRisk } from '../approval-risk.js'
+import type { ContextClaim } from '../../context/claims.js'
+
+function antibodyClaim(text: string, evidenceSummary?: string): ContextClaim {
+  return {
+    id: 'ab1',
+    kind: 'failure_pattern',
+    scope: 'session',
+    status: 'active',
+    text,
+    confidence: 0.9,
+    fitness: 5,
+    source: { actor: 'tool', sessionId: 's1', turn: 1, eventId: 'e1' },
+    evidence: [{ id: 'ev1', kind: 'tool_result', summary: evidenceSummary ?? text, createdAt: 1 }],
+    counterevidence: [],
+    consumers: [],
+    createdAt: 1,
+    lastUsedAt: 1,
+    tags: ['antibody', 'type_error'],
+  }
+}
 
 describe('assessToolRisk', () => {
   it('returns none for safe read-only tools', () => {
@@ -150,5 +170,42 @@ describe('MCP tool risk', () => {
   it('extracts server ID from MCP tool name', () => {
     const result = assessToolRisk('mcp__context7__resolve-library-id', { query: 'react' })
     assert.ok(result.reasons.some(r => r.includes('context7')), `should mention server name, got: ${result.reasons}`)
+  })
+})
+
+describe('assessToolRisk — antibody boost', () => {
+  it('boosts risk from none to low when antibody evidence matches tool name', () => {
+    const antibodies = [antibodyClaim('[type_error] Fix type annotation.', 'bash: type_error (npx tsc --noEmit)')]
+
+    const result = assessToolRisk('bash', { command: 'npx tsc --noEmit' }, 'none', antibodies)
+
+    assert.equal(result.level, 'low')
+    assert.ok(result.reasons.some(r => r.includes('antibody')))
+  })
+
+  it('no boost when no antibodies match the tool', () => {
+    const antibodies = [antibodyClaim('[module_resolution] Check import path.', 'bash: module_resolution')]
+
+    const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'none', antibodies)
+
+    assert.equal(result.level, 'none')
+    assert.ok(!result.reasons.some(r => r.includes('antibody')))
+  })
+
+  it('preserves higher risk level when antibody matches but doom loop is blocked', () => {
+    const antibodies = [antibodyClaim('[type_error] Fix type.', 'bash: type_error')]
+
+    const result = assessToolRisk('bash', { command: 'echo hi' }, 'blocked', antibodies)
+
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('doom loop')))
+    assert.ok(result.reasons.some(r => r.includes('antibody')))
+  })
+
+  it('works with default empty antibodies', () => {
+    const result = assessToolRisk('bash', { command: 'ls' })
+
+    assert.equal(result.level, 'none')
+    assert.ok(!result.reasons.some(r => r.includes('antibody')))
   })
 })
