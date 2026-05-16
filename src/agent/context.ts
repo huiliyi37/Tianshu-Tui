@@ -109,6 +109,18 @@ export class SessionContext {
     return total > 0 ? latest.cacheRead / total : null
   }
 
+  getRecentTurnHitRate(lastN: number): number | null {
+    const slice = this.state.turnCacheHistory.slice(-lastN)
+    if (slice.length === 0) return null
+    let totalRead = 0
+    let totalCache = 0
+    for (const t of slice) {
+      totalRead += t.cacheRead
+      totalCache += t.cacheRead + t.cacheCreation
+    }
+    return totalCache > 0 ? totalRead / totalCache : null
+  }
+
   getMessages(): Message[] {
     return this.state.messages
   }

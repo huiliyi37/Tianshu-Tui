@@ -84,3 +84,56 @@ it('getLatestTurnHitRate returns latest turn cache read ratio', () => {
 
   assert.equal(ctx.getLatestTurnHitRate(), 0.75)
 })
+
+describe('getRecentTurnHitRate', () => {
+  it('returns null with no turn cache snapshots', () => {
+    const ctx = new SessionContext()
+    assert.equal(ctx.getRecentTurnHitRate(3), null)
+  })
+
+  it('returns average over available turns when fewer than requested', () => {
+    const ctx = new SessionContext()
+    ctx.recordTurnCache(1, {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_read_input_tokens: 80,
+      cache_creation_input_tokens: 20,
+    })
+    assert.equal(ctx.getRecentTurnHitRate(3), 0.8)
+  })
+
+  it('returns average over last N turns', () => {
+    const ctx = new SessionContext()
+    ctx.recordTurnCache(1, {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_read_input_tokens: 90,
+      cache_creation_input_tokens: 10,
+    })
+    ctx.recordTurnCache(2, {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_read_input_tokens: 30,
+      cache_creation_input_tokens: 70,
+    })
+    ctx.recordTurnCache(3, {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_read_input_tokens: 60,
+      cache_creation_input_tokens: 40,
+    })
+    // Last 2 turns aggregated: (30+60) / ((30+70)+(60+40)) = 90/200 = 0.45
+    assert.equal(ctx.getRecentTurnHitRate(2), 0.45)
+  })
+
+  it('returns null when all turns have zero cache counters', () => {
+    const ctx = new SessionContext()
+    ctx.recordTurnCache(1, {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    })
+    assert.equal(ctx.getRecentTurnHitRate(3), null)
+  })
+})

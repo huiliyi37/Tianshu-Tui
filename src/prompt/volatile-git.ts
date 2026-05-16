@@ -30,6 +30,20 @@ async function loadGitStatus(cwd: string): Promise<string | undefined> {
   }
 }
 
+const MAX_CACHED_CWDS = 50
+
+function trimCache<V>(map: Map<string, { value: V; timestamp: number }>, ttlMs: number): void {
+  if (map.size <= MAX_CACHED_CWDS) return
+  const now = Date.now()
+  for (const [key, val] of map) {
+    if (now - val.timestamp > ttlMs) map.delete(key)
+  }
+  while (map.size > MAX_CACHED_CWDS) {
+    const [key] = map.keys()
+    map.delete(key!)
+  }
+}
+
 export function createGitStatusCache(options: GitStatusCacheOptions) {
   const values = new Map<string, { value: string | undefined; timestamp: number }>()
   const refreshing = new Map<string, Promise<void>>()
@@ -44,11 +58,13 @@ export function createGitStatusCache(options: GitStatusCacheOptions) {
       if (!isFresh(cwd) && !refreshing.has(cwd)) {
         void this.refresh(cwd)
       }
+      trimCache(values, options.ttlMs)
       return values.get(cwd)?.value
     },
 
     prime(cwd: string, nextValue: string | undefined): void {
       values.set(cwd, { value: nextValue, timestamp: options.now() })
+      trimCache(values, options.ttlMs)
     },
 
     async refresh(cwd: string): Promise<void> {
@@ -56,6 +72,7 @@ export function createGitStatusCache(options: GitStatusCacheOptions) {
       if (existing) return existing
       const work = options.load(cwd).then(nextValue => {
         values.set(cwd, { value: nextValue, timestamp: options.now() })
+        trimCache(values, options.ttlMs)
       }).finally(() => {
         refreshing.delete(cwd)
       })

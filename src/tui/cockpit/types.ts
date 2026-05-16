@@ -92,6 +92,7 @@ export interface CockpitSnapshot {
     cost: number
     routingReason: string | null
     perTurnHitRate: number | null
+    recentTurnHitRate: number | null
     prewarmHits: number
     prewarmMisses: number
     prewarmHitRate: number

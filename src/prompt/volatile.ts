@@ -33,6 +33,19 @@ export interface VolatileContext {
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
 const RIVET_MD_CACHE_TTL_MS = 30_000 // 30 seconds
+const RIVET_MD_CACHE_MAX = 50
+
+function trimCache(): void {
+  if (rivetMdCache.size <= RIVET_MD_CACHE_MAX) return
+  const now = Date.now()
+  for (const [key, val] of rivetMdCache) {
+    if (now - val.timestamp > RIVET_MD_CACHE_TTL_MS) rivetMdCache.delete(key)
+  }
+  while (rivetMdCache.size > RIVET_MD_CACHE_MAX) {
+    const [key] = rivetMdCache.keys()
+    rivetMdCache.delete(key!)
+  }
+}
 
 function readRivetMd(cwd: string): string | undefined {
   const cached = rivetMdCache.get(cwd)
@@ -45,10 +58,12 @@ function readRivetMd(cwd: string): string | undefined {
     if (existsSync(path)) {
       const value = readFileSync(path, 'utf-8')
       rivetMdCache.set(cwd, { value, timestamp: Date.now() })
+      trimCache()
       return value
     }
   } catch { /* ignore */ }
   rivetMdCache.set(cwd, { value: undefined, timestamp: Date.now() })
+  trimCache()
   return undefined
 }
 

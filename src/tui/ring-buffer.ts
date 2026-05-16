@@ -7,18 +7,37 @@ export interface RingBuffer<T> {
 }
 
 export function createRingBuffer<T>(cap: number): RingBuffer<T> {
-  const buf: T[] = []
+  const buf: T[] = new Array(cap)
+  let head = 0
+  let count = 0
+
   return {
     push(item: T) {
-      if (buf.length >= cap) buf.shift()
-      buf.push(item)
+      buf[(head + count) % cap] = item
+      if (count < cap) count++
+      else head = (head + 1) % cap
     },
-    items() { return [...buf] },
-    clear() { buf.length = 0 },
+    items() {
+      const result: T[] = new Array(count)
+      for (let i = 0; i < count; i++) {
+        result[i] = buf[(head + i) % cap]!
+      }
+      return result
+    },
+    clear() {
+      head = 0
+      count = 0
+    },
     drain(n: number): T[] {
-      const count = Math.min(n, buf.length)
-      return buf.splice(0, count)
+      const drained = Math.min(n, count)
+      const result: T[] = new Array(drained)
+      for (let i = 0; i < drained; i++) {
+        result[i] = buf[(head + i) % cap]!
+      }
+      head = (head + drained) % cap
+      count -= drained
+      return result
     },
-    get size() { return buf.length },
+    get size() { return count },
   }
 }

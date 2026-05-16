@@ -13,6 +13,7 @@ export interface ModelPanelProps {
   cost: number
   routingReason?: string | null
   perTurnHitRate?: number | null
+  recentTurnHitRate?: number | null
   prewarmHits?: number
   prewarmMisses?: number
   prewarmHitRate?: number
@@ -21,7 +22,7 @@ export interface ModelPanelProps {
 
 export const ModelPanel = memo(function ModelPanel({
   model, cacheHitRate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost, routingReason,
-  perTurnHitRate = null, prewarmHits = 0, prewarmMisses = 0, prewarmHitRate = 0, cacheDiagnostic = null,
+  perTurnHitRate = null, recentTurnHitRate = null, prewarmHits = 0, prewarmMisses = 0, prewarmHitRate = 0, cacheDiagnostic = null,
 }: ModelPanelProps) {
   const theme = getTheme()
 
@@ -58,10 +59,19 @@ export const ModelPanel = memo(function ModelPanel({
         <Text>
           <Text color={theme.dim}>Turn cache: </Text>
           <Text color={theme.contextColor(1 - perTurnHitRate)}>{Math.round(perTurnHitRate * 100)}%</Text>
+          {recentTurnHitRate !== null && (
+            <>
+              <Text color={theme.dim}> │ Recent 3: </Text>
+              <Text color={theme.contextColor(1 - recentTurnHitRate)}>{Math.round(recentTurnHitRate * 100)}%</Text>
+            </>
+          )}
           <Text color={theme.dim}> │ Prewarm: </Text>
           <Text>{prewarmHits}/{prewarmHits + prewarmMisses}</Text>
           <Text color={theme.dim}> ({Math.round(prewarmHitRate * 100)}%)</Text>
         </Text>
+      )}
+      {perTurnHitRate !== null && perTurnHitRate < 0.4 && (
+        <Text color={theme.warning}>▼ Cache degraded — compaction or prefix drift may have reset cache</Text>
       )}
       {cacheDiagnostic && <Text color={theme.warning}>{cacheDiagnostic}</Text>}
       <Text>

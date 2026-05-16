@@ -8,6 +8,19 @@ import { persistRawOutput } from './output-store.js'
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
 const GITIGNORE_CACHE_TTL = 60_000 // 60 seconds
+const GITIGNORE_CACHE_MAX = 50
+
+function trimGitignoreCache(): void {
+  if (gitignoreCache.size <= GITIGNORE_CACHE_MAX) return
+  const now = Date.now()
+  for (const [key, val] of gitignoreCache) {
+    if (now - val.ts > GITIGNORE_CACHE_TTL) gitignoreCache.delete(key)
+  }
+  while (gitignoreCache.size > GITIGNORE_CACHE_MAX) {
+    const [key] = gitignoreCache.keys()
+    gitignoreCache.delete(key!)
+  }
+}
 
 function getGitignoreFilter(cwd: string): GitignoreFilter {
   const cached = gitignoreCache.get(cwd)
@@ -16,6 +29,7 @@ function getGitignoreFilter(cwd: string): GitignoreFilter {
   }
   const filter = new GitignoreFilter(cwd)
   gitignoreCache.set(cwd, { filter, ts: Date.now() })
+  trimGitignoreCache()
   return filter
 }
 

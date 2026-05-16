@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { assertValidSessionId } from '../validation.js'
 import {
@@ -34,6 +34,8 @@ export class ContextClaimStore {
 
   readonly sessionId: string
 
+  private cachedEvents: ContextClaimEvent[] | null = null
+  private lastFileSize: number = -1
   private cachedClaims: ContextClaim[] | null = null
   private lastProcessedLineCount: number = 0
 
@@ -46,6 +48,9 @@ export class ContextClaimStore {
 
   appendEvent(event: ContextClaimEvent): void {
     appendFileSync(this.path, JSON.stringify(event) + '\n', 'utf-8')
+    if (this.cachedEvents) {
+      this.cachedEvents.push(event)
+    }
   }
 
   propose(proposal: ClaimProposal): ContextClaim {
@@ -97,15 +102,15 @@ export class ContextClaimStore {
   boostFitness(id: string, delta: number, cap: number): ContextClaim | null {
     const claim = this.listClaims().find(c => c.id === id)
     if (!claim) return null
-    claim.fitness = Math.min(claim.fitness + delta, cap)
+    const newFitness = Math.min(claim.fitness + delta, cap)
     this.appendEvent({
       type: 'claim_boosted',
       eventId: `${id}:boost:${Date.now()}`,
       createdAt: Date.now(),
       claimId: id,
-      fitness: claim.fitness,
+      fitness: newFitness,
     })
-    return claim
+    return { ...claim, fitness: newFitness }
   }
 
   listClaims(filter: ClaimFilter = {}): ContextClaim[] {
@@ -189,7 +194,15 @@ export class ContextClaimStore {
 
   private readEvents(): ContextClaimEvent[] {
     if (!existsSync(this.path)) return []
-    return readFileSync(this.path, 'utf-8')
+    if (this.cachedEvents) {
+      // Check if file was externally modified by comparing byte size.
+      // This avoids the readFileSync in the common case (all events flow through appendEvent).
+      const size = statSync(this.path).size
+      if (size === this.lastFileSize) return this.cachedEvents
+    }
+    const content = readFileSync(this.path, 'utf-8')
+    this.lastFileSize = Buffer.byteLength(content)
+    const events = content
       .split('\n')
       .filter(line => line.trim().length > 0)
       .flatMap(line => {
@@ -199,6 +212,8 @@ export class ContextClaimStore {
           return []
         }
       })
+    this.cachedEvents = events
+    return events
   }
 
   private projectClaims(): ContextClaim[] {

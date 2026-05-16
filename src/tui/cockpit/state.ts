@@ -142,6 +142,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       cost,
       routingReason: null,  // Will be updated from agent state in future
       perTurnHitRate: session.getLatestTurnHitRate(),
+      recentTurnHitRate: session.getRecentTurnHitRate(3),
       prewarmHits: prewarmStats.hits,
       prewarmMisses: prewarmStats.misses,
       prewarmHitRate: prewarmStats.hitRate,
