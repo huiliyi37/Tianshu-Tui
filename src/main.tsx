@@ -56,15 +56,11 @@ function loadConfig(): Config {
 
 function getOrCreateSessionId(): string {
   const dir = join(homedir(), '.rivet')
-  const idFile = join(dir, 'session-id.txt')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-  if (existsSync(idFile)) {
-    const id = readFileSync(idFile, 'utf-8').trim()
-    if (id) return id
-  }
   const id = randomUUID()
+  const idFile = join(dir, 'session-id.txt')
   writeFileSync(idFile, id)
   return id
 }
