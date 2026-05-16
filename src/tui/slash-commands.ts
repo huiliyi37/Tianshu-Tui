@@ -340,13 +340,18 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           setIsStreaming(false)
           return true
         }
-        const proposals = loadProjectRules(process.cwd(), 'project')
+        // Stale existing project_rule claims so deleted rule files are cleaned up
+        const existing = store.listClaims({ kind: ['project_rule'] })
+        for (const c of existing) {
+          store.updateClaimStatus(c.id, 'stale', 'reload: rules directory refreshed')
+        }
+        const proposals = loadProjectRules(process.cwd())
         let loaded = 0
         for (const p of proposals) {
           store.propose(p)
           loaded++
         }
-        pushStatic(createLogEntry({ type: 'text', content: `Reloaded ${loaded} project rules from .rivet/rules/` }))
+        pushStatic(createLogEntry({ type: 'text', content: `Reloaded ${loaded} project rules from .rivet/rules/ (${existing.length} previous rules cleared)` }))
         setIsStreaming(false)
         return true
       }
