@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-05-16 — Wave 8 + Evolutionary Context Fabric Phase 2 + Phase 3 + Phase 4
+## 2026-05-16 — Wave 8 + Evolutionary Context Fabric Phase 2–4B
 
 ### Added — Wave 8 Context Fabric Phase 2
 - **Claim Extractor** (`src/context/claim-extractor.ts`) — Automatic claim extraction from tool results:
@@ -35,7 +35,14 @@
 - **/context reload** — Hot-reload project rules from `.rivet/rules/` at runtime
 - **Goal loop rules** — Autonomous `--goal` mode also loads project rules on startup
 
-### Changed
+### Added — Evolutionary Context Fabric Phase 4B
+- **Recall tool rewrite** (`src/tools/recall.ts`) — Searches claim store by keyword (substring match), kind filter, limit param; replaces old PersistentStore-based recall
+- **Claim export/import** (`src/context/claim-export.ts`) — `exportDurableClaims()` writes durable claims to JSON; `importClaims()` reads with 0.8x confidence decay and 'imported' tag
+- **/context export** — Exports durable claims to `~/.rivet/exports/<timestamp>.json`
+- **/context import** — Imports claims from JSON file with confidence decay
+
+### Removed
+- **PersistentStore** (`src/context/persistent-store.ts`) — Dead code; recall tool now uses ContextClaimStore
 - `src/context/promotion.ts` — `evaluatePromotion()` now handles both `active → durable_candidate` and `durable_candidate → durable`
 - `src/agent/session-persist.ts` — Added `loadPreviousDurableClaims()` and `injectDurableClaims()` methods
 - `src/agent/loop.ts` — Wired antibody generation, conflict detection, file observation dedup, and antibody injection into `assessToolRisk`
