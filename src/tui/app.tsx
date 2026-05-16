@@ -6,6 +6,10 @@ import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
 import { ThinkingCollapser } from './thinking.js'
 import { ToolCard } from './tool-card.js'
+import { UserMessage } from './user-message.js'
+import { SystemMessage } from './system-message.js'
+import { ToolGroup } from './tool-group.js'
+import { groupLogs } from './group-logs.js'
 import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
 import { SummaryBar, type SummaryState } from './summary-bar.js'
 import { PhaseTracker } from './phase-tracker.js'
@@ -59,12 +63,20 @@ const TOOL_FLUSH_MS = 120
 
 function renderStaticEntry(entry: LogEntry, verbose: boolean) {
   switch (entry.type) {
+    case 'user_message':
+      return <UserMessage key={entry.id} content={entry.content} />
+    case 'assistant_message':
+      return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
     case 'tool':
       return <ToolCard key={entry.id} name={entry.toolName ?? ''} result={entry.content} isError={entry.isError} verbose={verbose} rawPath={entry.rawPath} />
+    case 'tool_group':
+      return <ToolGroup key={entry.id} tools={entry.children ?? []} verbose={verbose} />
     case 'checkpoint':
       return <Box key={entry.id} paddingX={2}><Text dimColor color="yellow">⚑ {entry.content}</Text></Box>
     case 'evidence':
       return <Box key={entry.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{entry.content}</Text></Box>
+    case 'system':
+      return <SystemMessage key={entry.id} content={entry.content} isError={entry.isError} />
     default:
       return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
   }
@@ -365,7 +377,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
 
     const promptInput = resolveAppPromptInput(userInput, process.cwd())
-    pushStatic(createLogEntry({ type: 'user_message', content: `> ${userInput}` }))
+    pushStatic(createLogEntry({ type: 'user_message', content: userInput }))
 
     await agent.run(promptInput, {
       onTextDelta: (text) => {
@@ -532,7 +544,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   return (
     <>
-      <Static items={staticItems}>
+      <Static items={groupLogs(staticItems)}>
         {(item) => renderStaticEntry(item, verbose)}
       </Static>
       <Box flexDirection="column">

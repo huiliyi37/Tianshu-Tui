@@ -15,7 +15,7 @@ export function replayMessagesToLogEntries(messages: Message[]): ReplayResult {
   for (const msg of messages) {
     if (msg.role === 'user' && typeof msg.content === 'string') {
       turnCount++
-      entries.push(createLogEntry({ type: 'user_message', content: `> ${msg.content}` }))
+      entries.push(createLogEntry({ type: 'user_message', content: msg.content }))
       continue
     }
 

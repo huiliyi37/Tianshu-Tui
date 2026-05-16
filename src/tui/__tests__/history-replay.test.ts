@@ -17,7 +17,7 @@ describe('replayMessagesToLogEntries', () => {
     ]
     const result = replayMessagesToLogEntries(messages)
     assert.equal(result.entries.length, 1)
-    assert.equal(result.entries[0]!.content, '> hello')
+    assert.equal(result.entries[0]!.content, 'hello')
     assert.equal(result.turnCount, 1)
   })
 
