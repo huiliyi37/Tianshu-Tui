@@ -77,32 +77,39 @@ export class McpManager {
       const server = await this._connectServer(serverId, serverConfig)
       this.connections.set(serverId, server)
 
-      const mcpTools = await this._discoverTools(serverId, server)
+      try {
+        const mcpTools = await this._discoverTools(serverId, server)
 
-      const rivetTools = mcpTools.map(mcpDef => {
-        const perToolCallFn = async (input: Record<string, unknown>) => {
-          if (!this.connections.has(serverId)) {
-            throw new Error(`MCP server "${serverId}" is disconnected`)
+        const rivetTools = mcpTools.map(mcpDef => {
+          const perToolCallFn = async (input: Record<string, unknown>) => {
+            if (!this.connections.has(serverId)) {
+              throw new Error(`MCP server "${serverId}" is disconnected`)
+            }
+            const result = await server.client.callTool({ name: mcpDef.name, arguments: input })
+            const textContent = (result.content as Array<{ type: string; text?: string }>)
+              .filter((c): c is { type: 'text'; text: string } =>
+                c.type === 'text' && typeof c.text === 'string')
+            return {
+              content: textContent,
+              isError: result.isError as boolean | undefined,
+            }
           }
-          const result = await server.client.callTool({ name: mcpDef.name, arguments: input })
-          const textContent = (result.content as Array<{ type: string; text?: string }>)
-            .filter((c): c is { type: 'text'; text: string } =>
-              c.type === 'text' && typeof c.text === 'string')
-          return {
-            content: textContent,
-            isError: result.isError as boolean | undefined,
-          }
-        }
-        return createMcpToolWrapper(serverId, mcpDef, perToolCallFn)
-      })
+          return createMcpToolWrapper(serverId, mcpDef, perToolCallFn)
+        })
 
-      this.tools.push(...rivetTools)
-      this.states.set(serverId, {
-        serverId,
-        status: 'connected',
-        toolCount: mcpTools.length,
-        lastConnectedAt: Date.now(),
-      })
+        this.tools.push(...rivetTools)
+        this.states.set(serverId, {
+          serverId,
+          status: 'connected',
+          toolCount: mcpTools.length,
+          lastConnectedAt: Date.now(),
+        })
+      } catch (err) {
+        // Tool discovery failed — close the transport that was just opened
+        try { await server.transport.close() } catch { /* best-effort */ }
+        this.connections.delete(serverId)
+        throw err
+      }
     } catch (err) {
       this.states.set(serverId, {
         serverId,
