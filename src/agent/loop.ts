@@ -459,10 +459,30 @@ export class AgentLoop {
           },
         }
 
-        await this.config.client.stream(request, streamCallbacks, this.abortController.signal)
+        let streamError: Error | null = null
+        try {
+          await this.config.client.stream(request, streamCallbacks, this.abortController.signal)
+        } catch (err) {
+          // On stream error, estimate usage from collected content before propagating
+          const estimatedOut = this.streamedText.length + collectedBlocks.reduce((s, b) => s + (b.type === 'text' ? (b as { text: string }).text.length : 0), 0)
+          if (estimatedOut > 0) {
+            this.session.addUsage({ output_tokens: Math.ceil(estimatedOut / 4) })
+          }
+          streamError = err as Error
+        }
 
         if (this.abortController.signal.aborted) {
+          // Estimate output usage from what was streamed before abort
+          const estimatedOut = this.streamedText.length
+          if (estimatedOut > 0) {
+            this.session.addUsage({ output_tokens: Math.ceil(estimatedOut / 4) })
+          }
           callbacks.onAbort()
+          return
+        }
+
+        if (streamError) {
+          callbacks.onError(streamError)
           return
         }
 
@@ -485,6 +505,7 @@ export class AgentLoop {
               traceStore: this.traceStore,
               repairHintTracker: this.repairHintTracker,
               repairPipeline: this.repairPipeline,
+              abortSignal: this.abortController.signal,
               importGraph: this.importGraph,
               lastConflictCheckCount: this.lastConflictCheckCount,
               trajectory: this.trajectory,

@@ -387,6 +387,8 @@ export class ApiClient implements StreamClient {
 
               case 'error': {
                 callbacks.onError(new Error(data.error?.message ?? 'Unknown API error'))
+                // Terminate the stream on API error to prevent corrupted state
+                reader.cancel().catch(() => {})
                 break
               }
             }

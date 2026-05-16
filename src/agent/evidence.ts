@@ -13,6 +13,8 @@ export interface EvidenceState {
   impactedTests: Set<string>
 }
 
+const MAX_VERIFICATIONS = 50
+
 export class EvidenceTracker {
   private state: EvidenceState
 
@@ -38,6 +40,9 @@ export class EvidenceTracker {
 
   trackVerification(result: VerificationMetadata): void {
     this.state.verifications.push(result)
+    if (this.state.verifications.length > MAX_VERIFICATIONS) {
+      this.state.verifications = this.state.verifications.slice(-MAX_VERIFICATIONS)
+    }
     this.refreshDeliveryStatus()
   }
 

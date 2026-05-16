@@ -11,11 +11,16 @@ export interface RoutingEvent {
   verificationOutcome?: 'passed' | 'failed' | 'blocked'
 }
 
+const MAX_ROUTING_EVENTS = 100
+
 export class RoutingMetricsCollector {
   private events: RoutingEvent[] = []
 
   record(event: RoutingEvent): void {
     this.events.push(event)
+    if (this.events.length > MAX_ROUTING_EVENTS) {
+      this.events = this.events.slice(-MAX_ROUTING_EVENTS)
+    }
   }
 
   getEvents(): RoutingEvent[] {

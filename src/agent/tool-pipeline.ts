@@ -27,6 +27,27 @@ import { PrewarmCache } from './prewarm.js'
 import { compactThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 
+const TOOL_TIMEOUT_MS = 120_000 // 2 minutes
+
+function withToolTimeout<T>(
+  promise: Promise<T>,
+  toolName: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Tool ${toolName} timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)
+    const onAbort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')) }
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    promise.then(
+      (v) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); resolve(v) },
+      (e) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(e) },
+    )
+  })
+}
+
 export interface ToolPipelineDeps {
   config: AgentConfig
   cwd: string
@@ -43,6 +64,7 @@ export interface ToolPipelineDeps {
   latestRisk: import('./approval-risk.js').RiskAssessment
   sessionTurnCount: number
   sessionId: string | undefined
+  abortSignal?: AbortSignal
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
   getInterventionLevel?(): import('./prediction-error.js').InterventionLevel
   recordPrediction?(correct: boolean): void
@@ -224,7 +246,11 @@ export async function executeToolUse(
             }
           } catch { /* fall through */ }
         }
-        const r = await deps.config.toolRegistry.execute(tu.name, params)
+        const r = await withToolTimeout(
+          deps.config.toolRegistry.execute(tu.name, params),
+          tu.name,
+          deps.abortSignal,
+        )
         rawToolResult = r
         return { content: r.content, isError: r.isError }
       },
