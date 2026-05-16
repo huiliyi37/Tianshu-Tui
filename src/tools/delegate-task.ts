@@ -72,16 +72,27 @@ export function createDelegateTaskTool(
           const createdAt = Date.now()
           for (const result of run.results) {
             if (result.status !== 'passed') continue
+            const evidencePaths = result.changedFiles.slice(0, 3)
             for (const finding of result.findings) {
               const claimText = typeof finding === 'string' ? finding : finding.claim
+              const confidence = typeof finding === 'string' ? 0.7
+                : finding.confidence === 'high' ? 0.85
+                : finding.confidence === 'medium' ? 0.7
+                : 0.55
               const proposal: ClaimProposal = {
                 kind: 'worker_finding',
                 scope: 'session',
                 text: claimText,
-                confidence: 0.75,
-                fitness: 4,
+                confidence,
+                fitness: confidence >= 0.85 ? 5 : confidence >= 0.7 ? 3 : 2,
                 source: { actor: 'worker', sessionId: sid, turn: 0, eventId: `${params.toolUseId}:worker` },
-                evidence: [{ id: `${params.toolUseId}:finding`, kind: 'worker', summary: claimText, createdAt }],
+                evidence: [{
+                  id: `${params.toolUseId}:finding`,
+                  kind: 'worker',
+                  summary: typeof finding === 'string' ? finding : finding.evidence,
+                  path: evidencePaths[0],
+                  createdAt,
+                }],
                 createdAt,
                 tags: ['worker', result.workOrderId],
               }

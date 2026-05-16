@@ -194,20 +194,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 
   const [claimStore] = useState(() => {
     const store = persist.createClaimStore()
-    const durableClaims = persist.loadPreviousDurableClaims()
-    for (const claim of durableClaims) {
-      store.propose({
-        kind: claim.kind,
-        scope: claim.scope,
-        text: claim.text,
-        confidence: claim.confidence * 0.9,
-        fitness: claim.fitness,
-        source: { ...claim.source, eventId: `resume:${claim.id}` },
-        evidence: claim.evidence,
-        createdAt: Date.now(),
-        tags: [...claim.tags, 'resumed'],
-      })
-    }
+    persist.injectDurableClaims(store)
     return store
   })
 
@@ -477,20 +464,7 @@ async function main() {
     const sessionId = randomUUID()
     const persist = new SessionPersist(sessionId)
     const claimStore = persist.createClaimStore()
-    const durableClaims = persist.loadPreviousDurableClaims()
-    for (const claim of durableClaims) {
-      claimStore.propose({
-        kind: claim.kind,
-        scope: claim.scope,
-        text: claim.text,
-        confidence: claim.confidence * 0.9,
-        fitness: claim.fitness,
-        source: { ...claim.source, eventId: `resume:${claim.id}` },
-        evidence: claim.evidence,
-        createdAt: Date.now(),
-        tags: [...claim.tags, 'resumed'],
-      })
-    }
+    persist.injectDurableClaims(claimStore)
 
     const result = await runGoalLoop({
       goal: parsed.goal,

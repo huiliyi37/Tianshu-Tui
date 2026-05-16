@@ -119,6 +119,24 @@ export class SessionPersist {
     return ContextClaimStore.loadDurableClaims(SESSION_DIR, previous)
   }
 
+  /** Inject durable claims from previous session into a claim store with confidence decay. */
+  injectDurableClaims(store: ContextClaimStore): void {
+    const durableClaims = this.loadPreviousDurableClaims()
+    for (const claim of durableClaims) {
+      store.propose({
+        kind: claim.kind,
+        scope: claim.scope,
+        text: claim.text,
+        confidence: claim.confidence * 0.9,
+        fitness: claim.fitness,
+        source: { ...claim.source, eventId: `resume:${claim.id}` },
+        evidence: claim.evidence,
+        createdAt: Date.now(),
+        tags: [...claim.tags, 'resumed'],
+      })
+    }
+  }
+
   /** List all session files */
   static listSessions(): string[] {
     ensureDir(SESSION_DIR)
