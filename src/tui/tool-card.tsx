@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo, useMemo } from 'react'
 import { getTheme } from './theme.js'
+import { getToolFamily } from './tool-family.js'
 
 const MAX_COLLAPSED_LINES = 8
 
@@ -33,11 +34,12 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
   }, [result, limit])
 
   const borderColor = isError ? theme.error : theme.toolColor(name)
+  const family = getToolFamily(name)
 
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={0}>
       <Text bold color={borderColor}>
-        ── {name} ──{isStreaming ? ' …' : ''}
+        {family.glyph} {family.verb}{isStreaming ? ' …' : ''}
         {truncated > 0 && <Text dimColor> {truncated} lines hidden</Text>}
       </Text>
       <Text>{displayText}</Text>
