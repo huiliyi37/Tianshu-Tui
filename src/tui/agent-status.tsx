@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink'
 import { memo, useState, useEffect } from 'react'
+import { getTheme } from './theme.js'
 
 export interface ToolCallItem {
   id: string
@@ -91,6 +92,7 @@ export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tok
 
   if (!isStreaming) return null
 
+  const theme = getTheme()
   const now = Date.now()
   const elapsed = now - startMs
   const spinner = SPINNER_FRAMES[tick % SPINNER_FRAMES.length]!
@@ -110,7 +112,7 @@ export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tok
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
-        <Text bold color="cyan">{spinner} {phase}</Text>
+        <Text bold color={theme.primary}>{spinner} {phase}</Text>
         <Text dimColor> ({parts.join(' · ')})</Text>
       </Box>
       {visible.length > 0 && (

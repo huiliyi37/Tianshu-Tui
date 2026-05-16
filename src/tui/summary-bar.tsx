@@ -35,8 +35,9 @@ export function brailleSparkline(values: number[]): string {
   if (values.length === 0) return ''
 
   const BRAILLE_BASE = 0x2800
-  const leftDots = [0, 1, 2, 6]
-  const rightDots = [3, 4, 5, 7]
+  // Standard braille encoding: bits 0-3 = left column (dot 1-4, bottom→top), bits 4-7 = right column (dot 5-8, bottom→top)
+  const leftDots = [0, 1, 2, 3]   // dot 1,2,3,4
+  const rightDots = [4, 5, 6, 7]  // dot 5,6,7,8
 
   const chars: string[] = []
   for (let i = 0; i < values.length; i += 2) {
@@ -102,9 +103,9 @@ export const SummaryBar = memo(function SummaryBar({ state }: { state: SummarySt
         {state.totalSteps > 0 && <Text dimColor> ({state.stepCount}/{state.totalSteps})</Text>}
         <Text color={theme.dim}> │ </Text>
         <Text color={ctxColor} bold={state.contextPct >= 0.95}>{contextBar(state.contextPct)} {Math.round(state.contextPct * 100)}%</Text>
-{state.tokenHistory && state.tokenHistory.length > 1 && (
-  <Text color={theme.dim}> {brailleSparkline(state.tokenHistory)}</Text>
-)}
+        {state.tokenHistory && state.tokenHistory.length > 1 && (
+          <Text color={theme.dim}> {brailleSparkline(state.tokenHistory)}</Text>
+        )}
         <Text color={theme.dim}> │ </Text>
         <Text dimColor>{formatElapsed(state.elapsedMs)}</Text>
       </Text>
