@@ -1,4 +1,5 @@
 import type { MessageRequest, ContentBlock, Usage } from './types.js'
+import type { StreamClient } from './stream-client.js'
 import { SSEParser } from './sse.js'
 
 class ApiError extends Error {
@@ -182,7 +183,7 @@ async function withRetry<T>(
   throw lastError
 }
 
-export class ApiClient {
+export class ApiClient implements StreamClient {
   constructor(private config: ClientConfig) {}
 
   private stripUnsupported(request: MessageRequest): MessageRequest {

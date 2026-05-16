@@ -2,14 +2,14 @@
   "version": 1,
   "created_at": "2026-05-15T11:15:57.947Z",
   "lifetime": {
-    "total_tokens_estimated": 10526962,
-    "total_reads": 4332,
-    "total_writes": 4263,
-    "total_sessions": 50,
-    "anatomy_hits": 3204,
-    "anatomy_misses": 785,
-    "repeated_reads_blocked": 3276,
-    "estimated_savings_vs_bare_cli": 15530971
+    "total_tokens_estimated": 10581404,
+    "total_reads": 4372,
+    "total_writes": 4266,
+    "total_sessions": 51,
+    "anatomy_hits": 3220,
+    "anatomy_misses": 792,
+    "repeated_reads_blocked": 3277,
+    "estimated_savings_vs_bare_cli": 15540293
   },
   "sessions": [
     {
@@ -51074,6 +51074,358 @@
         "writes_count": 2,
         "repeated_reads_blocked": 1,
         "anatomy_lookups": 11
+      }
+    },
+    {
+      "id": "session-2026-05-16-0245",
+      "started": "2026-05-16T18:45:15.586Z",
+      "ended": "2026-05-16T19:05:38.405Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/block-stream-writer.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/history-replay.ts",
+          "tokens_estimated": 428,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts",
+          "tokens_estimated": 2144,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx",
+          "tokens_estimated": 7134,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts",
+          "tokens_estimated": 5942,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx",
+          "tokens_estimated": 6122,
+          "was_repeated": true,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/history-replay.test.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/block-stream-writer.test.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-result-truncate.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/prewarm.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts",
+          "tokens_estimated": 4371,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/context.ts",
+          "tokens_estimated": 1837,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/prewarm-file.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-pipeline.test.ts",
+          "tokens_estimated": 1116,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/loop.test.ts",
+          "tokens_estimated": 5646,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-result-truncate.test.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/prewarm-file.test.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/prewarm.test.ts",
+          "tokens_estimated": 443,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/context.test.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/cache-diagnostic.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/cockpit/__tests__/panels.test.ts",
+          "tokens_estimated": 1977,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/cockpit/state.ts",
+          "tokens_estimated": 1533,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/cockpit/types.ts",
+          "tokens_estimated": 724,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/cockpit/model-panel.tsx",
+          "tokens_estimated": 526,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/cockpit/__tests__/state.test.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts",
+          "tokens_estimated": 485,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/__tests__/cache-diagnostic.test.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/provider.ts",
+          "tokens_estimated": 459,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/sse.ts",
+          "tokens_estimated": 602,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/provider-profile.ts",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/client.ts",
+          "tokens_estimated": 3729,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/deepseek.ts",
+          "tokens_estimated": 572,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/types.ts",
+          "tokens_estimated": 552,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md",
+          "tokens_estimated": 0,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/.omc/prd.json",
+          "tokens_estimated": 446,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/reference_rivet-codebase-index.md",
+          "tokens_estimated": 1335,
+          "action": "create"
+        },
+        {
+          "file": "/Users/banxia/.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/MEMORY.md",
+          "tokens_estimated": 80,
+          "action": "edit"
+        },
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/codebase-index.md",
+          "tokens_estimated": 3114,
+          "action": "create"
+        }
+      ],
+      "totals": {
+        "input_tokens_estimated": 46788,
+        "output_tokens_estimated": 4529,
+        "reads_count": 35,
+        "writes_count": 3,
+        "repeated_reads_blocked": 1,
+        "anatomy_lookups": 11
+      }
+    },
+    {
+      "id": "session-2026-05-16-0306",
+      "started": "2026-05-16T19:06:01.082Z",
+      "ended": "2026-05-16T19:10:06.411Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-agent-config.ts",
+          "tokens_estimated": 625,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [],
+      "totals": {
+        "input_tokens_estimated": 625,
+        "output_tokens_estimated": 0,
+        "reads_count": 1,
+        "writes_count": 0,
+        "repeated_reads_blocked": 0,
+        "anatomy_lookups": 1
+      }
+    },
+    {
+      "id": "session-2026-05-16-0306",
+      "started": "2026-05-16T19:06:01.082Z",
+      "ended": "2026-05-16T19:11:28.906Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-agent-config.ts",
+          "tokens_estimated": 625,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [],
+      "totals": {
+        "input_tokens_estimated": 625,
+        "output_tokens_estimated": 0,
+        "reads_count": 1,
+        "writes_count": 0,
+        "repeated_reads_blocked": 0,
+        "anatomy_lookups": 1
+      }
+    },
+    {
+      "id": "session-2026-05-16-0306",
+      "started": "2026-05-16T19:06:01.082Z",
+      "ended": "2026-05-16T19:12:04.135Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-agent-config.ts",
+          "tokens_estimated": 625,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [],
+      "totals": {
+        "input_tokens_estimated": 625,
+        "output_tokens_estimated": 0,
+        "reads_count": 1,
+        "writes_count": 0,
+        "repeated_reads_blocked": 0,
+        "anatomy_lookups": 1
+      }
+    },
+    {
+      "id": "session-2026-05-16-0306",
+      "started": "2026-05-16T19:06:01.082Z",
+      "ended": "2026-05-16T19:12:29.987Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-agent-config.ts",
+          "tokens_estimated": 625,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [],
+      "totals": {
+        "input_tokens_estimated": 625,
+        "output_tokens_estimated": 0,
+        "reads_count": 1,
+        "writes_count": 0,
+        "repeated_reads_blocked": 0,
+        "anatomy_lookups": 1
+      }
+    },
+    {
+      "id": "session-2026-05-16-0306",
+      "started": "2026-05-16T19:06:01.082Z",
+      "ended": "2026-05-16T19:19:51.942Z",
+      "reads": [
+        {
+          "file": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-agent-config.ts",
+          "tokens_estimated": 625,
+          "was_repeated": false,
+          "anatomy_had_description": false
+        }
+      ],
+      "writes": [],
+      "totals": {
+        "input_tokens_estimated": 625,
+        "output_tokens_estimated": 0,
+        "reads_count": 1,
+        "writes_count": 0,
+        "repeated_reads_blocked": 0,
+        "anatomy_lookups": 1
       }
     }
   ],
