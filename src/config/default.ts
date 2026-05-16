@@ -41,7 +41,7 @@ export const DEFAULT_CONFIG: Config = {
       kimi: {
         name: 'kimi',
         apiKeyEnv: 'KIMI_API_KEY',
-        baseUrl: 'https://api.kimi.com/coding',
+        baseUrl: 'https://api.kimi.com/coding/v1',
         protocol: 'anthropic' as const,
         capabilities: {
           cacheControl: false,
