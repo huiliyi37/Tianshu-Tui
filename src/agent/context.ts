@@ -2,6 +2,10 @@ import type { Message, ContentBlock, Usage } from '../api/types.js'
 import type { CompactEvent, ContextLedger } from '../context/types.js'
 import { estimateMessageTokens, estimateTokens } from '../compact/micro.js'
 
+const MAX_TRACKED_FILES = 500
+const MAX_TEST_RESULTS = 500
+const MAX_CACHE_HISTORY = 500
+
 export const EMPTY_USAGE: Usage = {
   input_tokens: 0,
   output_tokens: 0,
@@ -115,15 +119,32 @@ export class SessionContext {
   }
 
   trackFileRead(path: string): void {
+    if (this.state.filesRead.has(path)) {
+      this.state.filesRead.delete(path)
+    }
     this.state.filesRead.add(path)
+    while (this.state.filesRead.size > MAX_TRACKED_FILES) {
+      const first = this.state.filesRead.values().next().value
+      if (first !== undefined) this.state.filesRead.delete(first)
+    }
   }
 
   trackFileModified(path: string): void {
+    if (this.state.filesModified.has(path)) {
+      this.state.filesModified.delete(path)
+    }
     this.state.filesModified.add(path)
+    while (this.state.filesModified.size > MAX_TRACKED_FILES) {
+      const first = this.state.filesModified.values().next().value
+      if (first !== undefined) this.state.filesModified.delete(first)
+    }
   }
 
   trackTestResult(passed: number, failed: number): void {
     this.state.testResults.push({ passed, failed })
+    if (this.state.testResults.length > MAX_TEST_RESULTS) {
+      this.state.testResults = this.state.testResults.slice(-MAX_TEST_RESULTS)
+    }
   }
 
   getFilesRead(): string[] {
@@ -146,6 +167,9 @@ export class SessionContext {
       inputTokens: usage.input_tokens,
       outputTokens: usage.output_tokens,
     })
+    if (this.state.turnCacheHistory.length > MAX_CACHE_HISTORY) {
+      this.state.turnCacheHistory = this.state.turnCacheHistory.slice(-MAX_CACHE_HISTORY)
+    }
   }
 
   markCompacted(turn: number): void {
