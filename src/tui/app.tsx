@@ -22,7 +22,6 @@ import type { McpManager } from '../mcp/manager.js'
 import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel } from './cockpit/index.js'
 import type { Panel } from './cockpit/types.js'
 import { PANEL_LABELS } from './cockpit/types.js'
-import { assessToolRisk } from '../agent/approval-risk.js'
 
 interface PendingApproval {
   id: string
@@ -359,7 +358,7 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
   const ledger = session.getContextLedger()
   const doomLevel = agent.getDoomLoopLevel()
   const usage = session.getTotalUsage()
-  const risk = assessToolRisk('', {}, doomLevel)
+  const risk = agent.getLatestRisk()
   const compactEvents = session.getCompactEvents()
 
   return (

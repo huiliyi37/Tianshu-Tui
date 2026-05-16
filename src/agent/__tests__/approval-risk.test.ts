@@ -42,7 +42,7 @@ describe('assessToolRisk', () => {
     assert.ok(result.reasons.some(r => r.includes('absolute path')))
   })
 
-  it('treats safe read_file as low risk (no reasons)', () => {
+  it('treats safe read_file as no risk', () => {
     const result = assessToolRisk('read_file', { file_path: 'src/main.tsx' })
     assert.equal(result.level, 'none')
     assert.deepEqual(result.reasons, [])
@@ -103,5 +103,28 @@ describe('assessToolRisk', () => {
     const result = assessToolRisk('bash', { command: 'ls' })
     assert.equal(result.level, 'none')
     assert.deepEqual(result.reasons, [])
+  })
+
+  it('flags web_fetch with non-http protocol as high risk', () => {
+    const result = assessToolRisk('web_fetch', { url: 'file:///etc/passwd' }, 'none')
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('non-http')))
+  })
+
+  it('flags web_fetch with localhost as medium risk', () => {
+    const result = assessToolRisk('web_fetch', { url: 'http://localhost:3000/api' }, 'none')
+    assert.equal(result.level, 'medium')
+    assert.ok(result.reasons.some(r => r.includes('localhost')))
+  })
+
+  it('flags web_fetch with IP literal as medium risk', () => {
+    const result = assessToolRisk('web_fetch', { url: 'http://192.168.1.1/admin' }, 'none')
+    assert.equal(result.level, 'medium')
+    assert.ok(result.reasons.some(r => r.includes('IP literal')))
+  })
+
+  it('returns none for web_fetch with public URL', () => {
+    const result = assessToolRisk('web_fetch', { url: 'https://example.com/docs' }, 'none')
+    assert.equal(result.level, 'none')
   })
 })

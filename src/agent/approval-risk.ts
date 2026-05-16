@@ -1,3 +1,5 @@
+import { isIP } from 'node:net'
+
 export type RiskLevel = 'none' | 'low' | 'medium' | 'high'
 
 export interface RiskAssessment {
@@ -52,6 +54,29 @@ export function assessToolRisk(
   // Write operations
   if (toolName === 'write_file' || toolName === 'edit_file') {
     level = level === 'none' ? 'low' : level
+  }
+
+  // Web fetch URL risk
+  if (toolName === 'web_fetch') {
+    const url = typeof input.url === 'string' ? input.url : ''
+    if (url) {
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          reasons.push('non-http URL protocol')
+          level = 'high'
+        } else if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1') {
+          reasons.push('localhost URL target')
+          level = level === 'high' ? 'high' : 'medium'
+        } else if (isIP(parsed.hostname) > 0) {
+          reasons.push('IP literal URL target')
+          level = level === 'high' ? 'high' : 'medium'
+        }
+      } catch {
+        reasons.push('malformed URL')
+        level = 'medium'
+      }
+    }
   }
 
   // Rollback/undo is always high risk

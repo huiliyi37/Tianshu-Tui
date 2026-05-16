@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { WEB_FETCH_TOOL, htmlToMarkdown } from '../web-fetch.js'
+import { createWebFetchTool, htmlToMarkdown } from '../web-fetch.js'
 import { isPrivateIP } from '../web-fetch.js'
 
 describe('htmlToMarkdown', () => {
@@ -31,12 +31,14 @@ describe('htmlToMarkdown', () => {
 })
 
 describe('WEB_FETCH_TOOL', () => {
+  const tool = createWebFetchTool()
+
   it('has correct definition name', () => {
-    assert.equal(WEB_FETCH_TOOL.definition.name, 'web_fetch')
+    assert.equal(tool.definition.name, 'web_fetch')
   })
 
   it('rejects invalid URLs', async () => {
-    const result = await WEB_FETCH_TOOL.execute({
+    const result = await tool.execute({
       input: { url: 'not-a-url' },
       toolUseId: 'tu_1',
       cwd: '/',
@@ -46,7 +48,7 @@ describe('WEB_FETCH_TOOL', () => {
   })
 
   it('rejects non-http protocols', async () => {
-    const result = await WEB_FETCH_TOOL.execute({
+    const result = await tool.execute({
       input: { url: 'file:///etc/passwd' },
       toolUseId: 'tu_2',
       cwd: '/',
@@ -57,9 +59,63 @@ describe('WEB_FETCH_TOOL', () => {
 
   it('requires approval', () => {
     assert.equal(
-      WEB_FETCH_TOOL.requiresApproval({ input: { url: 'https://example.com' }, toolUseId: 't', cwd: '/' }),
+      tool.requiresApproval({ input: { url: 'https://example.com' }, toolUseId: 't', cwd: '/' }),
       true,
     )
+  })
+})
+
+describe('web_fetch redirect SSRF', () => {
+  it('rejects redirect to private IP', async () => {
+    const tool = createWebFetchTool({
+      lookup: async (hostname: string) => {
+        if (hostname === 'evil.com') return { address: '10.0.0.1' }
+        return { address: '93.184.216.34' }
+      },
+      fetch: async (_url: string, init?: RequestInit) => {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: 'http://evil.com/private' },
+        })
+      },
+    })
+
+    const result = await tool.execute({
+      input: { url: 'https://public.example.com/page' },
+      toolUseId: 'tu_ssrf',
+      cwd: '/',
+    })
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('Access denied'))
+    assert.ok(result.content.includes('10.0.0.1'))
+  })
+
+  it('allows redirect to public URL', async () => {
+    let fetchCalled = 0
+    const tool = createWebFetchTool({
+      lookup: async () => ({ address: '93.184.216.34' }),
+      fetch: async (url: string, init?: RequestInit) => {
+        fetchCalled++
+        if (fetchCalled === 1) {
+          return new Response(null, {
+            status: 301,
+            headers: { Location: 'https://public2.example.com/page' },
+          })
+        }
+        return new Response('<p>OK</p>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        })
+      },
+    })
+
+    const result = await tool.execute({
+      input: { url: 'https://public.example.com/page' },
+      toolUseId: 'tu_redirect',
+      cwd: '/',
+    })
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('OK'))
   })
 })
 
