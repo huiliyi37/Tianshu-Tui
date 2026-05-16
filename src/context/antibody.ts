@@ -9,6 +9,8 @@ export interface AntibodyContext {
   eventId: string
 }
 
+const ANTIBODY_TTL = 4 * 60 * 60_000 // 4 hours
+
 export function createAntibodyProposal(failure: ClassifiedFailure, ctx: AntibodyContext): ClaimProposal {
   const createdAt = Date.now()
   return {
@@ -25,6 +27,7 @@ export function createAntibodyProposal(failure: ClassifiedFailure, ctx: Antibody
       createdAt,
     }],
     createdAt,
+    expiresAt: createdAt + ANTIBODY_TTL,
     tags: ['antibody', failure.class],
   }
 }
