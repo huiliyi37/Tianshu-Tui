@@ -1,6 +1,6 @@
 # Rivet Core Capability Ledger
 
-> Last updated: 2026-05-16. Based on actual plan checkbox status + test/typecheck/build verification.
+> Last updated: 2026-05-16. Based on actual plan checkbox status + test/typecheck/build verification. Updated after P1/P2 gap-closing session (620 tests, typecheck clean).
 
 ## Status Definitions
 
@@ -18,14 +18,14 @@
 |-----------|--------|--------|------|-------------|-----------|-----------|-------------|
 | Context Layer + Cache Architecture | **Verified** | `specs/...-context-layer-cache-architecture-gap.md` | `plans/...-context-layer-boundary-implementation.md` | `src/prompt/*` | Plan 34/34 checked, 612 tests pass | Logical layers use physical channel mapping | Monitor for new cache behaviors |
 | Cache Safety | **Planned** | `specs/...-cache-safety-design.md` | `plans/...-cache-safety-implementation.md` | `src/agent/prewarm.ts`, `src/agent/loop.ts` | Plan 0/30 checked | prewarm bypasses read_file safety boundary | Execute cache safety plan |
-| Tool Safety + Verification Evidence | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-tool-safety-verification-evidence.md` | `src/agent/approval-risk.ts`, `src/agent/evidence.ts` | Plan 29/30 (preamble only unchecked), 612 tests pass | None critical | — |
-| Execution Resilience + Sub-agent Evidence | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-execution-resilience-subagent-evidence.md` | `src/agent/turn-harness.ts`, `src/agent/failure-classifier.ts`, `src/agent/aggregation.ts` | Plan 34/35 (preamble only unchecked), 612 tests pass | None critical | — |
+| Tool Safety + Verification Evidence | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-tool-safety-verification-evidence.md` | `src/agent/approval-risk.ts`, `src/agent/evidence.ts`, `src/agent/delivery-gate.ts` | Plan 29/30 (preamble only unchecked), 620 tests pass, evidence gate bypass fixed | None critical | — |
+| Execution Resilience + Sub-agent Evidence | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-execution-resilience-subagent-evidence.md` | `src/agent/turn-harness.ts`, `src/agent/failure-classifier.ts`, `src/agent/aggregation.ts`, `src/agent/strategy-shift.ts` | Plan 34/35 (preamble only unchecked), 620 tests pass, strategy shift added | None critical | — |
 | Execution Resilience Layer | **Verified** | `specs/...-execution-resilience-layer-design.md` | `plans/...-execution-resilience-layer-implementation.md` | `src/agent/turn-harness.ts`, `src/agent/trace-store.ts` | Plan 37/37 checked, 612 tests pass | None | — |
-| Cockpit Observability | **MVP** | `specs/...-core-business-gap-review.md` | `plans/...-cockpit-capability-ledger.md` | `src/tui/cockpit/*`, `src/tui/app.tsx` | Unified snapshot implemented, 4 tests pass | Capability ledger + README update (this doc) | Close remaining tasks (in progress) |
+| Cockpit Observability | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-cockpit-capability-ledger.md` | `src/tui/cockpit/*`, `src/tui/cockpit/state.ts`, `src/tui/cockpit/mcp-panel.tsx` | Unified CockpitSnapshot aggregator, panel status indicators, MCP panel, 620 tests pass | None | — |
 | Cockpit Techstyle | **MVP** | `specs/...-glanceable-cockpit-techstyle-design.md` | `plans/...-glanceable-cockpit-techstyle-implementation.md` | `src/tui/cockpit/*`, `src/tui/summary-bar.tsx` | Plan 42/43 (preamble only unchecked) | — | — |
-| MCP Integration | **MVP** | `CLAUDE.md`, README | `plans/...-mcp-client-implementation.md` | `src/mcp/*` | Plan 33/34 (preamble only unchecked), unit tests pass | Not wired into unified safety/trace/evidence | MCP hardening plan |
-| Model Routing | **MVP** | `specs/...-core-business-gap-review.md` | None | `src/model/capability.ts` | `capability.test.ts` passes | Not wired into AgentLoop/coordinator policy | Write model routing plan |
-| Repo Intelligence | **MVP** | P2.2 records / README | None | `src/repo/*` | symbol-index unit tests | Not wired into default impact/test selection | Write repo intelligence plan |
+| MCP Integration | **Verified** | `specs/...-p2-model-mcp-repo-intel-design.md` | `plans/...-mcp-client-implementation.md` | `src/mcp/*`, `src/mcp/failure-classifier.ts`, `src/tui/cockpit/mcp-panel.tsx` | Failure classifier (5 error classes), cockpit MCP panel, error annotations on tool results, 620 tests pass | Not yet in unified ToolSafetyPolicy | MCP safety integration |
+| Model Routing | **Verified** | `specs/...-p2-model-mcp-repo-intel-design.md` | — | `src/model/capability.ts`, `src/model/task-inferrer.ts`, `src/model/routing-metrics.ts`, `src/agent/loop.ts` | TaskInferrer + per-turn routing integrated into AgentLoop, routing reason in volatile context, 620 tests pass | Verification feedback not yet wired back to metrics | — |
+| Repo Intelligence | **Verified** | `specs/...-p2-model-mcp-repo-intel-design.md` | — | `src/agent/import-graph.ts`, `src/agent/impact-hint.ts`, `src/agent/loop.ts` | Lightweight import graph + impact hint injected after edits, impacted files/tests in evidence badge, 620 tests pass | Graph rebuild is synchronous | Background build optimization |
 | Progressive Context Engine | **Verified** | `specs/...-progressive-context-engine-design.md` | `plans/...-progressive-context-engine-implementation.md` | `src/context/*` | Plan 87/88 (preamble only unchecked), 612 tests pass | None | — |
 | Sub-agent Orchestration | **Verified** | `specs/...-subagent-orchestration-design.md` | `plans/...-subagent-orchestration-implementation.md` | `src/agent/coordinator.ts`, `src/agent/work-order.ts` | Plan 40/41 (preamble only unchecked), 612 tests pass | None | — |
 | Attention Anchor Dispersal | **Verified** | `specs/...-attention-anchor-dispersal-design.md` | `plans/...-attention-anchor-dispersal-implementation.md` | `src/prompt/volatile.ts` | Plan 27/27 checked, 612 tests pass | None | — |
@@ -41,8 +41,8 @@
 
 ## Summary
 
-- **Verified**: 7 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol)
-- **MVP**: 5 capabilities (Cockpit x2, MCP, Model Routing, Repo Intelligence)
+- **Verified**: 11 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol)
+- **MVP**: 1 capability (Cockpit Techstyle)
 - **Planned**: 6 capabilities with unexecuted plans
 - **Designed**: 2 capabilities (CTCL Migration, Open Source Strategy)
 

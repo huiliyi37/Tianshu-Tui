@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 510 tests passing, typecheck clean. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (6 panels + risk assessment + doom loop detection), execution resilience layer (TurnHarness with retry loop + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection with redirect-safe DNS validation. All prior features: subagent orchestration, adaptive model routing, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 620 tests passing, typecheck clean. All P0-P2 core business gaps closed. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection with redirect-safe DNS validation. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -33,7 +33,8 @@ src/
 │   ├── session-persist.ts JSONL session persistence (~/.rivet/sessions/)
 │   ├── checkpoint.ts     Per-project git checkpoint + rollback v2 (agent-owned files only)
 │   ├── file-history.ts   Per-file snapshot backup + rewind (undo backbone)
-│   ├── evidence.ts       File tracking + test result badge
+│   ├── evidence.ts       File tracking + test result badge + impacted files/tests
+│   ├── delivery-gate.ts  Delivery gate: blocks unverified changes from delivery
 │   ├── failure-classifier.ts  Test failure categorization + fix suggestions
 │   ├── verification.ts   VerificationState: passed/failed/blocked tracking
 │   ├── work-order.ts     WorkOrder/WorkerResult types + zod schemas
@@ -47,9 +48,13 @@ src/
 │   ├── intent-extractor.ts Intent classification from user input
 │   ├── prewarm.ts        Speculative pre-warming cache
 │   ├── trace-store.ts    Structured event tracing (doom loop detection)
+│   ├── strategy-shift.ts Doom-loop strategy suggestion (4 pattern detectors)
 │   ├── approval-risk.ts  Tool risk assessment (doom loop, path traversal, destructive commands)
 │   ├── turn-harness.ts   Retry loop + trajectory recording for tool execution
 │   └── task-state.ts     Task progress extraction from trajectory + model text
+│   ├── import-graph.ts   Static import graph builder + reverse deps + invalidation
+│   ├── impact-hint.ts    Edit impact analysis (affected files + related tests)
+│   ├── delivery-gate.ts  Delivery gate: computes delivery status from evidence state
 ├── api/
 │   ├── client.ts         Streaming API client with retry (exp backoff 1s/2s/4s)
 │   ├── deepseek.ts       DeepSeek V4 provider: dual-format usage mapping
@@ -68,7 +73,9 @@ src/
 │   ├── fingerprint.ts    SHA-256 fingerprint for cache drift detection
 │   └── cache-diagnostic.ts  Cache miss reason analysis (5 categories)
 ├── model/
-│   └── capability.ts     ModelCapabilityCard + recommendModelForTask scoring
+│   ├── capability.ts     ModelCapabilityCard + recommendModelForTask scoring
+│   ├── task-inferrer.ts  Task type inference from tool call patterns
+│   └── routing-metrics.ts Routing event tracking + stats
 ├── repo/
 │   ├── symbol-index.ts   Regex-based symbol extraction
 │   ├── import-graph.ts   Relative import edge graph
@@ -118,9 +125,10 @@ src/
 │   └── manager.ts        CLI config manager (rivet config <command>)
 ├── mcp/
 │   ├── config.ts         MCP server config schema (stdio/SSE validation)
-│   ├── wrapper.ts        MCP tool → Rivet Tool adapter (mcp__<server>__<tool> naming)
+│   ├── wrapper.ts        MCP tool → Rivet Tool adapter (mcp__<server>__<tool> naming, __ sanitization, error classification)
 │   ├── manager.ts        Connection lifecycle, parallel tool discovery, error handling
-│   └── types.ts          McpConnectionState type
+│   ├── failure-classifier.ts MCP error taxonomy (config/auth/network/protocol/tool_error, retryable hints)
+│   └── types.ts          McpConnectionState type (with lastErrorClass)
 └── tui/
     ├── app.tsx            Main app: slash commands, approval UI, cockpit, live tool output
     ├── input.tsx          Input bar with cursor, history, Ctrl+A/E/W/U
@@ -140,13 +148,15 @@ src/
     ├── history.ts         Command history persistence
     ├── error-boundary.tsx React error boundary (catch without crash)
     └── cockpit/           Multi-panel cockpit module
-        ├── types.ts       Panel type + PANELS + PANEL_LABELS
-        ├── rail.tsx       CockpitRail tab navigation
+        ├── types.ts       Panel type + PANELS + PANEL_LABELS + CockpitSnapshot
+        ├── state.ts       buildCockpitSnapshot aggregator + computePanelStatuses
+        ├── rail.tsx       CockpitRail tab navigation with ok/warn/error status indicators
         ├── trace-panel.tsx      TraceEvent visualization (color-coded status)
-        ├── verification-panel.tsx Evidence display (files read/modified, test results)
-        ├── context-panel.tsx    Context ledger details (token bar, rounds, compaction)
-        ├── safety-panel.tsx     Doom loop + risk assessment + fingerprint diversity
-        ├── model-panel.tsx      Model name, cache hit rate, token breakdown, cost
+        ├── verification-panel.tsx Evidence display (files read/modified, impacted files/tests, delivery status)
+        ├── context-panel.tsx    Context ledger details (token bar, rounds, compaction, context layers)
+        ├── safety-panel.tsx     Doom loop + risk assessment + strategy shift + fingerprint diversity
+        ├── model-panel.tsx      Model name, cache hit rate, token breakdown, cost, routing reason
+        ├── mcp-panel.tsx        MCP server status (connected/error/tool count)
         ├── approval-risk-card.tsx Inline risk card (color-coded border)
         └── index.ts       Barrel export
 ```
@@ -226,7 +236,7 @@ Layers L1-L4 form the stable volatile block (frozen at construction, participate
 - **Truncated JSON recovery** — Recovers partial tool_use JSON from streaming
 - **Slash commands** — /help /exit /compact /model /clear /rollback /sessions /resume /verbose /debug /evidence
 - **Config CLI** — Manage API keys, providers, models, MCP servers from terminal
-- **MCP client** — Model Context Protocol: connect external tool servers (stdio), auto-discover tools, register as `mcp__<server>__<tool>`, parallel init, approval heuristics, `/mcp` + `/debug mcp` status
+- **MCP client** — Model Context Protocol: connect external tool servers (stdio), auto-discover tools, register as `mcp__<server>__<tool>` (with `__` sanitization), parallel init, approval heuristics, 5-class error classifier (config/auth/network/protocol/tool_error), `/mcp` + `/debug mcp` status
 - **.gitignore filter** — Skips node_modules, .git, build artifacts
 - **Graceful shutdown** — SIGINT/SIGTERM → abort agent + persist session + kill children
 - **ErrorBoundary** — React errors caught without crashing the process
@@ -241,7 +251,7 @@ Layers L1-L4 form the stable volatile block (frozen at construction, participate
 - **Session memory** — Per-session sidecar that survives compaction; `/memory` CRUD
 - **Reactive compact** — Selects API-invariant rounds for compaction, preserves cache anchors
 - **Compact policy** — Progressive tier decision + circuit breaker (3 consecutive failures → skip)
-- **TUI cockpit** — Multi-panel cockpit with 6 views (Summary, Trace, Verify, Context, Safety, Model), `/cockpit [panel]` sub-mode navigation, doom loop detection, risk assessment
+- **TUI cockpit** — Multi-panel cockpit with 7 views (Summary, Trace, Verify, Context, Safety, Model, MCP), `/cockpit [panel]` sub-mode navigation, doom loop detection, risk assessment, unified CockpitSnapshot aggregator with panel status indicators (●/◐)
 - **Theme system** — Truecolor palette (cyan/purple/green) with 256-color fallback, tool-specific border colors
 - **Gradient banner** — Startup banner with gradient-string
 - **XML protocol layer** — Volatile context uses structured XML tags for cache-stable injection
@@ -257,9 +267,11 @@ Layers L1-L4 form the stable volatile block (frozen at construction, participate
 - **Targeted test runs** — run_tests filter constructs safe argv (no sh -c), outputs VerificationMetadata
 - **Verification engine** — VerificationState tracks passed/failed/blocked, evidence badge uses buildFinalVerificationReport
 - **Tool safety policy** — Unified `assessToolRisk` evaluates destructive commands, force push, path traversal, rollback/undo; outputs structured `RiskAssessment` with reasons and suggestedAction; feeds approval prompts, hooks, and cockpit safety panel
-- **Evidence delivery gate** — `DeliveryVerificationStatus` (verified/failed/blocked/unverified) computed from EvidenceTracker state; badge surfaces unverified-change warnings when no relevant verification ran after edits
-- **Repo intelligence** — symbol-index (regex-based), import-graph (relative edges), context-bundle (task context assembly)
-- **Model capability routing** — ModelCapabilityCard + recommendModelForTask scoring per task type
+- **Evidence delivery gate** — `DeliveryVerificationStatus` (verified/failed/blocked/unverified) computed from EvidenceTracker state; badge surfaces unverified-change warnings when no relevant verification ran after edits; single worker results gated through `aggregateResults()`
+- **Repo intelligence** — Lightweight import graph (regex-based, 1000-file cap) with reverse dependency lookup; impact hint generated after each edit showing affected files and related tests; impact info surfaced in evidence badge
+- **Model capability routing** — ModelCapabilityCard + recommendModelForTask scoring per task type; TaskInferrer infers task from tool call patterns (code_edit, test_failure_diagnosis, risky_refactor, repo_summarization); per-turn model switching integrated into AgentLoop; routing reason visible in volatile context and cockpit
+- **Doom-loop strategy shift** — `suggestStrategyShift()` detects 4 trajectory patterns (repeated failures, unverified writes, transient errors, generic repetition) and injects strategy suggestions when doom-loop is detected
+- **MCP failure classifier** — 5-class error taxonomy (config, auth, network, protocol, tool_error) with retryable hints and user-facing suggestions; error class annotated on MCP tool results
 - **Failure sample library** — createFailureSample with automatic secret redaction (sk-* patterns)
 - **Raw output path safety** — SHA-256 hashed filenames, no toolUseId in path
 - **Agent hooks** — PreToolUse/PostToolUse/Notification/SubagentStop lifecycle hooks; input chaining, block support, synchronous handlers
@@ -365,7 +377,7 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and are auto-discovered at sta
 | `/context` | Show context ledger: health, tokens, API round safety, compact events |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
-| `/cockpit [summary\|trace\|verify\|context\|safety\|model\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
+| `/cockpit [summary\|trace\|verify\|context\|safety\|model\|mcp\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/mcp` | Show MCP server connection status |
 | `/scroll` | Browse output history with scrolling (j/k/PgUp/PgDn/g/G/q) |
 
@@ -432,12 +444,13 @@ Type `/cockpit` to toggle the expanded cockpit panel, or `/cockpit <panel>` to o
 
 | `/cockpit` sub-command | Panel | Shows |
 |---|---|---|
-| `summary` (default) | SummaryBar | Live phase, context%, last action, risk |
+| `summary` (default) | SummaryBar | Live phase, context%, last action, risk, panel status indicators |
 | `trace` | TracePanel | Tool execution events with color-coded status and duration |
-| `verify` | VerificationPanel | Files read/modified counts, test result entries |
-| `context` | ContextPanel | Token bar, API rounds, compaction state, compact history |
-| `safety` | SafetyPanel | Doom loop level, risk level + reasons, fingerprint diversity |
-| `model` | ModelPanel | Model name, cache hit rate bar, token breakdown, cost |
+| `verify` | VerificationPanel | Files read/modified counts, impacted files/tests, test results, delivery status |
+| `context` | ContextPanel | Token bar, API rounds, compaction state, compact history, context layers |
+| `safety` | SafetyPanel | Doom loop level, risk level + reasons, strategy shift suggestion, fingerprint diversity |
+| `model` | ModelPanel | Model name, cache hit rate bar, token breakdown, cost, routing reason |
+| `mcp` | McpPanel | MCP server status (connected/error/tool count) |
 | `off` | — | Collapse cockpit |
 
 Press **Esc** to collapse the cockpit from any panel.
@@ -550,6 +563,7 @@ The `TurnHarness` wraps all tool execution with automatic retry and trajectory r
 - **Transient retry**: Network errors (ECONNRESET, ETIMEDOUT, etc.) and flaky failures are automatically retried up to `maxRetries` times (default: 2). Non-transient errors (type errors, assertions) fail immediately. Each `FailureClassification` now includes a `retryable` boolean for programmatic policy decisions.
 - **Trajectory recording**: Every tool execution is recorded with duration, status, and error class. Stats are exposed via `agent.getTrajectoryStats()` and reflected in the SummaryBar step count.
 - **Doom loop detection**: Tool call fingerprints are tracked via `TraceStore`. When identical calls repeat 2+ times (warn) or 3+ times (blocked), tool execution is blocked entirely — the tool returns an error without executing, forcing the agent to change strategy.
+- **Strategy shift**: When doom-loop is detected, `suggestStrategyShift()` analyzes the trajectory for patterns (repeated failures, unverified writes, transient errors) and injects a `<strategy-shift>` suggestion into the volatile context, guiding the model toward a different approach.
 - **Risk assessment**: `assessToolRisk()` evaluates doom loop level, path traversal, destructive commands, and write operations to produce a risk level (none/low/medium/high).
 - **Task-state injection**: After turn 3, `extractTaskState()` derives completed/current/remaining steps from the trajectory and model text. This is injected as `<task-progress>` in the volatile context block, giving the model implicit awareness of its own progress.
 - **Retry hint**: When all retries fail, a hint is appended: `[All N retries failed. Error class: X. Consider alternative approach.]`
@@ -564,6 +578,29 @@ Sub-agent workers must return structured evidence in their `WorkerResult`:
 - **verification**: command, status, scope, and exit code when tests were run
 
 The aggregation `evidenceGate` blocks any worker result that changed files without verified evidence before any aggregation policy is applied.
+
+### Model Routing
+
+Rivet can automatically switch between models based on the inferred task type each turn:
+
+- **Task inference**: `TaskInferrer` analyzes the last 10 tool calls to determine the current task type:
+  - `code_edit` — when edit_file/write_file are used
+  - `test_failure_diagnosis` — when run_tests shows failures
+  - `risky_refactor` — when multiple files are edited and tests are run
+  - `repo_summarization` — when search tools are used extensively (≥3 calls with no edits)
+- **Model selection**: `recommendModelForTask()` scores available models against the task type using `ModelCapabilityCard` profiles
+- **Routing visibility**: The routing reason is shown in the cockpit Model panel and injected into the volatile context as `<routing-reason>`
+- **Metrics**: Routing events are tracked via `RoutingMetricsCollector` for diagnostics
+- **Safety**: Model switching requires `getCurrentModel` to be configured; failures in the switch callback are non-fatal
+
+### Repo Intelligence
+
+Rivet builds a lightweight import graph to track code impact:
+
+- **Import graph**: Regex-based static analysis of relative imports across the project (capped at 1000 files). Built lazily on first edit.
+- **Impact hints**: After each `edit_file`/`write_file`, `generateImpactHint()` computes which files and tests are affected by the change. The hint is injected as `<impact-hint>` in the volatile context.
+- **Evidence integration**: Impacted files and related tests are surfaced in the evidence badge via `trackImpact()`.
+- **Invalidation**: The graph is incrementally updated when files change via `invalidateFile()`.
 
 ### Session Memory
 
@@ -615,7 +652,7 @@ Tool output and model responses are automatically enhanced:
 | `/context` | Show context health, token sections, round diagnostics |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
-| `/cockpit [summary\|trace\|verify\|context\|safety\|model\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
+| `/cockpit [summary\|trace\|verify\|context\|safety\|model\|mcp\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/clear` | Clear screen |
 | `/scroll` | Browse output history (j/k/PgUp/PgDn/g/G/q/Esc) |
 | `/exit` | Save session and exit |
@@ -672,7 +709,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (510)
+npm run test                   # Run all tests (620)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
@@ -681,6 +718,8 @@ npm run dev                    # Watch mode
 
 - `docs/superpowers/specs/2026-05-16-rivet-subagent-orchestration-design.md` — Subagent orchestration: Cache-first Bounded Coordinator design
 - `docs/superpowers/plans/2026-05-16-rivet-subagent-orchestration-implementation.md` — Phase 1-4 implementation plan
+- `docs/superpowers/specs/2026-05-16-rivet-core-business-gap-review.md` — P0-P2 core business gap review (all gaps closed)
+- `docs/superpowers/specs/2026-05-16-rivet-p2-model-mcp-repo-intel-design.md` — P2 design: Model Routing + MCP Integration + Repo Intelligence
 - `docs/superpowers/specs/2026-05-15-rivet-p2-3-harness-cockpit-design.md` — P2.3 Harness Cockpit design
 - `docs/superpowers/plans/2026-05-15-rivet-p2-3-harness-cockpit-implementation.md` — P2.3 implementation plan
 - `docs/superpowers/plans/2026-05-15-rivet-p2-2-capability-reliability-layer.md` — P2.2 Capability Reliability Layer plan
@@ -689,7 +728,7 @@ npm run dev                    # Watch mode
 - `docs/superpowers/plans/2026-05-15-rivet-p2.1-remaining.md` — P2.1 remaining tasks + execution record
 - `docs/superpowers/plans/2026-05-15-rivet-performance-optimization.md` — Performance optimization plan
 - `docs/analysis/2026-05-15-handoff.md` — Full project handoff document with validation records
-- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger
+- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (11 Verified)
 
 ## License
 

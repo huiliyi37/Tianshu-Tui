@@ -2,7 +2,9 @@ import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import { classifyMcpError } from './failure-classifier.js'
 
 export function mcpToolName(serverId: string, toolName: string): string {
-  return `mcp__${serverId}__${toolName}`
+  const safeServerId = serverId.replaceAll('__', '_')
+  const safeToolName = toolName.replaceAll('__', '_')
+  return `mcp__${safeServerId}__${safeToolName}`
 }
 
 const WRITE_TOOL_PATTERNS = /\b(write|create|update|delete|remove|push|post|put|patch|execute)\b/i

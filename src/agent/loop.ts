@@ -29,9 +29,9 @@ import { getDoomLoopLevel } from './trace-store.js'
 import { assessToolRisk } from './approval-risk.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
 import { inferTaskType } from '../model/task-inferrer.js'
-import { RoutingMetricsCollector, type RoutingEvent } from '../model/routing-metrics.js'
+import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import { recommendModelForTask, type ModelCapabilityCard } from '../model/capability.js'
-import { buildImportGraph, getReverseDeps, invalidateFile, type ImportGraph } from './import-graph.js'
+import { buildImportGraph, invalidateFile, type ImportGraph } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
@@ -348,10 +348,17 @@ export class AgentLoop {
                 }
               }
 
-              // Doom-loop block: prevent repeated identical failures
+              const trajectorySummary: TrajectorySummary[] = this.trajectory.getEntries().map(e => ({
+                tool: e.tool,
+                target: e.target,
+                status: e.status === 'retried-failed' || e.status === 'failed' ? 'failed' : 'success',
+                errorClass: e.errorClass,
+              }))
               const doomLevel = this.getDoomLoopLevel()
+              const hint = suggestStrategyShift(trajectorySummary, doomLevel)
+              this.config.promptEngine.setStrategyShift(hint)
               if (doomLevel === 'blocked') {
-                const msg = 'Tool execution blocked: repeated identical failures detected. Change strategy before retrying.'
+                const msg = hint ?? 'Tool execution blocked: repeated identical failures detected. Change strategy before retrying.'
                 callbacks.onToolResult(tu.id, tu.name, msg, true)
                 toolResults.push({
                   type: 'tool_result',
@@ -359,17 +366,6 @@ export class AgentLoop {
                   content: msg,
                   is_error: true,
                 })
-                // Inject strategy shift hint into volatile context
-                const trajectorySummary: TrajectorySummary[] = this.trajectory.getEntries().map(e => ({
-                  tool: e.tool,
-                  target: e.target,
-                  status: e.status === 'retried-failed' || e.status === 'failed' ? 'failed' : 'success',
-                  errorClass: e.errorClass,
-                }))
-                const hint = suggestStrategyShift(trajectorySummary, doomLevel)
-                if (hint) {
-                  this.config.promptEngine.setStrategyShift(hint)
-                }
                 continue
               }
 
@@ -444,6 +440,7 @@ export class AgentLoop {
                   return { content: r.content, isError: r.isError }
                 },
                 classify: (content) => classifyFailure(content).class,
+                isConcurrencySafe: toolDef?.isConcurrencySafe() ?? false,
               })
 
               // PostToolUse hook — can modify result
@@ -470,6 +467,7 @@ export class AgentLoop {
 
               if (!harnessResult.isError) {
                 this.repairHintTracker.recordSuccess(tu.name)
+                this.config.promptEngine.setStrategyShift(null)
               }
 
               // Invalidate prewarm cache after writes
@@ -545,8 +543,8 @@ export class AgentLoop {
           this.config.promptEngine.setBehaviorMirror(mirror)
 
           // Model routing: infer task type and potentially switch model
-          if (this.config.modelCards && this.config.modelCards.length > 1) {
-            const currentModel = this.config.getCurrentModel?.() ?? ''
+          if (this.config.modelCards && this.config.modelCards.length > 1 && this.config.getCurrentModel) {
+            const currentModel = this.config.getCurrentModel()
             const recentCalls = this.trajectory.getEntries().slice(-10).map(e => ({
               name: e.tool,
               isError: e.status === 'failed' || e.status === 'retried-failed',
@@ -565,7 +563,9 @@ export class AgentLoop {
                   reason: inference.reason,
                   timestamp: Date.now(),
                 })
-                this.config.onModelSwitch(recommended.model)
+                try {
+                  this.config.onModelSwitch(recommended.model)
+                } catch { /* model switch failure is non-fatal */ }
               }
             }
           }

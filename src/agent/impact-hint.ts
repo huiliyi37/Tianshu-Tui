@@ -1,7 +1,7 @@
 import type { ImportGraph } from './import-graph.js'
 import { getReverseDeps } from './import-graph.js'
 import { existsSync } from 'fs'
-import { join, dirname, basename, extname, isAbsolute } from 'path'
+import { join, dirname, basename, extname, isAbsolute, relative } from 'path'
 
 export interface ImpactHint {
   changedFile: string
@@ -20,7 +20,8 @@ function findTestsForSource(file: string, cwd: string): string[] {
   const baseName = basename(file, ext)
   const dir = dirname(file)
   const parentDir = dirname(dir)
-  const relDir = dir.startsWith('src/') ? dir.slice(4) : dir
+  const relDir = isAbsolute(dir) ? relative(cwd, dir) : dir
+  const relDirClean = relDir.startsWith('src/') ? relDir.slice(4) : relDir
 
   const candidates = [
     join(dir, '__tests__', `${baseName}.test.ts`),
@@ -29,8 +30,8 @@ function findTestsForSource(file: string, cwd: string): string[] {
     join(parentDir, '__tests__', `${baseName}.spec.ts`),
     join(dir, `${baseName}.test.ts`),
     join(dir, `${baseName}.spec.ts`),
-    join('__tests__', relDir, `${baseName}.test.ts`),
-    join('__tests__', relDir, `${baseName}.spec.ts`),
+    join('__tests__', relDirClean, `${baseName}.test.ts`),
+    join('__tests__', relDirClean, `${baseName}.spec.ts`),
   ]
 
   return candidates
@@ -45,7 +46,8 @@ export function generateImpactHint(
 ): ImpactHint | null {
   if (!graph) return null
 
-  const impacted = getReverseDeps(graph, changedFile)
+  const absFile = isAbsolute(changedFile) ? changedFile : join(cwd, changedFile)
+  const impacted = getReverseDeps(graph, absFile)
   const impactedFiles = [...impacted].filter(f => !isTestFile(f))
 
   if (impactedFiles.length === 0) return null

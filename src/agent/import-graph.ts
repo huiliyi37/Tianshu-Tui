@@ -81,8 +81,8 @@ export function buildImportGraph(cwd: string, maxFiles?: number): ImportGraph | 
   return { forward, reverse }
 }
 
-export function getReverseDeps(graph: ImportGraph, file: string): Set<string> {
-  const absPath = file.startsWith('/') ? file : ''
+export function getReverseDeps(graph: ImportGraph, file: string, cwd?: string): Set<string> {
+  const absPath = file.startsWith('/') ? file : cwd ? resolve(cwd, file) : ''
   return absPath ? (graph.reverse.get(absPath) ?? new Set()) : new Set()
 }
 

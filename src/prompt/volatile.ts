@@ -144,7 +144,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   }
 
   if (ctx.repairHint) {
-    parts.push(ctx.repairHint)
+    parts.push(escapeXml(ctx.repairHint))
   }
 
   if (ctx.decisions && ctx.decisions.length > 0) {
