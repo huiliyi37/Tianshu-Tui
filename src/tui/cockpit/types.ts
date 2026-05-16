@@ -91,6 +91,11 @@ export interface CockpitSnapshot {
     cacheWriteTokens: number
     cost: number
     routingReason: string | null
+    perTurnHitRate: number | null
+    prewarmHits: number
+    prewarmMisses: number
+    prewarmHitRate: number
+    cacheDiagnostic: string | null
   }
   mcp: {
     servers: Array<{

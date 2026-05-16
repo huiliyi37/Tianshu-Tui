@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildCockpitSnapshot } from '../state.js'
 import type { AgentLoop } from '../../../agent/loop.js'
-import type { SessionContext } from '../../../agent/context.js'
+import { SessionContext } from '../../../agent/context.js'
 import type { McpManager } from '../../../mcp/manager.js'
 import { createTraceStore } from '../../../agent/trace-store.js'
 
@@ -20,6 +20,8 @@ function makeAgent(overrides: Partial<AgentLoop> = {}): AgentLoop {
 function makeSession(overrides: Partial<SessionContext> = {}): SessionContext {
   return {
     getTotalUsage: () => ({ input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 80, cache_creation_input_tokens: 20 }),
+    getCacheHitRate: () => 0.8,
+    getLatestTurnHitRate: () => null,
     getContextLedger: () => null,
     getCompactEvents: () => [],
     ...overrides,
@@ -137,4 +139,28 @@ describe('buildCockpitSnapshot', () => {
     assert.equal(snap.blockingReason, 'Files were modified without passing verification evidence.')
     assert.match(snap.nextAction ?? '', /Run relevant targeted tests/)
   })
+})
+
+
+it('buildCockpitSnapshot includes cache diagnostics and prewarm stats', () => {
+  const session = new SessionContext()
+  session.recordTurnCache(1, {
+    input_tokens: 100,
+    output_tokens: 10,
+    cache_read_input_tokens: 80,
+    cache_creation_input_tokens: 20,
+  })
+  const snapshot = buildCockpitSnapshot({
+    session,
+    agent: makeAgent({
+      getPrewarmStats: () => ({ hits: 3, misses: 1, hitRate: 0.75 }),
+      getCacheDiagnostic: () => 'Cache drift detected',
+    } as Partial<AgentLoop>),
+  })
+
+  assert.equal(snapshot.model.perTurnHitRate, 0.8)
+  assert.equal(snapshot.model.prewarmHits, 3)
+  assert.equal(snapshot.model.prewarmMisses, 1)
+  assert.equal(snapshot.model.prewarmHitRate, 0.75)
+  assert.equal(snapshot.model.cacheDiagnostic, 'Cache drift detected')
 })

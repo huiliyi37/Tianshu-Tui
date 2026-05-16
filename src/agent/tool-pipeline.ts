@@ -23,6 +23,8 @@ import { isToolAllowed } from './permissions.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
 import { PrewarmCache } from './prewarm.js'
+import { compactThresholds } from '../compact/constants.js'
+import { truncateToolResult } from './tool-result-truncate.js'
 
 export interface ToolPipelineDeps {
   config: AgentConfig
@@ -50,6 +52,10 @@ export interface ToolExecResult {
   lastConflictCheckCount: number
   checkpointCreated: boolean
   latestRisk: import('./approval-risk.js').RiskAssessment
+}
+
+function truncateSuccessfulToolResult(content: string, contextWindow: number | undefined): string {
+  return truncateToolResult(content, compactThresholds(contextWindow ?? 1_000_000).toolResultMaxTokens)
 }
 
 export async function executeToolUse(
@@ -231,6 +237,10 @@ ${check.formatted}`
       }
     }
 
+    if (!harnessResult.isError) {
+      finalContent = truncateSuccessfulToolResult(finalContent, deps.config.contextWindow)
+    }
+
     // Trace recording
     traceStore = finishTraceEvent(traceStore, traceId, {
       status: harnessResult.isError ? 'failed' : 'passed',
@@ -330,7 +340,11 @@ ${check.formatted}`
         if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
           const failureClass = classifyFailure(harnessResult.content)
           deps.repairHintTracker.recordFailure(tu.name, failureClass.class)
-          return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: `${finalContent}\n\nDiagnosis: ${failures[0]!.suggestion}`, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+          let diagnosedContent = `${finalContent}\n\nDiagnosis: ${failures[0]!.suggestion}`
+          if (!harnessResult.isError) {
+            diagnosedContent = truncateSuccessfulToolResult(diagnosedContent, deps.config.contextWindow)
+          }
+          return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
         }
       }
     }

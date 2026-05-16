@@ -7,10 +7,10 @@ import type { CockpitSnapshot, Panel, PanelStatus } from './types.js'
 export interface CockpitSnapshotSources {
   agent: AgentLoop
   session: SessionContext
-  model: string
-  cacheHitRate: number
-  cost: number
-  mcpManager: McpManager | null
+  model?: string
+  cacheHitRate?: number
+  cost?: number
+  mcpManager?: McpManager | null
   claimCounts?: import('../../context/promotion.js').ClaimStatusCounts
 }
 
@@ -57,7 +57,17 @@ function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>):
 }
 
 export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSnapshot {
-  const { agent, session, model, cacheHitRate, cost, mcpManager, claimCounts } = sources
+  const { agent, session, claimCounts } = sources
+  const model = sources.model ?? 'unknown'
+  const cacheHitRate = sources.cacheHitRate ?? session.getCacheHitRate()
+  const cost = sources.cost ?? 0
+  const mcpManager = sources.mcpManager ?? null
+  const agentWithCache = agent as AgentLoop & {
+    getPrewarmStats?: () => { hits: number; misses: number; hitRate: number }
+    getCacheDiagnostic?: () => string | null
+  }
+  const prewarmStats = agentWithCache.getPrewarmStats?.() ?? { hits: 0, misses: 0, hitRate: 0 }
+  const cacheDiagnostic = agentWithCache.getCacheDiagnostic?.() ?? null
 
   const traceStore = agent.getTraceStore()
   const evidence = agent.getEvidenceState()
@@ -131,6 +141,11 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       cacheWriteTokens: usage.cache_creation_input_tokens,
       cost,
       routingReason: null,  // Will be updated from agent state in future
+      perTurnHitRate: session.getLatestTurnHitRate(),
+      prewarmHits: prewarmStats.hits,
+      prewarmMisses: prewarmStats.misses,
+      prewarmHitRate: prewarmStats.hitRate,
+      cacheDiagnostic,
     },
     mcp: {
       servers: mcpStates.map(s => ({

@@ -102,6 +102,13 @@ export class SessionContext {
     return total === 0 ? 0 : this.state.totalUsage.cache_read_input_tokens / total
   }
 
+  getLatestTurnHitRate(): number | null {
+    const latest = this.state.turnCacheHistory[this.state.turnCacheHistory.length - 1]
+    if (!latest) return null
+    const total = latest.cacheRead + latest.cacheCreation
+    return total > 0 ? latest.cacheRead / total : null
+  }
+
   getMessages(): Message[] {
     return this.state.messages
   }

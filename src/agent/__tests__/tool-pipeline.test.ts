@@ -89,6 +89,64 @@ describe('executeToolUse', () => {
     assert.ok(successCalled)
   })
 
+  it('truncates oversized successful tool results', async () => {
+    const hugeContent = 'HEAD_MARKER' + 'x'.repeat(500_000) + 'TAIL_MARKER'
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        contextWindow: 10_000,
+        toolRegistry: {
+          execute: async () => ({ content: hugeContent, isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-5', name: 'read_file', input: { file_path: '/tmp/huge.txt' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const content = (result.toolResult as any).content as string
+    assert.ok(content.length < hugeContent.length)
+    assert.ok(content.startsWith('HEAD_MARKER'))
+    assert.ok(content.endsWith('TAIL_MARKER'))
+    assert.match(content, /\.\.\.\[truncated \d+ chars\]\.\.\./)
+  })
+
+  it('truncates oversized run_tests diagnosis results', async () => {
+    const hugeContent = 'HEAD_MARKER' + 'x'.repeat(500_000) + 'TAIL_MARKER'
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        contextWindow: 10_000,
+        toolRegistry: {
+          execute: async () => ({ content: hugeContent, isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+      repairPipeline: {
+        run: (input: any) => ({
+          output: input,
+          telemetry: [{ pass: 'failure-classifier', kind: 'test_failure', suggestion: 'Run the focused failing test.' }],
+        }),
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-6', name: 'run_tests', input: { command: 'npm test' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const content = (result.toolResult as any).content as string
+    assert.ok(content.length < hugeContent.length)
+    assert.ok(content.startsWith('HEAD_MARKER'))
+    assert.match(content, /\.\.\.\[truncated \d+ chars\]\.\.\./)
+    assert.match(content, /TAIL_MARKER|Diagnosis:/)
+  })
+
   it('handles tool execution error gracefully', async () => {
     const deps = makeDeps({
       harness: {

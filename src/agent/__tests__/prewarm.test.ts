@@ -54,4 +54,32 @@ describe('PrewarmCache', () => {
     assert.equal(cache.get('a'), undefined)
     assert.equal(cache.get('d')?.content, '4')
   })
+
+  it('evicts least recently used entry when full', () => {
+    const cache = new PrewarmCache(30_000, 3)
+    cache.set('a', pv('1'))
+    cache.set('b', pv('2'))
+    cache.set('c', pv('3'))
+
+    assert.equal(cache.get('a')?.content, '1')
+    cache.set('d', pv('4'))
+
+    assert.equal(cache.get('a')?.content, '1')
+    assert.equal(cache.get('b'), undefined)
+    assert.equal(cache.get('c')?.content, '3')
+    assert.equal(cache.get('d')?.content, '4')
+  })
+
+  it('refreshes recency on get', () => {
+    const cache = new PrewarmCache(30_000, 2)
+    cache.set('a', pv('1'))
+    cache.set('b', pv('2'))
+    assert.equal(cache.get('a')?.content, '1')
+
+    cache.set('c', pv('3'))
+
+    assert.equal(cache.get('a')?.content, '1')
+    assert.equal(cache.get('b'), undefined)
+    assert.equal(cache.get('c')?.content, '3')
+  })
 })

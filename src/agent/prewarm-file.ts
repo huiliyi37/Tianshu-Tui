@@ -31,3 +31,23 @@ export function buildPrewarmValue(cwd: string, filePath: string): PrewarmValue |
     return undefined
   }
 }
+
+
+export async function batchPrewarm(
+  cwd: string,
+  paths: string[],
+  cache: import('./prewarm.js').PrewarmCache,
+): Promise<void> {
+  const pending: PrewarmValue[] = []
+  for (const filePath of paths) {
+    const value = buildPrewarmValue(cwd, filePath)
+    if (!value) continue
+    if (cache.has(value.canonicalPath)) continue
+    pending.push(value)
+    if (pending.length >= 5) break
+  }
+
+  for (const value of pending) {
+    cache.set(value.canonicalPath, value)
+  }
+}

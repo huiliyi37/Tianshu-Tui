@@ -36,13 +36,8 @@ export function diagnoseCacheMiss(
     }
   }
 
-  const prev = history[history.length - 2]!
-
-  // Compute per-turn deltas
-  const turnRead = current.cacheRead - prev.cacheRead
-  const turnCreation = current.cacheCreation - prev.cacheCreation
-  const turnTotal = turnRead + turnCreation
-  const turnHitRate = turnTotal > 0 ? turnRead / turnTotal : 1
+  const turnTotal = current.cacheRead + current.cacheCreation
+  const turnHitRate = turnTotal > 0 ? current.cacheRead / turnTotal : 1
 
   // High hit rate — nothing to explain
   if (turnHitRate >= 0.8) return null

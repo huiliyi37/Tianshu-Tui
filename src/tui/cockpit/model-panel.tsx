@@ -11,11 +11,17 @@ export interface ModelPanelProps {
   cacheReadTokens: number
   cacheWriteTokens: number
   cost: number
-  routingReason?: string
+  routingReason?: string | null
+  perTurnHitRate?: number | null
+  prewarmHits?: number
+  prewarmMisses?: number
+  prewarmHitRate?: number
+  cacheDiagnostic?: string | null
 }
 
 export const ModelPanel = memo(function ModelPanel({
   model, cacheHitRate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost, routingReason,
+  perTurnHitRate = null, prewarmHits = 0, prewarmMisses = 0, prewarmHitRate = 0, cacheDiagnostic = null,
 }: ModelPanelProps) {
   const theme = getTheme()
 
@@ -48,6 +54,16 @@ export const ModelPanel = memo(function ModelPanel({
         <Text color={theme.dim}> write: </Text>
         <Text>{(cacheWriteTokens / 1000).toFixed(1)}k</Text>
       </Text>
+      {perTurnHitRate !== null && (
+        <Text>
+          <Text color={theme.dim}>Turn cache: </Text>
+          <Text color={theme.contextColor(1 - perTurnHitRate)}>{Math.round(perTurnHitRate * 100)}%</Text>
+          <Text color={theme.dim}> │ Prewarm: </Text>
+          <Text>{prewarmHits}/{prewarmHits + prewarmMisses}</Text>
+          <Text color={theme.dim}> ({Math.round(prewarmHitRate * 100)}%)</Text>
+        </Text>
+      )}
+      {cacheDiagnostic && <Text color={theme.warning}>{cacheDiagnostic}</Text>}
       <Text>
         <Text color={theme.dim}>Est. cost: </Text>
         <Text color={theme.success}>${cost.toFixed(4)}</Text>

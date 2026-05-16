@@ -48,3 +48,39 @@ describe('SessionContext bounded collections', () => {
     assert.equal(history[history.length - 1]!.turn, 501)
   })
 })
+
+
+it('getLatestTurnHitRate returns null with no turn cache snapshots', () => {
+  const ctx = new SessionContext()
+  assert.equal(ctx.getLatestTurnHitRate(), null)
+})
+
+it('getLatestTurnHitRate returns null when latest turn has no cache counters', () => {
+  const ctx = new SessionContext()
+  ctx.recordTurnCache(1, {
+    input_tokens: 100,
+    output_tokens: 10,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  })
+
+  assert.equal(ctx.getLatestTurnHitRate(), null)
+})
+
+it('getLatestTurnHitRate returns latest turn cache read ratio', () => {
+  const ctx = new SessionContext()
+  ctx.recordTurnCache(1, {
+    input_tokens: 100,
+    output_tokens: 10,
+    cache_read_input_tokens: 20,
+    cache_creation_input_tokens: 80,
+  })
+  ctx.recordTurnCache(2, {
+    input_tokens: 100,
+    output_tokens: 10,
+    cache_read_input_tokens: 75,
+    cache_creation_input_tokens: 25,
+  })
+
+  assert.equal(ctx.getLatestTurnHitRate(), 0.75)
+})

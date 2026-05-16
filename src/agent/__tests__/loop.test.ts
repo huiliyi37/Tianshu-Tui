@@ -1,6 +1,6 @@
 import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentLoop } from '../loop.js'
@@ -41,6 +41,20 @@ function mockClient(blocks: ContentBlock[], stopReason = 'end_turn', usage = { i
       cb.onStopReason('tool_use', usage)
     }),
   } as unknown as ApiClient
+}
+
+
+function makeCallbacks() {
+  return {
+    onTextDelta: () => {},
+    onThinkingDelta: () => {},
+    onToolUse: () => {},
+    onToolResult: () => {},
+    onTurnComplete: () => {},
+    onError: (error: Error) => { throw error },
+    onAbort: () => {},
+    onApprovalRequired: async () => false,
+  }
 }
 
 function makeEngine() {
@@ -121,6 +135,130 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.deepEqual(toolUses, ['read_file'])
     assert.deepEqual(toolResults, ['read_file'])
     assert.equal(session.getMessages().length, 4)
+  })
+
+
+  it('stores cache diagnostic when latest turn hit rate is low', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        cb.onContentBlock(makeTextBlock('done'))
+        cb.onStopReason('end_turn', {
+          input_tokens: 100,
+          output_tokens: 10,
+          cache_read_input_tokens: 10,
+          cache_creation_input_tokens: 90,
+        })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+
+    await agent.run('hello', makeCallbacks())
+
+    assert.match(agent.getCacheDiagnostic() ?? '', /cache/i)
+  })
+
+  it('clears cache diagnostic when latest turn hit rate is healthy', async () => {
+    const session = new SessionContext()
+    session.recordTurnCache(1, {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_read_input_tokens: 10,
+      cache_creation_input_tokens: 90,
+    })
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        cb.onContentBlock(makeTextBlock('done'))
+        cb.onStopReason('end_turn', {
+          input_tokens: 100,
+          output_tokens: 10,
+          cache_read_input_tokens: 90,
+          cache_creation_input_tokens: 10,
+        })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+
+    await agent.run('hello', makeCallbacks())
+
+    assert.equal(agent.getCacheDiagnostic(), null)
+  })
+
+  it('clears cache diagnostic when latest turn has no cache counters', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        cb.onContentBlock(makeTextBlock('done'))
+        cb.onStopReason('end_turn', {
+          input_tokens: 100,
+          output_tokens: 10,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+
+    await agent.run('hello', makeCallbacks())
+
+    assert.equal(agent.getCacheDiagnostic(), null)
+  })
+
+
+  it('prewarms recent successful read_file history at turn start', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-loop-prewarm-'))
+    const filePath = join(dir, 'cached.txt')
+    writeFileSync(filePath, 'cached content', 'utf-8')
+
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    let callCount = 0
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        callCount++
+        if (callCount === 1 || callCount === 3) {
+          cb.onContentBlock(makeToolUseBlock(`tu_${callCount}`, 'read_file', { file_path: filePath }))
+          cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 50 })
+          return
+        }
+        cb.onContentBlock(makeTextBlock('done'))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, dir)
+    const callbacks = {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (error: Error) => { throw error },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    }
+
+    await agent.run('read once', callbacks)
+    assert.equal(agent.getPrewarmStats().hits, 0)
+
+    await agent.run('read again', callbacks)
+    assert.equal(agent.getPrewarmStats().hits, 1)
+
+    rmSync(dir, { recursive: true, force: true })
   })
 
   it('respects maxTurns limit', async () => {
