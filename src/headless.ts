@@ -6,6 +6,8 @@ export interface HeadlessCliArgs {
   prompt?: string
   json: boolean
   streamJson: boolean
+  goal?: string
+  budget?: number
 }
 
 export interface HeadlessJsonOutput {
@@ -35,8 +37,16 @@ export interface HeadlessRunConfig {
 
 export function parseCliArgs(args: string[]): HeadlessCliArgs {
   const printIndex = args.findIndex(arg => arg === '-p' || arg === '--print')
+  const goalIndex = args.findIndex(arg => arg === '--goal')
   const json = args.includes('--json')
   const streamJson = args.includes('--stream-json')
+
+  if (goalIndex >= 0) {
+    const goal = args[goalIndex + 1]
+    const budgetIndex = args.indexOf('--budget')
+    const budget = budgetIndex >= 0 ? parseInt(args[budgetIndex + 1]!, 10) : 100
+    return { headless: true, prompt: undefined, json, streamJson, goal, budget }
+  }
 
   if (printIndex === -1) return { headless: false, json, streamJson }
 

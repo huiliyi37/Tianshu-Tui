@@ -332,6 +332,7 @@ async function main() {
     rivet config       Manage API keys and model configuration
     rivet --help       Show this help
     rivet --version    Show version
+    rivet --goal \"text\"  Autonomous goal loop (--budget N, default 100)
 
   Commands:
     config show              Show current configuration
@@ -408,6 +409,72 @@ async function main() {
   if (args[0] === 'config') {
     runConfigCLI(args.slice(1))
     return
+  }
+
+  // rivet --goal "text" [--budget N] — Autonomous goal loop
+  if (args.includes('--goal')) {
+    const { parseCliArgs } = await import('./headless.js')
+    const { runGoalLoop } = await import('./goal-loop.js')
+    const parsed = parseCliArgs(args)
+    if (!parsed.goal) {
+      console.error('--goal requires a goal description')
+      process.exit(2)
+    }
+
+    const cfg = loadConfig()
+    const prov = cfg.provider.providers[cfg.provider.default]
+    if (!prov) { console.error('Provider not configured'); process.exit(1) }
+    const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
+    if (!key) { console.error('API key not configured'); process.exit(1) }
+
+    const model = prov.models[0]!
+    const sessionId = randomUUID()
+
+    const result = await runGoalLoop({
+      goal: parsed.goal,
+      budget: parsed.budget ?? 100,
+      createAgent: () => {
+        const toolRegistry = createDefaultToolRegistry()
+        const client = createDeepSeekClient({
+          apiKey: key,
+          model: model.id,
+          reasoningEffort: model.reasoningEffort,
+          maxTokens: model.maxTokens,
+          thinkingBudget: model.reasoningEffort === 'max' ? 64000 : Math.min(16000, Math.floor(model.contextWindow * 0.02)),
+        })
+        const promptEngine = new PromptEngine({
+          model: model.id,
+          maxTokens: model.maxTokens,
+          staticCtx: { tools: toolRegistry.getDefinitions() },
+          volatileCtx: { cwd: process.cwd() },
+        })
+        const session = new SessionContext()
+        return new AgentLoop({
+          client,
+          promptEngine,
+          toolRegistry,
+          maxTurns: 25,
+          contextWindow: model.contextWindow,
+          compact: cfg.compact,
+          approvalMode: 'auto-accept',
+          sessionId,
+          autoReasoning: true,
+        }, session, process.cwd())
+      },
+      checkGoalAchieved: (text: string) => {
+        const lower = text.toLowerCase()
+        return lower.includes('goal achieved') || lower.includes('all tests pass') || lower.includes('task complete')
+      },
+      onIteration: (i, _text, usage) => {
+        console.log(`[Goal Loop] Iteration ${i} — ${usage.input_tokens ?? 0} in / ${usage.output_tokens ?? 0} out`)
+      },
+    })
+
+    console.log(`\n[Goal Loop] ${result.achieved ? '✓ Goal achieved' : '✗ Goal not achieved'}`)
+    console.log(`  Iterations: ${result.iterations}`)
+    console.log(`  Exit reason: ${result.exitReason}`)
+    console.log(`  Total tokens: ${result.totalUsage.input_tokens} in / ${result.totalUsage.output_tokens} out`)
+    process.exit(result.achieved ? 0 : 1)
   }
 
   const config = loadConfig()

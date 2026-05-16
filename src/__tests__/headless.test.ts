@@ -4,15 +4,29 @@ import { parseCliArgs, runHeadless } from '../headless.js'
 
 describe('headless CLI parsing', () => {
   it('recognizes -p prompt input', () => {
-    assert.deepEqual(parseCliArgs(['-p', 'echo hello']), { headless: true, prompt: 'echo hello', json: false })
+    assert.deepEqual(parseCliArgs(['-p', 'echo hello']), { headless: true, prompt: 'echo hello', json: false, streamJson: false })
   })
 
   it('recognizes --print prompt input with --json', () => {
-    assert.deepEqual(parseCliArgs(['--print', 'summarize', '--json']), { headless: true, prompt: 'summarize', json: true })
+    assert.deepEqual(parseCliArgs(['--print', 'summarize', '--json']), { headless: true, prompt: 'summarize', json: true, streamJson: false })
   })
 
   it('leaves interactive args alone', () => {
-    assert.deepEqual(parseCliArgs([]), { headless: false, json: false })
+    assert.deepEqual(parseCliArgs([]), { headless: false, json: false, streamJson: false })
+  })
+
+  it('recognizes --goal with --budget', () => {
+    assert.deepEqual(
+      parseCliArgs(['--goal', 'make tests pass', '--budget', '20']),
+      { headless: true, prompt: undefined, json: false, streamJson: false, goal: 'make tests pass', budget: 20 },
+    )
+  })
+
+  it('--goal defaults budget to 100', () => {
+    const result = parseCliArgs(['--goal', 'fix lint'])
+    assert.equal(result.goal, 'fix lint')
+    assert.equal(result.budget, 100)
+    assert.equal(result.headless, true)
   })
 })
 
@@ -21,6 +35,7 @@ describe('runHeadless', () => {
     const result = await runHeadless({
       prompt: 'hello',
       json: false,
+      streamJson: false,
       createAgent: () => ({
         run: async (_prompt, callbacks) => {
           callbacks.onTextDelta('Hello')
@@ -39,6 +54,7 @@ describe('runHeadless', () => {
     const result = await runHeadless({
       prompt: 'hello',
       json: true,
+      streamJson: false,
       createAgent: () => ({
         run: async (_prompt, callbacks) => {
           callbacks.onTextDelta('Done')
@@ -60,6 +76,7 @@ describe('runHeadless', () => {
     const result = await runHeadless({
       prompt: 'fail',
       json: true,
+      streamJson: false,
       createAgent: () => ({
         run: async (_prompt, callbacks) => {
           callbacks.onError(new Error('boom'))
