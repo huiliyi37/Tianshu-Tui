@@ -1,5 +1,5 @@
-import { Box, Text, useInput } from 'ink'
-import { memo, useState } from 'react'
+import { Box, Text } from 'ink'
+import { memo } from 'react'
 import { ToolCard } from './tool-card.js'
 import { getGroupSummary } from './tool-family.js'
 import { getTheme } from './theme.js'
@@ -10,23 +10,16 @@ interface ToolGroupProps {
   verbose: boolean
 }
 
-export const ToolGroup = memo(function ToolGroup({ tools, verbose: initialVerbose }: ToolGroupProps) {
+export const ToolGroup = memo(function ToolGroup({ tools, verbose }: ToolGroupProps) {
   const theme = getTheme()
-  const [expanded, setExpanded] = useState(initialVerbose)
   const summary = getGroupSummary(tools)
-
-  useInput((_input, key) => {
-    if (key.return) {
-      setExpanded(v => !v)
-    }
-  })
 
   if (tools.length === 0) return null
 
-  if (!expanded) {
+  if (!verbose) {
     return (
       <Box paddingX={1} flexDirection="column">
-        <Text color={theme.dim}>{'▸'} {summary} <Text italic>— Enter to expand</Text></Text>
+        <Text color={theme.dim}>{'▸'} {summary} <Text italic>— /verbose to expand</Text></Text>
       </Box>
     )
   }
@@ -34,7 +27,7 @@ export const ToolGroup = memo(function ToolGroup({ tools, verbose: initialVerbos
   return (
     <Box flexDirection="column">
       <Box paddingX={1}>
-        <Text color={theme.dim}>{'▾'} {summary} <Text italic>— Enter to collapse</Text></Text>
+        <Text color={theme.dim}>{'▾'} {summary}</Text>
       </Box>
       {tools.map(tool => (
         <ToolCard
@@ -42,7 +35,7 @@ export const ToolGroup = memo(function ToolGroup({ tools, verbose: initialVerbos
           name={tool.toolName ?? ''}
           result={tool.content}
           isError={tool.isError}
-          verbose={initialVerbose}
+          verbose={verbose}
           rawPath={tool.rawPath}
         />
       ))}

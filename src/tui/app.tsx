@@ -24,11 +24,7 @@ import type { McpManager } from '../mcp/manager.js'
 import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, McpPanel } from './cockpit/index.js'
 import { buildCockpitSnapshot } from './cockpit/state.js'
 import type { Panel } from './cockpit/types.js'
-import type { Usage } from '../api/types.js'
-import { dismissOnboarding, getOnboardingState, shouldHandleOnboardingInput } from '../onboarding.js'
-import { OnboardingPanel } from './onboarding.js'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { getOnboardingState } from '../onboarding.js'
 import { CommandPalette, getPaletteCommands } from './command-palette.js'
 import { openInEditor } from './external-editor.js'
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from './slash-commands.js'
@@ -125,6 +121,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [staticItems, setStaticItems] = useState<LogEntry[]>([])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const staticBuf = useMemo(() => createRingBuffer<LogEntry>(500), [])
+  const liveToolsRef = useRef<LogEntry[]>([])
 
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
@@ -133,8 +130,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [cacheHitRate, setCacheHitRate] = useState(0)
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
-  const [showOnboarding, setShowOnboarding] = useState(() => getOnboardingState().shouldShow)
-  const [vimEnabled, setVimEnabled] = useState(false)
   const [showPalette, setShowPalette] = useState(false)
 
   const [verbose, _setVerbose] = useState(false)
@@ -155,6 +150,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const pushStatic = useCallback((entry: LogEntry) => {
     staticBuf.push(entry)
+    setStaticItems(staticBuf.items())
+  }, [staticBuf])
+
+  const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
+    for (const entry of entries) staticBuf.push(entry)
     setStaticItems(staticBuf.items())
   }, [staticBuf])
 
@@ -283,11 +283,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       return
     }
 
-    if (_key.ctrl && _input === '') {
+    if (_key.ctrl && _input === '\x0b') {
       setShowPalette(prev => !prev)
       return
     }
-    if (_key.ctrl && _input === '') {
+    if (_key.ctrl && _input === '\x0f') {
       const edited = openInEditor('')
       if (edited) {
         handleSubmit(edited.trim())
@@ -311,6 +311,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setStreamingText('')
     setStreamingThinking('')
     setLiveTools([])
+    liveToolsRef.current = []
 
     streamBuf.current = ''
     thinkBuf.current = ''
@@ -404,7 +405,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           thinkStartRef.current = 0
         }
 
-        setLiveTools(prev => [...prev, createLogEntry({ type: 'tool', id, content: 'Running...', toolName: name })])
+        const entry = createLogEntry({ type: 'tool', id, content: 'Running...', toolName: name })
+        liveToolsRef.current = [...liveToolsRef.current, entry]
+        setLiveTools(liveToolsRef.current)
 
         toolCallTracker.current.set(id, { id, name, label: toolLabel(name, input), done: false, error: false })
         setToolCallsDisplay([...toolCallTracker.current.values()])
@@ -439,7 +442,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolNames.current.delete(id)
 
         const finalContent = uiContent ?? result
-        setLiveTools(prev => prev.filter(e => e.id !== id))
+        liveToolsRef.current = liveToolsRef.current.filter(e => e.id !== id)
+        setLiveTools(liveToolsRef.current)
         pushStatic(createLogEntry({ type: 'tool', id, toolName: name, content: finalContent, isError, rawPath }))
 
         const tcEntry = toolCallTracker.current.get(id)
@@ -494,12 +498,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setStreamingThinking(thinkBuf.current)
         thinkBuf.current = ''
 
-        setLiveTools(prev => {
-          for (const entry of prev) {
-            pushStatic(entry)
-          }
-          return []
-        })
+        const remaining = liveToolsRef.current
+        if (remaining.length > 0) {
+          pushStaticBatch(remaining)
+        }
+        liveToolsRef.current = []
+        setLiveTools([])
 
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
@@ -537,14 +541,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
         setIsStreaming(false)
       })
-  }, [agent, session, pushStatic, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+  }, [agent, session, pushStatic, pushStaticBatch, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   const currentTokens = session.getEstimatedTokens()
   const tokenEstimate = Math.floor(streamingText.length / 4)
+  const groupedItems = useMemo(() => groupLogs(staticItems), [staticItems])
 
   return (
     <>
-      <Static items={groupLogs(staticItems)}>
+      <Static items={groupedItems}>
         {(item) => renderStaticEntry(item, verbose)}
       </Static>
       <Box flexDirection="column">
@@ -595,7 +600,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             onCancel={() => setShowPalette(false)}
           />
         )}
-        <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} vimEnabled={vimEnabled} />
+        <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} vimEnabled={false} />
       </Box>
     </>
   )
