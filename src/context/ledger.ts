@@ -1,6 +1,6 @@
 import type { Message } from '../api/types.js'
 import { groupIntoRounds, computeInvariantStatus } from './rounds.js'
-import type { CompactionState, ContextLedger, LedgerSessionMemoryState } from './types.js'
+import type { CompactionState, ContextAnchor, ContextLedger, LedgerSessionMemoryState } from './types.js'
 
 export function createContextLedger(
   sessionId: string,
@@ -8,6 +8,7 @@ export function createContextLedger(
   messages: Message[],
   contextWindow: number,
   sessionMemory?: LedgerSessionMemoryState,
+  extraAnchors?: ContextAnchor[],
 ): ContextLedger {
   const rounds = groupIntoRounds(messages)
   const estimatedTokens = rounds.reduce((sum, r) => sum + r.tokenEstimate, 0)
@@ -20,7 +21,7 @@ export function createContextLedger(
 
   return {
     sessionId, transcriptPath, rounds,
-    anchors: [], workingSet: [], compactedSpans: [], sessionMemory: sessionMemory ?? null,
+    anchors: extraAnchors ?? [], workingSet: [], compactedSpans: [], sessionMemory: sessionMemory ?? null,
     tokenBudget: { estimatedTokens, maxTokens: contextWindow, warningThreshold: Math.floor(contextWindow * 0.5), compactionState },
     apiInvariantStatus: invariantStatus,
   }

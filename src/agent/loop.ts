@@ -14,7 +14,7 @@ import { microCompact, estimateTokens } from '../compact/micro.js'
 import { CACHE_ANCHOR_MESSAGES, type CompactionConfig } from '../compact/constants.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import { createContextLedger } from '../context/ledger.js'
-import type { CompactCircuitBreakerState } from '../context/types.js'
+import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
@@ -101,6 +101,7 @@ export class AgentLoop {
   private harness: TurnHarness
   private routingMetrics = new RoutingMetricsCollector()
   private importGraph: ImportGraph | null = null
+  private userAnchors: ContextAnchor[] = []
 
   constructor(
     private config: AgentConfig,
@@ -175,6 +176,15 @@ export class AgentLoop {
 
   getLatestRisk(): import('./approval-risk.js').RiskAssessment { return this.latestRisk }
 
+  getLedger() { return this.session.getContextLedger() }
+
+  addAnchor(kind: ContextAnchor['kind'], text: string): void {
+    this.userAnchors.push({ kind, text, sourceRoundIndex: -1, salience: 1.0 })
+    this.refreshLedger()
+  }
+
+  getFileHistory() { return this.config.fileHistory }
+
   getDebugInfo() {
     const fp = this.config.promptEngine.getFingerprint()
     const drift = this.config.promptEngine.checkDrift()
@@ -213,6 +223,7 @@ export class AgentLoop {
       this.session.getMessages(),
       this.config.contextWindow,
       this.config.getSessionMemoryState?.(),
+      this.userAnchors,
     )
     this.session.setContextLedger(ledger)
   }

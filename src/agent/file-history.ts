@@ -169,6 +169,10 @@ export class FileHistory {
     return this.snapshots.at(-1)?.messageId
   }
 
+  getAllSnapshots(): FileSnapshot[] {
+    return this.snapshots
+  }
+
   async cleanupOrphans(): Promise<number> {
     const sessionDir = join(this.backupDir, this.sessionId)
     let dirEntries: string[]

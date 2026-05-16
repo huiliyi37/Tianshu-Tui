@@ -291,6 +291,19 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     }
 
     case '/context': {
+      const args = parts.slice(1).join(' ').trim()
+      if (args.startsWith('pin ')) {
+        const text = args.slice(4).trim()
+        if (text) {
+          ctx.agent.addAnchor('user_preference', text)
+          pushStatic(createLogEntry({ type: 'text', content: `Pinned: "${text}"` }))
+        } else {
+          pushStatic(createLogEntry({ type: 'text', content: 'Usage: /context pin <text>' }))
+        }
+        setIsStreaming(false)
+        return true
+      }
+
       const ledger = ctx.session.getContextLedger()
       if (!ledger) {
         pushStatic(createLogEntry({ type: 'text', content: 'Context ledger not available yet. Send a message to build the first ledger snapshot.' }))
@@ -307,9 +320,13 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         ? 'No compact events.'
         : compacts.slice(-5).map(e => `- turn ${e.turn}: tier ${e.tier}, ${e.beforeTokens}→${e.afterTokens}`).join('\n')
 
+      const anchorLines = ledger.anchors.length > 0
+        ? `\n\nPinned Anchors:\n${ledger.anchors.map(a => `  [${a.kind}] ${a.text.slice(0, 60)}`).join('\n')}`
+        : ''
+
       pushStatic(createLogEntry({
         type: 'text',
-        content: `Context: ${sections.compactionState}\nTokens: ${sections.estimatedTokens.toLocaleString()}/${sections.maxTokens.toLocaleString()} (${Math.round(sections.estimatedTokens / sections.maxTokens * 100)}%)\nRounds: ${ledger.rounds.length}\n${diagnostics}\n\nCompaction:\n${compactStr}`,
+        content: `Context: ${sections.compactionState}\nTokens: ${sections.estimatedTokens.toLocaleString()}/${sections.maxTokens.toLocaleString()} (${Math.round(sections.estimatedTokens / sections.maxTokens * 100)}%)\nRounds: ${ledger.rounds.length}\n${diagnostics}\n\nCompaction:\n${compactStr}${anchorLines}`,
       }))
       setIsStreaming(false)
       return true
@@ -334,6 +351,46 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
 
     case '/mcp': {
       pushStatic(createLogEntry({ type: 'text', content: 'MCP status: use /debug mcp for detailed connection info, or check startup logs.' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/undo': {
+      const fh = ctx.agent.getFileHistory()
+      if (!fh) {
+        pushStatic(createLogEntry({ type: 'text', content: 'Undo not available (no file history).' }))
+        setIsStreaming(false)
+        return true
+      }
+      const snapshots = fh.getAllSnapshots()
+      if (snapshots.length === 0) {
+        pushStatic(createLogEntry({ type: 'text', content: 'No undo history yet.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const arg = parts[1]
+      if (arg && /^\d+$/.test(arg)) {
+        const idx = parseInt(arg, 10) - 1
+        if (idx < 0 || idx >= snapshots.length) {
+          pushStatic(createLogEntry({ type: 'text', content: `Invalid index. History has ${snapshots.length} entries (1-${snapshots.length}).` }))
+          setIsStreaming(false)
+          return true
+        }
+        const target = snapshots[idx]!
+        fh.rewind(target.messageId).then(restored => {
+          pushStatic(createLogEntry({ type: 'text', content: `Undo complete. Restored files: ${restored.join(', ') || '(none)'}` }))
+        }).catch(err => {
+          pushStatic(createLogEntry({ type: 'text', content: `Undo failed: ${(err as Error).message}` }))
+        })
+      } else {
+        const recent = snapshots.slice(-10).reverse()
+        const lines = recent.map((s, i) => {
+          const n = snapshots.length - i
+          const files = Object.keys(s.trackedFileBackups).join(', ')
+          return `  ${n}. [${s.messageId.slice(0, 8)}] ${files || '(no files)'}`
+        })
+        pushStatic(createLogEntry({ type: 'text', content: `Undo history (${snapshots.length} total):\n${lines.join('\n')}\n\nUse /undo <number> to revert.` }))
+      }
       setIsStreaming(false)
       return true
     }

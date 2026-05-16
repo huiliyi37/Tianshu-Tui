@@ -9,10 +9,13 @@ import { ErrorBoundary } from './tui/error-boundary.js'
 import { AgentLoop } from './agent/loop.js'
 import { SessionContext } from './agent/context.js'
 import { SessionPersist } from './agent/session-persist.js'
+import { FileHistory } from './agent/file-history.js'
+import { persistFileHistory } from './agent/file-history-persist.js'
 import { PromptEngine } from './prompt/engine.js'
 import { ToolRegistry } from './tools/registry.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool, type DelegateTaskCoordinator } from './tools/delegate-task.js'
+import { createUndoTool } from './tools/undo.js'
 import { createDeepSeekClient } from './api/deepseek.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
@@ -75,6 +78,9 @@ let _pipedInput: string | undefined
 // read by the delegate_task tool's execute method.
 let _coordinatorRef: DelegationCoordinator | null = null
 
+// Module-level FileHistory reference — created in Root, read by undo tool
+let _fileHistoryRef: FileHistory | null = null
+
 // Module-level MCP manager reference — initialized in Root, shut down on exit
 let _mcpManager: McpManager | null = null
 
@@ -100,6 +106,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
         return _coordinatorRef.delegate(request)
       },
     }))
+    reg.register(createUndoTool(() => _fileHistoryRef ?? undefined))
     return reg
   })
 
@@ -155,6 +162,12 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   const [session] = useState(() => new SessionContext())
 
   const [sessionId] = useState(() => getOrCreateSessionId())
+
+  const [fileHistory] = useState(() => {
+    const fh = new FileHistory(join(homedir(), '.rivet', 'sessions', sessionId, 'backups'), sessionId)
+    _fileHistoryRef = fh
+    return fh
+  })
 
   const [persist] = useState(() => {
     const p = new SessionPersist(sessionId)
@@ -248,11 +261,14 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
         approvalMode: config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
         sessionId,
         getSessionMemoryState: () => persist.getSessionMemoryState(),
+        autoReasoning: true,
+        lspEnabled: true,
+        fileHistory,
       },
       session,
       cwd,
     )
-  }, [currentModel, toolVersion])
+  }, [currentModel, toolVersion, fileHistory])
 
   const availableModels = provider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id }))
 
@@ -268,9 +284,15 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       killAll()
       _mcpManager?.shutdown().catch(() => {})
       persist.compact(session.getMessages())
+      if (_fileHistoryRef) {
+        persistFileHistory(
+          join(homedir(), '.rivet', 'sessions', sessionId, 'file-history.json'),
+          _fileHistoryRef.getAllSnapshots(),
+        )
+      }
     }
     return () => { shutdownCallback = null }
-  }, [agent, persist, session])
+  }, [agent, persist, session, sessionId])
 
   return createElement(App, {
     agent,
