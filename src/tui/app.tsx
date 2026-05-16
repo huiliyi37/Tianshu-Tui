@@ -455,6 +455,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   // Tool target tracking for SummaryBar
   const toolTargetMap = useRef<Map<string, string>>(new Map())
 
+  // Braille sparkline token history
+  const tokenHistoryRef = useRef<number[]>([])
+  const pushTokenHistory = useCallback((pct: number): number[] => {
+    tokenHistoryRef.current.push(Math.max(0, Math.min(1, pct)))
+    if (tokenHistoryRef.current.length > 20) {
+      tokenHistoryRef.current = tokenHistoryRef.current.slice(-20)
+    }
+    return tokenHistoryRef.current
+  }, [])
+
   const flushStream = useCallback(() => {
     streamTimer.current = null
     if (streamBuf.current !== lastFlushedStream.current) {
@@ -576,8 +586,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setToolCallsDisplay([])
 
     const taskDesc = userInput.length > 30 ? userInput.slice(0, 29) + '…' : userInput
+    const initPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
     phaseTracker.current = new PhaseTracker()
-    setSummaryState({ task: taskDesc, phase: 'idle', stepCount: 0, totalSteps: 0, contextPct: Math.min(session.getEstimatedTokens() / maxTokens, 1), elapsedMs: 0, lastAction: null, risk: 'none' })
+    setSummaryState({ task: taskDesc, phase: 'idle', stepCount: 0, totalSteps: 0, contextPct: initPct, elapsedMs: 0, lastAction: null, risk: 'none', tokenHistory: pushTokenHistory(initPct) })
 
     for (const ref of [streamTimer, thinkTimer, toolTimer]) {
       if (ref.current) {
@@ -655,12 +666,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setToolCallsDisplay([...toolCallTracker.current.values()])
 
         phaseTracker.current.onToolUse(name, target)
+        const tuPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setSummaryState(prev => ({
           ...prev,
           phase: phaseTracker.current.current(),
           stepCount: agent.getTrajectoryStats().totalTools,
-          contextPct: Math.min(session.getEstimatedTokens() / maxTokens, 1),
+          contextPct: tuPct,
           elapsedMs: Date.now() - streamStartRef.current,
+          tokenHistory: pushTokenHistory(tuPct),
         }))
       },
       onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {
@@ -694,12 +707,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
         phaseTracker.current.onToolResult(name, !!isError)
         const risk = (name === 'bash' && !autoSafeRef.current) ? 'medium' as const : 'none' as const
+        const trPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setSummaryState(prev => ({
           ...prev,
           lastAction: phaseTracker.current.lastAction(),
           risk,
           elapsedMs: Date.now() - streamStartRef.current,
           approvalNeeded: null,
+          tokenHistory: pushTokenHistory(trPct),
         }))
       },
       onCheckpoint: (hash) => {
@@ -745,7 +760,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setIsStreaming(false)
         setCacheHitRate(session.getCacheHitRate())
         phaseTracker.current.onTurnComplete()
-        setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current }))
+        const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
+        setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current, tokenHistory: pushTokenHistory(tcPct) }))
 
         const usage = session.getTotalUsage()
         const normalInput = usage.input_tokens - usage.cache_read_input_tokens
@@ -780,7 +796,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         })
       },
     })
-  }, [agent, session, pushStatic, flushStream, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe])
+  }, [agent, session, pushStatic, flushStream, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   const currentTokens = session.getEstimatedTokens()
   const tokenEstimate = Math.floor(streamingText.length / 4)

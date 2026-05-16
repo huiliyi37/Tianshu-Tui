@@ -14,6 +14,7 @@ export interface SummaryState {
   risk: 'none' | 'medium' | 'high'
   compactEvent?: { beforeTokens: number; afterTokens: number } | null
   approvalNeeded?: { tool: string; target: string } | null
+  tokenHistory?: number[]  // last N context percentages (0-1)
 }
 
 function truncate(s: string, max: number): string {
@@ -26,6 +27,33 @@ export function formatElapsed(ms: number): string {
   const m = Math.floor(sec / 60)
   const s = sec % 60
   return `${m}m${s > 0 ? `${s}s` : ''}`
+}
+
+// Braille sparkline: renders values 0-1 as braille dot columns
+// Each braille char encodes a 2-wide x 4-tall dot grid
+export function brailleSparkline(values: number[]): string {
+  if (values.length === 0) return ''
+
+  const BRAILLE_BASE = 0x2800
+  const leftDots = [0, 1, 2, 6]
+  const rightDots = [3, 4, 5, 7]
+
+  const chars: string[] = []
+  for (let i = 0; i < values.length; i += 2) {
+    let pattern = 0
+    const lv = Math.max(0, Math.min(1, values[i] ?? 0))
+    const lLevel = Math.round(lv * 3)
+    for (let d = 0; d <= lLevel; d++) {
+      pattern |= 1 << leftDots[d]!
+    }
+    const rv = Math.max(0, Math.min(1, values[i + 1] ?? values[i] ?? 0))
+    const rLevel = Math.round(rv * 3)
+    for (let d = 0; d <= rLevel; d++) {
+      pattern |= 1 << rightDots[d]!
+    }
+    chars.push(String.fromCodePoint(BRAILLE_BASE + pattern))
+  }
+  return chars.join('')
 }
 
 export function contextBar(pct: number, width = 5): string {
@@ -74,6 +102,9 @@ export const SummaryBar = memo(function SummaryBar({ state }: { state: SummarySt
         {state.totalSteps > 0 && <Text dimColor> ({state.stepCount}/{state.totalSteps})</Text>}
         <Text color={theme.dim}> │ </Text>
         <Text color={ctxColor} bold={state.contextPct >= 0.95}>{contextBar(state.contextPct)} {Math.round(state.contextPct * 100)}%</Text>
+{state.tokenHistory && state.tokenHistory.length > 1 && (
+  <Text color={theme.dim}> {brailleSparkline(state.tokenHistory)}</Text>
+)}
         <Text color={theme.dim}> │ </Text>
         <Text dimColor>{formatElapsed(state.elapsedMs)}</Text>
       </Text>
