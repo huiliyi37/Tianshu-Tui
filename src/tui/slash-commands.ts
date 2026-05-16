@@ -291,6 +291,47 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         return true
       }
 
+      if (args === 'antibodies') {
+        const store = ctx.claimStoreRef.current
+        if (!store) {
+          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          setIsStreaming(false)
+          return true
+        }
+        const antibodies = store.listClaims({ kind: ['failure_pattern'], status: ['active', 'durable_candidate', 'durable'] })
+        if (antibodies.length === 0) {
+          pushStatic(createLogEntry({ type: 'text', content: 'No active antibodies.' }))
+          setIsStreaming(false)
+          return true
+        }
+        const lines = antibodies.map(c => {
+          const tag = c.tags.filter(t => t !== 'antibody')[0] ?? c.kind
+          return `  [${tag}] ${c.text.slice(0, 80)}`
+        })
+        pushStatic(createLogEntry({ type: 'text', content: `Antibodies (${antibodies.length}):\n${lines.join('\n')}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (args === 'conflicts') {
+        const store = ctx.claimStoreRef.current
+        if (!store) {
+          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          setIsStreaming(false)
+          return true
+        }
+        const conflicted = store.listClaims({ status: ['conflicted'] })
+        if (conflicted.length === 0) {
+          pushStatic(createLogEntry({ type: 'text', content: 'No conflicted claims.' }))
+          setIsStreaming(false)
+          return true
+        }
+        const lines = conflicted.map(c => `  [${c.id.slice(0, 8)}] ${c.text.slice(0, 80)}`)
+        pushStatic(createLogEntry({ type: 'text', content: `Conflicts (${conflicted.length}):\n${lines.join('\n')}` }))
+        setIsStreaming(false)
+        return true
+      }
+
       const ledger = ctx.session.getContextLedger()
       if (!ledger) {
         pushStatic(createLogEntry({ type: 'text', content: 'Context ledger not available yet. Send a message to build the first ledger snapshot.' }))
