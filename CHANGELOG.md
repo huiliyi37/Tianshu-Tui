@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-05-16 — Wave 8 + Evolutionary Context Fabric Phase 2 + Phase 3
+## 2026-05-16 — Wave 8 + Evolutionary Context Fabric Phase 2 + Phase 3 + Phase 4
 
 ### Added — Wave 8 Context Fabric Phase 2
 - **Claim Extractor** (`src/context/claim-extractor.ts`) — Automatic claim extraction from tool results:
@@ -27,6 +27,13 @@
 - **Worker finding evidence** — `delegate_task` claim proposals include `evidence[0].path` from `changedFiles[0]`; confidence mapped: high→0.85, medium→0.7, low→0.55
 - **TUI slash commands** — `/context antibodies` lists active failure_pattern claims; `/context conflicts` lists conflicted claims
 - **File observation dedup** — `extractClaimsFromToolResult` accepts `existingFileObservations` set; same file path → skip duplicate claim
+
+### Added — Evolutionary Context Fabric Phase 4
+- **Project rules loader** (`src/context/rules-loader.ts`) — `.rivet/rules/*.md` loaded as `project_rule` claims (scope=project, status=durable, confidence=1.0, fitness=10); 500-char truncation; fixed sessionId='project' for cross-session dedup
+- **Claim budget cap** (`src/context/claim-budget.ts`) — `MAX_ACTIVE_CLAIMS=50`; `selectEvictionCandidates()` evicts lowest fitness→confidence→lastUsedAt; `project_rule`/`user_constraint`/`user_preference` exempt
+- **Budget eviction in AgentLoop** — `refreshActiveClaims()` marks excess low-value claims stale before projection
+- **/context reload** — Hot-reload project rules from `.rivet/rules/` at runtime
+- **Goal loop rules** — Autonomous `--goal` mode also loads project rules on startup
 
 ### Changed
 - `src/context/promotion.ts` — `evaluatePromotion()` now handles both `active → durable_candidate` and `durable_candidate → durable`
