@@ -15,6 +15,7 @@ export type ContextClaimEvent =
   | { type: 'claim_proposed'; eventId: string; createdAt: number; claim: ContextClaim }
   | { type: 'claim_status_changed'; eventId: string; createdAt: number; claimId: string; status: ContextClaimStatus; reason: string }
   | { type: 'claim_used'; eventId: string; createdAt: number; claimId: string; consumerId: string; consumerKind: 'prompt' | 'tool' | 'test' | 'worker' }
+  | { type: 'claim_boosted'; eventId: string; createdAt: number; claimId: string; fitness: number }
 
 export interface ClaimFilter {
   status?: ContextClaimStatus[]
@@ -91,6 +92,20 @@ export class ContextClaimStore {
     })
 
     return this.listClaims().find(claim => claim.id === id) ?? null
+  }
+
+  boostFitness(id: string, delta: number, cap: number): ContextClaim | null {
+    const claim = this.listClaims().find(c => c.id === id)
+    if (!claim) return null
+    claim.fitness = Math.min(claim.fitness + delta, cap)
+    this.appendEvent({
+      type: 'claim_boosted',
+      eventId: `${id}:boost:${Date.now()}`,
+      createdAt: Date.now(),
+      claimId: id,
+      fitness: claim.fitness,
+    })
+    return claim
   }
 
   listClaims(filter: ClaimFilter = {}): ContextClaim[] {
@@ -233,17 +248,27 @@ export class ContextClaimStore {
         continue
       }
 
-      const claim = claims.get(event.claimId)
-      if (!claim) continue
-      claims.set(event.claimId, {
-        ...claim,
-        lastUsedAt: event.createdAt,
-        consumers: [...claim.consumers, {
-          id: event.consumerId,
-          kind: event.consumerKind,
-          usedAt: event.createdAt,
-        }],
-      })
+      if (event.type === 'claim_used') {
+        const claim = claims.get(event.claimId)
+        if (!claim) continue
+        claims.set(event.claimId, {
+          ...claim,
+          lastUsedAt: event.createdAt,
+          consumers: [...claim.consumers, {
+            id: event.consumerId,
+            kind: event.consumerKind,
+            usedAt: event.createdAt,
+          }],
+        })
+        continue
+      }
+
+      if (event.type === 'claim_boosted') {
+        const claim = claims.get(event.claimId)
+        if (!claim) continue
+        claims.set(event.claimId, { ...claim, fitness: event.fitness })
+        continue
+      }
     }
   }
 }

@@ -269,3 +269,62 @@ test('loadDurableClaims returns empty for nonexistent session', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('boostFitness increases fitness by delta', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-boost-'))
+  try {
+    const store = new ContextClaimStore(dir, 'session-1')
+    const claim = store.propose({
+      kind: 'file_observation',
+      scope: 'session',
+      text: 'config uses port 3000',
+      confidence: 0.7,
+      fitness: 3,
+      source: { actor: 'tool', sessionId: 'session-1', turn: 1, eventId: 'e1' },
+      evidence: [{ id: 'ev1', kind: 'tool_result', summary: 'x', createdAt: Date.now() }],
+      createdAt: Date.now(),
+      tags: ['test'],
+    })
+
+    const updated = store.boostFitness(claim.id, 2, 10)
+
+    assert.equal(updated!.fitness, 5)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('boostFitness caps fitness at max value', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-boost-'))
+  try {
+    const store = new ContextClaimStore(dir, 'session-1')
+    const claim = store.propose({
+      kind: 'file_observation',
+      scope: 'session',
+      text: 'high fitness claim',
+      confidence: 0.7,
+      fitness: 9,
+      source: { actor: 'tool', sessionId: 'session-1', turn: 1, eventId: 'e2' },
+      evidence: [{ id: 'ev2', kind: 'tool_result', summary: 'x', createdAt: Date.now() }],
+      createdAt: Date.now(),
+      tags: ['test'],
+    })
+
+    const updated = store.boostFitness(claim.id, 5, 10)
+
+    assert.equal(updated!.fitness, 10)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('boostFitness returns null for nonexistent claim', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-boost-'))
+  try {
+    const store = new ContextClaimStore(dir, 'session-1')
+    const result = store.boostFitness('nonexistent', 1, 10)
+    assert.equal(result, null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
