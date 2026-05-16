@@ -3,3 +3,8 @@ dist/
 *.tsbuildinfo
 .DS_Store
 failure-samples/**/transcript.raw.jsonl
+
+# Session artifacts
+findings.md
+progress.md
+task_plan.md
