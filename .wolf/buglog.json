@@ -1709,6 +1709,1142 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-05-16T13:50:57.640358Z"
+    },
+    {
+      "id": "bug-107",
+      "timestamp": "2026-05-16T14:13:27.508Z",
+      "error_message": "Wrong return value",
+      "file": "src/main.tsx",
+      "root_cause": "Was returning: lower.includes('goal achieved') || lower.includes(",
+      "fix": "Now returns: /\\bgoal\\s+achieved\\b/.test(lower)",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:13:27.508Z"
+    },
+    {
+      "id": "bug-108",
+      "timestamp": "2026-05-16T14:14:34.358Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/__tests__/goal-loop.test.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:14:34.358Z"
+    },
+    {
+      "id": "bug-109",
+      "timestamp": "2026-05-16T14:20:13.263Z",
+      "error_message": "Type error",
+      "file": "src/agent/coordinator.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:20:13.263Z"
+    },
+    {
+      "id": "bug-110",
+      "timestamp": "2026-05-16T14:22:27.400Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tools/delegate-task.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:22:27.400Z"
+    },
+    {
+      "id": "bug-111",
+      "timestamp": "2026-05-16T14:23:11.655Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/main.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check) | Also: const runtimeFactory: WorkerRuntimeFactory = (_order, card, ; const writeProfiles = ['patcher', 'verifier']",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T14:24:14.848Z"
+    },
+    {
+      "id": "bug-112",
+      "timestamp": "2026-05-16T14:25:53.290Z",
+      "error_message": "Missing import: ../context/claims.js",
+      "file": "src/agent/worker-session.ts",
+      "root_cause": "Module(s) not imported: ../context/claims.js",
+      "fix": "Added import(s) for ../context/claims.js",
+      "tags": [
+        "auto-detected",
+        "missing-import",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:25:53.290Z"
+    },
+    {
+      "id": "bug-113",
+      "timestamp": "2026-05-16T14:26:40.637Z",
+      "error_message": "Function not marked async",
+      "file": "src/main.tsx",
+      "root_cause": "Function uses await but wasn't declared async",
+      "fix": "Added async modifier",
+      "tags": [
+        "auto-detected",
+        "async-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:26:40.637Z"
+    },
+    {
+      "id": "bug-114",
+      "timestamp": "2026-05-16T14:27:59.355Z",
+      "error_message": "Missing guard clause",
+      "file": "src/main.tsx",
+      "root_cause": "No early return/throw for edge case: !_coordinatorRef",
+      "fix": "Added guard clause: if (!_coordinatorRef)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:27:59.355Z"
+    },
+    {
+      "id": "bug-115",
+      "timestamp": "2026-05-16T14:29:46.212Z",
+      "error_message": "Wrong reference: false should be true",
+      "file": ".omc/prd.json",
+      "root_cause": "Used \"false\" instead of \"true\"",
+      "fix": "Changed false → true",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "json"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:29:46.212Z"
+    },
+    {
+      "id": "bug-116",
+      "timestamp": "2026-05-16T14:33:29.980Z",
+      "error_message": "Wrong reference: 855 should be 755",
+      "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
+      "root_cause": "Used \"855\" instead of \"755\"",
+      "fix": "Changed 855 → 755",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:33:29.980Z"
+    },
+    {
+      "id": "bug-117",
+      "timestamp": "2026-05-16T14:34:10.938Z",
+      "error_message": "Incorrect value in code",
+      "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
+      "root_cause": "Had `specs/...-wave6-goal-loop-design.md`",
+      "fix": "Changed to `plans/...-wave6-goal-loop.md`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:34:10.938Z"
+    },
+    {
+      "id": "bug-118",
+      "timestamp": "2026-05-16T14:35:38.545Z",
+      "error_message": "Wrong reference: true should be false",
+      "file": "src/tools/delegate-task.ts",
+      "root_cause": "Used \"true\" instead of \"false\"",
+      "fix": "Changed true → false",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:35:38.545Z"
+    },
+    {
+      "id": "bug-119",
+      "timestamp": "2026-05-16T14:46:26.675Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/context/__tests__/claim-store.test.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check) | Also: test('marks claims with matching file evidence as stale', (); const dir = tempDir()",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T14:50:47.202Z"
+    },
+    {
+      "id": "bug-120",
+      "timestamp": "2026-05-16T14:46:54.789Z",
+      "error_message": "Missing guard clause",
+      "file": "src/context/claim-store.ts",
+      "root_cause": "No early return/throw for edge case: !next",
+      "fix": "Added guard clause: if (!next)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:46:54.789Z"
+    },
+    {
+      "id": "bug-121",
+      "timestamp": "2026-05-16T14:48:25.713Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/__tests__/loop.test.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:48:25.714Z"
+    },
+    {
+      "id": "bug-122",
+      "timestamp": "2026-05-16T14:50:29.140Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/__tests__/commands-loader.test.ts",
+      "root_cause": "Had '../tui/app.js'",
+      "fix": "Changed to '../tui/slash-commands.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:50:29.140Z"
+    },
+    {
+      "id": "bug-123",
+      "timestamp": "2026-05-16T14:51:48.528Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:51:48.528Z"
+    },
+    {
+      "id": "bug-124",
+      "timestamp": "2026-05-16T14:53:11.644Z",
+      "error_message": "Missing guard clause",
+      "file": "src/tui/slash-commands.ts",
+      "root_cause": "No early return/throw for edge case: claims.length === 0",
+      "fix": "Added guard clause: if (claims.length === 0)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:53:11.644Z"
+    },
+    {
+      "id": "bug-125",
+      "timestamp": "2026-05-16T14:53:39.100Z",
+      "error_message": "Type error",
+      "file": "src/tui/slash-commands.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:53:39.100Z"
+    },
+    {
+      "id": "bug-126",
+      "timestamp": "2026-05-16T14:54:00.839Z",
+      "error_message": "Missing import: ../../../context/promotion.js",
+      "file": "src/tui/cockpit/types.ts",
+      "root_cause": "Module(s) not imported: ../../../context/promotion.js",
+      "fix": "Added import(s) for ../../../context/promotion.js",
+      "tags": [
+        "auto-detected",
+        "missing-import",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:54:00.839Z"
+    },
+    {
+      "id": "bug-127",
+      "timestamp": "2026-05-16T14:54:14.475Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/tui/cockpit/types.ts",
+      "root_cause": "Had '../../../context/promotion.js'",
+      "fix": "Changed to '../../context/promotion.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:54:14.475Z"
+    },
+    {
+      "id": "bug-128",
+      "timestamp": "2026-05-16T14:54:36.572Z",
+      "error_message": "Missing import: ../../context/promotion.js",
+      "file": "src/tui/cockpit/state.ts",
+      "root_cause": "Module(s) not imported: ../../context/promotion.js",
+      "fix": "Added import(s) for ../../context/promotion.js",
+      "tags": [
+        "auto-detected",
+        "missing-import",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:54:36.572Z"
+    },
+    {
+      "id": "bug-129",
+      "timestamp": "2026-05-16T14:54:57.739Z",
+      "error_message": "Wrong reference: sources should be claimCounts",
+      "file": "src/tui/cockpit/state.ts",
+      "root_cause": "Used \"sources\" instead of \"claimCounts\"",
+      "fix": "Changed sources → claimCounts",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:54:57.739Z"
+    },
+    {
+      "id": "bug-130",
+      "timestamp": "2026-05-16T14:55:19.315Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/cockpit/state.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:55:19.315Z"
+    },
+    {
+      "id": "bug-131",
+      "timestamp": "2026-05-16T14:55:20.781Z",
+      "error_message": "Type error",
+      "file": "src/tools/bash.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:55:20.781Z"
+    },
+    {
+      "id": "bug-132",
+      "timestamp": "2026-05-16T14:55:48.775Z",
+      "error_message": "Wrong return value",
+      "file": "src/tools/bash.ts",
+      "root_cause": "Was returning: DANGEROUS_PATTERNS.some(d => command.includes(d))",
+      "fix": "Now returns: DANGEROUS_PATTERNS.some(pattern => pattern.test(co",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:55:48.775Z"
+    },
+    {
+      "id": "bug-133",
+      "timestamp": "2026-05-16T14:57:16.255Z",
+      "error_message": "Missing import: ../context/claim-store.js",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Module(s) not imported: ../context/claim-store.js",
+      "fix": "Added import(s) for ../context/claim-store.js",
+      "tags": [
+        "auto-detected",
+        "missing-import",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:57:16.255Z"
+    },
+    {
+      "id": "bug-134",
+      "timestamp": "2026-05-16T14:57:36.414Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:57:36.414Z"
+    },
+    {
+      "id": "bug-135",
+      "timestamp": "2026-05-16T14:58:16.801Z",
+      "error_message": "Wrong reference: AppProps should be claimStoreRef",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Used \"AppProps\" instead of \"claimStoreRef\"",
+      "fix": "Changed AppProps → claimStoreRef",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:58:16.801Z"
+    },
+    {
+      "id": "bug-136",
+      "timestamp": "2026-05-16T14:59:15.610Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/context/claim-store.ts",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 44→60 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T14:59:15.610Z"
+    },
+    {
+      "id": "bug-137",
+      "timestamp": "2026-05-16T15:00:51.051Z",
+      "error_message": "Wrong reference: overrides should be claimStoreRef",
+      "file": "src/tui/__tests__/slash-commands.test.ts",
+      "root_cause": "Used \"overrides\" instead of \"claimStoreRef\"",
+      "fix": "Changed overrides → claimStoreRef",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:00:51.052Z"
+    },
+    {
+      "id": "bug-138",
+      "timestamp": "2026-05-16T15:01:32.345Z",
+      "error_message": "Wrong reference: false should be true",
+      "file": ".omc/prd.json",
+      "root_cause": "Used \"false\" instead of \"true\"",
+      "fix": "Changed false → true",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "json"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:01:32.345Z"
+    },
+    {
+      "id": "bug-139",
+      "timestamp": "2026-05-16T15:09:32.284Z",
+      "error_message": "Wrong condition in logic",
+      "file": "src/context/promotion.ts",
+      "root_cause": "Condition was: if (claim.consumers.length < 3)",
+      "fix": "Changed to: if (new Set(claim.consumers.map(c => c.id)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:09:32.284Z"
+    },
+    {
+      "id": "bug-140",
+      "timestamp": "2026-05-16T15:19:01.046Z",
+      "error_message": "Null/undefined access in ",
+      "file": "docs/superpowers/plans/2026-05-16-rivet-evolutionary-context-fabric-phase3.md",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:19:01.046Z"
+    },
+    {
+      "id": "bug-141",
+      "timestamp": "2026-05-16T15:27:24.176Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Had '../context/claim-store.js'",
+      "fix": "Changed to '../context/claim-extractor.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:27:24.176Z"
+    },
+    {
+      "id": "bug-142",
+      "timestamp": "2026-05-16T15:28:09.097Z",
+      "error_message": "Wrong condition in logic",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Condition was: if (!harnessResult.isError)",
+      "fix": "Changed to: if (this.config.contextClaimStore && this.config.sessi)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:28:09.097Z"
+    },
+    {
+      "id": "bug-143",
+      "timestamp": "2026-05-16T15:28:29.266Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:28:29.266Z"
+    },
+    {
+      "id": "bug-144",
+      "timestamp": "2026-05-16T15:29:21.351Z",
+      "error_message": "Type error",
+      "file": "src/context/__tests__/promotion.test.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:29:21.351Z"
+    },
+    {
+      "id": "bug-145",
+      "timestamp": "2026-05-16T15:29:49.651Z",
+      "error_message": "Wrong operator: !== should be ===",
+      "file": "src/context/promotion.ts",
+      "root_cause": "Used \"!==\" instead of \"===\"",
+      "fix": "Changed operator !== → ===",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:29:49.651Z"
+    },
+    {
+      "id": "bug-146",
+      "timestamp": "2026-05-16T15:31:00.629Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "src/context/claim-store.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:31:00.629Z"
+    },
+    {
+      "id": "bug-147",
+      "timestamp": "2026-05-16T15:31:15.360Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/session-persist.ts",
+      "root_cause": "Had '../validation.js'",
+      "fix": "Changed to '../context/claims.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:31:15.360Z"
+    },
+    {
+      "id": "bug-148",
+      "timestamp": "2026-05-16T15:31:30.203Z",
+      "error_message": "Missing guard clause",
+      "file": "src/agent/session-persist.ts",
+      "root_cause": "No early return/throw for edge case: !previous",
+      "fix": "Added guard clause: if (!previous)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:31:30.203Z"
+    },
+    {
+      "id": "bug-149",
+      "timestamp": "2026-05-16T15:32:04.722Z",
+      "error_message": "Type error",
+      "file": "src/main.tsx",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation | Also: const durableClaims = persist.loadPreviousDurableClaims(); for (const claim of durableClaims) {",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T15:32:29.791Z"
+    },
+    {
+      "id": "bug-150",
+      "timestamp": "2026-05-16T15:33:35.805Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/context/__tests__/claims.test.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:33:35.805Z"
+    },
+    {
+      "id": "bug-151",
+      "timestamp": "2026-05-16T15:34:46.967Z",
+      "error_message": "Missing await",
+      "file": "src/agent/__tests__/loop.test.ts",
+      "root_cause": "Async call without await — returned Promise instead of value",
+      "fix": "Added await to async call",
+      "tags": [
+        "auto-detected",
+        "async-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:34:46.967Z"
+    },
+    {
+      "id": "bug-152",
+      "timestamp": "2026-05-16T15:35:17.591Z",
+      "error_message": "Wrong reference: parameters should be input_schema",
+      "file": "src/agent/__tests__/loop.test.ts",
+      "root_cause": "Used \"parameters\" instead of \"input_schema\"",
+      "fix": "Changed parameters → input_schema",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:35:17.591Z"
+    },
+    {
+      "id": "bug-153",
+      "timestamp": "2026-05-16T15:37:50.085Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/__tests__/approval-risk.test.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:37:50.085Z"
+    },
+    {
+      "id": "bug-154",
+      "timestamp": "2026-05-16T15:39:12.339Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/approval-risk.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:39:12.339Z"
+    },
+    {
+      "id": "bug-155",
+      "timestamp": "2026-05-16T15:45:14.770Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/main.tsx",
+      "root_cause": "13 lines replaced/restructured",
+      "fix": "Rewrote 18→5 lines (13 removed) | Also: const durableClaims = persist.loadPreviousDurableC; for (const claim of durableClaims) {",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T15:45:49.005Z"
+    },
+    {
+      "id": "bug-156",
+      "timestamp": "2026-05-16T15:45:51.779Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/tools/delegate-task.ts",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 18→29 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:45:51.779Z"
+    },
+    {
+      "id": "bug-157",
+      "timestamp": "2026-05-16T15:50:58.379Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/slash-commands.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:50:58.379Z"
+    },
+    {
+      "id": "bug-158",
+      "timestamp": "2026-05-16T15:52:16.908Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:52:16.908Z"
+    },
+    {
+      "id": "bug-159",
+      "timestamp": "2026-05-16T15:58:01.974Z",
+      "error_message": "Wrong reference: 859 should be 825",
+      "file": "README.md",
+      "root_cause": "Used \"859\" instead of \"825\"",
+      "fix": "Changed 859 → 825",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T15:58:01.974Z"
+    },
+    {
+      "id": "bug-160",
+      "timestamp": "2026-05-16T16:04:59.421Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "9 lines replaced/restructured",
+      "fix": "Rewrote 19→7 lines (9 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:04:59.421Z"
+    },
+    {
+      "id": "bug-161",
+      "timestamp": "2026-05-16T16:06:24.813Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/context/claim-extractor.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check) | Also: export function extractClaimsFromToolResult(ctx: ToolResultC; const path = String(ctx.input.file_path ?? '')",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T16:11:17.632Z"
+    },
+    {
+      "id": "bug-162",
+      "timestamp": "2026-05-16T16:08:38.657Z",
+      "error_message": "Wrong operator: && should be !==",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Used \"&&\" instead of \"!==\"",
+      "fix": "Changed operator && → !==",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:08:38.657Z"
+    },
+    {
+      "id": "bug-163",
+      "timestamp": "2026-05-16T16:11:22.447Z",
+      "error_message": "Wrong condition in logic",
+      "file": "src/context/claim-extractor.ts",
+      "root_cause": "Condition was: if (ctx.toolName === 'bash' && /vulnerabilit|CVE-|secu)",
+      "fix": "Changed to: if (ctx.toolName === 'bash' && ctx.isError && /vulnera)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:11:22.447Z"
+    },
+    {
+      "id": "bug-164",
+      "timestamp": "2026-05-16T16:14:36.041Z",
+      "error_message": "Significant refactor of ",
+      "file": "CHANGELOG.md",
+      "root_cause": "15 lines replaced/restructured",
+      "fix": "Rewrote 40→49 lines (15 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:14:36.041Z"
+    },
+    {
+      "id": "bug-165",
+      "timestamp": "2026-05-16T16:21:24.040Z",
+      "error_message": "Missing await",
+      "file": "src/server/__tests__/server.test.ts",
+      "root_cause": "Async call without await — returned Promise instead of value",
+      "fix": "Added await to async call",
+      "tags": [
+        "auto-detected",
+        "async-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:21:24.040Z"
+    },
+    {
+      "id": "bug-166",
+      "timestamp": "2026-05-16T16:32:14.030Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/main.tsx",
+      "root_cause": "Had './agent/context.js'",
+      "fix": "Changed to './agent/create-agent-config.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T16:35:50.139Z"
+    },
+    {
+      "id": "bug-167",
+      "timestamp": "2026-05-16T16:32:47.029Z",
+      "error_message": "CSS fix: compact, compactModel, contextWindow",
+      "file": "src/main.tsx",
+      "root_cause": "compact: config.compact, → { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash'; compactModel: compactModel?.id, → compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort; contextWindow: currentModel.contextWindow, → card.contextWindow,",
+      "fix": "Changed compact: config.compact, → { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash'; compactModel: compactModel?.id, → compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort; contextWindow: currentModel.contextWindow, → card.contextWindow,",
+      "tags": [
+        "auto-detected",
+        "style-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:32:47.029Z"
+    },
+    {
+      "id": "bug-168",
+      "timestamp": "2026-05-16T16:33:10.666Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/create-agent-config.ts",
+      "root_cause": "Had 'max'",
+      "fix": "Changed to 'off'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:33:10.667Z"
+    },
+    {
+      "id": "bug-169",
+      "timestamp": "2026-05-16T16:34:40.999Z",
+      "error_message": "Type error",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:34:40.999Z"
+    },
+    {
+      "id": "bug-170",
+      "timestamp": "2026-05-16T16:37:05.578Z",
+      "error_message": "Wrong reference: sessionId should be _sessionId",
+      "file": "src/context/rules-loader.ts",
+      "root_cause": "Used \"sessionId\" instead of \"_sessionId\"",
+      "fix": "Changed sessionId → _sessionId",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:37:05.579Z"
+    },
+    {
+      "id": "bug-171",
+      "timestamp": "2026-05-16T16:37:14.729Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/context/rules-loader.ts",
+      "root_cause": "Had `rules:${file}`",
+      "fix": "Changed to 'project'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:37:14.729Z"
+    },
+    {
+      "id": "bug-172",
+      "timestamp": "2026-05-16T16:38:29.488Z",
+      "error_message": "Missing await",
+      "file": "src/tui/slash-commands.ts",
+      "root_cause": "Async call without await — returned Promise instead of value",
+      "fix": "Added await to async call",
+      "tags": [
+        "auto-detected",
+        "async-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:38:29.488Z"
+    },
+    {
+      "id": "bug-173",
+      "timestamp": "2026-05-16T16:38:46.588Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/tui/slash-commands.ts",
+      "root_cause": "Had '../context/rules-loader.js'",
+      "fix": "Changed to 'project'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:38:46.588Z"
+    },
+    {
+      "id": "bug-174",
+      "timestamp": "2026-05-16T16:40:49.737Z",
+      "error_message": "Wrong reference: 831 should be 856",
+      "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
+      "root_cause": "Used \"831\" instead of \"856\"",
+      "fix": "Changed 831 → 856",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:40:49.737Z"
+    },
+    {
+      "id": "bug-175",
+      "timestamp": "2026-05-16T16:41:01.242Z",
+      "error_message": "Incorrect value in code",
+      "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
+      "root_cause": "Had `src/context/antibody.ts`",
+      "fix": "Changed to `plans/...-rivet-ecf-phase4-rules-budget.md`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:41:01.242Z"
+    },
+    {
+      "id": "bug-176",
+      "timestamp": "2026-05-16T16:49:13.324Z",
+      "error_message": "Missing error handling in loadProjectRules",
+      "file": "src/context/rules-loader.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:49:13.324Z"
+    },
+    {
+      "id": "bug-177",
+      "timestamp": "2026-05-16T16:49:26.266Z",
+      "error_message": "Wrong reference: _sessionId should be ClaimProposal",
+      "file": "src/context/rules-loader.ts",
+      "root_cause": "Used \"_sessionId\" instead of \"ClaimProposal\"",
+      "fix": "Changed _sessionId → ClaimProposal",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T16:49:26.266Z"
     }
   ]
 }

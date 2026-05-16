@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T12:59:18.033Z
-> Files: 261 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T16:50:52.110Z
+> Files: 289 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -12,12 +12,12 @@
 ## ./
 
 - `.gitignore` — Git ignore rules (~23 tok)
-- `CHANGELOG.md` — Changelog (~2736 tok)
+- `CHANGELOG.md` — Changelog (~5076 tok)
 - `CLAUDE.md` — Rivet (~310 tok)
 - `config.example.toml` — ~/.opencode/config.toml (~232 tok)
 - `package-lock.json` — npm lock file (~19981 tok)
 - `package.json` — Node.js package manifest (~164 tok)
-- `README.md` — Project documentation (~13222 tok)
+- `README.md` — Project documentation (~13595 tok)
 - `tsconfig.json` — TypeScript configuration (~153 tok)
 - `tsup.config.ts` (~65 tok)
 
@@ -31,7 +31,7 @@
 
 ## .omc/
 
-- `prd.json` (~719 tok)
+- `prd.json` (~663 tok)
 - `progress.txt` — Wave 5: Trust Infrastructure — Progress Log (~633 tok)
 
 ## .superpowers/brainstorm/
@@ -46,10 +46,22 @@
 - `2026-05-16-rivet-subagent-orchestration-fragments.json` (~2146 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-fragments.json` (~1213 tok)
 
+## Evolutionary Context Fabric Phase 1 Final Review Fixes
+
+
 ## Evolutionary Context Fabric Phase 1 Implementation
 
 
+## Evolutionary Context Fabric Phase 1 Review Feedback
+
+
+## Evolutionary Context Fabric Phase 1 Runtime
+
+
 ## Planned Evolutionary Context Fabric Phase 1
+
+
+## Planned Evolutionary Context Fabric Phase 2
 
 
 ## docs/
@@ -68,16 +80,21 @@
 - `2026-05-15-rivet-performance-optimization.md` — Rivet 性能优化与 Claude Code 对标实现计划 (~10205 tok)
 - `2026-05-16-multi-pass-repair-pipeline.md` — Multi-Pass Repair Pipeline 实现计划 (~6966 tok)
 - `2026-05-16-rivet-cockpit-capability-ledger.md` — Rivet Cockpit + Capability Ledger 实现计划 (~3995 tok)
+- `2026-05-16-rivet-ecf-phase4-rules-budget.md` — ECF Phase 4: Project Rules + Claim Budget 实现计划 (~3464 tok)
 - `2026-05-16-rivet-evolutionary-context-fabric-phase1.md` — Evolutionary Context Fabric Phase 1 实现计划 (~9576 tok)
+- `2026-05-16-rivet-evolutionary-context-fabric-phase3.md` — Evolutionary Context Fabric Phase 3 实现计划 (~5833 tok)
 - `2026-05-16-rivet-execution-resilience-layer-implementation.md` — Execution Resilience Layer 实现计划 (~6873 tok)
 - `2026-05-16-rivet-execution-trust-closure-implementation.md` — Rivet Execution Trust Closure 实现计划 (~10006 tok)
 - `2026-05-16-rivet-gap-closing-hooks-git-todo-webfetch-undo.md` — Rivet 差距弥补：Hooks / Git / Todo / WebFetch / Undo 实现计划 (~11245 tok)
 - `2026-05-16-rivet-glanceable-cockpit-techstyle-implementation.md` — Rivet Glanceable Cockpit + 科技风视觉层 实现计划 (~6867 tok)
 - `2026-05-16-rivet-mcp-client-implementation.md` — Rivet MCP Client 实现计划 (~7790 tok)
 - `2026-05-16-rivet-progressive-context-engine-implementation.md` — Rivet Progressive Context Engine 实现计划 (~18102 tok)
+- `2026-05-16-rivet-risk-remediation.md` — Rivet 风险修复 实现计划 (~5070 tok)
 - `2026-05-16-rivet-subagent-orchestration-implementation.md` — Rivet 子代理协同 Phase 1 实现计划 (~14921 tok)
 - `2026-05-16-rivet-wave6-goal-loop.md` — Wave 6: Goal Loop 实施计划 (~3900 tok)
+- `2026-05-16-rivet-wave8-context-fabric-phase2.md` — Wave 8: Context Fabric Phase 2 — Claim 自动提取 + TTL + 晋升 实施计划 (~4816 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5642 tok)
+- `2026-05-17-rivet-wave9-defect-fixes.md` — Wave 9: 内部缺陷修复 + 结构优化 实施计划 (~4239 tok)
 
 ## docs/superpowers/specs/
 
@@ -98,7 +115,7 @@
 
 ## docs/superpowers/status/
 
-- `2026-05-16-rivet-core-capability-ledger.md` — Rivet Core Capability Ledger (~2615 tok)
+- `2026-05-16-rivet-core-capability-ledger.md` — Rivet Core Capability Ledger (~3991 tok)
 
 ## docs/superpowers/validations/
 
@@ -123,14 +140,19 @@
 
 - `goal-loop.ts` — Exports GoalLoopAgent, GoalLoopConfig, GoalLoopResult, runGoalLoop (~874 tok)
 - `headless.ts` — Exports HeadlessCliArgs, HeadlessJsonOutput, HeadlessRunResult, HeadlessAgent + 3 more (~1052 tok)
-- `main.tsx` — Read piped stdin (non-TTY only) as initial input (~5198 tok)
+- `main.tsx` — Read piped stdin (non-TTY only) as initial input (~5975 tok)
 - `validation.ts` — Exports isValidSessionId, assertValidSessionId (~78 tok)
 
 ## src/__tests__/
 
+- `claim-store-durable.test.ts` — Declares dir (~1178 tok)
+- `commands-loader.test.ts` — Declares makeProject (~716 tok)
+- `create-agent-config.test.ts` — Declares AgentConfigInput (~636 tok)
+- `delegate-batch.test.ts` — Declares tool (~472 tok)
+- `delegate-task.test.ts` — Declares tool (~488 tok)
 - `file-history-persist.test.ts` — Declares snapshots (~529 tok)
 - `goal-loop-integration.test.ts` — Declares result (~773 tok)
-- `goal-loop.test.ts` — Declares GoalLoopConfig (~632 tok)
+- `goal-loop.test.ts` — Declares GoalLoopConfig (~1554 tok)
 - `headless.test.ts` — Declares result (~840 tok)
 - `wave5-integration.test.ts` — Declares reg (~930 tok)
 
@@ -138,11 +160,12 @@
 
 - `adaptive-routing.ts` — 1 second of avgLatencyMs penalizes 0.1 points of passRate in the composite score (~530 tok)
 - `aggregation.ts` — Exports aggregateResults (~388 tok)
-- `approval-risk.ts` — Exports RiskLevel, RiskAssessment, assessToolRisk (~1037 tok)
+- `approval-risk.ts` — Exports RiskLevel, RiskAssessment, assessToolRisk (~1266 tok)
 - `checkpoint.ts` — Create a checkpoint by recording the current HEAD hash and dirty worktree state. (~1577 tok)
-- `context.ts` — Replace all messages (used after compaction) (~1512 tok)
+- `context.ts` — Replace all messages (used after compaction) (~1837 tok)
 - `coordinator-state.ts` — Cumulative event counts — each completed work order increments queued, running, AND its terminal sta (~490 tok)
-- `coordinator.ts` — Exports DelegationRequest, CoordinatorRun, WorkerRuntimeFactory, DelegationCoordinatorConfig + 2 mor (~1269 tok)
+- `coordinator.ts` — Exports DelegationRequest, CoordinatorRun, WorkerRuntimeFactory, DelegationCoordinatorConfig + 2 mor (~1550 tok)
+- `create-agent-config.ts` — Exports ModelSpec, AgentConfigInput, createAgentConfig (~625 tok)
 - `delivery-gate.ts` — Exports DeliveryGateSeverity, DeliveryGateResult, buildDeliveryGate (~641 tok)
 - `evidence.ts` — Exports DeliveryVerificationStatus, EvidenceState, EvidenceTracker (~1160 tok)
 - `execution-guidance.ts` — Exports GuidanceTrajectoryEntry, ExecutionGuidanceInput, ExecutionGuidance, buildExecutionGuidance (~1292 tok)
@@ -152,13 +175,13 @@
 - `impact-hint.ts` — Exports ImpactHint, generateImpactHint (~764 tok)
 - `import-graph.ts` — Exports ImportGraph, buildImportGraph, getReverseDeps, invalidateFile (~1122 tok)
 - `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~8990 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~10064 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
 - `repair-hint.ts` — Exports RepairHintTracker (~368 tok)
 - `repair-passes.ts` — Exports fourHorsemenPass, fixAutoLinks, semanticRepairPass (~1019 tok)
 - `repair-pipeline.ts` — Exports RepairContext, RepairResult, RepairPass, RepairTelemetryEntry + 2 more (~346 tok)
 - `retry-policy.ts` — Exports RetryPolicyInput, RetryPolicyDecision, shouldRetryToolFailure (~428 tok)
-- `session-persist.ts` — Append a single message to the session file (~1129 tok)
+- `session-persist.ts` — Append a single message to the session file (~1465 tok)
 - `strategy-shift.ts` — Exports TrajectorySummary, suggestStrategyShift (~103 tok)
 - `task-state.ts` — Exports TaskState, extractTaskState (~326 tok)
 - `trace-store.ts` — Exports TraceEventKind, TraceEventStatus, DoomLoopLevel, TraceEvent + 9 more (~718 tok)
@@ -169,13 +192,13 @@
 - `work-queue.ts` — Exports QueueEntry, WorkOrderQueue (~472 tok)
 - `worker-evidence.ts` — Exports verifyWorkerEvidence (~385 tok)
 - `worker-prompts.ts` — buildWorkerPrompt, buildWorkerRepairPrompt, buildPrimaryWorkerPacket (~2263 tok)
-- `worker-session.ts` — Exports WorkerSessionConfig, WorkerTranscript, WorkerSessionRun, runWorkerSession (~1077 tok)
+- `worker-session.ts` — Exports WorkerSessionConfig, WorkerTranscript, WorkerSessionRun, runWorkerSession (~1132 tok)
 
 ## src/agent/__tests__/
 
 - `adaptive-routing.test.ts` — Declares router (~703 tok)
 - `aggregation.test.ts` — Declares result (~708 tok)
-- `approval-risk.test.ts` — Declares result (~1849 tok)
+- `approval-risk.test.ts` — Declares antibodyClaim (~2444 tok)
 - `checkpoint.test.ts` — makeTempGitRepo: cleanupRepo (~2001 tok)
 - `context-ledger-state.test.ts` — Declares makeLedger (~543 tok)
 - `coordinator-state.test.ts` — Declares state (~791 tok)
@@ -187,7 +210,7 @@
 - `impact-hint.test.ts` — Exports a, b, mod (~524 tok)
 - `intent-extractor.test.ts` — Declares Intent (~812 tok)
 - `loop-evidence.test.ts` — Captures a snapshot of evidence state during onTurnComplete, before the loop resets the same object (~3445 tok)
-- `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~4456 tok)
+- `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~5646 tok)
 - `prewarm.test.ts` — API routes: GET (9 endpoints) (~443 tok)
 - `repair-pipeline.test.ts` — --- Pipeline skeleton tests --- (~1683 tok)
 - `retry-policy.test.ts` — Declares result (~457 tok)
@@ -217,7 +240,7 @@
 
 ## src/compact/
 
-- `auto.ts` — Decide whether automatic compaction should fire. (~1707 tok)
+- `auto.ts` — Decide whether automatic compaction should fire. (~1732 tok)
 - `constants.ts` — Compaction constants ported from DeepSeek TUI compaction.rs (v0.8.11+). (~485 tok)
 - `index.ts` — Declares CompactionDecision (~104 tok)
 - `micro.ts` — MicroCompact: lightweight round-safe truncation without API calls. (~1270 tok)
@@ -234,25 +257,37 @@
 
 ## src/context/
 
-- `claim-store.ts` — Exports ContextClaimEvent, ClaimFilter, ClaimUseInput, ContextClaimStore (~1363 tok)
-- `claims.ts` — Exports ContextClaimKind, ContextClaimScope, ContextClaimStatus, EvidenceKind + 11 more (~1436 tok)
+- `antibody.ts` — Exports AntibodyContext, createAntibodyProposal (~296 tok)
+- `claim-budget.ts` — Exports MAX_ACTIVE_CLAIMS, selectEvictionCandidates (~176 tok)
+- `claim-extractor.ts` — Exports ToolResultContext, ClaimExtractionMeta, extractClaimsFromToolResult (~1456 tok)
+- `claim-store.ts` — Exports ContextClaimEvent, ClaimFilter, ClaimUseInput, ContextClaimStore (~2388 tok)
+- `claims.ts` — Exports ContextClaimKind, ContextClaimScope, ContextClaimStatus, EvidenceKind + 12 more (~1509 tok)
+- `conflict-detect.ts` — Exports ClaimConflict, detectConflicts (~415 tok)
 - `ledger.ts` — Exports createContextLedger (~359 tok)
 - `microcompact.ts` — Exports microcompactToolResults, applyMicrocompact (~926 tok)
+- `promotion.ts` — Exports ClaimStatusCounts, evaluatePromotion, claimHasFileEvidence, countClaimsByStatus (~536 tok)
 - `reactive-compact.ts` — Exports ReactiveRoundSelectionOptions, CompactBoundaryInput, selectReactiveCompactRounds, createComp (~384 tok)
 - `resume-preflight.ts` — Exports runResumePreflight (~682 tok)
 - `rounds.ts` — Exports groupIntoRounds, computeInvariantStatus, getSafeCutIndices (~1703 tok)
+- `rules-loader.ts` — Exports loadProjectRules (~375 tok)
 - `session-memory.ts` — Exports loadSessionMemory, appendSessionMemory, buildSessionMemoryBlock (~586 tok)
 - `token-estimate.ts` (~18 tok)
 - `types.ts` — ─── Health & Budget ────────────────────────────────────────── (~1066 tok)
 
 ## src/context/__tests__/
 
-- `claim-store.test.ts` — tempDir: proposal (~1153 tok)
-- `claims.test.ts` — Declares ContextClaim (~1130 tok)
+- `antibody.test.ts` — Declares failure (~589 tok)
+- `claim-budget.test.ts` — Declares claim (~648 tok)
+- `claim-extractor.test.ts` — Exports MAX_RETRIES, TIMEOUT, PORT, X (~1731 tok)
+- `claim-store.test.ts` — tempDir: proposal (~2706 tok)
+- `claims.test.ts` — Declares ContextClaim (~1870 tok)
+- `conflict-detect.test.ts` — Declares claim (~747 tok)
 - `ledger.test.ts` — userText: assistantText (~440 tok)
 - `microcompact.test.ts` — userText: assistantText, assistantWithBlocks, userWithBlocks + 4 more (~1539 tok)
+- `promotion.test.ts` — Declares claim (~1791 tok)
 - `resume-preflight.test.ts` — userText: assistantText, assistantWithBlocks, userWithBlocks + 4 more (~1321 tok)
 - `rounds.test.ts` — userText: assistantText, assistantWithBlocks, userWithBlocks + 4 more (~2586 tok)
+- `rules-loader.test.ts` — Declares dir (~786 tok)
 - `session-memory.test.ts` — Declares dir (~701 tok)
 
 ## src/failures/
@@ -321,11 +356,16 @@
 
 - `symbol-index.test.ts` — Declares idx (~250 tok)
 
+## src/server/__tests__/
+
+- `server.test.ts` — ── SseStream ────────────────────────────────────────────── (~1937 tok)
+
 ## src/tools/
 
-- `bash.ts` — Exports BASH_TOOL (~1107 tok)
+- `bash.ts` — Exports BASH_TOOL (~1365 tok)
 - `default-registry.ts` — Exports createDefaultToolRegistry (~398 tok)
-- `delegate-task.ts` — createDelegateTaskTool: Phase 1 read-only worker delegation tool (~2416 tok)
+- `delegate-batch.ts` — Zod schemas: taskSchema, inputSchema (~898 tok)
+- `delegate-task.ts` — Zod schemas: delegateTaskInputSchema (~1383 tok)
 - `diff.ts` — Exports DIFF_TOOL (~1291 tok)
 - `edit.ts` — Exports EDIT_FILE_TOOL (~942 tok)
 - `git.ts` — Exports GIT_TOOL (~1038 tok)
@@ -363,12 +403,13 @@
 ## src/tui/
 
 - `agent-status.tsx` — MAX_VISIBLE_ITEMS (~1232 tok)
-- `app.tsx` — STREAM_FLUSH_MS (~11645 tok)
+- `app.tsx` — STREAM_FLUSH_MS (~7074 tok)
 - `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
 - `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)
 - `log-state.ts` — Exports LogEntry, createLogEntry, appendLogInPlace, visibleLogs + 2 more (~586 tok)
 - `phase-tracker.ts` — Exports Phase, LastAction, PhaseTracker (~482 tok)
+- `slash-commands.ts` — Exports SlashHandlerContext, formatContextClaimsCommand, resolveAppPromptInput, handleSlashCommand (~6056 tok)
 - `status-bar.tsx` — tokenBar (~586 tok)
 - `stream.tsx` — StreamOutput (~105 tok)
 - `summary-bar.tsx` — truncate (~1249 tok)
@@ -381,6 +422,7 @@
 
 - `log-state.test.ts` — Declares LogEntry (~803 tok)
 - `phase-tracker.test.ts` — Declares pt (~1177 tok)
+- `slash-commands.test.ts` — SlashHandlerContext: makeCtx (~682 tok)
 - `status-bar.test.ts` — contextColor: roundsColor, usageColor, cacheColor (~436 tok)
 - `summary-bar.test.ts` — Declares state (~888 tok)
 - `theme.test.ts` — Declares theme (~331 tok)
@@ -388,12 +430,13 @@
 
 ## src/tui/cockpit/
 
+- `context-panel.tsx` — formatClaimCounts (~891 tok)
 - `index.ts` — Declares Panel (~138 tok)
 - `mcp-panel.tsx` — statusIcon (~484 tok)
 - `model-panel.tsx` — ModelPanel (~526 tok)
 - `rail.tsx` — statusIndicator (~391 tok)
-- `state.ts` — Exports CockpitSnapshotSources, buildCockpitSnapshot (~1404 tok)
-- `types.ts` — Exports Panel, PANELS, PANEL_LABELS, CockpitContextLayerView + 5 more (~679 tok)
+- `state.ts` — Exports CockpitSnapshotSources, buildCockpitSnapshot (~1533 tok)
+- `types.ts` — Exports Panel, PANELS, PANEL_LABELS, CockpitContextLayerView + 5 more (~724 tok)
 - `verification-panel.tsx` — statusIcon (~764 tok)
 
 ## src/tui/cockpit/__tests__/
@@ -404,26 +447,3 @@
 ## src/types/
 
 - `gradient-string.d.ts` — Gradient: gradient, gradient (~69 tok)
-
-## Evolutionary Context Fabric Phase 1 Runtime
-
-- `src/prompt/volatile.ts` — Adds latest-turn active claim projection while keeping stable volatile context cache-safe.
-- `src/prompt/engine.ts` — Refreshes latest-turn volatile context so active claims and updated session memory are visible immediately.
-- `src/agent/loop.ts` — Seeds claims from user constraint anchors and refreshes active-claim prompt projection before LLM requests.
-- `src/agent/session-persist.ts` — Creates session-scoped `ContextClaimStore` files under `~/.rivet/sessions/`.
-
-## Evolutionary Context Fabric Phase 1 Final Review Fixes
-
-- `src/context/claims.ts` — Claim IDs are semantic within a session: kind + scope + normalized text + session id, not event/evidence IDs.
-- `src/context/claim-store.ts` — `propose()` is idempotent for an existing semantic claim and replay ignores duplicate `claim_proposed` events instead of resetting projection state.
-- `src/prompt/volatile.ts` — Active claims are accepted as typed `ContextClaim[]` and rendered at the prompt boundary, preserving XML escaping.
-- `src/prompt/engine.ts` — `updateActiveClaims()` accepts typed claims, removing raw active-claim XML from runtime callers.
-- `src/main.tsx` — Autonomous `--goal` agents reuse a session-scoped `ContextClaimStore`, matching TUI runtime claim persistence/projection.
-
-## Evolutionary Context Fabric Phase 1 Review Feedback
-
-- `src/context/claim-store.ts` — Maintains an in-memory projected-claims cache and invalidates it on every appended JSONL event.
-- `src/context/claims.ts` — `isPromptEligibleClaim()` filters expired claims using `expiresAt`.
-- `src/prompt/engine.ts` — Latest user turn always receives fresh volatile context so active claims/session memory project without requiring tool history.
-- `docs/superpowers/specs/2026-05-16-rivet-evolutionary-tui-memory-design.md` — Documents Phase 1 anchor-gated claim extraction triggers and cache/TTL behavior.
-- `docs/superpowers/plans/2026-05-16-rivet-evolutionary-context-fabric-phase1.md` — Records review clarifications and future commit-hygiene guidance.

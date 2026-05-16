@@ -894,3 +894,285 @@
 
 | Time | Action | File(s) | Outcome | ~Tokens |
 |------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 22:12
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+- [2026-05-16T14:17:01.042322Z] Created Phase 2 Evolutionary Context Fabric implementation plan covering claim lifecycle, promotion, file staleness, consumer tracking, and minimal TUI observability.
+
+| 22:17 | Edited src/__tests__/delegate-task.test.ts | inline fix | ~4 |
+| 22:17 | Edited src/__tests__/delegate-task.test.ts | inline fix | ~5 |
+| 22:17 | Edited src/__tests__/goal-loop.test.ts | modified if() | ~330 |
+| 22:19 | Edited src/__tests__/goal-loop.test.ts | modified if() | ~330 |
+| 22:19 | Edited src/agent/coordinator.ts | 11→13 lines | ~86 |
+| 22:20 | Edited src/agent/coordinator.ts | added 1 condition(s) | ~675 |
+| 22:22 | Edited src/tools/delegate-task.ts | modified formatUiContent() | ~396 |
+| 22:22 | Session end: 20 writes across 11 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 25 reads | ~86169 tok |
+| 22:22 | Edited src/tools/delegate-task.ts | added optional chaining | ~381 |
+| 22:22 | Session end: 21 writes across 11 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 25 reads | ~86550 tok |
+| 22:23 | Edited src/main.tsx | CSS: _claimStoreRef, _sessionIdRef | ~104 |
+| 22:23 | Edited src/main.tsx | added nullish coalescing | ~96 |
+| 22:23 | Edited src/main.tsx | 3→6 lines | ~58 |
+| 22:24 | Session end: 24 writes across 11 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 25 reads | ~86975 tok |
+| 22:24 | Edited src/main.tsx | added optional chaining | ~359 |
+| 22:25 | Edited src/agent/worker-session.ts | 10→11 lines | ~82 |
+| 22:25 | Edited src/agent/worker-session.ts | added 1 condition(s) | ~86 |
+| 22:26 | Edited src/main.tsx | expanded (+23 lines) | ~677 |
+| 22:27 | Created src/tools/delegate-batch.ts | — | ~898 |
+| 22:27 | Created src/__tests__/delegate-batch.test.ts | — | ~472 |
+| 22:27 | Edited src/main.tsx | added 1 import(s) | ~34 |
+| 22:27 | Edited src/main.tsx | CSS: delegateBatch | ~99 |
+| 22:29 | Edited .omc/prd.json | inline fix | ~4 |
+| 22:30 | Session end: 33 writes across 14 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 25 reads | ~89781 tok |
+| 22:31 | Edited CHANGELOG.md | expanded (+31 lines) | ~629 |
+| 22:32 | Edited README.md | removed 1 lines | ~53 |
+| 22:33 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | 5→8 lines | ~735 |
+| 22:33 | Session end: 36 writes across 17 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 27 reads | ~96650 tok |
+| 22:33 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~31 |
+| 22:34 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | "specs/...-wave6-goal-loop" → "plans/...-wave6-goal-loop" | ~20 |
+| 22:34 | Session end: 38 writes across 17 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 27 reads | ~96706 tok |
+| 22:35 | Edited src/tools/delegate-task.ts | inline fix | ~10 |
+| 22:36 | Edited src/agent/context.ts | added 1 condition(s) | ~79 |
+| 22:36 | Session end: 40 writes across 18 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 28 reads | ~98502 tok |
+| 22:36 | Edited src/compact/auto.ts | 10→12 lines | ~176 |
+| 22:37 | Session end: 41 writes across 19 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 28 reads | ~98678 tok |
+| 22:37 | Session end: 41 writes across 19 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 28 reads | ~98678 tok |
+| 22:38 | Session end: 41 writes across 19 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 28 reads | ~98678 tok |
+| 22:44 | Created .omc/prd.json | — | ~991 |
+| 22:44 | Created docs/superpowers/plans/2026-05-16-rivet-risk-remediation.md | — | ~5408 |
+| 22:44 | Session end: 43 writes across 20 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 37 reads | ~118093 tok |
+| 22:45 | Created src/context/__tests__/promotion.test.ts | — | ~1197 |
+| 22:45 | Created src/context/promotion.ts | — | ~463 |
+| 22:46 | Edited src/context/__tests__/claim-store.test.ts | added optional chaining | ~530 |
+| 22:46 | Edited src/context/claim-store.ts | added 1 import(s) | ~83 |
+| 22:46 | Edited src/context/claim-store.ts | added 2 condition(s) | ~226 |
+| 22:47 | Edited src/agent/loop.ts | modified refreshActiveClaims() | ~193 |
+| 22:48 | Edited src/agent/__tests__/loop.test.ts | added optional chaining | ~668 |
+| 22:50 | Edited src/agent/__tests__/loop.test.ts | reduced (-15 lines) | ~502 |
+| 22:50 | Edited src/__tests__/commands-loader.test.ts | "../tui/app.js" → "../tui/slash-commands.js" | ~19 |
+| 22:50 | Edited src/context/__tests__/claim-store.test.ts | added optional chaining | ~229 |
+| 22:51 | Edited src/context/claim-store.ts | added 2 condition(s) | ~230 |
+| 22:51 | Edited src/agent/loop.ts | added optional chaining | ~120 |
+| 22:53 | Edited src/tui/slash-commands.ts | added 1 condition(s) | ~502 |
+| 22:53 | Edited src/tui/slash-commands.ts | added 3 condition(s) | ~403 |
+| 22:54 | Edited src/tui/cockpit/types.ts | 8→9 lines | ~74 |
+| 22:54 | Edited src/tui/cockpit/types.ts | "../../../context/promotio" → "../../context/promotion.j" | ~21 |
+| 22:54 | Edited src/tui/cockpit/state.ts | 8→9 lines | ~70 |
+| 22:54 | Edited src/tui/cockpit/state.ts | inline fix | ~26 |
+| 22:55 | Edited src/tui/cockpit/state.ts | added nullish coalescing | ~124 |
+| 22:55 | Edited src/tools/bash.ts | expanded (+12 lines) | ~224 |
+| 22:55 | Edited src/tools/bash.ts | modified requiresApproval() | ~51 |
+| 22:55 | Edited src/tui/cockpit/context-panel.tsx | CSS: counts, Claims, Claims | ~326 |
+| 22:56 | Edited src/tui/cockpit/context-panel.tsx | modified ContextPanel() | ~502 |
+| 22:57 | Edited src/tui/app.tsx | CSS: claimStoreRef | ~126 |
+| 22:57 | Edited src/tui/app.tsx | added optional chaining | ~206 |
+| 22:57 | Edited src/tui/app.tsx | 7→7 lines | ~117 |
+| 22:58 | Edited src/tui/app.tsx | inline fix | ~50 |
+| 22:58 | Edited src/tui/app.tsx | inline fix | ~67 |
+| 22:58 | Edited src/context/claim-store.ts | 1→2 lines | ~28 |
+| 22:58 | Edited src/context/claim-store.ts | modified appendEvent() | ~35 |
+| 22:59 | Edited src/context/claim-store.ts | added 1 condition(s) | ~571 |
+| 22:59 | Edited src/main.tsx | 12→16 lines | ~130 |
+| 23:00 | Edited src/tui/__tests__/slash-commands.test.ts | 2→3 lines | ~27 |
+| 23:01 | Edited .omc/prd.json | inline fix | ~4 |
+| 23:01 | Edited src/tui/__tests__/slash-commands.test.ts | 1→2 lines | ~22 |
+| 23:02 | Edited src/tui/__tests__/slash-commands.test.ts | 4→3 lines | ~27 |
+| 23:03 | Session end: 79 writes across 34 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 44 reads | ~130105 tok |
+| 23:03 | Session end: 79 writes across 34 files (2026-05-16-rivet-wave7-subagent-wiring-design.md, 2026-05-16-rivet-evolutionary-context-fabric-phase2.md, 2026-05-16-rivet-wave7-subagent-wiring.md, goal-loop.ts, prd.json) | 44 reads | ~130105 tok |
+
+## Session: 2026-05-16 23:05
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 23:05
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:09 | Edited src/context/promotion.ts | inline fix | ~20 |
+| 23:09 | Edited src/context/__tests__/promotion.test.ts | expanded (+11 lines) | ~213 |
+| 23:10 | Session end: 2 writes across 2 files (promotion.ts, promotion.test.ts) | 4 reads | ~3902 tok |
+| 23:12 | Session end: 2 writes across 2 files (promotion.ts, promotion.test.ts) | 4 reads | ~3902 tok |
+| 23:13 | Session end: 2 writes across 2 files (promotion.ts, promotion.test.ts) | 5 reads | ~9640 tok |
+| 23:17 | Created docs/superpowers/plans/2026-05-16-rivet-evolutionary-context-fabric-phase3.md | — | ~3032 |
+| 23:18 | Created docs/superpowers/plans/2026-05-16-rivet-wave8-context-fabric-phase2.md | — | ~5137 |
+| 23:18 | Session end: 4 writes across 4 files (promotion.ts, promotion.test.ts, 2026-05-16-rivet-evolutionary-context-fabric-phase3.md, 2026-05-16-rivet-wave8-context-fabric-phase2.md) | 16 reads | ~46755 tok |
+| 23:19 | Edited docs/superpowers/plans/2026-05-16-rivet-evolutionary-context-fabric-phase3.md | added optional chaining | ~3215 |
+| 23:19 | Session end: 5 writes across 4 files (promotion.ts, promotion.test.ts, 2026-05-16-rivet-evolutionary-context-fabric-phase3.md, 2026-05-16-rivet-wave8-context-fabric-phase2.md) | 16 reads | ~53191 tok |
+
+## Session: 2026-05-16 23:22
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-16 23:25
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:25 | Created src/context/__tests__/claim-extractor.test.ts | — | ~1218 |
+| 23:26 | Created src/context/claim-extractor.ts | — | ~1182 |
+| 23:27 | Edited src/agent/loop.ts | added 1 import(s) | ~59 |
+| 23:28 | Edited src/agent/loop.ts | added 1 condition(s) | ~252 |
+| 23:28 | Edited src/agent/loop.ts | added optional chaining | ~60 |
+| 23:29 | Edited src/context/__tests__/promotion.test.ts | expanded (+40 lines) | ~558 |
+| 23:29 | Session end: 6 writes across 4 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts) | 7 reads | ~25215 tok |
+| 23:29 | Edited src/context/promotion.ts | added 3 condition(s) | ~167 |
+| 23:30 | Created .omc/prd.json | — | ~1147 |
+| 23:30 | Edited src/context/__tests__/claim-store.test.ts | expanded (+28 lines) | ~362 |
+| 23:31 | Edited src/context/claim-store.ts | added error handling | ~286 |
+| 23:31 | Created src/context/__tests__/antibody.test.ts | — | ~589 |
+| 23:31 | Created src/context/__tests__/conflict-detect.test.ts | — | ~574 |
+| 23:31 | Edited src/agent/session-persist.ts | added 1 import(s) | ~50 |
+| 23:31 | Edited src/agent/session-persist.ts | added 1 condition(s) | ~152 |
+| 23:31 | Created src/context/antibody.ts | — | ~271 |
+| 23:31 | Created src/context/conflict-detect.ts | — | ~338 |
+| 23:32 | Edited src/main.tsx | modified for() | ~165 |
+| 23:32 | Edited src/main.tsx | modified for() | ~175 |
+| 23:32 | Edited .omc/prd.json | 4→4 lines | ~30 |
+| 23:32 | Edited .omc/prd.json | 4→4 lines | ~31 |
+| 23:33 | Edited src/agent/loop.ts | added 2 import(s) | ~58 |
+| 23:33 | Edited src/agent/loop.ts | added 1 condition(s) | ~256 |
+| 23:33 | Edited src/context/__tests__/claims.test.ts | added nullish coalescing | ~561 |
+| 23:33 | Edited src/agent/loop.ts | modified for() | ~150 |
+| 23:34 | Edited src/context/claims.ts | modified renderActiveClaimsBlock() | ~88 |
+| 23:34 | Edited src/agent/__tests__/loop.test.ts | added 1 condition(s) | ~699 |
+| 23:35 | Edited src/agent/__tests__/loop.test.ts | 9→7 lines | ~113 |
+| 23:35 | Edited src/agent/__tests__/loop.test.ts | inline fix | ~40 |
+| 23:36 | Edited .omc/prd.json | 4→4 lines | ~36 |
+| 23:37 | Edited src/agent/__tests__/approval-risk.test.ts | added nullish coalescing | ~205 |
+| 23:37 | Session end: 30 writes across 18 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 19 reads | ~59757 tok |
+| 23:38 | Edited src/agent/__tests__/approval-risk.test.ts | expanded (+37 lines) | ~505 |
+| 23:38 | Edited src/agent/approval-risk.ts | added 1 import(s) | ~41 |
+| 23:38 | Edited src/agent/approval-risk.ts | modified assessToolRisk() | ~56 |
+| 23:39 | Edited src/agent/approval-risk.ts | added optional chaining | ~115 |
+| 23:39 | Edited src/agent/__tests__/approval-risk.test.ts | 8→8 lines | ~106 |
+| 23:44 | Edited .omc/prd.json | 4→4 lines | ~33 |
+| 23:44 | Edited src/agent/session-persist.ts | modified loadPreviousDurableClaims() | ~284 |
+| 23:45 | Edited src/main.tsx | reduced (-13 lines) | ~42 |
+| 23:45 | Edited src/main.tsx | reduced (-13 lines) | ~41 |
+| 23:45 | Edited src/tools/delegate-task.ts | modified for() | ~381 |
+| 23:50 | Edited .omc/prd.json | 4→4 lines | ~34 |
+| 23:50 | Edited src/tui/slash-commands.ts | added nullish coalescing | ~744 |
+| 23:51 | Edited .omc/prd.json | 4→4 lines | ~37 |
+| 23:52 | Session end: 43 writes across 21 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 24 reads | ~71434 tok |
+| 23:52 | Edited src/agent/loop.ts | added optional chaining | ~101 |
+| 23:53 | Edited .omc/prd.json | 4→4 lines | ~36 |
+| 23:55 | Edited CHANGELOG.md | expanded (+35 lines) | ~726 |
+| 23:56 | Edited README.md | inline fix | ~51 |
+| 23:56 | Session end: 47 writes across 23 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 26 reads | ~88859 tok |
+| 23:57 | Edited README.md | expanded (+6 lines) | ~359 |
+| 23:57 | Edited README.md | expanded (+6 lines) | ~228 |
+| 23:57 | Edited README.md | 1→3 lines | ~69 |
+| 23:57 | Edited README.md | modified extraction() | ~527 |
+| 23:57 | Edited README.md | 1→3 lines | ~53 |
+| 23:58 | Edited README.md | 859 → 825 | ~14 |
+| 23:58 | Session end: 53 writes across 23 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 26 reads | ~90195 tok |
+| 00:02 | Session end: 53 writes across 23 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 28 reads | ~90905 tok |
+| 00:02 | Session end: 53 writes across 23 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 28 reads | ~90905 tok |
+| 00:04 | Edited src/agent/loop.ts | modified refreshActiveClaims() | ~66 |
+| 00:05 | Edited src/agent/loop.ts | added 1 condition(s) | ~376 |
+| 00:06 | Edited src/context/claim-extractor.ts | added optional chaining | ~438 |
+| 00:06 | Edited src/context/__tests__/claim-extractor.test.ts | 7→9 lines | ~143 |
+| 00:07 | Edited src/agent/loop.ts | modified refreshActiveClaims() | ~82 |
+| 00:07 | Edited src/agent/loop.ts | 3→2 lines | ~36 |
+| 00:08 | Edited src/agent/loop.ts | 2→3 lines | ~38 |
+| 00:08 | Edited src/agent/loop.ts | added 1 condition(s) | ~232 |
+| 00:08 | Edited src/context/antibody.ts | modified createAntibodyProposal() | ~224 |
+| 00:09 | Session end: 62 writes across 23 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 28 reads | ~92657 tok |
+| 00:09 | Session end: 62 writes across 23 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 28 reads | ~92657 tok |
+| 00:10 | Edited src/context/__tests__/claim-extractor.test.ts | expanded (+48 lines) | ~578 |
+| 00:10 | Edited src/context/__tests__/conflict-detect.test.ts | expanded (+14 lines) | ~235 |
+| 00:11 | Edited src/context/claim-extractor.ts | added optional chaining | ~136 |
+| 00:11 | Edited src/context/claim-extractor.ts | 3→3 lines | ~44 |
+| 00:11 | Edited src/context/conflict-detect.ts | added 1 condition(s) | ~415 |
+| 00:11 | Edited CHANGELOG.md | modified ts() | ~370 |
+| 00:11 | Edited src/context/__tests__/claim-extractor.test.ts | 11→11 lines | ~131 |
+| 00:12 | Edited src/agent/loop.ts | modified if() | ~225 |
+| 00:13 | Session end: 70 writes across 23 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 29 reads | ~96350 tok |
+| 00:13 | Session end: 70 writes across 23 files (claim-extractor.test.ts, claim-extractor.ts, loop.ts, promotion.test.ts, promotion.ts) | 29 reads | ~96350 tok |
+| 00:14 | Edited CHANGELOG.md | modified ts() | ~1288 |
+| 00:14 | Edited README.md | inline fix | ~62 |
+| 00:14 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~31 |
+| 00:15 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | 1→2 lines | ~344 |
+
+## Session: 2026-05-16 00:15
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 00:15 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~236 |
+
+## Session: 2026-05-16 ECF Phase 3 — Immune System
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:30 | TDD: antibody.ts + conflict-detect.ts pure functions | src/context/antibody.ts, conflict-detect.ts, tests | 7 tests pass, createAntibodyProposal + detectConflicts | ~4000 |
+| 23:35 | AgentLoop wiring: antibody on error + conflict in refreshActiveClaims | src/agent/loop.ts, loop.test.ts | 1 new loop test, 821 pass | ~3000 |
+| 23:40 | approval-risk antibody boost | src/agent/approval-risk.ts, approval-risk.test.ts | 4 new tests, 821 pass | ~2500 |
+| 23:45 | Worker finding file evidence + confidence mapping | src/tools/delegate-task.ts | typecheck clean | ~1500 |
+| 23:50 | /context antibodies + /context conflicts | src/tui/slash-commands.ts | typecheck clean | ~1500 |
+| 23:55 | assessToolRisk antibody injection in loop.ts | src/agent/loop.ts | 825 pass | ~500 |
+| 00:00 | P1 review fixes: remove dup promoteEligibleClaims, conflict guard | src/agent/loop.ts | 825 pass | ~1000 |
+| 00:05 | P2 review fixes: file_observation dedup, conflict text dedup, security isError | claim-extractor.ts, conflict-detect.ts, loop.ts | 831 pass | ~2000 |
+| 00:10 | Docs update: CHANGELOG, README, capability ledger | 3 files | 44th verified capability | ~1500 |
+| 00:16 | Session end: 1 writes across 1 files (2026-05-16-rivet-core-capability-ledger.md) | 6 reads | ~7160 tok |
+| 00:19 | Session end: 1 writes across 1 files (2026-05-16-rivet-core-capability-ledger.md) | 9 reads | ~18469 tok |
+| 00:20 | Created src/server/__tests__/server.test.ts | — | ~1924 |
+| 00:20 | Session end: 2 writes across 2 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts) | 10 reads | ~21822 tok |
+| 00:21 | Edited src/server/__tests__/server.test.ts | 33→33 lines | ~378 |
+| 00:23 | Created docs/superpowers/plans/2026-05-16-rivet-ecf-phase4-rules-budget.md | — | ~3695 |
+| 00:23 | Session end: 4 writes across 3 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md) | 12 reads | ~31038 tok |
+| 00:24 | Session end: 4 writes across 3 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md) | 13 reads | ~34502 tok |
+| 00:25 | Session end: 4 writes across 3 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md) | 13 reads | ~34502 tok |
+| 00:28 | Created docs/superpowers/plans/2026-05-17-rivet-wave9-defect-fixes.md | — | ~4522 |
+| 00:29 | Session end: 5 writes across 4 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md) | 16 reads | ~47302 tok |
+| 00:31 | Created .omc/prd.json | — | ~665 |
+| 00:31 | Created src/__tests__/create-agent-config.test.ts | — | ~636 |
+| 00:31 | Created src/context/__tests__/rules-loader.test.ts | — | ~801 |
+| 00:31 | Created src/agent/create-agent-config.ts | — | ~622 |
+| 00:31 | Created src/context/__tests__/claim-budget.test.ts | — | ~648 |
+| 00:31 | Created src/context/rules-loader.ts | — | ~319 |
+| 00:31 | Created src/context/claim-budget.ts | — | ~198 |
+| 00:32 | Edited src/main.tsx | added 1 import(s) | ~51 |
+| 00:32 | Edited src/context/claim-budget.ts | modified selectEvictionCandidates() | ~122 |
+| 00:32 | Edited src/main.tsx | CSS: id, toolDefinitions, id | ~808 |
+| 00:33 | Edited src/agent/create-agent-config.ts | "max" → "off" | ~18 |
+| 00:33 | Edited src/main.tsx | inline fix | ~19 |
+| 00:34 | Edited src/main.tsx | 61→58 lines | ~839 |
+| 00:34 | Edited src/agent/loop.ts | added 1 import(s) | ~57 |
+| 00:34 | Edited src/agent/loop.ts | modified for() | ~228 |
+| 00:35 | Edited src/main.tsx | added 1 import(s) | ~49 |
+| 00:36 | Edited src/main.tsx | 5→8 lines | ~71 |
+| 00:36 | Edited src/main.tsx | 3→6 lines | ~89 |
+| 00:36 | Created src/__tests__/claim-store-durable.test.ts | — | ~1178 |
+| 00:36 | Edited src/context/claim-store.ts | added 2 condition(s) | ~185 |
+| 00:37 | Edited src/context/rules-loader.ts | inline fix | ~24 |
+| 00:37 | Edited src/context/rules-loader.ts | inline fix | ~26 |
+| 00:38 | Edited src/tui/slash-commands.ts | added 2 condition(s) | ~251 |
+| 00:38 | Edited src/tui/slash-commands.ts | added 1 import(s) | ~55 |
+| 00:38 | Edited src/tui/slash-commands.ts | 2→1 lines | ~20 |
+| 00:39 | Session end: 30 writes across 16 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 20 reads | ~63556 tok |
+| 00:40 | Created .omc/prd.json | — | ~663 |
+| 00:40 | Edited CHANGELOG.md | inline fix | ~22 |
+| 00:40 | Edited CHANGELOG.md | expanded (+7 lines) | ~247 |
+| 00:40 | Edited README.md | inline fix | ~74 |
+| 00:40 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~31 |
+| 00:41 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~246 |
+| 00:41 | Session end: 36 writes across 18 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 22 reads | ~70427 tok |
+| 00:47 | Session end: 36 writes across 18 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~72677 tok |
+| 00:47 | Session end: 36 writes across 18 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~72677 tok |
+| 00:48 | Edited src/agent/session-persist.ts | modified constructor() | ~111 |
+| 00:48 | Edited src/main.tsx | 5→5 lines | ~43 |
+| 00:49 | Edited src/main.tsx | inline fix | ~22 |
+| 00:49 | Edited src/context/rules-loader.ts | added error handling | ~330 |
+| 00:49 | Edited src/tui/slash-commands.ts | modified if() | ~271 |
+| 00:49 | Edited src/context/rules-loader.ts | inline fix | ~19 |
+| 00:49 | Edited src/tui/slash-commands.ts | inline fix | ~9 |
+| 00:49 | Edited src/main.tsx | inline fix | ~17 |
+| 00:50 | Edited src/context/__tests__/rules-loader.test.ts | 9→9 lines | ~144 |
+| 00:50 | Edited src/context/__tests__/rules-loader.test.ts | 2→2 lines | ~24 |
+| 00:50 | Edited src/context/__tests__/rules-loader.test.ts | 2→2 lines | ~25 |
+| 00:50 | Edited src/context/__tests__/rules-loader.test.ts | 2→2 lines | ~28 |
+| 00:51 | Session end: 48 writes across 19 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~73977 tok |
+| 00:52 | Session end: 48 writes across 19 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~73977 tok |
+| 00:52 | Session end: 48 writes across 19 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~73977 tok |
