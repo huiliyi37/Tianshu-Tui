@@ -60,10 +60,11 @@ function escapeXml(text: string): string {
     .replaceAll('"', '&quot;')
 }
 
-/** Build stable volatile block — excludes per-turn dynamic sections and active claims. */
+/** Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (lazy injection). */
 export function buildStableVolatileBlock(ctx: VolatileContext): string {
   return buildVolatileBlockInternal({
     ...ctx,
+    gitStatus: undefined,
     activeClaims: undefined,
     toolHistory: undefined,
     taskProgress: undefined,
