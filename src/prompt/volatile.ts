@@ -29,23 +29,24 @@ export interface VolatileContext {
   routingReason?: string | null
 }
 
-let rivetMdCache: { value: string | undefined; timestamp: number } | null = null
+let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
 const RIVET_MD_CACHE_TTL_MS = 30_000 // 30 seconds
 
 function readRivetMd(cwd: string): string | undefined {
-  if (rivetMdCache && Date.now() - rivetMdCache.timestamp < RIVET_MD_CACHE_TTL_MS) {
-    return rivetMdCache.value
+  const cached = rivetMdCache.get(cwd)
+  if (cached && Date.now() - cached.timestamp < RIVET_MD_CACHE_TTL_MS) {
+    return cached.value
   }
 
   const path = join(cwd, '.rivet.md')
   try {
     if (existsSync(path)) {
       const value = readFileSync(path, 'utf-8')
-      rivetMdCache = { value, timestamp: Date.now() }
+      rivetMdCache.set(cwd, { value, timestamp: Date.now() })
       return value
     }
   } catch { /* ignore */ }
-  rivetMdCache = { value: undefined, timestamp: Date.now() }
+  rivetMdCache.set(cwd, { value: undefined, timestamp: Date.now() })
   return undefined
 }
 

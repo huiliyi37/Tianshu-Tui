@@ -18,7 +18,7 @@ describe('volatile git status cache', () => {
       load: () => new Promise(resolve => { resolveRefresh = resolve }),
     })
 
-    cache.prime('old status')
+    cache.prime('/repo', 'old status')
     const refresh = cache.refresh('/repo')
 
     assert.equal(cache.get('/repo'), 'old status')

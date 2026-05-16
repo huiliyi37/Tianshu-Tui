@@ -31,34 +31,36 @@ async function loadGitStatus(cwd: string): Promise<string | undefined> {
 }
 
 export function createGitStatusCache(options: GitStatusCacheOptions) {
-  let value: string | undefined
-  let timestamp = 0
-  let refreshing: Promise<void> | null = null
+  const values = new Map<string, { value: string | undefined; timestamp: number }>()
+  const refreshing = new Map<string, Promise<void>>()
 
-  const isFresh = () => options.now() - timestamp < options.ttlMs
+  const isFresh = (cwd: string) => {
+    const entry = values.get(cwd)
+    return !!entry && options.now() - entry.timestamp < options.ttlMs
+  }
 
   return {
     get(cwd: string): string | undefined {
-      if (!isFresh() && !refreshing) {
+      if (!isFresh(cwd) && !refreshing.has(cwd)) {
         void this.refresh(cwd)
       }
-      return value
+      return values.get(cwd)?.value
     },
 
-    prime(nextValue: string | undefined): void {
-      value = nextValue
-      timestamp = options.now()
+    prime(cwd: string, nextValue: string | undefined): void {
+      values.set(cwd, { value: nextValue, timestamp: options.now() })
     },
 
     async refresh(cwd: string): Promise<void> {
-      if (refreshing) return refreshing
-      refreshing = options.load(cwd).then(nextValue => {
-        value = nextValue
-        timestamp = options.now()
+      const existing = refreshing.get(cwd)
+      if (existing) return existing
+      const work = options.load(cwd).then(nextValue => {
+        values.set(cwd, { value: nextValue, timestamp: options.now() })
       }).finally(() => {
-        refreshing = null
+        refreshing.delete(cwd)
       })
-      return refreshing
+      refreshing.set(cwd, work)
+      return work
     },
   }
 }
