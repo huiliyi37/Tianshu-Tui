@@ -5,6 +5,7 @@ export interface HeadlessCliArgs {
   headless: boolean
   prompt?: string
   json: boolean
+  streamJson: boolean
 }
 
 export interface HeadlessJsonOutput {
@@ -28,21 +29,19 @@ export interface HeadlessAgent {
 export interface HeadlessRunConfig {
   prompt: string
   json: boolean
+  streamJson: boolean
   createAgent: () => Pick<AgentLoop, 'run'> | HeadlessAgent
 }
 
 export function parseCliArgs(args: string[]): HeadlessCliArgs {
   const printIndex = args.findIndex(arg => arg === '-p' || arg === '--print')
   const json = args.includes('--json')
+  const streamJson = args.includes('--stream-json')
 
-  if (printIndex === -1) return { headless: false, json }
+  if (printIndex === -1) return { headless: false, json, streamJson }
 
   const prompt = args[printIndex + 1]
-  return { headless: true, prompt, json }
-}
-
-function stringifyOutput(result: HeadlessJsonOutput, json: boolean): string {
-  return json ? JSON.stringify(result) : result.text
+  return { headless: true, prompt, json, streamJson }
 }
 
 export async function runHeadless(config: HeadlessRunConfig): Promise<HeadlessRunResult> {
@@ -51,27 +50,56 @@ export async function runHeadless(config: HeadlessRunConfig): Promise<HeadlessRu
   let usage: Partial<Usage> | undefined
   let error: string | undefined
 
-  await agent.run(config.prompt, {
-    onTextDelta: delta => { text += delta },
-    onThinkingDelta: () => {},
-    onToolUse: () => {},
-    onToolResult: (_id, _name, result, isError) => {
-      if (isError) error = result
-    },
-    onTurnComplete: turnUsage => { usage = turnUsage },
-    onError: err => { error = err.message },
-    onAbort: () => { error = 'Aborted' },
-    onApprovalRequired: async () => false,
-  })
+  const callbacks: AgentCallbacks = config.streamJson
+    ? {
+        onTextDelta: delta => {
+          text += delta
+          process.stdout.write(JSON.stringify({ type: 'text_delta', text: delta }) + '\n')
+        },
+        onThinkingDelta: () => {},
+        onToolUse: (id, name, input) => {
+          process.stdout.write(JSON.stringify({ type: 'tool_use', id, name, input }) + '\n')
+        },
+        onToolResult: (id, name, result, isError) => {
+          if (isError) error = result
+          process.stdout.write(JSON.stringify({ type: 'tool_result', id, name, isError, result: result.slice(0, 500) }) + '\n')
+        },
+        onTurnComplete: turnUsage => {
+          usage = turnUsage
+          process.stdout.write(JSON.stringify({ type: 'turn_complete', usage: turnUsage }) + '\n')
+        },
+        onError: err => {
+          error = err.message
+          process.stdout.write(JSON.stringify({ type: 'error', error: err.message }) + '\n')
+        },
+        onAbort: () => { error = 'Aborted' },
+        onApprovalRequired: async () => false,
+      }
+    : {
+        onTextDelta: delta => { text += delta },
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onToolResult: (_id, _name, result, isError) => {
+          if (isError) error = result
+        },
+        onTurnComplete: turnUsage => { usage = turnUsage },
+        onError: err => { error = err.message },
+        onAbort: () => { error = 'Aborted' },
+        onApprovalRequired: async () => false,
+      }
+
+  await agent.run(config.prompt, callbacks)
 
   const success = !error
   const payload: HeadlessJsonOutput = success
     ? { success: true, text, ...(usage ? { usage } : {}) }
     : { success: false, text, error: error ?? 'Unknown error' }
 
+  const stdout = config.json ? JSON.stringify(payload) : config.streamJson ? '' : payload.text
+
   return {
     exitCode: success ? 0 : 1,
-    stdout: stringifyOutput(payload, config.json),
-    json: config.json ? payload : undefined,
+    stdout,
+    json: (config.json || config.streamJson) ? payload : undefined,
   }
 }

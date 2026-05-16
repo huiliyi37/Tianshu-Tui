@@ -50,6 +50,10 @@ export const cacheSchema = z.object({
   showHitRate: z.boolean().default(true),
 })
 
+export const editorSchema = z.object({
+  vim: z.boolean().default(false),
+})
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -58,6 +62,7 @@ export const configSchema = z.object({
   agent: agentSchema.default({}),
   compact: compactSchema.default({}),
   cache: cacheSchema.default({}),
+  editor: editorSchema.default({}),
   mcp: mcpConfigSchema.default({}),
 })
 
@@ -66,11 +71,13 @@ export type Config = {
   agent: AgentConfig
   compact: CompactConfig
   cache: CacheConfig
+  editor: EditorConfig
   mcp: McpConfig
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
 export type ModelConfig = z.infer<typeof modelConfigSchema>
+export type EditorConfig = z.infer<typeof editorSchema>
 export type AgentConfig = z.infer<typeof agentSchema>
 export type CompactConfig = z.infer<typeof compactSchema>
 export type CacheConfig = z.infer<typeof cacheSchema>

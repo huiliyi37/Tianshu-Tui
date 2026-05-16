@@ -371,6 +371,18 @@ async function main() {
     return
   }
 
+  // --worktree flag
+  if (args.includes('--worktree')) {
+    const { createWorktree, removeWorktree } = await import('./agent/worktree.js')
+    const sessionId = crypto.randomUUID()
+    const wtPath = createWorktree(process.cwd(), sessionId)
+    process.chdir(wtPath)
+    process.on('exit', () => removeWorktree(process.cwd(), wtPath))
+    process.on('SIGINT', () => { removeWorktree(process.cwd(), wtPath); process.exit(0) })
+    process.on('SIGTERM', () => { removeWorktree(process.cwd(), wtPath); process.exit(0) })
+    console.log(`Worktree created at: ${wtPath}`)
+  }
+
   if (args[0] === 'config') {
     runConfigCLI(args.slice(1))
     return
@@ -390,6 +402,10 @@ async function main() {
   }
 
   _pipedInput = readPipedStdin()
+
+  // Composable CLI: if stdout is not TTY, force JSON output
+  const pipeJson = !process.stdout.isTTY
+
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config })),
     { exitOnCtrlC: false },

@@ -6,9 +6,10 @@ import { loadHistory, appendHistory, nextHistoryAfterSubmit } from './history.js
 interface InputBarProps {
   onSubmit: (value: string) => void
   disabled?: boolean
+  vimEnabled?: boolean
 }
 
-export function InputBar({ onSubmit, disabled }: InputBarProps) {
+export function InputBar({ onSubmit, disabled, vimEnabled }: InputBarProps) {
   const [value, setValue] = useState('')
   const [history, setHistory] = useState(() => loadHistory())
 
@@ -18,6 +19,7 @@ export function InputBar({ onSubmit, disabled }: InputBarProps) {
       <BaseTextInput
         value={value}
         onChange={setValue}
+        vimEnabled={vimEnabled}
         onSubmit={(v) => {
           const trimmed = v.trim()
           if (trimmed) {

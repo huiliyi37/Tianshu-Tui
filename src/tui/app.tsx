@@ -30,6 +30,8 @@ import { dismissOnboarding, getOnboardingState, shouldHandleOnboardingInput } fr
 import { OnboardingPanel } from './onboarding.js'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
+import { CommandPalette, getPaletteCommands } from './command-palette.js'
+import { openInEditor } from './external-editor.js'
 import { PANEL_LABELS } from './cockpit/types.js'
 
 interface PendingApproval {
@@ -422,6 +424,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
   const [showOnboarding, setShowOnboarding] = useState(() => getOnboardingState().shouldShow)
+  const [vimEnabled, setVimEnabled] = useState(false)
+  const [showPalette, setShowPalette] = useState(false)
 
   const [verbose, _setVerbose] = useState(false)
   const [, _setAutoSafe] = useState(true)
@@ -565,6 +569,18 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         pushStatic(createLogEntry({ type: 'text', content: `Restored session ${sessions[0]!.slice(0, 8)}... (${msgs.length} messages)` }))
       }
       setSessionPrompt('done')
+      return
+    }
+
+    if (_key.ctrl && _input === '') {
+      setShowPalette(prev => !prev)
+      return
+    }
+    if (_key.ctrl && _input === '') {
+      const edited = openInEditor('')
+      if (edited) {
+        handleSubmit(edited.trim())
+      }
       return
     }
 
@@ -859,7 +875,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             <Text> [y/n] </Text>
           </Box>
         )}
-        <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} />
+        {showPalette && (
+          <CommandPalette
+            commands={getPaletteCommands()}
+            onSelect={(name) => {
+              setShowPalette(false)
+              handleSubmit(name)
+            }}
+            onCancel={() => setShowPalette(false)}
+          />
+        )}
+        <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} vimEnabled={vimEnabled} />
       </Box>
     </>
   )

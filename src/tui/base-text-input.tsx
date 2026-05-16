@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react'
+import { VimState as VimStateClass, processVimKey } from './vim-mode.js'
 import { Text } from 'ink'
 import { useInput } from 'ink'
 
@@ -9,13 +10,15 @@ interface BaseTextInputProps {
   disabled?: boolean
   placeholder?: string
   history?: string[]
+  vimEnabled?: boolean
 }
 
-export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder, history }: BaseTextInputProps) {
+export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder, history, vimEnabled }: BaseTextInputProps) {
   const [cursorPos, setCursorPos] = useState(0)
   const [cursorShown, setCursorShown] = useState(true)
   const historyIndexRef = useRef(-1)
   const savedInputRef = useRef('')
+  const vimRef = useRef(new VimStateClass())
 
   React.useEffect(() => {
     if (disabled) return
