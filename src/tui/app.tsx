@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Box, Text, useInput, Static } from 'ink'
 import gradient from 'gradient-string'
 import { StatusBar } from './status-bar.js'
@@ -373,8 +373,11 @@ interface CockpitViewProps {
 
 function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState, mcpManager }: CockpitViewProps) {
   const theme = getTheme()
-  const snap = buildCockpitSnapshot({ agent, session, model, cacheHitRate, cost, mcpManager })
-  const compactEvents = session.getCompactEvents()
+  const snap = useMemo(
+    () => buildCockpitSnapshot({ agent, session, model, cacheHitRate, cost, mcpManager }),
+    [agent, session, model, cacheHitRate, cost, mcpManager],
+  )
+  const compactEvents = useMemo(() => session.getCompactEvents(), [session])
 
   return (
     <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor={theme.primary}>
