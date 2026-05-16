@@ -7,6 +7,9 @@ export interface RivetTheme {
   warning: string
   error: string
   dim: string
+  userColor: string
+  assistantColor: string
+  systemColor: string
   toolColor: (toolName: string) => string
   contextColor: (pct: number) => string
 }
@@ -84,6 +87,9 @@ function makeContextColor(c: Pick<ColorSet, 'primary' | 'warning' | 'error'>) {
 function buildTheme(colors: ColorSet): RivetTheme {
   return {
     ...colors,
+    userColor: colors.primary,       // mint green
+    assistantColor: colors.secondary, // lavender
+    systemColor: colors.dim,          // dim gray
     toolColor: makeToolColor(colors),
     contextColor: makeContextColor(colors),
   }
