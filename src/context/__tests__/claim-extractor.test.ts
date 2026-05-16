@@ -17,6 +17,8 @@ describe('claim-extractor', () => {
     assert.equal(proposals[0]!.kind, 'file_observation')
     assert.equal(proposals[0]!.scope, 'session')
     assert.ok(proposals[0]!.text.includes('config.ts'))
+    assert.ok(proposals[0]!.text.includes('MAX_RETRIES'))
+    assert.ok(proposals[0]!.text.includes('TIMEOUT'))
     assert.ok(proposals[0]!.evidence[0]!.path === '/repo/src/config.ts')
     assert.ok(proposals[0]!.expiresAt! > Date.now())
   })
@@ -59,12 +61,12 @@ describe('claim-extractor', () => {
     assert.equal(proposals.length, 0)
   })
 
-  it('extracts security_finding from bash with security-related output', () => {
+  it('extracts security_finding from bash with security-related output and error', () => {
     const ctx: ToolResultContext = {
       toolName: 'bash',
       input: { command: 'npm audit' },
       result: '3 vulnerabilities found\n  high: prototype-pollution in lodash',
-      isError: false,
+      isError: true,
     }
     const proposals = extractClaimsFromToolResult(ctx, meta)
     assert.equal(proposals.length, 1)
@@ -102,6 +104,54 @@ describe('claim-extractor', () => {
       isError: true,
     }
     assert.equal(extractClaimsFromToolResult(ctx, meta).length, 0)
+  })
+
+  it('deduplicates file_observation when path already observed', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'read_file',
+      input: { file_path: '/repo/src/config.ts' },
+      result: 'export const PORT = 3000',
+      isError: false,
+    }
+    const existing = new Set(['/repo/src/config.ts'])
+    const proposals = extractClaimsFromToolResult(ctx, meta, existing)
+    assert.equal(proposals.length, 0)
+  })
+
+  it('allows file_observation for unobserved paths', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'read_file',
+      input: { file_path: '/repo/src/new.ts' },
+      result: 'export const X = 1',
+      isError: false,
+    }
+    const existing = new Set(['/repo/src/config.ts'])
+    const proposals = extractClaimsFromToolResult(ctx, meta, existing)
+    assert.equal(proposals.length, 1)
+    assert.equal(proposals[0]!.kind, 'file_observation')
+  })
+
+  it('does not extract security_finding from clean npm audit', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'bash',
+      input: { command: 'npm audit' },
+      result: 'found 0 vulnerabilities',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 0)
+  })
+
+  it('extracts security_finding when bash audit has errors', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'bash',
+      input: { command: 'npm audit' },
+      result: 'found 3 vulnerabilities\nhigh: prototype-pollution in lodash',
+      isError: true,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 1)
+    assert.equal(proposals[0]!.kind, 'security_finding')
   })
 
   it('extracts failure from bash running tests', () => {

@@ -27,13 +27,15 @@ const TTL: Record<ContextClaimKind, number> = {
 
 const SKIP_TOOLS = new Set(['grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'recall'])
 
-export function extractClaimsFromToolResult(ctx: ToolResultContext, meta: ClaimExtractionMeta): ClaimProposal[] {
+export function extractClaimsFromToolResult(ctx: ToolResultContext, meta: ClaimExtractionMeta, existingFileObservations?: Set<string>): ClaimProposal[] {
   if (SKIP_TOOLS.has(ctx.toolName)) return []
   if (ctx.result.length < 10) return []
 
   const now = Date.now()
 
   if (ctx.toolName === 'read_file' && !ctx.isError) {
+    const path = String(ctx.input.file_path ?? '')
+    if (existingFileObservations?.has(path)) return []
     return [fileObservation(ctx, meta, now)]
   }
 
@@ -46,7 +48,7 @@ export function extractClaimsFromToolResult(ctx: ToolResultContext, meta: ClaimE
     return []
   }
 
-  if (ctx.toolName === 'bash' && /vulnerabilit|CVE-|security|audit/i.test(ctx.result)) {
+  if (ctx.toolName === 'bash' && ctx.isError && /vulnerabilit|CVE-|security|audit/i.test(ctx.result)) {
     return [securityFinding(ctx, meta, now)]
   }
 
@@ -57,10 +59,14 @@ function fileObservation(ctx: ToolResultContext, meta: ClaimExtractionMeta, now:
   const path = String(ctx.input.file_path ?? '')
   const filename = path.split('/').pop() ?? path
   const lines = ctx.result.split('\n').length
+  const symbols = extractSymbols(ctx.result)
+  const text = symbols.length > 0
+    ? `${filename} (${lines}L): ${symbols.slice(0, 8).join(', ')}`
+    : `Read ${filename} (${lines} lines)`
   return {
     kind: 'file_observation',
     scope: 'session',
-    text: `Read ${filename} (${lines} lines)`,
+    text,
     confidence: 0.6,
     fitness: 2,
     source: { actor: 'tool', sessionId: meta.sessionId, turn: meta.turn, eventId: meta.eventId },
@@ -69,6 +75,26 @@ function fileObservation(ctx: ToolResultContext, meta: ClaimExtractionMeta, now:
     expiresAt: now + TTL.file_observation,
     tags: ['tool', 'read_file'],
   }
+}
+
+const EXPORT_RE = /^(?:export\s+(?:default\s+)?(?:const|let|var|function|class|interface|type|enum)\s+(\w+)|export\s+\{([^}]+)\})/gm
+
+function extractSymbols(content: string): string[] {
+  const symbols: string[] = []
+  let match: RegExpExecArray | null
+  EXPORT_RE.lastIndex = 0
+  while ((match = EXPORT_RE.exec(content)) !== null) {
+    if (match[1]) {
+      symbols.push(match[1])
+    } else if (match[2]) {
+      for (const name of match[2].split(',')) {
+        const trimmed = name.trim().split(/\s+as\s+/).pop()?.trim()
+        if (trimmed) symbols.push(trimmed)
+      }
+    }
+    if (symbols.length >= 10) break
+  }
+  return symbols
 }
 
 function failurePattern(ctx: ToolResultContext, meta: ClaimExtractionMeta, now: number): ClaimProposal {

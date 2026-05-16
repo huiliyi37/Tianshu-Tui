@@ -29,6 +29,12 @@
 
 ### Fixed
 - **DRY violation** — Duplicated durable claim injection in main.tsx extracted to `SessionPersist.injectDurableClaims()`
+- **Duplicate promotion call** — Removed `promoteEligibleClaims()` from `refreshActiveClaims()` (only called at turn end now)
+- **Lazy conflict detection** — `detectConflicts()` only runs after new `file_observation` proposals, not every turn
+- **Enriched file_observation text** — Claims now include extracted export/function/class names (up to 8 symbols), e.g. `config.ts (42L): MAX_RETRIES, TIMEOUT, loadConfig`
+- **Antibody TTL** — Antibody claims now expire after 4 hours; previously never expired
+- **File observation dedup** — `extractClaimsFromToolResult` accepts optional `existingFileObservations` set to skip already-observed paths
+- **Clean npm audit** — Security extraction now correctly skips when `found 0 vulnerabilities`
 
 ### Verified
 - 825 tests pass, 0 fail
