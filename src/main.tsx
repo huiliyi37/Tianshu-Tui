@@ -319,6 +319,9 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     return () => { shutdownCallback = null }
   }, [agent, persist, session, sessionId])
 
+  const claimStoreRef = useRef<import('./context/claim-store.js').ContextClaimStore | null>(null)
+  claimStoreRef.current = _claimStoreRef
+
   return createElement(App, {
     agent,
     session,
@@ -330,6 +333,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     onModelSwitch: handleModelSwitch,
     initialInput,
     mcpManagerRef,
+    claimStoreRef,
   })
 }
 

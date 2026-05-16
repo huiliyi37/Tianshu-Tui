@@ -260,6 +260,17 @@ export class AgentLoop {
       return
     }
 
+    this.config.contextClaimStore.promoteEligibleClaims()
+    const activeClaims = this.config.contextClaimStore.listActiveClaims()
+    const usedAt = Date.now()
+    const consumerId = `turn-${this.session.getTurnCount()}:prompt`
+    for (const claim of activeClaims) {
+      this.config.contextClaimStore.recordClaimUsed(claim.id, {
+        consumerId,
+        consumerKind: 'prompt',
+        usedAt,
+      })
+    }
     this.config.promptEngine.updateActiveClaims(this.config.contextClaimStore.listActiveClaims())
   }
 
@@ -623,6 +634,10 @@ ${check.formatted}`
                 this.evidence.trackFileRead(tu.input.file_path as string)
               } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
                 this.evidence.trackFileModified(tu.input.file_path as string)
+                this.config.contextClaimStore?.markClaimsStaleForFile(
+                  tu.input.file_path as string,
+                  `file modified by ${tu.name}`,
+                )
                 // Impact hint from import graph
                 if (!this.importGraph) {
                   this.importGraph = buildImportGraph(this.cwd)

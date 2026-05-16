@@ -28,6 +28,7 @@ function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext 
     setCacheHitRate: () => {},
     setSummaryState: () => {},
     mcpManagerRef: { current: null },
+    claimStoreRef: { current: null },
     ...overrides,
   }
 }

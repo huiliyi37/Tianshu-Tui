@@ -48,6 +48,7 @@ interface AppProps {
   currentSessionId: string
   initialInput?: string
   mcpManagerRef: React.MutableRefObject<McpManager | null>
+  claimStoreRef: React.MutableRefObject<import('../context/claim-store.js').ContextClaimStore | null>
 }
 
 const STREAM_FLUSH_MS = 80
@@ -80,13 +81,14 @@ interface CockpitViewProps {
   cost: number
   summaryState: SummaryState
   mcpManager: McpManager | null
+  claimStoreRef: React.MutableRefObject<import('../context/claim-store.js').ContextClaimStore | null>
 }
 
-function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState, mcpManager }: CockpitViewProps) {
+function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState, mcpManager, claimStoreRef }: CockpitViewProps) {
   const theme = getTheme()
   const snap = useMemo(
-    () => buildCockpitSnapshot({ agent, session, model, cacheHitRate, cost, mcpManager }),
-    [agent, session, model, cacheHitRate, cost, mcpManager],
+    () => buildCockpitSnapshot({ agent, session, model, cacheHitRate, cost, mcpManager, claimCounts: claimStoreRef.current?.getStatusCounts() }),
+    [agent, session, model, cacheHitRate, cost, mcpManager, claimStoreRef],
   )
   const compactEvents = useMemo(() => session.getCompactEvents(), [session])
 
@@ -107,7 +109,7 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
 
 // --- Main App ---
 
-export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput, mcpManagerRef }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput, mcpManagerRef, claimStoreRef }: AppProps) {
   const [staticItems, setStaticItems] = useState<LogEntry[]>([])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const staticBuf = useMemo(() => createRingBuffer<LogEntry>(500), [])
@@ -351,7 +353,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         currentSessionId, cost, cacheHitRate, autoSafeRef, verboseRef,
         setVerbose, setAutoSafe, rollbackTokenRef, cockpitPanelRef,
         setCockpitPanel, pushStatic, setIsStreaming, setCacheHitRate, setSummaryState,
-        mcpManagerRef,
+        mcpManagerRef, claimStoreRef,
       }
       if (handleSlashCommand(slashCtx)) return
     }
@@ -544,7 +546,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           apiSafe={(session.getContextLedger()?.apiInvariantStatus.brokenRounds ?? 0) === 0}
         />
         {isStreaming && !cockpitPanel && <SummaryBar state={summaryState} />}
-        {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} />}
+        {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">Previous session found.</Text>

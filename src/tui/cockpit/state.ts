@@ -11,6 +11,7 @@ export interface CockpitSnapshotSources {
   cacheHitRate: number
   cost: number
   mcpManager: McpManager | null
+  claimCounts?: import('../../context/promotion.js').ClaimStatusCounts
 }
 
 function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>): Record<Panel, PanelStatus> {
@@ -56,7 +57,7 @@ function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>):
 }
 
 export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSnapshot {
-  const { agent, session, model, cacheHitRate, cost, mcpManager } = sources
+  const { agent, session, model, cacheHitRate, cost, mcpManager, claimCounts } = sources
 
   const traceStore = agent.getTraceStore()
   const evidence = agent.getEvidenceState()
@@ -118,6 +119,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
             digest: l.digest,
             tokenEstimate: l.tokenEstimate,
           })),
+          claimCounts: claimCounts ?? { active: 0, stale: 0, conflicted: 0, durable: 0, durableCandidate: 0, quarantined: 0 },
         }
       : null,
     model: {

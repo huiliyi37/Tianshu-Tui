@@ -410,4 +410,53 @@ describe('AgentLoop — active claims projection', () => {
     assert.match(requestText, /<active-claims count="1">/)
     assert.match(requestText, /always run tests before saying done/)
   })
+
+  it('records prompt consumers and promotes repeatedly projected claims', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    const engine = makeEngine()
+    const claimDir = mkdtempSync(join(tmpdir(), 'rivet-loop-promo-'))
+    const claimStore = new ContextClaimStore(claimDir, 'session-123')
+
+    let callCount = 0
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        callCount++
+        cb.onContentBlock(makeTextBlock(`response ${callCount}`))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({
+      client,
+      promptEngine: engine,
+      toolRegistry: registry,
+      maxTurns: 1,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      sessionId: 'session-123',
+      contextClaimStore: claimStore,
+    }, session, '/test')
+
+    const cb = {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onError: (error: Error) => { throw error },
+      onAbort: () => {},
+      onTurnComplete: () => {},
+      onApprovalRequired: async () => false,
+    }
+
+    // 3 turns record consumers; promotion runs before consumers on turn 4
+    await agent.run('CRITICAL: always run tests before saying done', cb)
+    await agent.run('continue', cb)
+    await agent.run('continue again', cb)
+    await agent.run('one more for promotion', cb)
+
+    const [claim] = claimStore.listClaims()
+    assert.equal(claim?.status, 'durable_candidate')
+    assert.equal(claim?.consumers.length, 4)
+  })
 })

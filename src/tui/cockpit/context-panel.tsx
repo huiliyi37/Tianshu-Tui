@@ -3,6 +3,7 @@ import { memo } from 'react'
 import { getTheme } from '../theme.js'
 import { contextBar } from '../summary-bar.js'
 import type { CockpitContextLayerView } from './types.js'
+import type { ClaimStatusCounts } from '../../context/promotion.js'
 
 export interface CompactEvent {
   turn: number
@@ -19,6 +20,18 @@ export interface ContextPanelProps {
   brokenRounds: number
   compactEvents: CompactEvent[]
   layers?: CockpitContextLayerView[]
+  claimCounts?: ClaimStatusCounts
+}
+
+export function formatClaimCounts(counts: ClaimStatusCounts): string {
+  const parts = [
+    counts.active > 0 ? `${counts.active} active` : '',
+    counts.stale > 0 ? `${counts.stale} stale` : '',
+    counts.conflicted > 0 ? `${counts.conflicted} conflicted` : '',
+    counts.durable > 0 ? `${counts.durable} durable` : '',
+    counts.durableCandidate > 0 ? `${counts.durableCandidate} candidate` : '',
+  ].filter(Boolean)
+  return parts.length === 0 ? 'Claims: none' : `Claims: ${parts.join(', ')}`
 }
 
 function compactionColor(state: string, theme: ReturnType<typeof getTheme>): string {
@@ -28,7 +41,7 @@ function compactionColor(state: string, theme: ReturnType<typeof getTheme>): str
 }
 
 export const ContextPanel = memo(function ContextPanel({
-  estimatedTokens, maxTokens, rounds, compactionState, brokenRounds, compactEvents, layers,
+  estimatedTokens, maxTokens, rounds, compactionState, brokenRounds, compactEvents, layers, claimCounts,
 }: ContextPanelProps) {
   const theme = getTheme()
   const pct = maxTokens > 0 ? estimatedTokens / maxTokens : 0
@@ -49,6 +62,11 @@ export const ContextPanel = memo(function ContextPanel({
         <Text color={theme.dim}>Compaction: </Text>
         <Text color={compactionColor(compactionState, theme)}>{compactionState}</Text>
       </Text>
+      {claimCounts && (
+        <Text>
+          <Text color={theme.dim}>{formatClaimCounts(claimCounts)}</Text>
+        </Text>
+      )}
       {compactEvents.slice(-3).map((e, i) => (
         <Text key={i} color={theme.dim}>
           t{e.turn} tier{e.tier}: {Math.round(e.beforeTokens / 1000)}k→{Math.round(e.afterTokens / 1000)}k

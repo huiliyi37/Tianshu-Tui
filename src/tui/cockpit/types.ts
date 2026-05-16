@@ -80,6 +80,7 @@ export interface CockpitSnapshot {
     compactionState: string
     brokenRounds: number
     layers: CockpitContextLayerView[]
+    claimCounts: import('../../context/promotion.js').ClaimStatusCounts
   } | null
   model: {
     name: string
