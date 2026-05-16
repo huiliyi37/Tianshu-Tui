@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { RepairPipeline } from '../repair-pipeline.js'
+import { RepairPipeline, summarizeRepairTelemetry } from '../repair-pipeline.js'
 import type { RepairPass, RepairContext } from '../repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass, fixAutoLinks } from '../repair-passes.js'
 import { RepairHintTracker } from '../repair-hint.js'
@@ -32,6 +32,17 @@ describe('RepairPipeline', () => {
     const ctx: RepairContext = { toolName: 'bash', schema: { type: 'object', properties: {}, required: [] } }
     const result = pipeline.run({ x: 1 }, ctx)
     assert.equal(result.telemetry.length, 0)
+  })
+})
+
+describe('summarizeRepairTelemetry', () => {
+  it('summarizes repair telemetry for trace output', () => {
+    const summary = summarizeRepairTelemetry([
+      { pass: 'four-horsemen', fixType: 'fourHorsemen', toolName: 'edit_file', timestamp: 1 },
+      { pass: 'semantic-repair', fixType: 'autoLink', toolName: 'write_file', timestamp: 2 },
+    ])
+
+    assert.equal(summary, 'repair: fourHorsemen(edit_file), autoLink(write_file)')
   })
 })
 

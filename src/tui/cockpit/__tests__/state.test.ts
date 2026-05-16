@@ -108,8 +108,33 @@ describe('buildCockpitSnapshot', () => {
         getAllTools: () => [{ definition: { name: 't1' } }] as any[],
       }),
     })
+
     assert.equal(snap.mcp.servers.length, 2)
     assert.equal(snap.mcp.connectedServers, 1)
     assert.equal(snap.mcp.totalTools, 1)
+    assert.equal(snap.panelStatuses.mcp, 'error')
+  })
+
+  it('snapshot exposes blocking reason and next action for unverified modified files', () => {
+    const snap = buildCockpitSnapshot({
+      agent: makeAgent({
+        getEvidenceState: () => ({
+          filesRead: new Set(),
+          filesModified: new Set(['src/a.ts']),
+          verifications: [],
+          deliveryStatus: 'unverified' as const,
+          impactedFiles: new Set(),
+          impactedTests: new Set(),
+        }),
+      }),
+      session: makeSession(),
+      model: 'deepseek-chat',
+      cacheHitRate: 0.8,
+      cost: 0,
+      mcpManager: null,
+    })
+
+    assert.equal(snap.blockingReason, 'Files were modified without passing verification evidence.')
+    assert.match(snap.nextAction ?? '', /Run relevant targeted tests/)
   })
 })

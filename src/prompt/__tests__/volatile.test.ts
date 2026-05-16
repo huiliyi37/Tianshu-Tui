@@ -215,6 +215,17 @@ describe('decisions XML section', () => {
   })
 })
 
+describe('repair hint XML section', () => {
+  it('renders repair hint in latest-turn volatile block', () => {
+    const block = buildLatestTurnVolatileBlock({
+      cwd: '/tmp/project',
+      repairHint: '<repair-hint tool="edit_file">Read before editing.</repair-hint>',
+    })
+
+    assert.match(block, /<repair-hint tool="edit_file">/)
+    assert.match(block, /Read before editing/)
+  })
+})
 describe('stable/latest volatile split', () => {
   it('keeps dynamic sections out of stable block', () => {
     const stable = buildStableVolatileBlock({

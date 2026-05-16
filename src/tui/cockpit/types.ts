@@ -43,6 +43,9 @@ export interface CockpitVerificationState {
 export type PanelStatus = 'ok' | 'warn' | 'error' | 'idle'
 
 export interface CockpitSnapshot {
+  intent: string | null
+  blockingReason: string | null
+  nextAction: string | null
   safety: {
     doomLoopLevel: 'none' | 'warn' | 'blocked'
     riskLevel: 'none' | 'low' | 'medium' | 'high'

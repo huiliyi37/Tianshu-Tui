@@ -1,5 +1,6 @@
 import type { AgentLoop } from '../../agent/loop.js'
 import type { SessionContext } from '../../agent/context.js'
+import { buildDeliveryGate } from '../../agent/delivery-gate.js'
 import type { McpManager } from '../../mcp/manager.js'
 import type { CockpitSnapshot, Panel, PanelStatus } from './types.js'
 
@@ -64,8 +65,12 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
   const risk = agent.getLatestRisk()
   const contextReport = agent.getContextLayerReport()
   const mcpStates = mcpManager?.getStates() ?? []
+  const deliveryGate = buildDeliveryGate(evidence)
 
   const snapshot: Omit<CockpitSnapshot, 'panelStatuses'> = {
+    intent: null,
+    blockingReason: deliveryGate.blockingReason ?? null,
+    nextAction: deliveryGate.nextAction ?? null,
     safety: {
       doomLoopLevel: doomLevel,
       riskLevel: risk.level,

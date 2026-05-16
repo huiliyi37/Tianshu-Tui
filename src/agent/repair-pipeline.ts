@@ -28,6 +28,12 @@ export interface PipelineResult {
   telemetry: RepairTelemetryEntry[]
 }
 
+export function summarizeRepairTelemetry(entries: RepairTelemetryEntry[]): string | null {
+  if (entries.length === 0) return null
+  const compact = entries.map(e => `${e.fixType}(${e.toolName})`).join(', ')
+  return `repair: ${compact}`
+}
+
 export class RepairPipeline {
   constructor(private passes: RepairPass[]) {}
 

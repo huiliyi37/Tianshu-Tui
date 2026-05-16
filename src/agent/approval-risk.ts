@@ -1,4 +1,5 @@
 import { isIP } from 'node:net'
+import { evaluateMcpPolicy } from '../mcp/policy.js'
 
 export type RiskLevel = 'none' | 'low' | 'medium' | 'high'
 
@@ -89,11 +90,19 @@ export function assessToolRisk(
   const mcpMatch = toolName.match(/^mcp__(.+)__(.+)$/)
   if (mcpMatch) {
     const serverId = mcpMatch[1]!
-    const mcpToolName = mcpMatch[2]!
     reasons.push(`MCP tool from server "${serverId}"`)
     level = level === 'none' ? 'low' : level
-    const mcpWritePattern = /(?:^|[_-])(?:write|create|update|delete|remove|push|post|put|patch|execute)(?:$|[_-])/i
-    if (mcpWritePattern.test(mcpToolName)) {
+    const policy = evaluateMcpPolicy({
+      toolName,
+      trustedServers: [],
+      blockedTools: [],
+      allowedTools: [],
+      mustConfirmCapabilities: ['write', 'execute'],
+    })
+    reasons.push(`MCP policy: ${policy.action} (${policy.reason})`)
+    if (policy.action === 'block') level = 'high'
+    else if (policy.action === 'confirm' || policy.action === 'require') level = level === 'high' ? 'high' : 'medium'
+    if (policy.capability === 'write' || policy.capability === 'execute') {
       reasons.push('MCP write-capable tool')
       level = level === 'high' ? 'high' : 'medium'
     }

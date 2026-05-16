@@ -24,7 +24,7 @@ import { extractDecisions } from './decision-anchor.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
-import { createTraceStore, startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, type TraceStore } from './trace-store.js'
+import { createTraceStore, startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, recordTraceEvent, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel } from './trace-store.js'
 import { assessToolRisk } from './approval-risk.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
@@ -33,7 +33,7 @@ import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import { recommendModelForTask, type ModelCapabilityCard } from '../model/capability.js'
 import { buildImportGraph, invalidateFile, type ImportGraph } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
-import { RepairPipeline } from './repair-pipeline.js'
+import { RepairPipeline, summarizeRepairTelemetry } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
 import { RepairHintTracker } from './repair-hint.js'
 
@@ -345,6 +345,21 @@ export class AgentLoop {
                 if (repairResult.telemetry.length > 0) {
                   tu.input = repairResult.output
                   params.input = repairResult.output
+                  const repairSummary = summarizeRepairTelemetry(repairResult.telemetry)
+                  if (repairSummary) {
+                    const now = Date.now()
+                    this.traceStore = recordTraceEvent(this.traceStore, {
+                      id: `${tu.id}:repair`,
+                      turn,
+                      kind: 'tool',
+                      name: `${tu.name}:repair`,
+                      status: 'passed',
+                      startedAt: now,
+                      endedAt: now,
+                      durationMs: 0,
+                      summary: repairSummary,
+                    })
+                  }
                 }
               }
 
