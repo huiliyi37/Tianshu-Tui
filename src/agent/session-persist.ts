@@ -10,7 +10,7 @@ import { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaim } from '../context/claims.js'
 import { assertValidSessionId } from '../validation.js'
 
-const SESSION_DIR = join(homedir(), '.rivet', 'sessions')
+const SESSION_DIR = process.env.RIVET_SESSION_DIR ?? join(homedir(), '.rivet', 'sessions')
 
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) {
