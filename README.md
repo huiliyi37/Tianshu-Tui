@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 702 tests passing, typecheck clean. 21 capabilities Verified. All P0-P2 core business gaps closed. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks (error isolation + UserPromptSubmit/PreCompact events), structured git (status/diff/log/stash/commit + 50KB truncation), todo with worker-scoped TodoStore, web-fetch with turndown HTML conversion, file-level undo with orphan cleanup, SSRF protection with redirect-safe DNS validation, cache safety layer (centralized readFilePayload, safe prewarm with canonical keys, per-cwd volatile caches, prefix fingerprint coverage), multi-session isolation (UUID session ID per launch, session-scoped checkpoints, checkpoint index for cross-session discovery, rollback session selection, legacy backward compat). 天枢 persona with design-doc-first workflow.
+P2.6 ACF complete — 736 tests passing, typecheck clean. 22 capabilities Verified. All P0-P2 core business gaps closed. Adaptive Context Fabric (percentage-based compaction thresholds 8K–1M, zero-overflow safety layer with ceiling checkpoint-resume, PSI-style pressure/thrashing detection, structural anchor registry with budget enforcement, cold storage archive with disk cap, provider-aware cache strategy for 6 providers, recall tool, proactive context injection), Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks (error isolation + UserPromptSubmit/PreCompact events), structured git (status/diff/log/stash/commit + 50KB truncation), todo with worker-scoped TodoStore, web-fetch with turndown HTML conversion, file-level undo with orphan cleanup, SSRF protection with redirect-safe DNS validation, cache safety layer (centralized readFilePayload, safe prewarm with canonical keys, per-cwd volatile caches, prefix fingerprint coverage), multi-session isolation (UUID session ID per launch, session-scoped checkpoints, checkpoint index for cross-session discovery, rollback session selection, legacy backward compat). 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -110,14 +110,18 @@ src/
 │   ├── auto.ts           Smart compact: reactive round selection + boundary message
 │   └── constants.ts      Compaction thresholds per context window size
 ├── context/
+│   ├── compact-policy.ts Progressive ratio-based compaction (tier 0-4) + circuit breaker
+│   ├── anchor-registry.ts Pinned structural anchors with budget enforcement
+│   ├── persistent-store.ts SHA-256 cold storage archive with disk limit
+│   ├── pressure-monitor.ts PSI-style pressure/thrashing detection
+│   ├── proactive-inject.ts Anchor-to-XML active-constraints injection
 │   ├── rounds.ts         API round grouping + invariant validation
 │   ├── ledger.ts         Context Ledger with health levels
 │   ├── resume-preflight.ts Repair broken message histories
 │   ├── session-memory.ts Per-session memory sidecar
-│   ├── compact-policy.ts Progressive compaction policy + circuit breaker
 │   ├── reactive-compact.ts Compact round selection + boundary message
 │   ├── microcompact.ts   Microcompact tool results (preserve API rounds)
-│   └── types.ts          Context health, budget, session memory types
+│   └── types.ts          Context health, budget, anchor, session memory types
 ├── failures/
 │   └── sample.ts         Redacted failure sample library for testing
 ├── config/

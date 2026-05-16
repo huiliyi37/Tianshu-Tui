@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-05-16 — Adaptive Context Fabric (ACF) Phase 1–4
+
+### Added
+
+**Phase 1 — Zero-Overflow Safety Layer:**
+- `compactThresholds(contextWindow)` percentage-based thresholds scaling 8K to 1M windows — auto (80%), floor (60%), tool_result max (30%)
+- Compaction policy (`src/context/compact-policy.ts`) as sole compact decision source — removed legacy double-AND gate with `shouldAutoCompact`
+- Window-relative single `tool_result` size limit applied before early return in microCompact
+- `AgentLoop.enforceContextCeiling()` last-resort 95% ceiling with cache-anchor + checkpoint-resume fallback
+- Tier 4 reason updated: "emergency truncation required" → "context ceiling exceeded; checkpoint-resume required"
+
+**Phase 2 — Structural Anchors + Cold Storage:**
+- `PressureMonitor` PSI-style pressure/thrashing detection — tier, shouldCompact, thrashing (3+ compactions in 4-turn window), task_decomposition suggestion
+- `AnchorRegistry` pinned structural anchors for user constraints (regex-based extraction) and decisions, with salience scoring, token budget enforcement, and low-salience eviction
+- `PersistentStore` SHA-256 indexed cold storage — archive/retrieve/search with disk limit enforcement (oldest-first eviction)
+- `ContextAnchor` extended with `user_constraint` kind
+
+**Phase 3 — Provider-Aware Message Assembly:**
+- `ProviderProfile` 6-provider cache profiles (deepseek exact-prefix, anthropic explicit-breakpoint, openai partial-prefix, google/qwen explicit-breakpoint, vllm block-kv)
+- `CacheStrategy` provider-aware message assembly — injects `cache_control: { type: 'ephemeral' }` for explicit-breakpoint providers at anchor boundary
+- `Message` type extended with optional `cache_control` field
+
+**Phase 4 — Recall + Proactive Injection:**
+- `recall` tool — retrieves archived tool results from PersistentStore by keyword/toolName/since/filter
+- `buildProactiveContext()` — builds `<active-constraints>` XML block from anchors sorted by salience with token budget
+
+### Changed
+
+- `src/compact/constants.ts` — added `CompactThresholds` interface and `compactThresholds()` function; legacy `AUTO_COMPACT_THRESHOLD`/`MINIMUM_AUTO_COMPACT_TOKENS` preserved
+- `src/compact/micro.ts` — `compactToolResultBlock` now receives `contextWindow`; Tier 1 tool_result truncation runs before early-return guard
+- `src/agent/loop.ts` — removed `shouldAutoCompact` import and AND gate; calls `enforceContextCeiling()` before every API request
+- `src/context/compact-policy.ts` — `tierForRatio` exported; Tier 4 reason changed
+- `src/context/types.ts` — `ContextAnchor.kind` union includes `user_constraint`
+- `src/api/types.ts` — `Message` interface extended with optional `cache_control`
+
+### Verified
+
+- 736/736 tests passing, typecheck clean, build succeeds
+- DeepSeek prefix cache preserved: first 2 messages (CACHE_ANCHOR_MESSAGES=2) never modified
+- 128K window test: 320K token fixture compacts to below 95% ceiling with anchors + resume state
+
 ## 2026-05-16 — Cache Safety Layer
 
 ### Added
