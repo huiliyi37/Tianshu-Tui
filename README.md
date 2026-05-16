@@ -284,6 +284,11 @@ Layers L1-L4 form the stable volatile block (frozen at construction, participate
 - **Diff colorizer** — Unified diff detection with signal-based heuristics, colorized output (add=green, del=red, hunk=gray, header=yellow), auto-truncation
 - **Scroll pager** — `/scroll` command with vi-style navigation (j/k/PgUp/PgDn/g/G/q/Esc), 500-entry ScrollBuffer, 100-item Static cap to prevent terminal buffer overflow
 - **Context layer model** — Typed context layers with stability/channel/fingerprint metadata, stable digest for cache diagnostics, CockpitContextLayerView in context panel
+- **Pastel theme** — Soft, pleasant color palette (default); switchable to cyberpunk via `/theme cyberpunk`
+- **Rendering optimization** — Memoized cockpit snapshot, bounded staticItems ring buffer (500 cap)
+- **Memory safety** — SessionContext collections capped at 500 entries (filesRead, filesModified, testResults, cacheHistory)
+- **Braille sparkline** — Context token trend visualization in SummaryBar (last 20 turns)
+- **Spinner animation** — Rotating braille spinner in AgentStatus during streaming
 
 ## Configuration
 
@@ -380,6 +385,7 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and are auto-discovered at sta
 | `/cockpit [summary\|trace\|verify\|context\|safety\|model\|mcp\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/mcp` | Show MCP server connection status |
 | `/scroll` | Browse output history with scrolling (j/k/PgUp/PgDn/g/G/q) |
+| `/theme [pastel\|cyberpunk\|list]` | Switch color theme |
 
 ## User Manual
 
@@ -655,6 +661,7 @@ Tool output and model responses are automatically enhanced:
 | `/cockpit [summary\|trace\|verify\|context\|safety\|model\|mcp\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/clear` | Clear screen |
 | `/scroll` | Browse output history (j/k/PgUp/PgDn/g/G/q/Esc) |
+| `/theme [pastel\|cyberpunk\|list]` | Switch color theme |
 | `/exit` | Save session and exit |
 
 ### How Cache Works
