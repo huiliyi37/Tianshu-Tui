@@ -55,7 +55,7 @@ export const DEFAULT_CONFIG: Config = {
           {
             id: 'kimi-for-coding',
             alias: 'kimi',
-            contextWindow: 131072,
+            contextWindow: 200_000,
             maxTokens: 64000,
             reasoningEffort: 'high',
           },
@@ -79,7 +79,7 @@ export const DEFAULT_CONFIG: Config = {
           {
             id: 'glm-5.1',
             alias: 'glm',
-            contextWindow: 128000,
+            contextWindow: 200_000,
             maxTokens: 64000,
             reasoningEffort: 'high',
           },
