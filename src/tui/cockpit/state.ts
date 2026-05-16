@@ -1,0 +1,134 @@
+import type { AgentLoop } from '../../agent/loop.js'
+import type { SessionContext } from '../../agent/context.js'
+import type { McpManager } from '../../mcp/manager.js'
+import type { CockpitSnapshot, Panel, PanelStatus } from './types.js'
+
+export interface CockpitSnapshotSources {
+  agent: AgentLoop
+  session: SessionContext
+  model: string
+  cacheHitRate: number
+  cost: number
+  mcpManager: McpManager | null
+}
+
+function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>): Record<Panel, PanelStatus> {
+  const safety: PanelStatus = snapshot.safety.riskLevel === 'high' || snapshot.safety.doomLoopLevel === 'blocked'
+    ? 'error'
+    : snapshot.safety.riskLevel === 'medium' || snapshot.safety.doomLoopLevel === 'warn'
+      ? 'warn'
+      : 'ok'
+
+  const verify: PanelStatus = snapshot.verification.deliveryStatus === 'failed' || snapshot.verification.deliveryStatus === 'blocked'
+    ? 'error'
+    : snapshot.verification.deliveryStatus === 'unverified' && snapshot.verification.filesModified > 0
+      ? 'warn'
+      : 'ok'
+
+  const context: PanelStatus = snapshot.context
+    ? snapshot.context.brokenRounds > 0
+      ? 'error'
+      : snapshot.context.compactionState === 'critical'
+        ? 'error'
+        : snapshot.context.compactionState === 'warning'
+          ? 'warn'
+          : 'ok'
+    : 'idle'
+
+  const model: PanelStatus = 'ok'
+  const trace: PanelStatus = snapshot.trace.events.some(e => e.status === 'failed')
+    ? 'error'
+    : 'ok'
+  const summary: PanelStatus = safety === 'error' || verify === 'error'
+    ? 'error'
+    : safety === 'warn' || verify === 'warn'
+      ? 'warn'
+      : 'ok'
+
+  return { summary, trace, verify, context, safety, model }
+}
+
+export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSnapshot {
+  const { agent, session, model, cacheHitRate, cost, mcpManager } = sources
+
+  const traceStore = agent.getTraceStore()
+  const evidence = agent.getEvidenceState()
+  const doomLevel = agent.getDoomLoopLevel()
+  const usage = session.getTotalUsage()
+  const risk = agent.getLatestRisk()
+  const contextReport = agent.getContextLayerReport()
+  const mcpStates = mcpManager?.getStates() ?? []
+
+  const snapshot: Omit<CockpitSnapshot, 'panelStatuses'> = {
+    safety: {
+      doomLoopLevel: doomLevel,
+      riskLevel: risk.level,
+      riskReasons: risk.reasons,
+      suggestedAction: risk.suggestedAction,
+      recentFingerprints: new Set(traceStore.toolFingerprints).size,
+    },
+    verification: {
+      filesRead: evidence.filesRead.size,
+      filesModified: evidence.filesModified.size,
+      runs: evidence.verifications.map(v => ({
+        tool: v.command,
+        status: v.status,
+        summary: `${v.passed}✓ ${v.failed}✗ ${v.skipped}skip`,
+      })),
+      deliveryStatus: evidence.deliveryStatus,
+    },
+    trace: {
+      events: traceStore.events.map(e => ({
+        id: e.id,
+        turn: e.turn,
+        kind: e.kind,
+        name: e.name,
+        status: e.status,
+        durationMs: e.durationMs,
+        summary: e.summary,
+      })),
+      totalEvents: traceStore.events.length,
+    },
+    context: session.getContextLedger()
+      ? {
+          estimatedTokens: session.getContextLedger()!.tokenBudget.estimatedTokens,
+          maxTokens: session.getContextLedger()!.tokenBudget.maxTokens,
+          rounds: session.getContextLedger()!.rounds.length,
+          compactionState: session.getContextLedger()!.tokenBudget.compactionState,
+          brokenRounds: session.getContextLedger()!.apiInvariantStatus.brokenRounds,
+          layers: contextReport.layers.map(l => ({
+            id: l.id,
+            label: l.label,
+            stability: l.stability,
+            channel: l.channel,
+            fingerprint: l.fingerprint,
+            digest: l.digest,
+            tokenEstimate: l.tokenEstimate,
+          })),
+        }
+      : null,
+    model: {
+      name: model,
+      cacheHitRate,
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      cacheReadTokens: usage.cache_read_input_tokens,
+      cacheWriteTokens: usage.cache_creation_input_tokens,
+      cost,
+    },
+    mcp: {
+      servers: mcpStates.map(s => ({
+        serverId: s.serverId,
+        status: s.status,
+        toolCount: s.toolCount,
+      })),
+      totalTools: mcpManager?.getAllTools().length ?? 0,
+      connectedServers: mcpStates.filter(s => s.status === 'connected').length,
+    },
+  }
+
+  return {
+    ...snapshot,
+    panelStatuses: computePanelStatuses(snapshot),
+  }
+}

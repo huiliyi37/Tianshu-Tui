@@ -38,3 +38,60 @@ export interface CockpitVerificationState {
   deliveryStatus: 'verified' | 'failed' | 'blocked' | 'unverified'
   runs: CockpitVerificationRunView[]
 }
+
+export type PanelStatus = 'ok' | 'warn' | 'error' | 'idle'
+
+export interface CockpitSnapshot {
+  safety: {
+    doomLoopLevel: 'none' | 'warn' | 'blocked'
+    riskLevel: 'none' | 'low' | 'medium' | 'high'
+    riskReasons: string[]
+    suggestedAction: string
+    recentFingerprints: number
+  }
+  verification: {
+    filesRead: number
+    filesModified: number
+    runs: Array<{ tool: string; status: string; summary: string }>
+    deliveryStatus: 'verified' | 'failed' | 'blocked' | 'unverified'
+  }
+  trace: {
+    events: Array<{
+      id: string
+      turn: number
+      kind: string
+      name: string
+      status: string
+      durationMs?: number
+      summary?: string
+    }>
+    totalEvents: number
+  }
+  context: {
+    estimatedTokens: number
+    maxTokens: number
+    rounds: number
+    compactionState: string
+    brokenRounds: number
+    layers: CockpitContextLayerView[]
+  } | null
+  model: {
+    name: string
+    cacheHitRate: number
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    cost: number
+  }
+  mcp: {
+    servers: Array<{
+      serverId: string
+      status: string
+      toolCount: number
+    }>
+    totalTools: number
+    connectedServers: number
+  }
+  panelStatuses: Record<Panel, PanelStatus>
+}

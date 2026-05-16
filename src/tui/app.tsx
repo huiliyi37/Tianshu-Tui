@@ -20,6 +20,7 @@ import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { runResumePreflight } from '../context/resume-preflight.js'
 import type { McpManager } from '../mcp/manager.js'
 import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel } from './cockpit/index.js'
+import { buildCockpitSnapshot } from './cockpit/state.js'
 import type { Panel } from './cockpit/types.js'
 import { PANEL_LABELS } from './cockpit/types.js'
 
@@ -349,28 +350,24 @@ interface CockpitViewProps {
   cacheHitRate: number
   cost: number
   summaryState: SummaryState
+  mcpManager: McpManager | null
 }
 
-function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState }: CockpitViewProps) {
+function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState, mcpManager }: CockpitViewProps) {
   const theme = getTheme()
-  const traceStore = agent.getTraceStore()
-  const evidence = agent.getEvidenceState()
-  const ledger = session.getContextLedger()
-  const doomLevel = agent.getDoomLoopLevel()
-  const usage = session.getTotalUsage()
-  const risk = agent.getLatestRisk()
+  const snap = buildCockpitSnapshot({ agent, session, model, cacheHitRate, cost, mcpManager })
   const compactEvents = session.getCompactEvents()
 
   return (
     <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor={theme.primary}>
       <Text color={theme.primary} bold>─── COCKPIT ───</Text>
-      <CockpitRail activePanel={panel} onSelect={() => {}} />
+      <CockpitRail activePanel={panel} panelStatuses={snap.panelStatuses} onSelect={() => {}} />
       {panel === 'summary' && <SummaryBar state={summaryState} />}
-      {panel === 'trace' && <TracePanel events={traceStore.events.map(e => ({ id: e.id, turn: e.turn, kind: e.kind, name: e.name, status: e.status, durationMs: e.durationMs, summary: e.summary }))} />}
-      {panel === 'verify' && <VerificationPanel filesRead={evidence.filesRead.size} filesModified={evidence.filesModified.size} verifications={evidence.verifications.map(v => ({ tool: v.command, status: v.status, summary: `${v.passed}✓ ${v.failed}✗ ${v.skipped}skip` }))} deliveryStatus={evidence.deliveryStatus} />}
-      {panel === 'context' && ledger && <ContextPanel estimatedTokens={ledger.tokenBudget.estimatedTokens} maxTokens={ledger.tokenBudget.maxTokens} rounds={ledger.rounds.length} compactionState={ledger.tokenBudget.compactionState} brokenRounds={ledger.apiInvariantStatus.brokenRounds} compactEvents={compactEvents.map(e => ({ turn: e.turn, tier: e.tier, beforeTokens: e.beforeTokens, afterTokens: e.afterTokens }))} layers={agent.getContextLayerReport().layers.map(l => ({ id: l.id, label: l.label, stability: l.stability, channel: l.channel, fingerprint: l.fingerprint, digest: l.digest, tokenEstimate: l.tokenEstimate }))} />}
-      {panel === 'safety' && <SafetyPanel doomLoopLevel={doomLevel} riskLevel={risk.level} riskReasons={risk.reasons} suggestedAction={risk.suggestedAction} recentFingerprints={new Set(traceStore.toolFingerprints).size} />}
-      {panel === 'model' && <ModelPanel model={model} cacheHitRate={cacheHitRate} inputTokens={usage.input_tokens} outputTokens={usage.output_tokens} cacheReadTokens={usage.cache_read_input_tokens} cacheWriteTokens={usage.cache_creation_input_tokens} cost={cost} />}
+      {panel === 'trace' && <TracePanel events={snap.trace.events} />}
+      {panel === 'verify' && <VerificationPanel filesRead={snap.verification.filesRead} filesModified={snap.verification.filesModified} verifications={snap.verification.runs} deliveryStatus={snap.verification.deliveryStatus} />}
+      {panel === 'context' && snap.context && <ContextPanel estimatedTokens={snap.context.estimatedTokens} maxTokens={snap.context.maxTokens} rounds={snap.context.rounds} compactionState={snap.context.compactionState} brokenRounds={snap.context.brokenRounds} compactEvents={compactEvents.map(e => ({ turn: e.turn, tier: e.tier, beforeTokens: e.beforeTokens, afterTokens: e.afterTokens }))} layers={snap.context.layers} />}
+      {panel === 'safety' && <SafetyPanel doomLoopLevel={snap.safety.doomLoopLevel} riskLevel={snap.safety.riskLevel} riskReasons={snap.safety.riskReasons} suggestedAction={snap.safety.suggestedAction} recentFingerprints={snap.safety.recentFingerprints} />}
+      {panel === 'model' && <ModelPanel model={snap.model.name} cacheHitRate={snap.model.cacheHitRate} inputTokens={snap.model.inputTokens} outputTokens={snap.model.outputTokens} cacheReadTokens={snap.model.cacheReadTokens} cacheWriteTokens={snap.model.cacheWriteTokens} cost={snap.model.cost} />}
     </Box>
   )
 }
@@ -779,7 +776,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           apiSafe={(session.getContextLedger()?.apiInvariantStatus.brokenRounds ?? 0) === 0}
         />
         {isStreaming && !cockpitPanel && <SummaryBar state={summaryState} />}
-        {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} />}
+        {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">Previous session found.</Text>
