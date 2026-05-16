@@ -65,4 +65,37 @@ describe('aggregateResults', () => {
     const aggregated = aggregateResults(results, 'majority')
     assert.equal(aggregated.length, 2)
   })
+
+  it('blocks implementation result that changed files without verified evidence', () => {
+    const results: WorkerResult[] = [{
+      workOrderId: 'wo1',
+      status: 'passed',
+      summary: 'Changed files',
+      findings: [],
+      artifacts: [],
+      changedFiles: ['src/agent/loop.ts'],
+      risks: [],
+      nextActions: [],
+      evidenceStatus: 'unverified',
+    }]
+    const aggregated = aggregateResults(results, 'primary_decides')
+    assert.equal(aggregated[0]!.status, 'blocked')
+    assert.ok(aggregated[0]!.risks.some(r => r.includes('unverified')))
+  })
+
+  it('does not block read-only results with unverified evidence', () => {
+    const results: WorkerResult[] = [{
+      workOrderId: 'wo1',
+      status: 'passed',
+      summary: 'Found the seam.',
+      findings: [],
+      artifacts: [],
+      changedFiles: [],
+      risks: [],
+      nextActions: [],
+      evidenceStatus: 'unverified',
+    }]
+    const aggregated = aggregateResults(results, 'primary_decides')
+    assert.equal(aggregated[0]!.status, 'passed')
+  })
 })
