@@ -9,6 +9,7 @@ import { ToolCard } from './tool-card.js'
 import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
 import { SummaryBar, type SummaryState } from './summary-bar.js'
 import { PhaseTracker } from './phase-tracker.js'
+import { createRingBuffer } from './ring-buffer.js'
 import { getTheme, setTheme, getActiveThemeName, type ThemeName } from './theme.js'
 import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
@@ -399,6 +400,7 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput, mcpManagerRef }: AppProps) {
   const [staticItems, setStaticItems] = useState<LogEntry[]>([])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
+  const staticBuf = useMemo(() => createRingBuffer<LogEntry>(500), [])
 
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
@@ -425,8 +427,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   useEffect(() => { cockpitPanelRef.current = cockpitPanel }, [cockpitPanel])
 
   const pushStatic = useCallback((entry: LogEntry) => {
-    setStaticItems(prev => [...prev, entry])
-  }, [])
+    staticBuf.push(entry)
+    setStaticItems(staticBuf.items())
+  }, [staticBuf])
 
   const streamStartRef = useRef(0)
   const thinkStartRef = useRef(0)
