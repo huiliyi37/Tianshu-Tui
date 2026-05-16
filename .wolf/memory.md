@@ -883,3 +883,14 @@
 | Time | Action | File(s) | Outcome | ~Tokens |
 |------|--------|---------|---------|--------|
 - [2026-05-16T13:19:25.496143Z] Phase 1 final review fixes: semantic session-scoped claim identity, idempotent duplicate proposals, typed active-claim prompt rendering, and `--goal` claim-store wiring.
+
+## Session: 2026-05-16 21:44
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+- [2026-05-16T13:50:57.640358Z] Phase 1 review feedback fixes: claim-store projection cache, expiresAt active filtering, documented anchor-gated extraction, clarified latest-turn volatile refresh rationale, and recorded future commit hygiene guidance.
+
+## Session: 2026-05-16 21:51
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|

@@ -103,6 +103,39 @@ test('filters active claims and excludes quarantined claims', () => {
   }
 })
 
+
+test('cached projections are invalidated after appended events', () => {
+  const dir = tempDir()
+  try {
+    const store = new ContextClaimStore(dir, 'session-123')
+    const claim = store.propose(proposal('Cache this claim'))
+
+    assert.equal(store.listClaims()[0]?.status, 'active')
+    store.updateClaimStatus(claim.id, 'stale', 'cache must refresh')
+
+    const claims = store.listClaims()
+    assert.equal(claims.length, 1)
+    assert.equal(claims[0]?.status, 'stale')
+    assert.equal(claims[0]?.counterevidence[0]?.summary, 'cache must refresh')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('active claim listing excludes expired claims at the supplied time', () => {
+  const dir = tempDir()
+  try {
+    const store = new ContextClaimStore(dir, 'session-123')
+    const durable = store.propose(proposal('Keep this claim'))
+    const expired = store.propose({ ...proposal('Drop this expired claim'), expiresAt: 20 })
+
+    assert.deepEqual(store.listActiveClaims(19).map(c => c.id), [durable.id, expired.id])
+    assert.deepEqual(store.listActiveClaims(20).map(c => c.id), [durable.id])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('ignores invalid JSONL lines while preserving valid events', () => {
   const dir = tempDir()
   try {

@@ -166,7 +166,8 @@ export function createClaimFromProposal(proposal: ClaimProposal): ContextClaim {
   }
 }
 
-export function isPromptEligibleClaim(claim: ContextClaim): boolean {
+export function isPromptEligibleClaim(claim: ContextClaim, now = Date.now()): boolean {
+  if (claim.expiresAt !== undefined && claim.expiresAt <= now) return false
   return claim.status === 'active' || claim.status === 'durable_candidate' || claim.status === 'durable'
 }
 

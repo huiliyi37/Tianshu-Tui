@@ -137,7 +137,7 @@ export class PromptEngine {
       const msg = normalized[i]!
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         if (i === lastUserTextIdx) {
-          // Fresh volatile block with tool history, active claims, and dynamic sections for the latest turn
+          // Always refresh the latest turn so active claims and session memory updates project even when no tools ran.
           const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, decisions: this.decisions })
           result.push({ role: 'user', content: freshBlock })
         } else {

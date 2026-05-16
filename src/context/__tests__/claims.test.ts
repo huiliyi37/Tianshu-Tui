@@ -119,6 +119,30 @@ test('only active durable candidate and durable claims are prompt eligible', () 
   assert.equal(isPromptEligibleClaim({ ...base, id: 'c_quarantined', status: 'quarantined' }), false)
 })
 
+
+test('expired claims are not prompt eligible', () => {
+  const claim: ContextClaim = {
+    id: 'c_expired',
+    kind: 'user_constraint',
+    scope: 'session',
+    status: 'active',
+    text: 'Temporary constraint',
+    confidence: 0.9,
+    fitness: 5,
+    source: { actor: 'user', sessionId: 'session-123', turn: 1, eventId: 'e1' },
+    evidence: [{ id: 'e1', kind: 'user_message', summary: 'Temporary constraint', createdAt: 1 }],
+    counterevidence: [],
+    consumers: [],
+    createdAt: 1,
+    lastUsedAt: 1,
+    expiresAt: 10,
+    tags: ['anchor'],
+  }
+
+  assert.equal(isPromptEligibleClaim(claim, 9), true)
+  assert.equal(isPromptEligibleClaim(claim, 10), false)
+})
+
 test('renders only prompt eligible claims and escapes XML-sensitive text', () => {
   const claim: ContextClaim = {
     id: 'c_xml',

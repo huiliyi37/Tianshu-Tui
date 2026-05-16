@@ -336,6 +336,13 @@ V1、V2、V3、V4、V5 都收敛到同一个核心真相：
 
 这就是最终方案的核心。
 
+
+### Phase 1 Claim 提取边界
+
+Phase 1 不把所有用户输入都转成 claim。`AgentLoop.recordUserInputClaims()` 只复用 `AnchorRegistry.processUserMessage()` 产生的高显著性 anchor，因此触发条件与 AnchorRegistry 一致：明确约束/偏好/决策/验证/错误信号，例如 `CRITICAL`、`ALWAYS`、`NEVER`、`必须`、`不要`、`记住`、`决定`、`失败`、`报错` 等模式。普通叙述性消息不会生成 claim，这是为了避免 session claim 污染；Phase 2 可以引入更细的语义提取器，但必须继续保留证据和反证状态。
+
+Phase 1 的 JSONL store 使用内存投影缓存，并在追加事件后失效缓存，避免每次 `listClaims()` 都全量重读文件。`expiresAt` 是 prompt eligibility 的硬过滤条件；过期 claim 不再进入 active projection。
+
 ## 最终方案：Evolutionary Context Fabric
 
 ### 核心循环

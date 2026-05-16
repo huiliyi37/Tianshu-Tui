@@ -32,6 +32,8 @@ export class ContextClaimStore {
 
   readonly sessionId: string
 
+  private cachedClaims: ContextClaim[] | null = null
+
   constructor(dir: string, sessionId: string) {
     assertValidSessionId(sessionId)
     this.sessionId = sessionId
@@ -41,6 +43,7 @@ export class ContextClaimStore {
 
   appendEvent(event: ContextClaimEvent): void {
     appendFileSync(this.path, JSON.stringify(event) + '\n', 'utf-8')
+    this.cachedClaims = null
   }
 
   propose(proposal: ClaimProposal): ContextClaim {
@@ -98,8 +101,8 @@ export class ContextClaimStore {
     })
   }
 
-  listActiveClaims(): ContextClaim[] {
-    return this.listClaims().filter(isPromptEligibleClaim)
+  listActiveClaims(now = Date.now()): ContextClaim[] {
+    return this.listClaims().filter(claim => isPromptEligibleClaim(claim, now))
   }
 
   exportSession(): string {
@@ -122,6 +125,8 @@ export class ContextClaimStore {
   }
 
   private projectClaims(): ContextClaim[] {
+    if (this.cachedClaims) return this.cachedClaims
+
     const claims = new Map<string, ContextClaim>()
 
     for (const event of this.readEvents()) {
@@ -160,6 +165,7 @@ export class ContextClaimStore {
       })
     }
 
-    return [...claims.values()]
+    this.cachedClaims = [...claims.values()]
+    return this.cachedClaims
   }
 }

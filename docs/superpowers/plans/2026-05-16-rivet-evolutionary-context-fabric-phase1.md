@@ -14,6 +14,15 @@
 
 本计划只实现 Phase 1 的可工作闭环：user input → anchor → claim proposal → JSONL event → active-claim prompt projection → tests。SQLite、`sqlite-vec`、跨机器合并、worker claim proposal、TUI conflict journal 面板、加密导入导出不属于这个计划；它们依赖 Phase 1 产生的 claim/event 基础类型，可以拆成独立计划实现。
 
+
+## Review Clarifications
+
+- Phase 1 claim extraction is intentionally anchor-gated. Only `AnchorRegistry` matches become `ClaimProposal`s; ordinary user text is stored in transcript but not promoted to claim state.
+- The latest user turn always receives a fresh volatile context block. This is required so active claims and session-memory updates can project on turns without tool history; historical turns still use the frozen stable volatile block to preserve prefix-cache shape.
+- `ContextClaimStore` keeps an in-memory projected-claims cache and invalidates it on append. JSONL remains the durable source of truth, but normal `listClaims()` calls do not repeatedly re-read the full file within the same store instance.
+- `expiresAt` is enforced by prompt eligibility and active-claim listing, so expired claims stop projecting even before a later compaction or cleanup pass removes them from JSONL.
+- Non-functional cleanup should be committed separately from feature work when practical; Phase 1 follow-up commits should avoid mixing unrelated import/variable cleanup with claim-store changes.
+
 ## 文件结构
 
 ### 新建文件

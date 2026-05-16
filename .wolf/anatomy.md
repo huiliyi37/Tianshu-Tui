@@ -419,3 +419,11 @@
 - `src/prompt/volatile.ts` — Active claims are accepted as typed `ContextClaim[]` and rendered at the prompt boundary, preserving XML escaping.
 - `src/prompt/engine.ts` — `updateActiveClaims()` accepts typed claims, removing raw active-claim XML from runtime callers.
 - `src/main.tsx` — Autonomous `--goal` agents reuse a session-scoped `ContextClaimStore`, matching TUI runtime claim persistence/projection.
+
+## Evolutionary Context Fabric Phase 1 Review Feedback
+
+- `src/context/claim-store.ts` — Maintains an in-memory projected-claims cache and invalidates it on every appended JSONL event.
+- `src/context/claims.ts` — `isPromptEligibleClaim()` filters expired claims using `expiresAt`.
+- `src/prompt/engine.ts` — Latest user turn always receives fresh volatile context so active claims/session memory project without requiring tool history.
+- `docs/superpowers/specs/2026-05-16-rivet-evolutionary-tui-memory-design.md` — Documents Phase 1 anchor-gated claim extraction triggers and cache/TTL behavior.
+- `docs/superpowers/plans/2026-05-16-rivet-evolutionary-context-fabric-phase1.md` — Records review clarifications and future commit-hygiene guidance.
