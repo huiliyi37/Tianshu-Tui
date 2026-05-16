@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink'
+import { Box, Text, useStdout } from 'ink'
 import { memo } from 'react'
 import { getTheme } from './theme.js'
 
@@ -47,6 +47,8 @@ interface StatusBarProps {
 
 export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheStatus = 'healthy', totalCost, currentTokens, maxTokens, contextHealth = 'healthy', apiSafe = true, interview, clarityHistory }: StatusBarProps) {
   const theme = getTheme()
+  const { stdout } = useStdout()
+  const cols = stdout?.columns ?? 80
 
   if (interview) {
     const clarityColor = interview.clarity < 0.4 ? theme.error : interview.clarity < 0.7 ? theme.warning : theme.success
@@ -76,7 +78,6 @@ export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheSta
 
   const hitPct = (cacheHitRate * 100).toFixed(1)
   const usagePct = ((currentTokens / maxTokens) * 100).toFixed(0)
-  const bar = tokenBar(currentTokens, maxTokens)
   const usageColor = theme.contextColor(currentTokens / maxTokens)
   const cacheColor = cacheHitRate === 0 ? theme.dim : cacheHitRate >= 0.8 ? theme.success : cacheHitRate >= 0.4 ? theme.warning : theme.error
   const healthColor = contextHealth === 'critical' ? theme.error : contextHealth === 'compacting' ? theme.warning : contextHealth === 'warning' ? theme.warning : theme.success
@@ -84,27 +85,38 @@ export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheSta
   const statusIcon = cacheStatus === 'degraded' ? '▼' : cacheStatus === 'recovering' ? '↗' : ''
   const statusColor = cacheStatus === 'degraded' ? theme.error : cacheStatus === 'recovering' ? theme.warning : cacheColor
 
+  const compact = cols < 70
+  const narrow = cols < 90
+
+  const shortModel = model.length > 8 && narrow ? model.slice(0, 7) + '…' : model
+  const barW = compact ? 6 : narrow ? 8 : 10
+  const shortBar = tokenBar(currentTokens, maxTokens, barW)
+
   return (
     <Box flexDirection="row" justifyContent="space-between" paddingX={1} borderStyle="round" borderColor={theme.dim}>
       <Box gap={1}>
-        <Text bold color={theme.primary}>{model}</Text>
+        <Text bold color={theme.primary}>{shortModel}</Text>
         <Text color={statusColor}>
           cache:{statusIcon}{hitPct}%
         </Text>
-        <Text color={healthColor}>
-          ctx:{contextHealth}
-        </Text>
-        <Text color={apiSafe ? theme.success : theme.error}>
-          rounds:{apiSafe ? 'safe' : '!'}
-        </Text>
+        {!compact && (
+          <Text color={healthColor}>
+            ctx:{contextHealth}
+          </Text>
+        )}
+        {!narrow && (
+          <Text color={apiSafe ? theme.success : theme.error}>
+            rounds:{apiSafe ? 'safe' : '!'}
+          </Text>
+        )}
         <Text dimColor>
           ¥{totalCost}
         </Text>
       </Box>
       <Box gap={1}>
-        <Text color={usageColor}>{bar}</Text>
+        <Text color={usageColor}>{shortBar}</Text>
         <Text dimColor>
-          {currentTokens.toLocaleString()}/{maxTokens.toLocaleString()} ({usagePct}%)
+          {usagePct}%
         </Text>
       </Box>
     </Box>

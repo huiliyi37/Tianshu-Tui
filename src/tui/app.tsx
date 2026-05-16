@@ -641,7 +641,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current, tokenHistory: pushTokenHistory(tcPct) }))
 
         const usage = session.getTotalUsage()
-        const normalInput = usage.input_tokens - usage.cache_read_input_tokens
+        const normalInput = Math.max(0, usage.input_tokens - usage.cache_read_input_tokens)
         const estimatedCost = (normalInput * 1 + usage.cache_read_input_tokens * 0.1 + usage.output_tokens * 4) / 1_000_000
         setCost(estimatedCost)
 
