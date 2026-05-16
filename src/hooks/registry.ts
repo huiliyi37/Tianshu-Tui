@@ -25,12 +25,16 @@ export class HookRegistry {
 
     let current = input
     for (const handler of handlers) {
-      const result = (handler as HookHandler<'PreToolUse'>)(current)
-      if (result.block) {
-        return { block: true, reason: result.reason }
-      }
-      if (result.input) {
-        current = { ...current, input: result.input }
+      try {
+        const result = (handler as HookHandler<'PreToolUse'>)(current)
+        if (result.block) {
+          return { block: true, reason: result.reason }
+        }
+        if (result.input) {
+          current = { ...current, input: result.input }
+        }
+      } catch {
+        // Handler error is non-fatal — skip and continue
       }
     }
     return { input: current.input }
@@ -42,9 +46,13 @@ export class HookRegistry {
 
     let current = input
     for (const handler of handlers) {
-      const result = (handler as HookHandler<'PostToolUse'>)(current)
-      if (result.result) {
-        current = { ...current, result: result.result }
+      try {
+        const result = (handler as HookHandler<'PostToolUse'>)(current)
+        if (result.result) {
+          current = { ...current, result: result.result }
+        }
+      } catch {
+        // Handler error is non-fatal — skip and continue
       }
     }
     return { result: current.result }
@@ -54,7 +62,11 @@ export class HookRegistry {
     const handlers = this.handlers.get('Notification')
     if (!handlers) return
     for (const handler of handlers) {
-      (handler as HookHandler<'Notification'>)(input)
+      try {
+        (handler as HookHandler<'Notification'>)(input)
+      } catch {
+        // Handler error is non-fatal — skip and continue
+      }
     }
   }
 
@@ -62,7 +74,11 @@ export class HookRegistry {
     const handlers = this.handlers.get('SubagentStop')
     if (!handlers) return
     for (const handler of handlers) {
-      (handler as HookHandler<'SubagentStop'>)(input)
+      try {
+        (handler as HookHandler<'SubagentStop'>)(input)
+      } catch {
+        // Handler error is non-fatal — skip and continue
+      }
     }
   }
 

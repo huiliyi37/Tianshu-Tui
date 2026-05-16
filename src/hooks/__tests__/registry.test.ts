@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { HookRegistry } from '../registry.js'
 import type { HookHandler, PreToolUseInput, PostToolUseInput } from '../types.js'
 
+// --- Error isolation tests ---
+
 describe('HookRegistry', () => {
   it('registers and fires a PreToolUse hook that can modify input', () => {
     const registry = new HookRegistry()
@@ -73,5 +75,47 @@ describe('HookRegistry', () => {
     registry.unregister('PreToolUse', handler)
     const result = registry.firePreToolUse({ toolName: 'bash', input: {} })
     assert.deepEqual(result.input, {})
+  })
+})
+
+describe('HookRegistry error isolation', () => {
+  it('catches handler throw in firePreToolUse and returns safe default', () => {
+    const registry = new HookRegistry()
+    registry.register('PreToolUse', () => { throw new Error('handler boom') })
+    const result = registry.firePreToolUse({ toolName: 'bash', input: { command: 'ls' } })
+    assert.equal(result.block, undefined)
+    assert.deepEqual(result.input, { command: 'ls' })
+  })
+
+  it('catches handler throw in firePostToolUse', () => {
+    const registry = new HookRegistry()
+    registry.register('PostToolUse', () => { throw new Error('post boom') })
+    const result = registry.firePostToolUse({ toolName: 'bash', input: {}, result: 'ok', isError: false })
+    assert.equal(result.result, 'ok')
+  })
+
+  it('catches handler throw in fireNotification', () => {
+    const registry = new HookRegistry()
+    registry.register('Notification', () => { throw new Error('notif boom') })
+    assert.doesNotThrow(() => registry.fireNotification({ message: 'hi', level: 'info' }))
+  })
+
+  it('catches handler throw in fireSubagentStop', () => {
+    const registry = new HookRegistry()
+    registry.register('SubagentStop', () => { throw new Error('stop boom') })
+    assert.doesNotThrow(() => registry.fireSubagentStop({ workOrderId: 'w1', status: 'done' }))
+  })
+
+  it('continues to next handler after one throws', () => {
+    const registry = new HookRegistry()
+    const seen: string[] = []
+    registry.register('PreToolUse', () => { throw new Error('fail') })
+    registry.register('PreToolUse', ((_: any) => {
+      seen.push('second')
+      return { input: { command: 'ok' } }
+    }) as HookHandler<'PreToolUse'>)
+    const result = registry.firePreToolUse({ toolName: 'bash', input: { command: 'ls' } })
+    assert.deepEqual(seen, ['second'])
+    assert.deepEqual(result.input, { command: 'ok' })
   })
 })
