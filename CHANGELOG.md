@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-05-16 — Wave 5 Trust Infrastructure + Wave 6 Goal Loop + Wave 7 Sub-Agent Wiring
+
+### Added — Wave 5 Trust Infrastructure
+- **Tool activation** — Registered inspect_project, repo_map, related_tests, undo tools; autoReasoning + lspEnabled wired into AgentLoop
+- **Per-call undo** — FileHistory persistence with ring-buffer GC (50 snapshots max); `/undo` slash command for selective rewind
+- **Context visibility** — `/context pin <text>` for manual anchor pinning; pinned anchors displayed in `/context` output
+- **AgentLoop public API** — `addAnchor()`, `getLedger()`, `getFileHistory()` methods for TUI access
+- **createContextLedger** accepts extraAnchors for user-pinned anchors
+
+### Added — Wave 6 Goal Loop
+- **`--goal` CLI flag** — `rivet --goal "text" [--budget N]` launches autonomous goal loop
+- **Goal loop core** — Budget-capped iteration (default 100); 3-strike circuit breaker on consecutive API errors
+- **Exit condition** — `checkGoalAchieved` with merged text + tool_result context
+- **NDJSON streaming** — `--stream-json` outputs `goal_iteration` + `goal_complete` events
+- **Tool errors vs API errors** — Tool-level errors don't trigger circuit breaker; only API errors count
+
+### Added — Wave 7 Sub-Agent Wiring
+- **delegate_task kind/profile** — Tool schema exposes optional `kind` and `profile` params; `isConcurrencySafe: true`
+- **Profile-based tool selection** — `patcher`/`verifier` profiles get `WRITE_WORKER_TOOLS` (edit_file, write_file, bash, run_tests)
+- **Failure escalation** — `CoordinatorState.shouldEscalate()` triggers after 3 consecutive non-passed events
+- **Worker findings → claims** — `worker_finding` claims extracted from worker results into `ContextClaimStore`
+- **Worker inherits active claims** — `WorkerSessionConfig.activeClaims` injected via `PromptEngine.updateActiveClaims()`
+- **Goal loop + coordinator** — Goal loop `createAgent` creates `DelegationCoordinator` and registers `delegate_task`
+- **delegate_batch tool** — Parallel worker execution (max 5 tasks) with configurable aggregation policy
+- **maxWorkers=3** — Write profiles get `maxTurns=8` and larger token budget (8192)
+
+### Verified
+- 755+ tests pass
+- npm run typecheck clean (0 errors)
+- All 7 stories per wave verified (21 total)
+
 ## 2026-05-16 — Wave 2 Differentiation + Wave 3 UX Polish + Wave 4 Ecosystem Extension
 
 ### Added — Wave 2 Differentiation

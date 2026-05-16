@@ -1,6 +1,6 @@
 # Rivet Core Capability Ledger
 
-> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 855 tests passing.
+> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 755+ tests passing.
 
 ## Status Definitions
 
@@ -53,11 +53,14 @@
 | Streaming JSON Output | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/headless.ts` | --stream-json NDJSON, text_delta/tool_use/tool_result/turn_complete, 855 tests pass | None | — |
 | POST /prompt SSE | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/server/prompt-route.ts`, `src/server/routes.ts` | Prompt validation, SseStream, rivet serve integration, 855 tests pass | None | — |
 | Composable CLI | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/main.tsx` | Stdin pipe detection, auto-JSON non-TTY stdout, 855 tests pass | None | — |
+| Trust Infrastructure (Wave 5) | **Verified** | `specs/...-wave5-trust-infrastructure-design.md` | `plans/...-wave5-trust-infrastructure.md` | `src/agent/file-history-persist.ts`, `src/agent/file-history.ts`, `src/agent/loop.ts`, `src/context/ledger.ts`, `src/tools/default-registry.ts`, `src/tui/app.tsx`, `src/main.tsx` | Tool activation (repo_map, inspect_project, related_tests, undo), per-call undo with ring-buffer GC, /context pin for manual anchors, /undo slash command, persistent FileHistory, addAnchor/getLedger/getFileHistory API, 755 tests pass | None | — |
+| Goal Loop (Wave 6) | **Verified** | `specs/...-wave6-goal-loop-design.md` | `plans/...-wave6-goal-loop.md` | `src/goal-loop.ts`, `src/headless.ts`, `src/main.tsx` | `--goal`/`--budget` CLI flags, budget-capped iteration (default 100), 3-strike circuit breaker, tool_result + text context merge for exit condition, NDJSON streaming via `--stream-json`, 755 tests pass | None | — |
+| Sub-Agent Wiring (Wave 7) | **Verified** | — | `plans/...-wave7-subagent-wiring.md` | `src/tools/delegate-task.ts`, `src/tools/delegate-batch.ts`, `src/agent/coordinator.ts`, `src/agent/worker-session.ts`, `src/main.tsx` | delegate_task kind/profile params, profile-based WRITE_WORKER_TOOLS, failure escalation after 3 non-passed, worker_finding claims, worker activeClaims inheritance, goal loop coordinator injection, delegate_batch parallel tool, maxWorkers=3, write profile maxTurns=8, 755 tests pass | None | — |
 | Multi-Session Isolation | **Verified** | `specs/...-multi-session-isolation-design.md` | `plans/...-multi-session-isolation-implementation.md` | `src/main.tsx`, `src/agent/checkpoint.ts`, `src/agent/loop.ts`, `src/tui/app.tsx` | UUID session ID per launch, session-scoped checkpoints, checkpoint index for cross-session discovery, rollback session selection, legacy backward compat, 702 tests pass | None | — |
 
 ## Summary
 
-- **Verified**: 40 capabilities (Adaptive Context Fabric, Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety, Multi-Session Isolation, Permission Allow Rules, Cost/Token Display, Headless Mode, Custom Slash Commands, First-Run Onboarding)
+- **Verified**: 43 capabilities (ACF, Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety, Multi-Session Isolation, Permission Allow Rules, Cost/Token Display, Headless Mode, Custom Slash Commands, First-Run Onboarding, Session Forking, Approval Edit, Auto Reasoning, LSP Diagnostics, HTTP/SSE API, Vim Keybindings, @file Autocomplete, Command Palette, External Editor, Git Worktree, Streaming JSON, POST /prompt SSE, Composable CLI, Trust Infrastructure, Goal Loop, Sub-Agent Wiring)
 - **MVP**: 0
 - **Planned**: 0 capabilities
 - **Designed**: 2 capabilities (CTCL Migration, Open Source Strategy)
