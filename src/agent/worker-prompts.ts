@@ -1,4 +1,4 @@
-import type { WorkOrder, WorkerResult } from './work-order.js'
+import { READ_ONLY_WORKER_TOOLS, type WorkOrder, type WorkerResult } from './work-order.js'
 
 const RESULT_SHAPE = `{
   "workOrderId": "<copy WorkOrder ID>",
@@ -18,8 +18,10 @@ const RESULT_SHAPE = `{
 }`
 
 export function buildWorkerPrompt(order: WorkOrder): string {
+  const hasWriteTools = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
+  const capability = hasWriteTools ? 'write-capable' : 'read-only'
   return [
-    'You are a headless read-only Rivet worker.',
+    `You are a headless ${capability} Rivet worker.`,
     `WorkOrder ID: ${order.id}`,
     `Kind: ${order.kind}`,
     `Profile: ${order.profile}`,

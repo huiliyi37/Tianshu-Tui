@@ -246,4 +246,53 @@ describe('DelegationCoordinator', () => {
     assert.ok(state.getSummary().queued > 0)
     assert.ok(state.getSummary().passed > 0)
   })
+
+  it('blocks single worker result with changed files and unverified evidence', async () => {
+    const unverifiedResult: WorkerResult = {
+      workOrderId: 'wo_unverified',
+      status: 'passed',
+      summary: 'Changed files without verification',
+      findings: [],
+      artifacts: [],
+      changedFiles: ['src/agent/loop.ts', 'src/agent/coordinator.ts'],
+      risks: [],
+      nextActions: [],
+      evidenceStatus: 'unverified',
+    }
+
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as ApiClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => ({
+        result: { ...unverifiedResult, workOrderId: config.order.id },
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_ev1',
+      objective: 'Search for evidence gate seams across coordinator and aggregation modules.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/agent/coordinator.ts', 'src/agent/aggregation.ts'] },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results.length, 1)
+    assert.equal(run.results[0]!.status, 'blocked')
+    assert.ok(run.results[0]!.risks.some(r => r.includes('unverified')))
+  })
 })

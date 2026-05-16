@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createReadOnlyWorkOrder } from '../work-order.js'
+import { createReadOnlyWorkOrder, createWriteWorkOrder, WRITE_WORKER_TOOLS } from '../work-order.js'
 import {
   buildPrimaryWorkerPacket,
   buildWorkerPrompt,
@@ -22,9 +22,28 @@ describe('worker prompts', () => {
 
     assert.ok(prompt.includes('WorkOrder ID: wo_1'))
     assert.ok(prompt.includes('Allowed tools: read_file, glob, grep, diff'))
+    assert.ok(prompt.includes('read-only Rivet worker'))
     assert.ok(prompt.includes('Return exactly one JSON object'))
     assert.ok(prompt.includes('"workOrderId"'))
     assert.ok(prompt.includes('Do not call disallowed tools'))
+  })
+
+  it('builds a write-capable worker prompt for write work orders', () => {
+    const order = createWriteWorkOrder({
+      id: 'wo_write1',
+      parentTurnId: 'turn_1',
+      kind: 'patch_proposal',
+      objective: 'Fix the evidence gate bypass.',
+      scope: { files: ['src/agent/coordinator.ts'] },
+    })
+
+    const prompt = buildWorkerPrompt(order)
+
+    assert.ok(prompt.includes('write-capable Rivet worker'))
+    assert.ok(!prompt.includes('read-only'))
+    for (const tool of WRITE_WORKER_TOOLS) {
+      assert.ok(prompt.includes(tool), `prompt should list ${tool}`)
+    }
   })
 
   it('builds a repair prompt with the parse error but not a new objective', () => {

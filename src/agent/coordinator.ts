@@ -93,7 +93,7 @@ export class DelegationCoordinator {
     const run = await this.runWorker(workerConfig)
     this.state.recordEvent({ type: run.result.status === 'passed' ? 'passed' : run.result.status === 'blocked' ? 'blocked' : 'failed', workOrderId: order.id, timestamp: Date.now() })
 
-    const results = [run.result]
+    const results = aggregateResults([run.result], 'primary_decides')
 
     return {
       status: 'completed',
