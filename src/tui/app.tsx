@@ -9,7 +9,7 @@ import { ToolCard } from './tool-card.js'
 import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
 import { SummaryBar, type SummaryState } from './summary-bar.js'
 import { PhaseTracker } from './phase-tracker.js'
-import { getTheme } from './theme.js'
+import { getTheme, setTheme, getActiveThemeName, type ThemeName } from './theme.js'
 import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
@@ -99,6 +99,7 @@ function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /evidence — Show last turn evidence summary
 /mcp — Show MCP server status
 /auto — Toggle auto-approve (current: ${ctx.autoSafeRef.current ? 'auto-safe' : 'manual'})
+/theme [pastel|cyberpunk|list] — Switch color theme
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle or switch cockpit panel
 Ctrl+C — Interrupt current turn (press twice to exit)` }))
       setIsStreaming(false)
@@ -164,6 +165,23 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       ctx.setAutoSafe(next)
       ctx.agent.setApprovalMode(next ? 'auto-safe' : 'manual')
       pushStatic(createLogEntry({ type: 'text', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/theme': {
+      const raw = parts[1]?.toLowerCase()
+      const validThemes: ThemeName[] = ['pastel', 'cyberpunk']
+      if (!raw || raw === 'list') {
+        const current = getActiveThemeName()
+        const list = validThemes.map(t => `  ${t}${t === current ? ' ← current' : ''}`).join('\n')
+        pushStatic(createLogEntry({ type: 'text', content: `Available themes:\n${list}\n\nUsage: /theme <name>` }))
+      } else if ((validThemes as string[]).includes(raw)) {
+        setTheme(raw as ThemeName)
+        pushStatic(createLogEntry({ type: 'text', content: `Theme switched to: ${raw}` }))
+      } else {
+        pushStatic(createLogEntry({ type: 'text', content: `Theme "${raw}" not found. Available: ${validThemes.join(', ')}` }))
+      }
       setIsStreaming(false)
       return true
     }
