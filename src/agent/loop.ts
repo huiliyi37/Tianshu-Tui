@@ -3,12 +3,10 @@ import type { ContentBlock, Message, Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { ToolRegistry } from '../tools/registry.js'
-import type { ToolCallParams } from '../tools/types.js'
 import { SessionContext } from './context.js'
 import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
-import { buildPrewarmValue, canUsePrewarmForRead } from './prewarm-file.js'
-import { validatePath } from '../tools/path-validate.js'
+import { buildPrewarmValue } from './prewarm-file.js'
 import { smartCompact } from '../compact/index.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 import { CACHE_ANCHOR_MESSAGES, type CompactionConfig } from '../compact/constants.js'
@@ -17,36 +15,26 @@ import { createContextLedger } from '../context/ledger.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import { AnchorRegistry } from '../context/anchor-registry.js'
 import { claimProposalFromAnchor } from '../context/claims.js'
-import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import { EvidenceTracker } from './evidence.js'
-import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
-import { classifyFailure, classifyTestRun } from './failure-classifier.js'
-import { createAntibodyProposal } from '../context/antibody.js'
-import { detectConflicts } from '../context/conflict-detect.js'
 import { selectEvictionCandidates } from '../context/claim-budget.js'
-import { extractTaskState } from './task-state.js'
-import { detectMirror } from './behavior-mirror.js'
-import { extractDecisions } from './decision-anchor.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
-import { createTraceStore, startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, recordTraceEvent, type TraceStore } from './trace-store.js'
+import { createTraceStore, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel } from './trace-store.js'
-import { assessToolRisk } from './approval-risk.js'
-import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
-import { inferTaskType } from '../model/task-inferrer.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
-import { recommendModelForTask, type ModelCapabilityCard } from '../model/capability.js'
-import { buildImportGraph, invalidateFile, type ImportGraph } from './import-graph.js'
-import { generateImpactHint } from './impact-hint.js'
-import { RepairPipeline, summarizeRepairTelemetry } from './repair-pipeline.js'
+import type { ModelCapabilityCard } from '../model/capability.js'
+import type { ImportGraph } from './import-graph.js'
+import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
 import { RepairHintTracker } from './repair-hint.js'
-import { isToolAllowed, type PermissionConfig } from './permissions.js'
-import { type ApprovalResult, applyApprovalEdit } from './approval-edit.js'
+import type { PermissionConfig } from './permissions.js'
+import { type ApprovalResult } from './approval-edit.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
-import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
+import { extractTaskState } from './task-state.js'
+import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
+import { processTurnEnd } from './turn-end.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -431,374 +419,64 @@ export class AgentLoop {
           const toolResults: ContentBlock[] = []
 
           for (const tu of toolUses) {
-            const params: ToolCallParams = {
-              input: tu.input,
-              toolUseId: tu.id,
+            const pipelineDeps: ToolPipelineDeps = {
+              config: this.config,
               cwd: this.cwd,
-              onOutput: (chunk) => {
-                callbacks.onToolResult(tu.id, tu.name, chunk)
-              },
+              harness: this.harness,
+              prewarm: this.prewarm,
+              evidence: this.evidence,
+              traceStore: this.traceStore,
+              repairHintTracker: this.repairHintTracker,
+              repairPipeline: this.repairPipeline,
+              importGraph: this.importGraph,
+              lastConflictCheckCount: this.lastConflictCheckCount,
+              trajectory: this.trajectory,
+              getDoomLoopLevel: () => this.getDoomLoopLevel(),
+              latestRisk: this.latestRisk,
+              sessionTurnCount: this.session.getTurnCount(),
+              sessionId: this.config.sessionId,
+              recordToolHistory: (name, input, isError, content) => this.recordToolHistory(name, input, isError, content),
             }
-            try {
-              // PreToolUse hook — can modify input or block execution
-              const preHookResult = this.config.hooks?.firePreToolUse({ toolName: tu.name, input: tu.input as Record<string, unknown> }) ?? {}
-              if (preHookResult.block) {
-                const blockMsg = `Tool blocked by hook: ${preHookResult.reason ?? 'no reason given'}`
-                callbacks.onToolResult(tu.id, tu.name, blockMsg, true)
-                toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: blockMsg, is_error: true })
-                continue
-              }
-              if (preHookResult.input) {
-                tu.input = preHookResult.input
-                params.input = preHookResult.input
-              }
 
-              // Multi-pass tool input repair
-              const toolDef = this.config.toolRegistry.get(tu.name)
-              if (toolDef) {
-                const repairResult = this.repairPipeline.run(
-                  tu.input as Record<string, unknown>,
-                  { toolName: tu.name, schema: toolDef.definition.input_schema },
-                )
-                if (repairResult.telemetry.length > 0) {
-                  tu.input = repairResult.output
-                  params.input = repairResult.output
-                  const repairSummary = summarizeRepairTelemetry(repairResult.telemetry)
-                  if (repairSummary) {
-                    const now = Date.now()
-                    this.traceStore = recordTraceEvent(this.traceStore, {
-                      id: `${tu.id}:repair`,
-                      turn,
-                      kind: 'tool',
-                      name: `${tu.name}:repair`,
-                      status: 'passed',
-                      startedAt: now,
-                      endedAt: now,
-                      durationMs: 0,
-                      summary: repairSummary,
-                    })
-                  }
-                }
-              }
+            const result = await executeToolUse(tu, pipelineDeps, callbacks, turn, checkpointCreatedThisTurn)
 
-              const trajectorySummary: TrajectorySummary[] = this.trajectory.getEntries().map(e => ({
-                tool: e.tool,
-                target: e.target,
-                status: e.status === 'retried-failed' || e.status === 'failed' ? 'failed' : 'success',
-                errorClass: e.errorClass,
-              }))
-              const doomLevel = this.getDoomLoopLevel()
-              const hint = suggestStrategyShift(trajectorySummary, doomLevel)
-              this.config.promptEngine.setStrategyShift(hint)
-              if (doomLevel === 'blocked') {
-                const msg = hint ?? 'Tool execution blocked: repeated identical failures detected. Change strategy before retrying.'
-                callbacks.onToolResult(tu.id, tu.name, msg, true)
-                toolResults.push({
-                  type: 'tool_result',
-                  tool_use_id: tu.id,
-                  content: msg,
-                  is_error: true,
-                })
-                continue
-              }
+            this.traceStore = result.traceStore
+            this.importGraph = result.importGraph
+            this.lastConflictCheckCount = result.lastConflictCheckCount
+            this.latestRisk = result.latestRisk
+            if (result.checkpointCreated) checkpointCreatedThisTurn = true
 
-              const needsApproval = this.config.toolRegistry.needsApproval(tu.name, params)
-              const antibodies = this.config.contextClaimStore?.listClaims({ kind: ['failure_pattern'], status: ['active', 'durable_candidate', 'durable'] }) ?? []
-              const risk = assessToolRisk(tu.name, tu.input, this.getDoomLoopLevel(), antibodies)
-              this.latestRisk = risk
-              const isHighRisk = risk.level === 'high'
-              const approvalMode = this.config.approvalMode ?? 'manual'
-
-              const allowlisted = isToolAllowed(tu.name, tu.input, this.config.permissions?.allow)
-              const shouldAsk = allowlisted
-                ? false
-                : approvalMode === 'manual'
-                  ? needsApproval
-                  : approvalMode === 'auto-safe'
-                    ? isHighRisk
-                    : false // auto-accept: never ask
-
-              if (shouldAsk) {
-                const approvalResult = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
-                const resolved: ApprovalResult = typeof approvalResult === 'boolean'
-                  ? { approved: approvalResult }
-                  : approvalResult
-                const finalInput = applyApprovalEdit(tu.input, resolved)
-                if (!finalInput) {
-                  const denyMsg = 'Tool execution denied: requires user approval'
-                  callbacks.onToolResult(tu.id, tu.name, denyMsg, true)
-                  toolResults.push({
-                    type: 'tool_result',
-                    tool_use_id: tu.id,
-                    content: denyMsg,
-                    is_error: true,
-                  })
-                  continue
-                }
-                if (finalInput !== tu.input) {
-                  tu.input = finalInput
-                  params.input = finalInput
-                }
-              }
-
-              if ((tu.name === 'write_file' || tu.name === 'edit_file') && !checkpointCreatedThisTurn) {
-                const cp = await createCheckpoint(this.cwd, 'auto', this.config.sessionId)
-                checkpointCreatedThisTurn = true
-                if (cp) callbacks.onCheckpoint?.(cp.hash)
-              }
-
-              if ((tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
-                recordAgentTouchedFile(this.cwd, tu.input.file_path, this.config.sessionId)
-              }
-
-              if (this.config.fileHistory && (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
-                await this.config.fileHistory.trackEdit(tu.input.file_path, tu.id)
-              }
-
-              // Execute via TurnHarness (retry + trajectory recording)
-              const traceId = tu.id
-              this.traceStore = startTraceEvent(this.traceStore, {
-                id: traceId,
-                turn,
-                kind: 'tool',
-                name: tu.name,
-                startedAt: Date.now(),
-                summary: JSON.stringify(tu.input).slice(0, 60),
-              })
-              let rawToolResult: import('../tools/types.js').ToolResult | undefined
-              const harnessResult = await this.harness.executeTool({
-                id: tu.id,
-                name: tu.name,
-                input: tu.input,
-                turn,
-                execute: async () => {
-                  // Prewarm cache fast-path for read_file (canonical full-file only)
-                  if (tu.name === 'read_file' && canUsePrewarmForRead(tu.input)) {
-                    try {
-                      const canonicalPath = validatePath(this.cwd, tu.input.file_path as string)
-                      const cached = this.prewarm.get(canonicalPath)
-                      if (cached) {
-                        rawToolResult = { content: cached.content, uiContent: cached.uiContent }
-                        return { content: cached.content }
-                      }
-                    } catch {
-                      // Fall through to the real tool so it can return the standard error.
-                    }
-                  }
-                  const r = await this.config.toolRegistry.execute(tu.name, params)
-                  rawToolResult = r
-                  return { content: r.content, isError: r.isError }
-                },
-                classify: (content) => classifyFailure(content).class,
-                isConcurrencySafe: toolDef?.isConcurrencySafe() ?? false,
-              })
-
-              // PostToolUse hook — can modify result
-              const postHookResult = this.config.hooks?.firePostToolUse({
-                toolName: tu.name,
-                input: tu.input as Record<string, unknown>,
-                result: harnessResult.content,
-                isError: harnessResult.isError,
-              }) ?? {}
-              let finalContent = postHookResult.result ?? harnessResult.content
-
-              // LSP diagnostics after successful TS/JS file edits
-              if (this.config.lspEnabled && !harnessResult.isError && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
-                const check = runTypeCheck(this.cwd, tu.input.file_path as string)
-                if (check.formatted) {
-                  finalContent = finalContent + `
-
-[LSP Diagnostics]
-${check.formatted}`
-                }
-              }
-
-              this.traceStore = finishTraceEvent(this.traceStore, traceId, {
-                status: harnessResult.isError ? 'failed' : 'passed',
-                endedAt: Date.now(),
-                summary: harnessResult.content.slice(0, 100),
-              })
-              const fp = fingerprintToolCall(tu.name, tu.input, harnessResult.isError ? 'error' : 'success')
-              this.traceStore = recordToolFingerprint(this.traceStore, fp)
-
-              callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError, rawToolResult?.rawPath, rawToolResult?.uiContent)
-
-              // Record tool history for volatile context injection
-              this.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content)
-
-              // Extract claims from tool results
-              if (this.config.contextClaimStore && this.config.sessionId) {
-                const existingPaths = new Set(
-                  this.config.contextClaimStore.listClaims({ kind: ['file_observation'] })
-                    .flatMap(c => c.evidence.filter(e => e.path).map(e => e.path!)),
-                )
-                const proposals = extractClaimsFromToolResult(
-                  { toolName: tu.name, input: tu.input as Record<string, unknown>, result: harnessResult.content, isError: harnessResult.isError },
-                  { sessionId: this.config.sessionId, turn: this.session.getTurnCount(), eventId: `turn-${this.session.getTurnCount()}:${tu.name}:${tu.id}` },
-                  existingPaths,
-                )
-                for (const proposal of proposals) {
-                  this.config.contextClaimStore.propose(proposal)
-                }
-                // Detect conflicting file-evidence claims after new file observations
-                if (proposals.some(p => p.kind === 'file_observation')) {
-                  const allClaims = this.config.contextClaimStore.listClaims()
-                  if (allClaims.length !== this.lastConflictCheckCount) {
-                    this.lastConflictCheckCount = allClaims.length
-                    const conflicts = detectConflicts(allClaims)
-                    for (const conflict of conflicts) {
-                      this.config.contextClaimStore.updateClaimStatus(
-                        conflict.olderClaimId, 'conflicted',
-                        `superseded by ${conflict.newerClaimId} on ${conflict.sharedPath}`,
-                      )
-                    }
-                  }
-                }
-              }
-
-              if (!harnessResult.isError) {
-                this.repairHintTracker.recordSuccess(tu.name)
-                this.config.promptEngine.setStrategyShift(null)
-              } else {
-                const failureClass = classifyFailure(harnessResult.content)
-                this.repairHintTracker.recordFailure(tu.name, failureClass.class)
-
-                // Generate antibody claim for classifiable failures
-                if (this.config.contextClaimStore && this.config.sessionId && failureClass.class !== 'unknown') {
-                  const proposal = createAntibodyProposal(failureClass, {
-                    toolName: tu.name,
-                    command: typeof tu.input.command === 'string' ? tu.input.command : undefined,
-                    sessionId: this.config.sessionId,
-                    turn: this.session.getTurnCount(),
-                    eventId: `turn-${this.session.getTurnCount()}:${tu.name}:${tu.id}`,
-                  })
-                  this.config.contextClaimStore.propose(proposal)
-                }
-              }
-
-              // Invalidate prewarm cache after writes (canonical path)
-              if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError && typeof tu.input.file_path === 'string') {
-                try {
-                  this.prewarm.invalidate(validatePath(this.cwd, tu.input.file_path as string))
-                } catch {
-                  this.prewarm.invalidate(tu.input.file_path as string)
-                }
-              }
-
-              if (tu.name === 'read_file' && !harnessResult.isError) {
-                this.evidence.trackFileRead(tu.input.file_path as string)
-              } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
-                this.evidence.trackFileModified(tu.input.file_path as string)
-                this.config.contextClaimStore?.markClaimsStaleForFile(
-                  tu.input.file_path as string,
-                  `file modified by ${tu.name}`,
-                )
-                // Impact hint from import graph
-                if (!this.importGraph) {
-                  this.importGraph = buildImportGraph(this.cwd)
-                }
-                if (this.importGraph) {
-                  this.importGraph = invalidateFile(this.importGraph, this.cwd, tu.input.file_path as string)
-                  const hint = generateImpactHint(this.importGraph, tu.input.file_path as string, this.cwd)
-                  if (hint) {
-                    this.evidence.trackImpact(hint.impactedFiles, hint.relatedTests)
-                    this.config.promptEngine.setImpactHint(hint.summary)
-                  }
-                }
-              } else if (tu.name === 'run_tests' && rawToolResult) {
-                if (rawToolResult.verification) {
-                  this.evidence.trackVerification(rawToolResult.verification)
-                }
-                if (rawToolResult.verification && rawToolResult.verification.status !== 'passed') {
-                  const failures = classifyTestRun(harnessResult.content)
-                  if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
-                    toolResults.push({
-                      type: 'tool_result',
-                      tool_use_id: tu.id,
-                      content: `${finalContent}\n\nDiagnosis: ${failures[0]!.suggestion}`,
-                      is_error: harnessResult.isError,
-                    })
-                    continue
-                  }
-                }
-              }
-
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: tu.id,
-                content: finalContent,
-                is_error: harnessResult.isError,
-              })
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err)
-              this.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
-              callbacks.onToolResult(tu.id, tu.name, msg, true)
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: tu.id,
-                content: msg,
-                is_error: true,
-              })
-            }
+            toolResults.push(result.toolResult)
           }
 
           this.session.addToolResults(toolResults)
 
-          // Extract task-state and inject into volatile context (after warmup turns)
-          if (this.session.getTurnCount() > 3) {
-            const taskState = extractTaskState(this.trajectory.getEntries(), this.streamedText)
-            this.config.promptEngine.setTaskProgress(taskState)
-          }
-
-          // Behavior mirror detection (after warmup turns)
-          const mirror = this.session.getTurnCount() > 3
-            ? detectMirror(this.trajectory.getEntries())
-            : null
-          this.config.promptEngine.setBehaviorMirror(mirror)
-
-          // Model routing: infer task type and potentially switch model
-          if (this.config.modelCards && this.config.modelCards.length > 1 && this.config.getCurrentModel) {
-            const currentModel = this.config.getCurrentModel()
-            const recentCalls = this.trajectory.getEntries().slice(-10).map(e => ({
-              name: e.tool,
-              isError: e.status === 'failed' || e.status === 'retried-failed',
-            }))
-            const inference = inferTaskType(recentCalls)
-            if (inference) {
-              const recommended = recommendModelForTask(inference.task, this.config.modelCards)
-              this.config.promptEngine.setRoutingReason(`${inference.task} · ${recommended.model} ${inference.reason}`)
-              if (recommended.model !== currentModel && this.config.onModelSwitch) {
-                this.routingMetrics.record({
-                  turn: this.session.getTurnCount(),
-                  inferredTask: inference.task,
-                  recommendedModel: recommended.model,
-                  currentModel,
-                  switched: true,
-                  reason: inference.reason,
-                  timestamp: Date.now(),
-                })
-                try {
-                  this.config.onModelSwitch(recommended.model)
-                } catch { /* model switch failure is non-fatal */ }
-              }
-            }
-          }
-
+          const turnEndResult = processTurnEnd({
+            config: this.config,
+            session: this.session,
+            trajectory: this.trajectory,
+            streamedText: this.streamedText,
+            routingMetrics: this.routingMetrics,
+            decisions: this.decisions,
+            evidence: this.evidence,
+          })
+          this.decisions = turnEndResult.decisions
           this.refreshLedger()
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
           continue
         }
 
-        // Extract decisions from model output
-        const newDecisions = extractDecisions(this.streamedText)
-        for (const d of newDecisions) {
-          if (!this.decisions.includes(d)) this.decisions.push(d)
-        }
-        if (this.decisions.length > 3) this.decisions = this.decisions.slice(-3)
-        this.config.promptEngine.setDecisions(this.decisions)
-
-        const badge = this.evidence.buildBadge()
-        if (badge) callbacks.onTextDelta('\n' + badge)
+        const finalResult = processTurnEnd({
+          config: this.config,
+          session: this.session,
+          trajectory: this.trajectory,
+          streamedText: this.streamedText,
+          routingMetrics: this.routingMetrics,
+          decisions: this.decisions,
+          evidence: this.evidence,
+        })
+        this.decisions = finalResult.decisions
+        if (finalResult.badge) callbacks.onTextDelta('\n' + finalResult.badge)
         this.refreshLedger()
         callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
         this.evidence.reset()
