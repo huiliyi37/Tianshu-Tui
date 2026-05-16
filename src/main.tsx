@@ -185,12 +185,6 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   // Evict old session files to stay within the session limit
   useState(() => { evictOldSessions(sessionId) })
 
-  const [fileHistory] = useState(() => {
-    const fh = new FileHistory(persist.getBackupDir(), sessionId)
-    _fileHistoryRef = fh
-    return fh
-  })
-
   const [persist] = useState(() => {
     const p = new SessionPersist(sessionId)
     const existingMessages = p.load()
@@ -198,6 +192,12 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       session.loadMessages(existingMessages)
     }
     return p
+  })
+
+  const [fileHistory] = useState(() => {
+    const fh = new FileHistory(persist.getBackupDir(), sessionId)
+    _fileHistoryRef = fh
+    return fh
   })
 
   const [claimStore] = useState(() => {
