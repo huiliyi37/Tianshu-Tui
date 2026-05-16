@@ -44,6 +44,50 @@ function buildFileUiOutput(raw: string, maxLines: number): string {
   return [...head, `  ... ${omitted} lines omitted ...`, ...tail].join('\n')
 }
 
+export interface ReadFilePayloadOptions {
+  filePath: string
+  offset?: number
+  limit?: number
+}
+
+export interface ReadFilePayload {
+  canonicalPath: string
+  rawContent: string
+  modelContent: string
+  uiContent: string
+}
+
+/** Centralized safe file read — validates path, checks gitignore, applies offset/limit, truncates for model. */
+export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): ReadFilePayload {
+  const filePath = validatePath(cwd, options.filePath)
+  if (!existsSync(filePath)) {
+    throw new Error(`File not found: ${filePath}`)
+  }
+
+  const filter = getGitignoreFilter(cwd)
+  if (filter.isIgnored(cwd, filePath)) {
+    throw new Error(`File is gitignored (node_modules, build artifacts, etc.): ${filePath}`)
+  }
+
+  let content = readFileSync(filePath, 'utf-8')
+  const offset = options.offset ?? 1
+  const limit = options.limit
+
+  if (offset > 1 || limit) {
+    const lines = content.split('\n')
+    const startIdx = offset - 1
+    const endIdx = limit ? startIdx + limit : undefined
+    content = lines.slice(startIdx, endIdx).join('\n')
+  }
+
+  return {
+    canonicalPath: filePath,
+    rawContent: content,
+    modelContent: truncateContent(content, MODEL_MAX_CHARS, MODEL_HEAD_CHARS, MODEL_TAIL_CHARS),
+    uiContent: buildFileUiOutput(content, 50),
+  }
+}
+
 export const READ_FILE_TOOL: Tool = {
   definition: {
     name: 'read_file',
@@ -73,45 +117,23 @@ Bad: re-reading the same file multiple times in one session without it being mod
   },
 
   async execute(params: ToolCallParams) {
-    let filePath: string
+    let payload: ReadFilePayload
     try {
-      filePath = validatePath(params.cwd, params.input.file_path as string)
-    } catch {
-      return { content: 'Error: Path escapes project directory', isError: true }
-    }
-    if (!existsSync(filePath)) {
-      return { content: `Error: File not found: ${filePath}`, isError: true }
-    }
-
-    const filter = getGitignoreFilter(params.cwd)
-    if (filter.isIgnored(params.cwd, filePath)) {
-      return { content: `Error: File is gitignored (node_modules, build artifacts, etc.): ${filePath}`, isError: true }
+      payload = readFilePayload(params.cwd, {
+        filePath: params.input.file_path as string,
+        offset: (params.input.offset as number) ?? 1,
+        limit: params.input.limit as number | undefined,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { content: `Error: ${message}`, isError: true }
     }
 
-    const raw = readFileSync(filePath, 'utf-8')
-    let content = raw
-    const offset = (params.input.offset as number) ?? 1
-    const limit = params.input.limit as number | undefined
-
-    if (offset > 1 || limit) {
-      const lines = content.split('\n')
-      const startIdx = offset - 1
-      const endIdx = limit ? startIdx + limit : undefined
-      content = lines.slice(startIdx, endIdx).join('\n')
-    }
-
-    // Persist full raw content so user can inspect large files via rawPath
-    const rawPath = await persistRawOutput(params.toolUseId, content)
-
-    // LLM gets char-capped head+tail for context efficiency
-    const modelContent = truncateContent(content, MODEL_MAX_CHARS, MODEL_HEAD_CHARS, MODEL_TAIL_CHARS)
-
-    // TUI gets line-numbered preview (50 lines)
-    const uiContent = buildFileUiOutput(content, 50)
+    const rawPath = await persistRawOutput(params.toolUseId, payload.rawContent)
 
     return {
-      content: modelContent,
-      uiContent,
+      content: payload.modelContent,
+      uiContent: payload.uiContent,
       rawPath,
     }
   },
