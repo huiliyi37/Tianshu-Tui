@@ -27,7 +27,7 @@ export interface SlashHandlerContext {
   model: string
   maxTokens: number
   availableModels: Array<{ id: string; alias: string }>
-  onModelSwitch: (modelId: string) => void
+  onModelSwitch: (modelId: string) => { ok: boolean; error?: string }
   allProviders: Record<string, { models: Array<{ id: string; alias: string }> }>
   currentProvider: string
   currentSessionId: string
@@ -135,17 +135,12 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         }
         pushStatic(createLogEntry({ type: 'system', content: `Models:\n${lines.join('\n')}\n\nCurrent: ${ctx.model} [${ctx.currentProvider}]\nContext: ${ctx.maxTokens.toLocaleString()} tokens\nCost: ¥${ctx.cost.toFixed(4)}` }))
       } else {
-        // Search across all providers
-        for (const [provName, prov] of Object.entries(ctx.allProviders)) {
-          const found = prov.models.find(m => m.alias === targetModel || m.id === targetModel)
-          if (found) {
-            ctx.onModelSwitch(found.id)
-            pushStatic(createLogEntry({ type: 'system', content: `Switched to ${found.alias} (${found.id}) [${provName}]` }))
-            setIsStreaming(false)
-            return true
-          }
+        const result = ctx.onModelSwitch(targetModel)
+        if (result.ok) {
+          pushStatic(createLogEntry({ type: 'system', content: `Switched to ${targetModel}` }))
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: result.error ?? `Model "${targetModel}" not found.` }))
         }
-        pushStatic(createLogEntry({ type: 'system', content: `Model "${targetModel}" not found. Use /model list to see available models.` }))
       }
       setIsStreaming(false)
       return true

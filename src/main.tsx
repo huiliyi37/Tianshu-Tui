@@ -311,21 +311,23 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 
   const availableModels = activeProvider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id }))
 
-  const handleModelSwitch = useCallback((modelId: string) => {
-    // Search across all providers
+  const handleModelSwitch = useCallback((modelId: string): { ok: boolean; error?: string } => {
     for (const [provName, prov] of Object.entries(config.provider.providers)) {
       const found = prov.models.find(m => m.id === modelId || m.alias === modelId)
       if (found) {
         const provKey = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
-        if (!provKey) continue
+        if (!provKey) {
+          return { ok: false, error: `API key not set for ${provName}. Set ${prov.apiKeyEnv ?? 'apiKey'} in config or environment.` }
+        }
         if (provName !== activeProvider.name) {
           setActiveProvider(prov)
           setActiveApiKey(provKey)
         }
         setCurrentModel(found)
-        return
+        return { ok: true }
       }
     }
+    return { ok: false, error: `Model "${modelId}" not found in any provider.` }
   }, [config.provider.providers, activeProvider.name])
 
   // Register shutdown callback for signal handlers

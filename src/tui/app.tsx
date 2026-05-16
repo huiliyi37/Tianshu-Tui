@@ -46,7 +46,7 @@ interface AppProps {
   model: string
   maxTokens: number
   availableModels: Array<{ id: string; alias: string }>
-  onModelSwitch: (modelId: string) => void
+  onModelSwitch: (modelId: string) => { ok: boolean; error?: string }
   allProviders: Record<string, { models: Array<{ id: string; alias: string }> }>
   currentProvider: string
   currentSessionId: string
