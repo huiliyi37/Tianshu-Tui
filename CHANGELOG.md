@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-05-16 — Cache Safety Layer
+
+### Added
+
+- `readFilePayload` shared helper — centralized validatePath + gitignore + offset/limit + truncation for both `read_file` tool and prewarm
+- `prewarm-file.ts` — `buildPrewarmValue` (safe file read with size limit) and `canUsePrewarmForRead` (offset/limit guard)
+- `PrewarmCache` now uses `PrewarmValue` type with canonical absolute path keys
+- Per-cwd volatile caches — `.rivet.md` cache and git status cache both use per-cwd `Map` instead of module-level single values
+- Prefix fingerprint covers stable volatile block (`stableVolatileSha256` in `PrefixFingerprint`)
+
+### Fixed
+
+- Prewarm cache bypasses `validatePath` and gitignore filtering → now uses `readFilePayload` for safe reads
+- Prewarm cache key uses relative path on set but absolute path on get/invalidate → now uses canonical absolute path throughout
+- Volatile caches not isolated by cwd → per-cwd `Map` prevents cross-project leakage
+- 5 new tests: path traversal, gitignored files, canonical key, offset/limit bypass, cwd isolation
+
+## 2026-05-16 — Multi-Session Isolation
+
+### Added
+
+- UUID session ID per TUI launch — `getOrCreateSessionId()` generates `crypto.randomUUID()` each time instead of reading from `session-id.txt`
+- Session-scoped checkpoints — `checkpointFileForSession(sessionId)` with `CheckpointData.sessionId` field
+- Checkpoint index — `checkpoint-index-<cwd>.json` tracks all sessions with checkpoints for a directory (cross-session discovery)
+- Rollback session selection — `getRollbackPreview` and `rollbackToCheckpoint` accept optional `sessionId`, fallback to cwd-scoped legacy
+- 7 new tests: UUID uniqueness, session-scoped paths, index tracking, selective removal, index deduplication
+
+### Fixed
+
+- Multiple TUI instances sharing the same session ID via `session-id.txt` → each launch gets unique ID
+- Checkpoint files keyed by cwd slug → keyed by session ID, eliminates cross-session overwrite
+- Session JSONL/memory files no longer conflict (natural isolation via unique session ID)
+
 ## 2026-05-16 — Capability Ledger Audit + Documentation Update
 
 ### Changed
@@ -12,13 +45,12 @@
 
 ### Updated
 
-- Capability ledger: 18 Verified (was 14), 1 MVP, 1 Planned (Cache Safety), 2 Designed. 694 tests.
-- README status line: 694 tests, 18 Verified capabilities, all P0-P2 gaps closed.
+- Capability ledger: 18 Verified (was 14), 1 MVP, 1 Planned (Cache Safety), 2 Designed. 694 tests (now 702).
+- README status line updated.
 - CHANGELOG.md created.
 
 ### Known Remaining
 
-- **Cache Safety** (Planned, 0/30) — prewarm bypasses read_file safety boundary, cache key not canonical, volatile cache not per-cwd isolated, fingerprint doesn't cover volatile block
 - **CTCL Migration** (Designed) — tool input repair port from external repo
 - **Open Source Harness Strategy** (Designed) — no implementation plan yet
 
