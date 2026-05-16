@@ -153,6 +153,19 @@ export class ContextClaimStore {
         } else if (event.type === 'claim_status_changed') {
           const claim = claims.get(event.claimId)
           if (claim) claims.set(event.claimId, { ...claim, status: event.status })
+        } else if (event.type === 'claim_used') {
+          const claim = claims.get(event.claimId)
+          if (claim) {
+            claims.set(event.claimId, {
+              ...claim,
+              lastUsedAt: event.createdAt,
+              consumers: [...claim.consumers, {
+                id: event.consumerId,
+                kind: event.consumerKind,
+                usedAt: event.createdAt,
+              }],
+            })
+          }
         }
       } catch { /* skip malformed lines */ }
     }
