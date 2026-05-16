@@ -45,7 +45,13 @@ function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>):
       ? 'warn'
       : 'ok'
 
-  return { summary, trace, verify, context, safety, model }
+  const mcp: PanelStatus = snapshot.mcp.servers.some(s => s.status === 'error')
+    ? 'error'
+    : snapshot.mcp.servers.some(s => s.status === 'connecting')
+      ? 'warn'
+      : 'ok'
+
+  return { summary, trace, verify, context, safety, model, mcp }
 }
 
 export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSnapshot {
@@ -76,6 +82,8 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
         summary: `${v.passed}✓ ${v.failed}✗ ${v.skipped}skip`,
       })),
       deliveryStatus: evidence.deliveryStatus,
+      impactedFiles: evidence.impactedFiles.size,
+      impactedTests: evidence.impactedTests.size,
     },
     trace: {
       events: traceStore.events.map(e => ({
@@ -115,12 +123,14 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       cacheReadTokens: usage.cache_read_input_tokens,
       cacheWriteTokens: usage.cache_creation_input_tokens,
       cost,
+      routingReason: null,  // Will be updated from agent state in future
     },
     mcp: {
       servers: mcpStates.map(s => ({
         serverId: s.serverId,
         status: s.status,
         toolCount: s.toolCount,
+        lastErrorClass: s.lastErrorClass,
       })),
       totalTools: mcpManager?.getAllTools().length ?? 0,
       connectedServers: mcpStates.filter(s => s.status === 'connected').length,

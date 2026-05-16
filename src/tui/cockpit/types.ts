@@ -1,6 +1,6 @@
-export type Panel = 'summary' | 'trace' | 'verify' | 'context' | 'safety' | 'model'
+export type Panel = 'summary' | 'trace' | 'verify' | 'context' | 'safety' | 'model' | 'mcp'
 
-export const PANELS: Panel[] = ['summary', 'trace', 'verify', 'context', 'safety', 'model']
+export const PANELS: Panel[] = ['summary', 'trace', 'verify', 'context', 'safety', 'model', 'mcp']
 
 export const PANEL_LABELS: Record<Panel, string> = {
   summary: 'Summary',
@@ -9,6 +9,7 @@ export const PANEL_LABELS: Record<Panel, string> = {
   context: 'Context',
   safety: 'Safety',
   model: 'Model',
+  mcp: 'MCP',
 }
 
 export interface CockpitContextLayerView {
@@ -54,6 +55,8 @@ export interface CockpitSnapshot {
     filesModified: number
     runs: Array<{ tool: string; status: string; summary: string }>
     deliveryStatus: 'verified' | 'failed' | 'blocked' | 'unverified'
+    impactedFiles: number
+    impactedTests: number
   }
   trace: {
     events: Array<{
@@ -83,12 +86,14 @@ export interface CockpitSnapshot {
     cacheReadTokens: number
     cacheWriteTokens: number
     cost: number
+    routingReason: string | null
   }
   mcp: {
     servers: Array<{
       serverId: string
       status: string
       toolCount: number
+      lastErrorClass?: string
     }>
     totalTools: number
     connectedServers: number

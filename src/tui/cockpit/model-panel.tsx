@@ -11,10 +11,11 @@ export interface ModelPanelProps {
   cacheReadTokens: number
   cacheWriteTokens: number
   cost: number
+  routingReason?: string
 }
 
 export const ModelPanel = memo(function ModelPanel({
-  model, cacheHitRate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost,
+  model, cacheHitRate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost, routingReason,
 }: ModelPanelProps) {
   const theme = getTheme()
 
@@ -24,6 +25,12 @@ export const ModelPanel = memo(function ModelPanel({
       <Text>
         <Text color={theme.secondary}>{model}</Text>
       </Text>
+      {routingReason && (
+        <Text>
+          <Text color={theme.dim}>Selected for: </Text>
+          <Text color={theme.secondary}>{routingReason}</Text>
+        </Text>
+      )}
       <Text>
         <Text color={theme.dim}>Cache: </Text>
         <Text color={theme.contextColor(1 - cacheHitRate)}>{contextBar(cacheHitRate, 8)}</Text>

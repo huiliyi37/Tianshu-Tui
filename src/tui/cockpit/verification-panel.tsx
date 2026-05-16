@@ -14,6 +14,8 @@ export interface VerificationPanelProps {
   filesModified: number
   verifications: VerificationEntry[]
   deliveryStatus?: DeliveryVerificationStatus
+  impactedFiles?: number
+  impactedTests?: number
 }
 
 function statusIcon(status: string): string {
@@ -36,7 +38,7 @@ function deliveryColor(status: DeliveryVerificationStatus, theme: ReturnType<typ
 }
 
 export const VerificationPanel = memo(function VerificationPanel({
-  filesRead, filesModified, verifications, deliveryStatus,
+  filesRead, filesModified, verifications, deliveryStatus, impactedFiles, impactedTests,
 }: VerificationPanelProps) {
   const theme = getTheme()
 
@@ -53,6 +55,18 @@ export const VerificationPanel = memo(function VerificationPanel({
         <Text>
           <Text color={theme.dim}>Delivery: </Text>
           <Text color={deliveryColor(deliveryStatus, theme)} bold>{deliveryStatus}</Text>
+        </Text>
+      )}
+      {(impactedFiles ?? 0) > 0 && (
+        <Text>
+          <Text color={theme.dim}>Impacts: </Text>
+          <Text color={theme.secondary}>{impactedFiles} files</Text>
+          {(impactedTests ?? 0) > 0 && (
+            <>
+              <Text color={theme.dim}> │ </Text>
+              <Text color={theme.warning}>{impactedTests} tests to run</Text>
+            </>
+          )}
         </Text>
       )}
       {verifications.map((v, i) => (

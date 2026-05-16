@@ -9,7 +9,7 @@ import { createTraceStore } from '../../../agent/trace-store.js'
 function makeAgent(overrides: Partial<AgentLoop> = {}): AgentLoop {
   return {
     getTraceStore: () => createTraceStore(),
-    getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified' as const }),
+    getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified' as const, impactedFiles: new Set(), impactedTests: new Set() }),
     getDoomLoopLevel: () => 'none' as const,
     getLatestRisk: () => ({ level: 'none' as const, reasons: [], suggestedAction: '' }),
     getContextLayerReport: () => ({ layers: [] }),
@@ -79,6 +79,8 @@ describe('buildCockpitSnapshot', () => {
           filesModified: new Set(['b.ts', 'c.ts']),
           verifications: [],
           deliveryStatus: 'unverified' as const,
+          impactedFiles: new Set(),
+          impactedTests: new Set(),
         }),
       }),
       session: makeSession(),

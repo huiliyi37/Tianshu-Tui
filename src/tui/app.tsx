@@ -19,7 +19,7 @@ import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { runResumePreflight } from '../context/resume-preflight.js'
 import type { McpManager } from '../mcp/manager.js'
-import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel } from './cockpit/index.js'
+import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, McpPanel } from './cockpit/index.js'
 import { buildCockpitSnapshot } from './cockpit/state.js'
 import type { Panel } from './cockpit/types.js'
 import { PANEL_LABELS } from './cockpit/types.js'
@@ -364,10 +364,10 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
       <CockpitRail activePanel={panel} panelStatuses={snap.panelStatuses} onSelect={() => {}} />
       {panel === 'summary' && <SummaryBar state={summaryState} />}
       {panel === 'trace' && <TracePanel events={snap.trace.events} />}
-      {panel === 'verify' && <VerificationPanel filesRead={snap.verification.filesRead} filesModified={snap.verification.filesModified} verifications={snap.verification.runs} deliveryStatus={snap.verification.deliveryStatus} />}
+      {panel === 'verify' && <VerificationPanel filesRead={snap.verification.filesRead} filesModified={snap.verification.filesModified} verifications={snap.verification.runs} deliveryStatus={snap.verification.deliveryStatus} impactedFiles={snap.verification.impactedFiles} impactedTests={snap.verification.impactedTests} />}
       {panel === 'context' && snap.context && <ContextPanel estimatedTokens={snap.context.estimatedTokens} maxTokens={snap.context.maxTokens} rounds={snap.context.rounds} compactionState={snap.context.compactionState} brokenRounds={snap.context.brokenRounds} compactEvents={compactEvents.map(e => ({ turn: e.turn, tier: e.tier, beforeTokens: e.beforeTokens, afterTokens: e.afterTokens }))} layers={snap.context.layers} />}
       {panel === 'safety' && <SafetyPanel doomLoopLevel={snap.safety.doomLoopLevel} riskLevel={snap.safety.riskLevel} riskReasons={snap.safety.riskReasons} suggestedAction={snap.safety.suggestedAction} recentFingerprints={snap.safety.recentFingerprints} />}
-      {panel === 'model' && <ModelPanel model={snap.model.name} cacheHitRate={snap.model.cacheHitRate} inputTokens={snap.model.inputTokens} outputTokens={snap.model.outputTokens} cacheReadTokens={snap.model.cacheReadTokens} cacheWriteTokens={snap.model.cacheWriteTokens} cost={snap.model.cost} />}
+      {panel === 'model' && <ModelPanel model={snap.model.name} cacheHitRate={snap.model.cacheHitRate} inputTokens={snap.model.inputTokens} outputTokens={snap.model.outputTokens} cacheReadTokens={snap.model.cacheReadTokens} cacheWriteTokens={snap.model.cacheWriteTokens} cost={snap.model.cost} routingReason={snap.model.routingReason ?? undefined} />}
     </Box>
   )
 }
