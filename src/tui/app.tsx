@@ -605,11 +605,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       if (cmd === '/rollback') {
         const subcmd = parts[1]
         if (subcmd === 'confirm') {
-          const result = await rollbackToCheckpoint(process.cwd(), rollbackTokenRef.current ?? undefined)
+          const result = await rollbackToCheckpoint(process.cwd(), rollbackTokenRef.current ?? undefined, currentSessionId)
           rollbackTokenRef.current = null
           pushStatic(createLogEntry({ type: 'text', content: result.success ? `Rolled back to checkpoint ${result.hash}. Agent-owned changes reverted.` : 'Rollback failed. No valid checkpoint or confirmation token.' }))
         } else {
-          const preview = await getRollbackPreview(process.cwd())
+          const preview = await getRollbackPreview(process.cwd(), currentSessionId)
           if (preview) {
             rollbackTokenRef.current = preview.confirmationToken
             pushStatic(createLogEntry({ type: 'text', content: `⚠️  Agent-owned changes to revert:\n${preview.text}\n\nType /rollback confirm to proceed.` }))

@@ -168,13 +168,14 @@ export function recordAgentTouchedFile(cwd: string, file: string, sessionId?: st
 }
 
 /** Preview what a rollback would affect. Returns null if nothing to rollback. */
-export async function getRollbackPreview(cwd: string): Promise<RollbackPreview | null> {
-  const data = loadCheckpointData(cwd)
+export async function getRollbackPreview(cwd: string, sessionId?: string): Promise<RollbackPreview | null> {
+  const data = sessionId ? loadCheckpointDataForSession(sessionId) : loadCheckpointData(cwd)
   if (!data) return null
 
   const token = Math.random().toString(36).slice(2, 10)
   data.confirmationToken = token
-  writeFileSync(checkpointFile(cwd), JSON.stringify(data, null, 2))
+  const file = sessionId ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
+  writeFileSync(file, JSON.stringify(data, null, 2))
 
   const protectedFiles = new Set([...data.preExistingDirtyFiles, ...data.preExistingUntrackedFiles])
   const rollbackFiles = data.agentTouchedFiles.filter(f => !protectedFiles.has(f))
@@ -194,8 +195,9 @@ export async function getRollbackPreview(cwd: string): Promise<RollbackPreview |
 export async function rollbackToCheckpoint(
   cwd: string,
   confirmationToken?: string,
+  sessionId?: string,
 ): Promise<{ success: boolean; hash?: string }> {
-  const data = loadCheckpointData(cwd)
+  const data = sessionId ? loadCheckpointDataForSession(sessionId) : loadCheckpointData(cwd)
   if (!data || !confirmationToken || confirmationToken !== data.confirmationToken) {
     return { success: false }
   }
