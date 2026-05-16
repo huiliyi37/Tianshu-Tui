@@ -198,6 +198,9 @@ export class SessionContext {
 
   recordCompactEvent(event: CompactEvent): void {
     this.state.compactEvents = [...this.state.compactEvents, event]
+    if (this.state.compactEvents.length > MAX_CACHE_HISTORY) {
+      this.state.compactEvents = this.state.compactEvents.slice(-MAX_CACHE_HISTORY)
+    }
   }
 
   getCompactEvents(): CompactEvent[] {

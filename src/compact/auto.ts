@@ -163,9 +163,11 @@ export async function smartCompact(
   // selectedRounds may be empty (nothing to compact); ?. handles the undefined case
   const firstRound = selectedRounds[0]
   const lastRound = selectedRounds[selectedRounds.length - 1]
+  const safeStart = firstRound?.startMessageIndex ?? CACHE_ANCHOR_MESSAGES
+  const safeEnd = lastRound?.endMessageIndex ?? Math.max(CACHE_ANCHOR_MESSAGES + 1, messages.length - KEEP_RECENT_MESSAGES - 1)
   const compactMessage = createCompactBoundaryMessage({
-    startIndex: firstRound?.startMessageIndex ?? CACHE_ANCHOR_MESSAGES,
-    endIndex: lastRound?.endMessageIndex ?? Math.max(CACHE_ANCHOR_MESSAGES, messages.length - KEEP_RECENT_MESSAGES - 1),
+    startIndex: safeStart,
+    endIndex: Math.max(safeStart + 1, safeEnd),
     summary,
     tokenBefore: tokenCount,
     tokenAfter: Math.ceil(summary.length / 4),
