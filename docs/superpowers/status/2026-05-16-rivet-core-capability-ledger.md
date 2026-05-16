@@ -1,6 +1,6 @@
 # Rivet Core Capability Ledger
 
-> Last updated: 2026-05-16. Based on actual plan checkbox status + test/typecheck/build verification. After pastel theme + render perf + memory bounds session (684 tests, typecheck clean).
+> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 694 tests passing.
 
 ## Status Definitions
 
@@ -34,17 +34,17 @@
 | Multi-pass Repair Pipeline | **Verified** | `specs/...-multi-pass-repair-pipeline-design.md` | `plans/...-multi-pass-repair-pipeline.md` | `src/agent/repair-pipeline.ts`, `src/agent/repair-passes.ts`, `src/agent/repair-hint.ts`, `src/api/client.ts` | Plan 36/36 (all 6 tasks complete: pipeline skeleton, four horsemen, semantic repair, schema gate, adaptive injection, integration test), 642 tests pass | None | — |
 | CTCL Migration (Tool Input Repair) | **Designed** | None | `plans/...-tool-input-repair-cch-strip-schema-gate.md` | None | Plan 0/41 checked, code in ebook-v1.0 repo | Port from external repo | Execute migration plan |
 | Gap Closing (hooks/git/todo/webfetch/undo) | **Verified** | — | `plans/...-rivet-gap-closing-hardening.md` | `src/hooks/*`, `src/tools/git.ts`, `src/tools/todo*.ts`, `src/tools/web-fetch.ts`, `src/agent/file-history.ts` | Hooks error isolation + 2 new events (UserPromptSubmit, PreCompact), git log/stash + 50KB truncation, turndown HTML, TodoStore concurrency, undo orphan cleanup, 684 tests pass | None | — |
-| P1 Remaining Gaps | **Planned** | — | `plans/...-p1-remaining-gaps.md` | — | Plan 0/28 checked | Not evaluated | Execute plan |
-| Performance Optimization | **Planned** | — | `plans/...-performance-optimization.md` | — | Plan 0/72 checked | Not evaluated | Execute plan |
-| Capability Reliability Layer | **Planned** | — | `plans/...-p2-2-capability-reliability-layer.md` | — | Plan 0/100 checked | Not evaluated | Execute plan |
-| Harness Cockpit | **Planned** | `specs/...-p2-3-harness-cockpit-design.md` | `plans/...-p2-3-harness-cockpit-implementation.md` | — | Plan 0/69 checked | Not evaluated | Execute plan |
+| P1 Remaining Gaps | **Verified** | — | `plans/...-p1-remaining-gaps.md` | `src/tui/cockpit/state.ts`, `src/agent/strategy-shift.ts`, `src/agent/approval-risk.ts` | CockpitSnapshot aggregator, doom-loop strategy shift (4 detectors), MCP tool risk rules, 694 tests pass | None | — |
+| Performance Optimization | **Verified** | — | `plans/...-performance-optimization.md` | `src/prompt/volatile-git.ts`, `src/tui/log-state.ts`, `src/agent/context.ts`, `src/main.tsx` | Non-blocking git status stale cache, TUI log batching, incremental token accounting, smartCompact wired, 694 tests pass | None | — |
+| Capability Reliability Layer | **Verified** | — | `plans/...-p2-2-capability-reliability-layer.md` | `src/tools/path-validate.ts`, `src/agent/checkpoint.ts`, `src/tools/output-store.ts`, `src/tools/glob.ts`, `src/tools/grep.ts`, `src/tools/run-tests.ts` | Cwd boundary validation, checkpoint v2 (dirty snapshot + confirmation token), safe output filenames, glob/grep realpath + symlink cycle protection, safe test filter argv, VerificationMetadata, 694 tests pass | None | — |
+| Harness Cockpit | **Verified** | `specs/...-p2-3-harness-cockpit-design.md` | `plans/...-p2-3-harness-cockpit-implementation.md` | `src/agent/trace-store.ts`, `src/agent/approval-risk.ts`, `src/tui/cockpit/*`, `src/model/capability.ts` | TraceStore, approval risk assessment, 6 cockpit panels (trace/verify/context/safety/model/mcp), CockpitRail with status indicators, ModelCapabilityCard, 694 tests pass | None | — |
 | Open Source Harness Strategy | **Designed** | `specs/...-open-source-harness-strategy-design.md` | None | None | Brainstorm complete | No plan yet | Review design, write implementation plan |
 
 ## Summary
 
-- **Verified**: 14 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety)
+- **Verified**: 18 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit)
 - **MVP**: 1 capability (Cockpit Techstyle)
-- **Planned**: 4 capabilities with unexecuted plans
+- **Planned**: 1 capability (Cache Safety)
 - **Designed**: 2 capabilities (CTCL Migration, Open Source Strategy)
 
 ## Maintenance Rules

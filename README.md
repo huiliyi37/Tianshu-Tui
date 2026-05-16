@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 684 tests passing, typecheck clean. All P0-P2 core business gaps closed. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks (error isolation + UserPromptSubmit/PreCompact events), structured git (status/diff/log/stash/commit + 50KB truncation), todo with worker-scoped TodoStore, web-fetch with turndown HTML conversion, file-level undo with orphan cleanup, SSRF protection with redirect-safe DNS validation. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 694 tests passing, typecheck clean (1 pre-existing PrewarmValue type error in Cache Safety scope). 18 capabilities Verified. All P0-P2 core business gaps closed. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks (error isolation + UserPromptSubmit/PreCompact events), structured git (status/diff/log/stash/commit + 50KB truncation), todo with worker-scoped TodoStore, web-fetch with turndown HTML conversion, file-level undo with orphan cleanup, SSRF protection with redirect-safe DNS validation. P1 gaps (CockpitSnapshot + strategy shift + MCP risk), performance (volatile-git stale cache + log batching + incremental tokens + smartCompact), capability reliability (path validation + checkpoint v2 + safe output + glob/grep boundary), harness cockpit (TraceStore + approval-risk + 6 panels + rail + model card). 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -721,7 +721,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (684)
+npm run test                   # Run all tests (694)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
@@ -744,7 +744,7 @@ npm run dev                    # Watch mode
 - `docs/superpowers/specs/2026-05-16-rivet-pastel-aesthetic-performance-memory-design.md` — Pastel theme + render perf + memory safety design (deep-brainstorm)
 - `docs/superpowers/plans/2026-05-16-rivet-render-perf-memory-bounded-visual-polish.md` — Rendering perf + memory bounds + visual polish implementation plan (7 tasks)
 - `docs/analysis/2026-05-16-pastel-theme-render-perf-memory-visual-polish.md` — Work record: pastel theme, ring buffer, bounded collections, sparkline, spinner
-- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (14 Verified)
+- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (18 Verified, 1 MVP, 1 Planned, 2 Designed)
 
 ## License
 

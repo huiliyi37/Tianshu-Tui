@@ -1,45 +1,88 @@
 # Changelog
 
-## v0.1.0 — 2026-05-15
+## 2026-05-16 — Capability Ledger Audit + Documentation Update
 
-Initial release of Rivet — a terminal coding agent optimized for DeepSeek V4 prefix cache.
+### Changed
 
-### Architecture
-- Ink 6 + React 19 TUI with ErrorBoundary and graceful shutdown
-- Anthropic-compatible SSE streaming client with retry (exponential backoff + Retry-After)
-- Multi-turn agent loop: tool_use → tool_result → LLM continuation
-- SHA-256 cache fingerprinting for DeepSeek V4 prefix cache (99%+ hit rate)
-- 3-layer compaction: auto-trigger at 800K tokens, floor at 500K, LLM summary compact
-- ProviderCapabilities abstraction for multi-provider support
+- **Capability ledger audit**: 4 capabilities upgraded from Planned → Verified after codebase verification confirmed full implementation:
+  - **P1 Remaining Gaps** — CockpitSnapshot aggregator, doom-loop strategy shift (4 pattern detectors), MCP tool risk rules in approval-risk
+  - **Performance Optimization** — Non-blocking volatile-git stale cache, TUI log batching, incremental token accounting, smartCompact wired in main.tsx
+  - **Capability Reliability Layer** — Path validation (path-validate.ts), checkpoint v2 (dirty snapshot + confirmation token + agent-owned files), safe output filenames (SHA-256), glob/grep cwd boundary + symlink cycle protection, run_tests safe argv filter, VerificationMetadata
+  - **Harness Cockpit** — TraceStore, approval-risk assessment, 6 cockpit panels (trace/verify/context/safety/model/mcp), CockpitRail with status indicators, ModelCapabilityCard
 
-### DeepSeek V4 Integration
-- Thinking mode (reasoning_effort)
-- Truncated JSON recovery for streaming tool_use
-- Tool JSON content fallback (DeepSeek V4 bug workaround)
-- Dual-format usage normalization (prompt_tokens / input_tokens)
-- Volatile context injection via independent user message (preserves cache)
+### Updated
 
-### Tools
-- `read_file` — with offset/limit, gitignore filter
-- `write_file` — path validation, approval gate
-- `edit_file` — unique string match, replace_all, path validation
-- `bash` — spawn streaming, sliding buffer, approval gate, process tracking
+- Capability ledger: 18 Verified (was 14), 1 MVP, 1 Planned (Cache Safety), 2 Designed. 694 tests.
+- README status line: 694 tests, 18 Verified capabilities, all P0-P2 gaps closed.
+- CHANGELOG.md created.
 
-### Features
-- Config file loading with deep merge (`~/.rivet/config.json`)
-- Config CLI (`rivet config show/providers/set-key/set-key-env/set-default/add-model/remove-model`)
-- Session persistence (JSONL at `~/.rivet/sessions/`)
-- Session recovery prompt on startup
-- Model switching (v4-pro / v4-flash) via `/model`
-- Slash commands: /help /exit /compact /model /sessions /resume /clear
-- Token progress bar (green/yellow/red) in status bar
-- Multi-line input (Alt+Enter / Ctrl+N)
-- macOS backspace fix (\x7f handling)
-- Stream render batching at 20fps
-- SSE event id/retry field support
+### Known Remaining
 
-### Testing
-- 67 unit tests (SSE parsing, path validation, edit tool, agent loop, fingerprint, compaction)
-- TypeScript strict mode, 0 errors
-- DeepSeek API live test: 17/17 (thinking, tool_use, cache hit)
-- Build: tsup ESM ~32KB
+- **Cache Safety** (Planned, 0/30) — prewarm bypasses read_file safety boundary, cache key not canonical, volatile cache not per-cwd isolated, fingerprint doesn't cover volatile block
+- **Cockpit Techstyle** (MVP, 42/43) — one checklist item unchecked
+- **CTCL Migration** (Designed) — tool input repair port from external repo
+- **Open Source Harness Strategy** (Designed) — no implementation plan yet
+
+## 2026-05-16 — Gap Closing Hardening
+
+### Added
+
+- Hooks error isolation — all `fire*` methods wrapped in try/catch
+- `UserPromptSubmit` hook event — prompt chaining + block support
+- `PreCompact` hook event — pre-compaction state preservation
+- Git `log` action — oneline + decorate, configurable maxCount (1-100)
+- Git `stash` action — stash working directory changes
+- Git output truncation — 50KB max
+- `TodoStore` class — worker-scoped concurrency safety with Zod validation
+- `cleanupOrphans()` on FileHistory — removes unreferenced backup files
+
+### Changed
+
+- Web-fetch: regex `htmlToMarkdown()` replaced with turndown library (script/style stripped)
+- Todo tool: module-level state → `TodoStore` instance with factory function
+- 10 new tests across hooks, git, web-fetch, todo, file-history
+
+## 2026-05-16 — Pastel Theme + Render Perf + Memory Safety
+
+### Added
+
+- Pastel color palette (default) with 256-color fallback
+- `/theme [pastel|cyberpunk|list]` command
+- Ring buffer for static items (500 cap)
+- SessionContext collections bounded at 500 entries
+- Braille sparkline for context token trend (last 20 turns)
+- Rotating braille spinner in AgentStatus
+- Memoized cockpit snapshot computation
+
+## 2026-05-16 — Multi-pass Repair Pipeline
+
+### Added
+
+- 4-pass repair pipeline: syntax fix, type fix, import fix, semantic repair
+- Schema gate strips invalid tool-use JSON before LLM retry
+- Adaptive repair hint injection based on failure class
+- Integration test covering full pipeline
+
+## 2026-05-16 — Sub-agent Orchestration (Phase 1-4)
+
+### Added
+
+- WorkOrder/WorkerResult types with zod schemas
+- Headless WorkerSession with independent context
+- Priority queue with dedupe + dependency blocking
+- 4 aggregation policies (primary_decides, all_required, first_success, majority)
+- DelegationCoordinator with budget gate and batch dispatch
+- Evidence status contract (verified/failed/blocked/unverified)
+- Delivery gate blocks unverified worker results
+
+## 2026-05-15 — P2 Capability Building
+
+### Added
+
+- MCP client (stdio/SSE, tool discovery, 5-class error classifier)
+- Per-turn model routing (TaskInferrer + RoutingMetricsCollector)
+- Repo intelligence (import graph + impact hint)
+- Verification engine (VerificationState tracking)
+- Failure sample library with secret redaction
+- Cache diagnostic system (hit rate, miss reasons, drift detection)
+- Progressive context engine (rounds, ledger, resume-preflight, session-memory)
