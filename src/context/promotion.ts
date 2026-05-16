@@ -13,7 +13,7 @@ export function evaluatePromotion(claim: ContextClaim, now = Date.now()): Contex
   if (claim.status !== 'active') return null
   if (!isPromptEligibleClaim(claim, now)) return null
   if (claim.counterevidence.length > 0) return null
-  if (claim.consumers.length < 3) return null
+  if (new Set(claim.consumers.map(c => c.id)).size < 3) return null
   return 'durable_candidate'
 }
 

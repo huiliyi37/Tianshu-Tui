@@ -56,13 +56,24 @@ describe('evaluatePromotion', () => {
     }), 4), null)
   })
 
-  it('does not promote with fewer than 3 consumers', () => {
+  it('does not promote with fewer than 3 unique consumers', () => {
     assert.equal(evaluatePromotion(claim({
       consumers: [
         { id: 'turn-1:prompt', kind: 'prompt', usedAt: 1 },
         { id: 'turn-2:prompt', kind: 'prompt', usedAt: 2 },
       ],
     }), 3), null)
+  })
+
+  it('does not promote with 4 total but only 2 unique consumers (dedup)', () => {
+    assert.equal(evaluatePromotion(claim({
+      consumers: [
+        { id: 'turn-1:prompt', kind: 'prompt', usedAt: 1 },
+        { id: 'turn-1:prompt', kind: 'prompt', usedAt: 2 },  // duplicate consumerId
+        { id: 'turn-2:prompt', kind: 'prompt', usedAt: 3 },
+        { id: 'turn-2:prompt', kind: 'prompt', usedAt: 4 },  // duplicate consumerId
+      ],
+    }), 4), null)
   })
 
   it('does not promote non-active claims', () => {
