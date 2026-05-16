@@ -19,7 +19,6 @@
 ### Known Remaining
 
 - **Cache Safety** (Planned, 0/30) — prewarm bypasses read_file safety boundary, cache key not canonical, volatile cache not per-cwd isolated, fingerprint doesn't cover volatile block
-- **Cockpit Techstyle** (MVP, 42/43) — one checklist item unchecked
 - **CTCL Migration** (Designed) — tool input repair port from external repo
 - **Open Source Harness Strategy** (Designed) — no implementation plan yet
 

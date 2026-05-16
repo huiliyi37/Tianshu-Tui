@@ -744,7 +744,7 @@ npm run dev                    # Watch mode
 - `docs/superpowers/specs/2026-05-16-rivet-pastel-aesthetic-performance-memory-design.md` — Pastel theme + render perf + memory safety design (deep-brainstorm)
 - `docs/superpowers/plans/2026-05-16-rivet-render-perf-memory-bounded-visual-polish.md` — Rendering perf + memory bounds + visual polish implementation plan (7 tasks)
 - `docs/analysis/2026-05-16-pastel-theme-render-perf-memory-visual-polish.md` — Work record: pastel theme, ring buffer, bounded collections, sparkline, spinner
-- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (18 Verified, 1 MVP, 1 Planned, 2 Designed)
+- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (19 Verified, 1 Planned, 2 Designed)
 
 ## License
 
