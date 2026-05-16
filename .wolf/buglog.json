@@ -2845,6 +2845,118 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-16T16:49:26.266Z"
+    },
+    {
+      "id": "bug-178",
+      "timestamp": "2026-05-16T17:07:57.156Z",
+      "error_message": "Missing error handling in function",
+      "file": "docs/superpowers/plans/2026-05-17-wave10-test-loop-split.md",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block | Also: ## 任务 4：提取 tool-pipeline.ts; **文件：**",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T17:09:06.015Z"
+    },
+    {
+      "id": "bug-179",
+      "timestamp": "2026-05-16T17:11:23.930Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/session-persist.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:11:23.930Z"
+    },
+    {
+      "id": "bug-180",
+      "timestamp": "2026-05-16T17:15:55.956Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "277 lines replaced/restructured",
+      "fix": "Rewrote 376→66 lines (277 removed) | Also: import type { ToolCallParams } from '../tools/type; import { buildPrewarmValue, canUsePrewarmForRead }",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T17:17:01.097Z"
+    },
+    {
+      "id": "bug-181",
+      "timestamp": "2026-05-16T17:17:02.875Z",
+      "error_message": "Wrong reference: Phase should be 4B",
+      "file": "CHANGELOG.md",
+      "root_cause": "Used \"Phase\" instead of \"4B\"",
+      "fix": "Changed Phase → 4B",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:17:02.875Z"
+    },
+    {
+      "id": "bug-182",
+      "timestamp": "2026-05-16T17:17:41.349Z",
+      "error_message": "Wrong reference: 856 should be 878",
+      "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
+      "root_cause": "Used \"856\" instead of \"878\"",
+      "fix": "Changed 856 → 878",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:17:41.349Z"
+    },
+    {
+      "id": "bug-183",
+      "timestamp": "2026-05-16T17:17:52.608Z",
+      "error_message": "Incorrect value in code",
+      "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
+      "root_cause": "Had `src/context/antibody.ts`",
+      "fix": "Changed to `plans/...-rivet-ecf-phase4b-recall-export.md`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:17:52.608Z"
+    },
+    {
+      "id": "bug-184",
+      "timestamp": "2026-05-16T17:19:00.156Z",
+      "error_message": "Wrong reference: undefined should be false",
+      "file": "src/agent/__tests__/tool-pipeline.test.ts",
+      "root_cause": "Used \"undefined\" instead of \"false\"",
+      "fix": "Changed undefined → false",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T17:19:00.156Z"
     }
   ]
 }

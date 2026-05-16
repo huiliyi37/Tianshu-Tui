@@ -1176,3 +1176,50 @@
 | 00:51 | Session end: 48 writes across 19 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~73977 tok |
 | 00:52 | Session end: 48 writes across 19 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~73977 tok |
 | 00:52 | Session end: 48 writes across 19 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~73977 tok |
+| 00:54 | Session end: 48 writes across 19 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 26 reads | ~73977 tok |
+| 00:57 | Created docs/superpowers/plans/2026-05-16-rivet-ecf-phase4b-recall-export.md | — | ~4555 |
+| 00:58 | Session end: 49 writes across 20 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 32 reads | ~90724 tok |
+| 01:01 | Session end: 49 writes across 20 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 32 reads | ~90825 tok |
+| 01:04 | Created docs/superpowers/specs/2026-05-17-wave10-test-loop-split-design.md | — | ~914 |
+| 01:06 | Created docs/superpowers/plans/2026-05-17-wave10-test-loop-split.md | — | ~2434 |
+| 01:07 | Edited docs/superpowers/plans/2026-05-17-wave10-test-loop-split.md | added error handling | ~4946 |
+| 01:09 | Edited docs/superpowers/plans/2026-05-17-wave10-test-loop-split.md | added error handling | ~3537 |
+| 01:09 | Session end: 53 writes across 22 files (2026-05-16-rivet-core-capability-ledger.md, server.test.ts, 2026-05-16-rivet-ecf-phase4-rules-budget.md, 2026-05-17-rivet-wave9-defect-fixes.md, prd.json) | 33 reads | ~110375 tok |
+| 01:10 | Created .omc/prd.json | — | ~624 |
+| 01:11 | Created src/compact/__tests__/auto.test.ts | — | ~784 |
+| 01:11 | Created src/compact/__tests__/micro.test.ts | — | ~585 |
+| 01:11 | Edited src/agent/session-persist.ts | added nullish coalescing | ~26 |
+| 01:11 | Created src/agent/__tests__/session-persist.test.ts | — | ~521 |
+| 01:11 | Created src/context/__tests__/claim-export.test.ts | — | ~995 |
+| 01:12 | Created src/tools/__tests__/recall.test.ts | — | ~930 |
+| 01:12 | Created src/tools/recall.ts | — | ~609 |
+| 01:12 | Created src/context/claim-export.ts | — | ~434 |
+| 01:13 | Created src/agent/tool-pipeline.ts | — | ~4334 |
+| 01:13 | Edited src/main.tsx | expanded (+6 lines) | ~66 |
+| 01:13 | Edited src/main.tsx | added 1 import(s) | ~33 |
+| 01:13 | Edited src/main.tsx | useState() → useEffect() | ~53 |
+| 01:13 | Edited src/main.tsx | 4→2 lines | ~39 |
+| 01:13 | Edited src/main.tsx | added 1 condition(s) | ~62 |
+| 01:13 | Created src/agent/turn-end.ts | — | ~781 |
+| 01:14 | Edited src/agent/loop.ts | added 2 import(s) | ~55 |
+| 01:14 | Edited src/tui/slash-commands.ts | added 3 import(s) | ~97 |
+| 01:15 | Edited src/tui/slash-commands.ts | added 4 condition(s) | ~425 |
+| 01:15 | Edited src/agent/loop.ts | removed 376 lines | ~769 |
+| 01:16 | Edited src/agent/tool-pipeline.ts | modified recordToolHistory() | ~134 |
+| 01:16 | Created .omc/prd.json | — | ~446 |
+| 01:17 | Edited src/agent/loop.ts | reduced (-16 lines) | ~616 |
+| 01:17 | Edited CHANGELOG.md | inline fix | ~17 |
+
+## Session: 2026-05-16 01:17
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 01:17 | Edited src/agent/loop.ts | added 2 import(s) | ~80 |
+| 01:17 | Edited CHANGELOG.md | expanded (+7 lines) | ~207 |
+| 01:17 | Edited README.md | inline fix | ~75 |
+| 01:17 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~31 |
+| 01:17 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~257 |
+| 01:18 | Created src/agent/__tests__/tool-pipeline.test.ts | — | ~1107 |
+| 01:18 | Created src/agent/__tests__/turn-end.test.ts | — | ~667 |
+| 01:18 | Session end: 7 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 1 reads | ~7536 tok |
+| 01:19 | Edited src/agent/__tests__/tool-pipeline.test.ts | inline fix | ~15 |
