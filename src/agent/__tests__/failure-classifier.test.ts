@@ -104,4 +104,23 @@ describe('isTransient', () => {
   it('classifies ECONNRESET as transient from raw error text', () => {
     assert.equal(isTransient(classifyFailure('Error: ECONNRESET connection reset').class), true)
   })
+
+  it('marks TypeScript failures as not retryable', () => {
+    const result = classifyFailure('error TS2305: Module has no exported member')
+    assert.equal(result.class, 'type_error')
+    assert.equal(result.retryable, false)
+    assert.match(result.suggestion, /fix/i)
+  })
+
+  it('marks timeout failures as retryable', () => {
+    const result = classifyFailure('Command timed out after 120000ms')
+    assert.equal(result.class, 'timeout')
+    assert.equal(result.retryable, true)
+  })
+
+  it('marks flaky failures as retryable', () => {
+    const result = classifyFailure('intermittent flaky test failure')
+    assert.equal(result.class, 'flaky')
+    assert.equal(result.retryable, true)
+  })
 })
