@@ -34,7 +34,7 @@
 - 创建：`src/agent/repair-pipeline.ts`
 - 创建：`src/agent/__tests__/repair-pipeline.test.ts`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 `src/agent/__tests__/repair-pipeline.test.ts`:
 
@@ -107,12 +107,12 @@ describe('RepairPipeline', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`npx tsx --test src/agent/__tests__/repair-pipeline.test.ts`
 预期：FAIL — `Cannot find module '../repair-pipeline.js'`
 
-- [ ] **步骤 3：实现管线骨架**
+- [x] **步骤 3：实现管线骨架**
 
 `src/agent/repair-pipeline.ts`:
 
@@ -172,12 +172,12 @@ export class RepairPipeline {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`npx tsx --test src/agent/__tests__/repair-pipeline.test.ts`
 预期：PASS
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/repair-pipeline.ts src/agent/__tests__/repair-pipeline.test.ts
@@ -192,7 +192,7 @@ git commit -m "feat(agent): add RepairPipeline + RepairPass interface"
 - 创建：`src/agent/repair-passes.ts`
 - 修改：`src/agent/__tests__/repair-pipeline.test.ts`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 追加到 `src/agent/__tests__/repair-pipeline.test.ts`:
 
@@ -280,12 +280,12 @@ describe('fourHorsemenPass', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`npx tsx --test src/agent/__tests__/repair-pipeline.test.ts`
 预期：FAIL — `Cannot find module '../repair-passes.js'`
 
-- [ ] **步骤 3：实现四骑士 pass**
+- [x] **步骤 3：实现四骑士 pass**
 
 `src/agent/repair-passes.ts`:
 
@@ -395,12 +395,12 @@ export const semanticRepairPass: RepairPass = {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`npx tsx --test src/agent/__tests__/repair-pipeline.test.ts`
 预期：PASS
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/repair-passes.ts src/agent/__tests__/repair-pipeline.test.ts
@@ -414,7 +414,7 @@ git commit -m "feat(agent): add fourHorsemen + semanticRepair passes"
 **文件：**
 - 修改：`src/agent/__tests__/repair-pipeline.test.ts`
 
-- [ ] **步骤 1：编写测试**
+- [x] **步骤 1：编写测试**
 
 追加到 `src/agent/__tests__/repair-pipeline.test.ts`:
 
@@ -458,12 +458,12 @@ describe('fixAutoLinks — unit', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证通过**
+- [x] **步骤 2：运行测试验证通过**
 
 运行：`npx tsx --test src/agent/__tests__/repair-pipeline.test.ts`
 预期：PASS（实现已在任务 2 完成）
 
-- [ ] **步骤 3：Commit**
+- [x] **步骤 3：Commit**
 
 ```bash
 git add src/agent/__tests__/repair-pipeline.test.ts
@@ -478,7 +478,7 @@ git commit -m "test(agent): add semantic repair autolink tests"
 - 修改：`src/api/client.ts:320-342`
 - 创建：`src/api/__tests__/schema-gate.test.ts`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 `src/api/__tests__/schema-gate.test.ts`:
 
@@ -510,12 +510,12 @@ describe('validateRequiredFields (schema gate)', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`npx tsx --test src/api/__tests__/schema-gate.test.ts`
 预期：FAIL — `validateRequiredFields` not exported from `../client.js`
 
-- [ ] **步骤 3：实现 schema gate**
+- [x] **步骤 3：实现 schema gate**
 
 在 `src/api/client.ts` 中，`recoverTruncatedJSON` 函数之后添加：
 
@@ -557,12 +557,12 @@ export function validateRequiredFields(
                   }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`npx tsx --test src/api/__tests__/schema-gate.test.ts`
 预期：PASS
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/api/client.ts src/api/__tests__/schema-gate.test.ts
@@ -576,7 +576,7 @@ git commit -m "feat(api): add schema gate to suppress incomplete tool_use"
 **文件：**
 - 修改：`src/agent/loop.ts`
 
-- [ ] **步骤 1：添加 import 和管线实例**
+- [x] **步骤 1：添加 import 和管线实例**
 
 在 `src/agent/loop.ts` 顶部添加：
 
@@ -591,7 +591,7 @@ import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
   private repairPipeline = new RepairPipeline([fourHorsemenPass, semanticRepairPass])
 ```
 
-- [ ] **步骤 2：在工具执行前调用管线**
+- [x] **步骤 2：在工具执行前调用管线**
 
 在 `loop.ts` 工具执行循环中，`preHookResult` 处理之后（约 316 行）、`doomLevel` 检查之前，添加：
 
@@ -610,12 +610,12 @@ import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
               }
 ```
 
-- [ ] **步骤 3：运行全量测试 + typecheck**
+- [x] **步骤 3：运行全量测试 + typecheck**
 
 运行：`npm test && npm run typecheck`
 预期：全部 PASS，无类型错误
 
-- [ ] **步骤 4：Commit**
+- [x] **步骤 4：Commit**
 
 ```bash
 git add src/agent/loop.ts
@@ -633,7 +633,7 @@ git commit -m "feat(agent): wire repair pipeline into AgentLoop before tool exec
 - 修改：`src/prompt/volatile.ts`
 - 修改：`src/agent/loop.ts`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 `src/agent/__tests__/repair-hint.test.ts`:
 
@@ -686,12 +686,12 @@ describe('RepairHintTracker', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`npx tsx --test src/agent/__tests__/repair-hint.test.ts`
 预期：FAIL — `Cannot find module '../repair-hint.js'`
 
-- [ ] **步骤 3：实现 RepairHintTracker**
+- [x] **步骤 3：实现 RepairHintTracker**
 
 `src/agent/repair-hint.ts`:
 
@@ -740,12 +740,12 @@ export class RepairHintTracker {
 }
 ```
 
-- [ ] **步骤 4：运行测试验证通过**
+- [x] **步骤 4：运行测试验证通过**
 
 运行：`npx tsx --test src/agent/__tests__/repair-hint.test.ts`
 预期：PASS
 
-- [ ] **步骤 5：添加 setRepairHint 到 PromptEngine**
+- [x] **步骤 5：添加 setRepairHint 到 PromptEngine**
 
 在 `src/prompt/engine.ts` 中，`setStrategyShift` 方法之后添加：
 
@@ -763,7 +763,7 @@ export class RepairHintTracker {
           const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, decisions: this.decisions, repairHint: this.repairHint })
 ```
 
-- [ ] **步骤 6：修改 volatile.ts 接受 repairHint**
+- [x] **步骤 6：修改 volatile.ts 接受 repairHint**
 
 在 `src/prompt/volatile.ts` 的 `buildLatestTurnVolatileBlock` 函数参数中添加 `repairHint?: string | null`，并在输出末尾追加：
 
@@ -773,7 +773,7 @@ export class RepairHintTracker {
   }
 ```
 
-- [ ] **步骤 7：在 AgentLoop 中接入 RepairHintTracker**
+- [x] **步骤 7：在 AgentLoop 中接入 RepairHintTracker**
 
 在 `src/agent/loop.ts` 中：
 
@@ -803,12 +803,12 @@ import { RepairHintTracker } from './repair-hint.js'
   this.config.promptEngine.setRepairHint(hint)
 ```
 
-- [ ] **步骤 8：运行全量测试 + typecheck**
+- [x] **步骤 8：运行全量测试 + typecheck**
 
 运行：`npm test && npm run typecheck`
 预期：全部 PASS
 
-- [ ] **步骤 9：Commit**
+- [x] **步骤 9：Commit**
 
 ```bash
 git add src/agent/repair-hint.ts src/agent/__tests__/repair-hint.test.ts src/prompt/engine.ts src/prompt/volatile.ts src/agent/loop.ts
@@ -822,7 +822,7 @@ git commit -m "feat(agent): add Pass 5 adaptive injection via RepairHintTracker"
 **文件：**
 - 创建：`src/__tests__/repair-parity.test.ts`
 
-- [ ] **步骤 1：编写集成测试**
+- [x] **步骤 1：编写集成测试**
 
 `src/__tests__/repair-parity.test.ts`:
 
@@ -889,17 +889,17 @@ describe('CTCL parity — full pipeline', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试验证通过**
+- [x] **步骤 2：运行测试验证通过**
 
 运行：`npx tsx --test src/__tests__/repair-parity.test.ts`
 预期：PASS
 
-- [ ] **步骤 3：运行全量测试 + typecheck**
+- [x] **步骤 3：运行全量测试 + typecheck**
 
 运行：`npm test && npm run typecheck`
 预期：全部 PASS
 
-- [ ] **步骤 4：Commit**
+- [x] **步骤 4：Commit**
 
 ```bash
 git add src/__tests__/repair-parity.test.ts

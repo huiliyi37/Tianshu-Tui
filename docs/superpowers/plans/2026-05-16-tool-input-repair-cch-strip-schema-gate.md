@@ -1,5 +1,7 @@
 # Tool Input Repair + CCH Strip + Schema Gate 实现计划
 
+> **SUPERSEDED** by `2026-05-16-multi-pass-repair-pipeline.md`. Four Horsemen and Schema Gate implemented via RepairPipeline architecture. CCH stripping not needed (Rivet doesn't inject Claude Code cch markers).
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 将灵境 CTCL 已验证的 3 项核心优化移植到 Rivet 应用层——Tool Input Repair（四骑士修复）、CCH 剥离（恢复 prefix cache 命中）、SSE Schema Gate（拦截不完整 tool_use）。

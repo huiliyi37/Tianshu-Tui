@@ -483,6 +483,9 @@ export class AgentLoop {
               if (!harnessResult.isError) {
                 this.repairHintTracker.recordSuccess(tu.name)
                 this.config.promptEngine.setStrategyShift(null)
+              } else {
+                const failureClass = classifyFailure(harnessResult.content)
+                this.repairHintTracker.recordFailure(tu.name, failureClass.class)
               }
 
               // Invalidate prewarm cache after writes
@@ -532,7 +535,7 @@ export class AgentLoop {
               })
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err)
-              this.repairHintTracker.recordFailure(tu.name, 'execution_error')
+              this.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
               callbacks.onToolResult(tu.id, tu.name, msg, true)
               toolResults.push({
                 type: 'tool_result',
