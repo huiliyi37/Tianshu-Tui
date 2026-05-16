@@ -1,6 +1,6 @@
 # Rivet Core Capability Ledger
 
-> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 694 tests passing.
+> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 697 tests passing.
 
 ## Status Definitions
 
@@ -17,7 +17,7 @@
 | Capability | Status | Design | Plan | Primary Code | Validation | Known Gaps | Next Action |
 |-----------|--------|--------|------|-------------|-----------|-----------|-------------|
 | Context Layer + Cache Architecture | **Verified** | `specs/...-context-layer-cache-architecture-gap.md` | `plans/...-context-layer-boundary-implementation.md` | `src/prompt/*` | Plan 34/34 checked, 612 tests pass | Logical layers use physical channel mapping | Monitor for new cache behaviors |
-| Cache Safety | **Planned** | `specs/...-cache-safety-design.md` | `plans/...-cache-safety-implementation.md` | `src/agent/prewarm.ts`, `src/agent/loop.ts` | Plan 0/30 checked | prewarm bypasses read_file safety boundary | Execute cache safety plan |
+| Cache Safety | **Verified** | `specs/...-cache-safety-design.md` | `plans/...-cache-safety-implementation.md` | `src/agent/prewarm.ts`, `src/agent/prewarm-file.ts`, `src/agent/loop.ts`, `src/tools/read-file.ts`, `src/prompt/volatile.ts`, `src/prompt/volatile-git.ts` | Plan 30/30 checked, 697 tests pass, Task 5 (fingerprint) pre-verified | None | — |
 | Tool Safety + Verification Evidence | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-tool-safety-verification-evidence.md` | `src/agent/approval-risk.ts`, `src/agent/evidence.ts`, `src/agent/delivery-gate.ts` | Plan 29/30 (preamble only unchecked), 620 tests pass, evidence gate bypass fixed | None critical | — |
 | Execution Resilience + Sub-agent Evidence | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-execution-resilience-subagent-evidence.md` | `src/agent/turn-harness.ts`, `src/agent/failure-classifier.ts`, `src/agent/aggregation.ts`, `src/agent/strategy-shift.ts` | Plan 34/35 (preamble only unchecked), 620 tests pass, strategy shift added | None critical | — |
 | Execution Resilience Layer | **Verified** | `specs/...-execution-resilience-layer-design.md` | `plans/...-execution-resilience-layer-implementation.md` | `src/agent/turn-harness.ts`, `src/agent/trace-store.ts` | Plan 37/37 checked, 612 tests pass | None | — |
@@ -42,9 +42,9 @@
 
 ## Summary
 
-- **Verified**: 19 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit)
+- **Verified**: 20 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety)
 - **MVP**: 0
-- **Planned**: 1 capability (Cache Safety)
+- **Planned**: 0 capabilities
 - **Designed**: 2 capabilities (CTCL Migration, Open Source Strategy)
 
 ## Maintenance Rules
