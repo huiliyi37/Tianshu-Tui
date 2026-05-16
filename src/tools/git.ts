@@ -108,7 +108,7 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
         }
 
         case 'log': {
-          const maxCount = (params.input.maxCount as number) ?? 20
+          const maxCount = Math.max(1, Math.min((params.input.maxCount as number) ?? 20, 100))
           const log = runGit(['log', `--max-count=${maxCount}`, '--oneline', '--decorate'], cwd).trim()
           return { content: log || 'No commits yet.' }
         }
