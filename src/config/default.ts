@@ -11,6 +11,13 @@ export const DEFAULT_CONFIG: Config = {
         name: 'deepseek',
         apiKeyEnv: 'DEEPSEEK_API_KEY',
         baseUrl: 'https://api.deepseek.com/anthropic',
+        protocol: 'anthropic' as const,
+        capabilities: {
+          cacheControl: false,
+          stripParams: [],
+          toolJsonBug: true,
+          prefixCache: 'deepseek-native' as const,
+        },
         thinking: 'enabled',
         maxTokens: 64000,
         models: [

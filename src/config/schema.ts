@@ -9,11 +9,21 @@ export const modelConfigSchema = z.object({
   reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
 })
 
+export const providerCapabilitiesSchema = z.object({
+  cacheControl: z.boolean().default(false),
+  stripParams: z.array(z.string()).default([]),
+  toolJsonBug: z.boolean().default(false),
+  prefixCache: z.enum(['deepseek-native', 'anthropic-cache-control', 'none']).default('none'),
+}).default({})
+
 export const providerSchema = z.object({
   name: z.string(),
   apiKey: z.string().optional(),
   apiKeyEnv: z.string().optional(),
   baseUrl: z.string().url(),
+  protocol: z.enum(['anthropic', 'openai']).default('anthropic'),
+  capabilities: providerCapabilitiesSchema,
+  fallback: z.array(z.string()).optional(),
   models: z.array(modelConfigSchema).min(1),
   thinking: z.enum(['enabled', 'disabled']).default('enabled'),
   maxTokens: z.number().int().positive().default(64000),
@@ -76,6 +86,7 @@ export type Config = {
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
+export type ProviderCapabilitiesConfig = z.infer<typeof providerCapabilitiesSchema>
 export type ModelConfig = z.infer<typeof modelConfigSchema>
 export type EditorConfig = z.infer<typeof editorSchema>
 export type AgentConfig = z.infer<typeof agentSchema>
