@@ -37,6 +37,14 @@ export function createProviderClient(
   capabilities: ProviderCapabilities,
   params: RuntimeParams,
 ): ApiClient {
+  // Phase 2: OpenAI protocol will use OpenAIClient
+  if (provider.protocol === 'openai') {
+    throw new Error(
+      `Provider "${provider.name}" uses OpenAI protocol which is not yet supported. ` +
+      `OpenAI client is planned for Phase 2. Use protocol: 'anthropic'.`
+    )
+  }
+
   const clientConfig: ClientConfig = {
     baseUrl: provider.baseUrl,
     apiKey: params.apiKey,
@@ -47,7 +55,12 @@ export function createProviderClient(
     reasoningEffort: capabilities.effortFormat === 'none'
       ? undefined
       : (params.reasoningEffort ?? 'high'),
-    unsupported: provider.unsupported ?? capabilities.stripParams,
+    // Empty default [] is truthy, so ?? would never fallback.  Use explicit
+    // length check: only trust provider.unsupported when the user actually
+    // set it; otherwise defer to the well-known defaults.
+    unsupported: provider.unsupported.length > 0
+      ? provider.unsupported
+      : capabilities.stripParams,
     hasToolJsonInContentBug: capabilities.hasToolJsonInContentBug,
     mapUsage: capabilities.mapUsage,
   }
