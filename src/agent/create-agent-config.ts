@@ -1,8 +1,10 @@
-import { createDeepSeekClient } from '../api/deepseek.js'
+import { createProviderClient } from '../api/factory.js'
+import { resolveCapabilities } from '../api/provider.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { AgentConfig } from './loop.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
+import type { ProviderConfig } from '../config/schema.js'
 
 export interface ModelSpec {
   id: string
@@ -18,6 +20,7 @@ export interface AgentConfigInput {
   compact: CompactionConfig
   sessionId: string
   toolDefinitions: ToolDefinition[]
+  provider: ProviderConfig
   compactModel?: ModelSpec
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual'
@@ -27,12 +30,13 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
   'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'compactClient' | 'compactModel' | 'sessionId' | 'approvalMode' | 'autoReasoning'
 > {
-  const { model, apiKey, cwd } = input
+  const { model, apiKey, cwd, provider } = input
+  const capabilities = resolveCapabilities(provider.name, provider.capabilities)
   const thinkingBudget = model.reasoningEffort === 'max'
     ? 64000
     : Math.min(16000, Math.floor(model.contextWindow * 0.02))
 
-  const client = createDeepSeekClient({
+  const client = createProviderClient(provider, capabilities, {
     apiKey,
     model: model.id,
     reasoningEffort: model.reasoningEffort,
@@ -50,7 +54,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
   let compactClient: AgentConfig['compactClient']
   let compactModelId: string | undefined
   if (input.compactModel) {
-    compactClient = createDeepSeekClient({
+    compactClient = createProviderClient(provider, capabilities, {
       apiKey,
       model: input.compactModel.id,
       reasoningEffort: input.compactModel.reasoningEffort,

@@ -1,6 +1,23 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createAgentConfig, type AgentConfigInput } from '../agent/create-agent-config.js'
+import type { ProviderConfig } from '../config/schema.js'
+
+const testProvider: ProviderConfig = {
+  name: 'deepseek',
+  baseUrl: 'https://api.deepseek.com/anthropic',
+  protocol: 'anthropic',
+  capabilities: {
+    cacheControl: false,
+    stripParams: [],
+    toolJsonBug: true,
+    prefixCache: 'deepseek-native',
+  },
+  thinking: 'enabled',
+  maxTokens: 64000,
+  models: [{ id: 'deepseek-r1', contextWindow: 128000, maxTokens: 8192 }],
+  unsupported: [],
+}
 
 describe('createAgentConfig', () => {
   const baseInput: AgentConfigInput = {
@@ -10,6 +27,7 @@ describe('createAgentConfig', () => {
     compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
     sessionId: 'session-1',
     toolDefinitions: [],
+    provider: testProvider,
   }
 
   it('creates client with correct model params', () => {

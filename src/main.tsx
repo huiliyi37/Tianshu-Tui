@@ -18,7 +18,8 @@ import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
-import { createDeepSeekClient } from './api/deepseek.js'
+import { createProviderClient } from './api/factory.js'
+import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
@@ -231,6 +232,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       apiKey,
       model: { id: currentModel.id, maxTokens: currentModel.maxTokens, contextWindow: currentModel.contextWindow, reasoningEffort: currentModel.reasoningEffort },
       cwd,
+      provider,
       compact: config.compact,
       sessionId,
       toolDefinitions: toolRegistry.getDefinitions(),
@@ -256,7 +258,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       const isWrite = writeProfiles.includes(_order.profile)
       return {
         order: _order,
-        client: createDeepSeekClient({
+        client: createProviderClient(provider, resolveCapabilities(provider.name, provider.capabilities), {
           apiKey,
           model: card.model,
           reasoningEffort: undefined,
@@ -482,6 +484,7 @@ async function main() {
           apiKey: key,
           model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
           cwd: process.cwd(),
+          provider: prov,
           compact: cfg.compact,
           sessionId,
           toolDefinitions: toolRegistry.getDefinitions(),
@@ -496,7 +499,7 @@ async function main() {
           maxWorkers: 3,
           runtimeFactory: (order, card, workerRegistry) => ({
             order,
-            client: createDeepSeekClient({ apiKey: key, model: card.model, reasoningEffort: undefined, maxTokens: Math.min(4096, card.contextWindow), thinkingBudget: 4096 }),
+            client: createProviderClient(prov, resolveCapabilities(prov.name, prov.capabilities), { apiKey: key, model: card.model, reasoningEffort: undefined, maxTokens: Math.min(4096, card.contextWindow), thinkingBudget: 4096 }),
             promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: process.cwd() } }),
             toolRegistry: workerRegistry,
             cwd: process.cwd(),

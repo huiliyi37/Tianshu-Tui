@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T19:04:50.266Z
-> Files: 313 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T19:35:32.997Z
+> Files: 315 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -100,6 +100,7 @@
 - `2026-05-17-multi-provider-phase1.md` — Multi-Provider Integration Phase 1 实现计划 (~4349 tok)
 - `2026-05-17-rivet-ecf-phase5-recall-feedback.md` — ECF Phase 5: Recall 正反馈 + Claim 质量信号 实现计划 (~2705 tok)
 - `2026-05-17-rivet-wave9-defect-fixes.md` — Wave 9: 内部缺陷修复 + 结构优化 实施计划 (~4239 tok)
+- `2026-05-17-session-rendering-p0.md` — 会话渲染 P0 实现计划 (~8138 tok)
 - `2026-05-17-wave10-test-loop-split.md` — Wave 10: 测试补强 + loop.ts 拆分 实施计划 (~10180 tok)
 - `2026-05-17-wave11-cache-perf.md` — Wave 11: Cache 效率 + Token 节约 实现计划 (~3516 tok)
 
@@ -121,6 +122,7 @@
 - `2026-05-16-rivet-xml-protocol-speculative-engine-design.md` — Rivet XML Protocol Layer + Speculative Pre-warming 设计 (~2060 tok)
 - `2026-05-17-multi-provider-integration-design.md` — Multi-Provider Integration: Design (v2 — Deep Brainstorm) (~4366 tok)
 - `2026-05-17-recall-feedback-design.md` — ECF Phase 5: Recall 正反馈 + Claim 质量信号 (~399 tok)
+- `2026-05-17-session-rendering-p0-design.md` — P0 会话渲染优化：消息类型分离 + 工具调用折叠 (~1534 tok)
 - `2026-05-17-wave10-test-loop-split-design.md` — Wave 10: 测试补强 + loop.ts 拆分 设计规格 (~857 tok)
 - `2026-05-17-wave11-cache-perf-design.md` — Wave 11: 性能优化 — Cache 效率 + Token 节约 (~598 tok)
 
