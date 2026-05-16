@@ -40,8 +40,8 @@ export const DEFAULT_CONFIG: Config = {
       },
       kimi: {
         name: 'kimi',
-        apiKeyEnv: 'MOONSHOT_API_KEY',
-        baseUrl: 'https://api.moonshot.cn/anthropic',
+        apiKeyEnv: 'KIMI_API_KEY',
+        baseUrl: 'https://api.kimi.com/coding',
         protocol: 'anthropic' as const,
         capabilities: {
           cacheControl: false,
@@ -53,8 +53,8 @@ export const DEFAULT_CONFIG: Config = {
         maxTokens: 64000,
         models: [
           {
-            id: 'kimi-k2-0711',
-            alias: 'k2',
+            id: 'kimi-for-coding',
+            alias: 'kimi',
             contextWindow: 131072,
             maxTokens: 64000,
             reasoningEffort: 'high',
@@ -65,7 +65,7 @@ export const DEFAULT_CONFIG: Config = {
       glm: {
         name: 'glm',
         apiKeyEnv: 'ZHIPU_API_KEY',
-        baseUrl: 'https://open.bigmodel.cn/api/paas/v4/anthropic',
+        baseUrl: 'https://open.bigmodel.cn/api/anthropic',
         protocol: 'anthropic' as const,
         capabilities: {
           cacheControl: false,
@@ -77,8 +77,8 @@ export const DEFAULT_CONFIG: Config = {
         maxTokens: 64000,
         models: [
           {
-            id: 'glm-4-plus',
-            alias: '4plus',
+            id: 'glm-5.1',
+            alias: 'glm',
             contextWindow: 128000,
             maxTokens: 64000,
             reasoningEffort: 'high',
