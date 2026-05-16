@@ -1,5 +1,6 @@
 import { TrajectoryRecorder, type TrajectoryEntry } from './trajectory.js'
-import { isTransient, type FailureClass } from './failure-classifier.js'
+import type { FailureClass } from './failure-classifier.js'
+import { shouldRetryToolFailure } from './retry-policy.js'
 
 export interface ToolExecution {
   id: string
@@ -8,6 +9,7 @@ export interface ToolExecution {
   turn: number
   execute: () => Promise<{ content: string; isError?: boolean }>
   classify: (content: string) => FailureClass | undefined
+  isConcurrencySafe: boolean
 }
 
 export interface ToolExecutionResult {
@@ -37,20 +39,25 @@ export class TurnHarness {
 
     if (result.isError) {
       errorClass = exec.classify(result.content) ?? undefined
-      if (
-        errorClass
-        && isTransient(errorClass)
-        && this.config.retryableClasses.includes(errorClass)
-        && this.config.maxRetries > 0
-      ) {
-        for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
-          retried = true
-          result = await exec.execute()
-          if (!result.isError) break
-          if (attempt === this.config.maxRetries - 1) {
-            result = {
-              content: `${result.content}\n\n[All ${this.config.maxRetries} retries failed. Error class: ${errorClass}. Consider alternative approach.]`,
-              isError: true,
+      if (errorClass) {
+        const decision = shouldRetryToolFailure({
+          toolName: exec.name,
+          failureClass: errorClass,
+          isConcurrencySafe: exec.isConcurrencySafe,
+          retryableClasses: this.config.retryableClasses,
+          retriesRemaining: this.config.maxRetries,
+        })
+
+        if (decision.retry) {
+          for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
+            retried = true
+            result = await exec.execute()
+            if (!result.isError) break
+            if (attempt === this.config.maxRetries - 1) {
+              result = {
+                content: `${result.content}\n\n[All ${this.config.maxRetries} retries failed. Error class: ${errorClass}. Consider alternative approach.]`,
+                isError: true,
+              }
             }
           }
         }

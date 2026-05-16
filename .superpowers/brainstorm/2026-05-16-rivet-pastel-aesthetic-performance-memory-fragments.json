@@ -1,0 +1,99 @@
+{
+  "phase": "complete",
+  "topic": "二次元 pastel UI + 渲染性能 + 内存安全",
+  "date": "2026-05-16",
+  "fragments": [
+    {
+      "text": "当前色板 #00ffcc/#7b2fff/#00ff88 是赛博朋克霓虹色，高饱和度导致视觉疲劳。pastel 色值 70-85% 明度 + 15-40% 饱和度更舒适",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["theme", "pastel", "aesthetics"]
+    },
+    {
+      "text": "Ink 的 react-reconciler 是渲染瓶颈——这个假设未被验证。实际瓶颈可能是 80ms flush 频率导致的状态更新过多",
+      "fragmentType": "observation",
+      "source": "agent",
+      "tags": ["performance", "ink", "reconciler"]
+    },
+    {
+      "text": "静态装饰元素（边框、颜色、unicode）的渲染成本很低；贵的是动态更新（流式文本、tool 输出、状态变化）",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["performance", "rendering"]
+    },
+    {
+      "text": "pushStatic 每次 append 都拷贝整个数组 O(n)；cockpit snapshot 每次渲染都重建——这两个是已确认的性能问题",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["performance", "memory", "app.tsx"]
+    },
+    {
+      "text": "SessionContext 的 filesRead/filesModified/testResults 是 append-only 无界集合——这是已确认的内存增长点",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["memory", "session-context"]
+    },
+    {
+      "text": "Worker session 隔离良好：per-run 创建、timeout 清理、coordinator 不持有引用。UI 层不持有 worker SessionContext 引用",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["memory", "worker", "isolation"]
+    },
+    {
+      "text": "Braille 字符 (U+2800) 每个 cell 编码 2x4 点阵，可以在终端里画高分辨率 sparkline，零依赖",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["braille", "sparkline", "visualization"]
+    },
+    {
+      "text": "Ink 的 <Static> 组件用于分离静态输出和动态 UI——已完成的 tool card 应该移入 Static 减少 reconciler 工作",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["ink", "static", "performance"]
+    },
+    {
+      "text": "换色板和内存优化是正交问题——色板改 6 个 hex 值，内存需要 bounded collections。两者可以独立实施",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["architecture", "decoupling"]
+    },
+    {
+      "text": "256-color 终端下 pastel 色可能不可读——需要为 FALLBACK 色板选择更饱和的 chalk 色名",
+      "fragmentType": "risk",
+      "source": "agent",
+      "tags": ["theme", "fallback", "compatibility"]
+    }
+  ],
+  "candidates": [
+    {
+      "id": "V1",
+      "niche": "轻量改造",
+      "oneLiner": "换色板 + 固化 cockpit snapshot + 限定 staticItems",
+      "status": "survivor_rank2",
+      "advantage": "最快见效（1-2天），风险最低"
+    },
+    {
+      "id": "V2",
+      "niche": "视觉+性能并重",
+      "oneLiner": "V1 + braille sparklines + <Static> 分离 + SessionContext 有界化",
+      "status": "survivor_rank1",
+      "advantage": "同时回应审美+性能+内存三个目标，因果链完整"
+    },
+    {
+      "id": "V3",
+      "niche": "内存架构重塑",
+      "oneLiner": "Worker 池化 + SessionContext 有界化 + eviction policy",
+      "status": "extinct",
+      "extinctionReason": "因果链断裂：不解决审美问题。特征被 V2 吸收"
+    },
+    {
+      "id": "V4",
+      "niche": "流式层绕过 Ink",
+      "oneLiner": "流式输出用 raw ANSI，cockpit 保留 React，双通道架构",
+      "status": "extinct",
+      "extinctionReason": "双通道维护成本高，raw ANSI 丢失组件组合能力"
+    }
+  ],
+  "convergenceInsight": "不需要重写渲染引擎。让已有的好实践（memo、buffered flush、Static、bounded collections）真正生效，同时换一套 pastel 色板，就能同时解决审美、性能和内存三个问题。",
+  "finalRecommendation": "V2: Pastel 色板 + 渲染优化 + 内存有界化"
+}

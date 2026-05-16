@@ -1,4 +1,5 @@
 import type { VerificationMetadata } from '../tools/types.js'
+import { buildDeliveryGate } from './delivery-gate.js'
 import { buildFinalVerificationReport, type VerificationState } from './verification.js'
 
 export type DeliveryVerificationStatus = 'verified' | 'failed' | 'blocked' | 'unverified'
@@ -77,7 +78,8 @@ export class EvidenceTracker {
       for (const f of modified) parts.push(`  - ${f}`)
     }
 
-    const status = this.state.deliveryStatus
+    const gate = buildDeliveryGate(this.state)
+    const status = gate.status
     if (status === 'failed') {
       const failedRun = this.state.verifications.find(r => r.status === 'failed')
       parts.push(`- **Verification failed**: ${failedRun?.command ?? ''}`)
@@ -85,6 +87,11 @@ export class EvidenceTracker {
       parts.push('- **Verification blocked**')
     } else if (status === 'unverified' && modified.length > 0) {
       parts.push(`- **Unverified changes**: ${modified.join(', ')}`)
+    }
+
+    if (modified.length > 0) {
+      parts.push(`- **Delivery gate**: ${gate.message}`)
+      if (gate.nextAction) parts.push(`- **Next action**: ${gate.nextAction}`)
     }
 
     if (this.state.verifications.length > 0 || modified.length > 0) {

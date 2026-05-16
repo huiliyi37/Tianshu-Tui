@@ -979,6 +979,550 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-15T20:50:34.362Z"
+    },
+    {
+      "id": "bug-062",
+      "timestamp": "2026-05-16T03:59:26.921Z",
+      "error_message": "Wrong reference: decisions should be strategyShift",
+      "file": "src/prompt/engine.ts",
+      "root_cause": "Used \"decisions\" instead of \"strategyShift\"",
+      "fix": "Changed decisions → strategyShift",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T03:59:26.921Z"
+    },
+    {
+      "id": "bug-063",
+      "timestamp": "2026-05-16T04:00:14.441Z",
+      "error_message": "Type error",
+      "file": "src/agent/__tests__/approval-risk.test.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:00:14.441Z"
+    },
+    {
+      "id": "bug-064",
+      "timestamp": "2026-05-16T04:03:48.740Z",
+      "error_message": "Missing import: ../types.js",
+      "file": "src/tui/cockpit/__tests__/panels.test.ts",
+      "root_cause": "Module(s) not imported: ../types.js",
+      "fix": "Added import(s) for ../types.js",
+      "tags": [
+        "auto-detected",
+        "missing-import",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:03:48.740Z"
+    },
+    {
+      "id": "bug-065",
+      "timestamp": "2026-05-16T04:10:02.272Z",
+      "error_message": "Missing error handling in fixAutoLinks",
+      "file": "docs/superpowers/plans/2026-05-16-multi-pass-repair-pipeline.md",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block | Also: ## 任务 3：Pass 2 — Schema Gate (在 client.ts 中拦截); **文件：**",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T04:12:31.258Z"
+    },
+    {
+      "id": "bug-066",
+      "timestamp": "2026-05-16T04:16:40.241Z",
+      "error_message": "Missing guard clause",
+      "file": "src/api/client.ts",
+      "root_cause": "No early return/throw for edge case: required.length === 0",
+      "fix": "Added guard clause: if (required.length === 0)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:16:40.241Z"
+    },
+    {
+      "id": "bug-067",
+      "timestamp": "2026-05-16T04:16:48.189Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/api/client.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:16:48.189Z"
+    },
+    {
+      "id": "bug-068",
+      "timestamp": "2026-05-16T04:18:03.830Z",
+      "error_message": "Type error",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation | Also: // Pass 5: adaptive repair hint injection; const repairHint = this.repairHintTracker.getHint()",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T04:18:23.428Z"
+    },
+    {
+      "id": "bug-069",
+      "timestamp": "2026-05-16T04:18:30.002Z",
+      "error_message": "Wrong reference: decisions should be repairHint",
+      "file": "src/prompt/engine.ts",
+      "root_cause": "Used \"decisions\" instead of \"repairHint\"",
+      "fix": "Changed decisions → repairHint",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:18:30.002Z"
+    },
+    {
+      "id": "bug-070",
+      "timestamp": "2026-05-16T04:25:33.340Z",
+      "error_message": "Wrong reference: return should be statSync",
+      "file": "src/agent/import-graph.ts",
+      "root_cause": "Used \"return\" instead of \"statSync\"",
+      "fix": "Changed return → statSync",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:25:33.340Z"
+    },
+    {
+      "id": "bug-071",
+      "timestamp": "2026-05-16T04:31:40.635Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check) | Also: const currentModel = this.config.getCurrentModel?.() ?? ''",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T04:32:30.354Z"
+    },
+    {
+      "id": "bug-072",
+      "timestamp": "2026-05-16T04:34:38.124Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/mcp/wrapper.ts",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 19→23 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:34:38.124Z"
+    },
+    {
+      "id": "bug-073",
+      "timestamp": "2026-05-16T04:34:42.849Z",
+      "error_message": "Wrong reference: ModelPanelProps should be routingReason",
+      "file": "src/tui/cockpit/model-panel.tsx",
+      "root_cause": "Used \"ModelPanelProps\" instead of \"routingReason\"",
+      "fix": "Changed ModelPanelProps → routingReason",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:34:42.849Z"
+    },
+    {
+      "id": "bug-074",
+      "timestamp": "2026-05-16T04:34:49.129Z",
+      "error_message": "Wrong reference: VerificationPanelProps should be impactedFiles",
+      "file": "src/tui/cockpit/verification-panel.tsx",
+      "root_cause": "Used \"VerificationPanelProps\" instead of \"impactedFiles\"",
+      "fix": "Changed VerificationPanelProps → impactedFiles",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:34:49.129Z"
+    },
+    {
+      "id": "bug-075",
+      "timestamp": "2026-05-16T04:34:51.567Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/cockpit/verification-panel.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:34:51.567Z"
+    },
+    {
+      "id": "bug-076",
+      "timestamp": "2026-05-16T04:35:05.813Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:35:05.813Z"
+    },
+    {
+      "id": "bug-077",
+      "timestamp": "2026-05-16T04:35:38.380Z",
+      "error_message": "Wrong return value",
+      "file": "src/tui/cockpit/state.ts",
+      "root_cause": "Was returning: { summary, trace, verify, context, safety, model }",
+      "fix": "Now returns: { summary, trace, verify, context, safety, model, ",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:35:38.380Z"
+    },
+    {
+      "id": "bug-078",
+      "timestamp": "2026-05-16T04:39:17.970Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/mcp/__tests__/wrapper.test.ts",
+      "root_cause": "Had 'Echo: hello'",
+      "fix": "Changed to 'Echo: hello\\n[MCP: test · read-only]'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:39:17.970Z"
+    },
+    {
+      "id": "bug-079",
+      "timestamp": "2026-05-16T04:44:28.862Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/evidence.ts",
+      "root_cause": "Had './verification.js'",
+      "fix": "Changed to './delivery-gate.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:44:28.862Z"
+    },
+    {
+      "id": "bug-080",
+      "timestamp": "2026-05-16T04:46:40.467Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/agent/turn-harness.ts",
+      "root_cause": "6 lines replaced/restructured",
+      "fix": "Rewrote 18→23 lines (6 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:46:40.467Z"
+    },
+    {
+      "id": "bug-081",
+      "timestamp": "2026-05-16T04:46:56.227Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:46:56.227Z"
+    },
+    {
+      "id": "bug-082",
+      "timestamp": "2026-05-16T04:47:53.773Z",
+      "error_message": "Type error",
+      "file": "src/agent/impact-hint.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:47:53.773Z"
+    },
+    {
+      "id": "bug-083",
+      "timestamp": "2026-05-16T04:48:27.711Z",
+      "error_message": "Wrong return value",
+      "file": "src/mcp/wrapper.ts",
+      "root_cause": "Was returning: `mcp__${serverId}__${toolName}`",
+      "fix": "Now returns: `mcp__${safeServerId}__${safeToolName}`",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:48:27.711Z"
+    },
+    {
+      "id": "bug-084",
+      "timestamp": "2026-05-16T04:49:22.634Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:49:22.634Z"
+    },
+    {
+      "id": "bug-085",
+      "timestamp": "2026-05-16T04:55:44.346Z",
+      "error_message": "Incorrect value in code",
+      "file": "docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md",
+      "root_cause": "Had `src/tui/app.tsx`",
+      "fix": "Changed to `src/tui/cockpit/state.ts`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 4,
+      "last_seen": "2026-05-16T04:56:04.726Z"
+    },
+    {
+      "id": "bug-086",
+      "timestamp": "2026-05-16T04:56:27.694Z",
+      "error_message": "Significant refactor of ",
+      "file": "docs/superpowers/specs/2026-05-16-rivet-core-business-gap-review.md",
+      "root_cause": "11 lines replaced/restructured",
+      "fix": "Rewrote 13→13 lines (11 removed) | Also: 1. Cache Safety / Context Layer        已单独安排; 2. Tool Safety + Verification Evidence P0",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T04:56:36.331Z"
+    },
+    {
+      "id": "bug-087",
+      "timestamp": "2026-05-16T04:57:16.668Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/strategy-shift.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:57:16.668Z"
+    },
+    {
+      "id": "bug-088",
+      "timestamp": "2026-05-16T04:57:33.010Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:57:33.010Z"
+    },
+    {
+      "id": "bug-089",
+      "timestamp": "2026-05-16T04:57:53.855Z",
+      "error_message": "Type error",
+      "file": "src/agent/execution-guidance.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T04:57:53.855Z"
+    },
+    {
+      "id": "bug-090",
+      "timestamp": "2026-05-16T04:58:16.905Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/execution-guidance.ts",
+      "root_cause": "Had 'Change the approach before the next tool call.'",
+      "fix": "Changed to 'Use a different approach before the next tool cal",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T04:58:24.111Z"
+    },
+    {
+      "id": "bug-091",
+      "timestamp": "2026-05-16T04:58:20.990Z",
+      "error_message": "Significant refactor of ",
+      "file": "README.md",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 5→6 lines (2 removed) | Also: ├── types.ts       Panel type + PANELS + PANEL_LAB; ├── rail.tsx       CockpitRail tab navigation | Also: - **Evidence delivery gate** — `DeliveryVerificati; - **Repo intelligence** — symbol-index (regex-base | Also: | `summary` (default) | SummaryBar | Live phase, c; | `verify` | VerificationPanel | Files read/modifi",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 4,
+      "last_seen": "2026-05-16T04:59:40.570Z"
+    },
+    {
+      "id": "bug-092",
+      "timestamp": "2026-05-16T04:58:59.366Z",
+      "error_message": "Incorrect value in code",
+      "file": "README.md",
+      "root_cause": "Had `/mcp`",
+      "fix": "Changed to `__`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-16T05:00:58.693Z"
+    },
+    {
+      "id": "bug-093",
+      "timestamp": "2026-05-16T05:01:21.283Z",
+      "error_message": "execution-guidance tests failed after GREEN implementation because anchor-first guidance omitted read_file and different-approach wording expected by plan and compatibility tests.",
+      "file": "src/agent/execution-guidance.ts",
+      "root_cause": "The first guidance message described verification and boundary conditions but did not include explicit read_file recovery wording or the legacy different/alternative wording checked by strategy-shift tests.",
+      "fix": "Updated guidance messages to include read_file target-region recovery and a different approach instruction; reran execution-guidance, strategy-shift, loop tests and typecheck successfully.",
+      "tags": [
+        "test",
+        "strategy-shift",
+        "execution-guidance"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T05:01:21.283Z"
+    },
+    {
+      "id": "bug-094",
+      "timestamp": "2026-05-16T05:01:21.283Z",
+      "error_message": "OpenWolf logging helper failed with command not found: python.",
+      "file": ".wolf/memory.md",
+      "root_cause": "The environment provides node/npm for this project but not a python executable.",
+      "fix": "Re-ran the atomic OpenWolf memory and buglog update with node --input-type=module instead of python.",
+      "tags": [
+        "tooling",
+        "environment",
+        "openwolf"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T05:01:21.283Z"
+    },
+    {
+      "id": "bug-095",
+      "timestamp": "2026-05-16T05:01:28.703Z",
+      "error_message": "Wrong reference: 510 should be 620",
+      "file": "README.md",
+      "root_cause": "Used \"510\" instead of \"620\"",
+      "fix": "Changed 510 → 620",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T05:01:28.703Z"
     }
   ]
 }

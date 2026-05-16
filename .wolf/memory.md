@@ -3,6 +3,12 @@
 > Chronological action log. Hooks and AI append to this file automatically.
 > Old sessions are consolidated by the daemon weekly.
 
+## Session: 2026-05-16 Execution Trust Closure
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 12:55 | Implemented anchor-first execution guidance | src/agent/execution-guidance.ts, strategy-shift.ts, loop.ts, execution-guidance.test.ts | RED missing module confirmed; guidance, strategy-shift delegation, warn injection, blocked message, and success cleanup pass; typecheck clean | ~3500 |
+
 ## Session: 2026-05-15 20:15
 
 | Time | Action | File(s) | Outcome | ~Tokens |
@@ -512,3 +518,234 @@
 | 04:50 | Session end: 30 writes across 21 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 18 reads | ~75316 tok |
 | 04:52 | Session end: 30 writes across 21 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 21 reads | ~78373 tok |
 | 04:52 | Edited docs/analysis/2026-05-15-handoff.md | expanded (+33 lines) | ~518 |
+| 11:59 | Edited src/prompt/volatile.ts | 12→13 lines | ~94 |
+| 11:59 | Edited src/prompt/volatile.ts | added 1 condition(s) | ~75 |
+| 11:59 | Edited src/prompt/engine.ts | 2→3 lines | ~32 |
+| 11:59 | Edited src/prompt/engine.ts | inline fix | ~67 |
+| 11:59 | Edited src/prompt/engine.ts | modified setBehaviorMirror() | ~54 |
+| 11:59 | Edited src/agent/loop.ts | added 1 import(s) | ~54 |
+| 11:59 | Created .superpowers/brainstorm/2026-05-16-rivet-multi-pass-repair-pipeline-fragments.json | — | ~1282 |
+| 11:59 | Created src/tui/cockpit/types.ts | — | ~638 |
+| 11:59 | Edited src/agent/loop.ts | added 1 condition(s) | ~343 |
+| 11:59 | Session end: 40 writes across 24 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 27 reads | ~83446 tok |
+| 12:00 | Edited src/agent/approval-risk.ts | added 2 condition(s) | ~234 |
+| 12:00 | Edited src/agent/__tests__/approval-risk.test.ts | expanded (+24 lines) | ~349 |
+| 12:00 | Created src/tui/cockpit/state.ts | — | ~1288 |
+| 12:00 | Created src/tui/cockpit/rail.tsx | — | ~391 |
+| 12:02 | Created src/tui/cockpit/__tests__/state.test.ts | — | ~1127 |
+| 12:03 | Edited src/tui/cockpit/__tests__/panels.test.ts | 1→2 lines | ~68 |
+| 12:04 | Edited src/tui/cockpit/__tests__/panels.test.ts | inline fix | ~19 |
+| 12:05 | Session end: 47 writes across 30 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 29 reads | ~90663 tok |
+| 12:08 | Session end: 47 writes across 30 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 32 reads | ~96710 tok |
+| 12:09 | Created docs/superpowers/plans/2026-05-16-multi-pass-repair-pipeline.md | — | ~1550 |
+| 12:09 | Session end: 48 writes across 31 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 32 reads | ~98371 tok |
+| 12:10 | Edited docs/superpowers/plans/2026-05-16-multi-pass-repair-pipeline.md | added error handling | ~2317 |
+| 12:12 | Edited docs/superpowers/plans/2026-05-16-multi-pass-repair-pipeline.md | added error handling | ~3578 |
+| 12:13 | Edited docs/superpowers/plans/2026-05-16-multi-pass-repair-pipeline.md | inline fix | ~10 |
+| 12:13 | Edited docs/superpowers/plans/2026-05-16-multi-pass-repair-pipeline.md | 7→7 lines | ~59 |
+| 12:13 | Session end: 52 writes across 31 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 33 reads | ~111724 tok |
+| 12:14 | Created src/agent/repair-pipeline.ts | — | ~346 |
+| 12:15 | Created src/agent/repair-passes.ts | — | ~1019 |
+| 12:15 | Created src/agent/repair-hint.ts | — | ~368 |
+| 12:15 | Session end: 55 writes across 34 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 33 reads | ~113457 tok |
+| 12:15 | Created src/agent/__tests__/repair-pipeline.test.ts | — | ~1683 |
+| 12:16 | Edited src/api/client.ts | added 1 condition(s) | ~107 |
+| 12:16 | Session end: 57 writes across 36 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 33 reads | ~115893 tok |
+| 12:16 | Edited src/api/client.ts | added nullish coalescing | ~116 |
+| 12:16 | Edited src/api/client.ts | added 2 condition(s) | ~319 |
+| 12:17 | Session end: 59 writes across 36 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 33 reads | ~116328 tok |
+| 12:17 | Created src/api/__tests__/schema-gate.test.ts | — | ~205 |
+| 12:17 | Edited src/agent/loop.ts | added 3 import(s) | ~76 |
+| 12:17 | Session end: 61 writes across 37 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 40 reads | ~119836 tok |
+| 12:17 | Edited src/agent/loop.ts | 3→5 lines | ~72 |
+| 12:18 | Edited src/agent/loop.ts | added 2 condition(s) | ~223 |
+| 12:18 | Session end: 63 writes across 37 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 40 reads | ~120131 tok |
+| 12:18 | Session end: 63 writes across 37 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 40 reads | ~120131 tok |
+| 12:18 | Edited src/agent/loop.ts | added 1 condition(s) | ~84 |
+| 12:18 | Edited src/agent/loop.ts | modified catch() | ~70 |
+| 12:18 | Edited src/agent/loop.ts | 3→8 lines | ~99 |
+| 12:18 | Edited src/prompt/engine.ts | 2→3 lines | ~31 |
+| 12:18 | Edited src/prompt/engine.ts | modified setStrategyShift() | ~46 |
+| 12:18 | Edited src/prompt/engine.ts | inline fix | ~76 |
+| 12:18 | Edited src/prompt/volatile.ts | 13→14 lines | ~102 |
+| 12:18 | Edited src/prompt/volatile.ts | added 1 condition(s) | ~51 |
+| 12:19 | Created docs/superpowers/specs/2026-05-16-rivet-p2-model-mcp-repo-intel-design.md | — | ~2643 |
+| 12:19 | Session end: 72 writes across 38 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 40 reads | ~123522 tok |
+| 12:20 | Session end: 72 writes across 38 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 40 reads | ~123522 tok |
+| 12:21 | Created src/model/task-inferrer.ts | — | ~445 |
+| 12:21 | Created src/model/routing-metrics.ts | — | ~261 |
+| 12:21 | Created src/model/__tests__/task-inferrer.test.ts | — | ~583 |
+| 12:21 | Session end: 75 writes across 41 files (intent-extractor.ts, static.test.ts, prewarm.ts, intent-extractor.test.ts, prewarm.test.ts) | 43 reads | ~134859 tok |
+| 12:21 | Created src/model/__tests__/routing-metrics.test.ts | — | ~503 |
+| 12:23 | Created src/agent/impact-hint.ts | — | ~699 |
+| 12:23 | Created src/agent/__tests__/impact-hint.test.ts | — | ~524 |
+| 12:24 | Edited src/agent/import-graph.ts | inline fix | ~28 |
+
+## Session: 2026-05-16 12:25
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 12:25 | Edited src/agent/import-graph.ts | inline fix | ~20 |
+| 12:25 | Edited src/agent/import-graph.ts | 2→2 lines | ~33 |
+| 12:26 | Session end: 2 writes across 1 files (import-graph.ts) | 3 reads | ~1151 tok |
+| 12:26 | Session end: 2 writes across 1 files (import-graph.ts) | 3 reads | ~1163 tok |
+| 12:27 | Created src/agent/impact-hint.ts | — | ~715 |
+| 12:28 | Edited src/agent/evidence.ts | 6→8 lines | ~66 |
+| 12:29 | Edited src/agent/evidence.ts | 6→8 lines | ~60 |
+| 12:29 | Edited src/agent/evidence.ts | modified reset() | ~70 |
+| 12:29 | Edited src/agent/evidence.ts | added 2 condition(s) | ~96 |
+| 12:29 | Edited src/agent/evidence.ts | modified trackVerification() | ~90 |
+| 12:29 | Edited src/agent/loop.ts | added 5 import(s) | ~136 |
+| 12:29 | Edited src/agent/loop.ts | 16→18 lines | ~163 |
+| 12:29 | Edited src/agent/loop.ts | 2→4 lines | ~49 |
+| 12:30 | Edited src/agent/loop.ts | added 3 condition(s) | ~365 |
+| 12:30 | Edited src/prompt/volatile.ts | 3→5 lines | ~36 |
+| 12:30 | Edited src/prompt/engine.ts | modified setRepairHint() | ~92 |
+| 12:30 | Edited src/prompt/engine.ts | 2→4 lines | ~42 |
+| 12:31 | Edited src/prompt/engine.ts | inline fix | ~94 |
+| 12:31 | Created docs/superpowers/specs/2026-05-16-rivet-execution-trust-closure-design.md | — | ~1924 |
+| 12:31 | Edited src/agent/loop.ts | inline fix | ~21 |
+
+## Session: 2026-05-16 12:31
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 12:31 | Edited src/agent/loop.ts | added optional chaining | ~392 |
+| 12:31 | Edited src/agent/loop.ts | modified if() | ~102 |
+| 12:32 | Edited src/agent/loop.ts | 2→3 lines | ~33 |
+| 12:32 | Edited src/agent/loop.ts | modified if() | ~91 |
+| 12:32 | Edited src/agent/loop.ts | added optional chaining | ~42 |
+| 12:34 | Edited src/mcp/types.ts | 7→9 lines | ~68 |
+| 12:34 | Session end: 6 writes across 2 files (loop.ts, types.ts) | 13 reads | ~26458 tok |
+| 12:34 | Edited src/mcp/wrapper.ts | added 1 import(s) | ~38 |
+| 12:34 | Edited src/mcp/wrapper.ts | modified execute() | ~301 |
+| 12:34 | Edited src/tui/cockpit/model-panel.tsx | 9→10 lines | ~61 |
+| 12:34 | Edited src/tui/cockpit/model-panel.tsx | 2→2 lines | ~37 |
+| 12:34 | Edited src/tui/cockpit/model-panel.tsx | CSS: for | ~93 |
+| 12:34 | Edited src/tui/cockpit/verification-panel.tsx | 6→8 lines | ~63 |
+| 12:34 | Created src/tui/cockpit/mcp-panel.tsx | — | ~484 |
+| 12:34 | Edited src/tui/cockpit/verification-panel.tsx | 2→2 lines | ~34 |
+| 12:34 | Edited src/tui/cockpit/verification-panel.tsx | added nullish coalescing | ~128 |
+| 12:34 | Edited src/tui/cockpit/types.ts | 9→10 lines | ~61 |
+| 12:34 | Edited src/tui/cockpit/types.ts | 6→8 lines | ~74 |
+| 12:34 | Edited src/tui/cockpit/state.ts | 3→5 lines | ~48 |
+| 12:35 | Edited src/tui/cockpit/state.ts | 3→4 lines | ~44 |
+| 12:35 | Edited src/tui/app.tsx | inline fix | ~93 |
+| 12:35 | Edited src/tui/app.tsx | added nullish coalescing | ~101 |
+| 12:35 | Edited src/tui/cockpit/__tests__/state.test.ts | inline fix | ~55 |
+| 12:35 | Edited src/tui/cockpit/types.ts | 12→13 lines | ~109 |
+| 12:35 | Edited src/tui/cockpit/__tests__/state.test.ts | 6→8 lines | ~83 |
+| 12:35 | Edited src/tui/cockpit/types.ts | 9→10 lines | ~55 |
+| 12:35 | Created docs/superpowers/plans/2026-05-16-rivet-execution-trust-closure-implementation.md | — | ~10673 |
+| 12:35 | Edited src/tui/cockpit/state.ts | expanded (+6 lines) | ~72 |
+| 12:35 | Edited src/tui/cockpit/state.ts | 9→10 lines | ~95 |
+| 12:36 | Edited src/tui/cockpit/index.ts | 8→9 lines | ~138 |
+| 12:36 | Edited src/tui/app.tsx | inline fix | ~37 |
+| 12:36 | Edited src/tui/app.tsx | 1→2 lines | ~142 |
+| 12:37 | Created execution trust closure docs | docs/superpowers/specs/2026-05-16-rivet-execution-trust-closure-design.md, docs/superpowers/plans/2026-05-16-rivet-execution-trust-closure-implementation.md | captured Telemetry→Diagnosis→Guidance/Enforcement→Verification closure and TDD implementation plan | ~12500 |
+| 12:38 | Edited src/agent/__tests__/loop-evidence.test.ts | modified snapshotEvidence() | ~102 |
+| 12:39 | Session end: 33 writes across 13 files (loop.ts, types.ts, wrapper.ts, model-panel.tsx, verification-panel.tsx) | 17 reads | ~49327 tok |
+| 12:39 | Edited src/mcp/__tests__/wrapper.test.ts | 2→2 lines | ~34 |
+| 12:41 | Created docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | — | ~1740 |
+| 12:41 | Session end: 35 writes across 15 files (loop.ts, types.ts, wrapper.ts, model-panel.tsx, verification-panel.tsx) | 18 reads | ~52596 tok |
+| 12:42 | Edited README.md | expanded (+6 lines) | ~181 |
+| 12:42 | Edited README.md | 1→2 lines | ~57 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~9 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~6 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | 6→6 lines | ~44 |
+| 12:43 | Created src/agent/__tests__/delivery-gate.test.ts | — | ~676 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~7 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~6 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~8 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | 6→6 lines | ~32 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~6 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~7 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~8 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~7 |
+| 12:43 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~6 |
+| 12:44 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~6 |
+| 12:44 | Created src/agent/delivery-gate.ts | — | ~641 |
+| 12:44 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~9 |
+| 12:44 | Edited docs/superpowers/plans/2026-05-16-rivet-cockpit-capability-ledger.md | inline fix | ~9 |
+| 12:44 | Edited src/agent/evidence.ts | added 1 import(s) | ~59 |
+| 12:44 | Edited src/agent/evidence.ts | added 2 condition(s) | ~211 |
+| 12:45 | Session end: 55 writes across 20 files (loop.ts, types.ts, wrapper.ts, model-panel.tsx, verification-panel.tsx) | 39 reads | ~75594 tok |
+| 12:45 | Created src/agent/__tests__/retry-policy.test.ts | — | ~457 |
+| 12:46 | Created src/agent/retry-policy.ts | — | ~428 |
+| 12:46 | Edited src/agent/turn-harness.ts | added 1 import(s) | ~56 |
+| 12:46 | Edited src/agent/turn-harness.ts | 2→3 lines | ~26 |
+| 12:46 | Edited src/agent/turn-harness.ts | added 1 condition(s) | ~247 |
+| 12:46 | Edited src/agent/loop.ts | added optional chaining | ~46 |
+| 12:47 | Edited src/agent/__tests__/turn-harness.test.ts | 2→3 lines | ~20 |
+
+## Session: 2026-05-16 12:47
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 12:47 | Edited src/agent/__tests__/turn-harness.test.ts | 2→3 lines | ~35 |
+| 12:47 | Edited src/agent/import-graph.ts | modified getReverseDeps() | ~71 |
+| 12:47 | Edited src/agent/__tests__/turn-harness.test.ts | 2→3 lines | ~21 |
+| 12:47 | Edited src/agent/impact-hint.ts | 1→2 lines | ~38 |
+| 12:47 | Edited src/agent/__tests__/turn-harness.test.ts | 2→3 lines | ~20 |
+| 12:48 | Edited src/agent/impact-hint.ts | inline fix | ~22 |
+| 12:48 | Edited src/agent/impact-hint.ts | modified relative() | ~39 |
+| 12:48 | Edited src/agent/__tests__/turn-harness.test.ts | 2→3 lines | ~20 |
+| 12:48 | Edited src/agent/impact-hint.ts | 2→2 lines | ~34 |
+| 12:48 | Edited src/mcp/wrapper.ts | modified mcpToolName() | ~67 |
+| 12:48 | Edited src/agent/__tests__/turn-harness.test.ts | 2→3 lines | ~34 |
+| 12:48 | Edited src/prompt/volatile.ts | modified if() | ~20 |
+| 12:49 | Edited src/agent/loop.ts | added error handling | ~401 |
+| 12:49 | Session end: 13 writes across 6 files (turn-harness.test.ts, import-graph.ts, impact-hint.ts, wrapper.ts, volatile.ts) | 28 reads | ~34203 tok |
+| 12:50 | Edited src/agent/loop.ts | inline fix | ~20 |
+| 12:50 | Edited src/agent/loop.ts | inline fix | ~25 |
+| 12:51 | Session end: 15 writes across 6 files (turn-harness.test.ts, import-graph.ts, impact-hint.ts, wrapper.ts, volatile.ts) | 46 reads | ~54215 tok |
+| 12:51 | Session end: 15 writes across 6 files (turn-harness.test.ts, import-graph.ts, impact-hint.ts, wrapper.ts, volatile.ts) | 46 reads | ~54215 tok |
+| 12:51 | Session end: 15 writes across 6 files (turn-harness.test.ts, import-graph.ts, impact-hint.ts, wrapper.ts, volatile.ts) | 48 reads | ~54700 tok |
+
+## Session: 2026-05-16 12:54
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 12:55 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~46 |
+| 12:55 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~90 |
+| 12:55 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~102 |
+| 12:55 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | inline fix | ~83 |
+| 12:55 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | "CLAUDE.md" → "specs/...-p2-model-mcp-re" | ~101 |
+| 12:55 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | "specs/...-core-business-g" → "specs/...-p2-model-mcp-re" | ~98 |
+| 12:56 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | "src/repo/*" → "specs/...-p2-model-mcp-re" | ~93 |
+| 12:56 | Edited docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md | 4→4 lines | ~110 |
+| 12:56 | Edited docs/superpowers/specs/2026-05-16-rivet-core-business-gap-review.md | 13→13 lines | ~335 |
+| 12:56 | Created src/agent/__tests__/execution-guidance.test.ts | — | ~473 |
+| 12:56 | Edited docs/superpowers/specs/2026-05-16-rivet-core-business-gap-review.md | 13→13 lines | ~159 |
+| 12:56 | Edited README.md | 3→3 lines | ~246 |
+| 12:56 | Edited README.md | 2→3 lines | ~64 |
+| 12:56 | Created src/agent/execution-guidance.ts | — | ~933 |
+| 12:57 | Edited README.md | 2→3 lines | ~66 |
+| 12:57 | Edited README.md | 1→3 lines | ~55 |
+| 12:57 | Created .superpowers/brainstorm/2026-05-16-rivet-pastel-aesthetic-performance-memory-fragments.json | — | ~930 |
+| 12:57 | Edited README.md | 2→5 lines | ~89 |
+| 12:57 | Edited src/agent/strategy-shift.ts | added optional chaining | ~103 |
+| 12:57 | Edited README.md | 5→2 lines | ~34 |
+| 12:57 | Edited src/agent/loop.ts | added nullish coalescing | ~288 |
+| 12:57 | Created docs/superpowers/specs/2026-05-16-rivet-pastel-aesthetic-performance-memory-design.md | — | ~984 |
+| 12:57 | Edited README.md | 1→4 lines | ~88 |
+| 12:57 | Session end: 23 writes across 9 files (2026-05-16-rivet-core-capability-ledger.md, 2026-05-16-rivet-core-business-gap-review.md, execution-guidance.test.ts, README.md, execution-guidance.ts) | 18 reads | ~53381 tok |
+| 12:57 | Edited src/agent/execution-guidance.ts | added 1 condition(s) | ~372 |
+| 12:58 | Edited src/agent/execution-guidance.ts | "Change the approach befor" → "Use a different approach " | ~33 |
+| 12:58 | Edited README.md | 5→6 lines | ~127 |
+| 12:58 | Edited src/agent/execution-guidance.ts | "Change to a different app" → "Use a different approach " | ~29 |
+| 12:58 | Edited src/agent/loop.ts | modified if() | ~54 |
+| 12:58 | Edited README.md | 10→12 lines | ~266 |
+| 12:58 | Edited README.md | inline fix | ~80 |
+| 12:59 | Edited README.md | inline fix | ~68 |
+| 12:59 | Edited README.md | 3→5 lines | ~335 |
+| 12:59 | Edited README.md | 9→10 lines | ~209 |
+| 13:00 | Edited README.md | 1→2 lines | ~148 |
+| 13:00 | Edited README.md | expanded (+23 lines) | ~470 |
+| 13:00 | Edited README.md | "/cockpit [summary\|trace\" → "/cockpit [summary\|trace\" | ~34 |
+| 13:01 | Edited README.md | 11→13 lines | ~414 |
+| 13:01 | Edited README.md | 3→3 lines | ~38 |
+| 13:02 | Created src/agent/__tests__/worker-evidence.test.ts | — | ~579 |
+| 13:02 | Session end: 39 writes across 10 files (2026-05-16-rivet-core-capability-ledger.md, 2026-05-16-rivet-core-business-gap-review.md, execution-guidance.test.ts, README.md, execution-guidance.ts) | 20 reads | ~60595 tok |
+| 13:02 | Created src/agent/worker-evidence.ts | — | ~385 |
+| 13:03 | Edited src/agent/aggregation.ts | modified aggregateResults() | ~388 |

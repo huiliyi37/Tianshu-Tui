@@ -1,0 +1,47 @@
+{
+  "topic": "rivet-glanceable-cockpit-techstyle",
+  "date": "2026-05-16",
+  "hypothesis": "Sci-fi visual style and long-task capability converge when the TUI uses minimal high-contrast visual elements for status communication, designed for 'glance-back' moments rather than continuous monitoring.",
+  "phases": {
+    "diverge": {
+      "candidates": [
+        { "id": "V1", "niche": "enhanced-status-bar", "oneLiner": "Add token/cost/cache bar to existing TUI bottom", "status": "extinct" },
+        { "id": "V2", "niche": "phase-engine", "oneLiner": "Model agent execution as plan/code/test/verify phases, TUI organized around phases", "status": "survived" },
+        { "id": "V3", "niche": "glanceable-cockpit", "oneLiner": "3-line summary bar for 2-second context recovery on return", "status": "survived-winner" },
+        { "id": "V4", "niche": "dual-mode-tui", "oneLiner": "Minimal mode + full cockpit mode, user toggles", "status": "extinct" }
+      ]
+    },
+    "select": {
+      "extinctions": [
+        { "id": "V1", "reason": "Causal chain broken: seeing numbers does not equal capability improvement", "salvagedTraits": ["token progress bar as sub-element of V3", "colored tool cards"] },
+        { "id": "V4", "reason": "Depends on user actively switching modes (unvalidated assumption)", "salvagedTraits": ["minimal default concept → V3 collapsed state", "on-demand expand → /cockpit command"] }
+      ],
+      "survivors": [
+        { "id": "V3", "advantage": "Directly addresses users leaving and returning (validated by research)", "rank": 1 },
+        { "id": "V2", "advantage": "Phase awareness helps users decide when to intervene", "rank": 2 }
+      ]
+    },
+    "adapt": {
+      "finalCandidate": "V3+V2 fusion: V2 as data layer (PhaseTracker), V3 as display layer (SummaryBar)",
+      "convergenceInsight": "Long-task TUI value is not 'show more info' but 'in the moment attention returns, convey critical state with minimal visual elements'",
+      "designPhilosophy": "2-second context recovery"
+    }
+  },
+  "counterEvidence": {
+    "premise1_users_look": "ASSUMPTION - developers context-switch during 10+ min tasks. Design for glanceability not continuous monitoring.",
+    "premise2_truecolor": "STATUS - ~70-80% actual coverage due to tmux/SSH. Mandatory 256-color fallback.",
+    "premise3_performance": "FACT - Ink 6 has flicker risk. Limit live area, throttle updates.",
+    "premise4_dashboard": "CONVENTION - preference split. Only show ACTIONABLE metrics.",
+    "premise5_cache_display": "ASSUMPTION - cache hit rate not actionable for most users. Demote to /debug."
+  },
+  "fragments": [
+    { "text": "eDEX-UI's core visual: real-time data panels + cyberpunk palette on dark bg", "fragmentType": "observation", "source": "scout-github-tui" },
+    { "text": "Ink 6 Static component = write-once scrollback. All animation must be in live area only.", "fragmentType": "mechanism", "source": "scout-ink-visual" },
+    { "text": "gradient-string outputs ANSI sequences compatible with Ink Text component", "fragmentType": "mechanism", "source": "scout-ink-visual" },
+    { "text": "Braille sparklines (U+2800-28FF) give 2x resolution per character cell", "fragmentType": "mechanism", "source": "scout-ink-visual" },
+    { "text": "Dashboard fatigue: when everything is highlighted, nothing is. htop succeeds because every element is actionable.", "fragmentType": "contradiction", "source": "scout-counter" },
+    { "text": "Context pressure is a threshold event (80%), not a continuous visualization need", "fragmentType": "observation", "source": "scout-counter" },
+    { "text": "Error classification (retryable/recoverable/blocking) reduces cognitive load", "fragmentType": "mechanism", "source": "scout-long-task-ux" },
+    { "text": "Compaction as visible event: tell user what was PRESERVED, not just that it happened", "fragmentType": "observation", "source": "scout-long-task-ux" }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "topic": "rivet-execution-resilience-layer",
+  "date": "2026-05-16",
+  "hypothesis": "Rivet's core bottleneck is not missing tools but missing execution resilience in the agent loop — the correct fix is a TurnHarness abstraction (not full middleware rewrite) that adds retry, trajectory, and implicit task-state.",
+  "phases": {
+    "diverge": {
+      "candidates": [
+        { "id": "V1", "niche": "parallel-tool-retry", "oneLiner": "Parallel tool execution via isConcurrencySafe() + transient error retry", "status": "partial-extinct" },
+        { "id": "V2", "niche": "pipeline-middleware", "oneLiner": "Full middleware/pipeline rewrite of loop.ts", "status": "extinct" },
+        { "id": "V3", "niche": "harness-trajectory", "oneLiner": "TurnHarness abstraction + trajectory recording for retry and debug", "status": "survived-winner" },
+        { "id": "V4", "niche": "implicit-planning", "oneLiner": "Prefix-cache-safe implicit planning via task-state injection into volatile context", "status": "survived" }
+      ]
+    },
+    "select": {
+      "extinctions": [
+        { "id": "V2", "reason": "Indirect causality — refactoring doesn't directly improve capability; high cost, high regression risk", "salvagedTraits": ["separation of concerns → harness as lightweight extraction", "pluggable extension points → harness hooks"] },
+        { "id": "V1", "reason": "Parallel tool execution depends on unverified DeepSeek multi-tool-use frequency (<5% likely)", "salvagedTraits": ["tool retry logic → integrated into V3 harness", "isConcurrencySafe() → future activation when validated"] }
+      ],
+      "survivors": [
+        { "id": "V3", "advantage": "Clear causality (retry reduces turn waste), co-evolutionary (trajectory drives continuous improvement), directly reduces loop.ts complexity", "rank": 1 },
+        { "id": "V4", "advantage": "Zero API cost planning, leverages existing intent-extractor, prefix-cache-safe", "rank": 2 }
+      ]
+    },
+    "adapt": {
+      "finalCandidate": "V3 + V4 fusion: TurnHarness (execution resilience) + Task State (implicit planning)",
+      "convergenceInsight": "Execution resilience is not about 'what to do after failure' but 'giving the model enough execution state information at every turn to make correct decisions'",
+      "implementationPhases": [
+        { "phase": 1, "action": "Extract TurnHarness from loop.ts + add tool retry for transient errors", "duration": "1 week" },
+        { "phase": 2, "action": "Trajectory recording + task-state extraction + volatile context injection", "duration": "1 week" },
+        { "phase": 3, "action": "Enhanced failure reflexion + A/B validation", "duration": "1 week" }
+      ]
+    }
+  },
+  "fragments": [
+    { "text": "OpenClaw is a gateway-centric always-on platform, not a CLI agent — its patterns are transferable but not its features", "fragmentType": "observation", "source": "scout-openclaw" },
+    { "text": "OpenClaw's AgentHarness decouples execution from orchestration, enabling hot-swap of providers", "fragmentType": "mechanism", "source": "scout-openclaw" },
+    { "text": "OpenClaw trajectory recording is separate from session transcript — enables debug without polluting context", "fragmentType": "mechanism", "source": "scout-openclaw" },
+    { "text": "OpenClaw tool availability expressions: declarative allOf/anyOf conditions eliminate scattered runtime checks", "fragmentType": "mechanism", "source": "scout-openclaw" },
+    { "text": "OpenClaw model fallback with cooldown probes: tracks per-model failure cooldowns, periodically probes recovery", "fragmentType": "mechanism", "source": "scout-openclaw" },
+    { "text": "loop.ts is 411 lines with run() at 240 lines — already a God Method with 8+ orthogonal concerns", "fragmentType": "observation", "source": "scout-counter" },
+    { "text": "DeepSeek V4 multi-tool-use frequency is unverified — parallel tool execution may be <5% utilization", "fragmentType": "risk", "source": "scout-counter" },
+    { "text": "Planning turn breaks prefix cache stability — implicit planning via volatile context injection is cache-safe", "fragmentType": "mechanism", "source": "scout-counter" },
+    { "text": "Reflexion pattern: agent generates self-reflection after failure, retries with reflection as context", "fragmentType": "mechanism", "source": "scout-agent-patterns" },
+    { "text": "Error classification (transient/recoverable/permanent) + graded response is industry best practice", "fragmentType": "mechanism", "source": "scout-agent-patterns" },
+    { "text": "TDD closed loop: write test → run → fail → fix → run → pass — agent as test-driven developer", "fragmentType": "mechanism", "source": "scout-agent-patterns" },
+    { "text": "Existing failure-classifier.ts already classifies 8 failure modes — can be extended to drive retry decisions", "fragmentType": "observation", "source": "scout-rivet-gaps" },
+    { "text": "isConcurrencySafe() interface exists in tool registry but loop.ts never consumes it", "fragmentType": "observation", "source": "scout-rivet-gaps" },
+    { "text": "Checkpoint is per-session single snapshot, not per-tool — cannot precisely rollback one failed tool in parallel scenario", "fragmentType": "risk", "source": "scout-counter" }
+  ]
+}

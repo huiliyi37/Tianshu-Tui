@@ -22,6 +22,7 @@ describe('TurnHarness', () => {
       turn: 1,
       execute: async () => ({ content: 'file content' }),
       classify: () => undefined,
+      isConcurrencySafe: true,
     })
     assert.equal(result.content, 'file content')
     assert.equal(result.isError, false)
@@ -39,6 +40,7 @@ describe('TurnHarness', () => {
       turn: 3,
       execute: async () => ({ content: 'ok' }),
       classify: () => undefined,
+      isConcurrencySafe: true,
     })
     assert.equal(trajectory.getEntries()[0]!.turn, 3)
   })
@@ -58,6 +60,7 @@ describe('TurnHarness', () => {
         return { content: 'ok' }
       },
       classify: (content) => content.includes('ETIMEDOUT') ? 'timeout' : undefined,
+      isConcurrencySafe: true,
     })
     assert.equal(calls, 2)
     assert.equal(result.content, 'ok')
@@ -77,6 +80,7 @@ describe('TurnHarness', () => {
       turn: 1,
       execute: async () => { calls++; return { content: 'Type error TS2345', isError: true } },
       classify: () => 'type_error',
+      isConcurrencySafe: true,
     })
     assert.equal(calls, 1)
     assert.equal(result.isError, true)
@@ -93,6 +97,7 @@ describe('TurnHarness', () => {
       turn: 1,
       execute: async () => ({ content: 'ECONNRESET', isError: true }),
       classify: () => 'timeout',
+      isConcurrencySafe: true,
     })
     assert.equal(result.isError, true)
     assert.ok(result.content.includes('[All 1 retries failed.'))
@@ -110,6 +115,7 @@ describe('TurnHarness', () => {
       turn: 1,
       execute: async () => { calls++; return { content: 'ECONNRESET', isError: true } },
       classify: () => 'timeout',
+      isConcurrencySafe: true,
     })
     assert.equal(calls, 4) // 1 initial + 3 retries
     assert.equal(result.isError, true)
@@ -128,6 +134,7 @@ describe('TurnHarness', () => {
       turn: 1,
       execute: async () => { calls++; return { content: 'timeout', isError: true } },
       classify: () => 'timeout',
+      isConcurrencySafe: true,
     })
     assert.equal(calls, 1)
     assert.equal(result.isError, true)
@@ -149,6 +156,7 @@ describe('TurnHarness', () => {
         return { content: 'all passed' }
       },
       classify: () => 'flaky',
+      isConcurrencySafe: true,
     })
     assert.equal(calls, 2)
     assert.equal(result.retried, true)
@@ -165,6 +173,7 @@ describe('TurnHarness', () => {
       turn: 1,
       execute: async () => ({ content: 'ok' }),
       classify: () => undefined,
+      isConcurrencySafe: true,
     })
     assert.equal(trajectory.getEntries()[0]!.target, 'src/lib/helper.ts')
   })
@@ -183,6 +192,7 @@ describe('TurnHarness', () => {
         return { content: attempts < 3 ? 'Command timed out' : 'ok', isError: attempts < 3 }
       },
       classify: content => content.includes('timed out') ? 'timeout' : undefined,
+      isConcurrencySafe: true,
     })
     assert.equal(attempts, 3) // 1 initial + 2 retries
     assert.equal(result.isError, false)
@@ -200,6 +210,7 @@ describe('TurnHarness', () => {
       turn: 1,
       execute: async () => { attempts++; return { content: 'intermittent failure', isError: true } },
       classify: () => 'flaky',
+      isConcurrencySafe: true,
     })
     assert.equal(attempts, 1) // flaky is transient but not in retryableClasses
     assert.equal(result.isError, true)
@@ -217,6 +228,7 @@ describe('TurnHarness', () => {
       turn: 1,
       execute: async () => ({ content: 'ok' }),
       classify: () => undefined,
+      isConcurrencySafe: true,
     })
     assert.ok(trajectory.getEntries()[0]!.target.length <= 50)
   })

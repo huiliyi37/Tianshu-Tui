@@ -1,17 +1,8 @@
 import type { AggregationPolicy, WorkerResult } from './work-order.js'
+import { verifyWorkerEvidence } from './worker-evidence.js'
 
 export function aggregateResults(results: WorkerResult[], policy: AggregationPolicy): WorkerResult[] {
-  // Evidence gate: block implementation results that changed files without verified evidence
-  const gated = results.map(r => {
-    if (r.changedFiles.length > 0 && r.evidenceStatus !== 'verified') {
-      return {
-        ...r,
-        status: 'blocked' as const,
-        risks: [...r.risks, `unverified: ${r.changedFiles.length} file(s) changed without verified evidence`],
-      }
-    }
-    return r
-  })
+  const gated = results.map(verifyWorkerEvidence)
 
   if (policy === 'primary_decides') return gated
 

@@ -1,0 +1,47 @@
+{
+  "topic": "rivet-xml-protocol-speculative-engine",
+  "date": "2026-05-16",
+  "hypothesis": "XML restructuring of system prompt alone is low-gain; real value is XML as automation infrastructure enabling section-level operations, intent extraction, and speculative pre-warming.",
+  "phases": {
+    "diverge": {
+      "candidates": [
+        { "id": "V1", "niche": "xml-system-prompt", "oneLiner": "Restructure BASE_PROMPT from Markdown to XML sections", "status": "survived" },
+        { "id": "V2", "niche": "full-stack-xml-protocol", "oneLiner": "XML-ify all agent communication: tool results, memory, work orders", "status": "extinct" },
+        { "id": "V3", "niche": "xml-driven-state-machine", "oneLiner": "Model outputs XML tags to declare execution intent, agent routes automatically", "status": "extinct" },
+        { "id": "V4", "niche": "hybrid-protocol-speculative", "oneLiner": "XML protocol layer + intent extraction from streaming for speculative pre-warming", "status": "survived-winner" }
+      ]
+    },
+    "select": {
+      "extinctions": [
+        { "id": "V3", "reason": "Depends on DeepSeek obeying output XML schema — unvalidated assumption, no constrained decoding API", "salvagedTraits": ["heuristic intent extraction from text (not requiring XML output)"] },
+        { "id": "V2", "reason": "Over-engineering: all tools need refactoring, model already parses text tool results fine", "salvagedTraits": ["XML-wrap microcompact summaries only (not raw tool output)"] }
+      ],
+      "survivors": [
+        { "id": "V4", "advantage": "Solves both XML protocol and performance goals; 25-40% latency reduction measurable", "rank": 1 },
+        { "id": "V1", "advantage": "Low cost, low risk, cross-model compatibility foundation", "rank": 2 }
+      ]
+    },
+    "adapt": {
+      "finalCandidate": "V1 as Phase 1 foundation + V4 speculative engine as Phase 3",
+      "convergenceInsight": "XML value is not 'model likes it better' but 'structured prompt enables agent-side automation (section diff, intent extraction, pre-warming)'",
+      "implementationPhases": [
+        { "phase": 1, "action": "XML-ify system prompt + remove duplicate tool summary", "duration": "3 days" },
+        { "phase": 2, "action": "Enhance volatile context with <tool-history> and <session-memory> XML", "duration": "1 week" },
+        { "phase": 3, "action": "Speculative pre-warming engine driven by PhaseTracker + intent extraction", "duration": "1-2 weeks" },
+        { "phase": 4, "action": "Cross-model validation (Claude + Qwen)", "duration": "1 week" }
+      ]
+    }
+  },
+  "fragments": [
+    { "text": "DeepSeek has no special preference for XML vs Markdown — clear section boundaries matter, not format", "fragmentType": "observation", "source": "scout-xml-prompt" },
+    { "text": "Claude Code uses XML sections: identity, rules, capabilities, response_style, examples", "fragmentType": "mechanism", "source": "scout-xml-prompt" },
+    { "text": "Speculative pre-warming reduces end-to-end latency by 25-40% without increasing token cost", "fragmentType": "mechanism", "source": "scout-orchestration" },
+    { "text": "Parallel tool execution reduces latency by 40-70%", "fragmentType": "mechanism", "source": "scout-orchestration" },
+    { "text": "Token-budget circuit breakers prevent retry storms (retry budgets should be token-denominated not count-denominated)", "fragmentType": "mechanism", "source": "scout-orchestration" },
+    { "text": "Rivet volatile.ts already uses XML; system prompt is the only Markdown piece left", "fragmentType": "observation", "source": "scout-rivet-prompt" },
+    { "text": "Duplicated tool summary in system prompt wastes ~150 tokens per turn", "fragmentType": "observation", "source": "scout-rivet-prompt" },
+    { "text": "TencentDB-Agent-Memory: layered memory L0-L3 with symbolic short-term (Mermaid canvas) + offload pattern", "fragmentType": "mechanism", "source": "external" },
+    { "text": "XML nesting should be limited to 2 levels for DeepSeek", "fragmentType": "risk", "source": "scout-xml-prompt" },
+    { "text": "Cache fingerprint is format-agnostic (SHA-256 of final string) — XML migration is one-time cost", "fragmentType": "mechanism", "source": "scout-rivet-prompt" }
+  ]
+}

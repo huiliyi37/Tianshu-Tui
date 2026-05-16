@@ -1,0 +1,51 @@
+{
+  "topic": "rivet-attention-anchor-dispersal",
+  "date": "2026-05-16",
+  "hypothesis": "The solution to attention collapse is not randomness but mandatory cheap analysis — inject always-on context widening (git log + trajectory mirror) that forces the model to passively see global state, plus triggered behavior awareness when repetition is detected.",
+  "phases": {
+    "diverge": {
+      "candidates": [
+        { "id": "V1", "niche": "passive-context-widening", "oneLiner": "Inject git log + trajectory health into volatile context every turn", "status": "survived" },
+        { "id": "V2", "niche": "complexity-gate", "oneLiner": "Complexity detector triggers forced exploration prompt in tool results", "status": "partial-extinct" },
+        { "id": "V3", "niche": "trajectory-mirror", "oneLiner": "Detect repetition patterns and tell model 'you are repeating' via behavior-mirror block", "status": "survived-winner" },
+        { "id": "V4", "niche": "stochastic-injection", "oneLiner": "Randomly inject unrelated file paths as peripheral stimulus every 3 turns", "status": "extinct" }
+      ]
+    },
+    "select": {
+      "extinctions": [
+        { "id": "V4", "reason": "Causal chain broken: human defocused attention ≠ transformer attention. Random paths more likely to mislead than inspire.", "salvagedTraits": ["periodic trigger concept → V3 activation frequency", "low-cost exploration budget concept → git log as always-on 1% cost"] },
+        { "id": "V2", "reason": "Pure text warnings have limited enforcement on DeepSeek. But complexity detection logic survives as trait.", "salvagedTraits": ["complexity threshold → V3 only activates after turn 3", "forced planning output → mirror uses questions not commands"] }
+      ],
+      "survivors": [
+        { "id": "V1", "advantage": "Zero-cost passive global awareness, leverages existing volatile-git.ts", "rank": 2 },
+        { "id": "V3", "advantage": "Active behavior awareness via trajectory pattern detection, proven in CBT and Claude Code", "rank": 1 }
+      ]
+    },
+    "adapt": {
+      "finalCandidate": "V1 + V3 fusion: 3-layer defense (always-on git log + triggered mirror + persistent decisions)",
+      "convergenceInsight": "Models don't need to be TOLD what to do, they need to be SHOWN what they are doing. Information-driven behavior change > command-driven behavior change.",
+      "implementationPhases": [
+        { "phase": 1, "action": "Git log injection + behavior mirror detection", "duration": "3 days" },
+        { "phase": 2, "action": "ContextAnchor activation + decision persistence", "duration": "3 days" },
+        { "phase": 3, "action": "A/B validation + threshold tuning", "duration": "3 days" }
+      ]
+    }
+  },
+  "fragments": [
+    { "text": "Defocused attention bidirectionally causes creativity — doing divergent tasks widens attention, and wider attention improves divergent thinking", "fragmentType": "mechanism", "source": "scout-neuro" },
+    { "text": "Incubation effect is strongest on HARD problems and when subject KNOWS they will return to the problem", "fragmentType": "mechanism", "source": "scout-neuro" },
+    { "text": "Temporal straightening: visual system linearizes neural trajectories for easier prediction. INVERSE: introduce controlled curvature to prevent premature convergence", "fragmentType": "mechanism", "source": "scout-neuro" },
+    { "text": "AlphaZero temperature schedule: high early (exploration), low late (exploitation). User instructions force low temperature from token 1", "fragmentType": "mechanism", "source": "scout-neuro" },
+    { "text": "UCB exploration term: even the best-looking option must share attention with ignored alternatives. High confidence = MORE reason to explore, not less", "fragmentType": "contradiction", "source": "scout-neuro" },
+    { "text": "Bet hedging: bacteria maintain 1-5% persister cells at ALL TIMES, not triggered by failure. Stochastic switching without environmental signal", "fragmentType": "mechanism", "source": "scout-immune" },
+    { "text": "Marginal value theorem: leave current patch when marginal return drops below environment average, NOT when it hits zero", "fragmentType": "mechanism", "source": "scout-immune" },
+    { "text": "Most dangerous moment is when everything is going well — success may mean over-adaptation to current environment", "fragmentType": "contradiction", "source": "scout-immune" },
+    { "text": "Compiler analysis passes are CHEAP and MANDATORY — they don't modify code, just collect structural info. Transformation is expensive.", "fragmentType": "analogy", "source": "scout-compiler" },
+    { "text": "LICM hoists repeated computations out of loops. Analogy: hoist repeated local fixes into one-time architecture change", "fragmentType": "analogy", "source": "scout-compiler" },
+    { "text": "Rivet volatile-git.ts only gets branch + status --short. NO git log. Model cannot see recent project history.", "fragmentType": "observation", "source": "scout-rivet-prompt" },
+    { "text": "ContextAnchor type defined with decision/error/preference kinds but anchors array is ALWAYS empty in ledger creation", "fragmentType": "observation", "source": "scout-rivet-prompt" },
+    { "text": "Trajectory is not directly visible to model — only indirectly via task-state's 5 completed entries", "fragmentType": "observation", "source": "scout-rivet-prompt" },
+    { "text": "System prompt rules (verify-first, before-implementing) are pure text with no runtime enforcement mechanism", "fragmentType": "risk", "source": "scout-rivet-prompt" },
+    { "text": "Simulated annealing reheating: when stuck in local optimum, temporarily increase randomness. Detection signal: K consecutive steps without improvement", "fragmentType": "mechanism", "source": "scout-immune" }
+  ]
+}
