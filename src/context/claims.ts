@@ -171,10 +171,13 @@ export function isPromptEligibleClaim(claim: ContextClaim, now = Date.now()): bo
   return claim.status === 'active' || claim.status === 'durable_candidate' || claim.status === 'durable'
 }
 
+export const MAX_PROMPT_CLAIMS = 20
+
 export function renderActiveClaimsBlock(claims: ContextClaim[]): string {
   const active = claims
     .filter(isPromptEligibleClaim)
     .sort((a, b) => b.fitness - a.fitness || b.confidence - a.confidence || a.createdAt - b.createdAt)
+    .slice(0, MAX_PROMPT_CLAIMS)
 
   if (active.length === 0) return ''
 

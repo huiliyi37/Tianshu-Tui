@@ -140,6 +140,25 @@ export class ContextClaimStore {
     return readFileSync(this.path, 'utf-8')
   }
 
+  static loadDurableClaims(dir: string, sessionId: string): ContextClaim[] {
+    const filePath = join(dir, `${sessionId}.claims.jsonl`)
+    if (!existsSync(filePath)) return []
+    const lines = readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim().length > 0)
+    const claims = new Map<string, ContextClaim>()
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line) as ContextClaimEvent
+        if (event.type === 'claim_proposed' && !claims.has(event.claim.id)) {
+          claims.set(event.claim.id, event.claim)
+        } else if (event.type === 'claim_status_changed') {
+          const claim = claims.get(event.claimId)
+          if (claim) claims.set(event.claimId, { ...claim, status: event.status })
+        }
+      } catch { /* skip malformed lines */ }
+    }
+    return [...claims.values()].filter(c => c.status === 'durable')
+  }
+
   private readEvents(): ContextClaimEvent[] {
     if (!existsSync(this.path)) return []
     return readFileSync(this.path, 'utf-8')

@@ -169,3 +169,29 @@ test('renders only prompt eligible claims and escapes XML-sensitive text', () =>
   assert.match(block, /Use &lt;claims&gt; &amp; never trust &quot;raw&quot; XML/)
   assert.doesNotMatch(block, /stale text/)
 })
+
+test('renderActiveClaimsBlock caps at MAX_PROMPT_CLAIMS and sorts by fitness', () => {
+  const claims: ContextClaim[] = Array.from({ length: 30 }, (_, i) => ({
+    id: `c_${i}`,
+    kind: 'file_observation' as const,
+    scope: 'session' as const,
+    status: 'active' as const,
+    text: `Claim ${i}`,
+    confidence: 0.7,
+    fitness: i,
+    source: { actor: 'tool' as const, sessionId: 's', turn: 1, eventId: `e${i}` },
+    evidence: [{ id: `ev${i}`, kind: 'tool_result' as const, summary: `Claim ${i}`, createdAt: 1 }],
+    counterevidence: [],
+    consumers: [],
+    createdAt: 1,
+    lastUsedAt: 1,
+    tags: [],
+  }))
+
+  const block = renderActiveClaimsBlock(claims)
+  const claimCount = (block.match(/<claim /g) ?? []).length
+  assert.ok(claimCount <= 20, `expected at most 20 claims, got ${claimCount}`)
+  // Highest fitness claims should be included
+  assert.ok(block.includes('Claim 29'))
+  assert.ok(!block.includes('Claim 0'))
+})

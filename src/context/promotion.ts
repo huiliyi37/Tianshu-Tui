@@ -10,11 +10,22 @@ export interface ClaimStatusCounts {
 }
 
 export function evaluatePromotion(claim: ContextClaim, now = Date.now()): ContextClaimStatus | null {
-  if (claim.status !== 'active') return null
   if (!isPromptEligibleClaim(claim, now)) return null
   if (claim.counterevidence.length > 0) return null
-  if (new Set(claim.consumers.map(c => c.id)).size < 3) return null
-  return 'durable_candidate'
+
+  if (claim.status === 'active') {
+    if (new Set(claim.consumers.map(c => c.id)).size < 3) return null
+    return 'durable_candidate'
+  }
+
+  if (claim.status === 'durable_candidate') {
+    const age = now - claim.createdAt
+    if (age < 10 * 60_000) return null
+    if (new Set(claim.consumers.map(c => c.id)).size < 5) return null
+    return 'durable'
+  }
+
+  return null
 }
 
 export function claimHasFileEvidence(claim: ContextClaim, path: string): boolean {

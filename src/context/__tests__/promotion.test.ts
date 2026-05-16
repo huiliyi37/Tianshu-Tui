@@ -86,6 +86,46 @@ describe('evaluatePromotion', () => {
       ],
     }), 4), null)
   })
+
+  it('promotes durable_candidate to durable after 5+ consumers and 10+ minutes', () => {
+    const result = evaluatePromotion(claim({
+      status: 'durable_candidate',
+      consumers: Array.from({ length: 5 }, (_, i) => ({ id: `c${i}`, kind: 'prompt' as const, usedAt: Date.now() - 600_001 })),
+      createdAt: Date.now() - 600_001,
+      counterevidence: [],
+    }))
+    assert.equal(result, 'durable')
+  })
+
+  it('does not promote durable_candidate with fewer than 5 consumers', () => {
+    const result = evaluatePromotion(claim({
+      status: 'durable_candidate',
+      consumers: [{ id: 'c1', kind: 'prompt' as const, usedAt: Date.now() }],
+      createdAt: Date.now() - 600_001,
+      counterevidence: [],
+    }))
+    assert.equal(result, null)
+  })
+
+  it('does not promote durable_candidate younger than 10 minutes', () => {
+    const result = evaluatePromotion(claim({
+      status: 'durable_candidate',
+      consumers: Array.from({ length: 5 }, (_, i) => ({ id: `c${i}`, kind: 'prompt' as const, usedAt: Date.now() })),
+      createdAt: Date.now() - 100,
+      counterevidence: [],
+    }))
+    assert.equal(result, null)
+  })
+
+  it('does not promote durable_candidate with counterevidence', () => {
+    const result = evaluatePromotion(claim({
+      status: 'durable_candidate',
+      consumers: Array.from({ length: 5 }, (_, i) => ({ id: `c${i}`, kind: 'prompt' as const, usedAt: Date.now() - 600_001 })),
+      createdAt: Date.now() - 600_001,
+      counterevidence: [{ id: 'ce1', kind: 'tool_result', summary: 'contradicted', createdAt: 2 }],
+    }))
+    assert.equal(result, null)
+  })
 })
 
 describe('claimHasFileEvidence', () => {

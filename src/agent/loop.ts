@@ -17,10 +17,13 @@ import { createContextLedger } from '../context/ledger.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import { AnchorRegistry } from '../context/anchor-registry.js'
 import { claimProposalFromAnchor } from '../context/claims.js'
+import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import { EvidenceTracker } from './evidence.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
+import { createAntibodyProposal } from '../context/antibody.js'
+import { detectConflicts } from '../context/conflict-detect.js'
 import { extractTaskState } from './task-state.js'
 import { detectMirror } from './behavior-mirror.js'
 import { extractDecisions } from './decision-anchor.js'
@@ -261,6 +264,17 @@ export class AgentLoop {
     }
 
     this.config.contextClaimStore.promoteEligibleClaims()
+
+    // Mark conflicting file-evidence claims
+    const allClaims = this.config.contextClaimStore.listClaims()
+    const conflicts = detectConflicts(allClaims)
+    for (const conflict of conflicts) {
+      this.config.contextClaimStore.updateClaimStatus(
+        conflict.olderClaimId, 'conflicted',
+        `superseded by ${conflict.newerClaimId} on ${conflict.sharedPath}`,
+      )
+    }
+
     const activeClaims = this.config.contextClaimStore.listActiveClaims()
     const usedAt = Date.now()
     const consumerId = `turn-${this.session.getTurnCount()}:prompt`
@@ -613,12 +627,35 @@ ${check.formatted}`
               // Record tool history for volatile context injection
               this.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content)
 
+              // Extract claims from tool results
+              if (this.config.contextClaimStore && this.config.sessionId) {
+                const proposals = extractClaimsFromToolResult(
+                  { toolName: tu.name, input: tu.input as Record<string, unknown>, result: harnessResult.content, isError: harnessResult.isError },
+                  { sessionId: this.config.sessionId, turn: this.session.getTurnCount(), eventId: `turn-${this.session.getTurnCount()}:${tu.name}:${tu.id}` },
+                )
+                for (const proposal of proposals) {
+                  this.config.contextClaimStore.propose(proposal)
+                }
+              }
+
               if (!harnessResult.isError) {
                 this.repairHintTracker.recordSuccess(tu.name)
                 this.config.promptEngine.setStrategyShift(null)
               } else {
                 const failureClass = classifyFailure(harnessResult.content)
                 this.repairHintTracker.recordFailure(tu.name, failureClass.class)
+
+                // Generate antibody claim for classifiable failures
+                if (this.config.contextClaimStore && this.config.sessionId && failureClass.class !== 'unknown') {
+                  const proposal = createAntibodyProposal(failureClass, {
+                    toolName: tu.name,
+                    command: typeof tu.input.command === 'string' ? tu.input.command : undefined,
+                    sessionId: this.config.sessionId,
+                    turn: this.session.getTurnCount(),
+                    eventId: `turn-${this.session.getTurnCount()}:${tu.name}:${tu.id}`,
+                  })
+                  this.config.contextClaimStore.propose(proposal)
+                }
               }
 
               // Invalidate prewarm cache after writes (canonical path)
@@ -730,6 +767,7 @@ ${check.formatted}`
           }
 
           this.refreshLedger()
+          this.config.contextClaimStore?.promoteEligibleClaims()
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
           continue
         }

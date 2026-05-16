@@ -241,3 +241,31 @@ test('SessionPersist creates a claim store for the current session id', () => {
 
   assert.match(store.path, /session-claims-test\.claims\.jsonl$/)
 })
+
+test('loadDurableClaims returns only durable claims from a session file', () => {
+  const dir = tempDir()
+  try {
+    const store = new ContextClaimStore(dir, 'session-old')
+    const active = store.propose(proposal('Active claim'))
+    const durable = store.propose(proposal('Durable claim'))
+    store.updateClaimStatus(durable.id, 'durable_candidate', 'promoted')
+    store.updateClaimStatus(durable.id, 'durable', 'promotion threshold met')
+
+    const loaded = ContextClaimStore.loadDurableClaims(dir, 'session-old')
+    assert.equal(loaded.length, 1)
+    assert.equal(loaded[0]!.text, 'Durable claim')
+    assert.equal(loaded[0]!.status, 'durable')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('loadDurableClaims returns empty for nonexistent session', () => {
+  const dir = tempDir()
+  try {
+    const loaded = ContextClaimStore.loadDurableClaims(dir, 'nonexistent')
+    assert.equal(loaded.length, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
