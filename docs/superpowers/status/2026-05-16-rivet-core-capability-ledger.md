@@ -1,6 +1,6 @@
 # Rivet Core Capability Ledger
 
-> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 859 tests passing.
+> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 855 tests passing.
 
 ## Status Definitions
 
@@ -40,11 +40,24 @@
 | Capability Reliability Layer | **Verified** | — | `plans/...-p2-2-capability-reliability-layer.md` | `src/tools/path-validate.ts`, `src/agent/checkpoint.ts`, `src/tools/output-store.ts`, `src/tools/glob.ts`, `src/tools/grep.ts`, `src/tools/run-tests.ts` | Cwd boundary validation, checkpoint v2 (dirty snapshot + confirmation token), safe output filenames, glob/grep realpath + symlink cycle protection, safe test filter argv, VerificationMetadata, 694 tests pass | None | — |
 | Harness Cockpit | **Verified** | `specs/...-p2-3-harness-cockpit-design.md` | `plans/...-p2-3-harness-cockpit-implementation.md` | `src/agent/trace-store.ts`, `src/agent/approval-risk.ts`, `src/tui/cockpit/*`, `src/model/capability.ts` | TraceStore, approval risk assessment, 6 cockpit panels (trace/verify/context/safety/model/mcp), CockpitRail with status indicators, ModelCapabilityCard, 694 tests pass | None | — |
 | Open Source Harness Strategy | **Designed** | `specs/...-open-source-harness-strategy-design.md` | None | None | Brainstorm complete | No plan yet | Review design, write implementation plan |
+| Session Forking | **Verified** | `plans/...-wave2-differentiation.md` | same | `src/agent/session-fork.ts`, `src/tui/app.tsx` | /fork command, copy JSONL to new UUID, upToLine support, 855 tests pass | None | — |
+| Approval Edit | **Verified** | `plans/...-wave2-differentiation.md` | same | `src/agent/approval-edit.ts`, `src/agent/loop.ts` | ApprovalResult type, applyApprovalEdit, backward-compat boolean, 855 tests pass | None | — |
+| Auto Reasoning | **Verified** | `plans/...-wave2-differentiation.md` | same | `src/agent/auto-reasoning.ts`, `src/agent/loop.ts`, `src/config/schema.ts` | Keyword-based effort selection, config opt-in, 855 tests pass | None | — |
+| LSP Diagnostics | **Verified** | `plans/...-wave2-differentiation.md` | same | `src/lsp/diagnostics.ts`, `src/lsp/client.ts`, `src/agent/loop.ts` | tsc parser, PostToolUse hook, shouldRunDiagnostics gate, 855 tests pass | None | — |
+| HTTP/SSE Runtime API | **Verified** | `plans/...-wave2-differentiation.md` | same | `src/server/index.ts`, `src/server/routes.ts`, `src/server/sse-stream.ts`, `src/main.tsx` | Router, startServer, SseStream, GET /status, POST /abort, rivet serve, 855 tests pass | None | — |
+| Vim Keybindings | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/tui/vim-mode.ts`, `src/tui/base-text-input.tsx`, `src/tui/app.tsx` | Norm/ins/vis state machine, h/l/w/b/0/$/dd/x, /vim toggle, 855 tests pass | None | — |
+| @file Autocomplete | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/tui/file-completer.ts`, `src/tui/input.tsx` | extractAtToken, git ls-files completions, Tab selection, 855 tests pass | None | — |
+| Command Palette | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/tui/command-palette.tsx`, `src/tui/app.tsx` | Ctrl-K, fuzzy filterCommands, 18 commands, ↑↓/Enter/Esc, 855 tests pass | None | — |
+| External Editor | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/tui/external-editor.ts`, `src/tui/app.tsx` | Ctrl-O, $VISUAL/$EDITOR, temp file roundtrip, 855 tests pass | None | — |
+| Git Worktree Isolation | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/agent/worktree.ts`, `src/main.tsx` | create/remove/list, --worktree CLI, detached HEAD, 855 tests pass | None | — |
+| Streaming JSON Output | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/headless.ts` | --stream-json NDJSON, text_delta/tool_use/tool_result/turn_complete, 855 tests pass | None | — |
+| POST /prompt SSE | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/server/prompt-route.ts`, `src/server/routes.ts` | Prompt validation, SseStream, rivet serve integration, 855 tests pass | None | — |
+| Composable CLI | **Verified** | `plans/...-wave3-wave4-ux-polish.md` | same | `src/main.tsx` | Stdin pipe detection, auto-JSON non-TTY stdout, 855 tests pass | None | — |
 | Multi-Session Isolation | **Verified** | `specs/...-multi-session-isolation-design.md` | `plans/...-multi-session-isolation-implementation.md` | `src/main.tsx`, `src/agent/checkpoint.ts`, `src/agent/loop.ts`, `src/tui/app.tsx` | UUID session ID per launch, session-scoped checkpoints, checkpoint index for cross-session discovery, rollback session selection, legacy backward compat, 702 tests pass | None | — |
 
 ## Summary
 
-- **Verified**: 27 capabilities (Adaptive Context Fabric, Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety, Multi-Session Isolation, Permission Allow Rules, Cost/Token Display, Headless Mode, Custom Slash Commands, First-Run Onboarding)
+- **Verified**: 40 capabilities (Adaptive Context Fabric, Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety, Multi-Session Isolation, Permission Allow Rules, Cost/Token Display, Headless Mode, Custom Slash Commands, First-Run Onboarding)
 - **MVP**: 0
 - **Planned**: 0 capabilities
 - **Designed**: 2 capabilities (CTCL Migration, Open Source Strategy)

@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-05-16 — Wave 2 Differentiation + Wave 3 UX Polish + Wave 4 Ecosystem Extension
+
+### Added — Wave 2 Differentiation
+- **Session forking** — `/fork` copies current session JSONL to new UUID for exploration branches
+- **Approval edit** — `ApprovalResult` type with `editedInput`; AgentLoop backward-compatible
+- **Auto reasoning** — Keyword-based effort selection (off/medium/high/max), opt-in via config
+- **LSP diagnostics** — tsc output parser + PostToolUse hook for TS/JS file edits
+- **HTTP/SSE Runtime API** — Router, SSE stream, GET /status, POST /abort, `rivet serve`
+
+### Added — Wave 3 UX Polish
+- **Vim keybindings** — normal/insert/visual state machine; h/l/w/b/0/$/dd/x motions; `/vim` toggle
+- **@file autocomplete** — extractAtToken + getCompletions via git ls-files; Tab selection
+- **Command palette** — Ctrl-K overlay; fuzzy filterCommands; 18 slash commands
+- **External editor** — Ctrl-O spawns $VISUAL/$EDITOR; createTempFile + readAndCleanup
+- **Git worktree isolation** — createWorktree/removeWorktree/listWorktrees; `--worktree` CLI
+
+### Added — Wave 4 Ecosystem Extension
+- **Streaming JSON** — `--stream-json` NDJSON events (text_delta, tool_use, tool_result, turn_complete)
+- **POST /prompt SSE** — Prompt validation + SSE streaming via SseStream in rivet serve
+- **Composable CLI** — Stdin pipe detection + auto-JSON for non-TTY stdout
+
+### Verified
+- 855 tests pass
+- npm run typecheck clean
+- 34 capabilities Verified (capability ledger)
+
 ## 2026-05-16 — Adaptive Context Fabric (ACF) Phase 1–4
 
 ### Added
