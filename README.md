@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 7 complete — 755+ tests passing, typecheck clean. All P0-P2 core business gaps closed, trust infrastructure shipped, goal loop autonomous execution, sub-agent coordination at production grade.
+Wave 8 complete — 825 tests passing, typecheck clean. Claim extractor with TTL, durable cross-session claims, budget cap, antibody + conflict detection. Context Fabric Phase 2 operational.
 
 ## Quick Start
 
@@ -124,6 +124,12 @@ src/
 │   ├── session-memory.ts Per-session memory sidecar
 │   ├── reactive-compact.ts Compact round selection + boundary message
 │   ├── microcompact.ts   Microcompact tool results (preserve API rounds)
+│   ├── claims.ts         Context claim types, proposal, prompt eligibility, XML rendering (20-cap)
+│   ├── claim-store.ts    JSONL append-only event store with incremental projection
+│   ├── claim-extractor.ts Tool results → typed claim proposals with per-kind TTL
+│   ├── promotion.ts      Claim lifecycle: active → durable_candidate → durable
+│   ├── antibody.ts       Antibody claim generation from failure patterns
+│   ├── conflict-detect.ts Detects contradictory file-evidence claims
 │   └── types.ts          Context health, budget, anchor, session memory types
 ├── failures/
 │   └── sample.ts         Redacted failure sample library for testing
@@ -299,6 +305,12 @@ cd ../project-feature-a && rivet
 - **Speculative pre-warming** — Intent-based prompt pre-warming cache
 - **Input validation** — Shared sessionId regex in `src/validation.ts`, path boundary enforcement
 - **天枢 persona** — "Don't Guess — Verify" workflow, design-doc-first, TDD guidance
+- **Claim extractor** — Automatic claim extraction from tool results: read_file→file_observation (30min), run_tests→failure_pattern/verification_fact (2h/1h), bash→security_finding (4h); grep/glob skipped
+- **Claim promotion** — Two-stage lifecycle: active→durable_candidate (3 consumers), durable_candidate→durable (5 consumers + 10min age)
+- **Cross-session durable claims** — Durable claims survive session restart with 0.9 confidence decay; injected on TUI startup and goal loop launch
+- **Claim budget cap** — MAX_PROMPT_CLAIMS=20 limits active claims in prompt, sorted by fitness
+- **Antibody claims** — Failure patterns boost approval-risk for repeat tool failures
+- **Conflict detection** — Contradictory file-evidence claims auto-detected and marked conflicted
 - **Three-layer read_file** — Raw persistence + model compression + line-numbered TUI preview (50 lines)
 - **Live tool output** — Batched streaming display (50ms flush), no more silent tool execution
 - **Safe rollback** — Checkpoint v2: only reverts agent-owned files, protects user pre-existing changes, confirmation token gating
@@ -420,7 +432,9 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and are auto-discovered at sta
 | `/rollback` | Preview changes since checkpoint (`/rollback confirm` to execute) |
 | `/undo` | Undo last file change (preview diff, `confirm` to restore) |
 | `/evidence` | Show last turn evidence summary |
-| `/context` | Show context ledger: health, tokens, API round safety, compact events |
+| `/context` | Show context ledger: health, tokens, API round safety, compact events, claims |
+| `/context antibodies` | Show antibody claims (failure patterns boosting risk) |
+| `/context conflicts` | Show conflicted claims (contradictory file evidence) |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
 | `/cockpit [summary\|trace\|verify\|context\|safety\|model\|mcp\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
@@ -663,6 +677,31 @@ Session memory survives across compaction. Use it to bookmark decisions or prefe
 - Memory entries are automatically injected into the volatile context block sent to the model
 - Memory is reflected in the context ledger via `getSessionMemoryState()`
 
+### Context Claims
+
+Rivet automatically extracts context claims from tool results to maintain awareness across turns:
+
+**Automatic extraction (no user action needed):**
+- **File observations** — Every `read_file` creates a `file_observation` claim (30min TTL) tracking what files the agent has seen
+- **Test failures** — `run_tests` failures create `failure_pattern` claims (2h TTL) so the agent remembers past breakages
+- **Test passes** — Successful test runs create `verification_fact` claims (1h TTL)
+- **Security findings** — `npm audit` or security-related output creates `security_finding` claims (4h TTL)
+
+**Claim lifecycle:**
+1. Claims start as `active` and are injected into every prompt
+2. After 3 unique consumers → promoted to `durable_candidate`
+3. After 5 unique consumers + 10 minutes → promoted to `durable`
+4. **Durable claims survive session restart** — loaded with 0.9 confidence decay when you resume
+5. Claims with file evidence are marked `stale` when the file is modified
+
+**Budget control:** At most 20 claims are injected into the prompt, sorted by fitness (security > failure > verification > observation).
+
+**Antibody detection:** Failure patterns create "antibody" claims that boost risk assessment on repeated failures, helping the agent avoid repeating mistakes.
+
+**Conflict detection:** When two claims have contradictory file evidence for the same path, the older one is marked `conflicted` and excluded from the prompt.
+
+Use `/context` to see current claims, `/context antibodies` for antibody claims, or `/context conflicts` for conflicted claims.
+
 ### Scrollback History
 
 When output scrolls off screen, use `/scroll` to browse history:
@@ -711,7 +750,9 @@ Subsequent launches skip onboarding. The sentinel is separate from config existe
 | `/sessions` | List saved sessions |
 | `/resume <N>` | Restore a saved session |
 | `/evidence` | Show last turn evidence (files read, modified, tests) |
-| `/context` | Show context health, token sections, round diagnostics |
+| `/context` | Show context health, tokens, rounds, claims |
+| `/context antibodies` | Show antibody claims (failure→risk boosters) |
+| `/context conflicts` | Show conflicted file-evidence claims |
 | `/memory` | List session memory entries |
 | `/memory <text>` | Save a manual session memory entry |
 | `/cockpit [summary\|trace\|verify\|context\|safety\|model\|mcp\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
@@ -793,7 +834,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (859)
+npm run test                   # Run all tests (825)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```

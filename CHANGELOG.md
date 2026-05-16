@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-05-16 — Wave 8 Context Fabric Phase 2 + Evolutionary Context Fabric Phase 2
+
+### Added — Wave 8 Context Fabric Phase 2
+- **Claim Extractor** (`src/context/claim-extractor.ts`) — Automatic claim extraction from tool results:
+  - `read_file` → `file_observation` claim (30min TTL)
+  - `run_tests` failure → `failure_pattern` claim (2h TTL)
+  - `run_tests` success → `verification_fact` claim (1h TTL)
+  - `bash` security output → `security_finding` claim (4h TTL)
+  - Skip list: grep, glob, diff, inspect_project, repo_map, related_tests, recall (too noisy)
+- **AgentLoop wiring** — Claim extraction runs after every tool result; `promoteEligibleClaims()` at turn end
+- **Durable promotion** — `durable_candidate → durable` after 5 unique consumers + 10 minutes age (was only `active → durable_candidate`)
+- **Cross-session durable claims** — `ContextClaimStore.loadDurableClaims()` static method reads durable claims from previous session JSONL; `SessionPersist.injectDurableClaims()` injects with 0.9 confidence decay on startup/resume
+- **Claim budget cap** — `MAX_PROMPT_CLAIMS=20` caps `renderActiveClaimsBlock()` output, sorted by fitness descending
+
+### Added — Evolutionary Context Fabric Phase 2
+- **Claim lifecycle** — `markClaimsStaleForFile()` marks file-evidence claims stale on write; `promoteEligibleClaims()` batch promotion; `getStatusCounts()` status histogram
+- **Antibody claims** — Failure-pattern claims boost `approval-risk` for repeat failures; `antibodyClaim()` predicate checks kind + tool match
+- **Conflict detection** — `detectConflicts()` finds contradictory file-evidence claims; marks older claim as `conflicted`
+- **Slash commands** — `/context antibodies` shows antibody claims; `/context conflicts` shows conflicted claims
+- **Consumer deduplication** — `evaluatePromotion` gates use unique consumer IDs (prevents inflation from repeated `recordClaimUsed`)
+
+### Changed
+- `src/context/promotion.ts` — `evaluatePromotion()` now handles both `active → durable_candidate` and `durable_candidate → durable`
+- `src/agent/session-persist.ts` — Added `loadPreviousDurableClaims()` and `injectDurableClaims()` methods
+- `src/agent/loop.ts` — Wired `extractClaimsFromToolResult` + antibody generation + conflict detection
+- `src/context/claim-store.ts` — Added `loadDurableClaims()` static method; incremental projection from previous session
+
+### Fixed
+- **DRY violation** — Duplicated durable claim injection in main.tsx extracted to `SessionPersist.injectDurableClaims()`
+
+### Verified
+- 825 tests pass, 0 fail
+- npm run typecheck clean
+- All 11 Wave 8 acceptance criteria verified
+
 ## 2026-05-16 — Wave 5 Trust Infrastructure + Wave 6 Goal Loop + Wave 7 Sub-Agent Wiring
 
 ### Added — Wave 5 Trust Infrastructure
