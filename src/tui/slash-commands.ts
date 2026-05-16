@@ -15,6 +15,9 @@ import type { SummaryState } from './summary-bar.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimStatus } from '../context/claims.js'
 import { loadProjectRules } from '../context/rules-loader.js'
+import { exportDurableClaims, importClaims } from '../context/claim-export.js'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 export interface SlashHandlerContext {
   parts: string[]
@@ -352,6 +355,35 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           loaded++
         }
         pushStatic(createLogEntry({ type: 'text', content: `Reloaded ${loaded} project rules from .rivet/rules/ (${existing.length} previous rules cleared)` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (args === 'export') {
+        const store = ctx.claimStoreRef.current
+        if (!store) {
+          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          setIsStreaming(false)
+          return true
+        }
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+        const outPath = join(homedir(), '.rivet', 'exports', `${timestamp}.json`)
+        const count = exportDurableClaims(store, outPath)
+        pushStatic(createLogEntry({ type: 'text', content: `Exported ${count} durable claims to ${outPath}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (args.startsWith('import ')) {
+        const store = ctx.claimStoreRef.current
+        if (!store) {
+          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          setIsStreaming(false)
+          return true
+        }
+        const filePath = args.slice('import '.length).trim()
+        const count = importClaims(store, filePath)
+        pushStatic(createLogEntry({ type: 'text', content: count > 0 ? `Imported ${count} claims (confidence ×0.8)` : `No claims imported. Check file path: ${filePath}` }))
         setIsStreaming(false)
         return true
       }
