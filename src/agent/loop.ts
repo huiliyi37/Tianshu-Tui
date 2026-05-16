@@ -110,6 +110,7 @@ export class AgentLoop {
   private importGraph: ImportGraph | null = null
   private userAnchors: ContextAnchor[] = []
   private anchorRegistry = new AnchorRegistry(2_000)
+  private lastConflictCheckCount = 0
 
   constructor(
     private config: AgentConfig,
@@ -264,17 +265,6 @@ export class AgentLoop {
     }
 
     this.config.contextClaimStore.promoteEligibleClaims()
-
-    // Mark conflicting file-evidence claims
-    const allClaims = this.config.contextClaimStore.listClaims()
-    const conflicts = detectConflicts(allClaims)
-    for (const conflict of conflicts) {
-      this.config.contextClaimStore.updateClaimStatus(
-        conflict.olderClaimId, 'conflicted',
-        `superseded by ${conflict.newerClaimId} on ${conflict.sharedPath}`,
-      )
-    }
-
     const activeClaims = this.config.contextClaimStore.listActiveClaims()
     const usedAt = Date.now()
     const consumerId = `turn-${this.session.getTurnCount()}:prompt`
@@ -637,6 +627,20 @@ ${check.formatted}`
                 for (const proposal of proposals) {
                   this.config.contextClaimStore.propose(proposal)
                 }
+                // Detect conflicting file-evidence claims after new file observations
+                if (proposals.some(p => p.kind === 'file_observation')) {
+                  const allClaims = this.config.contextClaimStore.listClaims()
+                  if (allClaims.length !== this.lastConflictCheckCount) {
+                    this.lastConflictCheckCount = allClaims.length
+                    const conflicts = detectConflicts(allClaims)
+                    for (const conflict of conflicts) {
+                      this.config.contextClaimStore.updateClaimStatus(
+                        conflict.olderClaimId, 'conflicted',
+                        `superseded by ${conflict.newerClaimId} on ${conflict.sharedPath}`,
+                      )
+                    }
+                  }
+                }
               }
 
               if (!harnessResult.isError) {
@@ -768,7 +772,6 @@ ${check.formatted}`
           }
 
           this.refreshLedger()
-          this.config.contextClaimStore?.promoteEligibleClaims()
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
           continue
         }
