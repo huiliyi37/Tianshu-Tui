@@ -143,9 +143,9 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
       maxTurns: input.budget?.maxTurns ?? 4,
-      maxTokens: input.budget?.maxTokens ?? 4096,
+      maxTokens: input.budget?.maxTokens ?? 8192,
       timeoutMs: input.budget?.timeoutMs ?? 120_000,
-      maxRetries: input.budget?.maxRetries ?? 1,
+      maxRetries: input.budget?.maxRetries ?? 2,
     },
   })
 }
@@ -197,14 +197,47 @@ export function mapWorkOrderKindToCapabilityTask(kind: WorkOrderKind): Capabilit
 }
 
 function extractJsonObject(text: string): string {
+  // Strategy 1: Extract from fenced code block (```json ... ``` or ``` ... ```)
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  const source = (fenced?.[1] ?? text).trim()
-  const firstBrace = source.indexOf('{')
-  const lastBrace = source.lastIndexOf('}')
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
+  if (fenced?.[1]) {
+    const trimmed = fenced[1].trim()
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      return trimmed
+    }
+  }
+
+  // Strategy 2: Find balanced JSON object by scanning from first { to matching }
+  // Handles prose before/after the JSON — common when worker outputs thinking then JSON.
+  const firstBrace = text.indexOf('{')
+  if (firstBrace === -1) {
     throw new Error('Worker result did not contain a JSON object')
   }
-  return source.slice(firstBrace, lastBrace + 1)
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = firstBrace; i < text.length; i++) {
+    const ch = text[i]!
+    if (escaped) { escaped = false; continue }
+    if (ch === '\\') { escaped = true; continue }
+    if (ch === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (ch === '{') depth++
+    if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        return text.slice(firstBrace, i + 1)
+      }
+    }
+  }
+
+  // Strategy 3: Truncated JSON — use first { to last } as fallback
+  const lastBrace = text.lastIndexOf('}')
+  if (lastBrace > firstBrace) {
+    return text.slice(firstBrace, lastBrace + 1)
+  }
+
+  throw new Error('Worker result did not contain a valid JSON object')
 }
 
 export function parseWorkerResult(text: string, expectedWorkOrderId: string): WorkerResult {

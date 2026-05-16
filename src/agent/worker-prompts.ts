@@ -39,6 +39,11 @@ export function buildWorkerPrompt(order: WorkOrder): string {
 }
 
 export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, parseError: string): string {
+  // Use tail of previous text — JSON output is more likely at the end.
+  // If the text is short, use the whole thing; otherwise prefer the last 4000 chars.
+  const tail = previousText.length <= 4000
+    ? previousText
+    : previousText.slice(-4000)
   return [
     'Repair the previous answer so it is exactly one valid WorkerResult JSON object.',
     `WorkOrder ID that must be used: ${order.id}`,
@@ -46,8 +51,8 @@ export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, 
     'Do not add markdown fences or explanation.',
     'Use this shape:',
     RESULT_SHAPE,
-    'Previous answer:',
-    previousText.slice(0, 4000),
+    'Previous answer (last 4000 chars):',
+    tail,
   ].join('\n')
 }
 

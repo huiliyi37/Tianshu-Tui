@@ -25,7 +25,7 @@ describe('work-order contract', () => {
     assert.equal(order.kind, 'code_search')
     assert.deepEqual(order.allowedTools, READ_ONLY_WORKER_TOOLS)
     assert.deepEqual(order.disallowedTools, ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task'])
-    assert.equal(order.budget.maxRetries, 1)
+    assert.equal(order.budget.maxRetries, 2)
     assert.equal(order.aggregationPolicy, 'primary_decides')
   })
 
