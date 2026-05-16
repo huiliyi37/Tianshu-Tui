@@ -442,6 +442,12 @@ Type `/cockpit` to toggle the expanded cockpit panel, or `/cockpit <panel>` to o
 
 Press **Esc** to collapse the cockpit from any panel.
 
+### Cockpit State and Capability Ledger
+
+Cockpit panels are driven by a single `CockpitSnapshot` built by `buildCockpitSnapshot()` so safety, verification, context, model, and MCP status agree on the same turn state. The cockpit rail summarizes each panel area as ok, warn, error, or idle via `panelStatuses`.
+
+Core capability progress is tracked in `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md`. A capability is only marked **Verified** after targeted behavior tests and full validation pass; design and plan documents alone do not imply implementation completion.
+
 ### Subagent Orchestration
 
 Rivet can delegate sub-tasks to independent worker sessions:
@@ -683,6 +689,7 @@ npm run dev                    # Watch mode
 - `docs/superpowers/plans/2026-05-15-rivet-p2.1-remaining.md` — P2.1 remaining tasks + execution record
 - `docs/superpowers/plans/2026-05-15-rivet-performance-optimization.md` — Performance optimization plan
 - `docs/analysis/2026-05-15-handoff.md` — Full project handoff document with validation records
+- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger
 
 ## License
 

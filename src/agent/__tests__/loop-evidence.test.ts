@@ -65,6 +65,8 @@ function snapshotEvidence(state: EvidenceState): EvidenceState {
     filesModified: new Set(state.filesModified),
     verifications: [...state.verifications],
     deliveryStatus: state.deliveryStatus,
+    impactedFiles: new Set(state.impactedFiles),
+    impactedTests: new Set(state.impactedTests),
   }
 }
 
