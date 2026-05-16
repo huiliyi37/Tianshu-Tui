@@ -1,5 +1,7 @@
+import type { PrewarmValue } from './prewarm-file.js'
+
 interface CacheEntry {
-  value: string
+  value: PrewarmValue
   timestamp: number
 }
 
@@ -13,7 +15,7 @@ export class PrewarmCache {
     private maxEntries = 20,
   ) {}
 
-  set(key: string, value: string): void {
+  set(key: string, value: PrewarmValue): void {
     if (this.store.size >= this.maxEntries) {
       const oldest = this.store.keys().next().value!
       this.store.delete(oldest)
@@ -21,7 +23,7 @@ export class PrewarmCache {
     this.store.set(key, { value, timestamp: Date.now() })
   }
 
-  get(key: string): string | undefined {
+  get(key: string): PrewarmValue | undefined {
     const entry = this.store.get(key)
     if (!entry) { this.misses++; return undefined }
     if (Date.now() - entry.timestamp > this.ttlMs) {
