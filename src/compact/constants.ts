@@ -12,6 +12,20 @@ export const AUTO_COMPACT_THRESHOLD = 800_000
 /** Hard floor: never auto-compact below this token count */
 export const MINIMUM_AUTO_COMPACT_TOKENS = 500_000
 
+export interface CompactThresholds {
+  autoThreshold: number
+  autoFloor: number
+  toolResultMaxTokens: number
+}
+
+export function compactThresholds(contextWindow: number): CompactThresholds {
+  return {
+    autoThreshold: Math.floor(contextWindow * 0.8),
+    autoFloor: Math.min(Math.floor(contextWindow * 0.6), MINIMUM_AUTO_COMPACT_TOKENS),
+    toolResultMaxTokens: Math.min(Math.floor(contextWindow * 0.3), 100_000),
+  }
+}
+
 /** Number of messages to preserve at the start as cache anchor.
  * Keeping the first 2 messages (initial user request + assistant response)
  * preserves the prefix structure after compaction, so DeepSeek's prefix

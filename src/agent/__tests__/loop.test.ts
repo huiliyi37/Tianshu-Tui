@@ -263,3 +263,88 @@ describe('AgentLoop — error handling', () => {
     assert.equal(callCount, 2)
   })
 })
+
+
+describe('AgentLoop — compact policy', () => {
+  it('compacts on small context windows without legacy absolute-threshold approval', async () => {
+    const client = mockClient([makeTextBlock('done')])
+    const registry = new ToolRegistry()
+    const compactClient = mockClient([makeTextBlock('summary')])
+    const session = new SessionContext()
+    const historyMessage = 'x'.repeat(12_000 * 4)
+    session.loadMessages([
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+    ])
+    const agent = new AgentLoop({
+      client,
+      promptEngine: makeEngine(),
+      toolRegistry: registry,
+      maxTurns: 1,
+      contextWindow: 128_000,
+      compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      compactClient,
+      compactModel: 'flash',
+    }, session)
+
+    await agent.run('continue', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: () => {},
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    assert.equal((compactClient.stream as any).mock.callCount(), 1)
+  })
+
+
+  it('falls back to cache anchors plus resume state when compaction cannot fit the ceiling', async () => {
+    const client = mockClient([makeTextBlock('done')])
+    const registry = new ToolRegistry()
+    const session = new SessionContext()
+    const huge = 'x'.repeat(80_000 * 4)
+    session.loadMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+    ])
+    const agent = new AgentLoop({
+      client,
+      promptEngine: makeEngine(),
+      toolRegistry: registry,
+      maxTurns: 1,
+      contextWindow: 128_000,
+      compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+    }, session)
+
+    await agent.run('continue', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: () => {},
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    const messages = session.getMessages()
+    assert.equal(messages[0]?.content, 'anchor user')
+    assert.equal(messages[1]?.content, 'anchor assistant')
+    assert.match(String(messages[2]?.content), /<checkpoint-resume>/)
+    assert.ok(session.getEstimatedTokens() <= 128_000 * 0.95)
+  })
+})
