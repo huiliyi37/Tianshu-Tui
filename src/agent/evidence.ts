@@ -8,6 +8,8 @@ export interface EvidenceState {
   filesModified: Set<string>
   verifications: VerificationMetadata[]
   deliveryStatus: DeliveryVerificationStatus
+  impactedFiles: Set<string>
+  impactedTests: Set<string>
 }
 
 export class EvidenceTracker {
@@ -19,6 +21,8 @@ export class EvidenceTracker {
       filesModified: new Set(),
       verifications: [],
       deliveryStatus: 'unverified',
+      impactedFiles: new Set(),
+      impactedTests: new Set(),
     }
   }
 
@@ -34,6 +38,11 @@ export class EvidenceTracker {
   trackVerification(result: VerificationMetadata): void {
     this.state.verifications.push(result)
     this.refreshDeliveryStatus()
+  }
+
+  trackImpact(files: string[], tests: string[]): void {
+    for (const f of files) this.state.impactedFiles.add(f)
+    for (const t of tests) this.state.impactedTests.add(t)
   }
 
   private refreshDeliveryStatus(): void {
@@ -87,6 +96,13 @@ export class EvidenceTracker {
       parts.push(report)
     }
 
+    if (this.state.impactedFiles.size > 0) {
+      parts.push(`- **Impacted files**: ${[...this.state.impactedFiles].join(', ')}`)
+    }
+    if (this.state.impactedTests.size > 0) {
+      parts.push(`- **Tests to verify**: ${[...this.state.impactedTests].join(', ')}`)
+    }
+
     return parts.join('\n')
   }
 
@@ -95,6 +111,8 @@ export class EvidenceTracker {
     this.state.filesModified.clear()
     this.state.verifications = []
     this.state.deliveryStatus = 'unverified'
+    this.state.impactedFiles.clear()
+    this.state.impactedTests.clear()
   }
 
   getState(): EvidenceState { return this.state }

@@ -81,6 +81,8 @@ export class PromptEngine {
   private behaviorMirror?: string | null
   private strategyShift?: string | null
   private repairHint?: string | null
+  private impactHint?: string | null
+  private routingReason?: string | null
   private decisions?: string[]
   private contextLayerReportData: ContextLayerReport
 
@@ -135,7 +137,7 @@ export class PromptEngine {
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         if (i === lastUserTextIdx && toolHistory && toolHistory.length > 0) {
           // Fresh volatile block with tool history for the latest turn
-          const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, decisions: this.decisions })
+          const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, decisions: this.decisions })
           result.push({ role: 'user', content: freshBlock })
         } else {
           // Frozen volatile block for historical turns — preserves prefix cache
@@ -187,6 +189,14 @@ export class PromptEngine {
 
   setRepairHint(hint: string | null): void {
     this.repairHint = hint
+  }
+
+  setImpactHint(hint: string | null): void {
+    this.impactHint = hint
+  }
+
+  setRoutingReason(reason: string | null): void {
+    this.routingReason = reason
   }
 
   setDecisions(decisions: string[]): void {

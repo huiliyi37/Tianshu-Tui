@@ -25,6 +25,8 @@ export interface VolatileContext {
   decisions?: string[]
   strategyShift?: string | null
   repairHint?: string | null
+  impactHint?: string | null
+  routingReason?: string | null
 }
 
 let rivetMdCache: { value: string | undefined; timestamp: number } | null = null

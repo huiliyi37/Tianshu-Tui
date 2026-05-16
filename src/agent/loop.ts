@@ -28,6 +28,11 @@ import { createTraceStore, startTraceEvent, finishTraceEvent, fingerprintToolCal
 import { getDoomLoopLevel } from './trace-store.js'
 import { assessToolRisk } from './approval-risk.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
+import { inferTaskType } from '../model/task-inferrer.js'
+import { RoutingMetricsCollector, type RoutingEvent } from '../model/routing-metrics.js'
+import { recommendModelForTask, type ModelCapabilityCard } from '../model/capability.js'
+import { buildImportGraph, getReverseDeps, invalidateFile, type ImportGraph } from './import-graph.js'
+import { generateImpactHint } from './impact-hint.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
 import { RepairHintTracker } from './repair-hint.js'
@@ -49,6 +54,9 @@ export interface AgentConfig {
   getSessionMemoryState?: () => import('../context/types.js').LedgerSessionMemoryState | undefined
   hooks?: HookRegistry
   fileHistory?: import('./file-history.js').FileHistory
+  modelCards?: ModelCapabilityCard[]
+  onModelSwitch?: (newModel: string) => void
+  getCurrentModel?: () => string
 }
 
 export interface AgentCallbacks {
@@ -83,6 +91,8 @@ export class AgentLoop {
   private repairHintTracker = new RepairHintTracker()
   private traceStore: TraceStore
   private harness: TurnHarness
+  private routingMetrics = new RoutingMetricsCollector()
+  private importGraph: ImportGraph | null = null
 
   constructor(
     private config: AgentConfig,
@@ -471,6 +481,18 @@ export class AgentLoop {
                 this.evidence.trackFileRead(tu.input.file_path as string)
               } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
                 this.evidence.trackFileModified(tu.input.file_path as string)
+                // Impact hint from import graph
+                if (!this.importGraph) {
+                  this.importGraph = buildImportGraph(this.cwd)
+                }
+                if (this.importGraph) {
+                  this.importGraph = invalidateFile(this.importGraph, this.cwd, tu.input.file_path as string)
+                  const hint = generateImpactHint(this.importGraph, tu.input.file_path as string, this.cwd)
+                  if (hint) {
+                    this.evidence.trackImpact(hint.impactedFiles, hint.relatedTests)
+                    this.config.promptEngine.setImpactHint(hint.summary)
+                  }
+                }
               } else if (tu.name === 'run_tests' && rawToolResult) {
                 if (rawToolResult.verification) {
                   this.evidence.trackVerification(rawToolResult.verification)
@@ -521,6 +543,32 @@ export class AgentLoop {
             ? detectMirror(this.trajectory.getEntries())
             : null
           this.config.promptEngine.setBehaviorMirror(mirror)
+
+          // Model routing: infer task type and potentially switch model
+          if (this.config.modelCards && this.config.modelCards.length > 1) {
+            const currentModel = this.config.getCurrentModel?.() ?? ''
+            const recentCalls = this.trajectory.getEntries().slice(-10).map(e => ({
+              name: e.tool,
+              isError: e.status === 'failed' || e.status === 'retried-failed',
+            }))
+            const inference = inferTaskType(recentCalls)
+            if (inference) {
+              const recommended = recommendModelForTask(inference.task, this.config.modelCards)
+              this.config.promptEngine.setRoutingReason(`${inference.task} · ${recommended.model} ${inference.reason}`)
+              if (recommended.model !== currentModel && this.config.onModelSwitch) {
+                this.routingMetrics.record({
+                  turn: this.session.getTurnCount(),
+                  inferredTask: inference.task,
+                  recommendedModel: recommended.model,
+                  currentModel,
+                  switched: true,
+                  reason: inference.reason,
+                  timestamp: Date.now(),
+                })
+                this.config.onModelSwitch(recommended.model)
+              }
+            }
+          }
 
           this.refreshLedger()
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
