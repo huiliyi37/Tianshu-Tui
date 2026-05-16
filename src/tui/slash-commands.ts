@@ -69,7 +69,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 
   switch (cmd) {
     case '/help':
-      pushStatic(createLogEntry({ type: 'text', content: `Available commands:
+      pushStatic(createLogEntry({ type: 'system', content: `Available commands:
 /help — Show this help
 /exit — Exit Rivet
 /quit — Exit
@@ -95,11 +95,11 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     case '/exit':
     case '/quit':
       ctx.persist.compact(ctx.session.getMessages())
-      pushStatic(createLogEntry({ type: 'text', content: 'Session saved. Goodbye!' }))
+      pushStatic(createLogEntry({ type: 'system', content: 'Session saved. Goodbye!' }))
       process.exit(0)
 
     case '/compact':
-      pushStatic(createLogEntry({ type: 'text', content: 'Compacting conversation...' }))
+      pushStatic(createLogEntry({ type: 'system', content: 'Compacting conversation...' }))
       { const msgs = ctx.session.getMessages()
         const { messages: compacted, truncated } = microCompact(msgs, ctx.maxTokens, estimateTokens(msgs))
         ctx.session.replaceMessages(compacted)
@@ -111,7 +111,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           afterTokens: estimateTokens(compacted),
           createdAt: Date.now(),
         })
-        pushStatic(createLogEntry({ type: 'text', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` }))
         ctx.setSummaryState(prev => ({ ...prev, compactEvent: { beforeTokens: estimateTokens(msgs), afterTokens: estimateTokens(compacted) } }))
         setTimeout(() => ctx.setSummaryState(prev => ({ ...prev, compactEvent: null })), 5000)
       }
@@ -125,14 +125,14 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         const list = ctx.availableModels.map(m =>
           `  ${m.alias} (${m.id})${m.alias === ctx.model ? ' ← current' : ''}`
         ).join('\n')
-        pushStatic(createLogEntry({ type: 'text', content: `Available models:\n${list}\n\nCurrent: ${ctx.model}\nContext: ${ctx.maxTokens.toLocaleString()} tokens\nCost: ¥${ctx.cost.toFixed(4)}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Available models:\n${list}\n\nCurrent: ${ctx.model}\nContext: ${ctx.maxTokens.toLocaleString()} tokens\nCost: ¥${ctx.cost.toFixed(4)}` }))
       } else {
         const found = ctx.availableModels.find(m => m.alias === targetModel || m.id === targetModel)
         if (found) {
           ctx.onModelSwitch(found.id)
-          pushStatic(createLogEntry({ type: 'text', content: `Switched to ${found.alias} (${found.id})` }))
+          pushStatic(createLogEntry({ type: 'system', content: `Switched to ${found.alias} (${found.id})` }))
         } else {
-          pushStatic(createLogEntry({ type: 'text', content: `Model "${targetModel}" not found. Use /model list to see available models.` }))
+          pushStatic(createLogEntry({ type: 'system', content: `Model "${targetModel}" not found. Use /model list to see available models.` }))
         }
       }
       setIsStreaming(false)
@@ -142,7 +142,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     case '/verbose': {
       const nextVerbose = !ctx.verboseRef.current
       ctx.setVerbose(nextVerbose)
-      pushStatic(createLogEntry({ type: 'text', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' }))
+      pushStatic(createLogEntry({ type: 'system', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' }))
       setIsStreaming(false)
       return true
     }
@@ -151,7 +151,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       const next = !ctx.autoSafeRef.current
       ctx.setAutoSafe(next)
       ctx.agent.setApprovalMode(next ? 'auto-safe' : 'manual')
-      pushStatic(createLogEntry({ type: 'text', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
+      pushStatic(createLogEntry({ type: 'system', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
       setIsStreaming(false)
       return true
     }
@@ -162,12 +162,12 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (!raw || raw === 'list') {
         const current = getActiveThemeName()
         const list = validThemes.map(t => `  ${t}${t === current ? ' ← current' : ''}`).join('\n')
-        pushStatic(createLogEntry({ type: 'text', content: `Available themes:\n${list}\n\nUsage: /theme <name>` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Available themes:\n${list}\n\nUsage: /theme <name>` }))
       } else if ((validThemes as string[]).includes(raw)) {
         setTheme(raw as ThemeName)
-        pushStatic(createLogEntry({ type: 'text', content: `Theme switched to: ${raw}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Theme switched to: ${raw}` }))
       } else {
-        pushStatic(createLogEntry({ type: 'text', content: `Theme "${raw}" not found. Available: ${validThemes.join(', ')}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Theme "${raw}" not found. Available: ${validThemes.join(', ')}` }))
       }
       setIsStreaming(false)
       return true
@@ -177,20 +177,20 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       const subcmd = parts[1]
       const info = ctx.agent.getDebugInfo()
       if (subcmd === 'prompt') {
-        pushStatic(createLogEntry({ type: 'text', content: `System prompt (${info.systemPromptLength} chars):\n${info.systemPromptPreview}\n\nTools (${info.toolCount}): ${info.toolNames.join(', ')}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `System prompt (${info.systemPromptLength} chars):\n${info.systemPromptPreview}\n\nTools (${info.toolCount}): ${info.toolNames.join(', ')}` }))
       } else if (subcmd === 'fingerprint') {
         const fp = info.fingerprint
         const drift = info.drift
-        pushStatic(createLogEntry({ type: 'text', content: `Fingerprint:\n  system:  ${fp.systemSha256.slice(0, 16)}...\n  tools:   ${fp.toolsSha256.slice(0, 16)}...\n  combined: ${fp.combinedSha256.slice(0, 16)}...\n\nDrift: ${drift ? drift.message : 'none (cache stable)'}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Fingerprint:\n  system:  ${fp.systemSha256.slice(0, 16)}...\n  tools:   ${fp.toolsSha256.slice(0, 16)}...\n  combined: ${fp.combinedSha256.slice(0, 16)}...\n\nDrift: ${drift ? drift.message : 'none (cache stable)'}` }))
       } else if (subcmd === 'cache') {
         const usage = ctx.session.getTotalUsage()
         const hitRate = ctx.cacheHitRate
         const totalCached = usage.cache_read_input_tokens + usage.cache_creation_input_tokens
-        pushStatic(createLogEntry({ type: 'text', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${ctx.session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${ctx.cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${ctx.session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${ctx.cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
       } else if (subcmd === 'mcp') {
         const mgr = ctx.mcpManagerRef.current
         if (!mgr) {
-          pushStatic(createLogEntry({ type: 'text', content: 'MCP not initialized (no servers configured or MCP disabled).' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'MCP not initialized (no servers configured or MCP disabled).' }))
         } else {
           const states = mgr.getStates()
           const tools = mgr.getAllTools()
@@ -206,10 +206,10 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           if (tools.length > 0) {
             lines.push('Tools: ' + tools.map(t => t.definition.name).join(', '))
           }
-          pushStatic(createLogEntry({ type: 'text', content: lines.join('\n') }))
+          pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
         }
       } else {
-        pushStatic(createLogEntry({ type: 'text', content: 'Usage: /debug [prompt|fingerprint|cache|mcp]' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /debug [prompt|fingerprint|cache|mcp]' }))
       }
       setIsStreaming(false)
       return true
@@ -225,13 +225,13 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     case '/sessions': {
       const sessions = SessionPersist.listSessions()
       if (sessions.length === 0) {
-        pushStatic(createLogEntry({ type: 'text', content: 'No saved sessions.' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'No saved sessions.' }))
       } else {
         const list = sessions.map((id, i) => {
           const marker = id === ctx.currentSessionId ? ' ← current' : ''
           return `${i + 1}. ${id.slice(0, 8)}...${marker}`
         }).join('\n')
-        pushStatic(createLogEntry({ type: 'text', content: `Saved sessions:\n${list}\n\n/resume <number> to restore` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Saved sessions:\n${list}\n\n/resume <number> to restore` }))
       }
       setIsStreaming(false)
       return true
@@ -241,7 +241,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       const sessions = SessionPersist.listSessions()
       const idx = parseInt(parts[1] ?? '', 10) - 1
       if (isNaN(idx) || idx < 0 || idx >= sessions.length) {
-        pushStatic(createLogEntry({ type: 'text', content: `Invalid session number. Use /sessions to see available sessions.` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Invalid session number. Use /sessions to see available sessions.` }))
         setIsStreaming(false)
         return true
       }
@@ -253,9 +253,9 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (preflight.repaired) {
         p.compact(preflight.messages)
       }
-      pushStatic(createLogEntry({ type: 'text', content: `Restored session ${targetId.slice(0, 8)}... (${preflight.messages.length} messages, apiSafe=${preflight.safe})` }))
+      pushStatic(createLogEntry({ type: 'system', content: `Restored session ${targetId.slice(0, 8)}... (${preflight.messages.length} messages, apiSafe=${preflight.safe})` }))
       if (preflight.repaired) {
-        pushStatic(createLogEntry({ type: 'text', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted} orphan tool call(s).` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted} orphan tool call(s).` }))
       }
       setIsStreaming(false)
       return true
@@ -267,9 +267,9 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         const text = args.slice(4).trim()
         if (text) {
           ctx.agent.addAnchor('user_preference', text)
-          pushStatic(createLogEntry({ type: 'text', content: `Pinned: "${text}"` }))
+          pushStatic(createLogEntry({ type: 'system', content: `Pinned: "${text}"` }))
         } else {
-          pushStatic(createLogEntry({ type: 'text', content: 'Usage: /context pin <text>' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /context pin <text>' }))
         }
         setIsStreaming(false)
         return true
@@ -278,19 +278,19 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (args.startsWith('claims')) {
         const store = ctx.claimStoreRef.current
         if (!store) {
-          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'Claim store not available.' }))
           setIsStreaming(false)
           return true
         }
         const statusArg = args.slice(7).trim()
         const validStatuses = ['active', 'stale', 'conflicted', 'durable']
         if (statusArg && !validStatuses.includes(statusArg)) {
-          pushStatic(createLogEntry({ type: 'text', content: `Usage: /context claims [${validStatuses.join('|')}]` }))
+          pushStatic(createLogEntry({ type: 'system', content: `Usage: /context claims [${validStatuses.join('|')}]` }))
           setIsStreaming(false)
           return true
         }
         const output = formatContextClaimsCommand(store, statusArg as ContextClaimStatus | undefined)
-        pushStatic(createLogEntry({ type: 'text', content: output }))
+        pushStatic(createLogEntry({ type: 'system', content: output }))
         setIsStreaming(false)
         return true
       }
@@ -298,13 +298,13 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (args === 'antibodies') {
         const store = ctx.claimStoreRef.current
         if (!store) {
-          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'Claim store not available.' }))
           setIsStreaming(false)
           return true
         }
         const antibodies = store.listClaims({ kind: ['failure_pattern'], status: ['active', 'durable_candidate', 'durable'] })
         if (antibodies.length === 0) {
-          pushStatic(createLogEntry({ type: 'text', content: 'No active antibodies.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'No active antibodies.' }))
           setIsStreaming(false)
           return true
         }
@@ -312,7 +312,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           const tag = c.tags.filter(t => t !== 'antibody')[0] ?? c.kind
           return `  [${tag}] ${c.text.slice(0, 80)}`
         })
-        pushStatic(createLogEntry({ type: 'text', content: `Antibodies (${antibodies.length}):\n${lines.join('\n')}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Antibodies (${antibodies.length}):\n${lines.join('\n')}` }))
         setIsStreaming(false)
         return true
       }
@@ -320,18 +320,18 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (args === 'conflicts') {
         const store = ctx.claimStoreRef.current
         if (!store) {
-          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'Claim store not available.' }))
           setIsStreaming(false)
           return true
         }
         const conflicted = store.listClaims({ status: ['conflicted'] })
         if (conflicted.length === 0) {
-          pushStatic(createLogEntry({ type: 'text', content: 'No conflicted claims.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'No conflicted claims.' }))
           setIsStreaming(false)
           return true
         }
         const lines = conflicted.map(c => `  [${c.id.slice(0, 8)}] ${c.text.slice(0, 80)}`)
-        pushStatic(createLogEntry({ type: 'text', content: `Conflicts (${conflicted.length}):\n${lines.join('\n')}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Conflicts (${conflicted.length}):\n${lines.join('\n')}` }))
         setIsStreaming(false)
         return true
       }
@@ -339,7 +339,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (args === 'reload') {
         const store = ctx.claimStoreRef.current
         if (!store) {
-          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'Claim store not available.' }))
           setIsStreaming(false)
           return true
         }
@@ -354,7 +354,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           store.propose(p)
           loaded++
         }
-        pushStatic(createLogEntry({ type: 'text', content: `Reloaded ${loaded} project rules from .rivet/rules/ (${existing.length} previous rules cleared)` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Reloaded ${loaded} project rules from .rivet/rules/ (${existing.length} previous rules cleared)` }))
         setIsStreaming(false)
         return true
       }
@@ -362,14 +362,14 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (args === 'export') {
         const store = ctx.claimStoreRef.current
         if (!store) {
-          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'Claim store not available.' }))
           setIsStreaming(false)
           return true
         }
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
         const outPath = join(homedir(), '.rivet', 'exports', `${timestamp}.json`)
         const count = exportDurableClaims(store, outPath)
-        pushStatic(createLogEntry({ type: 'text', content: `Exported ${count} durable claims to ${outPath}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Exported ${count} durable claims to ${outPath}` }))
         setIsStreaming(false)
         return true
       }
@@ -377,20 +377,20 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (args.startsWith('import ')) {
         const store = ctx.claimStoreRef.current
         if (!store) {
-          pushStatic(createLogEntry({ type: 'text', content: 'Claim store not available.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'Claim store not available.' }))
           setIsStreaming(false)
           return true
         }
         const filePath = args.slice('import '.length).trim()
         const count = importClaims(store, filePath)
-        pushStatic(createLogEntry({ type: 'text', content: count > 0 ? `Imported ${count} claims (confidence ×0.8)` : `No claims imported. Check file path: ${filePath}` }))
+        pushStatic(createLogEntry({ type: 'system', content: count > 0 ? `Imported ${count} claims (confidence ×0.8)` : `No claims imported. Check file path: ${filePath}` }))
         setIsStreaming(false)
         return true
       }
 
       const ledger = ctx.session.getContextLedger()
       if (!ledger) {
-        pushStatic(createLogEntry({ type: 'text', content: 'Context ledger not available yet. Send a message to build the first ledger snapshot.' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Context ledger not available yet. Send a message to build the first ledger snapshot.' }))
         setIsStreaming(false)
         return true
       }
@@ -409,7 +409,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         : ''
 
       pushStatic(createLogEntry({
-        type: 'text',
+        type: 'system',
         content: `Context: ${sections.compactionState}\nTokens: ${sections.estimatedTokens.toLocaleString()}/${sections.maxTokens.toLocaleString()} (${Math.round(sections.estimatedTokens / sections.maxTokens * 100)}%)\nRounds: ${ledger.rounds.length}\n${diagnostics}\n\nCompaction:\n${compactStr}${anchorLines}`,
       }))
       setIsStreaming(false)
@@ -423,18 +423,18 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         const content = memory.entries.length === 0
           ? 'Session memory is empty.'
           : memory.entries.map(entry => `- [${entry.source}] ${entry.text}`).join('\n')
-        pushStatic(createLogEntry({ type: 'text', content }))
+        pushStatic(createLogEntry({ type: 'system', content }))
       } else {
         ctx.persist.appendMemory({ text, source: 'manual', createdAt: Date.now() })
         ctx.agent.updateSessionMemory(ctx.persist.buildMemoryBlock())
-        pushStatic(createLogEntry({ type: 'text', content: 'Saved to session memory.' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Saved to session memory.' }))
       }
       setIsStreaming(false)
       return true
     }
 
     case '/mcp': {
-      pushStatic(createLogEntry({ type: 'text', content: 'MCP status: use /debug mcp for detailed connection info, or check startup logs.' }))
+      pushStatic(createLogEntry({ type: 'system', content: 'MCP status: use /debug mcp for detailed connection info, or check startup logs.' }))
       setIsStreaming(false)
       return true
     }
@@ -442,13 +442,13 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     case '/undo': {
       const fh = ctx.agent.getFileHistory()
       if (!fh) {
-        pushStatic(createLogEntry({ type: 'text', content: 'Undo not available (no file history).' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Undo not available (no file history).' }))
         setIsStreaming(false)
         return true
       }
       const snapshots = fh.getAllSnapshots()
       if (snapshots.length === 0) {
-        pushStatic(createLogEntry({ type: 'text', content: 'No undo history yet.' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'No undo history yet.' }))
         setIsStreaming(false)
         return true
       }
@@ -456,15 +456,15 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       if (arg && /^\d+$/.test(arg)) {
         const idx = parseInt(arg, 10) - 1
         if (idx < 0 || idx >= snapshots.length) {
-          pushStatic(createLogEntry({ type: 'text', content: `Invalid index. History has ${snapshots.length} entries (1-${snapshots.length}).` }))
+          pushStatic(createLogEntry({ type: 'system', content: `Invalid index. History has ${snapshots.length} entries (1-${snapshots.length}).` }))
           setIsStreaming(false)
           return true
         }
         const target = snapshots[idx]!
         fh.rewind(target.messageId).then(restored => {
-          pushStatic(createLogEntry({ type: 'text', content: `Undo complete. Restored files: ${restored.join(', ') || '(none)'}` }))
+          pushStatic(createLogEntry({ type: 'system', content: `Undo complete. Restored files: ${restored.join(', ') || '(none)'}` }))
         }).catch(err => {
-          pushStatic(createLogEntry({ type: 'text', content: `Undo failed: ${(err as Error).message}` }))
+          pushStatic(createLogEntry({ type: 'system', content: `Undo failed: ${(err as Error).message}` }))
         })
       } else {
         const recent = snapshots.slice(-10).reverse()
@@ -473,7 +473,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           const files = Object.keys(s.trackedFileBackups).join(', ')
           return `  ${n}. [${s.messageId.slice(0, 8)}] ${files || '(no files)'}`
         })
-        pushStatic(createLogEntry({ type: 'text', content: `Undo history (${snapshots.length} total):\n${lines.join('\n')}\n\nUse /undo <number> to revert.` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Undo history (${snapshots.length} total):\n${lines.join('\n')}\n\nUse /undo <number> to revert.` }))
       }
       setIsStreaming(false)
       return true
@@ -483,13 +483,13 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       const subcmd = parts[1] as Panel | 'off' | undefined
       if (subcmd === 'off') {
         ctx.setCockpitPanel(null)
-        pushStatic(createLogEntry({ type: 'text', content: 'Cockpit panel collapsed.' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Cockpit panel collapsed.' }))
       } else if (subcmd && subcmd in PANEL_LABELS) {
         ctx.setCockpitPanel(subcmd as Panel)
-        pushStatic(createLogEntry({ type: 'text', content: `Cockpit: ${PANEL_LABELS[subcmd as Panel]} panel. /cockpit off to collapse.` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Cockpit: ${PANEL_LABELS[subcmd as Panel]} panel. /cockpit off to collapse.` }))
       } else {
         ctx.setCockpitPanel(prev => prev ? null : 'summary')
-        pushStatic(createLogEntry({ type: 'text', content: ctx.cockpitPanelRef.current ? `Cockpit: ${PANEL_LABELS[ctx.cockpitPanelRef.current]} panel. /cockpit off to collapse.` : 'Cockpit panel collapsed.' }))
+        pushStatic(createLogEntry({ type: 'system', content: ctx.cockpitPanelRef.current ? `Cockpit: ${PANEL_LABELS[ctx.cockpitPanelRef.current]} panel. /cockpit off to collapse.` : 'Cockpit panel collapsed.' }))
       }
       setIsStreaming(false)
       return true

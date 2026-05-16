@@ -1,17 +1,37 @@
+export type LogEntryType =
+  | 'user_message'
+  | 'assistant_message'
+  | 'tool'
+  | 'tool_group'
+  | 'checkpoint'
+  | 'evidence'
+  | 'system'
+
 export interface LogEntry {
-  type: 'text' | 'tool' | 'checkpoint' | 'evidence'
+  type: LogEntryType
   id: string
   content: string
   toolName?: string
   isError?: boolean
   rawPath?: string
+  turnNumber?: number
+  children?: LogEntry[]
 }
 
 let _nextLogId = 0
 
 const MAX_LOG_STORE = 200
 
-export function createLogEntry(entry: { id?: string; type: LogEntry['type']; content: string; toolName?: string; isError?: boolean; rawPath?: string }): LogEntry {
+export function createLogEntry(entry: {
+  id?: string
+  type: LogEntryType
+  content: string
+  toolName?: string
+  isError?: boolean
+  rawPath?: string
+  turnNumber?: number
+  children?: LogEntry[]
+}): LogEntry {
   return { ...entry, id: entry.id ?? `l${_nextLogId++}` }
 }
 
@@ -43,7 +63,7 @@ export function updateToolLog(
     }
   }
   if (idx === -1) {
-    return [...logs, { type: 'tool', id, toolName, content, isError, rawPath }]
+    return [...logs, { type: 'tool' as const, id, toolName, content, isError, rawPath }]
   }
 
   const existing = logs[idx]!
@@ -53,7 +73,7 @@ export function updateToolLog(
 
   return logs.map((entry, index) => {
     if (index !== idx) return entry
-    return { type: 'tool', id, toolName: entry.toolName ?? toolName, content, isError: isError ?? entry.isError, rawPath: rawPath ?? entry.rawPath }
+    return { type: 'tool' as const, id, toolName: entry.toolName ?? toolName, content, isError: isError ?? entry.isError, rawPath: rawPath ?? entry.rawPath }
   })
 }
 

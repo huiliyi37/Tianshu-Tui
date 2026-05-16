@@ -218,7 +218,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   useEffect(() => {
     const t = getTheme()
     const banner = gradient([t.primary, t.secondary])('◆ R I V E T')
-    pushStatic(createLogEntry({ type: 'text', content: banner }))
+    pushStatic(createLogEntry({ type: 'system', content: banner }))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -243,7 +243,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         process.exit(0)
       }
       lastCtrlCRef.current = Date.now()
-      pushStatic(createLogEntry({ type: 'text', content: '(Ctrl+C again to exit)' }))
+      pushStatic(createLogEntry({ type: 'system', content: '(Ctrl+C again to exit)' }))
       return
     }
 
@@ -265,7 +265,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setCacheHitRate(session.getCacheHitRate())
         setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
-        pushStatic(createLogEntry({ type: 'text', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools)` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools)` }))
       }
       setSessionPrompt('done')
       return
@@ -340,14 +340,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (subcmd === 'confirm') {
           const result = await rollbackToCheckpoint(process.cwd(), rollbackTokenRef.current ?? undefined, currentSessionId)
           rollbackTokenRef.current = null
-          pushStatic(createLogEntry({ type: 'text', content: result.success ? `Rolled back to checkpoint ${result.hash}. Agent-owned changes reverted.` : 'Rollback failed. No valid checkpoint or confirmation token.' }))
+          pushStatic(createLogEntry({ type: 'system', content: result.success ? `Rolled back to checkpoint ${result.hash}. Agent-owned changes reverted.` : 'Rollback failed. No valid checkpoint or confirmation token.' }))
         } else {
           const preview = await getRollbackPreview(process.cwd(), currentSessionId)
           if (preview) {
             rollbackTokenRef.current = preview.confirmationToken
-            pushStatic(createLogEntry({ type: 'text', content: `⚠️  Agent-owned changes to revert:\n${preview.text}\n\nType /rollback confirm to proceed.` }))
+            pushStatic(createLogEntry({ type: 'system', content: `⚠️  Agent-owned changes to revert:\n${preview.text}\n\nType /rollback confirm to proceed.` }))
           } else {
-            pushStatic(createLogEntry({ type: 'text', content: 'No agent-owned changes to rollback.' }))
+            pushStatic(createLogEntry({ type: 'system', content: 'No agent-owned changes to rollback.' }))
           }
         }
         setIsStreaming(false)
@@ -365,7 +365,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
 
     const promptInput = resolveAppPromptInput(userInput, process.cwd())
-    pushStatic(createLogEntry({ type: 'text', content: `> ${userInput}` }))
+    pushStatic(createLogEntry({ type: 'user_message', content: `> ${userInput}` }))
 
     await agent.run(promptInput, {
       onTextDelta: (text) => {
@@ -469,7 +469,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         const finalText = streamBuf.current
         if (finalText) {
-          pushStatic(createLogEntry({ type: 'text', content: finalText }))
+          pushStatic(createLogEntry({ type: 'assistant_message', content: finalText }))
         }
         streamBuf.current = ''
         setStreamingText('')
@@ -502,11 +502,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
       },
       onError: (error) => {
-        pushStatic(createLogEntry({ type: 'text', content: `Error: ${error.message}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Error: ${error.message}`, isError: true }))
         setIsStreaming(false)
       },
       onAbort: () => {
-        pushStatic(createLogEntry({ type: 'text', content: '⏹ Interrupted.' }))
+        pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
         setIsStreaming(false)
       },
       onApprovalRequired: async (id, name, input) => {
@@ -522,7 +522,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     promptQueueRef.current = promptQueueRef.current
       .then(run)
       .catch((err: Error) => {
-        pushStatic(createLogEntry({ type: 'text', content: `Queue error: ${err.message}` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
         setIsStreaming(false)
       })
   }, [agent, session, pushStatic, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])

@@ -15,14 +15,14 @@ export function replayMessagesToLogEntries(messages: Message[]): ReplayResult {
   for (const msg of messages) {
     if (msg.role === 'user' && typeof msg.content === 'string') {
       turnCount++
-      entries.push(createLogEntry({ type: 'text', content: `> ${msg.content}` }))
+      entries.push(createLogEntry({ type: 'user_message', content: `> ${msg.content}` }))
       continue
     }
 
     if (msg.role === 'assistant' && Array.isArray(msg.content)) {
       for (const block of msg.content as ContentBlock[]) {
         if (block.type === 'text') {
-          entries.push(createLogEntry({ type: 'text', content: block.text }))
+          entries.push(createLogEntry({ type: 'assistant_message', content: block.text }))
         } else if (block.type === 'tool_use') {
           // tool_use blocks are counted only when their result arrives below
         }

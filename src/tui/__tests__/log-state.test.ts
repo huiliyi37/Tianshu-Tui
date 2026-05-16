@@ -5,7 +5,7 @@ import { appendLogInPlace, summarizeToolOutput, updateToolLog, visibleLogs, crea
 describe('TUI log state helpers', () => {
   it('updates an existing tool log instead of appending a duplicate', () => {
     const logs: LogEntry[] = [
-      { type: 'text', id: 'l0', content: '> npm test' },
+      { type: 'user_message', id: 'l0', content: '> npm test' },
       { type: 'tool', id: 'tool-1', toolName: 'bash', content: 'running' },
     ]
 
@@ -36,7 +36,7 @@ describe('TUI log state helpers', () => {
   })
 
   it('keeps only the visible tail of logs', () => {
-    const logs = Array.from({ length: 60 }, (_, i): LogEntry => ({ type: 'text', id: `l${i}`, content: String(i) }))
+    const logs = Array.from({ length: 60 }, (_, i): LogEntry => ({ type: 'user_message', id: `l${i}`, content: String(i) }))
 
     assert.equal(visibleLogs(logs, 50).length, 50)
     assert.equal(visibleLogs(logs, 50)[0]!.content, '10')
@@ -61,8 +61,8 @@ describe('TUI log state helpers', () => {
   })
 
   it('assigns stable sequential IDs to log entries', () => {
-    const a = createLogEntry({ type: 'text', content: 'hello' })
-    const b = createLogEntry({ type: 'text', content: 'world' })
+    const a = createLogEntry({ type: 'user_message', content: 'hello' })
+    const b = createLogEntry({ type: 'user_message', content: 'world' })
 
     assert.ok(a.id.startsWith('l'))
     assert.ok(b.id.startsWith('l'))
@@ -78,10 +78,54 @@ describe('TUI log state helpers', () => {
   it('appends in place and trims when exceeding store limit', () => {
     const logs: LogEntry[] = []
     for (let i = 0; i < 250; i++) {
-      appendLogInPlace(logs, { type: 'text', id: `l${i}`, content: String(i) })
+      appendLogInPlace(logs, { type: 'user_message', id: `l${i}`, content: String(i) })
     }
 
     assert.ok(logs.length < 250)
     assert.ok(logs.length > 0)
+  })
+})
+
+describe('LogEntry extended types', () => {
+  it('creates user_message entry', () => {
+    const entry = createLogEntry({ type: 'user_message', content: 'hello', turnNumber: 1 })
+    assert.equal(entry.type, 'user_message')
+    assert.equal(entry.content, 'hello')
+    assert.equal(entry.turnNumber, 1)
+    assert.ok(entry.id.startsWith('l'))
+  })
+
+  it('creates assistant_message entry', () => {
+    const entry = createLogEntry({ type: 'assistant_message', content: 'response', turnNumber: 1 })
+    assert.equal(entry.type, 'assistant_message')
+    assert.equal(entry.turnNumber, 1)
+  })
+
+  it('creates system entry with isError flag', () => {
+    const entry = createLogEntry({ type: 'system', content: 'Error: timeout', isError: true })
+    assert.equal(entry.type, 'system')
+    assert.equal(entry.isError, true)
+  })
+
+  it('creates tool_group entry with children', () => {
+    const children = [
+      createLogEntry({ type: 'tool', content: 'ok', toolName: 'read_file' }),
+      createLogEntry({ type: 'tool', content: 'ok', toolName: 'grep' }),
+    ]
+    const group = createLogEntry({ type: 'tool_group', content: '', children, turnNumber: 2 })
+    assert.equal(group.type, 'tool_group')
+    assert.equal(group.children!.length, 2)
+    assert.equal(group.turnNumber, 2)
+  })
+
+  it('createLogEntry accepts turnNumber and children', () => {
+    const entry = createLogEntry({
+      type: 'tool',
+      content: 'test',
+      turnNumber: 5,
+      children: [],
+    })
+    assert.equal(entry.turnNumber, 5)
+    assert.deepEqual(entry.children, [])
   })
 })
