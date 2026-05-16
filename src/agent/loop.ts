@@ -27,6 +27,7 @@ import type { HookRegistry } from '../hooks/registry.js'
 import { createTraceStore, startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel } from './trace-store.js'
 import { assessToolRisk } from './approval-risk.js'
+import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -325,6 +326,17 @@ export class AgentLoop {
                   content: msg,
                   is_error: true,
                 })
+                // Inject strategy shift hint into volatile context
+                const trajectorySummary: TrajectorySummary[] = this.trajectory.getEntries().map(e => ({
+                  tool: e.tool,
+                  target: e.target,
+                  status: e.status === 'retried-failed' || e.status === 'failed' ? 'failed' : 'success',
+                  errorClass: e.errorClass,
+                }))
+                const hint = suggestStrategyShift(trajectorySummary, doomLevel)
+                if (hint) {
+                  this.config.promptEngine.setStrategyShift(hint)
+                }
                 continue
               }
 
