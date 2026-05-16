@@ -711,7 +711,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {(streamingText || isStreaming) && (
           <StreamOutput text={streamingText} isStreaming={isStreaming} />
         )}
-        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={false} />
+        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking} />
         <AgentStatus
           isStreaming={isStreaming}
           startMs={streamStartRef.current || Date.now()}

@@ -29,6 +29,7 @@ export interface VolatileContext {
   repairHint?: string | null
   impactHint?: string | null
   routingReason?: string | null
+  cerebellarHint?: string | null
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -170,6 +171,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   if (ctx.decisions && ctx.decisions.length > 0) {
     const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
     parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
+  }
+
+  if (ctx.cerebellarHint) {
+    parts.push(`<cerebellar-hint>
+${escapeXml(ctx.cerebellarHint)}
+</cerebellar-hint>`)
   }
 
   if (ctx.activeClaims && ctx.activeClaims.length > 0) {

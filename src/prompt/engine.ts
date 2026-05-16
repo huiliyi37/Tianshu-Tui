@@ -84,6 +84,7 @@ export class PromptEngine {
   private repairHint?: string | null
   private impactHint?: string | null
   private routingReason?: string | null
+  private cerebellarHint?: string | null
   private decisions?: string[]
   private contextLayerReportData: ContextLayerReport
 
@@ -138,7 +139,7 @@ export class PromptEngine {
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         if (i === lastUserTextIdx) {
           // Always refresh the latest turn so active claims and session memory updates project even when no tools ran.
-          const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, decisions: this.decisions })
+          const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions })
           result.push({ role: 'user', content: freshBlock })
         } else {
           // Frozen volatile block for historical turns — preserves prefix cache
@@ -202,6 +203,10 @@ export class PromptEngine {
 
   setRoutingReason(reason: string | null): void {
     this.routingReason = reason
+  }
+
+  setCerebellarHint(hint: string | null): void {
+    this.cerebellarHint = hint ?? undefined
   }
 
   setDecisions(decisions: string[]): void {

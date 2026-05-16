@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T19:35:32.997Z
-> Files: 315 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-16T22:10:42.246Z
+> Files: 345 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -97,10 +97,14 @@
 - `2026-05-16-rivet-wave6-goal-loop.md` — Wave 6: Goal Loop 实施计划 (~3900 tok)
 - `2026-05-16-rivet-wave8-context-fabric-phase2.md` — Wave 8: Context Fabric Phase 2 — Claim 自动提取 + TTL + 晋升 实施计划 (~4816 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5642 tok)
+- `2026-05-17-cerebellar-loop.md` — Cerebellar Loop: Prediction-Error Accumulator 实现计划 (~4838 tok)
+- `2026-05-17-deep-interview-plan.md` — Deep Interview 实施计划 (~196 tok)
 - `2026-05-17-multi-provider-phase1.md` — Multi-Provider Integration Phase 1 实现计划 (~4349 tok)
+- `2026-05-17-multi-provider-phase2.md` — Multi-Provider Phase 2: OpenAIClient 实现计划 (~7193 tok)
 - `2026-05-17-rivet-ecf-phase5-recall-feedback.md` — ECF Phase 5: Recall 正反馈 + Claim 质量信号 实现计划 (~2705 tok)
 - `2026-05-17-rivet-wave9-defect-fixes.md` — Wave 9: 内部缺陷修复 + 结构优化 实施计划 (~4239 tok)
 - `2026-05-17-session-rendering-p0.md` — 会话渲染 P0 实现计划 (~8138 tok)
+- `2026-05-17-session-rendering-p1p2.md` — Session Rendering P1/P2 实现计划 (~2385 tok)
 - `2026-05-17-wave10-test-loop-split.md` — Wave 10: 测试补强 + loop.ts 拆分 实施计划 (~10180 tok)
 - `2026-05-17-wave11-cache-perf.md` — Wave 11: Cache 效率 + Token 节约 实现计划 (~3516 tok)
 
@@ -120,9 +124,13 @@
 - `2026-05-16-rivet-progressive-context-engine-design.md` — Rivet Progressive Context Engine 方案设计 (~3845 tok)
 - `2026-05-16-rivet-subagent-orchestration-design.md` — Rivet 主控模型子代理协同能力深度头脑风暴结果 (~7664 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-design.md` — Rivet XML Protocol Layer + Speculative Pre-warming 设计 (~2060 tok)
+- `2026-05-17-cerebellar-loop-brainstorm.md` — Cerebellar Loop: Deep Brainstorm 过程记录 (~1245 tok)
+- `2026-05-17-deep-interview-design.md` — Deep Interview — 认知对齐模式 (~1212 tok)
 - `2026-05-17-multi-provider-integration-design.md` — Multi-Provider Integration: Design (v2 — Deep Brainstorm) (~4366 tok)
+- `2026-05-17-multi-provider-integration.md` — Multi-Provider Integration: Session Rendering P1/P2 + Cross-Provider Switching (~1031 tok)
 - `2026-05-17-recall-feedback-design.md` — ECF Phase 5: Recall 正反馈 + Claim 质量信号 (~399 tok)
 - `2026-05-17-session-rendering-p0-design.md` — P0 会话渲染优化：消息类型分离 + 工具调用折叠 (~1534 tok)
+- `2026-05-17-session-rendering-p1p2-design.md` — Session Rendering P1/P2: AssistantMessage + Segmented Static (~1287 tok)
 - `2026-05-17-wave10-test-loop-split-design.md` — Wave 10: 测试补强 + loop.ts 拆分 设计规格 (~857 tok)
 - `2026-05-17-wave11-cache-perf-design.md` — Wave 11: 性能优化 — Cache 效率 + Token 节约 (~598 tok)
 
@@ -151,9 +159,10 @@
 
 ## src/
 
+- `fs-atomic.ts` — Atomically write a file: write to a temp file in the same directory, (~235 tok)
 - `goal-loop.ts` — Exports GoalLoopAgent, GoalLoopConfig, GoalLoopResult, runGoalLoop (~874 tok)
 - `headless.ts` — Exports HeadlessCliArgs, HeadlessJsonOutput, HeadlessRunResult, HeadlessAgent + 3 more (~1052 tok)
-- `main.tsx` — deepMerge (~6122 tok)
+- `main.tsx` — deepMerge (~6569 tok)
 - `validation.ts` — Exports isValidSessionId, assertValidSessionId (~78 tok)
 
 ## src/__tests__/
@@ -174,8 +183,8 @@
 - `adaptive-routing.ts` — 1 second of avgLatencyMs penalizes 0.1 points of passRate in the composite score (~530 tok)
 - `aggregation.ts` — Exports aggregateResults (~388 tok)
 - `approval-risk.ts` — Exports RiskLevel, RiskAssessment, assessToolRisk (~1266 tok)
-- `checkpoint.ts` — Create a checkpoint by recording the current HEAD hash and dirty worktree state. (~1577 tok)
-- `context.ts` — Replace all messages (used after compaction) (~1837 tok)
+- `checkpoint.ts` — Returns the checkpoint file path scoped to a session ID. (~2353 tok)
+- `context.ts` — Replace all messages (used after compaction) (~2024 tok)
 - `coordinator-state.ts` — Cumulative event counts — each completed work order increments queued, running, AND its terminal sta (~490 tok)
 - `coordinator.ts` — Exports DelegationRequest, CoordinatorRun, WorkerRuntimeFactory, DelegationCoordinatorConfig + 2 mor (~1550 tok)
 - `create-agent-config.ts` — Exports ModelSpec, AgentConfigInput, createAgentConfig (~625 tok)
@@ -183,18 +192,19 @@
 - `evidence.ts` — Exports DeliveryVerificationStatus, EvidenceState, EvidenceTracker (~1160 tok)
 - `execution-guidance.ts` — Exports GuidanceTrajectoryEntry, ExecutionGuidanceInput, ExecutionGuidance, buildExecutionGuidance (~1292 tok)
 - `failure-classifier.ts` — Classify all failures found in a test run output (~1162 tok)
-- `file-history-persist.ts` — Exports FileSnapshot, HistoryEntry, persistFileHistory, loadFileHistory (~239 tok)
+- `file-history-persist.ts` — Exports FileSnapshot, HistoryEntry, persistFileHistory, loadFileHistory (~213 tok)
 - `file-history.ts` — Exports FileBackup, FileSnapshot, DiffStats, FileHistory (~1780 tok)
 - `impact-hint.ts` — Exports ImpactHint, generateImpactHint (~764 tok)
 - `import-graph.ts` — Exports ImportGraph, buildImportGraph, getReverseDeps, invalidateFile (~1122 tok)
 - `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~5942 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~5979 tok)
+- `prediction-error.ts` — Exports InterventionLevel, PredictionAccumulator, createPredictionAccumulator, recordPrediction + 4 (~567 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
 - `repair-hint.ts` — Exports RepairHintTracker (~368 tok)
 - `repair-passes.ts` — Exports fourHorsemenPass, fixAutoLinks, semanticRepairPass (~1019 tok)
 - `repair-pipeline.ts` — Exports RepairContext, RepairResult, RepairPass, RepairTelemetryEntry + 2 more (~346 tok)
 - `retry-policy.ts` — Exports RetryPolicyInput, RetryPolicyDecision, shouldRetryToolFailure (~428 tok)
-- `session-persist.ts` — Append a single message to the session file (~2144 tok)
+- `session-persist.ts` — Append a single message to the session file (~2153 tok)
 - `strategy-shift.ts` — Exports TrajectorySummary, suggestStrategyShift (~103 tok)
 - `task-state.ts` — Exports TaskState, extractTaskState (~326 tok)
 - `tool-pipeline.ts` — Exports ToolPipelineDeps, ToolExecResult, executeToolUse (~4371 tok)
@@ -216,6 +226,7 @@
 - `approval-risk.test.ts` — Declares antibodyClaim (~2444 tok)
 - `checkpoint.test.ts` — makeTempGitRepo: cleanupRepo (~2001 tok)
 - `context-ledger-state.test.ts` — Declares makeLedger (~543 tok)
+- `context.test.ts` — Declares ctx (~1222 tok)
 - `coordinator-state.test.ts` — Declares state (~791 tok)
 - `coordinator.test.ts` — WorkerRuntimeFactory: fakeTool, makeRegistry, resultFor (~2588 tok)
 - `delivery-gate.test.ts` — Declares state (~676 tok)
@@ -245,10 +256,11 @@
 
 ## src/api/
 
-- `client.ts` — Whether the provider has a known bug where tool JSON appears in text content (~3729 tok)
+- `client.ts` — Whether the provider has a known bug where tool JSON appears in text content (~3825 tok)
 - `deepseek.ts` — Generic factory: create an ApiClient for any provider described by a (~572 tok)
+- `factory.ts` — Runtime parameters that vary per-model or per-call, not stored in config (~663 tok)
 - `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~459 tok)
-- `sse.ts` — Exports SSEEvent, SSEParser (~602 tok)
+- `sse.ts` — Exports SSEEvent, SSEParser (~635 tok)
 - `types.ts` — Exports ContentBlockText, ContentBlockThinking, ContentBlockToolUse, ContentBlockToolResult + 7 more (~552 tok)
 
 ## src/api/__tests__/
@@ -271,8 +283,8 @@
 
 ## src/config/
 
-- `default.ts` — Exports DEFAULT_CONFIG (~324 tok)
-- `manager.ts` — Exports loadConfig, listProviders, getProvider, getDefaultProvider + 10 more (~3370 tok)
+- `default.ts` — Exports DEFAULT_CONFIG (~775 tok)
+- `manager.ts` — Exports loadConfig, listProviders, getProvider, getDefaultProvider + 10 more (~3332 tok)
 - `schema.ts` — Zod schemas: modelConfigSchema, providerSchema, agentSchema, compactSchema + 2 more (~623 tok)
 
 ## src/context/
@@ -281,7 +293,7 @@
 - `claim-budget.ts` — Exports MAX_ACTIVE_CLAIMS, selectEvictionCandidates (~176 tok)
 - `claim-export.ts` — Exports ClaimExportData, exportDurableClaims, importClaims (~434 tok)
 - `claim-extractor.ts` — Exports ToolResultContext, ClaimExtractionMeta, extractClaimsFromToolResult (~1456 tok)
-- `claim-store.ts` — Exports ContextClaimEvent, ClaimFilter, ClaimUseInput, ContextClaimStore (~2626 tok)
+- `claim-store.ts` — Exports ContextClaimEvent, ClaimFilter, ClaimUseInput, ContextClaimStore (~2811 tok)
 - `claims.ts` — Exports ContextClaimKind, ContextClaimScope, ContextClaimStatus, EvidenceKind + 12 more (~1509 tok)
 - `conflict-detect.ts` — Exports ClaimConflict, detectConflicts (~415 tok)
 - `ledger.ts` — Exports createContextLedger (~359 tok)
@@ -291,7 +303,7 @@
 - `resume-preflight.ts` — Exports runResumePreflight (~682 tok)
 - `rounds.ts` — Exports groupIntoRounds, computeInvariantStatus, getSafeCutIndices (~1703 tok)
 - `rules-loader.ts` — Exports loadProjectRules (~375 tok)
-- `session-memory.ts` — Exports loadSessionMemory, appendSessionMemory, buildSessionMemoryBlock (~586 tok)
+- `session-memory.ts` — Exports loadSessionMemory, appendSessionMemory, buildSessionMemoryBlock (~599 tok)
 - `token-estimate.ts` (~18 tok)
 - `types.ts` — ─── Health & Budget ────────────────────────────────────────── (~1066 tok)
 
@@ -332,7 +344,7 @@
 ## src/mcp/
 
 - `config.ts` — Zod schemas: mcpServerConfigSchema, mcpConfigSchema (~268 tok)
-- `manager.ts` — Exports McpToolDef, ConnectedServer, McpManager (~1342 tok)
+- `manager.ts` — Exports McpToolDef, ConnectedServer, McpManager (~1428 tok)
 - `types.ts` — Exports McpConnectionState (~68 tok)
 - `wrapper.ts` — Exports mcpToolName, createMcpToolWrapper (~782 tok)
 
@@ -359,7 +371,8 @@
 - `engine.ts` — Build a request. Volatile context is injected as an independent user message (~2504 tok)
 - `fingerprint.ts` — Exports PrefixFingerprint, DriftEvent, computeFingerprint, detectDrift (~400 tok)
 - `static.ts` — Exports StaticPromptContext, buildSystemPrompt (~946 tok)
-- `volatile.ts` — Build stable volatile block — excludes per-turn dynamic sections and active claims. (~1705 tok)
+- `volatile-git.ts` — Exports formatGitStatus, createGitStatusCache, gitStatusCache (~809 tok)
+- `volatile.ts` — Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (laz (~1877 tok)
 
 ## src/prompt/__tests__/
 
@@ -395,7 +408,7 @@
 - `grep.ts` — Exports GREP_TOOL (~2330 tok)
 - `output-store.ts` — Exports ToolOutputMeta, persistRawOutput, buildModelOutput, buildUiOutput (~794 tok)
 - `path-validate.ts` — Exports ValidatedPath, InvalidPath, PathValidationResult, validatePathSafe, validatePath (~241 tok)
-- `read-file.ts` — Exports READ_FILE_TOOL (~654 tok)
+- `read-file.ts` — TUI display: head + tail with line numbers, compact for large files. (~1530 tok)
 - `recall.ts` — Exports RecallContext, createRecallTool (~720 tok)
 - `registry.ts` — Exports ToolRegistry (~304 tok)
 - `run-tests.ts` — Exports RUN_TESTS_TOOL (~3052 tok)
@@ -426,43 +439,60 @@
 
 ## src/tui/
 
-- `agent-status.tsx` — MAX_VISIBLE_ITEMS (~1232 tok)
-- `app.tsx` — THINKING_FLUSH_MS (~7134 tok)
-- `base-text-input.tsx` — BaseTextInput — uses useState, useEffect, useCallback (~934 tok)
-- `history-replay.ts` — Exports ReplayResult, replayMessagesToLogEntries (~428 tok)
-- `history.ts` — Persistent TUI prompt history load/append helpers (~203 tok)
+- `agent-status.tsx` — SPINNER_FRAMES (~1461 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~9281 tok)
+- `assistant-message.tsx` — AssistantMessage (~212 tok)
+- `base-text-input.tsx` — Get line/column info from a flat cursor position in a multi-line string (~2447 tok)
+- `block-stream-writer.ts` — Exports BlockStreamConfig, BlockStreamWriter (~729 tok)
+- `group-logs.ts` — Exports groupLogs (~332 tok)
+- `history-replay.ts` — Exports ReplayResult, replayMessagesToLogEntries (~527 tok)
+- `history.ts` — Exports MAX_HISTORY, loadHistory, nextHistoryAfterSubmit, appendHistory (~251 tok)
 - `input.tsx` — InputBar — uses useState (~208 tok)
-- `log-state.ts` — Exports LogEntry, createLogEntry, appendLogInPlace, visibleLogs + 2 more (~586 tok)
-- `phase-tracker.ts` — Exports Phase, LastAction, PhaseTracker (~482 tok)
-- `slash-commands.ts` — Exports SlashHandlerContext, formatContextClaimsCommand, resolveAppPromptInput, handleSlashCommand (~6461 tok)
-- `status-bar.tsx` — tokenBar (~586 tok)
+- `log-state.ts` — Exports LogEntryType, LogEntry, createLogEntry, appendLogInPlace + 3 more (~650 tok)
+- `phase-tracker.ts` — Exports Phase, LastAction, PhaseTracker (~486 tok)
+- `ring-buffer.ts` — Exports RingBuffer, createRingBuffer (~278 tok)
+- `slash-commands.ts` — Exports SlashHandlerContext, formatContextClaimsCommand, resolveAppPromptInput, handleSlashCommand (~6702 tok)
+- `status-bar.tsx` — tokenBar (~1169 tok)
 - `stream.tsx` — StreamOutput (~105 tok)
 - `summary-bar.tsx` — truncate (~1249 tok)
-- `theme.ts` — Exports RivetTheme, getTheme (~456 tok)
+- `system-message.tsx` — SystemMessage (~137 tok)
+- `theme.ts` — Exports RivetTheme, ThemeName, setTheme, getActiveThemeName, getTheme (~887 tok)
 - `thinking.tsx` — ThinkingCollapser — uses useState (~242 tok)
-- `tool-card.tsx` — MAX_COLLAPSED_LINES (~456 tok)
+- `tool-card.tsx` — MAX_COLLAPSED_LINES (~485 tok)
+- `tool-family.ts` — Exports ToolFamily, ToolFamilyInfo, getToolFamily, getGroupSummary (~570 tok)
+- `tool-group.tsx` — ToolGroup (~318 tok)
 - `use-terminal-size.ts` — Exports TerminalSizeSnapshot, getTerminalSizeSnapshot, useTerminalSize (~209 tok)
+- `user-message.tsx` — UserMessage (~137 tok)
 
 ## src/tui/__tests__/
 
-- `history-replay.test.ts` — Declares result (~751 tok)
-- `log-state.test.ts` — Declares LogEntry (~803 tok)
+- `assistant-message.test.ts` (~103 tok)
+- `base-text-input.test.ts` — Replicate the helper functions from base-text-input.tsx for testing (~1532 tok)
+- `group-logs.test.ts` — Declares LogEntry (~1017 tok)
+- `history-replay.test.ts` — Declares result (~763 tok)
+- `interview.test.ts` — INTERVIEW_MARKER_RE: parseInterviewMarker, clarityColor, clarityTrend, formatTok (~1521 tok)
+- `log-state.test.ts` — Declares LogEntry (~1260 tok)
 - `phase-tracker.test.ts` — Declares pt (~1177 tok)
-- `slash-commands.test.ts` — SlashHandlerContext: makeCtx (~682 tok)
-- `status-bar.test.ts` — contextColor: roundsColor, usageColor, cacheColor (~436 tok)
+- `ring-buffer.test.ts` — Declares buf (~632 tok)
+- `slash-commands.test.ts` — SlashHandlerContext: makeCtx (~700 tok)
+- `status-bar.test.ts` — contextColor: roundsColor, usageColor, cacheColor, cacheStatusColor (~577 tok)
 - `summary-bar.test.ts` — Declares state (~888 tok)
+- `system-message.test.ts` (~97 tok)
 - `theme.test.ts` — Declares theme (~331 tok)
+- `tool-family.test.ts` — Declares f (~495 tok)
+- `tool-group.test.ts` (~95 tok)
 - `use-terminal-size.test.ts` — Declares first (~113 tok)
+- `user-message.test.ts` (~93 tok)
 
 ## src/tui/cockpit/
 
 - `context-panel.tsx` — formatClaimCounts (~891 tok)
 - `index.ts` — Declares Panel (~138 tok)
 - `mcp-panel.tsx` — statusIcon (~484 tok)
-- `model-panel.tsx` — ModelPanel (~526 tok)
+- `model-panel.tsx` — ModelPanel (~889 tok)
 - `rail.tsx` — statusIndicator (~391 tok)
-- `state.ts` — Exports CockpitSnapshotSources, buildCockpitSnapshot (~1533 tok)
-- `types.ts` — Exports Panel, PANELS, PANEL_LABELS, CockpitContextLayerView + 5 more (~724 tok)
+- `state.ts` — Exports CockpitSnapshotSources, buildCockpitSnapshot (~1752 tok)
+- `types.ts` — Exports Panel, PANELS, PANEL_LABELS, CockpitContextLayerView + 5 more (~776 tok)
 - `verification-panel.tsx` — statusIcon (~764 tok)
 
 ## src/tui/cockpit/__tests__/

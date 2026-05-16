@@ -18,6 +18,7 @@ import { generateImpactHint } from './impact-hint.js'
 import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, recordTraceEvent } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
+import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk } from './approval-risk.js'
 import { isToolAllowed } from './permissions.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
@@ -43,6 +44,8 @@ export interface ToolPipelineDeps {
   sessionTurnCount: number
   sessionId: string | undefined
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
+  getInterventionLevel?(): import('./prediction-error.js').InterventionLevel
+  recordPrediction?(correct: boolean): void
 }
 
 export interface ToolExecResult {
@@ -77,6 +80,17 @@ export async function executeToolUse(
   }
 
   try {
+    // Cerebellar Loop: read-before-edit gate
+    const intervention = deps.getInterventionLevel?.() ?? 'none'
+    if ((intervention === 'gate' || intervention === 'escalate') && (tu.name === 'edit_file' || tu.name === 'write_file')) {
+      const recentReads = deps.trajectory.getEntries().slice(-3).some(e => e.tool === 'read_file')
+      if (!recentReads) {
+        const gateMsg = `Tool blocked by cerebellar gate: recent prediction error rate is elevated. Read the file before editing to ensure mental model is current.`
+        callbacks.onToolResult(tu.id, tu.name, gateMsg, true)
+        return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: gateMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+      }
+    }
+
     // PreToolUse hook
     const preHookResult = deps.config.hooks?.firePreToolUse({ toolName: tu.name, input: tu.input as Record<string, unknown> }) ?? {}
     if (preHookResult.block) {
@@ -191,6 +205,7 @@ export async function executeToolUse(
       name: tu.name,
       startedAt: Date.now(),
       summary: JSON.stringify(tu.input).slice(0, 60),
+      predictedSuccess: true,
     })
     let rawToolResult: import('../tools/types.js').ToolResult | undefined
     const harnessResult = await deps.harness.executeTool({
@@ -247,6 +262,7 @@ ${check.formatted}`
       endedAt: Date.now(),
       summary: harnessResult.content.slice(0, 100),
     })
+    deps.recordPrediction?.(!harnessResult.isError)
     const fp = fingerprintToolCall(tu.name, tu.input, harnessResult.isError ? 'error' : 'success')
     traceStore = recordToolFingerprint(traceStore, fp)
 

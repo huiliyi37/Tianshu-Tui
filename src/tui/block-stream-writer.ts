@@ -5,9 +5,9 @@ export interface BlockStreamConfig {
 }
 
 const DEFAULT_CONFIG: BlockStreamConfig = {
-  minChars: 300,
-  maxChars: 800,
-  idleMs: 1200,
+  minChars: 100,
+  maxChars: 600,
+  idleMs: 500,
 }
 
 export class BlockStreamWriter {
@@ -16,6 +16,7 @@ export class BlockStreamWriter {
   private sending: Promise<void> = Promise.resolve()
   private readonly config: BlockStreamConfig
   private readonly onBlock: (text: string) => void
+  private hasEmitted = false
 
   constructor(config: Partial<BlockStreamConfig>, onBlock: (text: string) => void) {
     this.config = { ...DEFAULT_CONFIG, ...config }
@@ -51,7 +52,9 @@ export class BlockStreamWriter {
   }
 
   private checkEmit(): void {
-    if (this.buffer.length < this.config.minChars) return
+    const minChars = this.hasEmitted ? this.config.minChars : 15
+    if (this.buffer.length < minChars) return
+    this.hasEmitted = true
 
     if (this.buffer.length >= this.config.maxChars) {
       const pos = this.findBreakPoint(this.buffer, this.config.maxChars)

@@ -1,4 +1,4 @@
-import { createLogEntry, type LogEntry } from './log-state.js'
+import { type LogEntry } from './log-state.js'
 import { getGroupSummary } from './tool-family.js'
 
 const GROUP_THRESHOLD = 3
@@ -10,12 +10,15 @@ export function groupLogs(items: readonly LogEntry[]): LogEntry[] {
 
   const flushToolRun = () => {
     if (toolRun.length >= GROUP_THRESHOLD) {
-      result.push(createLogEntry({
+      // Use first child's id prefixed with 'g' for stable identity
+      const stableId = `g-${toolRun[0]!.id}`
+      result.push({
         type: 'tool_group',
+        id: stableId,
         content: getGroupSummary(toolRun),
         children: [...toolRun],
         turnNumber: toolRun[0]!.turnNumber,
-      }))
+      })
     } else {
       result.push(...toolRun)
     }

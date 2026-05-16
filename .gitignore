@@ -8,3 +8,4 @@ failure-samples/**/transcript.raw.jsonl
 findings.md
 progress.md
 task_plan.md
+.superpowers/

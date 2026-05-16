@@ -15,9 +15,10 @@ export interface TraceEvent {
   durationMs?: number
   summary?: string
   rawPath?: string
+  predictedSuccess?: boolean
 }
 
-export type TraceEventStartInput = Pick<TraceEvent, 'id' | 'turn' | 'kind' | 'name' | 'startedAt' | 'summary'>
+export type TraceEventStartInput = Pick<TraceEvent, 'id' | 'turn' | 'kind' | 'name' | 'startedAt' | 'summary' | 'predictedSuccess'>
 
 export interface TraceStore {
   maxEvents: number

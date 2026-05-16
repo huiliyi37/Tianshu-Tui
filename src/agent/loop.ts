@@ -38,6 +38,8 @@ import { selectReasoningEffort } from './auto-reasoning.js'
 import { extractTaskState } from './task-state.js'
 import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import { processTurnEnd } from './turn-end.js'
+import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, adjustReasoningEffort } from './prediction-error.js'
+import type { PredictionAccumulator } from './prediction-error.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -104,6 +106,7 @@ export class AgentLoop {
   private userAnchors: ContextAnchor[] = []
   private anchorRegistry = new AnchorRegistry(2_000)
   private lastConflictCheckCount = 0
+  private predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
 
   constructor(
     private config: AgentConfig,
@@ -360,6 +363,7 @@ export class AgentLoop {
     this.trajectory.reset()
     this.decisions = []
     this.traceStore = createTraceStore()
+    this.predictionAccumulator = createPredictionAccumulator()
     this.recordUserInputClaims(userInput)
     this.session.addUserMessage(userInput)
 
@@ -489,6 +493,10 @@ export class AgentLoop {
               sessionTurnCount: this.session.getTurnCount(),
               sessionId: this.config.sessionId,
               recordToolHistory: (name, input, isError, content) => this.recordToolHistory(name, input, isError, content),
+              getInterventionLevel: () => getInterventionLevel(this.predictionAccumulator),
+              recordPrediction: (correct) => {
+                this.predictionAccumulator = recordPrediction(this.predictionAccumulator, correct)
+              },
             }
 
             const result = await executeToolUse(tu, pipelineDeps, callbacks, turn, checkpointCreatedThisTurn)
@@ -503,6 +511,20 @@ export class AgentLoop {
           }
 
           this.session.addToolResults(toolResults)
+
+          // Cerebellar Loop: check intervention level and adjust reasoning
+          const level = getInterventionLevel(this.predictionAccumulator)
+          if (level !== 'none') {
+            this.config.promptEngine.setCerebellarHint(`Prediction error rate elevated (${level}). Mental model may be stale — verify assumptions before proceeding.`)
+          } else {
+            this.config.promptEngine.setCerebellarHint(null)
+          }
+          if (shouldTippingPointReset(this.predictionAccumulator)) {
+            this.config.promptEngine.setCerebellarHint(null)
+          }
+          if (this.config.autoReasoning && this.config.reasoningEffort) {
+            this.config.reasoningEffort = adjustReasoningEffort(this.config.reasoningEffort, level)
+          }
 
           const turnEndResult = processTurnEnd({
             config: this.config,
