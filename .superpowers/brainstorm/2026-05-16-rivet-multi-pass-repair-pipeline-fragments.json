@@ -1,0 +1,129 @@
+{
+  "phase": "complete",
+  "topic": "Multi-Pass Repair Pipeline + Adaptive Injection",
+  "date": "2026-05-16",
+  "fragments": [
+    {
+      "text": "航空 TMR 表决：N 路执行取多数结果。对应 harness 的多策略验证——关键操作让 N 个推理路径生成结果，harness 作为 voter",
+      "fragmentType": "analogy",
+      "source": "external",
+      "tags": ["aviation", "redundancy", "voting"]
+    },
+    {
+      "text": "数据库 AQP 的 Monitor→Assess→Respond：运行时监控偏差超阈值触发策略切换，不等整个查询结束。对应 agent 的实时 trajectory 监控 + 中途干预",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["database", "adaptive", "mid-execution"]
+    },
+    {
+      "text": "Query Store 版本化策略 + 回归检测：记录历史执行策略和性能，新策略退化时自动回滚。对应 harness 的修复规则版本化",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["database", "versioning", "rollback"]
+    },
+    {
+      "text": "TLS 降级防护信号 (Fallback SCSV)：在降级重试时附带信号，防止不必要的能力降级。对应 compact 后的能力保持断言",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["networking", "negotiation", "degradation-guard"]
+    },
+    {
+      "text": "Error-Recovering Parser 不停止而是跳到同步点继续。对应 harness 的格式韧性——不因小格式错误触发昂贵重试",
+      "fragmentType": "analogy",
+      "source": "external",
+      "tags": ["compiler", "error-recovery", "sync-point"]
+    },
+    {
+      "text": "Gradual Typing Coercion：类型不完全匹配时自动 coerce 而非拒绝。对应 harness 的 schema 宽容——string '42' vs number 42 自动转换",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["compiler", "coercion", "type-repair"]
+    },
+    {
+      "text": "APR Fault Localization：通过测试套件统计精确定位出错行。对应 harness 的精确重试——只让模型重做出错部分而非整个 turn",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["compiler", "fault-localization", "precise-retry"]
+    },
+    {
+      "text": "反证：单 session edit_file 仅 5-15 次调用，per-(model,tool) profiling 样本不足。跨 session 积累才有统计意义",
+      "fragmentType": "contradiction",
+      "source": "agent",
+      "tags": ["constraint", "sample-size", "profiling"]
+    },
+    {
+      "text": "反证：SSE 流唯一可靠同步点是 content_block_stop，中途无确定性恢复点。streaming 修复不可行",
+      "fragmentType": "contradiction",
+      "source": "agent",
+      "tags": ["constraint", "streaming", "sync-point"]
+    },
+    {
+      "text": "反证：Messages API 不支持参数级 partial retry。只能整 turn 重试或 harness 自己修参数",
+      "fragmentType": "contradiction",
+      "source": "agent",
+      "tags": ["constraint", "api", "partial-retry"]
+    },
+    {
+      "text": "反证：profile 注入 system prompt 会破坏 prefix cache。必须用 volatile block 注入",
+      "fragmentType": "risk",
+      "source": "agent",
+      "tags": ["constraint", "cache", "injection"]
+    },
+    {
+      "text": "Rivet 的 AdaptiveRouter 已有 per-model 评分基础设施(MAX_HISTORY=100)，但仅用于子代理路由。可扩展为主 loop 的模型行为监控",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["rivet", "adaptive-router", "extensible"]
+    },
+    {
+      "text": "failure-classifier 的 8 类分类可作为自适应注入的触发条件——连续 2 次同类失败才注入，而非任何失败都注入",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["rivet", "failure-classifier", "trigger"]
+    },
+    {
+      "text": "核心收敛：修复不是一次性动作而是管线(pipeline)。管线每级处理不同粒度问题，且可根据反馈调整。与 AQP 和编译器多 pass 完全收敛",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["convergence", "pipeline", "multi-pass"]
+    },
+    {
+      "text": "Pass 5 自适应注入是 Rivet 独有竞争力——Command Code 只做静态修复，不利用模型的 in-context learning 能力自我纠正",
+      "fragmentType": "observation",
+      "source": "agent",
+      "tags": ["competitive-advantage", "adaptive", "in-context-learning"]
+    }
+  ],
+  "candidates": [
+    {
+      "id": "V1",
+      "niche": "静态规则扩展",
+      "oneLiner": "在四骑士基础上加 per-model 修复规则",
+      "status": "absorbed_into_V4",
+      "note": "作为 V4 的 Pass 3 存在"
+    },
+    {
+      "id": "V2",
+      "niche": "失败驱动 tool description 注入",
+      "oneLiner": "连续同类失败时在 volatile block 追加修复提示",
+      "status": "survivor_rank2",
+      "advantage": "零维护 + 利用模型自身能力"
+    },
+    {
+      "id": "V3",
+      "niche": "跨 session model card",
+      "oneLiner": "持久化修复统计驱动策略选择",
+      "status": "extinct",
+      "extinctionReason": "冷启动 + 样本不足(事实约束) + 模型版本失效"
+    },
+    {
+      "id": "V4",
+      "niche": "多 pass 修复管线",
+      "oneLiner": "5 个独立 pass 依次处理结构/schema/类型/语义/自适应",
+      "status": "survivor_rank1",
+      "advantage": "架构可扩展 + 所有方案可作为 pass 插入"
+    }
+  ],
+  "convergenceInsight": "修复不是一次性动作而是管线。管线每级处理不同粒度问题，且可根据反馈调整行为。与数据库 AQP 和编译器多 pass 完全收敛。",
+  "finalRecommendation": "Multi-Pass Repair Pipeline (Pass 1-4 确定性修复) + Adaptive Injection (Pass 5 失败驱动注入)"
+}

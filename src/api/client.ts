@@ -96,6 +96,15 @@ function recoverTruncatedJSON(raw: string): Record<string, unknown> {
   }
 }
 
+/** Schema gate: validate required fields are present in tool_use input */
+export function validateRequiredFields(
+  input: Record<string, unknown>,
+  required: string[],
+): string[] {
+  if (required.length === 0) return []
+  return required.filter(f => input[f] === undefined || input[f] === null)
+}
+
 /** DeepSeek V4 known bug: tool call JSON may appear in text content */
 function extractToolJsonFromText(text: string): { name: string; input: Record<string, unknown> } | null {
   // Strategy 1: Try to find a JSON object with "name" and "input" keys via JSON.parse
@@ -195,6 +204,13 @@ export class ApiClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
+    const toolSchemas = new Map<string, string[]>()
+    if (request.tools) {
+      for (const tool of request.tools) {
+        toolSchemas.set(tool.name, tool.input_schema.required ?? [])
+      }
+    }
+
     const finalRequest = this.stripUnsupported({ ...request, stream: true })
 
     const response = await withRetry(
@@ -329,6 +345,19 @@ export class ApiClient {
                     input = JSON.parse(toolUseBuffer.partialJson) as Record<string, unknown>
                   } catch {
                     input = recoverTruncatedJSON(toolUseBuffer.partialJson)
+                  }
+                  // Schema gate: suppress tool_use with missing required fields
+                  const requiredFields = toolSchemas.get(toolUseBuffer.name)
+                  if (requiredFields && requiredFields.length > 0) {
+                    const missing = validateRequiredFields(input, requiredFields)
+                    if (missing.length > 0) {
+                      callbacks.onContentBlock({
+                        type: 'text',
+                        text: `[schema-gate] Suppressed ${toolUseBuffer.name}: missing required (${missing.join(', ')}). Retry with complete parameters.`,
+                      })
+                      toolUseBuffer = null
+                      break
+                    }
                   }
                   callbacks.onContentBlock({
                     type: 'tool_use',

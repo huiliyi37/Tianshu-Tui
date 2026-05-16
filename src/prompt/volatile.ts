@@ -24,6 +24,7 @@ export interface VolatileContext {
   behaviorMirror?: string | null
   decisions?: string[]
   strategyShift?: string | null
+  repairHint?: string | null
 }
 
 let rivetMdCache: { value: string | undefined; timestamp: number } | null = null
@@ -138,6 +139,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   if (ctx.strategyShift) {
     parts.push(`<strategy-shift>\n${escapeXml(ctx.strategyShift)}\n</strategy-shift>`)
+  }
+
+  if (ctx.repairHint) {
+    parts.push(ctx.repairHint)
   }
 
   if (ctx.decisions && ctx.decisions.length > 0) {

@@ -28,6 +28,9 @@ import { createTraceStore, startTraceEvent, finishTraceEvent, fingerprintToolCal
 import { getDoomLoopLevel } from './trace-store.js'
 import { assessToolRisk } from './approval-risk.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
+import { RepairPipeline } from './repair-pipeline.js'
+import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
+import { RepairHintTracker } from './repair-hint.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -76,6 +79,8 @@ export class AgentLoop {
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
   private decisions: string[] = []
   private trajectory = new TrajectoryRecorder()
+  private repairPipeline = new RepairPipeline([fourHorsemenPass, semanticRepairPass])
+  private repairHintTracker = new RepairHintTracker()
   private traceStore: TraceStore
   private harness: TurnHarness
 
@@ -248,6 +253,11 @@ export class AgentLoop {
 
         this.streamedText = ''
         this.lastPrewarmAt = 0
+
+        // Pass 5: adaptive repair hint injection
+        const repairHint = this.repairHintTracker.getHint()
+        this.config.promptEngine.setRepairHint(repairHint)
+
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const collectedBlocks: ContentBlock[] = []
         let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
@@ -313,6 +323,19 @@ export class AgentLoop {
               if (preHookResult.input) {
                 tu.input = preHookResult.input
                 params.input = preHookResult.input
+              }
+
+              // Multi-pass tool input repair
+              const toolDef = this.config.toolRegistry.get(tu.name)
+              if (toolDef) {
+                const repairResult = this.repairPipeline.run(
+                  tu.input as Record<string, unknown>,
+                  { toolName: tu.name, schema: toolDef.definition.input_schema },
+                )
+                if (repairResult.telemetry.length > 0) {
+                  tu.input = repairResult.output
+                  params.input = repairResult.output
+                }
               }
 
               // Doom-loop block: prevent repeated identical failures
@@ -435,6 +458,10 @@ export class AgentLoop {
               // Record tool history for volatile context injection
               this.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content)
 
+              if (!harnessResult.isError) {
+                this.repairHintTracker.recordSuccess(tu.name)
+              }
+
               // Invalidate prewarm cache after writes
               if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError && typeof tu.input.file_path === 'string') {
                 this.prewarm.invalidate(tu.input.file_path)
@@ -470,6 +497,7 @@ export class AgentLoop {
               })
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err)
+              this.repairHintTracker.recordFailure(tu.name, 'execution_error')
               callbacks.onToolResult(tu.id, tu.name, msg, true)
               toolResults.push({
                 type: 'tool_result',

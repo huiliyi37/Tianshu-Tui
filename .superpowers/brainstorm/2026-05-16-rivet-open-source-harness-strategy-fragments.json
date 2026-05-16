@@ -1,0 +1,99 @@
+{
+  "phase": "complete",
+  "topic": "开源策略 + harness 竞争力保留",
+  "date": "2026-05-16",
+  "fragments": [
+    {
+      "text": "Command Code 让 Kimi k2.6 接近 Opus 4.7 的关键不是模型调优，而是 harness 工程——session 级 prefix cache 命中、canonical model ID、provider 能力协商、reasoning mode 绕过",
+      "fragmentType": "observation",
+      "source": "external",
+      "tags": ["harness", "cache", "model-routing"]
+    },
+    {
+      "text": "CTCL 是 ~/bin/claude-tool-compat-layer.mjs（995 行），3 项已验证能力：四骑士修复（>95% 成功率）、CCH 剥离（恢复 ~90% cache 命中）、SSE schema gate",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["ctcl", "tool-repair", "cache"]
+    },
+    {
+      "text": "Rivet 的护城河是堆叠系统——cache-stable prompt engine + round-safe context + execution resilience + observability。单模块可复制，堆叠系统难复制",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["moat", "architecture"]
+    },
+    {
+      "text": "闭源模型的优势有相当一部分是平台工程优势，不是纯模型能力优势",
+      "fragmentType": "observation",
+      "source": "external",
+      "tags": ["harness", "open-source"]
+    },
+    {
+      "text": "假设反证：AI 代码生成工具可能在 1 周内复制 Rivet 的 harness 层，如果这样，'持续做好'不构成护城河",
+      "fragmentType": "risk",
+      "source": "agent",
+      "tags": ["moat", "ai-replication"]
+    },
+    {
+      "text": "假设反证：如果 DeepSeek V5 原生解决了 tool use、长上下文稳定性，harness 层价值会大幅下降",
+      "fragmentType": "risk",
+      "source": "agent",
+      "tags": ["moat", "model-evolution"]
+    },
+    {
+      "text": "CTCL 的 3 项能力正好是 harness 服务的最小可行产品",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["ctcl", "mvp", "harness-service"]
+    },
+    {
+      "text": "harness 优化是'服务'不是'代码'。代码可以开源，但持续的优化能力不能",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["strategy", "harness", "open-source"]
+    },
+    {
+      "text": "开源模型社区不信任闭源工具——开源代码是获取信任的必要条件",
+      "fragmentType": "observation",
+      "source": "agent",
+      "tags": ["community", "trust"]
+    },
+    {
+      "text": "Command Code $1/月 Go 计划证明开发者愿意为 harness 付费，但价格敏感",
+      "fragmentType": "observation",
+      "source": "external",
+      "tags": ["pricing", "monetization"]
+    }
+  ],
+  "candidates": [
+    {
+      "id": "V1",
+      "niche": "纯开源",
+      "oneLiner": "全部代码 MIT 开源，靠社区贡献和迭代速度竞争",
+      "status": "extinct",
+      "extinctionReason": "纯开源无法回答'核心竞争力如何保留'；Command Code 证明 harness 可复制"
+    },
+    {
+      "id": "V2",
+      "niche": "开源 agent + 闭源 harness 服务",
+      "oneLiner": "agent 代码开源，harness 优化作为托管 API 收费",
+      "status": "survivor_rank1",
+      "advantage": "开源获客 + harness 服务变现，因果链完整"
+    },
+    {
+      "id": "V3",
+      "niche": "分层开源",
+      "oneLiner": "核心 agent 开源，harness 优化按模块逐步开源但保留最新一代闭源",
+      "status": "survivor_rank2",
+      "advantage": "灵活但维护成本高于 V2"
+    },
+    {
+      "id": "V4",
+      "niche": "Harness 协议标准",
+      "oneLiner": "发布 Rivet Context Protocol 规范，靠标准制定权收费",
+      "status": "extinct",
+      "extinctionReason": "没有用户基础就推标准是本末倒置"
+    }
+  ],
+  "convergenceInsight": "harness 优化是'服务'不是'代码'。代码可以开源，但持续的优化能力不能。这和 Command Code 文章的核心论点完全一致。",
+  "finalRecommendation": "Open Agent + Harness-as-a-Service"
+}
