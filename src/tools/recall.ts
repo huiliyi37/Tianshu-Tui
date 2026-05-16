@@ -9,6 +9,11 @@ interface RecallInput {
   limit?: number
 }
 
+export interface RecallContext {
+  sessionId: string
+  getTurn: () => number
+}
+
 const DEFINITION: ToolDefinition = {
   name: 'recall',
   description: 'Search historical claims in context memory by keyword. Returns matching claims with their status, kind, and evidence.',
@@ -23,7 +28,7 @@ const DEFINITION: ToolDefinition = {
   },
 }
 
-export function createRecallTool(store: ContextClaimStore): Tool {
+export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext): Tool {
   return {
     definition: DEFINITION,
     async execute(params: ToolCallParams): Promise<ToolResult> {
@@ -38,6 +43,15 @@ export function createRecallTool(store: ContextClaimStore): Tool {
 
       if (matches.length === 0) {
         return { content: 'No claims found matching query.' }
+      }
+
+      if (ctx) {
+        const turn = ctx.getTurn()
+        const usedAt = Date.now()
+        for (const c of matches) {
+          store.recordClaimUsed(c.id, { consumerId: `recall:turn-${turn}`, consumerKind: 'tool', usedAt })
+          store.boostFitness(c.id, 1, 10)
+        }
       }
 
       const formatted = matches.map(c =>

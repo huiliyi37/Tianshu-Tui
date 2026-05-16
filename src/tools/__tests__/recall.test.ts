@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createRecallTool } from '../recall.js'
+import { createRecallTool, type RecallContext } from '../recall.js'
 import { ContextClaimStore } from '../../context/claim-store.js'
 import type { ClaimProposal } from '../../context/claims.js'
 
@@ -82,6 +82,61 @@ describe('recall tool', () => {
 
       const matches = result.content.split('[claim:').length - 1
       assert.equal(matches, 3)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('records consumer on matched claims when context provided', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
+    try {
+      const store = new ContextClaimStore(dir, 'session-1')
+      store.propose(proposal('config uses port 3000'))
+
+      const ctx: RecallContext = { sessionId: 'session-1', getTurn: () => 5 }
+      const tool = createRecallTool(store, ctx)
+      await tool.execute({ toolUseId: 't1', input: { query: 'port' }, cwd: '/tmp' })
+
+      const claims = store.listClaims()
+      assert.ok(claims[0]!.consumers.length >= 1)
+      assert.ok(claims[0]!.consumers.some(c => c.id.includes('recall')))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('boosts fitness on matched claims (capped at 10)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
+    try {
+      const store = new ContextClaimStore(dir, 'session-1')
+      store.propose(proposal('config uses port 3000'))
+
+      const ctx: RecallContext = { sessionId: 'session-1', getTurn: () => 3 }
+      const tool = createRecallTool(store, ctx)
+      await tool.execute({ toolUseId: 't1', input: { query: 'port' }, cwd: '/tmp' })
+
+      const claims = store.listClaims()
+      assert.equal(claims[0]!.fitness, 5) // original 4 + 1 boost
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not boost fitness beyond cap', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
+    try {
+      const store = new ContextClaimStore(dir, 'session-1')
+      store.propose({
+        ...proposal('high fitness claim'),
+        fitness: 10,
+      })
+
+      const ctx: RecallContext = { sessionId: 'session-1', getTurn: () => 1 }
+      const tool = createRecallTool(store, ctx)
+      await tool.execute({ toolUseId: 't1', input: { query: 'high' }, cwd: '/tmp' })
+
+      const claims = store.listClaims()
+      assert.equal(claims[0]!.fitness, 10)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
