@@ -505,7 +505,8 @@ export class AgentLoop {
               }
 
               const needsApproval = this.config.toolRegistry.needsApproval(tu.name, params)
-              const risk = assessToolRisk(tu.name, tu.input, this.getDoomLoopLevel())
+              const antibodies = this.config.contextClaimStore?.listClaims({ kind: ['failure_pattern'], status: ['active', 'durable_candidate', 'durable'] }) ?? []
+              const risk = assessToolRisk(tu.name, tu.input, this.getDoomLoopLevel(), antibodies)
               this.latestRisk = risk
               const isHighRisk = risk.level === 'high'
               const approvalMode = this.config.approvalMode ?? 'manual'
