@@ -328,6 +328,8 @@ ${check.formatted}`
       if (rawToolResult.verification && rawToolResult.verification.status !== 'passed') {
         const failures = classifyTestRun(harnessResult.content)
         if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
+          const failureClass = classifyFailure(harnessResult.content)
+          deps.repairHintTracker.recordFailure(tu.name, failureClass.class)
           return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: `${finalContent}\n\nDiagnosis: ${failures[0]!.suggestion}`, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
         }
       }
