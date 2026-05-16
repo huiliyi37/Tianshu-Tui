@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 483 tests passing, typecheck clean. Attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (6 panels + risk assessment + doom loop detection), execution resilience layer (TurnHarness with retry loop + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection with redirect-safe DNS validation. All prior features: subagent orchestration, adaptive model routing, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 510 tests passing, typecheck clean. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (6 panels + risk assessment + doom loop detection), execution resilience layer (TurnHarness with retry loop + trajectory recording + task-state injection), MCP client for external tool servers (stdio transport), agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection with redirect-safe DNS validation. All prior features: subagent orchestration, adaptive model routing, progressive context engine, theme system, XML protocol layer, and speculative pre-warming. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -62,8 +62,9 @@ src/
 ├── prompt/
 │   ├── engine.ts         PromptEngine: frozen system prompt + volatile context + XML protocol
 │   ├── static.ts         System prompt builder with 天枢 persona
-│   ├── volatile.ts       Volatile context: .rivet.md, git status, ledger, session memory
+│   ├── volatile.ts       Volatile context: .rivet.md, git status, ledger, session memory (stable/latest split)
 │   ├── volatile-git.ts   Non-blocking git status: stale cache + async refresh
+│   ├── context-layer.ts  Typed context layer model: stability, channel, fingerprint, stable digest
 │   ├── fingerprint.ts    SHA-256 fingerprint for cache drift detection
 │   └── cache-diagnostic.ts  Cache miss reason analysis (5 categories)
 ├── model/
@@ -132,6 +133,10 @@ src/
     ├── thinking.tsx       Thinking block with Tab expand/collapse
     ├── tool-card.tsx      Tool execution display with theme-colored borders
     ├── log-state.ts       Log entry types, state management, output summarization
+    ├── markdown-render.tsx Markdown parser + Ink renderer (inline/block, syntax highlight)
+    ├── diff-render.tsx    Unified diff detection + colorized rendering (+green/-red)
+    ├── pager.tsx          Interactive scroll pager (/scroll) + ScrollBuffer
+    ├── render-entry.tsx   Shared log entry renderer (tool/checkpoint/evidence/text)
     ├── history.ts         Command history persistence
     ├── error-boundary.tsx React error boundary (catch without crash)
     └── cockpit/           Multi-panel cockpit module
@@ -182,16 +187,20 @@ Turn 2: [system, user(<context>), user("hello"), assistant, user(<context>), use
 
 DeepSeek's prefix cache matches on complete prefix, so the frozen system prompt + early turns cache-hit every subsequent request.
 
-### Prompt Layering
+### Cache-first Context Layers
 
-The prompt is split into 4 layers for maximum cache stability:
+The prompt is split into 6 logical layers with explicit stability contracts. Physical channels remain `system + tools + volatile user message` for DeepSeek prefix-cache compatibility:
 
-| Layer | Content | Cache behavior |
-|-------|---------|---------------|
-| L1 | Frozen system prompt | Never changes → always cache hit |
-| L2 | Tool definitions (stable-sorted) | Only changes when tools are added/removed |
-| L3 | *(reserved for project memory)* | Future use |
-| L4 | Volatile context (cwd, git status, .rivet.md, tool-history, session-memory) | Changes per turn, isolated from L1-L2; tool history per-turn injection |
+| Layer | Content | Stability | Fingerprint |
+|-------|---------|-----------|-------------|
+| L1 | Frozen system prompt | stable | included |
+| L2 | Tool definitions (stable-sorted) | stable | included |
+| L3 | Project instructions + git status | stable-volatile | included |
+| L4 | Session memory + working set | stable-volatile | included/partial |
+| L5 | Tool history, task progress, behavior mirror, decisions | dynamic | excluded |
+| L6 | Current user request | dynamic | excluded |
+
+Layers L1-L4 form the stable volatile block (frozen at construction, participates in `PrefixFingerprint.stableVolatileSha256`). Layers L5-L6 are injected only into the latest turn's volatile context, never polluting the cached prefix. `PromptEngine.getContextLayerReport()` exposes per-layer stability, channel, fingerprint policy, and token estimates for diagnostics.
 
 ## Features
 
@@ -257,6 +266,10 @@ The prompt is split into 4 layers for maximum cache stability:
 - **Web fetch** — URL fetching with HTML→Markdown conversion, SSRF protection (private IP blocking), 15s timeout, 50K truncation
 - **File-level undo** — Per-file snapshot backup system; versioned backups in `~/.rivet/file-history/{sessionId}/`, preview + confirm workflow, orphaned backup cleanup
 - **SSRF protection** — Per-hop DNS resolution + private IP detection (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80) validated on every redirect, max 5 hops
+- **Markdown rendering** — Block parser (headers, code blocks, lists, blockquotes, tables, HR) + inline tokenizer (bold, italic, code, links), minimal syntax highlighting for JS/TS/Python/Go/Rust/Bash
+- **Diff colorizer** — Unified diff detection with signal-based heuristics, colorized output (add=green, del=red, hunk=gray, header=yellow), auto-truncation
+- **Scroll pager** — `/scroll` command with vi-style navigation (j/k/PgUp/PgDn/g/G/q/Esc), 500-entry ScrollBuffer, 100-item Static cap to prevent terminal buffer overflow
+- **Context layer model** — Typed context layers with stability/channel/fingerprint metadata, stable digest for cache diagnostics, CockpitContextLayerView in context panel
 
 ## Configuration
 
@@ -352,6 +365,7 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and are auto-discovered at sta
 | `/memory <text>` | Save a manual session memory entry |
 | `/cockpit [summary\|trace\|verify\|context\|safety\|model\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/mcp` | Show MCP server connection status |
+| `/scroll` | Browse output history with scrolling (j/k/PgUp/PgDn/g/G/q) |
 
 ## User Manual
 
@@ -541,6 +555,24 @@ Session memory survives across compaction. Use it to bookmark decisions or prefe
 - Memory entries are automatically injected into the volatile context block sent to the model
 - Memory is reflected in the context ledger via `getSessionMemoryState()`
 
+### Scrollback History
+
+When output scrolls off screen, use `/scroll` to browse history:
+
+- **j/k** or **↑/↓** — Scroll one line
+- **PgUp/PgDn** or **b/Space** — Scroll one page
+- **g** — Jump to top; **G** — Jump to bottom
+- **q** or **Esc** — Close pager
+
+The ScrollBuffer retains up to 500 entries. The Static display (terminal scrollback) caps at 100 items to prevent buffer overflow.
+
+### Markdown and Diff Rendering
+
+Tool output and model responses are automatically enhanced:
+
+- **Markdown**: Headers, code blocks (with syntax highlighting for JS/TS/Python/Go/Rust/Bash), lists, blockquotes, tables, bold/italic/code/links
+- **Diff**: Unified diff output is auto-detected and colorized — additions in green, deletions in red, file headers in yellow, hunk markers in gray
+
 ### Slash Commands Quick Reference
 
 | Command | What it does |
@@ -566,6 +598,7 @@ Session memory survives across compaction. Use it to bookmark decisions or prefe
 | `/memory <text>` | Save a manual session memory entry |
 | `/cockpit [summary\|trace\|verify\|context\|safety\|model\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/clear` | Clear screen |
+| `/scroll` | Browse output history (j/k/PgUp/PgDn/g/G/q/Esc) |
 | `/exit` | Save session and exit |
 
 ### How Cache Works
@@ -620,7 +653,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (474)
+npm run test                   # Run all tests (510)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```

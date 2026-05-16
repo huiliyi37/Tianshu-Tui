@@ -17,7 +17,7 @@ See [README.md](README.md) for full architecture overview.
 
 Key paths:
 - `src/main.tsx` — Entry point + CLI routing
-- `src/tui/` — Terminal UI (Ink 6 + React), SummaryBar, PhaseTracker, theme system, cockpit panels
+- `src/tui/` — Terminal UI (Ink 6 + React), SummaryBar, PhaseTracker, theme system, cockpit panels, markdown/diff renderer, scroll pager
 - `src/tui/cockpit/` — Multi-panel cockpit (TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, CockpitRail)
 - `src/api/` — SSE streaming client + provider abstraction
 - `src/agent/` — Agent loop + session management + sub-agent coordinator + TurnHarness (retry/trajectory) + task-state extraction + TraceStore + approval-risk
@@ -31,4 +31,4 @@ Key paths:
 
 ## Slash Commands
 
-`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/undo`, `/context`, `/evidence`, `/auto`, `/mcp`, `/cockpit [summary|trace|verify|context|safety|model|off]`
+`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/undo`, `/context`, `/evidence`, `/auto`, `/mcp`, `/scroll`, `/cockpit [summary|trace|verify|context|safety|model|off]`
