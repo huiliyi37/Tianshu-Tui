@@ -85,6 +85,20 @@ export function assessToolRisk(
     level = 'high'
   }
 
+  // MCP tool risk
+  const mcpMatch = toolName.match(/^mcp__(.+)__(.+)$/)
+  if (mcpMatch) {
+    const serverId = mcpMatch[1]!
+    const mcpToolName = mcpMatch[2]!
+    reasons.push(`MCP tool from server "${serverId}"`)
+    level = level === 'none' ? 'low' : level
+    const mcpWritePattern = /(?:^|[_-])(?:write|create|update|delete|remove|push|post|put|patch|execute)(?:$|[_-])/i
+    if (mcpWritePattern.test(mcpToolName)) {
+      reasons.push('MCP write-capable tool')
+      level = level === 'high' ? 'high' : 'medium'
+    }
+  }
+
   const suggestedAction = level === 'high'
     ? 'Require explicit user approval before execution.'
     : level === 'medium'

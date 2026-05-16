@@ -128,3 +128,27 @@ describe('assessToolRisk', () => {
     assert.equal(result.level, 'none')
   })
 })
+
+describe('MCP tool risk', () => {
+  it('flags MCP write-pattern tools as medium risk', () => {
+    const result = assessToolRisk('mcp__myserver__write_file', { path: 'config.json', content: 'data' })
+    assert.equal(result.level, 'medium')
+    assert.ok(result.reasons.some(r => r.includes('MCP')))
+  })
+
+  it('treats MCP read-only tools as low risk', () => {
+    const result = assessToolRisk('mcp__myserver__search', { query: 'test' })
+    assert.equal(result.level, 'low')
+    assert.ok(result.reasons.some(r => r.includes('MCP')))
+  })
+
+  it('elevates MCP tool to high risk under doom-loop blocked', () => {
+    const result = assessToolRisk('mcp__myserver__update_resource', { id: '123' }, 'blocked')
+    assert.equal(result.level, 'high')
+  })
+
+  it('extracts server ID from MCP tool name', () => {
+    const result = assessToolRisk('mcp__context7__resolve-library-id', { query: 'react' })
+    assert.ok(result.reasons.some(r => r.includes('context7')), `should mention server name, got: ${result.reasons}`)
+  })
+})
