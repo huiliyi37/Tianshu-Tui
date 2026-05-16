@@ -36,6 +36,10 @@ import { generateImpactHint } from './impact-hint.js'
 import { RepairPipeline, summarizeRepairTelemetry } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
 import { RepairHintTracker } from './repair-hint.js'
+import { isToolAllowed, type PermissionConfig } from './permissions.js'
+import { type ApprovalResult, applyApprovalEdit } from './approval-edit.js'
+import { selectReasoningEffort } from './auto-reasoning.js'
+import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -57,6 +61,10 @@ export interface AgentConfig {
   modelCards?: ModelCapabilityCard[]
   onModelSwitch?: (newModel: string) => void
   getCurrentModel?: () => string
+  autoReasoning?: boolean
+  reasoningEffort?: import('./auto-reasoning.js').ReasoningEffort
+  lspEnabled?: boolean
+  permissions?: PermissionConfig
 }
 
 export interface AgentCallbacks {
@@ -67,7 +75,7 @@ export interface AgentCallbacks {
   onTurnComplete: (usage: Partial<Usage>, turnNumber: number) => void
   onError: (error: Error) => void
   onAbort: () => void
-  onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<boolean>
+  onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
 }
 
@@ -215,6 +223,11 @@ export class AgentLoop {
     this.decisions = []
     this.traceStore = createTraceStore()
     this.session.addUserMessage(userInput)
+
+    if (this.config.autoReasoning) {
+      this.config.reasoningEffort = selectReasoningEffort(userInput)
+    }
+
     let checkpointCreatedThisTurn = false
 
     try {
@@ -385,15 +398,22 @@ export class AgentLoop {
               const isHighRisk = risk.level === 'high'
               const approvalMode = this.config.approvalMode ?? 'manual'
 
-              const shouldAsk = approvalMode === 'manual'
-                ? needsApproval
-                : approvalMode === 'auto-safe'
-                  ? isHighRisk
-                  : false // auto-accept: never ask
+              const allowlisted = isToolAllowed(tu.name, tu.input, this.config.permissions?.allow)
+              const shouldAsk = allowlisted
+                ? false
+                : approvalMode === 'manual'
+                  ? needsApproval
+                  : approvalMode === 'auto-safe'
+                    ? isHighRisk
+                    : false // auto-accept: never ask
 
               if (shouldAsk) {
-                const approved = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
-                if (!approved) {
+                const approvalResult = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
+                const resolved: ApprovalResult = typeof approvalResult === 'boolean'
+                  ? { approved: approvalResult }
+                  : approvalResult
+                const finalInput = applyApprovalEdit(tu.input, resolved)
+                if (!finalInput) {
                   const denyMsg = 'Tool execution denied: requires user approval'
                   callbacks.onToolResult(tu.id, tu.name, denyMsg, true)
                   toolResults.push({
@@ -403,6 +423,10 @@ export class AgentLoop {
                     is_error: true,
                   })
                   continue
+                }
+                if (finalInput !== tu.input) {
+                  tu.input = finalInput
+                  params.input = finalInput
                 }
               }
 
@@ -465,7 +489,18 @@ export class AgentLoop {
                 result: harnessResult.content,
                 isError: harnessResult.isError,
               }) ?? {}
-              const finalContent = postHookResult.result ?? harnessResult.content
+              let finalContent = postHookResult.result ?? harnessResult.content
+
+              // LSP diagnostics after successful TS/JS file edits
+              if (this.config.lspEnabled && !harnessResult.isError && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
+                const check = runTypeCheck(this.cwd, tu.input.file_path as string)
+                if (check.formatted) {
+                  finalContent = finalContent + `
+
+[LSP Diagnostics]
+${check.formatted}`
+                }
+              }
 
               this.traceStore = finishTraceEvent(this.traceStore, traceId, {
                 status: harnessResult.isError ? 'failed' : 'passed',

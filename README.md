@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 702 tests passing, typecheck clean. 21 capabilities Verified. All P0-P2 core business gaps closed. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks (error isolation + UserPromptSubmit/PreCompact events), structured git (status/diff/log/stash/commit + 50KB truncation), todo with worker-scoped TodoStore, web-fetch with turndown HTML conversion, file-level undo with orphan cleanup, SSRF protection with redirect-safe DNS validation, cache safety layer (centralized readFilePayload, safe prewarm with canonical keys, per-cwd volatile caches, prefix fingerprint coverage), multi-session isolation (UUID session ID per launch, session-scoped checkpoints, checkpoint index for cross-session discovery, rollback session selection, legacy backward compat). 天枢 persona with design-doc-first workflow.
+Wave 1 complete — 859 tests passing, typecheck clean. 26 capabilities Verified. Core gaps (permissions, cost display, headless, custom commands, onboarding) closed. All P0-P2 core business gaps closed. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks (error isolation + UserPromptSubmit/PreCompact events), structured git (status/diff/log/stash/commit + 50KB truncation), todo with worker-scoped TodoStore, web-fetch with turndown HTML conversion, file-level undo with orphan cleanup, SSRF protection with redirect-safe DNS validation, cache safety layer (centralized readFilePayload, safe prewarm with canonical keys, per-cwd volatile caches, prefix fingerprint coverage), multi-session isolation (UUID session ID per launch, session-scoped checkpoints, checkpoint index for cross-session discovery, rollback session selection, legacy backward compat). 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -26,6 +26,8 @@ rivet
 ```
 src/
 ├── main.tsx              Entry: CLI routing → config → tools → prompt engine → agent → TUI
+├── headless.ts           Headless mode: -p/--print with text/JSON output, no Ink
+├── onboarding.ts         First-run onboarding sentinel state and dismissal helpers
 ├── validation.ts         Shared input validation (sessionId regex)
 ├── agent/
 │   ├── loop.ts           Agent loop: LLM call → tool execution → repeat
@@ -50,6 +52,7 @@ src/
 │   ├── trace-store.ts    Structured event tracing (doom loop detection)
 │   ├── strategy-shift.ts Doom-loop strategy suggestion (4 pattern detectors)
 │   ├── approval-risk.ts  Tool risk assessment (doom loop, path traversal, destructive commands)
+│   ├── permissions.ts  Allowlist pattern matching for approval short-circuit
 │   ├── turn-harness.ts   Retry loop + trajectory recording for tool execution
 │   └── task-state.ts     Task progress extraction from trajectory + model text
 │   ├── import-graph.ts   Static import graph builder + reverse deps + invalidation
@@ -120,6 +123,8 @@ src/
 │   └── types.ts          Context health, budget, session memory types
 ├── failures/
 │   └── sample.ts         Redacted failure sample library for testing
+├── commands/
+│   └── loader.ts         Custom slash command loader from .rivet/commands/*.md
 ├── config/
 │   ├── schema.ts         Zod config schema (provider, agent, compact, cache, mcp)
 │   ├── default.ts        Default config: DeepSeek V4 Pro/Flash
@@ -135,7 +140,7 @@ src/
     ├── input.tsx          Input bar with cursor, history, Ctrl+A/E/W/U
     ├── base-text-input.tsx Full-featured text input with history nav
     ├── status-bar.tsx     Model, cache hit rate, cost, token bar, theme colors
-    ├── summary-bar.tsx    Live 3-line cockpit: phase, context%, last action, risk
+    ├── summary-bar.tsx    Live 3-line cockpit: phase, context%, last action, risk, token/cost
     ├── phase-tracker.ts   Tool→phase state machine (searching/coding/testing/…)
     ├── theme.ts           Truecolor/fallback color palette with tool-specific colors
     ├── stream.tsx         Streaming text output (memoized)
@@ -166,7 +171,8 @@ src/
 
 ```
 User input → App.handleSubmit
-  ├─ Slash command? → handle directly (/help, /exit, /compact, /model, /clear)
+  ├─ /onboarding dismiss? → dismiss onboarding → skip agent
+  ├─ Slash command? → handle built-in (/help, /exit, ...) → if unknown, resolve custom command from .rivet/commands/
   └─ Agent loop:
        PromptEngine.buildRequest(messages, toolHistory)
          → static system prompt (frozen, cache anchor)
@@ -264,6 +270,11 @@ cd ../project-feature-a && rivet
 - **Config CLI** — Manage API keys, providers, models, MCP servers from terminal
 - **MCP client** — Model Context Protocol: connect external tool servers (stdio), auto-discover tools, register as `mcp__<server>__<tool>` (with `__` sanitization), parallel init, approval heuristics, 5-class error classifier (config/auth/network/protocol/tool_error), `/mcp` + `/debug mcp` status
 - **.gitignore filter** — Skips node_modules, .git, build artifacts
+- **Headless mode** — `-p`/`--print` flag runs AgentLoop without Ink; `--json` returns structured JSON with success/text/usage/error
+- **Permission allow rules** — Configurable allowlist with exact, wildcard, and pattern matching; allowlisted tools skip approval while preserving risk tracking
+- **Cost/token display** — Live input/output/cache token counts and estimated cost in SummaryBar; derived from SessionContext usage, no duplicate counting
+- **Custom slash commands** — Project-local `.rivet/commands/*.md` with `$ARGUMENTS` interpolation; resolved after built-in slash commands
+- **First-run onboarding** — Explicit sentinel-based detection; guidance panel with setup instructions; `/onboarding dismiss` never intercepts normal input
 - **Graceful shutdown** — SIGINT/SIGTERM → abort agent + persist session + kill children
 - **ErrorBoundary** — React errors caught without crashing the process
 - **Config validation** — Zod schema with deep merge over defaults
@@ -411,6 +422,7 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and are auto-discovered at sta
 | `/cockpit [summary\|trace\|verify\|context\|safety\|model\|mcp\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/mcp` | Show MCP server connection status |
 | `/scroll` | Browse output history with scrolling (j/k/PgUp/PgDn/g/G/q) |
+| `/onboarding dismiss` | Dismiss first-run onboarding guide |
 | `/theme [pastel\|cyberpunk\|list]` | Switch color theme |
 
 ## User Manual
@@ -665,6 +677,16 @@ Tool output and model responses are automatically enhanced:
 - **Markdown**: Headers, code blocks (with syntax highlighting for JS/TS/Python/Go/Rust/Bash), lists, blockquotes, tables, bold/italic/code/links
 - **Diff**: Unified diff output is auto-detected and colorized — additions in green, deletions in red, file headers in yellow, hunk markers in gray
 
+### Onboarding
+
+On first run, Rivet shows an onboarding panel with setup guidance:
+
+- Configure a provider key: `rivet config set-key <provider> <api-key>`
+- Try `/help` for commands, `/model list` for models, `/mcp` for server status
+- Run `/onboarding dismiss` when ready — this writes a sentinel to `~/.rivet/onboarding-dismissed`
+
+Subsequent launches skip onboarding. The sentinel is separate from config existence, so you can wipe config without re-triggering onboarding.
+
 ### Slash Commands Quick Reference
 
 | Command | What it does |
@@ -691,7 +713,9 @@ Tool output and model responses are automatically enhanced:
 | `/cockpit [summary\|trace\|verify\|context\|safety\|model\|mcp\|off]` | Toggle or switch cockpit panel (Esc to collapse) |
 | `/clear` | Clear screen |
 | `/scroll` | Browse output history (j/k/PgUp/PgDn/g/G/q/Esc) |
+| `/onboarding dismiss` | Dismiss first-run onboarding guide |
 | `/theme [pastel\|cyberpunk\|list]` | Switch color theme |
+| `/onboarding dismiss` | Hide the first-run setup guide (persisted across sessions) |
 | `/exit` | Save session and exit |
 
 ### How Cache Works
@@ -708,6 +732,25 @@ When you see `cache:98.7%` in green, it means 98.7% of input tokens were served 
 - `💡 Compaction ran — message history restructured, partial cache miss expected` — Normal after context compaction
 - `⚠️ Cache drift: system prompt + tool definitions changed — prefix invalidated` — Something changed the frozen prefix (unusual)
 - `💡 Low cache hit (28%) — prefix may have been evicted` — Context too long, cache was evicted
+
+### Custom Slash Commands
+
+Define project-local slash commands in `.rivet/commands/`:
+
+```bash
+mkdir -p .rivet/commands
+echo 'Review this code for bugs and suggest fixes:
+$ARGUMENTS' > .rivet/commands/review.md
+```
+
+When you type `/review src/agent/loop.ts` in the TUI, `$ARGUMENTS` is replaced with `src/agent/loop.ts` and the resulting text is sent to the agent:
+
+```
+Review this code for bugs and suggest fixes:
+src/agent/loop.ts
+```
+
+Command names must match `[A-Za-z0-9][A-Za-z0-9_-]*`. Non-markdown files, nested directories, and names with spaces are ignored. Built-in slash commands always take priority over custom commands.
 
 ### Project Configuration
 
@@ -746,7 +789,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (694)
+npm run test                   # Run all tests (859)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
@@ -761,6 +804,8 @@ npm run dev                    # Watch mode
 - `docs/superpowers/plans/2026-05-15-rivet-p2-3-harness-cockpit-implementation.md` — P2.3 implementation plan
 - `docs/superpowers/plans/2026-05-15-rivet-p2-2-capability-reliability-layer.md` — P2.2 Capability Reliability Layer plan
 - `docs/superpowers/specs/2026-05-15-rivet-open-model-terminal-agent-direction-design.md` — Strategic direction: Trust Cockpit + Open Model Capability Lab
+- `docs/superpowers/specs/2026-05-16-tui-gap-closing-design.md` — TUI gap closing design: three-wave roadmap + architecture decisions
+- `docs/superpowers/plans/2026-05-16-rivet-wave1-core-gaps.md` — Wave 1 implementation plan: permissions, cost display, headless, custom commands, onboarding
 - `docs/superpowers/plans/2026-05-15-rivet-dev-capability-phase3.md` — Phase 3 implementation plan
 - `docs/superpowers/plans/2026-05-15-rivet-p2.1-remaining.md` — P2.1 remaining tasks + execution record
 - `docs/superpowers/plans/2026-05-15-rivet-performance-optimization.md` — Performance optimization plan

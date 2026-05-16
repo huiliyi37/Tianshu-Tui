@@ -16,6 +16,7 @@ import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
+import { forkSession } from '../agent/session-fork.js'
 import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { runResumePreflight } from '../context/resume-preflight.js'
@@ -23,6 +24,12 @@ import type { McpManager } from '../mcp/manager.js'
 import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, McpPanel } from './cockpit/index.js'
 import { buildCockpitSnapshot } from './cockpit/state.js'
 import type { Panel } from './cockpit/types.js'
+import type { Usage } from '../api/types.js'
+import { resolveCustomCommand } from '../commands/loader.js'
+import { dismissOnboarding, getOnboardingState, shouldHandleOnboardingInput } from '../onboarding.js'
+import { OnboardingPanel } from './onboarding.js'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { PANEL_LABELS } from './cockpit/types.js'
 
 interface PendingApproval {
@@ -75,6 +82,11 @@ interface SlashHandlerContext {
   setCacheHitRate: (v: number) => void
   setSummaryState: (v: SummaryState | ((prev: SummaryState) => SummaryState)) => void
   mcpManagerRef: React.MutableRefObject<McpManager | null>
+}
+
+export function resolveAppPromptInput(input: string, cwd: string): string {
+  if (!input.startsWith('/')) return input
+  return resolveCustomCommand(cwd, input) ?? input
 }
 
 function handleSlashCommand(ctx: SlashHandlerContext): boolean {
@@ -409,6 +421,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [cacheHitRate, setCacheHitRate] = useState(0)
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
+  const [showOnboarding, setShowOnboarding] = useState(() => getOnboardingState().shouldShow)
 
   const [verbose, _setVerbose] = useState(false)
   const [, _setAutoSafe] = useState(true)
@@ -631,9 +644,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       if (handleSlashCommand(slashCtx)) return
     }
 
+    const promptInput = resolveAppPromptInput(userInput, process.cwd())
     pushStatic(createLogEntry({ type: 'text', content: `> ${userInput}` }))
 
-    await agent.run(userInput, {
+    await agent.run(promptInput, {
       onTextDelta: (text) => {
         streamBuf.current += text
         if (!streamTimer.current) {

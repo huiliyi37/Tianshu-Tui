@@ -34,6 +34,10 @@ export const DEFAULT_CONFIG: Config = {
     approval: 'suggest',
     maxTurns: 50,
     mode: 'code',
+    autoReasoning: false,
+    permissions: {
+      allow: [],
+    },
   },
   compact: {
     enabled: true,

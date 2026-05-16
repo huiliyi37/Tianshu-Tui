@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-05-16 — Wave 1 Core Gaps Closed
+
+### Added
+
+- **Permission allow rules** — `src/agent/permissions.ts`: pattern matcher with exact, wildcard, and command-prefix support; `configSchema` extended with `permissions.allow`; `AgentLoop` approval short-circuits for allowlisted tool calls after risk assessment; allowlist does not skip risk tracking
+- **Cost/token SummaryBar display** — `SummaryUsage` type with `inputTokens`/`outputTokens`/`cacheReadTokens`/`costUsd`; `summaryUsageFrom()` derives display state from `SessionContext.getTotalUsage()` without duplicate counting; SummaryBar line 3 and JSX render conditional token/cost display
+- **Headless mode** — `src/headless.ts` with `parseCliArgs` (`-p`/`--print`, `--json`) and `runHeadless` (avoids Ink, collects output via callbacks, returns structured JSON with success/text/usage/error fields); `main.tsx` pre-Ink branch for headless args
+- **Custom slash commands** — `src/commands/loader.ts` loads `.rivet/commands/*.md` in cwd; filters non-markdown, nested paths, and unsafe names (`COMMAND_NAME_RE`); `$ARGUMENTS` interpolation; `resolveAppPromptInput` resolves unknown slash commands after built-in handlers
+- **First-run onboarding** — `src/onboarding.ts`: explicit sentinel file `~/.rivet/onboarding-dismissed` (not directory existence); `OnboardingPanel` Ink component with setup guidance; `/onboarding dismiss` only handles explicit command, never intercepts normal input
+
+### Changed
+
+- `src/config/schema.ts` — Extended `agentSchema` with `permissions.allow` array (pattern-matching rules)
+- `src/config/default.ts` — Default `agent.permissions.allow: []`
+- `src/agent/loop.ts` — Allowlist-aware approval short-circuit preserving risk tracking
+- `src/main.tsx` — Headless CLI branch before Ink render; permissions config pass-through
+- `src/tui/summary-bar.tsx` — Extended `SummaryState` with optional `usage`; token formatting helpers
+- `src/tui/app.tsx` — Usage derivation from session; onboarding state/show/hide; custom command resolution before agent.run
+
+### Verified
+
+- 859 tests pass (was 702)
+- npm run typecheck clean
+- 5 new test files: permissions, headless, commands-loader, onboarding, schema
+
 ## 2026-05-16 — Cache Safety Layer
 
 ### Added

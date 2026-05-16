@@ -20,10 +20,21 @@ export const providerSchema = z.object({
   unsupported: z.array(z.string()).default([]),
 })
 
+export const permissionAllowRuleSchema = z.object({
+  tool: z.string().min(1),
+  params: z.record(z.string()).optional(),
+})
+
+export const permissionsSchema = z.object({
+  allow: z.array(permissionAllowRuleSchema).default([]),
+})
+
 export const agentSchema = z.object({
   approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
+  autoReasoning: z.boolean().default(false),
+  permissions: permissionsSchema.default({}),
 })
 
 export const compactSchema = z.object({

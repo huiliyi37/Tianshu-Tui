@@ -351,6 +351,26 @@ async function main() {
     process.exit(0)
   }
 
+  // rivet serve [--port N] — HTTP Runtime API
+  if (args[0] === 'serve') {
+    const portIdx = args.indexOf('--port')
+    const port = parseInt(portIdx >= 0 ? args[portIdx + 1]! : '3100', 10)
+
+    const { startServer } = await import('./server/index.js')
+    const { createRoutes } = await import('./server/routes.js')
+
+    const state: import('./server/routes.js').ServerState = { running: false }
+    const routes = createRoutes(state)
+    const server = startServer(port, routes)
+
+    process.on('SIGINT', () => { server.close(); process.exit(0) })
+    process.on('SIGTERM', () => { server.close(); process.exit(0) })
+
+    console.log(`Rivet Runtime API listening on http://localhost:${port}`)
+    console.log('Endpoints: GET /status, POST /abort')
+    return
+  }
+
   if (args[0] === 'config') {
     runConfigCLI(args.slice(1))
     return

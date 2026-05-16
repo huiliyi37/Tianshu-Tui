@@ -1,6 +1,6 @@
 # Rivet Core Capability Ledger
 
-> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 697 tests passing.
+> Last updated: 2026-05-16. Based on actual code verification + test/typecheck/build validation. 859 tests passing.
 
 ## Status Definitions
 
@@ -43,7 +43,7 @@
 
 ## Summary
 
-- **Verified**: 21 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety, Multi-Session Isolation)
+- **Verified**: 26 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety, Multi-Session Isolation, Permission Allow Rules, Cost/Token Display, Headless Mode, Custom Slash Commands, First-Run Onboarding)
 - **MVP**: 0
 - **Planned**: 0 capabilities
 - **Designed**: 2 capabilities (CTCL Migration, Open Source Strategy)
