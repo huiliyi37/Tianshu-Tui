@@ -1,0 +1,129 @@
+{
+  "date": "2026-05-16",
+  "topic": "long-session-context-management",
+  "fragments": [
+    {
+      "text": "tool_result is the primary context growth source: bash 100K, git 50K, web-fetch 50K, run_tests 8K, grep 12K chars",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["context-growth", "tool-output", "truncation"]
+    },
+    {
+      "text": "Current Rivet has no progressive context budget — binary: under 800K = fine, over = emergency compress",
+      "fragmentType": "observation",
+      "source": "agent",
+      "tags": ["context-management", "gap", "budget"]
+    },
+    {
+      "text": "Lost-in-middle effect means model attention degrades significantly after 26K+ tokens — degradation happens BEFORE overflow limit",
+      "fragmentType": "observation",
+      "source": "external",
+      "tags": ["attention", "degradation", "proactive-management"]
+    },
+    {
+      "text": "Mem0 two-layer model achieves 91.6% accuracy at <7K tokens vs 72.9% at 26K+ — less context can be MORE accurate",
+      "fragmentType": "observation",
+      "source": "external",
+      "tags": ["memory-model", "accuracy", "context-window"]
+    },
+    {
+      "text": "Anthropic's three levers: compaction (first), structured note-taking, sub-agent architectures",
+      "fragmentType": "observation",
+      "source": "external",
+      "tags": ["anthropic", "compaction", "note-taking", "sub-agents"]
+    },
+    {
+      "text": "output-store.ts already has SHA-256 index pattern — can be extended as persistent memory backend",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["reuse", "infrastructure", "sha256"]
+    },
+    {
+      "text": "V1 multi-tier compression is a local optimum trap — more bulkheads on Titanic don't prevent sinking",
+      "fragmentType": "risk",
+      "source": "agent",
+      "tags": ["local-optimum", "extinct-V1"]
+    },
+    {
+      "text": "V4 minimal-window approach breaks causal chain in coding tasks — model needs previous modifications, constraints, goals",
+      "fragmentType": "risk",
+      "source": "agent",
+      "tags": ["context-loss", "extinct-V4", "coding-scenarios"]
+    },
+    {
+      "text": "Convergence insight: V2 and V3 converge on 'proactive budget control > passive compression' as core truth",
+      "fragmentType": "observation",
+      "source": "agent",
+      "tags": ["convergence", "core-truth", "budget-control"]
+    },
+    {
+      "text": "Forgetting is transfer not deletion — full content goes to persistent memory, working window only keeps lightweight reference",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["forgetting", "transfer", "reference"]
+    },
+    {
+      "text": "Reference format [archived:read_file:src/loop.ts:v3@2026-05-16T14:30:00] is ~50 tokens vs 2-5K original — 40-100:1 reclaim ratio",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["reference", "token-savings", "reclaim-ratio"]
+    },
+    {
+      "text": "discarded_trait from V4: recall tool concept — absorb into V3 as persistent memory retrieval interface",
+      "fragmentType": "discarded_trait",
+      "source": "extinct_V4",
+      "tags": ["recall-tool", "on-demand-retrieval"],
+      "extinctionReason": "V4 extinct due to 1-round window being too aggressive for coding tasks"
+    },
+    {
+      "text": "discarded_trait from V1: gradient thresholds (400K/600K/800K/900K) — absorb as budget management trigger signals",
+      "fragmentType": "discarded_trait",
+      "source": "extinct_V1",
+      "tags": ["gradient-threshold", "trigger-signal"],
+      "extinctionReason": "V1 extinct as local optimum — multi-tier compression doesn't solve root cause"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "V1",
+      "niche": "incremental improvement",
+      "oneLiner": "Multi-tier compression with gradient thresholds",
+      "status": "extinct",
+      "extinctionReason": "Local optimum trap — delays but doesn't prevent overflow"
+    },
+    {
+      "id": "V2",
+      "niche": "budget management in single layer",
+      "oneLiner": "Per-consumer token budget with priority-based reclaim",
+      "status": "survived",
+      "rank": 2
+    },
+    {
+      "id": "V3",
+      "niche": "layered memory architecture",
+      "oneLiner": "Working Memory (budgeted window) + Persistent Memory (file-level, cross-session) with forget/recall operations",
+      "status": "survived",
+      "rank": 1
+    },
+    {
+      "id": "V4",
+      "niche": "minimal window + on-demand retrieval",
+      "oneLiner": "Only keep latest round + system prompt, all history via recall tool",
+      "status": "extinct",
+      "extinctionReason": "1-round window causes severe capability degradation in coding tasks"
+    }
+  ],
+  "finalCandidate": {
+    "id": "V3",
+    "integratedTraits": [
+      {"fromExtinct": "V1", "trait": "gradient thresholds", "integratedAs": "WARN/HARD/CEILING budget levels"},
+      {"fromExtinct": "V4", "trait": "recall tool", "integratedAs": "built-in recall tool for persistent memory retrieval"}
+    ],
+    "convergenceInsight": "Proactive budget control > passive compression",
+    "implementationPhases": [
+      {"phase": 1, "action": "BudgetManager + proactive forget", "successCriteria": "50-round simulation stays 400-550K", "exitCondition": "If forgetting loses critical context, fall back to V2"},
+      {"phase": 2, "action": "PersistentStore + recall tool", "successCriteria": "Model recalls forgotten info via recall tool", "exitCondition": "If recall >2/round, adjust thresholds"},
+      {"phase": 3, "action": "Constraint extraction + cross-session restore", "successCriteria": "New session auto-knows 3 key constraints", "exitCondition": "If extraction accuracy <80%, pause auto-inject"}
+    ]
+  }
+}
