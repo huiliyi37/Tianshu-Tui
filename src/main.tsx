@@ -210,7 +210,10 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   // Register recall tool once (depends on claimStore existing)
   const recallRef = useRef(false)
   if (!recallRef.current) {
-    toolRegistry.register(createRecallTool(claimStore))
+    toolRegistry.register(createRecallTool(claimStore, {
+      sessionId,
+      getTurn: () => session.getTurnCount(),
+    }))
     recallRef.current = true
   }
 
