@@ -85,4 +85,79 @@ describe('GIT_TOOL', () => {
   it('does not require approval for status action', () => {
     assert.equal(GIT_TOOL.requiresApproval({ input: { action: 'status' }, toolUseId: 't', cwd: '/' }), false)
   })
+
+  it('truncates git output over 50KB', async () => {
+    const bigContent = 'x'.repeat(60_000)
+    writeFileSync(join(TMP, 'big.txt'), bigContent)
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "init"', { cwd: TMP })
+    writeFileSync(join(TMP, 'big.txt'), 'y'.repeat(60_000))
+
+    const result = await GIT_TOOL.execute({
+      input: { action: 'diff_summary' },
+      toolUseId: 'tu_big',
+      cwd: TMP,
+    })
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.length < 55_000, `Output too large: ${result.content.length}`)
+  })
+
+  it('returns git log with default count', async () => {
+    writeFileSync(join(TMP, 'a.txt'), 'hello')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "init"', { cwd: TMP })
+    writeFileSync(join(TMP, 'b.txt'), 'world')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "second"', { cwd: TMP })
+
+    const result = await GIT_TOOL.execute({
+      input: { action: 'log' },
+      toolUseId: 'tu_log',
+      cwd: TMP,
+    })
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('second'))
+    assert.ok(result.content.includes('init'))
+  })
+
+  it('returns git log with maxCount', async () => {
+    writeFileSync(join(TMP, 'a.txt'), 'hello')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "first"', { cwd: TMP })
+    writeFileSync(join(TMP, 'b.txt'), 'world')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "second"', { cwd: TMP })
+
+    const result = await GIT_TOOL.execute({
+      input: { action: 'log', maxCount: 1 },
+      toolUseId: 'tu_log2',
+      cwd: TMP,
+    })
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('second'))
+    assert.ok(!result.content.includes('first'))
+  })
+
+  it('git stash saves working changes', async () => {
+    writeFileSync(join(TMP, 'a.txt'), 'hello')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "init"', { cwd: TMP })
+    writeFileSync(join(TMP, 'a.txt'), 'dirty')
+
+    const result = await GIT_TOOL.execute({
+      input: { action: 'stash' },
+      toolUseId: 'tu_stash',
+      cwd: TMP,
+    })
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('Saved'))
+  })
+
+  it('does not require approval for log action', () => {
+    assert.equal(GIT_TOOL.requiresApproval({ input: { action: 'log' }, toolUseId: 't', cwd: '/' }), false)
+  })
+
+  it('does not require approval for stash action', () => {
+    assert.equal(GIT_TOOL.requiresApproval({ input: { action: 'stash' }, toolUseId: 't', cwd: '/' }), false)
+  })
 })

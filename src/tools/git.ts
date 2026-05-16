@@ -1,15 +1,21 @@
 import { spawnSync } from 'node:child_process'
 import type { Tool, ToolCallParams } from './types.js'
 
-const ACTIONS = ['status', 'diff_summary', 'commit'] as const
+const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash'] as const
 type GitAction = (typeof ACTIONS)[number]
+
+const MAX_OUTPUT = 50_000
 
 function runGit(args: string[], cwd: string): string {
   const result = spawnSync('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
   if (result.status !== 0) {
     throw new Error((result.stderr ?? '').trim() || `git exited with status ${result.status}`)
   }
-  return result.stdout
+  const output = result.stdout
+  if (output.length > MAX_OUTPUT) {
+    return output.slice(0, MAX_OUTPUT) + `\n\n[... truncated at ${MAX_OUTPUT} chars, total ${output.length}]`
+  }
+  return output
 }
 
 export const GIT_TOOL: Tool = {
@@ -19,8 +25,10 @@ export const GIT_TOOL: Tool = {
 - status: Show working tree status, current branch, and file changes
 - diff_summary: Show diff stats for staged and unstaged changes
 - commit: Stage all changes (including untracked files) and commit with a message
+- log: Show recent commit history (default 20, configurable with maxCount)
+- stash: Stash current working directory changes
 
-For complex git operations (branch, merge, rebase, push, pull, log), use the bash tool instead.`,
+For complex git operations (branch, merge, rebase, push, pull), use the bash tool instead.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -32,6 +40,10 @@ For complex git operations (branch, merge, rebase, push, pull, log), use the bas
         message: {
           type: 'string',
           description: 'Commit message (required for commit action)',
+        },
+        maxCount: {
+          type: 'number',
+          description: 'Maximum number of log entries (default 20, for log action)',
         },
       },
       required: ['action'],
@@ -94,6 +106,24 @@ For complex git operations (branch, merge, rebase, push, pull, log), use the bas
           }
           return { content: result.stdout.trim() }
         }
+
+        case 'log': {
+          const maxCount = (params.input.maxCount as number) ?? 20
+          const log = runGit(['log', `--max-count=${maxCount}`, '--oneline', '--decorate'], cwd).trim()
+          return { content: log || 'No commits yet.' }
+        }
+
+        case 'stash': {
+          const stashStatus = runGit(['status', '--porcelain'], cwd).trim()
+          if (!stashStatus) {
+            return { content: 'No changes to stash.' }
+          }
+          runGit(['stash'], cwd)
+          return { content: 'Saved working directory and index state.' }
+        }
+
+        default:
+          return { content: `Unknown action: ${action}. Supported: ${ACTIONS.join(', ')}`, isError: true }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
