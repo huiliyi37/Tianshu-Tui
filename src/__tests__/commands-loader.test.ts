@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadCustomCommands, resolveCustomCommand } from '../commands/loader.js'
-import { resolveAppPromptInput } from '../tui/app.js'
+import { resolveAppPromptInput } from '../tui/slash-commands.js'
 
 function makeProject(): string {
   const cwd = mkdtempSync(join(tmpdir(), 'rivet-commands-'))
