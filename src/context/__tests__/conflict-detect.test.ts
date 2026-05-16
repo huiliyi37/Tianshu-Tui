@@ -54,4 +54,18 @@ describe('detectConflicts', () => {
 
     assert.deepEqual(detectConflicts([a, b]), [])
   })
+
+  it('does not conflict claims with identical normalized text', () => {
+    const a = claim({ id: 'c1', text: 'Read config.ts (42 lines)', createdAt: 1 })
+    const b = claim({ id: 'c2', text: 'Read config.ts (42 lines)', createdAt: 5 })
+
+    assert.deepEqual(detectConflicts([a, b]), [])
+  })
+
+  it('does not conflict claims with same text but different casing/whitespace', () => {
+    const a = claim({ id: 'c1', text: 'Read Config.ts  (42 lines)', createdAt: 1 })
+    const b = claim({ id: 'c2', text: 'read config.ts (42 lines)', createdAt: 5 })
+
+    assert.deepEqual(detectConflicts([a, b]), [])
+  })
 })

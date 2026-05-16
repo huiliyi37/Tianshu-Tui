@@ -620,9 +620,14 @@ ${check.formatted}`
 
               // Extract claims from tool results
               if (this.config.contextClaimStore && this.config.sessionId) {
+                const existingPaths = new Set(
+                  this.config.contextClaimStore.listClaims({ kind: ['file_observation'] })
+                    .flatMap(c => c.evidence.filter(e => e.path).map(e => e.path!)),
+                )
                 const proposals = extractClaimsFromToolResult(
                   { toolName: tu.name, input: tu.input as Record<string, unknown>, result: harnessResult.content, isError: harnessResult.isError },
                   { sessionId: this.config.sessionId, turn: this.session.getTurnCount(), eventId: `turn-${this.session.getTurnCount()}:${tu.name}:${tu.id}` },
+                  existingPaths,
                 )
                 for (const proposal of proposals) {
                   this.config.contextClaimStore.propose(proposal)

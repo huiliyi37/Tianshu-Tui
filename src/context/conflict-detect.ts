@@ -9,6 +9,10 @@ export interface ClaimConflict {
 const CONFLICTABLE_KINDS: ContextClaim['kind'][] = ['file_observation', 'verification_fact']
 const ACTIVE_STATUSES: ContextClaim['status'][] = ['active', 'durable_candidate', 'durable']
 
+function normalizeText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 export function detectConflicts(claims: ContextClaim[]): ClaimConflict[] {
   const eligible = claims.filter(c => CONFLICTABLE_KINDS.includes(c.kind) && ACTIVE_STATUSES.includes(c.status))
   const byPath = new Map<string, ContextClaim[]>()
@@ -27,6 +31,8 @@ export function detectConflicts(claims: ContextClaim[]): ClaimConflict[] {
     if (group.length < 2) continue
     const sorted = group.sort((a, b) => a.createdAt - b.createdAt)
     for (let i = 0; i < sorted.length - 1; i++) {
+      // Skip if text is semantically identical (same normalized content)
+      if (normalizeText(sorted[i]!.text) === normalizeText(sorted[i + 1]!.text)) continue
       conflicts.push({
         olderClaimId: sorted[i]!.id,
         newerClaimId: sorted[i + 1]!.id,
