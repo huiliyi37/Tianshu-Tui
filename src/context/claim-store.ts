@@ -9,6 +9,7 @@ import {
   type ContextClaimStatus,
   type EvidenceRef,
 } from './claims.js'
+import { claimHasFileEvidence, countClaimsByStatus, evaluatePromotion, type ClaimStatusCounts } from './promotion.js'
 
 export type ContextClaimEvent =
   | { type: 'claim_proposed'; eventId: string; createdAt: number; claim: ContextClaim }
@@ -33,6 +34,7 @@ export class ContextClaimStore {
   readonly sessionId: string
 
   private cachedClaims: ContextClaim[] | null = null
+  private lastProcessedLineCount: number = 0
 
   constructor(dir: string, sessionId: string) {
     assertValidSessionId(sessionId)
@@ -43,7 +45,6 @@ export class ContextClaimStore {
 
   appendEvent(event: ContextClaimEvent): void {
     appendFileSync(this.path, JSON.stringify(event) + '\n', 'utf-8')
-    this.cachedClaims = null
   }
 
   propose(proposal: ClaimProposal): ContextClaim {
@@ -105,6 +106,35 @@ export class ContextClaimStore {
     return this.listClaims().filter(claim => isPromptEligibleClaim(claim, now))
   }
 
+  listClaimsByFileEvidence(path: string): ContextClaim[] {
+    return this.listClaims().filter(claim => claimHasFileEvidence(claim, path))
+  }
+
+  getStatusCounts(): ClaimStatusCounts {
+    return countClaimsByStatus(this.listClaims())
+  }
+
+  markClaimsStaleForFile(path: string, reason: string): ContextClaim[] {
+    const changed: ContextClaim[] = []
+    for (const claim of this.listClaimsByFileEvidence(path)) {
+      if (claim.status === 'stale' || claim.status === 'quarantined') continue
+      const updated = this.updateClaimStatus(claim.id, 'stale', reason)
+      if (updated) changed.push(updated)
+    }
+    return changed
+  }
+
+  promoteEligibleClaims(now = Date.now()): ContextClaim[] {
+    const promoted: ContextClaim[] = []
+    for (const claim of this.listClaims()) {
+      const next = evaluatePromotion(claim, now)
+      if (!next) continue
+      const updated = this.updateClaimStatus(claim.id, next, 'promotion threshold met')
+      if (updated) promoted.push(updated)
+    }
+    return promoted
+  }
+
   exportSession(): string {
     if (!existsSync(this.path)) return ''
     return readFileSync(this.path, 'utf-8')
@@ -125,11 +155,30 @@ export class ContextClaimStore {
   }
 
   private projectClaims(): ContextClaim[] {
-    if (this.cachedClaims) return this.cachedClaims
+    const events = this.readEvents()
+
+    if (this.cachedClaims && this.lastProcessedLineCount === events.length) {
+      return this.cachedClaims
+    }
+
+    if (this.cachedClaims && this.lastProcessedLineCount < events.length) {
+      const newEvents = events.slice(this.lastProcessedLineCount)
+      const map = new Map(this.cachedClaims.map(c => [c.id, c]))
+      this.applyEventsToMap(map, newEvents)
+      this.cachedClaims = [...map.values()]
+      this.lastProcessedLineCount = events.length
+      return this.cachedClaims
+    }
 
     const claims = new Map<string, ContextClaim>()
+    this.applyEventsToMap(claims, events)
+    this.cachedClaims = [...claims.values()]
+    this.lastProcessedLineCount = events.length
+    return this.cachedClaims
+  }
 
-    for (const event of this.readEvents()) {
+  private applyEventsToMap(claims: Map<string, ContextClaim>, events: ContextClaimEvent[]): void {
+    for (const event of events) {
       if (event.type === 'claim_proposed') {
         if (!claims.has(event.claim.id)) {
           claims.set(event.claim.id, event.claim)
@@ -164,8 +213,5 @@ export class ContextClaimStore {
         }],
       })
     }
-
-    this.cachedClaims = [...claims.values()]
-    return this.cachedClaims
   }
 }

@@ -171,6 +171,70 @@ test('records prompt consumers without changing prompt eligibility', () => {
   }
 })
 
+test('lists claims with file evidence and summarizes lifecycle statuses', () => {
+  const dir = tempDir()
+  try {
+    const store = new ContextClaimStore(dir, 'session-123')
+    const fileClaim = store.propose({
+      ...proposal('Observed config'),
+      kind: 'file_observation',
+      evidence: [{ id: 'f1', kind: 'file', summary: 'config', path: '/repo/src/config.ts', createdAt: 10 }],
+    })
+    const active = store.propose(proposal('Keep active'))
+    store.updateClaimStatus(active.id, 'durable', 'user confirmed')
+
+    assert.deepEqual(store.listClaimsByFileEvidence('/repo/src/config.ts').map(c => c.id), [fileClaim.id])
+    assert.deepEqual(store.getStatusCounts(), {
+      active: 1,
+      stale: 0,
+      conflicted: 0,
+      durable: 1,
+      durableCandidate: 0,
+      quarantined: 0,
+    })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('promotes eligible claims by appending status transition events', () => {
+  const dir = tempDir()
+  try {
+    const store = new ContextClaimStore(dir, 'session-123')
+    const claim = store.propose(proposal('Project this claim repeatedly'))
+    for (const turn of [1, 2, 3]) {
+      store.recordClaimUsed(claim.id, { consumerId: `turn-${turn}:prompt`, consumerKind: 'prompt', usedAt: turn })
+    }
+
+    const promoted = store.promoteEligibleClaims(4)
+
+    assert.deepEqual(promoted.map(c => c.id), [claim.id])
+    assert.equal(store.listClaims()[0]?.status, 'durable_candidate')
+    assert.match(store.exportSession(), /claim_status_changed/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('marks claims with matching file evidence as stale', () => {
+  const dir = tempDir()
+  try {
+    const store = new ContextClaimStore(dir, 'session-123')
+    const fileClaim = store.propose({
+      ...proposal('Observed file'),
+      kind: 'file_observation',
+      evidence: [{ id: 'f1', kind: 'file', summary: 'file', path: '/repo/src/a.ts', createdAt: 10 }],
+    })
+
+    const updated = store.markClaimsStaleForFile('/repo/src/a.ts', 'file modified')
+
+    assert.deepEqual(updated.map(c => c.id), [fileClaim.id])
+    assert.equal(store.listClaims()[0]?.status, 'stale')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('SessionPersist creates a claim store for the current session id', () => {
   const persist = new SessionPersist('session-claims-test')
   const store = persist.createClaimStore()
