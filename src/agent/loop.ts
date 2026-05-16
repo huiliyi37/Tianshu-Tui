@@ -1,5 +1,3 @@
-import { readFileSync, existsSync, statSync } from 'fs'
-import { join } from 'path'
 import type { ApiClient, StreamCallbacks } from '../api/client.js'
 import type { ContentBlock, Message, Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
@@ -9,6 +7,8 @@ import type { ToolCallParams } from '../tools/types.js'
 import { SessionContext } from './context.js'
 import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
+import { buildPrewarmValue, canUsePrewarmForRead } from './prewarm-file.js'
+import { validatePath } from '../tools/path-validate.js'
 import { shouldAutoCompact, smartCompact } from '../compact/index.js'
 import { microCompact } from '../compact/micro.js'
 import type { CompactionConfig } from '../compact/constants.js'
@@ -128,16 +128,11 @@ export class AgentLoop {
   private maybePrewarm(text: string): void {
     const intents = extractIntents(text)
     for (const intent of intents) {
-      if (intent.type === 'file' && !this.prewarm.get(intent.value)) {
-        const fullPath = join(this.cwd, intent.value)
-        if (existsSync(fullPath)) {
-          try {
-            const stat = statSync(fullPath)
-            if (stat.size > 100_000) continue // skip files > 100KB
-            const content = readFileSync(fullPath, 'utf-8')
-            this.prewarm.set(intent.value, content)
-          } catch { /* ignore unreadable files */ }
-        }
+      if (intent.type !== 'file') continue
+      const value = buildPrewarmValue(this.cwd, intent.value)
+      if (!value) continue
+      if (!this.prewarm.get(value.canonicalPath)) {
+        this.prewarm.set(value.canonicalPath, value)
       }
     }
   }
@@ -442,12 +437,17 @@ export class AgentLoop {
                 input: tu.input,
                 turn,
                 execute: async () => {
-                  // Prewarm cache fast-path for read_file
-                  if (tu.name === 'read_file' && typeof tu.input.file_path === 'string') {
-                    const cached = this.prewarm.get(tu.input.file_path)
-                    if (cached) {
-                      rawToolResult = { content: cached }
-                      return { content: cached }
+                  // Prewarm cache fast-path for read_file (canonical full-file only)
+                  if (tu.name === 'read_file' && canUsePrewarmForRead(tu.input)) {
+                    try {
+                      const canonicalPath = validatePath(this.cwd, tu.input.file_path as string)
+                      const cached = this.prewarm.get(canonicalPath)
+                      if (cached) {
+                        rawToolResult = { content: cached.content, uiContent: cached.uiContent }
+                        return { content: cached.content }
+                      }
+                    } catch {
+                      // Fall through to the real tool so it can return the standard error.
                     }
                   }
                   const r = await this.config.toolRegistry.execute(tu.name, params)
@@ -488,9 +488,13 @@ export class AgentLoop {
                 this.repairHintTracker.recordFailure(tu.name, failureClass.class)
               }
 
-              // Invalidate prewarm cache after writes
+              // Invalidate prewarm cache after writes (canonical path)
               if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError && typeof tu.input.file_path === 'string') {
-                this.prewarm.invalidate(tu.input.file_path)
+                try {
+                  this.prewarm.invalidate(validatePath(this.cwd, tu.input.file_path as string))
+                } catch {
+                  this.prewarm.invalidate(tu.input.file_path as string)
+                }
               }
 
               if (tu.name === 'read_file' && !harnessResult.isError) {
