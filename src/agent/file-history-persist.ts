@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import { dirname } from 'path'
+import { readFileSync, existsSync } from 'fs'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 
 export interface FileSnapshot {
   path: string
@@ -13,10 +13,8 @@ export interface HistoryEntry {
 }
 
 export function persistFileHistory<T = HistoryEntry>(filePath: string, entries: T[], maxSnapshots = 50): void {
-  const dir = dirname(filePath)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const trimmed = entries.length > maxSnapshots ? entries.slice(-maxSnapshots) : entries
-  writeFileSync(filePath, JSON.stringify(trimmed))
+  writeFileAtomicSync(filePath, JSON.stringify(trimmed))
 }
 
 export function loadFileHistory<T = HistoryEntry>(filePath: string): T[] {

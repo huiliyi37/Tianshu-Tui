@@ -1,15 +1,11 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
 import { join } from 'path'
 import { configSchema, type Config, type ProviderConfig, type ModelConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 
-const CONFIG_DIR = join(homedir(), '.rivet')
-const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
-
-function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true })
-}
+const CONFIG_PATH = join(homedir(), '.rivet', 'config.json')
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target }
@@ -37,8 +33,7 @@ export function loadConfig(): Config {
 }
 
 function saveConfig(config: Config): void {
-  ensureConfigDir()
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
+  writeFileAtomicSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
 }
 
 // --- Provider management ---

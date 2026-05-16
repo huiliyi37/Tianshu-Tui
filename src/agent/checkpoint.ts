@@ -1,5 +1,6 @@
 import { execFile } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
@@ -95,14 +96,12 @@ export function addToCheckpointIndex(cwd: string, sessionId: string, files: stri
   } else {
     index.push(entry)
   }
-  mkdirSync(RIVET_DIR, { recursive: true })
-  writeFileSync(checkpointIndexFile(cwd), JSON.stringify(index, null, 2))
+  writeFileAtomicSync(checkpointIndexFile(cwd), JSON.stringify(index, null, 2))
 }
 
 export function removeFromCheckpointIndex(cwd: string, sessionId: string): void {
   const index = loadCheckpointIndex(cwd).filter(e => e.sessionId !== sessionId)
-  mkdirSync(RIVET_DIR, { recursive: true })
-  writeFileSync(checkpointIndexFile(cwd), JSON.stringify(index, null, 2))
+  writeFileAtomicSync(checkpointIndexFile(cwd), JSON.stringify(index, null, 2))
 }
 
 async function gitLines(cwd: string, args: string[]): Promise<string[]> {
@@ -144,7 +143,7 @@ export async function createCheckpoint(cwd: string, label?: string, sessionId?: 
     }
 
     const file = sessionId ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
-    writeFileSync(file, JSON.stringify(data, null, 2))
+    writeFileAtomicSync(file, JSON.stringify(data, null, 2))
 
     if (sessionId) {
       addToCheckpointIndex(cwd, sessionId, [])
@@ -164,7 +163,7 @@ export function recordAgentTouchedFile(cwd: string, file: string, sessionId?: st
   if (normalized.startsWith('/') || normalized.includes('..')) return
   data.agentTouchedFiles = [...new Set([...data.agentTouchedFiles, normalized])].sort()
   const outFile = sessionId ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
-  writeFileSync(outFile, JSON.stringify(data, null, 2))
+  writeFileAtomicSync(outFile, JSON.stringify(data, null, 2))
 }
 
 /** Preview what a rollback would affect. Returns null if nothing to rollback. */
@@ -178,7 +177,7 @@ export async function getRollbackPreview(cwd: string, sessionId?: string): Promi
   data.confirmationToken = token
   // Write back to the same file we loaded from (session-scoped or legacy cwd-scoped)
   const file = (sessionId && data.sessionId === sessionId) ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
-  writeFileSync(file, JSON.stringify(data, null, 2))
+  writeFileAtomicSync(file, JSON.stringify(data, null, 2))
 
   const protectedFiles = new Set([...data.preExistingDirtyFiles, ...data.preExistingUntrackedFiles])
   const rollbackFiles = data.agentTouchedFiles.filter(f => !protectedFiles.has(f))

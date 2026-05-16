@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -23,7 +24,5 @@ export function nextHistoryAfterSubmit(history: string[], entry: string): string
 
 export function appendHistory(entry: string): void {
   const history = nextHistoryAfterSubmit(loadHistory(), entry)
-  const dir = join(homedir(), '.rivet')
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 2))
+  writeFileAtomicSync(HISTORY_PATH, JSON.stringify(history, null, 2))
 }

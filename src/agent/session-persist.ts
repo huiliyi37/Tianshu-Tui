@@ -1,5 +1,6 @@
 import { appendFile } from 'fs/promises'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync } from 'fs'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { Message } from '../api/types.js'
@@ -56,10 +57,7 @@ export class SessionPersist {
 
   /** Compact the session file with the given messages */
   compact(messages: Message[]): void {
-    writeFileSync(
-      this.filePath,
-      messages.map(m => JSON.stringify(m)).join('\n') + '\n',
-    )
+    writeFileAtomicSync(this.filePath, messages.map(m => JSON.stringify(m)).join('\n') + '\n')
   }
 
   /** Delete the session file */
@@ -105,7 +103,7 @@ export class SessionPersist {
   }
 
   writeMetadata(metadata: SessionMetadata): void {
-    writeFileSync(this.metadataPath, JSON.stringify(metadata, null, 2) + '\n')
+    writeFileAtomicSync(this.metadataPath, JSON.stringify(metadata, null, 2) + '\n')
   }
 
   loadMetadata(): SessionMetadata | undefined {

@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { SessionMemoryEntry, SessionMemoryState } from './types.js'
@@ -31,7 +32,7 @@ export function appendSessionMemory(
   const state = loadSessionMemory(dir, sessionId)
   const entry: SessionMemoryEntry = { id: idFor(input), ...input }
   const next: SessionMemoryState = { sessionId, entries: [...state.entries, entry].slice(-50) }
-  writeFileSync(memoryPath(dir, sessionId), JSON.stringify(next, null, 2) + '\n')
+  writeFileAtomicSync(memoryPath(dir, sessionId), JSON.stringify(next, null, 2) + '\n')
   return next
 }
 
