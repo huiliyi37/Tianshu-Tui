@@ -1,0 +1,71 @@
+{
+  "session": "2026-05-16",
+  "topic": "wave5-trust-infrastructure",
+  "hypothesis": "Rivet's next differentiator is Trust Infrastructure: per-tool-call undo + context visibility, not more features",
+  "fragments": [
+    {
+      "text": "User trust = visibility + rollback-ability. Two legs of the same chair.",
+      "fragmentType": "mechanism",
+      "source": "agent",
+      "tags": ["trust", "ux", "core-insight"]
+    },
+    {
+      "text": "Checkpoint is per-run (git HEAD hash), not per-tool-call. DAW time-travel needs new storage layer.",
+      "fragmentType": "contradiction",
+      "source": "tool",
+      "tags": ["checkpoint", "architecture", "blocker"]
+    },
+    {
+      "text": "Only 3 of 15+ 'dormant' features are truly wire-and-go (autoReasoning, lspEnabled, tool registration)",
+      "fragmentType": "observation",
+      "source": "tool",
+      "tags": ["estimation", "reality-check"]
+    },
+    {
+      "text": "Claude Code consumes 3-4x more tokens than Codex per equivalent task. DeepSeek cache = 4x cost advantage.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["competitive", "cost", "deepseek"]
+    },
+    {
+      "text": "No terminal coding agent lets users SEE context management. ACF is invisible to users without /context.",
+      "fragmentType": "observation",
+      "source": "agent",
+      "tags": ["differentiation", "ux", "acf"]
+    },
+    {
+      "text": "DAW scoped-undo: each edit surface maintains independent undo/redo stack. Focus switch routes to correct history.",
+      "fragmentType": "analogy",
+      "source": "external",
+      "tags": ["daw", "undo", "ux-pattern"]
+    },
+    {
+      "text": "lazygit priority-based responsive hiding: UI elements have priority groups, low-priority hides first when space shrinks.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["lazygit", "responsive", "ux-pattern"]
+    },
+    {
+      "text": "BAML partial object streaming: stream semantic-valid partial objects, not characters. UI can start processing before generation completes.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["streaming", "ux-pattern", "future"]
+    }
+  ],
+  "extinctions": [
+    {
+      "candidateId": "V4",
+      "reason": "Goal loop without per-call undo is a ticking bomb. Causal chain broken.",
+      "salvagedTraits": [
+        {"trait": "budget-capped autonomous loop", "transferableTo": ["Wave 6 after V2 complete"]},
+        {"trait": "exit condition DSL", "transferableTo": ["FileHistory GC policy"]}
+      ]
+    }
+  ],
+  "survivors": [
+    {"candidateId": "V1", "advantage": "Zero-cost activation, immediate capability boost", "rank": 3},
+    {"candidateId": "V2", "advantage": "Solves pain point #2, prerequisite for V4", "rank": 1},
+    {"candidateId": "V3", "advantage": "Makes ACF investment visible, solves pain point #1", "rank": 2}
+  ],
+  "finalPlan": "V1 (half day) → V2+V3 parallel (3 days) = Wave 5 Trust Infrastructure"
+}
