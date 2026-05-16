@@ -1,58 +1,53 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import type { PersistentStore } from '../context/persistent-store.js'
+import type { ContextClaimStore } from '../context/claim-store.js'
+import type { ContextClaimKind } from '../context/claims.js'
 import type { ToolDefinition } from '../api/types.js'
 
 interface RecallInput {
   query: string
-  type?: 'tool_result' | 'all'
-  toolName?: string
-  since?: string
+  kind?: ContextClaimKind
   limit?: number
 }
 
 const DEFINITION: ToolDefinition = {
   name: 'recall',
-  description: 'Retrieve archived tool results from persistent memory',
+  description: 'Search historical claims in context memory by keyword. Returns matching claims with their status, kind, and evidence.',
   input_schema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'Search keyword or file path' },
-      type: { type: 'string', enum: ['tool_result', 'all'], default: 'all' },
-      toolName: { type: 'string', description: 'Filter by tool name' },
-      since: { type: 'string', description: 'ISO 8601 timestamp filter' },
-      limit: { type: 'number', default: 5 },
+      query: { type: 'string', description: 'Search keyword (substring match on claim text)' },
+      kind: { type: 'string', enum: ['user_constraint', 'user_preference', 'decision', 'file_observation', 'verification_fact', 'failure_pattern', 'security_finding', 'worker_finding', 'project_rule'], description: 'Filter by claim kind' },
+      limit: { type: 'number', default: 5, description: 'Max results to return' },
     },
     required: ['query'],
   },
 }
 
-export function createRecallTool(store: PersistentStore): Tool {
+export function createRecallTool(store: ContextClaimStore): Tool {
   return {
     definition: DEFINITION,
     async execute(params: ToolCallParams): Promise<ToolResult> {
       const input = params.input as unknown as RecallInput
-      const results = store.search({
-        query: input.query || undefined,
-        toolName: input.toolName,
-        since: input.since,
-        limit: input.limit ?? 5,
-      })
-      if (results.length === 0) {
-        return { content: 'No archived results found matching query.' }
+      const limit = input.limit ?? 5
+      const filter = input.kind ? { kind: [input.kind] } : {}
+
+      const matches = store.listClaims(filter)
+        .filter(c => c.text.toLowerCase().includes(input.query.toLowerCase()))
+        .sort((a, b) => b.fitness - a.fitness || b.confidence - a.confidence)
+        .slice(0, limit)
+
+      if (matches.length === 0) {
+        return { content: 'No claims found matching query.' }
       }
-      const formatted = results.map(r =>
-        `[${r.toolName}] round ${r.roundNumber} (${r.timestamp}):\n${r.content.slice(0, 2000)}`
-      ).join('\n---\n')
-      return { content: formatted }
+
+      const formatted = matches.map(c =>
+        `[claim:${c.id.slice(0, 8)}] (${c.kind}, ${c.status}, confidence=${c.confidence.toFixed(2)})\n  ${c.text.slice(0, 200)}`
+      ).join('\n')
+
+      return { content: `Found ${matches.length} claim(s):\n${formatted}` }
     },
-    requiresApproval(): boolean {
-      return false
-    },
-    isConcurrencySafe(): boolean {
-      return true
-    },
-    isEnabled(): boolean {
-      return true
-    },
+    requiresApproval(): boolean { return false },
+    isConcurrencySafe(): boolean { return true },
+    isEnabled(): boolean { return true },
   }
 }
