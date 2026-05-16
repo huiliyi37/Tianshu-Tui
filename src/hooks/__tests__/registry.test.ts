@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { HookRegistry } from '../registry.js'
-import type { HookHandler, PreToolUseInput, PostToolUseInput } from '../types.js'
+import type { HookHandler, PreToolUseInput, PostToolUseInput, UserPromptSubmitInput, PreCompactInput } from '../types.js'
 
 // --- Error isolation tests ---
 
@@ -117,5 +117,47 @@ describe('HookRegistry error isolation', () => {
     const result = registry.firePreToolUse({ toolName: 'bash', input: { command: 'ls' } })
     assert.deepEqual(seen, ['second'])
     assert.deepEqual(result.input, { command: 'ok' })
+  })
+})
+
+describe('UserPromptSubmit hook', () => {
+  it('allows hook to modify prompt', () => {
+    const registry = new HookRegistry()
+    registry.register('UserPromptSubmit', ((input: UserPromptSubmitInput) => ({
+      prompt: input.prompt.replace(/badword/gi, '***'),
+    })) as any)
+    const result = registry.fireUserPromptSubmit({ prompt: 'fix the badword issue' })
+    assert.equal(result.prompt, 'fix the *** issue')
+  })
+
+  it('allows hook to block prompt', () => {
+    const registry = new HookRegistry()
+    registry.register('UserPromptSubmit', () => ({
+      block: true,
+      reason: 'Prompt contains disallowed content',
+    }))
+    const result = registry.fireUserPromptSubmit({ prompt: 'rm -rf /' })
+    assert.equal(result.block, true)
+    assert.equal(result.reason, 'Prompt contains disallowed content')
+  })
+
+  it('returns empty when no hooks registered', () => {
+    const registry = new HookRegistry()
+    const result = registry.fireUserPromptSubmit({ prompt: 'hello' })
+    assert.equal(result.block, undefined)
+    assert.equal(result.prompt, undefined)
+  })
+})
+
+describe('PreCompact hook', () => {
+  it('fires without error', () => {
+    const registry = new HookRegistry()
+    const seen: PreCompactInput[] = []
+    registry.register('PreCompact', ((input: PreCompactInput) => {
+      seen.push(input)
+    }) as any)
+    registry.firePreCompact({ turnCount: 10, messageCount: 25 })
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0]!.turnCount, 10)
   })
 })

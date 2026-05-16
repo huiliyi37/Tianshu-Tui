@@ -1,6 +1,7 @@
 import type {
   HookEvent, HookHandler, PreToolUseInput, PostToolUseInput,
   NotificationInput, SubagentStopInput, PreToolUseResult, PostToolUseResult,
+  UserPromptSubmitInput, PreCompactInput, UserPromptSubmitResult,
 } from './types.js'
 
 type AnyHandler = HookHandler<HookEvent>
@@ -84,5 +85,38 @@ export class HookRegistry {
 
   clear(): void {
     this.handlers.clear()
+  }
+
+  fireUserPromptSubmit(input: UserPromptSubmitInput): UserPromptSubmitResult {
+    const handlers = this.handlers.get('UserPromptSubmit')
+    if (!handlers || handlers.size === 0) return {}
+
+    let currentPrompt = input.prompt
+    for (const handler of handlers) {
+      try {
+        const result = (handler as HookHandler<'UserPromptSubmit'>)({ prompt: currentPrompt })
+        if (result.block) {
+          return { block: true, reason: result.reason }
+        }
+        if (result.prompt) {
+          currentPrompt = result.prompt
+        }
+      } catch {
+        // Handler error is non-fatal
+      }
+    }
+    return { prompt: currentPrompt }
+  }
+
+  firePreCompact(input: PreCompactInput): void {
+    const handlers = this.handlers.get('PreCompact')
+    if (!handlers) return
+    for (const handler of handlers) {
+      try {
+        (handler as HookHandler<'PreCompact'>)(input)
+      } catch {
+        // Handler error is non-fatal
+      }
+    }
   }
 }
