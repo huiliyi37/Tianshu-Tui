@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-P2.5 Phase 5 complete — 620 tests passing, typecheck clean. All P0-P2 core business gaps closed. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks, structured git/todo/web-fetch tools, file-level undo with snapshot backup, SSRF protection with redirect-safe DNS validation. 天枢 persona with design-doc-first workflow.
+P2.5 Phase 5 complete — 684 tests passing, typecheck clean. All P0-P2 core business gaps closed. Markdown/diff rendering, scroll pager, context layer model, attention anchor dispersal (git log + behavior mirror + decision anchors in volatile context), multi-panel cockpit (7 panels including MCP + unified CockpitSnapshot aggregator + status indicators), execution resilience layer (TurnHarness with retry loop + trajectory recording + doom-loop strategy shift + task-state injection), MCP client with failure classifier (5 error classes), per-turn model routing (TaskInferrer + RoutingMetricsCollector), repo intelligence (import graph + impact hint after edits), evidence delivery gate blocking unverified workers, agent lifecycle hooks (error isolation + UserPromptSubmit/PreCompact events), structured git (status/diff/log/stash/commit + 50KB truncation), todo with worker-scoped TodoStore, web-fetch with turndown HTML conversion, file-level undo with orphan cleanup, SSRF protection with redirect-safe DNS validation. 天枢 persona with design-doc-first workflow.
 
 ## Quick Start
 
@@ -62,8 +62,8 @@ src/
 │   ├── sse.ts            SSE parser with id/retry field support
 │   └── types.ts          Message, ContentBlock, Usage, ToolDefinition types
 ├── hooks/
-│   ├── types.ts          HookEvent, HookHandler, PreToolUse/PostToolUse/Notification/SubagentStop types
-│   └── registry.ts       HookRegistry: register, fire, input chaining, block support
+│   ├── types.ts          HookEvent, HookHandler, PreToolUse/PostToolUse/Notification/SubagentStop/UserPromptSubmit/PreCompact types
+│   └── registry.ts       HookRegistry: register, fire, input chaining, block support, error isolation
 ├── prompt/
 │   ├── engine.ts         PromptEngine: frozen system prompt + volatile context + XML protocol
 │   ├── static.ts         System prompt builder with 天枢 persona
@@ -89,9 +89,10 @@ src/
 │   ├── glob.ts           File discovery with **/*/?/{a,b} support
 │   ├── diff.ts           Git diff with three-layer output
 │   ├── run-tests.ts      Test runner with framework detection + parsing
-│   ├── git.ts            Structured git: status, diff_summary, commit (spawnSync, no shell injection)
-│   ├── todo.ts           Session-scoped task list with Zod validation
-│   ├── web-fetch.ts      URL fetch with HTML→Markdown, SSRF protection (redirect-safe), per-hop timeout
+│   ├── git.ts            Structured git: status, diff_summary, log, stash, commit (spawnSync, 50KB truncation)
+│   ├── todo.ts           Session-scoped task list with Zod validation (backed by TodoStore)
+│   ├── todo-store.ts     Worker-scoped todo state container (isolated per worker)
+│   ├── web-fetch.ts      URL fetch with turndown HTML→Markdown, SSRF protection (redirect-safe), per-hop timeout
 │   ├── undo.ts           File-level undo via snapshot rewind (preview + confirm)
 │   ├── inspect-project.ts Project summary: language, framework, scripts
 │   ├── repo-map.ts       Annotated file tree with entry/test/config markers
@@ -274,10 +275,10 @@ Layers L1-L4 form the stable volatile block (frozen at construction, participate
 - **MCP failure classifier** — 5-class error taxonomy (config, auth, network, protocol, tool_error) with retryable hints and user-facing suggestions; error class annotated on MCP tool results
 - **Failure sample library** — createFailureSample with automatic secret redaction (sk-* patterns)
 - **Raw output path safety** — SHA-256 hashed filenames, no toolUseId in path
-- **Agent hooks** — PreToolUse/PostToolUse/Notification/SubagentStop lifecycle hooks; input chaining, block support, synchronous handlers
-- **Structured git tool** — status, diff_summary, commit actions via spawnSync (no shell injection); approval-gated commits
-- **Todo tracking** — Session-scoped task list with Zod validation; read/write actions, status icons, concurrency-safe
-- **Web fetch** — URL fetching with HTML→Markdown conversion, SSRF protection (private IP blocking), 15s timeout, 50K truncation
+- **Agent hooks** — PreToolUse/PostToolUse/Notification/SubagentStop/UserPromptSubmit/PreCompact lifecycle hooks; input chaining, block support, error isolation (handler errors never crash agent loop)
+- **Structured git tool** — status, diff_summary, log (maxCount), stash, commit actions via spawnSync (no shell injection); 50KB output truncation; approval-gated commits
+- **Todo tracking** — Worker-scoped TodoStore class for concurrency safety; Zod validation; read/write actions, status icons
+- **Web fetch** — URL fetching with turndown HTML→Markdown conversion (script/style stripped), SSRF protection (private IP blocking), 15s timeout, 50K truncation
 - **File-level undo** — Per-file snapshot backup system; versioned backups in `~/.rivet/file-history/{sessionId}/`, preview + confirm workflow, orphaned backup cleanup
 - **SSRF protection** — Per-hop DNS resolution + private IP detection (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80) validated on every redirect, max 5 hops
 - **Markdown rendering** — Block parser (headers, code blocks, lists, blockquotes, tables, HR) + inline tokenizer (bold, italic, code, links), minimal syntax highlighting for JS/TS/Python/Go/Rust/Bash
@@ -505,8 +506,10 @@ The hook system allows intercepting tool execution at lifecycle points:
 - **PostToolUse** — Runs after each tool call. Can modify the result (e.g. redact secrets from output)
 - **Notification** — Receives informational events (e.g. status changes)
 - **SubagentStop** — Receives worker completion events
+- **UserPromptSubmit** — Runs before user prompt is sent. Can modify or block the prompt (e.g. content filtering)
+- **PreCompact** — Runs before context compaction. Receives turn/message counts for logging or state preservation
 
-Hooks are synchronous and execute in registration order. PreToolUse supports input chaining (each handler receives the modified input from the previous one) and short-circuit blocking.
+Hooks are synchronous and execute in registration order. Handler errors are caught and isolated — a broken hook never crashes the agent loop. PreToolUse supports input chaining and short-circuit blocking.
 
 ### Structured Git Tool
 
@@ -514,9 +517,11 @@ The `git` tool provides type-safe git operations without raw shell commands:
 
 - **status** — Show working tree status, current branch, and file changes
 - **diff_summary** — Show diff stats for staged and unstaged changes
+- **log** — Show recent commit history (default 20, configurable with `maxCount`, clamped to 1-100)
+- **stash** — Stash current working directory changes
 - **commit** — Stage all changes and commit with a message (requires approval)
 
-Commit messages are passed via `spawnSync` args array — never interpolated into a shell string — preventing command injection.
+Commit messages are passed via `spawnSync` args array — never interpolated into a shell string — preventing command injection. All output is truncated at 50KB to prevent context window overflow.
 
 ### Todo Tracking
 
@@ -534,7 +539,7 @@ The `web_fetch` tool retrieves web content:
 - URL validation (http/https only) and DNS resolution
 - **SSRF protection** — Per-hop DNS + private IP blocking on every redirect (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, ::1, fc/fd/fe80)
 - **Redirect-safe** — Manual redirect following with DNS validation at each hop (max 5 redirects)
-- HTML content is converted to Markdown (links, headings, code blocks preserved)
+- HTML content is converted to Markdown via `turndown` (links, headings, code blocks, tables preserved; script/style stripped)
 - Per-hop 10s fetch timeout, 15s body read timeout, 50K character truncation limit
 - Requires user approval for all requests
 
@@ -544,7 +549,7 @@ The undo system captures file snapshots before each modification:
 
 - Every `write_file` / `edit_file` creates a versioned backup in `~/.rivet/file-history/{sessionId}/`
 - Backups are SHA-256 hashed filenames, up to 100 snapshots retained
-- Orphaned backups are cleaned up when snapshots are evicted
+- Orphaned backups (files not referenced by any snapshot) can be cleaned via `cleanupOrphans()`
 - `undo` tool shows a preview (files changed, +/- lines) before restoring
 - `undo confirm` restores files to their pre-modification state
 
@@ -716,7 +721,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (620)
+npm run test                   # Run all tests (684)
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
@@ -735,7 +740,8 @@ npm run dev                    # Watch mode
 - `docs/superpowers/plans/2026-05-15-rivet-p2.1-remaining.md` — P2.1 remaining tasks + execution record
 - `docs/superpowers/plans/2026-05-15-rivet-performance-optimization.md` — Performance optimization plan
 - `docs/analysis/2026-05-15-handoff.md` — Full project handoff document with validation records
-- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (11 Verified)
+- `docs/superpowers/plans/2026-05-16-rivet-gap-closing-hardening.md` — Gap closing hardening plan (hooks isolation, git log/stash, turndown, TodoStore, undo cleanup)
+- `docs/superpowers/status/2026-05-16-rivet-core-capability-ledger.md` — Core capability implementation status ledger (13 Verified)
 
 ## License
 
