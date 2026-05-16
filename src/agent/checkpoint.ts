@@ -23,6 +23,7 @@ interface CheckpointData {
   timestamp: number
   label: string
   cwd: string
+  sessionId?: string  // absent in legacy checkpoints
   preExistingDirtyFiles: string[]
   preExistingUntrackedFiles: string[]
   agentTouchedFiles: string[]
@@ -36,6 +37,11 @@ function checkpointFile(cwd: string): string {
   return join(RIVET_DIR, `checkpoint-${slug}.json`)
 }
 
+/** Returns the checkpoint file path scoped to a session ID. */
+export function checkpointFileForSession(sessionId: string): string {
+  return join(RIVET_DIR, `checkpoint-${sessionId}.json`)
+}
+
 function loadCheckpointData(cwd: string): CheckpointData | null {
   const file = checkpointFile(cwd)
   if (!existsSync(file)) return null
@@ -44,6 +50,59 @@ function loadCheckpointData(cwd: string): CheckpointData | null {
   } catch {
     return null
   }
+}
+
+/** Load checkpoint data scoped by session ID. */
+function loadCheckpointDataForSession(sessionId: string): CheckpointData | null {
+  const file = checkpointFileForSession(sessionId)
+  if (!existsSync(file)) return null
+  try {
+    return JSON.parse(readFileSync(file, 'utf-8')) as CheckpointData
+  } catch {
+    return null
+  }
+}
+
+// ─── Checkpoint Index (cross-session discovery per cwd) ───
+
+export interface CheckpointIndexEntry {
+  sessionId: string
+  files: string[]
+  timestamp: number
+}
+
+function checkpointIndexFile(cwd: string): string {
+  const slug = cwd.replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
+  return join(RIVET_DIR, `checkpoint-index-${slug}.json`)
+}
+
+export function loadCheckpointIndex(cwd: string): CheckpointIndexEntry[] {
+  const file = checkpointIndexFile(cwd)
+  if (!existsSync(file)) return []
+  try {
+    return JSON.parse(readFileSync(file, 'utf-8')) as CheckpointIndexEntry[]
+  } catch {
+    return []
+  }
+}
+
+export function addToCheckpointIndex(cwd: string, sessionId: string, files: string[]): void {
+  const index = loadCheckpointIndex(cwd)
+  const existing = index.findIndex(e => e.sessionId === sessionId)
+  const entry: CheckpointIndexEntry = { sessionId, files, timestamp: Date.now() }
+  if (existing >= 0) {
+    index[existing] = entry
+  } else {
+    index.push(entry)
+  }
+  mkdirSync(RIVET_DIR, { recursive: true })
+  writeFileSync(checkpointIndexFile(cwd), JSON.stringify(index, null, 2))
+}
+
+export function removeFromCheckpointIndex(cwd: string, sessionId: string): void {
+  const index = loadCheckpointIndex(cwd).filter(e => e.sessionId !== sessionId)
+  mkdirSync(RIVET_DIR, { recursive: true })
+  writeFileSync(checkpointIndexFile(cwd), JSON.stringify(index, null, 2))
 }
 
 async function gitLines(cwd: string, args: string[]): Promise<string[]> {
