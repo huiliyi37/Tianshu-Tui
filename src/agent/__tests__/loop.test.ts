@@ -460,3 +460,62 @@ describe('AgentLoop — active claims projection', () => {
     assert.equal(claim?.consumers.length, 4)
   })
 })
+
+describe('AgentLoop — antibody generation', () => {
+  it('generates failure_pattern claim after tool error with classifiable failure', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    const engine = makeEngine()
+    const claimDir = mkdtempSync(join(tmpdir(), 'rivet-loop-antibody-'))
+    const claimStore = new ContextClaimStore(claimDir, 'session-ab')
+
+    let toolCalled = false
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        if (!toolCalled) {
+          toolCalled = true
+          cb.onContentBlock(makeToolUseBlock('tu1', 'bash', { command: 'npx tsc --noEmit' }))
+          cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 50 })
+          return
+        }
+        cb.onContentBlock(makeTextBlock('I will fix the type error.'))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+      }),
+    } as unknown as ApiClient
+
+    registry.register({
+      definition: { name: 'bash', description: 'run bash', input_schema: { type: 'object', properties: { command: { type: 'string' } } } },
+      execute: async () => ({ content: "error TS2345: Type 'string' is not assignable to type 'number'", isError: true }),
+      isConcurrencySafe: () => false,
+      isEnabled: () => true,
+      requiresApproval: () => false,
+    })
+
+    const agent = new AgentLoop({
+      client,
+      promptEngine: engine,
+      toolRegistry: registry,
+      maxTurns: 2,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      sessionId: 'session-ab',
+      contextClaimStore: claimStore,
+    }, session, '/test')
+
+    await agent.run('fix types', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onError: (error: Error) => { throw error },
+      onAbort: () => {},
+      onTurnComplete: () => {},
+      onApprovalRequired: async () => true,
+    })
+
+    const antibodies = claimStore.listClaims({ kind: ['failure_pattern'] })
+    assert.ok(antibodies.length >= 1, 'expected at least one failure_pattern claim')
+    assert.ok(antibodies[0]!.tags.includes('antibody'), 'expected antibody tag')
+    assert.ok(antibodies[0]!.text.includes('type_error'), 'expected type_error in text')
+  })
+})
