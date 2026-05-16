@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 8 + ECF Phase 4B complete — 878 tests passing, typecheck clean. Claim extractor, durable cross-session claims, antibody immunity, conflict detection, approval-risk boost, project rules, claim budget cap, recall tool, claim export/import. Context Fabric Phase 4B operational.
+Wave 10 + ECF Phase 5 complete — 1030 tests passing, typecheck clean. Claim extractor, durable cross-session claims, antibody immunity, conflict detection, approval-risk boost, project rules, claim budget cap, recall tool with positive feedback loop, claim export/import, tool-pipeline + turn-end extraction (loop.ts 815→493). Evolutionary Context Fabric fully operational.
 
 ## Quick Start
 

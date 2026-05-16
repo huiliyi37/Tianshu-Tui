@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-05-17 — Wave 9/10 + ECF Phase 5
+
+### Fixed — Wave 9 Defect Fixes
+- **createAgentConfig factory** — Extracted shared config factory eliminating TUI/goal-loop duplication
+- **Goal loop parity** — Added `compactClient`, `fileHistory`, `getSessionMemoryState`, `maxWorkers=3` to goal loop
+- **loadDurableClaims replay** — `claim_used` events now restore consumers + `lastUsedAt` on durable claims
+- **FileHistory path** — Uses `SessionPersist.getBackupDir()` instead of hardcoded path
+- **loadProjectRules** — Added try/catch for filesystem errors
+- **server tests** — 17 tests covering all 4 server modules (SseStream, createRouter, createRoutes, buildPromptHandler)
+
+### Refactored — Wave 10 Loop Split
+- **tool-pipeline.ts** (343L) — Extracted single tool execution: pre-hooks → repair → approval → checkpoint → harness → post-hooks → claim extraction → antibody → evidence → import graph → prewarm
+- **turn-end.ts** (76L) — Extracted turn-end processing: task state → mirror detection → model routing → decision extraction → evidence badge
+- **loop.ts** — 815→493 lines, delegates to tool-pipeline + turn-end
+
+### Added — Test Coverage (Wave 10)
+- compact/auto.ts — 8 tests (shouldAutoCompact + buildSummaryPrompt)
+- compact/micro.ts — 7 tests (estimateTokens + microCompact)
+- session-persist.ts — 5 tests with env-overridable `RIVET_SESSION_DIR`
+- tool-pipeline.ts — 4 tests
+- turn-end.ts — 5 tests
+
+### Added — ECF Phase 5: Recall Positive Feedback
+- **boostFitness** — `ContextClaimStore.boostFitness(id, delta, cap)` increases claim fitness, capped at max
+- **claim_boosted event** — New event type in JSONL for fitness changes; replayed by `loadDurableClaims`
+- **Recall consumer tracking** — recall tool records `recall:turn-N` consumer on each matched claim
+- **Recall fitness boost** — recall hits boost matched claim fitness by +1 (cap 10), improving prompt projection rank and eviction resistance
+- **RecallContext** — `createRecallTool(store, ctx)` accepts optional context for consumer/fitness tracking
+
+### Fixed
+- **tool-pipeline** — `run_tests` diagnosis early return now records `repairHintTracker.recordFailure` before returning
+
 ## 2026-05-16 — Wave 8 + Evolutionary Context Fabric Phase 2–4B
 
 ### Added — Wave 8 Context Fabric Phase 2
