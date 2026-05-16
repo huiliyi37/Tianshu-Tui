@@ -15,6 +15,7 @@ import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
+import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createDeepSeekClient } from './api/deepseek.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
@@ -114,6 +115,12 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       () => _sessionIdRef ?? undefined,
     ))
     reg.register(createUndoTool(() => _fileHistoryRef ?? undefined))
+    reg.register(createDelegateBatchTool({
+      delegateBatch: async (requests, policy) => {
+        if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+        return _coordinatorRef.delegateBatch(requests, policy)
+      },
+    }))
     return reg
   })
 
@@ -231,32 +238,37 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       recommendedTasks: ['code_search'],
     }]
 
-    const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => ({
-      order: _order,
-      client: createDeepSeekClient({
-        apiKey,
-        model: card.model,
-        reasoningEffort: undefined,
-        maxTokens: Math.min(4096, card.contextWindow),
-        thinkingBudget: 4096,
-      }),
-      promptEngine: new PromptEngine({
-        model: card.model,
-        maxTokens: 4096,
-        staticCtx: { tools: workerRegistry.getDefinitions() },
-        volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
-      }),
-      toolRegistry: workerRegistry,
-      cwd,
-      maxTurns: 4,
-      contextWindow: card.contextWindow,
-      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
-    })
+    const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
+      const writeProfiles = ['patcher', 'verifier']
+      const isWrite = writeProfiles.includes(_order.profile)
+      return {
+        order: _order,
+        client: createDeepSeekClient({
+          apiKey,
+          model: card.model,
+          reasoningEffort: undefined,
+          maxTokens: isWrite ? Math.min(8192, card.contextWindow) : Math.min(4096, card.contextWindow),
+          thinkingBudget: isWrite ? 8192 : 4096,
+        }),
+        promptEngine: new PromptEngine({
+          model: card.model,
+          maxTokens: isWrite ? 8192 : 4096,
+          staticCtx: { tools: workerRegistry.getDefinitions() },
+          volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
+        }),
+        toolRegistry: workerRegistry,
+        cwd,
+        maxTurns: isWrite ? 8 : 4,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        activeClaims: _claimStoreRef?.listActiveClaims() ?? [],
+      }
+    }
 
     _coordinatorRef = new DelegationCoordinator({
       baseToolRegistry: toolRegistry,
       modelCards,
-      maxWorkers: 2,
+      maxWorkers: 3,
       runtimeFactory,
     })
 
@@ -463,6 +475,29 @@ async function main() {
           staticCtx: { tools: toolRegistry.getDefinitions() },
           volatileCtx: { cwd: process.cwd() },
         })
+
+        const goalCoordinator = new DelegationCoordinator({
+          baseToolRegistry: toolRegistry,
+          modelCards: [{ model: model.id, toolUseReliability: 0.8, jsonStability: 0.8, editSuccessRate: 0.7, testRepairRate: 0.6, contextWindow: model.contextWindow, cacheEconomics: 'strong', recommendedTasks: ['code_search'] }],
+          maxWorkers: 2,
+          runtimeFactory: (order, card, workerRegistry) => ({
+            order,
+            client: createDeepSeekClient({ apiKey: key, model: card.model, reasoningEffort: undefined, maxTokens: Math.min(4096, card.contextWindow), thinkingBudget: 4096 }),
+            promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: process.cwd() } }),
+            toolRegistry: workerRegistry,
+            cwd: process.cwd(),
+            maxTurns: 4,
+            contextWindow: card.contextWindow,
+            compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+            activeClaims: claimStore.listActiveClaims(),
+          }),
+        })
+        toolRegistry.register(createDelegateTaskTool(
+          { delegate: async (req) => goalCoordinator.delegate(req) },
+          () => claimStore,
+          () => sessionId,
+        ))
+
         const session = new SessionContext()
         return new AgentLoop({
           client,

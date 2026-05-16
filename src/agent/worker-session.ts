@@ -22,6 +22,7 @@ export interface WorkerSessionConfig {
   maxTurns: number
   contextWindow: number
   compact: CompactionConfig
+  activeClaims?: import('../context/claims.js').ContextClaim[]
 }
 
 export interface WorkerTranscript {
@@ -81,6 +82,9 @@ async function runOnce(agent: AgentLoop, prompt: string, transcript: WorkerTrans
 }
 
 export async function runWorkerSession(config: WorkerSessionConfig): Promise<WorkerSessionRun> {
+  if (config.activeClaims && config.activeClaims.length > 0) {
+    config.promptEngine.updateActiveClaims(config.activeClaims)
+  }
   const session = new SessionContext()
   const agent = new AgentLoop({
     client: config.client,

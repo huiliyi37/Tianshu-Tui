@@ -3,8 +3,10 @@ import { recommendModelForTask } from '../model/capability.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import {
   createReadOnlyWorkOrder,
+  createWriteWorkOrder,
   mapWorkOrderKindToCapabilityTask,
   READ_ONLY_WORKER_TOOLS,
+  WRITE_WORKER_TOOLS,
   type AggregationPolicy,
   type WorkOrder,
   type WorkOrderKind,
@@ -75,23 +77,45 @@ export class DelegationCoordinator {
       }
     }
 
-    const order = createReadOnlyWorkOrder({
-      parentTurnId: request.parentTurnId,
-      kind: request.kind,
-      profile: request.profile,
-      objective: request.objective,
-      scope: request.scope,
-    })
+    const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
+    const isWrite = writeProfiles.includes(request.profile)
+    const order = isWrite
+      ? createWriteWorkOrder({
+          parentTurnId: request.parentTurnId,
+          kind: request.kind,
+          profile: request.profile,
+          objective: request.objective,
+          scope: request.scope,
+        })
+      : createReadOnlyWorkOrder({
+          parentTurnId: request.parentTurnId,
+          kind: request.kind,
+          profile: request.profile,
+          objective: request.objective,
+          scope: request.scope,
+        })
     this.state.recordEvent({ type: 'queued', workOrderId: order.id, timestamp: Date.now() })
 
     const task = mapWorkOrderKindToCapabilityTask(order.kind)
     const selected = recommendModelForTask(task, this.config.modelCards)
-    const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, READ_ONLY_WORKER_TOOLS)
+    const toolSet = isWrite ? WRITE_WORKER_TOOLS : READ_ONLY_WORKER_TOOLS
+    const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, toolSet)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
     const run = await this.runWorker(workerConfig)
     this.state.recordEvent({ type: run.result.status === 'passed' ? 'passed' : run.result.status === 'blocked' ? 'blocked' : 'failed', workOrderId: order.id, timestamp: Date.now() })
+
+    if (this.state.shouldEscalate()) {
+      this.state.recordEvent({ type: 'escalated', workOrderId: order.id, timestamp: Date.now() })
+      return {
+        status: 'completed',
+        order,
+        selectedModel: selected.model,
+        results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
+        packet: buildPrimaryWorkerPacket([run.result]),
+      }
+    }
 
     const results = aggregateResults([run.result], 'primary_decides')
 
