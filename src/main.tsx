@@ -80,6 +80,10 @@ let _coordinatorRef: DelegationCoordinator | null = null
 // Module-level FileHistory reference — created in Root, read by undo tool
 let _fileHistoryRef: FileHistory | null = null
 
+// Module-level claim store reference — created in Root, read by delegate_task tool
+let _claimStoreRef: import('./context/claim-store.js').ContextClaimStore | null = null
+let _sessionIdRef: string | null = null
+
 // Module-level MCP manager reference — initialized in Root, shut down on exit
 let _mcpManager: McpManager | null = null
 
@@ -99,12 +103,16 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     // Register delegate_task with a mutable coordinator reference.
     // The coordinator is recreated in useMemo on model switch; the tool reads
     // the latest via a closure over a module-level ref.
-    reg.register(createDelegateTaskTool({
-      delegate: async (request) => {
-        if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
-        return _coordinatorRef.delegate(request)
+    reg.register(createDelegateTaskTool(
+      {
+        delegate: async (request) => {
+          if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+          return _coordinatorRef.delegate(request)
+        },
       },
-    }))
+      () => _claimStoreRef ?? undefined,
+      () => _sessionIdRef ?? undefined,
+    ))
     reg.register(createUndoTool(() => _fileHistoryRef ?? undefined))
     return reg
   })
@@ -178,6 +186,9 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   })
 
   const [claimStore] = useState(() => persist.createClaimStore())
+
+  _claimStoreRef = claimStore
+  _sessionIdRef = sessionId
 
   // Switchable model — changing this recreates client + promptEngine + agent
   const [currentModel, setCurrentModel] = useState(() => provider.models[0]!)
@@ -468,7 +479,12 @@ async function main() {
       },
       checkGoalAchieved: (text: string) => {
         const lower = text.toLowerCase()
-        return lower.includes('goal achieved') || lower.includes('all tests pass') || lower.includes('task complete')
+        // Require explicit standalone markers — loose substrings like
+        // "I haven't achieved the goal yet" or "all tests pass for this module"
+        // must not trigger false positives.
+        return /\bgoal\s+achieved\b/.test(lower)
+          || /\ball\s+tests\s+pass(?:ed)?\s*[.!\n]/.test(lower)
+          || /\btask\s+complete[ds]?\s*[.!\n]/.test(lower)
       },
       onIteration: (i, _text, usage) => {
         console.log(`[Goal Loop] Iteration ${i} — ${usage.input_tokens ?? 0} in / ${usage.output_tokens ?? 0} out`)

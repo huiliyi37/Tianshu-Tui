@@ -27,30 +27,37 @@ export async function runGoalLoop(config: GoalLoopConfig): Promise<GoalLoopResul
   let iterations = 0
   let consecutiveFailures = 0
   let lastOutput = ''
+  let lastToolResult = ''
   const totalUsage = { input_tokens: 0, output_tokens: 0 }
+
+  const writeJson = (event: Record<string, unknown>) => {
+    if (config.streamJson) process.stdout.write(JSON.stringify(event) + '\n')
+  }
 
   while (iterations < config.budget) {
     iterations++
     let text = ''
-    let error: string | undefined
+    let apiError: string | undefined
     let turnUsage: Partial<Usage> = {}
     const toolResults: string[] = []
 
     const prompt = iterations === 1
-      ? `Goal: ${config.goal}\n\nWork toward this goal. When complete, clearly state the goal is achieved.`
-      : `Goal: ${config.goal}\n\nPrevious attempt output:\n${lastOutput.slice(-2000)}\n\nContinue working toward the goal.`
+      ? `Goal: ${config.goal}\n\nWork toward this goal. When complete, clearly state "GOAL ACHIEVED".`
+      : `Goal: ${config.goal}\n\nPrevious attempt summary:\n${lastOutput.slice(-1500)}${lastToolResult ? '\n\nLast tool result:\n' + lastToolResult.slice(-500) : ''}\n\nContinue working toward the goal.`
 
     await agent.run(prompt, {
       onTextDelta: (delta) => { text += delta },
       onThinkingDelta: () => {},
       onToolUse: () => {},
       onToolResult: (_id, _name, result, isError) => {
-        if (!isError) toolResults.push(result.slice(0, 500))
-        if (isError) error = result
+        const snippet = result.slice(0, 500)
+        toolResults.push(`${isError ? '[ERROR] ' : ''}${snippet}`)
+        if (!isError) lastToolResult = snippet
       },
       onTurnComplete: (usage) => { turnUsage = usage },
-      onError: (err) => { error = err.message },
-      onAbort: () => { error = 'aborted' },
+      onError: (err) => { apiError = err.message },
+      onAbort: () => { apiError = 'aborted' },
+      // auto-accept mode skips approval; this is a safety fallback only
       onApprovalRequired: async () => false,
     })
 
@@ -58,23 +65,21 @@ export async function runGoalLoop(config: GoalLoopConfig): Promise<GoalLoopResul
     totalUsage.output_tokens += turnUsage.output_tokens ?? 0
     lastOutput = text
 
-    if (config.streamJson) {
-      process.stdout.write(JSON.stringify({
-        type: 'goal_iteration',
-        iteration: iterations,
-        achieved: false,
-        usage: turnUsage,
-        text: text.slice(0, 500),
-      }) + '\n')
-    }
+    writeJson({
+      type: 'goal_iteration',
+      iteration: iterations,
+      achieved: false,
+      usage: turnUsage,
+      text: text.slice(0, 500),
+    })
 
     config.onIteration?.(iterations, text, turnUsage)
 
-    if (error === 'aborted') {
+    if (apiError === 'aborted') {
       return { achieved: false, iterations, exitReason: 'aborted', totalUsage, lastOutput }
     }
 
-    if (error) {
+    if (apiError) {
       consecutiveFailures++
       if (consecutiveFailures >= 3) {
         return { achieved: false, iterations, exitReason: 'consecutive_failures', totalUsage, lastOutput }
@@ -86,6 +91,14 @@ export async function runGoalLoop(config: GoalLoopConfig): Promise<GoalLoopResul
 
     const fullContext = text + '\n' + toolResults.join('\n')
     if (config.checkGoalAchieved(fullContext)) {
+      writeJson({
+        type: 'goal_complete',
+        iteration: iterations,
+        achieved: true,
+        exitReason: 'goal_achieved',
+        usage: turnUsage,
+        text: text.slice(0, 500),
+      })
       return { achieved: true, iterations, exitReason: 'goal_achieved', totalUsage, lastOutput }
     }
   }

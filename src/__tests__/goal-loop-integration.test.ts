@@ -40,20 +40,23 @@ describe('Goal Loop integration', () => {
     assert.equal(result.exitReason, 'budget_exhausted')
   })
 
-  it('detects goal from tool_result context', async () => {
+  it('detects goal from tool_result context including error-tagged results', async () => {
     const result = await runGoalLoop({
       goal: 'make tests pass',
       budget: 5,
       createAgent: () => ({
         run: async (_prompt: string, callbacks: AgentCallbacks) => {
           callbacks.onToolResult('t1', 'run_tests', 'Tests: 50 pass, 0 fail', false)
+          callbacks.onToolResult('t2', 'bash', 'some command failed', true)
           callbacks.onTextDelta('All tests are passing now.')
           callbacks.onTurnComplete({ input_tokens: 200, output_tokens: 100 }, 1)
         },
       }),
       checkGoalAchieved: (text: string) => text.includes('Tests:') && text.includes('pass'),
     })
+    // Tool errors are included in context for goal check but don't trigger circuit breaker
     assert.equal(result.achieved, true)
+    assert.equal(result.exitReason, 'goal_achieved')
   })
 
   it('consecutive errors trigger circuit breaker', async () => {
