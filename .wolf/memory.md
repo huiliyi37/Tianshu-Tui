@@ -1223,3 +1223,4 @@
 | 01:18 | Created src/agent/__tests__/turn-end.test.ts | — | ~667 |
 | 01:18 | Session end: 7 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 1 reads | ~7536 tok |
 | 01:19 | Edited src/agent/__tests__/tool-pipeline.test.ts | inline fix | ~15 |
+| 01:19 | Session end: 8 writes across 6 files (loop.ts, CHANGELOG.md, README.md, 2026-05-16-rivet-core-capability-ledger.md, tool-pipeline.test.ts) | 1 reads | ~7551 tok |

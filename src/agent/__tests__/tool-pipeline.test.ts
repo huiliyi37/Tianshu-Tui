@@ -60,9 +60,9 @@ describe('executeToolUse', () => {
       { id: 'tu-1', name: 'read_file', input: { file_path: '/tmp/test.ts' } },
       deps, noopCallbacks as any, 1, false,
     )
-    assert.equal(result.toolResult.tool_use_id, 'tu-1')
-    assert.equal(result.toolResult.content, 'ok')
-    assert.equal(result.toolResult.is_error, false)
+    assert.equal((result.toolResult as any).tool_use_id, 'tu-1')
+    assert.equal((result.toolResult as any).content, 'ok')
+    assert.equal((result.toolResult as any).is_error, false)
     assert.equal(result.checkpointCreated, false)
   })
 
@@ -102,6 +102,6 @@ describe('executeToolUse', () => {
       { id: 'tu-4', name: 'bash', input: { command: 'false' } },
       deps, noopCallbacks as any, 1, false,
     )
-    assert.equal(result.toolResult.is_error, true)
+    assert.equal((result.toolResult as any).is_error, true)
   })
 })
