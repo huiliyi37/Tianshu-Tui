@@ -3,6 +3,7 @@ import type { ContentBlock, Message, Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { ToolRegistry } from '../tools/registry.js'
+import { killAll } from '../tools/process-tracker.js'
 import { SessionContext } from './context.js'
 import { SessionPersist } from './session-persist.js'
 import { extractIntents } from './intent-extractor.js'
@@ -156,6 +157,7 @@ export class AgentLoop {
 
   abort(): void {
     this.abortController?.abort()
+    killAll()
   }
 
   setApprovalMode(mode: ApprovalMode): void {
@@ -468,6 +470,8 @@ export class AgentLoop {
           const toolResults: ContentBlock[] = []
 
           for (const tu of toolUses) {
+            if (this.abortController.signal.aborted) break
+
             const pipelineDeps: ToolPipelineDeps = {
               config: this.config,
               cwd: this.cwd,

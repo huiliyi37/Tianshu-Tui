@@ -95,6 +95,9 @@ let _mcpManager: McpManager | null = null
 
 function gracefulShutdown() {
   shutdownCallback?.()
+  if (process.stdin.isTTY && process.stdin.setRawMode) {
+    process.stdin.setRawMode(false)
+  }
   process.exit(0)
 }
 

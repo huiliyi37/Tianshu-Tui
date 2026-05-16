@@ -1,4 +1,4 @@
-export type Phase = 'idle' | 'searching' | 'coding' | 'testing' | 'running' | 'delegating'
+export type Phase = 'idle' | 'searching' | 'coding' | 'testing' | 'running' | 'delegating' | 'interview'
 
 export interface LastAction {
   tool: string

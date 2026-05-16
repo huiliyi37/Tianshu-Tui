@@ -90,6 +90,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /auto — Toggle auto-approve (current: ${ctx.autoSafeRef.current ? 'auto-safe' : 'manual'})
 /theme [pastel|cyberpunk|list] — Switch color theme
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle or switch cockpit panel
+/interview <topic> — Start deep interview to clarify requirements before coding
 Ctrl+C — Interrupt current turn (press twice to exit)` }))
       setIsStreaming(false)
       return true
@@ -500,6 +501,16 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       }
       setIsStreaming(false)
       return true
+    }
+
+    case '/interview': {
+      const topic = parts.slice(1).join(' ').trim()
+      if (!topic) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /interview <topic>\nExample: /interview add a notification system' }))
+        setIsStreaming(false)
+        return true
+      }
+      return false
     }
   }
 

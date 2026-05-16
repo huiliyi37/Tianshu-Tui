@@ -283,8 +283,14 @@ export class ApiClient implements StreamClient {
       }
     }
 
+    const abortHandler = () => { reader.cancel().catch(() => {}) }
+
     try {
+      if (signal) {
+        signal.addEventListener('abort', abortHandler, { once: true })
+      }
       while (true) {
+        if (signal?.aborted) break
         const { done, value } = await reader.read()
         if (done) break
 
@@ -390,6 +396,7 @@ export class ApiClient implements StreamClient {
         }
       }
     } finally {
+      signal?.removeEventListener('abort', abortHandler)
       reader.releaseLock()
     }
   }

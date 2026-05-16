@@ -13,6 +13,7 @@ import { AssistantMessage } from './assistant-message.js'
 import { groupLogs } from './group-logs.js'
 import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
 import { SummaryBar, type SummaryState } from './summary-bar.js'
+import type { InterviewState } from './status-bar.js'
 import { PhaseTracker } from './phase-tracker.js'
 import { createRingBuffer } from './ring-buffer.js'
 import { getTheme } from './theme.js'
@@ -119,6 +120,29 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
   )
 }
 
+const INTERVIEW_MARKER_RE = /<!-- interview:(\{.*?\}) -->/
+
+function parseInterviewMarker(text: string): { state: InterviewState; cleanText: string } | null {
+  const match = text.match(INTERVIEW_MARKER_RE)
+  if (!match) return null
+  try {
+    const raw = JSON.parse(match[1]!)
+    const clarity = Math.max(0, Math.min(1, typeof raw.clarity === 'number' ? raw.clarity : 0))
+    const state: InterviewState = {
+      intent: String(raw.intent ?? ''),
+      clarity,
+      round: Number(raw.round ?? 0),
+      maxRounds: Number(raw.maxRounds ?? 5),
+      tokensUsed: Number(raw.tokensUsed ?? 0),
+      confirmed: clarity >= 0.8,
+    }
+    const cleanText = text.replace(INTERVIEW_MARKER_RE, '').trimEnd()
+    return { state, cleanText }
+  } catch {
+    return null
+  }
+}
+
 // --- Main App ---
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef }: AppProps) {
@@ -153,6 +177,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   })
   const [cockpitPanel, setCockpitPanel] = useState<Panel | null>(null)
   const cockpitPanelRef = useRef<Panel | null>(null)
+  const [interviewState, setInterviewState] = useState<InterviewState | null>(null)
+  const [clarityHistory, setClarityHistory] = useState<number[]>([])
   useEffect(() => { cockpitPanelRef.current = cockpitPanel }, [cockpitPanel])
 
   const pushStatic = useCallback((entry: LogEntry) => {
@@ -259,7 +285,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   useInput((_input, _key) => {
     // Ctrl+C — soft interrupt or exit
-    if (_input === '\x03') {
+    if (_input === 'c' && _key.ctrl) {
       if (pendingApproval) {
         pendingApproval.resolve(false)
         setPendingApproval(null)
@@ -272,7 +298,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         return
       }
       if (lastCtrlCRef.current && Date.now() - lastCtrlCRef.current < 2000) {
-        process.exit(0)
+        if (process.stdin.isTTY && process.stdin.setRawMode) {
+          process.stdin.setRawMode(false)
+        }
+        process.emit('SIGINT')
       }
       lastCtrlCRef.current = Date.now()
       pushStatic(createLogEntry({ type: 'system', content: '(Ctrl+C again to exit)' }))
@@ -341,7 +370,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
   })
 
-  const handleSubmit = useCallback((userInput: string) => {
+  const handleSubmit = useCallback((_userInput: string) => {
+    let userInput = _userInput
     const run = async () => {
     setIsStreaming(true)
     setStreamingText('')
@@ -370,6 +400,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     const taskDesc = userInput.length > 30 ? userInput.slice(0, 29) + '…' : userInput
     const initPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
+
+    if (interviewState?.confirmed) {
+      setInterviewState(null)
+      setClarityHistory([])
+    }
+
     phaseTracker.current = new PhaseTracker()
     setSummaryState({ task: taskDesc, phase: 'idle', stepCount: 0, totalSteps: 0, contextPct: initPct, elapsedMs: 0, lastAction: null, risk: 'none', tokenHistory: pushTokenHistory(initPct) })
 
@@ -384,6 +420,22 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       const parts = userInput.split(/\s+/)
       const cmd = parts[0]!.toLowerCase()
 
+      if (cmd === '/interview') {
+        const topic = parts.slice(1).join(' ').trim()
+        if (!topic) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /interview <topic>' }))
+          setIsStreaming(false)
+          return
+        }
+        pushStatic(createLogEntry({ type: 'system', content: `⚡ Interview mode activated for: ${topic}` }))
+        setInterviewState({ intent: topic, clarity: 0, round: 0, maxRounds: 5, tokensUsed: 0, confirmed: false })
+        // Transform input and fall through to main agent.run below
+        const interviewInput = `[interview-mode] ${topic}\n\n[interview-instructions]\nActivate interview mode. Before implementing:\n1. Save my original intent verbatim\n2. Ask ONE clarifying question at a time (prefer A/B/C choices)\n3. Track clarity across: intent clarity, constraints, success criteria, edge cases\n4. After each round, append: <!-- interview:{"intent":"<summary>","clarity":<0-1>,"round":<n>,"maxRounds":5,"tokensUsed":<estimate>} -->\n5. When clarity >= 0.8 OR after 5 rounds, present a cognitive sync summary\n6. Wait for user confirmation before proceeding\n\nClarity base = weighted average of 4 dimensions (each 0 or 1, weight 25%)\n+0.1 if user volunteers edge cases, +0.1 if maps to BDD scenario\n-0.15 if contradictory assumptions, -0.1 if user answers unsure twice\nDegradation: hard cap 5 rounds, if 2 consecutive uncertain answers switch to best-effort mode`
+        pushStatic(createLogEntry({ type: 'user_message', content: userInput }))
+        // Use interview prompt as input, fall through to shared agent.run
+        userInput = interviewInput
+        // Skip remaining slash command handling
+      } else
       if (cmd === '/rollback') {
         const subcmd = parts[1]
         if (subcmd === 'confirm') {
@@ -522,7 +574,19 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         const finalText = streamBuf.current
         if (finalText) {
-          pushStatic(createLogEntry({ type: 'assistant_message', content: finalText }))
+          const parsed = parseInterviewMarker(finalText)
+          if (parsed) {
+            setInterviewState(parsed.state)
+            setClarityHistory(prev => [...prev, parsed.state.clarity])
+            if (parsed.state.confirmed) {
+              setSummaryState(prev => ({ ...prev, phase: 'interview' }))
+            }
+            if (parsed.cleanText) {
+              pushStatic(createLogEntry({ type: 'assistant_message', content: parsed.cleanText }))
+            }
+          } else {
+            pushStatic(createLogEntry({ type: 'assistant_message', content: finalText }))
+          }
         }
         streamBuf.current = ''
         setStreamingText('')
@@ -624,6 +688,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           maxTokens={maxTokens}
           contextHealth={session.getContextLedger()?.tokenBudget.compactionState ?? 'healthy'}
           apiSafe={(session.getContextLedger()?.apiInvariantStatus.brokenRounds ?? 0) === 0}
+          interview={interviewState}
+          clarityHistory={clarityHistory}
         />
         {isStreaming && !cockpitPanel && <SummaryBar state={summaryState} />}
         {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}

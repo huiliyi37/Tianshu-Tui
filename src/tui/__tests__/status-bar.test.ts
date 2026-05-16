@@ -24,6 +24,12 @@ function cacheColor(rate: number): string {
   return 'red'
 }
 
+function cacheStatusColor(status: string, rate: number): string {
+  if (status === 'degraded') return 'red'
+  if (status === 'recovering') return 'yellow'
+  return cacheColor(rate)
+}
+
 describe('StatusBar color logic', () => {
   it('maps context health levels to correct colors', () => {
     assert.equal(contextColor('healthy'), 'green')
@@ -48,5 +54,12 @@ describe('StatusBar color logic', () => {
     assert.equal(cacheColor(0.91), 'green')
     assert.equal(cacheColor(0.5), 'yellow')
     assert.equal(cacheColor(0.2), 'red')
+  })
+
+  it('cache status overrides cache color when degraded', () => {
+    assert.equal(cacheStatusColor('degraded', 0.9), 'red')
+    assert.equal(cacheStatusColor('recovering', 0.5), 'yellow')
+    assert.equal(cacheStatusColor('healthy', 0.2), 'red')
+    assert.equal(cacheStatusColor('healthy', 0.9), 'green')
   })
 })
