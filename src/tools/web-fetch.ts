@@ -1,5 +1,6 @@
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
+import TurndownService from 'turndown'
 import type { Tool, ToolCallParams } from './types.js'
 
 const MAX_CONTENT_LENGTH = 50_000
@@ -13,6 +14,16 @@ export interface FetchDeps {
 const defaultDeps: FetchDeps = {
   lookup: dnsLookup,
   fetch: globalThis.fetch.bind(globalThis),
+}
+
+const turndown = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+})
+turndown.remove(['script', 'style'])
+
+export function htmlToMarkdown(html: string): string {
+  return turndown.turndown(html)
 }
 
 export function isPrivateIP(ip: string): boolean {
@@ -34,24 +45,6 @@ export function isPrivateIP(ip: string): boolean {
     return false
   }
   return false
-}
-
-export function htmlToMarkdown(html: string): string {
-  let text = html
-  text = text.replace(/<a\s+href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
-  text = text.replace(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/gi, (_, content) => `## ${content}`)
-  text = text.replace(/<br\s*\/?>/gi, '\n')
-  text = text.replace(/<\/p>/gi, '\n\n')
-  text = text.replace(/<p[^>]*>/gi, '')
-  text = text.replace(/<(strong|b)[^>]*>(.*?)<\/(strong|b)>/gi, '**$2**')
-  text = text.replace(/<(em|i)[^>]*>(.*?)<\/(em|i)>/gi, '*$2*')
-  text = text.replace(/<pre[^>]*>(.*?)<\/pre>/gis, '```\n$1\n```')
-  text = text.replace(/<code[^>]*>(.*?)<\/code>/gi, '`$1`')
-  text = text.replace(/<li[^>]*>(.*?)<\/li>/gi, '- $1')
-  text = text.replace(/<[^>]+>/g, '')
-  text = text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-  text = text.replace(/\n{3,}/g, '\n\n').trim()
-  return text
 }
 
 export function createWebFetchTool(deps: FetchDeps = defaultDeps): Tool {

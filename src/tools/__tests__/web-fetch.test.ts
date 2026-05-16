@@ -3,11 +3,12 @@ import assert from 'node:assert/strict'
 import { createWebFetchTool, htmlToMarkdown } from '../web-fetch.js'
 import { isPrivateIP } from '../web-fetch.js'
 
-describe('htmlToMarkdown', () => {
+describe('htmlToMarkdown (turndown)', () => {
   it('strips HTML tags and preserves text', () => {
-    const result = htmlToMarkdown('<p>Hello <b>world</b></p>')
+    const result = htmlToMarkdown('<p>Hello <strong>world</strong></p>')
     assert.ok(result.includes('Hello'))
     assert.ok(!result.includes('<p>'))
+    assert.ok(result.includes('**world**'))
   })
 
   it('converts links to markdown format', () => {
@@ -20,8 +21,33 @@ describe('htmlToMarkdown', () => {
   })
 
   it('converts headings', () => {
-    const result = htmlToMarkdown('<h2>Title</h2>')
-    assert.ok(result.includes('## Title'))
+    const result = htmlToMarkdown('<h1>Title</h1>')
+    assert.ok(result.includes('# Title'))
+  })
+
+  it('converts unordered lists', () => {
+    const result = htmlToMarkdown('<ul><li>one</li><li>two</li></ul>')
+    assert.ok(result.includes('one'))
+    assert.ok(result.includes('two'))
+  })
+
+  it('converts code blocks', () => {
+    const result = htmlToMarkdown('<pre><code>const x = 1</code></pre>')
+    assert.ok(result.includes('const x = 1'))
+  })
+
+  it('strips script and style tags', () => {
+    const result = htmlToMarkdown('<script>alert("xss")</script><p>visible</p><style>.x{color:red}</style>')
+    assert.ok(!result.includes('alert'))
+    assert.ok(!result.includes('color'))
+    assert.ok(result.includes('visible'))
+  })
+
+  it('converts tables to readable text', () => {
+    const html = '<table><tr><th>Name</th><th>Value</th></tr><tr><td>foo</td><td>bar</td></tr></table>'
+    const result = htmlToMarkdown(html)
+    assert.ok(result.includes('Name'))
+    assert.ok(result.includes('foo'))
   })
 
   it('decodes HTML entities', () => {
