@@ -42,3 +42,44 @@ describe('createRingBuffer', () => {
     assert.equal(buf.size, 3)
   })
 })
+
+describe('RingBuffer clear and drain', () => {
+  it('clear removes all items', () => {
+    const buf = createRingBuffer<string>(10)
+    buf.push('a')
+    buf.push('b')
+    buf.push('c')
+    buf.clear()
+    assert.deepEqual(buf.items(), [])
+    assert.equal(buf.size, 0)
+  })
+
+  it('drain removes first n items and returns them', () => {
+    const buf = createRingBuffer<string>(10)
+    buf.push('a')
+    buf.push('b')
+    buf.push('c')
+    buf.push('d')
+    const drained = buf.drain(2)
+    assert.deepEqual(drained, ['a', 'b'])
+    assert.deepEqual(buf.items(), ['c', 'd'])
+  })
+
+  it('drain with count > size drains all', () => {
+    const buf = createRingBuffer<string>(10)
+    buf.push('a')
+    buf.push('b')
+    const drained = buf.drain(5)
+    assert.deepEqual(drained, ['a', 'b'])
+    assert.deepEqual(buf.items(), [])
+  })
+
+  it('drain 0 returns empty and leaves buffer unchanged', () => {
+    const buf = createRingBuffer<string>(10)
+    buf.push('a')
+    buf.push('b')
+    const drained = buf.drain(0)
+    assert.deepEqual(drained, [])
+    assert.deepEqual(buf.items(), ['a', 'b'])
+  })
+})
