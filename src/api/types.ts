@@ -31,6 +31,7 @@ export type ContentBlock =
 export interface Message {
   role: 'user' | 'assistant'
   content: string | ContentBlock[]
+  cache_control?: { type: 'ephemeral' }
 }
 
 export interface SystemBlock {

@@ -12,7 +12,9 @@ describe('compact policy', () => {
     assert.equal(decideCompactTier({ estimatedTokens: 650, maxTokens: 1000, turn: 1, failures: { consecutiveFailures: 0 } }).tier, 1)
     assert.equal(decideCompactTier({ estimatedTokens: 820, maxTokens: 1000, turn: 1, failures: { consecutiveFailures: 0 } }).tier, 2)
     assert.equal(decideCompactTier({ estimatedTokens: 900, maxTokens: 1000, turn: 1, failures: { consecutiveFailures: 0 } }).tier, 3)
-    assert.equal(decideCompactTier({ estimatedTokens: 980, maxTokens: 1000, turn: 1, failures: { consecutiveFailures: 0 } }).tier, 4)
+    const ceiling = decideCompactTier({ estimatedTokens: 980, maxTokens: 1000, turn: 1, failures: { consecutiveFailures: 0 } })
+    assert.equal(ceiling.tier, 4)
+    assert.equal(ceiling.reason, 'context ceiling exceeded; checkpoint-resume required')
   })
 
   it('disables automatic compact temporarily after repeated failures', () => {

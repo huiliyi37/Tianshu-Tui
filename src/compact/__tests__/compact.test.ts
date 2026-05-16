@@ -47,6 +47,26 @@ describe('microCompact', () => {
     assert.ok(after <= 160 || result.truncated === 2, `after=${after} truncated=${result.truncated}`)
   })
 
+  it('limits a single tool_result relative to the context window', () => {
+    const content = 'x'.repeat(20_000)
+    const messages = [
+      msg('user', 'start'),
+      msg('assistant', 'ack'),
+      { role: 'user' as const, content: [{ type: 'tool_result' as const, tool_use_id: 'toolu_1', content }] },
+      msg('assistant', 'done'),
+      msg('user', 'next'),
+      msg('assistant', 'ok'),
+    ]
+
+    const result = microCompact(messages, 8_000, 20_000)
+    const toolResultMessage = result.messages.find(message => Array.isArray(message.content))
+    assert.ok(toolResultMessage)
+    const block = Array.isArray(toolResultMessage.content) ? toolResultMessage.content[0] : undefined
+    assert.equal(block?.type, 'tool_result')
+    assert.ok((block?.content ?? '').length < 12_000)
+    assert.match(block?.content ?? '', /original_chars="20000"/)
+  })
+
   it('preserves anchor and recent, truncates middle only', () => {
     const bigMsg = 'x'.repeat(100)
     const messages = [

@@ -1,13 +1,15 @@
 import type { Message } from '../api/types.js'
-import { KEEP_RECENT_MESSAGES, CACHE_ANCHOR_MESSAGES } from './constants.js'
+import { KEEP_RECENT_MESSAGES, CACHE_ANCHOR_MESSAGES, compactThresholds } from './constants.js'
 import { groupIntoRounds } from '../context/rounds.js'
 
-const TOOL_RESULT_PREVIEW_CHARS = 1200
+const CHARS_PER_TOKEN = 4
 
-function compactToolResultBlock(block: any): { block: any; changed: boolean } {
+function compactToolResultBlock(block: any, contextWindow: number): { block: any; changed: boolean } {
   if (block.type !== 'tool_result') return { block, changed: false }
-  if (typeof block.content !== 'string' || block.content.length <= TOOL_RESULT_PREVIEW_CHARS) return { block, changed: false }
-  const stub = `<microcompacted tool_result original_chars="${block.content.length}">\n${block.content.slice(0, TOOL_RESULT_PREVIEW_CHARS)}\n</microcompacted tool_result>`
+  if (typeof block.content !== 'string') return { block, changed: false }
+  const previewChars = Math.max(1_200, compactThresholds(contextWindow).toolResultMaxTokens * CHARS_PER_TOKEN)
+  if (block.content.length <= previewChars) return { block, changed: false }
+  const stub = `<microcompacted tool_result original_chars="${block.content.length}">\n${block.content.slice(0, previewChars)}\n</microcompacted tool_result>`
   if (stub.length >= block.content.length) return { block, changed: false }
   return { block: { ...block, content: stub }, changed: true }
 }
@@ -30,26 +32,22 @@ export function microCompact(
   contextWindow: number,
   estimatedTokens: number,
 ): { messages: Message[]; truncated: number } {
-  if (estimatedTokens <= contextWindow || messages.length <= KEEP_RECENT_MESSAGES + CACHE_ANCHOR_MESSAGES) {
-    return { messages, truncated: 0 }
-  }
-
   // Tier 1: shorten large tool_result content (zero API cost)
   let compactedCount = 0
   const shortened = messages.map(msg => {
     if (!Array.isArray(msg.content)) return msg
     let modified = false
     const blocks = msg.content.map((block: any) => {
-      const result = compactToolResultBlock(block)
+      const result = compactToolResultBlock(block, contextWindow)
       if (result.changed) { compactedCount++; modified = true }
       return result.block
     })
     return modified ? { ...msg, content: blocks } : msg
   })
 
-  let currentTokens = estimateTokens(shortened)
+  let currentTokens = compactedCount > 0 ? estimateTokens(shortened) : estimatedTokens
 
-  if (currentTokens <= contextWindow) {
+  if (currentTokens <= contextWindow || messages.length <= KEEP_RECENT_MESSAGES + CACHE_ANCHOR_MESSAGES) {
     return { messages: shortened, truncated: compactedCount }
   }
 

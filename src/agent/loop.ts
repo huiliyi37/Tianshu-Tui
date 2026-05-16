@@ -9,9 +9,9 @@ import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
 import { buildPrewarmValue, canUsePrewarmForRead } from './prewarm-file.js'
 import { validatePath } from '../tools/path-validate.js'
-import { shouldAutoCompact, smartCompact } from '../compact/index.js'
-import { microCompact } from '../compact/micro.js'
-import type { CompactionConfig } from '../compact/constants.js'
+import { smartCompact } from '../compact/index.js'
+import { microCompact, estimateTokens } from '../compact/micro.js'
+import { CACHE_ANCHOR_MESSAGES, type CompactionConfig } from '../compact/constants.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import { createContextLedger } from '../context/ledger.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
@@ -217,6 +217,45 @@ export class AgentLoop {
     this.session.setContextLedger(ledger)
   }
 
+
+  private enforceContextCeiling(): void {
+    const ceiling = this.config.contextWindow * 0.95
+    if (this.session.getEstimatedTokens() <= ceiling) return
+
+    const messages = this.session.getMessages()
+    const taskState = extractTaskState(this.trajectory.getEntries(), this.streamedText)
+    const stateLines = [
+      `Current: ${taskState.current}`,
+      ...taskState.completed.map(item => `Completed: ${item}`),
+      ...taskState.remaining.map(item => `Remaining: ${item}`),
+    ]
+    const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
+    let resumeMessage: Message = {
+      role: 'user',
+      content: `<checkpoint-resume>\n${stateLines.join('\n')}\n</checkpoint-resume>`,
+    }
+    let candidate = [...anchorMessages, resumeMessage]
+
+    if (estimateTokens(candidate) > ceiling) {
+      resumeMessage = {
+        role: 'user',
+        content: '<checkpoint-resume>Context ceiling exceeded. Continue from preserved cache anchors and ask for missing details if needed.</checkpoint-resume>',
+      }
+      candidate = [...anchorMessages, resumeMessage]
+    }
+
+    this.session.replaceMessages(candidate)
+    this.session.recordCompactEvent({
+      turn: this.session.getTurnCount(),
+      tier: 4,
+      reason: 'context ceiling exceeded; checkpoint-resume required',
+      beforeTokens: estimateTokens(messages),
+      afterTokens: this.session.getEstimatedTokens(),
+      createdAt: Date.now(),
+    })
+    this.refreshLedger()
+  }
+
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     this.trajectory.reset()
@@ -245,8 +284,7 @@ export class AgentLoop {
           turn: this.session.getTurnCount(),
           failures: this.compactFailures,
         })
-        const legacyDecision = shouldAutoCompact(messages, this.config.compact, estTokens)
-        if (compactDecision.shouldCompact && legacyDecision.shouldCompact) {
+        if (compactDecision.shouldCompact) {
           const beforeTokens = estTokens
           try {
             const { messages: compacted } = await this.compactMessages(messages, estTokens)
@@ -276,6 +314,7 @@ export class AgentLoop {
         const repairHint = this.repairHintTracker.getHint()
         this.config.promptEngine.setRepairHint(repairHint)
 
+        this.enforceContextCeiling()
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const collectedBlocks: ContentBlock[] = []
         let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []

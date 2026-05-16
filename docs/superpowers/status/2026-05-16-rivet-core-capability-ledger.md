@@ -16,6 +16,7 @@
 
 | Capability | Status | Design | Plan | Primary Code | Validation | Known Gaps | Next Action |
 |-----------|--------|--------|------|-------------|-----------|-----------|-------------|
+| Adaptive Context Fabric (ACF) | **Verified** | `specs/...-adaptive-context-fabric-design.md` | `task_plan.md` | `src/context/compact-policy.ts`, `src/compact/micro.ts`, `src/compact/constants.ts`, `src/agent/loop.ts`, `src/context/pressure-monitor.ts`, `src/context/anchor-registry.ts`, `src/context/persistent-store.ts`, `src/context/proactive-inject.ts`, `src/api/provider-profile.ts`, `src/api/cache-strategy.ts`, `src/tools/recall.ts` | Plan 52/52 checked, 736 tests pass, typecheck clean, build succeeds | None | — |
 | Context Layer + Cache Architecture | **Verified** | `specs/...-context-layer-cache-architecture-gap.md` | `plans/...-context-layer-boundary-implementation.md` | `src/prompt/*` | Plan 34/34 checked, 612 tests pass | Logical layers use physical channel mapping | Monitor for new cache behaviors |
 | Cache Safety | **Verified** | `specs/...-cache-safety-design.md` | `plans/...-cache-safety-implementation.md` | `src/agent/prewarm.ts`, `src/agent/prewarm-file.ts`, `src/agent/loop.ts`, `src/tools/read-file.ts`, `src/prompt/volatile.ts`, `src/prompt/volatile-git.ts` | Plan 30/30 checked, 697 tests pass, Task 5 (fingerprint) pre-verified | None | — |
 | Tool Safety + Verification Evidence | **Verified** | `specs/...-core-business-gap-review.md` | `plans/...-tool-safety-verification-evidence.md` | `src/agent/approval-risk.ts`, `src/agent/evidence.ts`, `src/agent/delivery-gate.ts` | Plan 29/30 (preamble only unchecked), 620 tests pass, evidence gate bypass fixed | None critical | — |
@@ -43,7 +44,7 @@
 
 ## Summary
 
-- **Verified**: 26 capabilities (Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety, Multi-Session Isolation, Permission Allow Rules, Cost/Token Display, Headless Mode, Custom Slash Commands, First-Run Onboarding)
+- **Verified**: 27 capabilities (Adaptive Context Fabric, Context Layer, Tool Safety, Execution Resilience x2, Cockpit Observability, Cockpit Techstyle, MCP Integration, Model Routing, Repo Intelligence, Progressive Context Engine, Sub-agent Orchestration, Attention Anchors, XML Protocol, Multi-pass Repair Pipeline, Gap Closing, Pastel Theme + Render Perf + Memory Safety, P1 Remaining Gaps, Performance Optimization, Capability Reliability Layer, Harness Cockpit, Cache Safety, Multi-Session Isolation, Permission Allow Rules, Cost/Token Display, Headless Mode, Custom Slash Commands, First-Run Onboarding)
 - **MVP**: 0
 - **Planned**: 0 capabilities
 - **Designed**: 2 capabilities (CTCL Migration, Open Source Strategy)

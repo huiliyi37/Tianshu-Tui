@@ -7,7 +7,7 @@ export interface CompactPolicyInput {
   failures: CompactCircuitBreakerState
 }
 
-function tierForRatio(ratio: number): CompactTier {
+export function tierForRatio(ratio: number): CompactTier {
   if (ratio >= 0.95) return 4
   if (ratio >= 0.88) return 3
   if (ratio >= 0.78) return 2
@@ -20,7 +20,7 @@ function reasonForTier(tier: CompactTier): string {
   if (tier === 1) return 'tool results exceeded watch threshold'
   if (tier === 2) return 'session memory compact recommended'
   if (tier === 3) return 'reactive round summarization required'
-  return 'emergency truncation required'
+  return 'context ceiling exceeded; checkpoint-resume required'
 }
 
 export function decideCompactTier(input: CompactPolicyInput): CompactDecision {

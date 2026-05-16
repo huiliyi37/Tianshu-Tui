@@ -53,7 +53,7 @@ export interface CompactedSpan {
 }
 
 export interface ContextAnchor {
-  kind: 'decision' | 'error' | 'user_preference' | 'pending_task' | 'file' | 'verification'
+  kind: 'decision' | 'error' | 'user_preference' | 'user_constraint' | 'pending_task' | 'file' | 'verification'
   text: string
   sourceRoundIndex: number
   salience: number
