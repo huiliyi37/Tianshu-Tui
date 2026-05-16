@@ -27,6 +27,7 @@ import { DEFAULT_CONFIG } from './config/default.js'
 import { runConfigCLI } from './config/manager.js'
 import { McpManager } from './mcp/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
+import { createRecallTool } from './tools/recall.js'
 import type { Config, ProviderConfig } from './config/schema.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
@@ -205,6 +206,13 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
 
   _claimStoreRef = claimStore
   _sessionIdRef = sessionId
+
+  // Register recall tool once (depends on claimStore existing)
+  const recallRef = useRef(false)
+  if (!recallRef.current) {
+    toolRegistry.register(createRecallTool(claimStore))
+    recallRef.current = true
+  }
 
   // Switchable model — changing this recreates client + promptEngine + agent
   const [currentModel, setCurrentModel] = useState(() => provider.models[0]!)
