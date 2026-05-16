@@ -9,6 +9,7 @@ import { ToolCard } from './tool-card.js'
 import { UserMessage } from './user-message.js'
 import { SystemMessage } from './system-message.js'
 import { ToolGroup } from './tool-group.js'
+import { AssistantMessage } from './assistant-message.js'
 import { groupLogs } from './group-logs.js'
 import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
 import { SummaryBar, type SummaryState } from './summary-bar.js'
@@ -62,7 +63,7 @@ function renderStaticEntry(entry: LogEntry, verbose: boolean) {
     case 'user_message':
       return <UserMessage key={entry.id} content={entry.content} />
     case 'assistant_message':
-      return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
+      return <AssistantMessage key={entry.id} content={entry.content} />
     case 'tool':
       return <ToolCard key={entry.id} name={entry.toolName ?? ''} result={entry.content} isError={entry.isError} verbose={verbose} rawPath={entry.rawPath} />
     case 'tool_group':
@@ -109,7 +110,7 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
       {panel === 'verify' && <VerificationPanel filesRead={snap.verification.filesRead} filesModified={snap.verification.filesModified} verifications={snap.verification.runs} deliveryStatus={snap.verification.deliveryStatus} impactedFiles={snap.verification.impactedFiles} impactedTests={snap.verification.impactedTests} />}
       {panel === 'context' && snap.context && <ContextPanel estimatedTokens={snap.context.estimatedTokens} maxTokens={snap.context.maxTokens} rounds={snap.context.rounds} compactionState={snap.context.compactionState} brokenRounds={snap.context.brokenRounds} compactEvents={compactEvents.map(e => ({ turn: e.turn, tier: e.tier, beforeTokens: e.beforeTokens, afterTokens: e.afterTokens }))} layers={snap.context.layers} />}
       {panel === 'safety' && <SafetyPanel doomLoopLevel={snap.safety.doomLoopLevel} riskLevel={snap.safety.riskLevel} riskReasons={snap.safety.riskReasons} suggestedAction={snap.safety.suggestedAction} recentFingerprints={snap.safety.recentFingerprints} />}
-      {panel === 'model' && <ModelPanel model={snap.model.name} cacheHitRate={snap.model.cacheHitRate} inputTokens={snap.model.inputTokens} outputTokens={snap.model.outputTokens} cacheReadTokens={snap.model.cacheReadTokens} cacheWriteTokens={snap.model.cacheWriteTokens} cost={snap.model.cost} routingReason={snap.model.routingReason ?? undefined} perTurnHitRate={snap.model.perTurnHitRate} prewarmHits={snap.model.prewarmHits} prewarmMisses={snap.model.prewarmMisses} prewarmHitRate={snap.model.prewarmHitRate} cacheDiagnostic={snap.model.cacheDiagnostic} />}
+      {panel === 'model' && <ModelPanel model={snap.model.name} cacheHitRate={snap.model.cacheHitRate} inputTokens={snap.model.inputTokens} outputTokens={snap.model.outputTokens} cacheReadTokens={snap.model.cacheReadTokens} cacheWriteTokens={snap.model.cacheWriteTokens} cost={snap.model.cost} routingReason={snap.model.routingReason ?? undefined} perTurnHitRate={snap.model.perTurnHitRate} recentTurnHitRate={snap.model.recentTurnHitRate} prewarmHits={snap.model.prewarmHits} prewarmMisses={snap.model.prewarmMisses} prewarmHitRate={snap.model.prewarmHitRate} cacheDiagnostic={snap.model.cacheDiagnostic} />}
       {panel === 'mcp' && <McpPanel servers={snap.mcp.servers} totalTools={snap.mcp.totalTools} connectedServers={snap.mcp.connectedServers} />}
     </Box>
   )
@@ -118,9 +119,11 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
 // --- Main App ---
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput, mcpManagerRef, claimStoreRef }: AppProps) {
-  const [staticItems, setStaticItems] = useState<LogEntry[]>([])
+  const [frozenItems, setFrozenItems] = useState<LogEntry[]>([])
+  const [activeItems, setActiveItems] = useState<LogEntry[]>([])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const staticBuf = useMemo(() => createRingBuffer<LogEntry>(500), [])
+  const frozenBuf = useMemo(() => createRingBuffer<LogEntry>(500), [])
   const liveToolsRef = useRef<LogEntry[]>([])
 
   const [streamingText, setStreamingText] = useState('')
@@ -128,6 +131,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [isStreaming, setIsStreaming] = useState(false)
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
+  const [cacheStatus, setCacheStatus] = useState<import('./status-bar.js').CacheStatus>('healthy')
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
   const [showPalette, setShowPalette] = useState(false)
@@ -150,13 +154,25 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const pushStatic = useCallback((entry: LogEntry) => {
     staticBuf.push(entry)
-    setStaticItems(staticBuf.items())
+    setActiveItems(staticBuf.items())
   }, [staticBuf])
 
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     for (const entry of entries) staticBuf.push(entry)
-    setStaticItems(staticBuf.items())
+    setActiveItems(staticBuf.items())
   }, [staticBuf])
+
+  const ACTIVE_THRESHOLD = 20
+
+  const migrateToFrozen = useCallback(() => {
+    const active = staticBuf.items()
+    if (active.length <= ACTIVE_THRESHOLD) return
+    const migrateCount = active.length - ACTIVE_THRESHOLD
+    const toFreeze = staticBuf.drain(migrateCount)
+    for (const item of toFreeze) frozenBuf.push(item)
+    setFrozenItems(frozenBuf.items())
+    setActiveItems(staticBuf.items())
+  }, [staticBuf, frozenBuf])
 
   const streamStartRef = useRef(0)
   const thinkStartRef = useRef(0)
@@ -271,9 +287,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const msgs = p.load()
         session.loadMessages(msgs)
         const { entries, toolCount, turnCount } = replayMessagesToLogEntries(msgs)
-        for (const entry of entries) {
-          pushStatic(entry)
-        }
+        for (const entry of entries) frozenBuf.push(entry)
+        setFrozenItems(frozenBuf.items())
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setCacheHitRate(session.getCacheHitRate())
         setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
@@ -506,7 +521,27 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setLiveTools([])
 
         setIsStreaming(false)
-        setCacheHitRate(session.getCacheHitRate())
+
+        // Turn-level cache hit rate for StatusBar (last 3 turns)
+        const recentHitRate = session.getRecentTurnHitRate(3) ?? session.getCacheHitRate()
+        setCacheHitRate(recentHitRate)
+
+        // Detect cache degradation after compaction
+        const latestHitRate = session.getLatestTurnHitRate()
+        const wasCompacted = turnNumber > 1 && session.wasCompactedAt(turnNumber - 1)
+        if (latestHitRate !== null && latestHitRate < 0.4 && turnNumber > 1) {
+          if (wasCompacted) {
+            setCacheStatus('degraded')
+            pushStatic(createLogEntry({ type: 'system', content: `Cache degraded (${(latestHitRate * 100).toFixed(0)}%) — compaction restructured prefix. Normal on next turn.` }))
+          } else {
+            setCacheStatus('degraded')
+          }
+        } else if (latestHitRate !== null && latestHitRate >= 0.6) {
+          setCacheStatus(cacheStatus === 'degraded' ? 'recovering' : 'healthy')
+        } else {
+          setCacheStatus('healthy')
+        }
+
         phaseTracker.current.onTurnComplete()
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current, tokenHistory: pushTokenHistory(tcPct) }))
@@ -515,6 +550,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const normalInput = usage.input_tokens - usage.cache_read_input_tokens
         const estimatedCost = (normalInput * 1 + usage.cache_read_input_tokens * 0.1 + usage.output_tokens * 4) / 1_000_000
         setCost(estimatedCost)
+
+        migrateToFrozen()
 
       },
       onError: (error) => {
@@ -541,21 +578,25 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
         setIsStreaming(false)
       })
-  }, [agent, session, pushStatic, pushStaticBatch, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+  }, [agent, session, pushStatic, pushStaticBatch, migrateToFrozen, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   const currentTokens = session.getEstimatedTokens()
   const tokenEstimate = Math.floor(streamingText.length / 4)
-  const groupedItems = useMemo(() => groupLogs(staticItems), [staticItems])
+  const groupedActive = useMemo(() => groupLogs(activeItems), [activeItems])
 
   return (
     <>
-      <Static items={groupedItems}>
+      <Static items={frozenItems}>
+        {(item) => renderStaticEntry(item, verbose)}
+      </Static>
+      <Static items={groupedActive}>
         {(item) => renderStaticEntry(item, verbose)}
       </Static>
       <Box flexDirection="column">
         <StatusBar
           model={model}
           cacheHitRate={cacheHitRate}
+          cacheStatus={cacheStatus}
           totalCost={cost.toFixed(2)}
           currentTokens={currentTokens}
           maxTokens={maxTokens}
