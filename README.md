@@ -541,12 +541,23 @@ All three layers activate after turn 3 and are injected only in the fresh volati
 
 The `TurnHarness` wraps all tool execution with automatic retry and trajectory recording:
 
-- **Transient retry**: Network errors (ECONNRESET, ETIMEDOUT, etc.) and flaky failures are automatically retried up to `maxRetries` times (default: 2). Non-transient errors (type errors, assertions) fail immediately.
+- **Transient retry**: Network errors (ECONNRESET, ETIMEDOUT, etc.) and flaky failures are automatically retried up to `maxRetries` times (default: 2). Non-transient errors (type errors, assertions) fail immediately. Each `FailureClassification` now includes a `retryable` boolean for programmatic policy decisions.
 - **Trajectory recording**: Every tool execution is recorded with duration, status, and error class. Stats are exposed via `agent.getTrajectoryStats()` and reflected in the SummaryBar step count.
-- **Doom loop detection**: Tool call fingerprints are tracked via `TraceStore`. When identical calls repeat 3+ times (warn) or 5+ times (blocked), the Safety panel flags it.
+- **Doom loop detection**: Tool call fingerprints are tracked via `TraceStore`. When identical calls repeat 2+ times (warn) or 3+ times (blocked), tool execution is blocked entirely — the tool returns an error without executing, forcing the agent to change strategy.
 - **Risk assessment**: `assessToolRisk()` evaluates doom loop level, path traversal, destructive commands, and write operations to produce a risk level (none/low/medium/high).
 - **Task-state injection**: After turn 3, `extractTaskState()` derives completed/current/remaining steps from the trajectory and model text. This is injected as `<task-progress>` in the volatile context block, giving the model implicit awareness of its own progress.
 - **Retry hint**: When all retries fail, a hint is appended: `[All N retries failed. Error class: X. Consider alternative approach.]`
+
+### Sub-agent Evidence Contract
+
+Sub-agent workers must return structured evidence in their `WorkerResult`:
+
+- **evidenceStatus**: `verified | failed | blocked | unverified` — defaults to `unverified`. Implementation results that change files without running verification are automatically blocked by the aggregation layer.
+- **changedFiles**: exact file paths modified by the worker
+- **risks**: unresolved concerns or follow-up risks
+- **verification**: command, status, scope, and exit code when tests were run
+
+The aggregation `evidenceGate` blocks any worker result that changed files without verified evidence before any aggregation policy is applied.
 
 ### Session Memory
 
