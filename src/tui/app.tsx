@@ -55,6 +55,7 @@ interface AppProps {
 
 const THINKING_FLUSH_MS = 200
 const TOOL_FLUSH_MS = 120
+const ACTIVE_THRESHOLD = 20
 
 // --- Static entry renderer ---
 
@@ -162,8 +163,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setActiveItems(staticBuf.items())
   }, [staticBuf])
 
-  const ACTIVE_THRESHOLD = 20
-
   const migrateToFrozen = useCallback(() => {
     const active = staticBuf.items()
     if (active.length <= ACTIVE_THRESHOLD) return
@@ -193,6 +192,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const rollbackTokenRef = useRef<string | null>(null)
   const lastCtrlCRef = useRef(0)
+  const lastEscRef = useRef(0)
 
   // Tool target tracking for SummaryBar
   const toolTargetMap = useRef<Map<string, string>>(new Map())
@@ -264,6 +264,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
       if (isStreaming) {
         agent.abort()
+        setIsStreaming(false)
+        pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
         lastCtrlCRef.current = Date.now()
         return
       }
@@ -275,8 +277,25 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       return
     }
 
-    if (_key.escape && cockpitPanel) {
-      setCockpitPanel(null)
+    // Escape — close cockpit or double-press to interrupt streaming
+    if (_key.escape) {
+      if (cockpitPanel) {
+        setCockpitPanel(null)
+        return
+      }
+      if (isStreaming) {
+        const now = Date.now()
+        if (lastEscRef.current && now - lastEscRef.current < 1000) {
+          agent.abort()
+          setIsStreaming(false)
+          pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
+          lastEscRef.current = 0
+        } else {
+          lastEscRef.current = now
+          pushStatic(createLogEntry({ type: 'system', content: '(Esc again to interrupt)' }))
+        }
+        return
+      }
       return
     }
     if (sessionPrompt === 'waiting') {
