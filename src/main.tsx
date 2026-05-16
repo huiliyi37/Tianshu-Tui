@@ -222,17 +222,19 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     recallRef.current = true
   }
 
-  // Switchable model — changing this recreates client + promptEngine + agent
+  // Switchable provider + model — changing either recreates client + promptEngine + agent
+  const [activeProvider, setActiveProvider] = useState<ProviderConfig>(() => provider)
+  const [activeApiKey, setActiveApiKey] = useState(() => apiKey)
   const [currentModel, setCurrentModel] = useState(() => provider.models[0]!)
 
   const agent = useMemo(() => {
-    const compactModelSpec = provider.models.find(m => m.id === config.compact.model || m.alias === config.compact.model)
+    const compactModelSpec = activeProvider.models.find(m => m.id === config.compact.model || m.alias === config.compact.model)
 
     const agentCfg = createAgentConfig({
-      apiKey,
+      apiKey: activeApiKey,
       model: { id: currentModel.id, maxTokens: currentModel.maxTokens, contextWindow: currentModel.contextWindow, reasoningEffort: currentModel.reasoningEffort },
       cwd,
-      provider,
+      provider: activeProvider,
       compact: config.compact,
       sessionId,
       toolDefinitions: toolRegistry.getDefinitions(),
@@ -258,8 +260,8 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       const isWrite = writeProfiles.includes(_order.profile)
       return {
         order: _order,
-        client: createProviderClient(provider, resolveCapabilities(provider.name, provider.capabilities), {
-          apiKey,
+        client: createProviderClient(activeProvider, resolveCapabilities(activeProvider.name, activeProvider.capabilities), {
+          apiKey: activeApiKey,
           model: card.model,
           reasoningEffort: undefined,
           maxTokens: isWrite ? Math.min(8192, card.contextWindow) : Math.min(4096, card.contextWindow),
@@ -300,14 +302,31 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       session,
       cwd,
     )
-  }, [currentModel, toolVersion, fileHistory])
+  }, [activeProvider, activeApiKey, currentModel, toolVersion, fileHistory])
 
-  const availableModels = provider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id }))
+  const allProviders: Record<string, { models: Array<{ id: string; alias: string }> }> = {}
+  for (const [name, prov] of Object.entries(config.provider.providers)) {
+    allProviders[name] = { models: prov.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })) }
+  }
+
+  const availableModels = activeProvider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id }))
 
   const handleModelSwitch = useCallback((modelId: string) => {
-    const found = provider.models.find(m => m.id === modelId || m.alias === modelId)
-    if (found) setCurrentModel(found)
-  }, [provider.models])
+    // Search across all providers
+    for (const [provName, prov] of Object.entries(config.provider.providers)) {
+      const found = prov.models.find(m => m.id === modelId || m.alias === modelId)
+      if (found) {
+        const provKey = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
+        if (!provKey) continue
+        if (provName !== activeProvider.name) {
+          setActiveProvider(prov)
+          setActiveApiKey(provKey)
+        }
+        setCurrentModel(found)
+        return
+      }
+    }
+  }, [config.provider.providers, activeProvider.name])
 
   // Register shutdown callback for signal handlers
   useEffect(() => {
@@ -338,6 +357,8 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     currentSessionId: sessionId,
     availableModels,
     onModelSwitch: handleModelSwitch,
+    allProviders,
+    currentProvider: activeProvider.name,
     initialInput,
     mcpManagerRef,
     claimStoreRef,

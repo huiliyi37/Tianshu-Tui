@@ -47,6 +47,8 @@ interface AppProps {
   maxTokens: number
   availableModels: Array<{ id: string; alias: string }>
   onModelSwitch: (modelId: string) => void
+  allProviders: Record<string, { models: Array<{ id: string; alias: string }> }>
+  currentProvider: string
   currentSessionId: string
   initialInput?: string
   mcpManagerRef: React.MutableRefObject<McpManager | null>
@@ -119,7 +121,7 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
 
 // --- Main App ---
 
-export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, currentSessionId, initialInput, mcpManagerRef, claimStoreRef }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef }: AppProps) {
   const [frozenItems, setFrozenItems] = useState<LogEntry[]>([])
   const [activeItems, setActiveItems] = useState<LogEntry[]>([])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
@@ -403,6 +405,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
       const slashCtx: SlashHandlerContext = {
         parts, agent, session, persist, model, maxTokens, availableModels, onModelSwitch,
+        allProviders, currentProvider,
         currentSessionId, cost, cacheHitRate, autoSafeRef, verboseRef,
         setVerbose, setAutoSafe, rollbackTokenRef, cockpitPanelRef,
         setCockpitPanel, pushStatic, setIsStreaming, setCacheHitRate, setSummaryState,

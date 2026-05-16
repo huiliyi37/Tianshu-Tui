@@ -13,6 +13,8 @@ function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext 
     maxTokens: 128000,
     availableModels: [],
     onModelSwitch: () => {},
+    allProviders: {},
+    currentProvider: 'test',
     currentSessionId: 'test',
     cost: 0,
     cacheHitRate: 0,

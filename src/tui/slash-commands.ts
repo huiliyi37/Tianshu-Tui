@@ -28,6 +28,8 @@ export interface SlashHandlerContext {
   maxTokens: number
   availableModels: Array<{ id: string; alias: string }>
   onModelSwitch: (modelId: string) => void
+  allProviders: Record<string, { models: Array<{ id: string; alias: string }> }>
+  currentProvider: string
   currentSessionId: string
   cost: number
   cacheHitRate: number
@@ -122,18 +124,28 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     case '/model': {
       const targetModel = parts[1]
       if (!targetModel || targetModel === 'list') {
-        const list = ctx.availableModels.map(m =>
-          `  ${m.alias} (${m.id})${m.alias === ctx.model ? ' ← current' : ''}`
-        ).join('\n')
-        pushStatic(createLogEntry({ type: 'system', content: `Available models:\n${list}\n\nCurrent: ${ctx.model}\nContext: ${ctx.maxTokens.toLocaleString()} tokens\nCost: ¥${ctx.cost.toFixed(4)}` }))
-      } else {
-        const found = ctx.availableModels.find(m => m.alias === targetModel || m.id === targetModel)
-        if (found) {
-          ctx.onModelSwitch(found.id)
-          pushStatic(createLogEntry({ type: 'system', content: `Switched to ${found.alias} (${found.id})` }))
-        } else {
-          pushStatic(createLogEntry({ type: 'system', content: `Model "${targetModel}" not found. Use /model list to see available models.` }))
+        const lines: string[] = []
+        for (const [provName, prov] of Object.entries(ctx.allProviders)) {
+          const marker = provName === ctx.currentProvider ? ' ← current' : ''
+          lines.push(`[${provName}]${marker}`)
+          for (const m of prov.models) {
+            const isCurrent = m.alias === ctx.model || m.id === ctx.model
+            lines.push(`  ${m.alias} (${m.id})${isCurrent ? ' ←' : ''}`)
+          }
         }
+        pushStatic(createLogEntry({ type: 'system', content: `Models:\n${lines.join('\n')}\n\nCurrent: ${ctx.model} [${ctx.currentProvider}]\nContext: ${ctx.maxTokens.toLocaleString()} tokens\nCost: ¥${ctx.cost.toFixed(4)}` }))
+      } else {
+        // Search across all providers
+        for (const [provName, prov] of Object.entries(ctx.allProviders)) {
+          const found = prov.models.find(m => m.alias === targetModel || m.id === targetModel)
+          if (found) {
+            ctx.onModelSwitch(found.id)
+            pushStatic(createLogEntry({ type: 'system', content: `Switched to ${found.alias} (${found.id}) [${provName}]` }))
+            setIsStreaming(false)
+            return true
+          }
+        }
+        pushStatic(createLogEntry({ type: 'system', content: `Model "${targetModel}" not found. Use /model list to see available models.` }))
       }
       setIsStreaming(false)
       return true
