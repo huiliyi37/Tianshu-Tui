@@ -407,13 +407,13 @@ export class AgentLoop {
               }
 
               if ((tu.name === 'write_file' || tu.name === 'edit_file') && !checkpointCreatedThisTurn) {
-                const cp = await createCheckpoint(this.cwd, 'auto')
+                const cp = await createCheckpoint(this.cwd, 'auto', this.config.sessionId)
                 checkpointCreatedThisTurn = true
                 if (cp) callbacks.onCheckpoint?.(cp.hash)
               }
 
               if ((tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
-                recordAgentTouchedFile(this.cwd, tu.input.file_path)
+                recordAgentTouchedFile(this.cwd, tu.input.file_path, this.config.sessionId)
               }
 
               if (this.config.fileHistory && (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {

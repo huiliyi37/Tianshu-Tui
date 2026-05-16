@@ -121,7 +121,7 @@ async function getDirtySnapshot(cwd: string): Promise<{ dirty: string[]; untrack
 }
 
 /** Create a checkpoint by recording the current HEAD hash and dirty worktree state. */
-export async function createCheckpoint(cwd: string, label?: string): Promise<Checkpoint | null> {
+export async function createCheckpoint(cwd: string, label?: string, sessionId?: string): Promise<Checkpoint | null> {
   try {
     const { stdout } = await execFileP('git', ['rev-parse', 'HEAD'], {
       cwd, timeout: 5000, encoding: 'utf-8',
@@ -137,11 +137,18 @@ export async function createCheckpoint(cwd: string, label?: string): Promise<Che
       timestamp: Date.now(),
       label: msg,
       cwd,
+      ...(sessionId ? { sessionId } : {}),
       preExistingDirtyFiles: snapshot.dirty,
       preExistingUntrackedFiles: snapshot.untracked,
       agentTouchedFiles: [],
     }
-    writeFileSync(checkpointFile(cwd), JSON.stringify(data, null, 2))
+
+    const file = sessionId ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
+    writeFileSync(file, JSON.stringify(data, null, 2))
+
+    if (sessionId) {
+      addToCheckpointIndex(cwd, sessionId, [])
+    }
 
     return { hash, timestamp: data.timestamp, message: msg }
   } catch {
@@ -150,13 +157,14 @@ export async function createCheckpoint(cwd: string, label?: string): Promise<Che
 }
 
 /** Record that the agent touched a file — used for safe rollback scoping. */
-export function recordAgentTouchedFile(cwd: string, file: string): void {
-  const data = loadCheckpointData(cwd)
+export function recordAgentTouchedFile(cwd: string, file: string, sessionId?: string): void {
+  const data = sessionId ? loadCheckpointDataForSession(sessionId) : loadCheckpointData(cwd)
   if (!data) return
   const normalized = file.replace(/^\.\//, '')
   if (normalized.startsWith('/') || normalized.includes('..')) return
   data.agentTouchedFiles = [...new Set([...data.agentTouchedFiles, normalized])].sort()
-  writeFileSync(checkpointFile(cwd), JSON.stringify(data, null, 2))
+  const outFile = sessionId ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
+  writeFileSync(outFile, JSON.stringify(data, null, 2))
 }
 
 /** Preview what a rollback would affect. Returns null if nothing to rollback. */
