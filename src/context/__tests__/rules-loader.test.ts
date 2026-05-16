@@ -14,7 +14,7 @@ describe('loadProjectRules', () => {
     writeFileSync(join(rulesDir, 'test-first.md'), 'Always run tests before committing.')
 
     try {
-      const proposals = loadProjectRules(dir, 'session-1')
+      const proposals = loadProjectRules(dir)
 
       assert.equal(proposals.length, 2)
       assert.ok(proposals.every(p => p.kind === 'project_rule'))
@@ -31,7 +31,7 @@ describe('loadProjectRules', () => {
   it('returns empty array when rules directory does not exist', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-norules-'))
     try {
-      const proposals = loadProjectRules(dir, 'session-1')
+      const proposals = loadProjectRules(dir)
       assert.deepEqual(proposals, [])
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -47,7 +47,7 @@ describe('loadProjectRules', () => {
     writeFileSync(join(rulesDir, 'empty.md'), '')
 
     try {
-      const proposals = loadProjectRules(dir, 'session-1')
+      const proposals = loadProjectRules(dir)
       assert.equal(proposals.length, 1)
       assert.ok(proposals[0]!.text.includes('TypeScript strict mode'))
     } finally {
@@ -62,7 +62,7 @@ describe('loadProjectRules', () => {
     writeFileSync(join(rulesDir, 'long.md'), 'x'.repeat(1000))
 
     try {
-      const proposals = loadProjectRules(dir, 'session-1')
+      const proposals = loadProjectRules(dir)
       assert.ok(proposals[0]!.text.length <= 500)
     } finally {
       rmSync(dir, { recursive: true, force: true })

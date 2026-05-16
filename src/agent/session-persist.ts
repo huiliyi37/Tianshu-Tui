@@ -31,6 +31,12 @@ export class SessionPersist {
     this.metadataPath = join(SESSION_DIR, `${sessionId}.meta.json`)
   }
 
+  getBackupDir(): string {
+    const dir = join(SESSION_DIR, this.sessionId, 'backups')
+    ensureDir(dir)
+    return dir
+  }
+
   /** Append a single message to the session file */
   async append(message: Message): Promise<void> {
     const line = JSON.stringify(message) + '\n'

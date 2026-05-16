@@ -180,7 +180,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   const [sessionId] = useState(() => getOrCreateSessionId())
 
   const [fileHistory] = useState(() => {
-    const fh = new FileHistory(join(homedir(), '.rivet', 'sessions', sessionId, 'backups'), sessionId)
+    const fh = new FileHistory(persist.getBackupDir(), sessionId)
     _fileHistoryRef = fh
     return fh
   })
@@ -197,7 +197,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   const [claimStore] = useState(() => {
     const store = persist.createClaimStore()
     persist.injectDurableClaims(store)
-    for (const rule of loadProjectRules(process.cwd(), 'project')) {
+    for (const rule of loadProjectRules(process.cwd())) {
       store.propose(rule)
     }
     return store
@@ -452,10 +452,10 @@ async function main() {
     const persist = new SessionPersist(sessionId)
     const claimStore = persist.createClaimStore()
     persist.injectDurableClaims(claimStore)
-    for (const rule of loadProjectRules(process.cwd(), 'project')) {
+    for (const rule of loadProjectRules(process.cwd())) {
       claimStore.propose(rule)
     }
-    const fileHistory = new FileHistory(join(homedir(), '.rivet', 'sessions', sessionId, 'backups'), sessionId)
+    const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
 
     const result = await runGoalLoop({
       goal: parsed.goal,
