@@ -41,6 +41,7 @@ import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import { processTurnEnd } from './turn-end.js'
 import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, resetAccumulator, adjustReasoningEffort } from './prediction-error.js'
 import type { PredictionAccumulator } from './prediction-error.js'
+import { stripIntraTurnRepetition } from './dedup.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -87,6 +88,7 @@ export interface AgentCallbacks {
 function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id: string; name: string } {
   return b.type === 'tool_use'
 }
+
 
 function displayTextFingerprint(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
@@ -508,9 +510,10 @@ export class AgentLoop {
           streamError = err as Error
         }
 
-        const displayFingerprint = displayTextFingerprint(turnDisplayBuffer)
-        if (turnDisplayBuffer && displayFingerprint !== this.lastTurnTextFingerprint) {
-          callbacks.onTextDelta(turnDisplayBuffer)
+        const dedupedBuffer = stripIntraTurnRepetition(turnDisplayBuffer)
+        const displayFingerprint = displayTextFingerprint(dedupedBuffer)
+        if (dedupedBuffer && displayFingerprint !== this.lastTurnTextFingerprint) {
+          callbacks.onTextDelta(dedupedBuffer)
         }
         this.lastTurnTextFingerprint = displayFingerprint
 

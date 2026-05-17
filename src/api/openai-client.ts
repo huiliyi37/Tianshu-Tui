@@ -71,8 +71,15 @@ export class OpenAIClient implements StreamClient {
   ): Promise<void> {
     const body = this.buildRequestBody(request)
 
+    // Reset instance state to prevent stale data from previous calls/retries
+    this.toolCallBuffer.clear()
+    this.pendingStopReason = null
+
     let lastError: Error | null = null
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      // Clear per-attempt state on retry
+      this.toolCallBuffer.clear()
+      this.pendingStopReason = null
       try {
         // Resolve auth headers: AuthProvider takes precedence over static apiKey
         const authHeaders = this.config.auth
@@ -289,6 +296,20 @@ export class OpenAIClient implements StreamClient {
             this.processDelta(parsed, callbacks)
           } catch {
             // Skip malformed SSE lines
+          }
+        }
+      }
+
+      // Process any residual data in the SSE buffer (final chunk without trailing newline)
+      if (buffer.trim()) {
+        const trimmed = buffer.trim()
+        if (trimmed.startsWith('data: ')) {
+          const payload = trimmed.slice(6)
+          if (payload !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(payload)
+              this.processDelta(parsed, callbacks)
+            } catch { /* skip malformed */ }
           }
         }
       }

@@ -811,6 +811,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           writer.flush()
           blockWriterRef.current = null
         }
+        // Flush again — writer.flush() may have pushed new items into the batcher
+        textBatcher.current.flushNow()
         const finalText = streamBuf.current
         if (finalText || thinkBuf.current) {
           if (finalText) {
@@ -908,6 +910,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
         blockWriterRef.current?.flush()
         blockWriterRef.current = null
+        textBatcher.current.flushNow()
         foldedCountRef.current = 0
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
@@ -942,6 +945,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
         blockWriterRef.current?.flush()
         blockWriterRef.current = null
+        textBatcher.current.flushNow()
         foldedCountRef.current = 0
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
