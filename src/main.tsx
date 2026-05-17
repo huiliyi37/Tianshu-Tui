@@ -20,6 +20,8 @@ import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
+import { createAuthProvider } from './auth/registry.js'
+import type { AuthProvider } from './auth/types.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
@@ -106,7 +108,7 @@ function gracefulShutdown() {
   process.exit(0)
 }
 
-function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: string; config: Config }) {
+function Root({ provider, apiKey, config, auth }: { provider: ProviderConfig; apiKey: string; config: Config; auth?: AuthProvider }) {
   const initialInput = _pipedInput
   const cwd = process.cwd()
 
@@ -233,6 +235,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
   // Switchable provider + model — changing either recreates client + promptEngine + agent
   const [activeProvider, setActiveProvider] = useState<ProviderConfig>(() => provider)
   const [activeApiKey, setActiveApiKey] = useState(() => apiKey)
+  const [activeAuth, setActiveAuth] = useState<AuthProvider | undefined>(() => auth)
   const [currentModel, setCurrentModel] = useState(() => provider.models[0]!)
 
   const agent = useMemo(() => {
@@ -249,6 +252,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       compactModel: compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort } : undefined,
       sessionMemoryBlock: persist.buildMemoryBlock(),
       approvalMode: config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
+      auth: activeAuth,
     })
 
     // --- DelegationCoordinator ---
@@ -336,7 +340,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       session,
       cwd,
     )
-  }, [activeProvider, activeApiKey, currentModel, toolVersion, fileHistory])
+  }, [activeProvider, activeApiKey, activeAuth, currentModel, toolVersion, fileHistory])
 
   const allProviders: Record<string, { models: Array<{ id: string; alias: string }> }> = {}
   for (const [name, prov] of Object.entries(config.provider.providers)) {
@@ -349,6 +353,18 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
     for (const [provName, prov] of Object.entries(config.provider.providers)) {
       const found = prov.models.find(m => m.id === modelId || m.alias === modelId)
       if (found) {
+        // OAuth providers: check if token is already saved
+        if (prov.auth?.type === 'oauth') {
+          if (provName !== activeProvider.name) {
+            const oauthAuth = createAuthProvider(prov.auth, process.env)
+            setActiveProvider(prov)
+            setActiveApiKey('')
+            setActiveAuth(oauthAuth)
+          }
+          setCurrentModel(found)
+          return { ok: true }
+        }
+        // API key providers
         const provKey = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
         if (!provKey) {
           return { ok: false, error: `API key not set for ${provName}. Set ${prov.apiKeyEnv ?? 'apiKey'} in config or environment.` }
@@ -632,16 +648,30 @@ async function main() {
     process.exit(1)
   }
 
-  const apiKey = provider.apiKey ?? process.env[provider.apiKeyEnv ?? '']
-  if (!apiKey) {
-    console.error('API key not configured. Set api_key in config or set environment variable.')
-    process.exit(1)
+  // Auth resolution: OAuth providers get an AuthProvider, API key providers get a raw key
+  let auth: AuthProvider | undefined
+  let apiKey: string
+
+  if (provider.auth?.type === 'oauth') {
+    auth = createAuthProvider(provider.auth, process.env, provider.apiKey)
+    if (!auth.isAuthenticated()) {
+      console.error(`\n[${provider.name}] OAuth authentication required. Opening browser...\n`)
+      await auth.authenticate()
+      console.error('Authentication successful.\n')
+    }
+    apiKey = '' // AuthProvider handles headers directly
+  } else {
+    apiKey = provider.apiKey ?? process.env[provider.apiKeyEnv ?? ''] ?? ''
+    if (!apiKey) {
+      console.error('API key not configured. Set api_key in config or set environment variable.')
+      process.exit(1)
+    }
   }
 
   _pipedInput = readPipedStdin()
 
   const { waitUntilExit } = render(
-    createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config })),
+    createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth })),
     { exitOnCtrlC: false },
   )
 

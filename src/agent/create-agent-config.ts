@@ -5,6 +5,7 @@ import type { AgentConfig } from './loop.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
 import type { ProviderConfig } from '../config/schema.js'
+import type { AuthProvider } from '../auth/types.js'
 
 export interface ModelSpec {
   id: string
@@ -24,6 +25,7 @@ export interface AgentConfigInput {
   compactModel?: ModelSpec
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual'
+  auth?: AuthProvider
 }
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
@@ -42,6 +44,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     reasoningEffort: model.reasoningEffort,
     maxTokens: model.maxTokens,
     thinkingBudget,
+    auth: input.auth,
   })
 
   const promptEngine = new PromptEngine({
