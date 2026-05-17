@@ -235,3 +235,25 @@ export function shouldBeginAnalyzing({
 }): boolean {
   return ANALYZING_TOOLS.has(toolName) && resultLength >= ANALYZING_THRESHOLD
 }
+
+// ── Tool activity labels ──────────────────────────────────────────────
+
+export function toolActivityLabel(name: string, fallbackLabel: string): string {
+  switch (name) {
+    case 'read_file': return `Reading ${fallbackLabel.replace(/^read\s+/, '')}`
+    case 'write_file': return `Writing ${fallbackLabel.replace(/^write\s+/, '')}`
+    case 'edit_file': return `Editing ${fallbackLabel.replace(/^edit\s+/, '')}`
+    case 'bash': return `Running ${fallbackLabel}`
+    case 'grep':
+    case 'glob':
+    case 'diff': return `Searching ${fallbackLabel}`
+    case 'run_tests': return 'Running tests'
+    case 'delegate_task': return `Delegating ${fallbackLabel}`
+    default: return `Running ${fallbackLabel || name}`
+  }
+}
+
+export function analysisLabelForTool(name: string, label: string): string {
+  if (name === 'read_file') return `Analyzing ${label.replace(/^read\s+/, '')}`
+  return 'Analyzing tool results'
+}

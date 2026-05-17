@@ -14,6 +14,8 @@ import {
   classifyToolActivity,
   shouldBeginAnalyzing,
   shouldProjectActivity,
+  toolActivityLabel,
+  analysisLabelForTool,
 } from '../activity-status.js'
 
 describe('activity status lifecycle', () => {
@@ -157,5 +159,20 @@ describe('activity projection cadence', () => {
 
   it('allows unchanged text after one second for timer-driven stale updates', () => {
     assert.equal(shouldProjectActivity({ previousText: 'Thinking… 1s', nextText: 'Thinking… 1s', previousAt: 1000, now: 2200 }), true)
+  })
+})
+
+describe('tool activity labels', () => {
+  it('keeps file reads readable', () => {
+    assert.equal(toolActivityLabel('read_file', 'read app.ts'), 'Reading app.ts')
+  })
+
+  it('keeps bash commands readable', () => {
+    assert.equal(toolActivityLabel('bash', 'npm test -- src/tui'), 'Running npm test -- src/tui')
+  })
+
+  it('creates large-result analysis labels', () => {
+    assert.equal(analysisLabelForTool('read_file', 'read app.ts'), 'Analyzing app.ts')
+    assert.equal(analysisLabelForTool('bash', 'npm test'), 'Analyzing tool results')
   })
 })

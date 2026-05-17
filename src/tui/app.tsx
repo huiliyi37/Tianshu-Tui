@@ -42,6 +42,10 @@ import {
   formatActivitySummary,
   formatThinkingSize,
   shouldProjectActivity,
+  classifyToolActivity,
+  shouldBeginAnalyzing,
+  toolActivityLabel,
+  analysisLabelForTool,
   type ActivityState,
 } from './activity-status.js'
 
@@ -605,8 +609,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         liveToolsRef.current = [...liveToolsRef.current, entry]
         setLiveTools(liveToolsRef.current)
 
-        toolCallTracker.current.set(id, { id, name, label: toolLabel(name, input), done: false, error: false })
+        const label = toolLabel(name, input)
+        toolCallTracker.current.set(id, { id, name, label, done: false, error: false })
         setToolCallsDisplay([...toolCallTracker.current.values()])
+
+        // Begin tool activity for status bar
+        const now = Date.now()
+        const classified = classifyToolActivity(name, toolActivityLabel(name, label))
+        activityRef.current = beginActivity(activityRef.current, classified.phase, classified.label, now)
+        projectActivity(now)
 
         phaseTracker.current.onToolUse(name, target)
         const tuPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
@@ -625,6 +636,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           dirtyTools.current.add(id)
           if (!toolTimer.current) {
             toolTimer.current = setTimeout(flushTools, TOOL_FLUSH_MS)
+          }
+
+          // Heartbeat tool activity during live output
+          if (activityRef.current.phase === 'tool' || activityRef.current.phase === 'mcp') {
+            const now = Date.now()
+            activityRef.current = heartbeatActivity(activityRef.current, now)
+            projectActivity(now)
           }
           return
         }
@@ -660,6 +678,25 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           approvalNeeded: null,
           tokenHistory: pushTokenHistory(trPct),
         }))
+
+        // Complete/fail tool activity
+        const toolNow = Date.now()
+        const toolName = toolNames.current.get(id) ?? 'tool'
+        const toolLabel = toolCallTracker.current.get(id)?.label ?? toolName
+        const resultLength = result.length
+
+        if (isError) {
+          activityRef.current = failActivity(activityRef.current, toolNow)
+        } else {
+          activityRef.current = completeActivity(activityRef.current, toolNow)
+        }
+        projectActivity(toolNow)
+
+        // Begin analyzing activity for large results
+        if (!isError && shouldBeginAnalyzing({ toolName, resultLength })) {
+          activityRef.current = beginActivity(activityRef.current, 'analyzing', analysisLabelForTool(toolName, toolLabel), toolNow)
+          projectActivity(toolNow)
+        }
       },
       onCheckpoint: (hash) => {
         pushStatic(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
