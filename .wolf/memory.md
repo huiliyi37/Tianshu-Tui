@@ -1938,3 +1938,11 @@
 | 09:22 | Edited .claude/worktrees/session-ha-closure/src/tools/bash.ts | 3→4 lines | ~21 |
 | 09:22 | Edited .claude/worktrees/session-ha-closure/src/tools/bash.ts | 11→12 lines | ~108 |
 
+## 2026-05-17 — Activity Status Layer implementation plan
+
+Created `docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md` for the approved lightweight long-task observability layer. The plan defines TDD tasks for pure activity state helpers, AgentStatus rendering, ThinkingCollapser completed duration, low-frequency App projection, tool/MCP/analyzing activity events, documentation, OpenWolf updates, and final validation.
+
+## 2026-05-17 — Activity Status Layer Task 1: pure lifecycle module
+
+Created `src/tui/activity-status.ts` with immutable ActivityState lifecycle: ActivityPhase (idle/thinking/streaming/analyzing/tool/mcp/compacting/preflight), ActivityLifecycleStatus (idle/active/stale/completed/failed), and transition functions createIdleActivity, beginActivity, heartbeatActivity, completeActivity, failActivity, clearActivity. Covered by 5 tests in `src/tui/__tests__/activity-status.test.ts`. Typecheck and full test suite (1048 tests) pass.
+

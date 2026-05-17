@@ -16,6 +16,8 @@
 > Manual update 2026-05-17: Main merge resolved duplicate Session HA/cerebellar helper definitions in `src/agent/prediction-error.ts` and `src/tui/thinking.tsx`, reran typecheck/tests/build successfully, and logged bug `bug-089`.
 > Manual update 2026-05-17: Documentation refresh expanded `README.md` Session HA Closure status into a completed-this-round checklist, updated architecture entries for restore/process/MCP/compaction/prompt/TUI streaming, and added a CHANGELOG completed/validation section.
 > Manual update 2026-05-17: Activity Status Layer brainstorming produced `docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-design.md` and separate process asset `docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-brainstorm.md` for long-task observability beyond thinking.
+> Manual update 2026-05-17: Activity Status Layer implementation plan added `docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md` with TDD tasks for `src/tui/activity-status.ts`, AgentStatus, ThinkingCollapser, App projection, tool/MCP/analyzing activity, docs, and validation.
+> Manual update 2026-05-17: Activity Status Layer Task 1 created pure lifecycle module `src/tui/activity-status.ts` with ActivityPhase/ActivityLifecycleStatus/ActivityState types and immutable transition functions (createIdleActivity, beginActivity, heartbeatActivity, completeActivity, failActivity, clearActivity), covered in `src/tui/__tests__/activity-status.test.ts` (5 tests), typecheck/tests pass.
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
