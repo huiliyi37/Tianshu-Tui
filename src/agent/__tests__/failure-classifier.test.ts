@@ -50,6 +50,101 @@ describe('classifyFailure', () => {
     assert.equal(result.class, 'unknown')
     assert.ok(result.confidence <= 0.5)
   })
+
+  // === permission_denied ===
+  it('classifies EACCES permission errors', () => {
+    const result = classifyFailure("EACCES: permission denied, open '/etc/shadow'")
+    assert.equal(result.class, 'permission_denied')
+    assert.equal(result.retryable, false)
+  })
+
+  it('classifies Permission denied string', () => {
+    const result = classifyFailure('Error: Permission denied')
+    assert.equal(result.class, 'permission_denied')
+  })
+
+  it('classifies Operation not permitted', () => {
+    const result = classifyFailure('EPERM: operation not permitted')
+    assert.equal(result.class, 'permission_denied')
+  })
+
+  // === context_window_exceeded ===
+  it('classifies context length exceeded', () => {
+    const result = classifyFailure("This model's maximum context length is 200000 tokens")
+    assert.equal(result.class, 'context_window_exceeded')
+    assert.equal(result.retryable, false)
+  })
+
+  it('classifies token limit errors', () => {
+    const result = classifyFailure('Maximum context length exceeded')
+    assert.equal(result.class, 'context_window_exceeded')
+  })
+
+  it('classifies too many tokens', () => {
+    const result = classifyFailure('Too many tokens in input')
+    assert.equal(result.class, 'context_window_exceeded')
+  })
+
+  // === api_error ===
+  it('classifies 429 rate limit', () => {
+    const result = classifyFailure('429 Too Many Requests')
+    assert.equal(result.class, 'api_error')
+    assert.equal(result.retryable, true)
+  })
+
+  it('classifies 500 server error', () => {
+    const result = classifyFailure('500 Internal Server Error')
+    assert.equal(result.class, 'api_error')
+  })
+
+  it('classifies 502 bad gateway', () => {
+    const result = classifyFailure('502 Bad Gateway')
+    assert.equal(result.class, 'api_error')
+  })
+
+  it('classifies rate limit text', () => {
+    const result = classifyFailure('Error: rate limit exceeded')
+    assert.equal(result.class, 'api_error')
+  })
+
+  // === syntax_error ===
+  it('classifies SyntaxError', () => {
+    const result = classifyFailure('SyntaxError: Unexpected token')
+    assert.equal(result.class, 'syntax_error')
+    assert.equal(result.retryable, false)
+  })
+
+  it('classifies ParseError', () => {
+    const result = classifyFailure('ParseError: Unexpected end of input')
+    assert.equal(result.class, 'syntax_error')
+  })
+
+  it('classifies compilation error', () => {
+    const result = classifyFailure('compilation error in module foo')
+    assert.equal(result.class, 'syntax_error')
+  })
+
+  it('classifies reference error (is not defined)', () => {
+    const result = classifyFailure('ReferenceError: myVar is not defined')
+    assert.equal(result.class, 'syntax_error')
+  })
+
+  // === format_error ===
+  it('classifies JSON parse errors', () => {
+    const result = classifyFailure('JSON.parse: unexpected character at line 1 column 5')
+    assert.equal(result.class, 'format_error')
+    assert.equal(result.retryable, true)
+  })
+
+  it('classifies malformed output', () => {
+    const result = classifyFailure('Error: malformed response from API')
+    assert.equal(result.class, 'format_error')
+  })
+
+  it('classifies unterminated string in JSON', () => {
+    const result = classifyFailure('Unterminated string in JSON at position 42')
+    assert.equal(result.class, 'format_error')
+  })
 })
 
 describe('classifyTestRun', () => {
