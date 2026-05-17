@@ -9,6 +9,17 @@ export const modelConfigSchema = z.object({
   reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
 })
 
+export const authConfigSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('api-key'),
+    keyEnv: z.string(),
+  }),
+  z.object({
+    type: z.literal('oauth'),
+    provider: z.enum(['codex']),
+  }),
+])
+
 export const providerCapabilitiesSchema = z.object({
   cacheControl: z.boolean().default(false),
   stripParams: z.array(z.string()).default([]),
@@ -22,6 +33,7 @@ export const providerSchema = z.object({
   apiKeyEnv: z.string().optional(),
   baseUrl: z.string().url(),
   protocol: z.enum(['anthropic', 'openai']).default('anthropic'),
+  auth: authConfigSchema.optional(),
   capabilities: providerCapabilitiesSchema,
   fallback: z.array(z.string()).optional(),
   models: z.array(modelConfigSchema).min(1),
@@ -64,6 +76,16 @@ export const editorSchema = z.object({
   vim: z.boolean().default(false),
 })
 
+export const workerProfileSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+})
+
+export const workersSchema = z.object({
+  profiles: z.record(z.string(), workerProfileSchema).default({}),
+  routing: z.record(z.string(), z.string()).default({}),
+}).default({})
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -74,6 +96,7 @@ export const configSchema = z.object({
   cache: cacheSchema.default({}),
   editor: editorSchema.default({}),
   mcp: mcpConfigSchema.default({}),
+  workers: workersSchema,
 })
 
 export type Config = {
@@ -83,12 +106,15 @@ export type Config = {
   cache: CacheConfig
   editor: EditorConfig
   mcp: McpConfig
+  workers: WorkersConfig
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
+export type AuthConfig = z.infer<typeof authConfigSchema>
 export type ProviderCapabilitiesConfig = z.infer<typeof providerCapabilitiesSchema>
 export type ModelConfig = z.infer<typeof modelConfigSchema>
 export type EditorConfig = z.infer<typeof editorSchema>
 export type AgentConfig = z.infer<typeof agentSchema>
 export type CompactConfig = z.infer<typeof compactSchema>
 export type CacheConfig = z.infer<typeof cacheSchema>
+export type WorkersConfig = z.infer<typeof workersSchema>
