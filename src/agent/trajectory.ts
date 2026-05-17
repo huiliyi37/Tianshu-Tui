@@ -9,11 +9,21 @@ export interface TrajectoryEntry {
   resultSummary: string
 }
 
+const DEFAULT_MAX_ENTRIES = 200
+
 export class TrajectoryRecorder {
   private entries: TrajectoryEntry[] = []
+  private maxEntries: number
+
+  constructor(maxEntries: number = DEFAULT_MAX_ENTRIES) {
+    this.maxEntries = maxEntries
+  }
 
   record(entry: TrajectoryEntry): void {
     this.entries.push(entry)
+    if (this.entries.length > this.maxEntries) {
+      this.entries = this.entries.slice(-this.maxEntries)
+    }
   }
 
   getEntries(): TrajectoryEntry[] {

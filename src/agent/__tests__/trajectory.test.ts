@@ -36,4 +36,29 @@ describe('TrajectoryRecorder', () => {
     tr.reset()
     assert.equal(tr.getEntries().length, 0)
   })
+
+  it('caps entries at maxEntries, dropping oldest', () => {
+    const tr = new TrajectoryRecorder(3) // max 3
+    tr.record({ turn: 1, tool: 'a', target: '', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' })
+    tr.record({ turn: 2, tool: 'b', target: '', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' })
+    tr.record({ turn: 3, tool: 'c', target: '', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' })
+    tr.record({ turn: 4, tool: 'd', target: '', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' })
+    const entries = tr.getEntries()
+    assert.equal(entries.length, 3)
+    assert.equal(entries[0]!.tool, 'b')  // oldest dropped
+    assert.equal(entries[2]!.tool, 'd')
+  })
+
+  it('defaults maxEntries to 200 when not specified', () => {
+    const tr = new TrajectoryRecorder()
+    // Fill with 200 entries — should all be kept
+    for (let i = 0; i < 200; i++) {
+      tr.record({ turn: i, tool: `t${i}`, target: '', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' })
+    }
+    assert.equal(tr.getEntries().length, 200)
+    // 201st entry should drop the oldest
+    tr.record({ turn: 200, tool: 'overflow', target: '', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' })
+    assert.equal(tr.getEntries().length, 200)
+    assert.equal(tr.getEntries()[0]!.tool, 't1')
+  })
 })
