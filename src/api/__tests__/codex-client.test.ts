@@ -126,4 +126,122 @@ describe('CodexClient', () => {
     assert.ok(textDeltas.length > 0, 'Should capture text deltas')
     assert.ok(events.includes('stop:stop'), 'Should emit stop reason')
   })
+
+  it('buffers message output_item.done until reasoning arrives — preserves thinking→answer order', async () => {
+    const client = new CodexClient({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      model: 'gpt-5.5',
+      maxTokens: 64000,
+    })
+
+    const seq: string[] = []
+
+    // output_item.done (message) arrives BEFORE any reasoning — must be buffered
+    const sseData = [
+      'data: {"type":"response.created","response":{"id":"resp_1"}}',
+      'data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"Final answer."}],"usage":{"input_tokens":10,"output_tokens":5}}}',
+      'data: {"type":"response.reasoning_summary_text.delta","delta":"Let me think..."}',
+      'data: {"type":"response.output_item.done","item":{"type":"reasoning","summary":[{"text":"Step-by-step reasoning."}]}}',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":15,"output_tokens":10}}}',
+    ].join('\n') + '\n'
+
+    const mockResponse = { body: new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(sseData))
+        controller.close()
+      },
+    }) } as Response
+
+    await (client as any).processSSEStream(mockResponse, {
+      onTextDelta: (t: string) => seq.push(`text:${t}`),
+      onThinkingDelta: (t: string) => seq.push(`think:${t}`),
+      onContentBlock: () => {},
+      onStopReason: () => seq.push('stop'),
+      onError: (e: Error) => { throw e },
+    })
+
+    const thinkIdx = seq.findIndex(s => s.startsWith('think:'))
+    const textIdx = seq.findIndex(s => s.startsWith('text:'))
+
+    assert.ok(thinkIdx >= 0, 'Should emit thinking')
+    assert.ok(textIdx >= 0, 'Should emit text')
+    assert.ok(thinkIdx < textIdx, 'Thinking must appear before text when message done arrives first')
+    assert.equal(seq.filter(s => s.startsWith('text:')).join(','), 'text:Final answer.',
+      'Should emit buffered message content')
+  })
+
+  it('flushes buffered message at stream end when no reasoning events occur', async () => {
+    const client = new CodexClient({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      model: 'gpt-5.5',
+      maxTokens: 64000,
+    })
+
+    const textDeltas: string[] = []
+
+    // Only message, no reasoning events at all
+    const sseData = [
+      'data: {"type":"response.created","response":{"id":"resp_1"}}',
+      'data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"No reasoning used here."}]}}',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":5,"output_tokens":3}}}',
+    ].join('\n') + '\n'
+
+    const mockResponse = { body: new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(sseData))
+        controller.close()
+      },
+    }) } as Response
+
+    await (client as any).processSSEStream(mockResponse, {
+      onTextDelta: (t: string) => textDeltas.push(t),
+      onThinkingDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: () => {},
+      onError: (e: Error) => { throw e },
+    })
+
+    assert.equal(textDeltas.length, 1, 'Should emit text even without reasoning')
+    assert.equal(textDeltas[0], 'No reasoning used here.')
+  })
+
+  it('emits message immediately when reasoning deltas already arrived', async () => {
+    const client = new CodexClient({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      model: 'gpt-5.5',
+      maxTokens: 64000,
+    })
+
+    const seq: string[] = []
+
+    // Reasoning delta arrives BEFORE message output_item.done — no buffering needed
+    const sseData = [
+      'data: {"type":"response.created","response":{"id":"resp_1"}}',
+      'data: {"type":"response.reasoning_summary_text.delta","delta":"Thinking step 1..."}',
+      'data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"Here is the answer."}]}}',
+      'data: {"type":"response.output_item.done","item":{"type":"reasoning","summary":[{"text":"Complete reasoning."}]}}',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":5}}}',
+    ].join('\n') + '\n'
+
+    const mockResponse = { body: new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(sseData))
+        controller.close()
+      },
+    }) } as Response
+
+    await (client as any).processSSEStream(mockResponse, {
+      onTextDelta: (t: string) => seq.push(`text:${t}`),
+      onThinkingDelta: (t: string) => seq.push(`think:${t}`),
+      onContentBlock: () => {},
+      onStopReason: () => seq.push('stop'),
+      onError: (e: Error) => { throw e },
+    })
+
+    const textIdx = seq.findIndex(s => s.startsWith('text:'))
+    assert.ok(textIdx >= 0, 'Should emit text')
+    // When reasoning already seen, text should appear before reasoning done event
+    assert.ok(seq.some(s => s.startsWith('text:')), 'Text should be emitted')
+    assert.equal(seq.filter(s => s.startsWith('text:')).join(','), 'text:Here is the answer.')
+  })
 })
