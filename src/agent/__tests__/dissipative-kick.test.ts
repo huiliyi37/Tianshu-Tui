@@ -6,7 +6,6 @@ import {
   shouldEscalateFromKick,
 } from '../dissipative-kick.js'
 import type { Sensorium } from '../sensorium.js'
-import type { KickActions } from '../dissipative-kick.js'
 
 function makeSensorium(overrides: Partial<Sensorium> = {}): Sensorium {
   return {
@@ -129,6 +128,25 @@ describe('buildKickActions', () => {
     const actions = buildKickActions(s, '/project')
     assert.ok(typeof actions.injectedMessage === 'string')
     assert.ok(actions.injectedMessage.length > 0)
+  })
+})
+
+// ─── shouldEscalateFromKick ─────────────────────────────────────────
+
+// ─── Loop-consumed action shape ─────────────────────────────────────
+
+describe('buildKickActions integration data', () => {
+  it('provides dead-end paths and alternative frameworks for AgentLoop to consume', () => {
+    const s = makeSensorium({ momentum: 0.1, stability: 0.2 })
+    const actions = buildKickActions(s, '/project', ['src/stuck.ts'])
+
+    assert.deepEqual(actions.deadEndPaths, ['src/stuck.ts'])
+    assert.ok(actions.alternativeFrameworks.length > 0)
+    assert.ok(actions.injectedMessage.length > 0)
+
+    const fullMessage = `${actions.injectedMessage}\n\n**替代框架：**\n${actions.alternativeFrameworks.map(f => `- ${f}`).join('\n')}`
+    assert.ok(fullMessage.includes('simplest viable approach'))
+    assert.ok(fullMessage.includes('替代框架'))
   })
 })
 

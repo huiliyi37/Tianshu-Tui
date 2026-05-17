@@ -9,6 +9,7 @@ import {
   type PheromoneDeposit,
   type Pheromone,
 } from '../stigmergy.js'
+import { computeSensorium } from '../../agent/sensorium.js'
 
 // ─── computeCurrentStrength (pure decay) ────────────────────────────
 
@@ -231,5 +232,78 @@ describe('StigmergyStore', () => {
     const fragile = entries.filter(e => e.signal === 'fragile')
     assert.equal(fragile.length, 1)
     assert.equal(fragile[0]!.strength, 0.9)
+  })
+})
+
+// ─── Integration with Sensorium freshness ───────────────────────────
+
+describe('StigmergyStore integration with Sensorium freshness', () => {
+  let testDir: string
+  let storePath: string
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'stigmergy-freshness-test-'))
+    storePath = join(testDir, 'pheromones.json')
+  })
+
+  afterEach(() => {
+    try { rmSync(testDir, { recursive: true }) } catch { /* ignore */ }
+  })
+
+  it('query returns currentStrength less than original after time passes', async () => {
+    const store = new StigmergyStore(storePath)
+    await store.deposit({ path: 'src/a.ts', signal: 'well-tested', strength: 0.8 })
+
+    const entries = await store.load()
+    entries[0]!.depositedAt = Date.now() - 3 * 24 * 3600 * 1000
+    await store.save(entries)
+
+    const results = await store.query()
+    assert.equal(results.length, 1)
+    assert.ok(results[0]!.currentStrength < 0.8, `expected decay, got ${results[0]!.currentStrength}`)
+    assert.ok(results[0]!.currentStrength > 0.3, `expected partial decay, got ${results[0]!.currentStrength}`)
+  })
+
+  it('sensorium freshness uses decayed query strength when mapped to pheromone strength', async () => {
+    const store = new StigmergyStore(storePath)
+    await store.deposit({ path: 'src/a.ts', signal: 'well-tested', strength: 0.8 })
+
+    const entries = await store.load()
+    entries[0]!.depositedAt = Date.now() - 3 * 24 * 3600 * 1000
+    await store.save(entries)
+
+    const queried = await store.query()
+    const pheromones = queried.map(r => ({
+      path: r.path,
+      signal: r.signal,
+      strength: r.currentStrength,
+      depositedAt: r.depositedAt,
+      halfLife: r.halfLife,
+    }))
+
+    const sensorium = computeSensorium({
+      predictionAcc: { windowSize: 1, predictions: [true], consecutiveCorrect: 1 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0.1 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: [],
+      pheromones,
+      doomLevel: 'none',
+    })
+
+    assert.equal(sensorium.freshness, queried[0]!.currentStrength)
+    assert.ok(sensorium.freshness < 0.8)
+  })
+
+  it('prune removes entries below threshold', async () => {
+    const store = new StigmergyStore(storePath)
+    await store.deposit({ path: 'src/old.ts', signal: 'fragile', strength: 0.1 })
+
+    const entries = await store.load()
+    entries[0]!.depositedAt = Date.now() - 30 * 24 * 3600 * 1000
+    await store.save(entries)
+
+    await store.prune()
+    const remaining = await store.load()
+    assert.equal(remaining.length, 0)
   })
 })

@@ -48,12 +48,24 @@ import type { StrategyProfile } from './sensorium.js'
 import { mapSensoriumToPhase, createStarEvent, createThetaState, tickTheta, completeTheta, advanceThetaCounter } from './star-event.js'
 import type { StarEvent, ThetaState } from './star-event.js'
 import { shouldKick, buildKickActions, shouldEscalateFromKick } from './dissipative-kick.js'
+import { runThetaCheck } from './theta-check.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
-import type { Pheromone } from '../context/stigmergy.js'
+import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
 import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
+
+function mapQueriedPheromones(results: PheromoneQueryResult[]): Pheromone[] {
+  return results.map(r => ({
+    path: r.path,
+    signal: r.signal,
+    strength: r.currentStrength,
+    depositedAt: r.depositedAt,
+    halfLife: r.halfLife,
+    ...(r.context ? { context: r.context } : {}),
+  }))
+}
 
 export interface AgentConfig {
   client: StreamClient
@@ -423,8 +435,10 @@ export class AgentLoop {
     this.thetaState = createThetaState(7)
     this.loadedPheromones = []
     this._hasEnteredHighComplexity = false
-    // Load cross-session pheromones for Sensorium.freshness computation
-    this.stigmergyStore.load().then(p => { this.loadedPheromones = p }).catch(() => {})
+    // Load cross-session pheromones for Sensorium.freshness computation.
+    // Use query() so Sensorium sees decayed currentStrength, and prune stale entries opportunistically.
+    this.stigmergyStore.prune().catch(() => {})
+    this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
     this.recordUserInputClaims(userInput)
     this.session.addUserMessage(userInput)
 
@@ -543,9 +557,21 @@ export class AgentLoop {
 
         // Dissipative kick — stagnation breakthrough
         if (shouldKick(this.sensorium)) {
-          const kickActions = buildKickActions(this.sensorium, this.cwd)
-          if (kickActions.injectedMessage) {
-            this.session.addUserMessage(kickActions.injectedMessage)
+          const recentFailed = this.recentToolHistory
+            .filter(h => h.status === 'failed')
+            .map(h => h.target)
+            .filter(Boolean)
+          const kickActions = buildKickActions(this.sensorium, this.cwd, recentFailed)
+
+          for (const path of kickActions.deadEndPaths) {
+            this.stigmergyStore.deposit({ path, signal: 'dead-end', strength: 0.9 }).catch(() => {})
+          }
+
+          const fullMessage = kickActions.alternativeFrameworks.length > 0
+            ? `${kickActions.injectedMessage}\n\n**替代框架：**\n${kickActions.alternativeFrameworks.map(f => `- ${f}`).join('\n')}`
+            : kickActions.injectedMessage
+          if (fullMessage) {
+            this.session.addUserMessage(fullMessage)
           }
           if (shouldEscalateFromKick(this.sensorium) && callbacks.onPhaseChange) {
             callbacks.onPhaseChange('tianshu-encore', {
@@ -717,6 +743,11 @@ export class AgentLoop {
           // Theta-Gamma: advance counter, check if cross-file consistency check is due
           this.thetaState = advanceThetaCounter(this.thetaState)
           if (this.sensorium && this.sensorium.complexity > 0.5 && tickTheta(this.thetaState, turn)) {
+            runThetaCheck(this.cwd).then(result => {
+              for (const errFile of result.errors) {
+                this.repairHintTracker.recordFailure(errFile, 'type_error')
+              }
+            }).catch(() => {})
             this.thetaState = completeTheta(this.thetaState)
           }
 
@@ -758,8 +789,8 @@ export class AgentLoop {
               }
             }
           }
-          // Refresh loaded pheromones after deposition
-          this.stigmergyStore.load().then(p => { this.loadedPheromones = p }).catch(() => {})
+          // Refresh loaded pheromones after deposition, preserving decay semantics.
+          this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
           if (shouldTippingPointReset(this.predictionAccumulator)) {
             this.predictionAccumulator = resetAccumulator(this.predictionAccumulator)
             this.config.promptEngine.setCerebellarHint(null)
