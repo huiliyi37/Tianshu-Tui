@@ -1,4 +1,6 @@
 import { ApiClient, type ClientConfig } from './client.js'
+import { OpenAIClient } from './openai-client.js'
+import type { StreamClient } from './stream-client.js'
 import type { ProviderCapabilities } from './provider.js'
 import type { ProviderConfig } from '../config/schema.js'
 
@@ -36,13 +38,14 @@ export function createProviderClient(
   provider: ProviderConfig,
   capabilities: ProviderCapabilities,
   params: RuntimeParams,
-): ApiClient {
-  // Phase 2: OpenAI protocol will use OpenAIClient
+): StreamClient {
   if (provider.protocol === 'openai') {
-    throw new Error(
-      `Provider "${provider.name}" uses OpenAI protocol which is not yet supported. ` +
-      `OpenAI client is planned for Phase 2. Use protocol: 'anthropic'.`
-    )
+    return new OpenAIClient({
+      baseUrl: provider.baseUrl,
+      apiKey: params.apiKey,
+      model: params.model,
+      maxTokens: params.maxTokens,
+    })
   }
 
   const clientConfig: ClientConfig = {

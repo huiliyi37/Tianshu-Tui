@@ -1,4 +1,4 @@
-import type { ApiClient } from '../api/client.js'
+import type { StreamClient } from '../api/stream-client.js'
 import type { Usage } from '../api/types.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import { PromptEngine } from '../prompt/engine.js'
@@ -15,7 +15,7 @@ import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
 
 export interface WorkerSessionConfig {
   order: WorkOrder
-  client: ApiClient
+  client: StreamClient
   promptEngine: PromptEngine
   toolRegistry: ToolRegistry
   cwd: string

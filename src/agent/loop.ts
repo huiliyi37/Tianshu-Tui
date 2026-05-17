@@ -1,4 +1,5 @@
-import type { ApiClient, StreamCallbacks } from '../api/client.js'
+import type { StreamCallbacks } from '../api/client.js'
+import type { StreamClient } from '../api/stream-client.js'
 import type { ContentBlock, Message, Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
@@ -44,13 +45,13 @@ import type { PredictionAccumulator } from './prediction-error.js'
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
 export interface AgentConfig {
-  client: ApiClient
+  client: StreamClient
   promptEngine: PromptEngine
   toolRegistry: ToolRegistry
   maxTurns: number
   contextWindow: number
   compact: CompactionConfig
-  compactClient?: ApiClient
+  compactClient?: StreamClient
   compactModel?: string
   approvalMode?: ApprovalMode
   sessionId?: string
@@ -169,7 +170,7 @@ export class AgentLoop {
 
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort): void {
     this.config.reasoningEffort = effort
-    this.config.client.setReasoningEffort(effort)
+    this.config.client.setReasoningEffort?.(effort)
   }
 
   updateSessionMemory(block: string): void {

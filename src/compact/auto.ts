@@ -1,4 +1,4 @@
-import type { ApiClient } from '../api/client.js'
+import type { StreamClient } from '../api/stream-client.js'
 import type { Message } from '../api/types.js'
 import {
   CACHE_ANCHOR_MESSAGES,
@@ -115,7 +115,7 @@ export interface CompactResult {
  * Falls back to microCompact (truncation) on any LLM failure.
  */
 export async function smartCompact(
-  client: ApiClient,
+  client: StreamClient,
   messages: Message[],
   tokenCount: number,
   contextWindow: number,
