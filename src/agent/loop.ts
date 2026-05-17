@@ -375,6 +375,10 @@ export class AgentLoop {
     this.decisions = []
     this.traceStore = createTraceStore()
     this.predictionAccumulator = createPredictionAccumulator()
+    // Reset accumulations from previous run
+    this.evidence.reset()
+    this.repairHintTracker = new RepairHintTracker()
+    this.userAnchors = []
     this.recordUserInputClaims(userInput)
     this.session.addUserMessage(userInput)
 
@@ -595,6 +599,7 @@ export class AgentLoop {
         break
       }
     } catch (err) {
+      this.evidence.reset()
       if ((err as Error).name === 'AbortError') {
         callbacks.onAbort()
       } else {
