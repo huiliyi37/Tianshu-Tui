@@ -3,6 +3,13 @@
 > Chronological action log. Hooks and AI append to this file automatically.
 > Old sessions are consolidated by the daemon weekly.
 
+## Session: 2026-05-17 Task 4 — onError/onAbort tool-map cleanup + Promise queue
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| -- | Added 5 `.clear()` calls in `onError` and `onAbort` for toolAccum, toolNames, dirtyTools, toolTargetMap, toolCallTracker | src/tui/app.tsx | 1089/1089 tests pass, typecheck clean | ~500 |
+| -- | Replaced Promise `.then()` chain (`promptQueueRef`) with running-flag guard + `.catch().finally()` | src/tui/app.tsx | eliminates ~60KB Promise chain growth over 500 rounds | — |
+
 ## Session: 2026-05-16 Execution Trust Closure
 
 | Time | Action | File(s) | Outcome | ~Tokens |
@@ -2167,3 +2174,111 @@
 | 12:23 | Edited src/agent/loop.ts | 2→3 lines | ~43 |
 | 12:23 | Edited src/agent/tool-pipeline.ts | expanded (+7 lines) | ~73 |
 | 12:23 | Edited src/agent/tool-pipeline.ts | added 2 condition(s) | ~136 |
+
+## Session: 2026-05-17 12:34
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | CSS: elapsedMs, options | ~178 |
+| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | inline fix | ~36 |
+| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | inline fix | ~31 |
+| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/thinking.test.tsx | inline fix | ~26 |
+| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/thinking.test.tsx | expanded (+17 lines) | ~209 |
+| 12:38 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~181 |
+| 12:38 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~177 |
+| 12:39 | Session end: 7 writes across 4 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md) | 7 reads | ~61955 tok |
+| 12:40 | Session end: 7 writes across 4 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md) | 7 reads | ~61955 tok |
+| 12:41 | Session end: 7 writes across 4 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md) | 8 reads | ~62833 tok |
+| 12:41 | Edited .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | added 1 condition(s) | ~132 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | 14→15 lines | ~92 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | expanded (+14 lines) | ~297 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | expanded (+12 lines) | ~122 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | expanded (+9 lines) | ~240 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | CSS: previousText, previousAt | ~318 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 3 condition(s) | ~216 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | expanded (+8 lines) | ~149 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | CSS: sizeHint | ~207 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | CSS: sizeHint | ~255 |
+| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 condition(s) | ~160 |
+| 12:43 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 condition(s) | ~103 |
+| 12:43 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 condition(s) | ~141 |
+| 12:43 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | 9→10 lines | ~150 |
+| 12:43 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | inline fix | ~69 |
+| 12:44 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~203 |
+| 12:45 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~198 |
+| 12:47 | Edited .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | added 1 condition(s) | ~348 |
+| 12:47 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | 15→17 lines | ~105 |
+| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | expanded (+15 lines) | ~355 |
+| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | 12→16 lines | ~97 |
+| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | modified slice() | ~358 |
+| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 condition(s) | ~219 |
+| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added optional chaining | ~379 |
+| 12:49 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~235 |
+| 12:49 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~219 |
+| 12:51 | Session end: 33 writes across 7 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 11 reads | ~82049 tok |
+| 12:52 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | modified if() | ~193 |
+| 12:52 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~188 |
+| 12:53 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~183 |
+| 12:54 | Session end: 36 writes across 7 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 34 reads | ~130529 tok |
+| 12:57 | Created docs/superpowers/plans/2026-05-17-tui-content-preservation.md | — | ~2828 |
+| 12:57 | Edited .claude/worktrees/session-ha-closure/README.md | expanded (+11 lines) | ~211 |
+| 12:57 | Edited .claude/worktrees/session-ha-closure/CHANGELOG.md | expanded (+13 lines) | ~114 |
+| 12:57 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~149 |
+| 12:57 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~137 |
+| 12:57 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164765 tok |
+| 12:58 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164765 tok |
+| 13:02 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164901 tok |
+| 13:03 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164901 tok |
+| 13:04 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164901 tok |
+| 13:08 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 39 reads | ~164901 tok |
+| 13:08 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 39 reads | ~164901 tok |
+| 13:09 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 39 reads | ~164901 tok |
+| 13:09 | Edited src/tui/log-state.ts | 2→3 lines | ~13 |
+| 13:10 | Session end: 42 writes across 11 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 40 reads | ~165677 tok |
+| 13:10 | Edited src/tui/app.tsx | CSS: thinking, thinking, thinking | ~316 |
+| 13:10 | Edited src/tui/__tests__/history-replay.test.ts | expanded (+33 lines) | ~357 |
+| 13:10 | Edited src/tui/history-replay.ts | added 2 condition(s) | ~193 |
+| 13:12 | Session end: 45 writes across 13 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 48 reads | ~183173 tok |
+| 13:12 | Session end: 45 writes across 13 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 70 reads | ~208107 tok |
+| 13:12 | Edited src/tui/app.tsx | CSS: type, content, thinking | ~183 |
+| 13:12 | Edited src/tui/app.tsx | CSS: type, content, thinking | ~167 |
+| 13:14 | Session end: 47 writes across 13 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 76 reads | ~211719 tok |
+
+## Session: 2026-05-17 13:17
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-17 13:18
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 13:20 | Created .claude/worktrees/session-ha-closure/.superpowers/brainstorm/2026-05-17-tui-session-fluency-fragments.json | — | ~3053 |
+| 13:23 | Created .claude/worktrees/session-ha-closure/docs/superpowers/specs/2026-05-17-rivet-tui-session-fluency-layer-design.md | — | ~2659 |
+| 13:23 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | expanded (+8 lines) | ~150 |
+| 13:24 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→6 lines | ~289 |
+| 13:24 | Session end: 4 writes across 4 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md) | 72 reads | ~144805 tok |
+| 13:24 | Session end: 4 writes across 4 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md) | 72 reads | ~144805 tok |
+| 13:26 | Session end: 4 writes across 4 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md) | 72 reads | ~144805 tok |
+| 13:31 | Created docs/superpowers/plans/2026-05-17-session-fluency-layer-p1.md | — | ~3475 |
+| 13:31 | Created docs/superpowers/plans/2026-05-17-memory-leak-fixes.md | — | ~4029 |
+| 13:31 | Session end: 6 writes across 6 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md, 2026-05-17-session-fluency-layer-p1.md) | 77 reads | ~165399 tok |
+| 13:32 | Edited docs/superpowers/plans/2026-05-17-memory-leak-fixes.md | added 2 condition(s) | ~538 |
+| 13:32 | Edited docs/superpowers/plans/2026-05-17-memory-leak-fixes.md | inline fix | ~18 |
+| 13:32 | Session end: 8 writes across 6 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md, 2026-05-17-session-fluency-layer-p1.md) | 78 reads | ~169924 tok |
+| 13:33 | Edited src/agent/__tests__/trajectory.test.ts | modified for() | ~480 |
+| 13:33 | Created src/agent/trajectory.ts | — | ~390 |
+| 13:37 | Edited src/context/__tests__/claim-store.test.ts | modified for() | ~551 |
+| 13:37 | Edited src/context/claim-store.ts | 1→4 lines | ~28 |
+| 13:37 | Edited src/context/claim-store.ts | modified if() | ~190 |
+| 13:37 | Edited src/context/claim-store.ts | 5→7 lines | ~73 |
+| 13:37 | Edited src/context/claim-store.ts | added 1 condition(s) | ~166 |
+| 13:38 | Edited src/context/claim-store.ts | 8→10 lines | ~82 |
+| 13:41 | Edited src/context/claim-store.ts | modified evictExcessActiveClaims() | ~166 |
+| 13:41 | Edited src/context/claim-store.ts | modified appendEvent() | ~76 |
+| 13:42 | Edited src/agent/loop.ts | 2→6 lines | ~73 |
+| 13:42 | Edited src/agent/loop.ts | modified catch() | ~28 |
+| 13:44 | Edited src/tui/app.tsx | inline fix | ~15 |
+| 13:44 | Edited src/tui/app.tsx | expanded (+6 lines) | ~130 |
+| 13:44 | Edited src/tui/app.tsx | expanded (+6 lines) | ~123 |
+| 13:44 | Edited src/tui/app.tsx | added 1 condition(s) | ~125 |
