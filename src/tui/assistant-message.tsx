@@ -13,12 +13,23 @@ export const AssistantMessage = memo(function AssistantMessage({ content, thinki
 
   // Thinking-only turn: model produced reasoning but no text output
   if (!content && thinking) {
+    const lines = thinking.split('\n')
     return (
       <Box flexDirection="column" paddingX={1}>
         <Box flexDirection="row">
           <Text color={theme.assistantColor} bold>{'●'} </Text>
-          <Text dimColor italic>(thinking only — no text output)</Text>
+          <Text color={theme.assistantColor} italic>(thinking only)</Text>
         </Box>
+        {lines.slice(0, 5).map((line, i) => (
+          <Box key={i} flexDirection="row" paddingLeft={3}>
+            <Text dimColor>{line}</Text>
+          </Box>
+        ))}
+        {lines.length > 5 && (
+          <Box paddingLeft={3}>
+            <Text dimColor>… {lines.length - 5} more lines</Text>
+          </Box>
+        )}
       </Box>
     )
   }
