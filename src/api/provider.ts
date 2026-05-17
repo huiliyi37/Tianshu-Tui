@@ -52,6 +52,7 @@ export const DEEPSEEK_CAPABILITIES: ProviderCapabilities = {
   hasToolJsonInContentBug: true,
   effortFormat: 'reasoning_effort',
   prefixCacheStrategy: 'deepseek-native',
+  mapUsage: mapDeepSeekUsage,
 }
 
 export const DEFAULT_CAPABILITIES: ProviderCapabilities = {
