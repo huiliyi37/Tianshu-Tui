@@ -31,4 +31,4 @@ Key paths:
 
 ## Slash Commands
 
-`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/undo`, `/context`, `/evidence`, `/auto`, `/mcp`, `/scroll`, `/cockpit [summary|trace|verify|context|safety|model|off]`
+`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/clear`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/undo`, `/context`, `/evidence`, `/auto`, `/mcp`, `/scroll`, `/cockpit [summary|trace|verify|context|safety|model|off]`, `/theme [pastel|cyberpunk|list]`, `/interview <topic>`, `/effort [off|low|medium|high|max]`

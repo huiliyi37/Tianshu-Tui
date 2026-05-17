@@ -186,6 +186,10 @@ async function withRetry<T>(
 export class ApiClient implements StreamClient {
   constructor(private config: ClientConfig) {}
 
+  setReasoningEffort(effort: string): void {
+    this.config.reasoningEffort = effort
+  }
+
   private stripUnsupported(request: MessageRequest): MessageRequest {
     const req = { ...request }
     for (const field of this.config.unsupported) {

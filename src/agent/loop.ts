@@ -167,6 +167,11 @@ export class AgentLoop {
     this.config.approvalMode = mode
   }
 
+  setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort): void {
+    this.config.reasoningEffort = effort
+    this.config.client.setReasoningEffort(effort)
+  }
+
   updateSessionMemory(block: string): void {
     this.config.promptEngine.updateSessionMemory(block)
   }

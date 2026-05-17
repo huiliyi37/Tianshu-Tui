@@ -278,7 +278,8 @@ cd ../project-feature-a && rivet
 - **Cache-aware pricing** — Cache hit tokens priced at 1/10 rate (DeepSeek V4 promo), savings displayed in `/debug cache`
 - **Compaction cache anchor** — First 2 messages preserved as cache anchor after compaction, stable XML summary header
 - **Truncated JSON recovery** — Recovers partial tool_use JSON from streaming
-- **Slash commands** — /help /exit /compact /model /clear /rollback /sessions /resume /verbose /debug /evidence
+- **Slash commands** — /help /exit /compact /model /clear /rollback /sessions /resume /verbose /debug /evidence /undo /auto /mcp /context /memory /theme /cockpit /interview /effort
+- **Reasoning effort** — `/effort` controls reasoning depth: `off` | `low` | `medium` | `high` | `max`; persists for the session, `max` for full thinking on every turn
 - **Config CLI** — Manage API keys, providers, models, MCP servers from terminal
 - **MCP client** — Model Context Protocol: connect external tool servers (stdio), auto-discover tools, register as `mcp__<server>__<tool>` (with `__` sanitization), parallel init, approval heuristics, 5-class error classifier (config/auth/network/protocol/tool_error), `/mcp` + `/debug mcp` status
 - **.gitignore filter** — Skips node_modules, .git, build artifacts

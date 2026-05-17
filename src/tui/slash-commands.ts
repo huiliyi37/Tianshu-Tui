@@ -46,6 +46,8 @@ export interface SlashHandlerContext {
   setSummaryState: (v: SummaryState | ((prev: SummaryState) => SummaryState)) => void
   mcpManagerRef: React.MutableRefObject<import('../mcp/manager.js').McpManager | null>
   claimStoreRef: React.MutableRefObject<ContextClaimStore | null>
+  setReasoningEffort?: (effort: import('../agent/auto-reasoning.js').ReasoningEffort) => void
+  reasoningEffort?: string
 }
 
 function formatClaimLine(claim: import('../context/claims.js').ContextClaim): string {
@@ -78,6 +80,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /compact — Compact conversation context
 /model [name|list] — Show or switch model
 /verbose — Toggle verbose tool output
+/effort [off|low|medium|high|max] — Set reasoning effort (max = always full reasoning)
 /debug [prompt|fingerprint|cache|mcp] — Debug prefix cache, prompt, and MCP connections
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
@@ -504,6 +507,20 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       } else {
         ctx.setCockpitPanel(prev => prev ? null : 'summary')
         pushStatic(createLogEntry({ type: 'system', content: ctx.cockpitPanelRef.current ? `Cockpit: ${PANEL_LABELS[ctx.cockpitPanelRef.current]} panel. /cockpit off to collapse.` : 'Cockpit panel collapsed.' }))
+      }
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/effort': {
+      const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | undefined
+      const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max'> = ['off', 'low', 'medium', 'high', 'max']
+      if (!level || !(valid as string[]).includes(level)) {
+        const current = ctx.reasoningEffort ?? 'high'
+        pushStatic(createLogEntry({ type: 'system', content: `Reasoning effort: ${current}\nUsage: /effort [off|low|medium|high|max]\n\nSet max for full reasoning on every turn.` }))
+      } else {
+        ctx.setReasoningEffort?.(level)
+        pushStatic(createLogEntry({ type: 'system', content: `Reasoning effort set to: ${level}` }))
       }
       setIsStreaming(false)
       return true

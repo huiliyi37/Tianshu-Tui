@@ -163,6 +163,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
   const [showPalette, setShowPalette] = useState(false)
+  const [reasoningEffort, setReasoningEffortState] = useState<string>('')
 
   const [verbose, _setVerbose] = useState(false)
   const [, _setAutoSafe] = useState(true)
@@ -466,6 +467,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setVerbose, setAutoSafe, rollbackTokenRef, cockpitPanelRef,
         setCockpitPanel, pushStatic, setIsStreaming, setCacheHitRate, setSummaryState,
         mcpManagerRef, claimStoreRef,
+        setReasoningEffort: (effort) => {
+          agent.setReasoningEffort(effort)
+          setReasoningEffortState(effort)
+        },
+        reasoningEffort,
       }
       if (handleSlashCommand(slashCtx)) return
     }
