@@ -75,6 +75,15 @@ describe('FluencyTracker', () => {
       `expected staleMessage to include 's…', got ${policy.staleMessage}`)
   })
 
+  it('reports inspect with coalescing for large tool results', () => {
+    const tracker = new FluencyTracker()
+    tracker.recordToolResult({ name: 'read_file', isError: false, resultLength: 60_000 })
+    const policy = tracker.getPolicy()
+    assert.equal(policy.visibility, 'inspect')
+    assert.equal(policy.foldRoutine, true)
+    assert.equal(policy.coalesceMs, 1000)
+  })
+
   it('reports stress under high context pressure (0.92)', () => {
     const tracker = new FluencyTracker()
     tracker.setContextPressure(0.92)

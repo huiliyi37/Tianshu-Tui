@@ -85,6 +85,20 @@ describe('computeFluencyPolicy', () => {
     assert.equal(policy.staleMessage, 'No activity for 30s — may be stuck')
   })
 
+  it('returns inspect with coalescing for large results', () => {
+    const policy = computeFluencyPolicy({ ...baseline, resultLength: 60_000 })
+    assert.equal(policy.visibility, 'inspect')
+    assert.equal(policy.foldRoutine, true)
+    assert.equal(policy.coalesceMs, 1000)
+  })
+
+  it('returns inspect with coalescing for high output rate', () => {
+    const policy = computeFluencyPolicy({ ...baseline, outputRate: 60_000 })
+    assert.equal(policy.visibility, 'inspect')
+    assert.equal(policy.foldRoutine, true)
+    assert.equal(policy.coalesceMs, 1000)
+  })
+
   it('returns quiet when consecutiveRoutine >= 4', () => {
     const policy = computeFluencyPolicy({ ...baseline, consecutiveRoutine: 4 })
     assert.equal(policy.visibility, 'quiet')

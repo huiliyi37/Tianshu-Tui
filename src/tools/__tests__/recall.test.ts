@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRecallTool, type RecallContext } from '../recall.js'
@@ -66,6 +66,26 @@ describe('recall tool', () => {
       assert.ok(result.content.includes('No claims or knowledge found'))
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('searches project knowledge using tool cwd', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-knowledge-'))
+    try {
+      const knowledgeDir = join(cwd, '.rivet', 'knowledge')
+      mkdirSync(knowledgeDir, { recursive: true })
+      writeFileSync(join(knowledgeDir, 'project-memory.md'), '### Session\nThe fluency governor folds large tool output.\n', 'utf-8')
+
+      const store = new ContextClaimStore(dir, 'session-1')
+      const tool = createRecallTool(store)
+      const result = await tool.execute({ toolUseId: 't1', input: { query: 'governor' }, cwd })
+
+      assert.ok(result.content.includes('Project knowledge'))
+      assert.ok(result.content.includes('fluency governor'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(cwd, { recursive: true, force: true })
     }
   })
 

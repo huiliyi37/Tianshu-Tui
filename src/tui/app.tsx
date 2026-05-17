@@ -463,6 +463,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setStreamingThinking('')
     setLiveTools([])
     liveToolsRef.current = []
+    setFluencyStale(null)
+    fluencyRef.current.onTurnComplete()
+    foldedCountRef.current = 0
 
     streamBuf.current = ''
     thinkBuf.current = ''
@@ -570,6 +573,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     await agent.run(promptInput, {
       onTextDelta: (text) => {
         const now = Date.now()
+        fluencyRef.current.setPhase('streaming')
         if (activityRef.current.phase === 'thinking') {
           const completedAt = now
           activityRef.current = completeActivity(activityRef.current, completedAt, {
@@ -588,6 +592,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       },
       onThinkingDelta: (thinking) => {
         const now = Date.now()
+        fluencyRef.current.setPhase('thinking')
         if (thinkStartRef.current === 0) {
           thinkStartRef.current = now
           thinkingStartedAtRef.current = now
@@ -630,6 +635,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Begin tool activity for status bar
         const now = Date.now()
         const classified = classifyToolActivity(name, toolActivityLabel(name, label))
+        fluencyRef.current.setPhase(classified.phase)
         activityRef.current = beginActivity(activityRef.current, classified.phase, classified.label, now)
         projectActivity(now)
 
@@ -655,6 +661,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           // Heartbeat tool activity during live output
           if (activityRef.current.phase === 'tool' || activityRef.current.phase === 'mcp') {
             const now = Date.now()
+            fluencyRef.current.setPhase(activityRef.current.phase)
             activityRef.current = heartbeatActivity(activityRef.current, now)
             projectActivity(now)
           }
@@ -665,6 +672,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           clearTimeout(toolTimer.current)
           toolTimer.current = null
         }
+        const toolName = toolNames.current.get(id) ?? name
         dirtyTools.current.delete(id)
         toolAccum.current.delete(id)
         toolNames.current.delete(id)
@@ -674,16 +682,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setLiveTools(liveToolsRef.current)
 
         // Fluency: fold routine tools when policy says so
-        fluencyRef.current.recordToolResult({ name, isError: !!isError, resultLength: result.length })
+        fluencyRef.current.recordToolResult({ name: toolName, isError: !!isError, resultLength: result.length })
         const fluencyPolicy = fluencyRef.current.getPolicy()
-        if (fluencyPolicy.foldRoutine && fluencyRef.current.isRoutineTool(name, !!isError)) {
+        if (fluencyPolicy.foldRoutine && fluencyRef.current.isRoutineTool(toolName, !!isError)) {
           foldedCountRef.current++
+          pushStatic(createLogEntry({ type: 'tool', id, toolName, content: summarizeToolOutput(finalContent, verboseRef.current ? 80 : 8), isError, rawPath }))
         } else {
           if (foldedCountRef.current > 0) {
             pushStatic(createLogEntry({ type: 'system', content: `… ${foldedCountRef.current} routine tool calls folded` }))
             foldedCountRef.current = 0
           }
-          pushStatic(createLogEntry({ type: 'tool', id, toolName: name, content: finalContent, isError, rawPath }))
+          pushStatic(createLogEntry({ type: 'tool', id, toolName, content: finalContent, isError, rawPath }))
         }
 
         const tcEntry = toolCallTracker.current.get(id)
@@ -708,7 +717,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
         // Complete/fail tool activity
         const toolNow = Date.now()
-        const toolName = toolNames.current.get(id) ?? 'tool'
         const resolvedLabel = toolCallTracker.current.get(id)?.label ?? toolName
         const resultLength = result.length
 
@@ -813,6 +821,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
         phaseTracker.current.onTurnComplete()
         fluencyRef.current.onTurnComplete()
+        setFluencyStale(null)
         // Flush any remaining folded tools
         if (foldedCountRef.current > 0) {
           pushStatic(createLogEntry({ type: 'system', content: `… ${foldedCountRef.current} routine tool calls folded` }))
@@ -843,6 +852,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         blockWriterRef.current = null
         foldedCountRef.current = 0
         fluencyRef.current.onTurnComplete()
+        setFluencyStale(null)
         // Preserve any partial text/thinking before clearing
         if (streamBuf.current || thinkBuf.current) {
           pushStatic(createLogEntry({ type: 'assistant_message', content: streamBuf.current, thinking: thinkBuf.current || undefined }))
@@ -875,6 +885,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         blockWriterRef.current = null
         foldedCountRef.current = 0
         fluencyRef.current.onTurnComplete()
+        setFluencyStale(null)
         // Preserve any partial text/thinking before clearing
         if (streamBuf.current || thinkBuf.current) {
           pushStatic(createLogEntry({ type: 'assistant_message', content: streamBuf.current, thinking: thinkBuf.current || undefined }))
@@ -895,6 +906,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setIsStreaming(false)
       },
       onApprovalRequired: async (id, name, input) => {
+        fluencyRef.current.recordApproval()
         const target = String(input?.path ?? input?.command ?? name)
         setSummaryState(prev => ({ ...prev, approvalNeeded: { tool: name, target } }))
         return new Promise<boolean>((resolve) => {

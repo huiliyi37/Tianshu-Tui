@@ -15,6 +15,8 @@ export class FluencyTracker {
   private lastIsError = false
   private lastIsApproval = false
   private phase: FluencySignals['phase'] = 'idle'
+  private outputRate = 0
+  private resultLength = 0
 
   isRoutineTool(name: string, isError: boolean): boolean {
     if (isError) return false
@@ -22,8 +24,12 @@ export class FluencyTracker {
   }
 
   recordToolResult(event: ToolResultEvent): void {
+    const now = Date.now()
+    const elapsedSeconds = Math.max((now - this.lastEventAt) / 1000, 1)
     this.routine.record(this.isRoutineTool(event.name, event.isError))
-    this.lastEventAt = Date.now()
+    this.outputRate = event.resultLength / elapsedSeconds
+    this.resultLength = event.resultLength
+    this.lastEventAt = now
     this.lastIsError = event.isError
     this.lastIsApproval = false
     this.phase = 'tool'
@@ -51,6 +57,9 @@ export class FluencyTracker {
     this.routine.reset()
     this.lastIsError = false
     this.lastIsApproval = false
+    this.outputRate = 0
+    this.resultLength = 0
+    this.lastEventAt = Date.now()
     this.phase = 'idle'
   }
 
@@ -58,8 +67,8 @@ export class FluencyTracker {
     const signals: FluencySignals = {
       phase: this.phase,
       silentMs: Date.now() - this.lastEventAt,
-      outputRate: 0,
-      resultLength: 0,
+      outputRate: this.outputRate,
+      resultLength: this.resultLength,
       contextPressure: this.contextPressure,
       isError: this.lastIsError,
       isApproval: this.lastIsApproval,

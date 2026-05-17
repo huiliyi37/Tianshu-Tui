@@ -85,8 +85,9 @@ export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext &
       }
 
       // Knowledge file search
-      if (ctx?.cwd) {
-        const knowledgeHits = searchKnowledgeFiles(ctx.cwd, input.query)
+      const knowledgeCwd = ctx?.cwd ?? params.cwd
+      if (knowledgeCwd) {
+        const knowledgeHits = searchKnowledgeFiles(knowledgeCwd, input.query)
         if (knowledgeHits.length > 0) {
           const knowledgeFormatted = knowledgeHits.slice(0, 3).map(e => e.slice(0, 300)).join('\n---\n')
           parts.push(`\nProject knowledge (${knowledgeHits.length} entries):\n${knowledgeFormatted}`)

@@ -22,6 +22,9 @@ export interface FluencyPolicy {
   staleMessage?: string
 }
 
+const HIGH_VOLUME_RESULT_LENGTH = 50_000
+const HIGH_OUTPUT_RATE = 50_000
+
 export function computeFluencyPolicy(signals: FluencySignals): FluencyPolicy {
   // Errors and approvals always surface
   if (signals.isError) {
@@ -46,6 +49,10 @@ export function computeFluencyPolicy(signals: FluencySignals): FluencyPolicy {
         ? `No activity for ${Math.round(signals.silentMs / 1000)}s — may be stuck`
         : `Waiting ${Math.round(signals.silentMs / 1000)}s…`,
     }
+  }
+
+  if (signals.resultLength >= HIGH_VOLUME_RESULT_LENGTH || signals.outputRate >= HIGH_OUTPUT_RATE) {
+    return { visibility: 'inspect', foldRoutine: true, coalesceMs: 1000 }
   }
 
   // Many consecutive routine events → quiet mode
