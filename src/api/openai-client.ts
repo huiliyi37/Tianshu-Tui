@@ -195,7 +195,7 @@ export class OpenAIClient implements StreamClient {
               type: 'function',
               function: {
                 name: block.name,
-                arguments: JSON.stringify(block.input),
+                arguments: stableStringify(block.input),
               },
             })
           }
