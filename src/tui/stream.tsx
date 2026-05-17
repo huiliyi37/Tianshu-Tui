@@ -14,7 +14,7 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text wrap="wrap">{text}</Text>
+      <Text>{text}</Text>
       {isStreaming && <Text dimColor>▊</Text>}
     </Box>
   )

@@ -244,4 +244,42 @@ describe('CodexClient', () => {
     assert.ok(seq.some(s => s.startsWith('text:')), 'Text should be emitted')
     assert.equal(seq.filter(s => s.startsWith('text:')).join(','), 'text:Here is the answer.')
   })
+
+  it('does not emit text twice when both delta and output_item.done contain same text', async () => {
+    const client = new CodexClient({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      model: 'gpt-5.5',
+      maxTokens: 64000,
+    })
+
+    const textDeltas: string[] = []
+
+    // Stream has both output_text.delta events AND output_item.done with message text
+    const sseData = [
+      'data: {"type":"response.created","response":{"id":"resp_1"}}',
+      'data: {"type":"response.reasoning_summary_text.delta","delta":"thinking..."}',
+      'data: {"type":"response.output_text.delta","delta":"Hello"}',
+      'data: {"type":"response.output_text.delta","delta":" world"}',
+      'data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"Hello world"}]}}',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":5}}}',
+    ].join('\n') + '\n'
+
+    const mockResponse = { body: new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(sseData))
+        controller.close()
+      },
+    }) } as Response
+
+    await (client as any).processSSEStream(mockResponse, {
+      onTextDelta: (t: string) => textDeltas.push(t),
+      onThinkingDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: () => {},
+      onError: (e: Error) => { throw e },
+    })
+
+    // Should only get the delta events, not the duplicate from output_item.done
+    assert.deepEqual(textDeltas, ['Hello', ' world'])
+  })
 })

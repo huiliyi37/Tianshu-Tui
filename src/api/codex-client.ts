@@ -232,11 +232,14 @@ export class CodexClient implements StreamClient {
       msgUsage?: Record<string, unknown>
     } | null = null
     let seenReasoningItem = false
+    let seenTextDelta = false
 
     const flushPendingMessage = () => {
       if (!pendingMessageItem) return
-      for (const t of pendingMessageItem.texts) {
-        callbacks.onTextDelta(t)
+      if (!seenTextDelta) {
+        for (const t of pendingMessageItem.texts) {
+          callbacks.onTextDelta(t)
+        }
       }
       for (const b of pendingMessageItem.blocks) {
         callbacks.onContentBlock(b)
@@ -294,6 +297,7 @@ export class CodexClient implements StreamClient {
 
           switch (type) {
             case 'response.output_text.delta': {
+              seenTextDelta = true
               // delta is a plain string, not { text: "..." }
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
@@ -361,7 +365,7 @@ export class CodexClient implements StreamClient {
                   if (content) {
                     for (const part of content) {
                       if (part.type === 'output_text' && typeof part.text === 'string') {
-                        callbacks.onTextDelta(part.text)
+                        if (!seenTextDelta) callbacks.onTextDelta(part.text)
                         callbacks.onContentBlock({ type: 'text', text: part.text })
                       }
                     }

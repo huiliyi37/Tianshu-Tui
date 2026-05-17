@@ -741,9 +741,39 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       onCheckpoint: (hash) => {
         pushStatic(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
       },
-      onTurnComplete: (_usage, turnNumber) => {
+      onTurnComplete: (_usage, turnNumber, isFinal) => {
         if (dirtyTools.current.size > 0) {
           flushTools()
+        }
+
+        // Intermediate turn: update activity, freeze tools, reset thinking — but keep writer alive
+        if (isFinal === false) {
+          if (thinkStartRef.current > 0) {
+            thinkTimeRef.current = Date.now() - thinkStartRef.current
+            thinkStartRef.current = 0
+          }
+          const midNow = Date.now()
+          if (activityRef.current.phase !== 'idle') {
+            activityRef.current = completeActivity(activityRef.current, midNow)
+            projectActivity(midNow)
+          }
+          // Freeze live tools into static log
+          const midTools = liveToolsRef.current
+          if (midTools.length > 0) {
+            pushStaticBatch(midTools)
+          }
+          liveToolsRef.current = []
+          setLiveTools([])
+          // Reset thinking for next turn
+          thinkBuf.current = ''
+          setStreamingThinking('')
+          setIsThinkingActive(false)
+          if (thinkTimer.current) {
+            clearTimeout(thinkTimer.current)
+            thinkTimer.current = null
+          }
+          lastFlushedThink.current = ''
+          return
         }
 
         if (thinkStartRef.current > 0) {

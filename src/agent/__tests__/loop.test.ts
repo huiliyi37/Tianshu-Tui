@@ -362,6 +362,55 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.equal(toolInputs.length, 1)
     assert.deepEqual(toolInputs[0], { file_path: '/test/data.json', offset: 10, limit: 50 })
   })
+
+  it('delivers text from all turns including after tool_use and passes isFinal correctly', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    let callCount = 0
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        callCount++
+        if (callCount === 1) {
+          cb.onTextDelta('Reading file...')
+          cb.onContentBlock(makeTextBlock('Reading file...'))
+          cb.onContentBlock(makeToolUseBlock('tu_1', 'read_file', { file_path: '/test/package.json' }))
+          cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 50 })
+        } else {
+          cb.onTextDelta('File contains hello world.')
+          cb.onContentBlock(makeTextBlock('File contains hello world.'))
+          cb.onStopReason('end_turn', { input_tokens: 200, output_tokens: 40 })
+        }
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+
+    const texts: string[] = []
+    let intermediateCount = 0
+    let finalCount = 0
+
+    await agent.run('read package.json', {
+      onTextDelta: (t) => texts.push(t),
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: (_u, _t, isFinal) => {
+        if (isFinal === false) intermediateCount++
+        if (isFinal === true) finalCount++
+      },
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    const allText = texts.join('')
+    assert.ok(allText.includes('Reading file...'), 'Turn 1 text should be delivered')
+    assert.ok(allText.includes('File contains hello world.'), 'Turn 2 text should be delivered')
+    assert.equal(intermediateCount, 1)
+    assert.equal(finalCount, 1)
+  })
 })
 
 describe('AgentLoop — error handling', () => {
@@ -688,5 +737,52 @@ describe('AgentLoop — antibody generation', () => {
     assert.ok(antibodies.length >= 1, 'expected at least one failure_pattern claim')
     assert.ok(antibodies[0]!.tags.includes('antibody'), 'expected antibody tag')
     assert.ok(antibodies[0]!.text.includes('type_error'), 'expected type_error in text')
+  })
+
+  it('does not suppress first-turn text when it matches previous run last turn', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks) => {
+        cb.onTextDelta('Hello! How can I help?')
+        cb.onContentBlock(makeTextBlock('Hello! How can I help?'))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({
+      client, promptEngine: makeEngine(), toolRegistry: registry,
+      maxTurns: 5, contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+    }, session, '/test')
+
+    const texts1: string[] = []
+    await agent.run('hello', {
+      onTextDelta: (t) => texts1.push(t),
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    const texts2: string[] = []
+    await agent.run('hello again', {
+      onTextDelta: (t) => texts2.push(t),
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    assert.equal(texts1.join(''), 'Hello! How can I help?')
+    assert.equal(texts2.join(''), 'Hello! How can I help?', 'second run text should not be suppressed by dedup')
   })
 })

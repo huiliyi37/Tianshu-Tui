@@ -74,7 +74,7 @@ export interface AgentCallbacks {
   onThinkingDelta: (thinking: string) => void
   onToolUse: (id: string, name: string, input: Record<string, unknown>) => void
   onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => void
-  onTurnComplete: (usage: Partial<Usage>, turnNumber: number) => void
+  onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean) => void
   onError: (error: Error) => void
   onAbort: () => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
@@ -383,6 +383,7 @@ export class AgentLoop {
     // Reset accumulations from previous run
     this.thinkingOnlyRetries = 0
     this.lastThinkingContent = ''
+    this.lastTurnText = ''
     this.evidence.reset()
     this.repairHintTracker = new RepairHintTracker()
     this.userAnchors = []
@@ -596,7 +597,7 @@ export class AgentLoop {
           this.refreshLedger()
           this.refreshCacheDiagnostic(turn)
           this.recordTurnSnapshot()
-          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
+          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
           continue
         }
 
@@ -639,7 +640,7 @@ export class AgentLoop {
         this.refreshLedger()
         this.refreshCacheDiagnostic(turn)
         this.recordTurnSnapshot()
-        callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
+        callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), true)
         this.evidence.reset()
         break
       }
