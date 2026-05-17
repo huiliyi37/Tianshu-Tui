@@ -1946,3 +1946,7 @@ Created `docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md` for t
 
 Created `src/tui/activity-status.ts` with immutable ActivityState lifecycle: ActivityPhase (idle/thinking/streaming/analyzing/tool/mcp/compacting/preflight), ActivityLifecycleStatus (idle/active/stale/completed/failed), and transition functions createIdleActivity, beginActivity, heartbeatActivity, completeActivity, failActivity, clearActivity. Covered by 5 tests in `src/tui/__tests__/activity-status.test.ts`. Typecheck and full test suite (1048 tests) pass.
 
+## 2026-05-17 — Activity Status Layer Task 1 follow-up
+
+Aligned `src/tui/activity-status.ts` with the plan exactly: removed comments, prevented beginning idle via `Exclude<ActivityPhase, 'idle'>`, introduced shared `HeartbeatOptions`, made heartbeat/complete/fail no-op for idle, and allowed complete/fail label and sizeHint updates. Expanded `src/tui/__tests__/activity-status.test.ts` for idle no-ops and terminal optional updates. Targeted tests (1049 tests via project runner) and typecheck pass.
+

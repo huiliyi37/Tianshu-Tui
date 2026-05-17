@@ -41,22 +41,34 @@ describe('activity status lifecycle', () => {
     assert.equal(next.status, 'active')
   })
 
-  it('completion and failure freeze timestamps', () => {
+  it('completion and failure freeze timestamps and preserve optional updates', () => {
     const activity = beginActivity(createIdleActivity(1000), 'mcp', 'Waiting for MCP context7', 2000)
 
-    assert.deepEqual(completeActivity(activity, 8000), {
+    assert.deepEqual(completeActivity(activity, 8000, { label: 'MCP complete', sizeHint: '2 tools' }), {
       ...activity,
+      label: 'MCP complete',
+      sizeHint: '2 tools',
       completedAt: 8000,
       lastEventAt: 8000,
       status: 'completed',
     })
 
-    assert.deepEqual(failActivity(activity, 9000), {
+    assert.deepEqual(failActivity(activity, 9000, { label: 'MCP failed', sizeHint: 'timeout' }), {
       ...activity,
+      label: 'MCP failed',
+      sizeHint: 'timeout',
       completedAt: 9000,
       lastEventAt: 9000,
       status: 'failed',
     })
+  })
+
+  it('heartbeat, completion, and failure leave idle unchanged', () => {
+    const idle = createIdleActivity(1000)
+
+    assert.equal(heartbeatActivity(idle, 2000, { label: 'Still idle', sizeHint: 'ignored' }), idle)
+    assert.equal(completeActivity(idle, 3000, { label: 'Complete idle', sizeHint: 'ignored' }), idle)
+    assert.equal(failActivity(idle, 4000, { label: 'Fail idle', sizeHint: 'ignored' }), idle)
   })
 
   it('clears to idle at the provided time', () => {

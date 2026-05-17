@@ -1,12 +1,3 @@
-/**
- * Pure Activity Status Lifecycle
- *
- * Immutable state machine for tracking what the agent is doing right now.
- * Every transition returns a new object — no mutations.
- */
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
 export type ActivityPhase =
   | 'idle'
   | 'thinking'
@@ -34,7 +25,10 @@ export interface ActivityState {
   readonly status: ActivityLifecycleStatus
 }
 
-// ── Transitions ────────────────────────────────────────────────────────────
+export interface HeartbeatOptions {
+  readonly label?: string
+  readonly sizeHint?: string
+}
 
 export function createIdleActivity(now: number): ActivityState {
   return {
@@ -47,7 +41,7 @@ export function createIdleActivity(now: number): ActivityState {
 
 export function beginActivity(
   _state: ActivityState,
-  phase: ActivityPhase,
+  phase: Exclude<ActivityPhase, 'idle'>,
   label: string,
   now: number,
   sizeHint?: string,
@@ -65,8 +59,12 @@ export function beginActivity(
 export function heartbeatActivity(
   state: ActivityState,
   now: number,
-  options: { label?: string; sizeHint?: string } = {},
+  options: HeartbeatOptions = {},
 ): ActivityState {
+  if (state.phase === 'idle') {
+    return state
+  }
+
   return {
     ...state,
     label: options.label ?? state.label,
@@ -79,10 +77,16 @@ export function heartbeatActivity(
 export function completeActivity(
   state: ActivityState,
   now: number,
-  _options?: Record<string, never>,
+  options: HeartbeatOptions = {},
 ): ActivityState {
+  if (state.phase === 'idle') {
+    return state
+  }
+
   return {
     ...state,
+    label: options.label ?? state.label,
+    sizeHint: options.sizeHint ?? state.sizeHint,
     completedAt: now,
     lastEventAt: now,
     status: 'completed',
@@ -92,10 +96,16 @@ export function completeActivity(
 export function failActivity(
   state: ActivityState,
   now: number,
-  _options?: Record<string, never>,
+  options: HeartbeatOptions = {},
 ): ActivityState {
+  if (state.phase === 'idle') {
+    return state
+  }
+
   return {
     ...state,
+    label: options.label ?? state.label,
+    sizeHint: options.sizeHint ?? state.sizeHint,
     completedAt: now,
     lastEventAt: now,
     status: 'failed',
