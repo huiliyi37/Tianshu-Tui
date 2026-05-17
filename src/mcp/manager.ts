@@ -5,6 +5,18 @@ import type { McpConfig, McpServerConfig } from './config.js'
 import type { McpConnectionState } from './types.js'
 import { createMcpToolWrapper } from './wrapper.js'
 
+const DEFAULT_MCP_TIMEOUT_MS = 15_000
+
+function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+    promise.then(
+      value => { clearTimeout(timer); resolve(value) },
+      error => { clearTimeout(timer); reject(error) },
+    )
+  })
+}
+
 export interface McpToolDef {
   name: string
   description?: string
@@ -26,9 +38,11 @@ export class McpManager {
   private connections: Map<string, ConnectedServer> = new Map()
   private states: Map<string, McpConnectionState> = new Map()
   private tools: Tool[] = []
+  private timeoutMs: number
 
   constructor(config: McpConfig) {
     this.config = config
+    this.timeoutMs = config.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS
   }
 
   async initialize(): Promise<void> {
@@ -85,13 +99,30 @@ export class McpManager {
             if (!this.connections.has(serverId)) {
               throw new Error(`MCP server "${serverId}" is disconnected`)
             }
-            const result = await server.client.callTool({ name: mcpDef.name, arguments: input })
-            const textContent = (result.content as Array<{ type: string; text?: string }>)
-              .filter((c): c is { type: 'text'; text: string } =>
-                c.type === 'text' && typeof c.text === 'string')
-            return {
-              content: textContent,
-              isError: result.isError as boolean | undefined,
+            try {
+              const result = await withTimeout(
+                server.client.callTool({ name: mcpDef.name, arguments: input }),
+                `MCP callTool ${serverId}/${mcpDef.name}`,
+                this.timeoutMs,
+              )
+              const textContent = (result.content as Array<{ type: string; text?: string }>)
+                .filter((c): c is { type: 'text'; text: string } =>
+                  c.type === 'text' && typeof c.text === 'string')
+              return {
+                content: textContent,
+                isError: result.isError as boolean | undefined,
+              }
+            } catch (err) {
+              const current = this.states.get(serverId)
+              this.states.set(serverId, {
+                serverId,
+                status: 'degraded',
+                toolCount: current?.toolCount ?? 0,
+                error: err instanceof Error ? err.message : String(err),
+                lastConnectedAt: current?.lastConnectedAt,
+                lastErrorAt: Date.now(),
+              })
+              throw err
             }
           }
           return createMcpToolWrapper(serverId, mcpDef, perToolCallFn)
@@ -136,7 +167,7 @@ export class McpManager {
         cwd: cfg.cwd,
         stderr: 'pipe',
       })
-      await client.connect(transport)
+      await withTimeout(client.connect(transport), `MCP connect ${serverId}`, this.timeoutMs)
       return { client, transport, serverId }
     } else if (cfg.url) {
       throw new Error(`SSE transport not yet implemented for server ${serverId}`)
@@ -149,7 +180,7 @@ export class McpManager {
   async _discoverTools(serverId: string, server?: ConnectedServer): Promise<McpToolDef[]> {
     const conn = server ?? this.connections.get(serverId)
     if (!conn) return []
-    const result = await conn.client.listTools()
+    const result = await withTimeout(conn.client.listTools(), `MCP listTools ${serverId}`, this.timeoutMs)
     return result.tools.map(t => ({
       name: t.name,
       description: t.description,

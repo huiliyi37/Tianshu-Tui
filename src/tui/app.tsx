@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo, type RefObject } from 'react'
 import { Box, Text, useInput, Static } from 'ink'
 import gradient from 'gradient-string'
 import { StatusBar } from './status-bar.js'
@@ -26,11 +26,11 @@ import type { McpManager } from '../mcp/manager.js'
 import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, McpPanel } from './cockpit/index.js'
 import { buildCockpitSnapshot } from './cockpit/state.js'
 import type { Panel } from './cockpit/types.js'
-import { getOnboardingState } from '../onboarding.js'
 import { CommandPalette, getPaletteCommands } from './command-palette.js'
 import { openInEditor } from './external-editor.js'
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from './slash-commands.js'
 import { BlockStreamWriter } from './block-stream-writer.js'
+import { appendStreamWindow } from './stream-window.js'
 import { replayMessagesToLogEntries } from './history-replay.js'
 
 interface PendingApproval {
@@ -52,13 +52,14 @@ interface AppProps {
   currentProvider: string
   currentSessionId: string
   initialInput?: string
-  mcpManagerRef: React.MutableRefObject<McpManager | null>
-  claimStoreRef: React.MutableRefObject<import('../context/claim-store.js').ContextClaimStore | null>
+  mcpManagerRef: RefObject<McpManager | null>
+  claimStoreRef: RefObject<import('../context/claim-store.js').ContextClaimStore | null>
 }
 
 const THINKING_FLUSH_MS = 200
 const TOOL_FLUSH_MS = 120
 const ACTIVE_THRESHOLD = 20
+const LIVE_STREAM_MAX_CHARS = 50_000
 
 // --- Static entry renderer ---
 
@@ -94,7 +95,7 @@ interface CockpitViewProps {
   cost: number
   summaryState: SummaryState
   mcpManager: McpManager | null
-  claimStoreRef: React.MutableRefObject<import('../context/claim-store.js').ContextClaimStore | null>
+  claimStoreRef: RefObject<import('../context/claim-store.js').ContextClaimStore | null>
 }
 
 function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState, mcpManager, claimStoreRef }: CockpitViewProps) {
@@ -337,7 +338,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       if (_input === 'r' && sessions.length > 0) {
         const id = sessions[0]!
         const p = new SessionPersist(id)
-        const msgs = p.load()
+        const recovery = p.loadRecoverableMessages()
+        const msgs = recovery.messages
         session.loadMessages(msgs)
         const { entries, toolCount, turnCount } = replayMessagesToLogEntries(msgs)
         for (const entry of entries) frozenBuf.push(entry)
@@ -345,7 +347,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setCacheHitRate(session.getCacheHitRate())
         setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
-        pushStatic(createLogEntry({ type: 'system', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools)` }))
+        const recoveryNote = recovery.usedSnapshot
+          ? `, rolled back to turn ${recovery.snapshotTurn}`
+          : recovery.preflight.repaired
+            ? `, repaired ${recovery.preflight.syntheticResultsInserted} missing tool result(s)`
+            : ''
+        pushStatic(createLogEntry({ type: 'system', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools${recoveryNote})` }))
       }
       setSessionPrompt('done')
       return
@@ -393,7 +400,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     blockWriterRef.current = new BlockStreamWriter({}, (text) => {
       streamBuf.current += text
-      setStreamingText(streamBuf.current)
+      setStreamingText(prev => appendStreamWindow(prev, text, LIVE_STREAM_MAX_CHARS))
     })
 
     streamStartRef.current = Date.now()

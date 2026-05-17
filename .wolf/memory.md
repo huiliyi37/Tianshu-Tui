@@ -3,6 +3,21 @@
 > Chronological action log. Hooks and AI append to this file automatically.
 > Old sessions are consolidated by the daemon weekly.
 
+## Session: 2026-05-17 Session HA Closure
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 09:20 | Recorded model delegation preference | .wolf/cerebrum.md, memory/feedback_model-delegation.md | Main assistant owns implementation; helper agents limited to Haiku/Sonnet review or lookup | ~500 |
+| 09:35 | Implemented stream-error partial persistence | src/agent/loop.ts, src/agent/__tests__/loop.test.ts, .wolf/buglog.json | RED loop test reproduced missing assistant partial; GREEN precise loop tests, planned npm test, and typecheck pass; logged bug-053 | ~1800 |
+| 09:50 | Implemented bash process-tree timeout cleanup | src/tools/bash.ts, src/tools/process-tracker.ts, src/tools/process-kill.ts, src/tools/__tests__/bash.test.ts, src/tools/__tests__/process-kill.test.ts | RED missing helper and timeout race reproduced; GREEN precise tests, planned npm test, and typecheck pass; logged bug-054 | ~2200 |
+| 09:55 | Hardened bash timeout settle path | src/tools/bash.ts | Added single-settle guard so timeout and close cannot both persist raw output; precise process cleanup tests and typecheck pass | ~500 |
+| 10:10 | Implemented MCP timeout degraded state | src/mcp/manager.ts, src/mcp/types.ts, src/mcp/config.ts, src/mcp/__tests__/manager.test.ts | RED listTools/callTool hang tests reproduced; GREEN precise MCP tests, planned npm test, and typecheck pass; logged bug-055 | ~2200 |
+| 10:25 | Implemented smart compaction summary quality gate | src/compact/auto.ts, src/compact/__tests__/auto.test.ts | RED unsafe XML summary accepted; GREEN empty/unsafe/oversized fallback tests, planned npm test, and typecheck pass; logged bug-056 | ~1800 |
+| 10:40 | Escaped volatile prompt raw blocks | src/prompt/volatile.ts, src/prompt/__tests__/volatile.test.ts | RED repairHint/sessionMemory XML injection reproduced; GREEN volatile tests and typecheck pass; logged bug-057 | ~900 |
+| 10:55 | Bounded live stream React state | src/tui/stream-window.ts, src/tui/app.tsx, src/tui/__tests__/stream-window.test.ts | RED missing helper reproduced; GREEN stream-window/block-writer tests and typecheck pass; final assistant content kept full outside bounded live display | ~1200 |
+| 11:10 | Covered cerebellar and thinking edge cases | src/agent/prediction-error.ts, src/agent/loop.ts, src/agent/__tests__/prediction-error.test.ts, src/tui/thinking.tsx, src/tui/__tests__/thinking.test.tsx | RED reset/thinking helper gaps reproduced; GREEN prediction/loop/thinking focused tests and typecheck pass; logged bug-059/bug-060 | ~1600 |
+| 11:25 | Final validation and docs update | CHANGELOG.md, README.md, src/prompt/__tests__/engine.test.ts | Fixed stale session-memory expectation after volatile escaping; final typecheck, 1043-test suite, and build pass; logged bug-061 | ~1000 |
+
 ## Session: 2026-05-16 Execution Trust Closure
 
 | Time | Action | File(s) | Outcome | ~Tokens |
@@ -1759,3 +1774,7 @@
 | 06:10 | Edited docs/superpowers/plans/2026-05-17-multi-provider-phase2.md | modified error() | ~301 |
 | 06:10 | Session end: 21 writes across 9 files (manager.ts, block-stream-writer.ts, base-text-input.tsx, agent-status.tsx, app.tsx) | 76 reads | ~123306 tok |
 | 06:10 | Edited src/tui/group-logs.ts | modified groupLogs() | ~215 |
+
+- 2026-05-17 Session HA Task 1: Added loadRecoverableMessages preflight/snapshot recovery, TUI restore recovery notes, targeted tests, and standardized synthetic missing tool_result text.
+- 2026-05-17 SessionPersist follow-up: Made session directory resolution dynamic so tests honoring RIVET_SESSION_DIR stay isolated and repeatable.
+- 2026-05-17 OpenWolf: Logged bug-052 for SessionPersist RIVET_SESSION_DIR import-time capture and dynamic getSessionDir() fix.

@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 12 (Session HA) + ECF Phase 5 complete — 926+ tests passing, typecheck clean. BlockStreamWriter semantic streaming, turn-level crash recovery snapshots, HistoryReplayBridge visual session restore, PromptQueue submission serialization, SessionEviction auto-cleanup. Evolutionary Context Fabric fully operational.
+Wave 12 (Session HA Closure) + ECF Phase 5 complete — 1043 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, and cerebellar/thinking edge cases are covered by tests.
 
 ## Quick Start
 

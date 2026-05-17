@@ -1,6 +1,6 @@
 export interface McpConnectionState {
   serverId: string
-  status: 'disconnected' | 'connecting' | 'connected' | 'error'
+  status: 'disconnected' | 'connecting' | 'connected' | 'degraded' | 'error'
   toolCount: number
   error?: string
   lastConnectedAt?: number

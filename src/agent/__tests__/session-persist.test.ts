@@ -106,6 +106,49 @@ describe('TurnSnapshot', () => {
     const userTurns = upTo2.filter((m: any) => m.role === 'user' && typeof m.content === 'string')
     assert.equal(userTurns.length, 2)
   })
+
+  it('loadRecoverableMessages inserts synthetic tool_result for orphan tool_use', async () => {
+    const persist = new SessionPersist('test-session-recoverable-orphan')
+    await persist.append({ role: 'user', content: 'run a tool' })
+    await persist.append({
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: 'README.md' } }],
+    })
+
+    const result = persist.loadRecoverableMessages()
+
+    assert.equal(result.usedSnapshot, false)
+    assert.equal(result.preflight.repaired, true)
+    assert.equal(result.preflight.syntheticResultsInserted, 1)
+    assert.equal(result.messages.length, 3)
+    assert.deepEqual(result.messages[2], {
+      role: 'user',
+      content: [{
+        type: 'tool_result',
+        tool_use_id: 'toolu_1',
+        content: '[recovered] Tool result missing after interrupted session resume.',
+        is_error: true,
+      }],
+    })
+  })
+
+  it('loadRecoverableMessages rolls back to last snapshot when transcript is unsafe', async () => {
+    const persist = new SessionPersist('test-session-recoverable-snapshot')
+    await persist.append({ role: 'user', content: 'first turn' })
+    await persist.append({ role: 'assistant', content: [{ type: 'text', text: 'done' }] })
+    persist.appendTurnSnapshot({ turn: 1, timestamp: 2, messageCount: 2, estimatedTokens: 20 })
+    await persist.append({
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'missing_toolu', content: 'orphan' }],
+    })
+
+    const result = persist.loadRecoverableMessages()
+
+    assert.equal(result.usedSnapshot, true)
+    assert.equal(result.snapshotTurn, 1)
+    assert.equal(result.messages.length, 1)
+    assert.deepEqual(result.messages[0], { role: 'user', content: 'first turn' })
+  })
 })
 
 describe('SessionEviction', () => {

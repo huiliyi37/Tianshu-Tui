@@ -2,6 +2,17 @@
 
 > Auto-maintained by OpenWolf. Last scanned: 2026-05-16T22:10:42.246Z
 > Files: 345 tracked | Anatomy hits: 0 | Misses: 0
+>
+> Manual update 2026-05-17: Session HA Task 1 added recoverable session loading and dynamic session-dir resolution in `src/agent/session-persist.ts`, restore recovery notes in `src/tui/app.tsx`, targeted coverage in `src/agent/__tests__/session-persist.test.ts`, standardized synthetic resume repair text in `src/context/resume-preflight.ts`, and buglog entry `bug-052` for session-dir test isolation.
+> Manual update 2026-05-17: Recorded user delegation preference in `.wolf/cerebrum.md`, `.wolf/memory.md`, and persistent memory `feedback_model-delegation.md`; main implementation remains in the primary assistant session.
+> Manual update 2026-05-17: Session HA Task 2 added partial assistant persistence on stream errors in `src/agent/loop.ts`, regression coverage in `src/agent/__tests__/loop.test.ts`, and buglog entry `bug-053`.
+> Manual update 2026-05-17: Session HA Task 3 added `src/tools/process-kill.ts`, process-tree timeout cleanup in `src/tools/bash.ts` and `src/tools/process-tracker.ts`, tests in `src/tools/__tests__/bash.test.ts` and `src/tools/__tests__/process-kill.test.ts`, timeout single-settle protection in `src/tools/bash.ts`, and buglog entry `bug-054`.
+> Manual update 2026-05-17: Session HA Task 4 added configurable MCP operation timeouts and degraded callTool state in `src/mcp/manager.ts`, `degraded` status in `src/mcp/types.ts`, `timeoutMs` config parsing in `src/mcp/config.ts`, tests in `src/mcp/__tests__/manager.test.ts`, and buglog entry `bug-055`.
+> Manual update 2026-05-17: Session HA Task 5 added smart compaction summary quality gates in `src/compact/auto.ts`, fallback coverage in `src/compact/__tests__/auto.test.ts`, and buglog entry `bug-056`.
+> Manual update 2026-05-17: Session HA Task 6 escaped volatile `repairHint` and `sessionMemoryBlock` inside fixed XML tags in `src/prompt/volatile.ts`, added injection regression tests in `src/prompt/__tests__/volatile.test.ts`, and buglog entry `bug-057`.
+> Manual update 2026-05-17: Session HA Task 7 added bounded live stream tail helper in `src/tui/stream-window.ts`, covered it in `src/tui/__tests__/stream-window.test.ts`, connected `src/tui/app.tsx` live display state without truncating final assistant content, and buglog entry `bug-058`.
+> Manual update 2026-05-17: Session HA Task 8 added `resetAccumulator()` and single-step `escalate` behavior in `src/agent/prediction-error.ts`, wired tipping-point recovery in `src/agent/loop.ts`, strengthened `src/agent/__tests__/prediction-error.test.ts`, exported ThinkingCollapser format helpers in `src/tui/thinking.tsx`, added `src/tui/__tests__/thinking.test.tsx`, and buglog entries `bug-059`/`bug-060`.
+> Manual update 2026-05-17: Session HA Task 9 updated `CHANGELOG.md` and `README.md` for Session HA Closure, aligned `src/prompt/__tests__/engine.test.ts` with escaped session-memory volatile context, logged bug `bug-061`, and final validation passed typecheck, 1043 tests, and build.
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 

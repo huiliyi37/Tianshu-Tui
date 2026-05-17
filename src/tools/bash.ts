@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
+import { killProcessTree } from './process-kill.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 
 const DANGEROUS_PATTERNS: RegExp[] = [
@@ -68,10 +69,12 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         cwd: params.cwd,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
       }))
 
       let stdout = ''
       let stderr = ''
+      let timedOut = false
 
       child.stdout!.on('data', (data: Buffer) => {
         const text = data.toString()
@@ -106,19 +109,34 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         }
       }
 
-      const timer = setTimeout(async () => {
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 3000)
-        resolve(await buildResult(0, true))
+      let settled = false
+      let timer: ReturnType<typeof setTimeout> | null = null
+      let forceKillTimer: ReturnType<typeof setTimeout> | null = null
+
+      const finish = async (code: number, isTimeout = false, clearForceKill = true) => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        if (clearForceKill && forceKillTimer) clearTimeout(forceKillTimer)
+        resolve(await buildResult(code, isTimeout))
+      }
+
+      timer = setTimeout(() => {
+        timedOut = true
+        killProcessTree(child, 'SIGTERM')
+        forceKillTimer = setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
+        void finish(0, true, false)
       }, timeout)
 
-      child.on('close', async (code) => {
-        clearTimeout(timer)
-        resolve(await buildResult(code ?? 1))
+      child.on('close', (code) => {
+        void finish(code ?? 1, timedOut)
       })
 
       child.on('error', (err) => {
-        clearTimeout(timer)
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        if (forceKillTimer) clearTimeout(forceKillTimer)
         resolve({ content: err.message, isError: true })
       })
     })

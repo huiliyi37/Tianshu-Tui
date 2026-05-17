@@ -10,6 +10,10 @@ export function createPredictionAccumulator(windowSize = 10): PredictionAccumula
   return { windowSize, predictions: [], consecutiveCorrect: 0 }
 }
 
+export function resetAccumulator(acc: PredictionAccumulator): PredictionAccumulator {
+  return { ...acc, predictions: [], consecutiveCorrect: 0 }
+}
+
 export function recordPrediction(
   acc: PredictionAccumulator,
   correct: boolean,
@@ -46,7 +50,7 @@ export function adjustReasoningEffort(
   const idx = order.indexOf(current)
 
   if (level === 'escalate') {
-    return order[Math.min(idx + 2, order.length - 1)]!
+    return order[Math.min(idx + 1, order.length - 1)]!
   }
   if (level === 'gate') {
     return order[Math.min(idx + 1, order.length - 1)]!

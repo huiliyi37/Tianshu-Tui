@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-17 — Session HA Closure
+
+### Fixed
+- Restore path now repairs interrupted tool transcripts and rolls back to the last valid turn snapshot when needed.
+- Stream errors persist partial assistant output before surfacing the error.
+- Bash timeouts terminate the process tree instead of only the shell child.
+- MCP servers time out hung connect/listTools/callTool operations and expose degraded state.
+- Smart compaction rejects empty, oversized, or unsafe summaries and falls back to micro compaction.
+- Volatile prompt repair and memory blocks escape untrusted content.
+- Live TUI stream rendering keeps a bounded tail window to avoid unbounded React state growth.
+- Cerebellar prediction-error and ThinkingCollapser edge cases have focused regression coverage.
+
 ## 2026-05-17 — Wave 12: Session High Availability
 
 ### Added — BlockStreamWriter

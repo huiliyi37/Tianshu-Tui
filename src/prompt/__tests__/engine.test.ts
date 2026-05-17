@@ -181,7 +181,9 @@ describe('PromptEngine active claims projection', () => {
     const request = engine.buildRequest([{ role: 'user', content: 'remember this' }])
     const context = request.messages[0]!.content as string
 
-    assert.match(context, /<session-memory session_id="s1">/)
+    assert.match(context, /<session-memory>/)
+    assert.match(context, /&lt;session-memory session_id=&quot;s1&quot;&gt;/)
     assert.match(context, /Use JSONL first/)
+    assert.doesNotMatch(context, /<session-memory session_id="s1">/)
   })
 })
