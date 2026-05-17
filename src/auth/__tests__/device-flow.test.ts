@@ -6,7 +6,7 @@ describe('buildDeviceCodeRequest', () => {
   it('builds correct request body', () => {
     const body = buildDeviceCodeRequest('test-client')
     assert.equal(body.client_id, 'test-client')
-    assert.ok(body.scope.includes('openid'))
+    assert.ok(body.scope?.includes('openid'))
   })
 })
 

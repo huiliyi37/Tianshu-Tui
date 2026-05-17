@@ -112,4 +112,8 @@ export const DEFAULT_CONFIG: Config = {
     enabled: true,
     servers: {},
   },
+  workers: {
+    profiles: {},
+    routing: {},
+  },
 }
