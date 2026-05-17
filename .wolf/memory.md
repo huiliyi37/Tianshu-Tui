@@ -17,6 +17,7 @@
 | 10:55 | Bounded live stream React state | src/tui/stream-window.ts, src/tui/app.tsx, src/tui/__tests__/stream-window.test.ts | RED missing helper reproduced; GREEN stream-window/block-writer tests and typecheck pass; final assistant content kept full outside bounded live display | ~1200 |
 | 11:10 | Covered cerebellar and thinking edge cases | src/agent/prediction-error.ts, src/agent/loop.ts, src/agent/__tests__/prediction-error.test.ts, src/tui/thinking.tsx, src/tui/__tests__/thinking.test.tsx | RED reset/thinking helper gaps reproduced; GREEN prediction/loop/thinking focused tests and typecheck pass; logged bug-086/bug-087 | ~1600 |
 | 11:25 | Final validation and docs update | CHANGELOG.md, README.md, src/prompt/__tests__/engine.test.ts | Fixed stale session-memory expectation after volatile escaping; final typecheck, 1043-test suite, and build pass; logged bug-088 | ~1000 |
+| 11:45 | Resolved main merge typecheck duplicate helpers | src/agent/prediction-error.ts, src/tui/thinking.tsx, .wolf/buglog.json | Removed duplicate resetAccumulator and thinking helper definitions from merge resolution; typecheck/tests/build pass; logged bug-089 | ~400 |
 
 ## Session: 2026-05-16 Execution Trust Closure
 

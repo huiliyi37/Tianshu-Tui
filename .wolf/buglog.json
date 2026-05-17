@@ -1426,6 +1426,27 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-05-17T02:01:40.388Z"
+    },
+    {
+      "id": "bug-089",
+      "timestamp": "2026-05-17T02:23:19.842Z",
+      "error_message": "Post-merge typecheck failed with duplicate resetAccumulator and thinking helper implementations",
+      "file": "src/agent/prediction-error.ts, src/tui/thinking.tsx",
+      "root_cause": "main and the Session HA branch both introduced the same helpers, and the initial merge resolution kept duplicate definitions.",
+      "fix": "Removed duplicate helper implementations, kept the exported helpers, and reran typecheck/tests/build successfully.",
+      "tags": [
+        "merge-conflict",
+        "typecheck",
+        "session-ha",
+        "ts",
+        "tsx"
+      ],
+      "related_bugs": [
+        "bug-086",
+        "bug-087"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:23:19.846Z"
     }
   ]
 }

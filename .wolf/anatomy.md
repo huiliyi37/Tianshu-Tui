@@ -13,6 +13,7 @@
 > Manual update 2026-05-17: Session HA Task 7 added bounded live stream tail helper in `src/tui/stream-window.ts`, covered it in `src/tui/__tests__/stream-window.test.ts`, connected `src/tui/app.tsx` live display state without truncating final assistant content, and buglog entry `bug-085`.
 > Manual update 2026-05-17: Session HA Task 8 added `resetAccumulator()` and single-step `escalate` behavior in `src/agent/prediction-error.ts`, wired tipping-point recovery in `src/agent/loop.ts`, strengthened `src/agent/__tests__/prediction-error.test.ts`, exported ThinkingCollapser format helpers in `src/tui/thinking.tsx`, added `src/tui/__tests__/thinking.test.tsx`, and buglog entries `bug-086`/`bug-087`.
 > Manual update 2026-05-17: Session HA Task 9 updated `CHANGELOG.md` and `README.md` for Session HA Closure, aligned `src/prompt/__tests__/engine.test.ts` with escaped session-memory volatile context, logged bug `bug-088`, and final validation passed typecheck, 1043 tests, and build.
+> Manual update 2026-05-17: Main merge resolved duplicate Session HA/cerebellar helper definitions in `src/agent/prediction-error.ts` and `src/tui/thinking.tsx`, reran typecheck/tests/build successfully, and logged bug `bug-089`.
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
