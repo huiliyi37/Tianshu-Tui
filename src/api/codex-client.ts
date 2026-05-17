@@ -156,6 +156,7 @@ export class CodexClient implements StreamClient {
       store: false,
       parallel_tool_calls: true,
       include: ['reasoning.encrypted_content'],
+      reasoning: { effort: 'high' },
     }
 
     if (instructions) {
@@ -245,7 +246,7 @@ export class CodexClient implements StreamClient {
 
           switch (type) {
             case 'response.output_text.delta': {
-              // delta is a plain string, not { text: '...' }
+              // delta is a plain string, not { text: "..." }
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
                 : (parsed.delta as Record<string, unknown>)?.text as string | undefined
@@ -255,7 +256,6 @@ export class CodexClient implements StreamClient {
 
             case 'response.reasoning_text.delta':
             case 'response.reasoning_summary_text.delta': {
-              // delta is a plain string, not { text: '...' }
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
                 : (parsed.delta as Record<string, unknown>)?.text as string | undefined
