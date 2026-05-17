@@ -871,4 +871,44 @@ describe('AgentLoop — output token escalation', () => {
     assert.equal(callCount, 2)
     assert.ok(texts.some(t => t.includes('continued and done')))
   })
+
+  it('stops escalating after repeated max_output_tokens turns', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    let callCount = 0
+    let finalCount = 0
+
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks) => {
+        callCount++
+        cb.onTextDelta(`chunk ${callCount}.`)
+        cb.onContentBlock(makeTextBlock(`chunk ${callCount}.`))
+        cb.onStopReason('max_output_tokens', { input_tokens: 100, output_tokens: 4096 })
+      }),
+    } as unknown as ApiClient
+
+    const texts: string[] = []
+    const agent = new AgentLoop(
+      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 10, contextWindow: 1_000_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
+      session, '/test',
+    )
+
+    await agent.run('test prompt', {
+      onTextDelta: (t) => texts.push(t),
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: (_usage, _turn, isFinal) => {
+        if (isFinal) finalCount++
+      },
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    assert.equal(callCount, 4)
+    assert.equal(finalCount, 1)
+    assert.ok(texts.join('').includes('chunk 4.'))
+  })
 })

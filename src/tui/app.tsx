@@ -752,12 +752,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           activityRef.current = beginActivity(activityRef.current, 'analyzing', analysisLabelForTool(toolName, resolvedLabel), toolNow)
           projectActivity(toolNow)
         }
-
-        const steerText = steerBuffer.current.drain()
-        if (steerText) {
-          agent.addAnchor('user_constraint', steerText)
-          pushStatic(createLogEntry({ type: 'system', content: 'Steering guidance injected into agent context.' }))
-        }
       },
       onCheckpoint: (hash) => {
         pushStatic(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
@@ -884,6 +878,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Drain any remaining steer guidance at turn boundary (pure-text turns)
         const turnSteer = steerBuffer.current.drain()
         if (turnSteer) {
+          agent.addAnchor('user_constraint', turnSteer)
           pushStatic(createLogEntry({ type: 'system', content: 'Steering guidance will be applied on next turn.' }))
         }
         // Flush any remaining folded tools
@@ -977,6 +972,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         return new Promise<boolean>((resolve) => {
           setPendingApproval({ id, name, input, resolve })
         })
+      },
+      onSteerDrain: () => {
+        const steerText = steerBuffer.current.drain()
+        if (steerText) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Steering guidance injected into agent context.' }))
+        }
+        return steerText
       },
     })
     } // end run

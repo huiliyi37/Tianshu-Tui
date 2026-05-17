@@ -53,22 +53,33 @@ export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> 
     }
 
     let settled = false
+    let timer: ReturnType<typeof setTimeout>
 
-    const timer = setTimeout(() => {
-      settled = true
-      resolve()
-    }, ms)
+    const cleanup = (): void => {
+      signal?.removeEventListener('abort', onAbort)
+    }
 
     const onAbort = (): void => {
       if (!settled) {
         settled = true
         clearTimeout(timer)
+        cleanup()
         reject(new DOMException('Aborted', 'AbortError'))
       }
     }
 
+    timer = setTimeout(() => {
+      settled = true
+      cleanup()
+      resolve()
+    }, ms)
+
     signal?.addEventListener('abort', onAbort, { once: true })
   })
+}
+
+function applyDelayJitter(delayMs: number): number {
+  return delayMs + Math.random() * delayMs * 0.5
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +151,7 @@ export async function withStructuredRetry<T>(
       // otherwise fall back to jittered exponential backoff.
       const nextDelayMs =
         classified.retryDelayMs > 0
-          ? classified.retryDelayMs
+          ? applyDelayJitter(classified.retryDelayMs)
           : jitteredBackoff(attempt + 1)
 
       // Notify caller
