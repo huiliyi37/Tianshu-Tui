@@ -54,6 +54,7 @@ describe('mapSensoriumToPhase', () => {
       isRunningTests: false,
       isFinalTurn: false,
       shouldEscalate: false,
+      hasEnteredHighComplexity: false,
       ...overrides,
     }
   }
@@ -94,10 +95,16 @@ describe('mapSensoriumToPhase', () => {
     assert.equal(mapSensoriumToPhase(s, ctx), 'tianxuan-locating')
   })
 
-  it('returns tianquan-contracting when confident + low complexity + not writing', () => {
+  it('returns tianquan-contracting when was high complexity + confident + low complexity + not writing', () => {
     const s = makeSensorium({ confidence: 0.8, complexity: 0.3, freshness: 0.5 })
-    const ctx = makeCtx({ isWriting: false, isRunningTests: false })
+    const ctx = makeCtx({ isWriting: false, isRunningTests: false, hasEnteredHighComplexity: true })
     assert.equal(mapSensoriumToPhase(s, ctx), 'tianquan-contracting')
+  })
+
+  it('skips contracting when hasEnteredHighComplexity is false', () => {
+    const s = makeSensorium({ confidence: 0.8, complexity: 0.3 })
+    const ctx = makeCtx({ isWriting: false, isRunningTests: false, hasEnteredHighComplexity: false })
+    assert.equal(mapSensoriumToPhase(s, ctx), 'tianxuan-locating')
   })
 
   it('returns tianshu-planning on first turn with escalation', () => {
@@ -137,10 +144,10 @@ describe('mapSensoriumToPhase', () => {
   it('skips contracting when isWriting or isRunningTests', () => {
     const s = makeSensorium({ confidence: 0.8, complexity: 0.3 })
     // Writing → should be implementing, not contracting
-    const writingCtx = makeCtx({ isWriting: true, isRunningTests: false })
+    const writingCtx = makeCtx({ isWriting: true, isRunningTests: false, hasEnteredHighComplexity: true })
     assert.equal(mapSensoriumToPhase(s, writingCtx), 'yuheng-implementing')
     // Testing → should be testing, not contracting
-    const testingCtx = makeCtx({ isWriting: false, isRunningTests: true })
+    const testingCtx = makeCtx({ isWriting: false, isRunningTests: true, hasEnteredHighComplexity: true })
     assert.equal(mapSensoriumToPhase(s, testingCtx), 'kaiyang-testing')
   })
 
@@ -168,6 +175,7 @@ describe('createStarEvent', () => {
     const ctx: StarPhaseContext = {
       turn: 5, isFinalTurn: true, isWriting: false,
       isRunningTests: false, shouldEscalate: false,
+      hasEnteredHighComplexity: false,
     }
     const event: StarEvent = createStarEvent(s, ctx)
     assert.equal(event.phase, 'yaoguang-delivering')
@@ -186,6 +194,7 @@ describe('createStarEvent', () => {
     const ctx: StarPhaseContext = {
       turn: 1, isFinalTurn: false, isWriting: false,
       isRunningTests: false, shouldEscalate: false,
+      hasEnteredHighComplexity: false,
     }
     const e1 = createStarEvent(s, ctx)
     const e2 = createStarEvent({ ...s }, { ...ctx })

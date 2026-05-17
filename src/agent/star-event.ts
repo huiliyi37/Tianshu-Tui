@@ -53,6 +53,9 @@ export interface StarPhaseContext {
   isRunningTests: boolean
   isFinalTurn: boolean
   shouldEscalate: boolean
+  /** True if complexity > 0.5 was ever reached this session.
+   *  Enables contracting phase (plan was decomposed, now settled). */
+  hasEnteredHighComplexity: boolean
 }
 
 /**
@@ -80,7 +83,7 @@ export interface StarEvent {
  * 3. Delivering: momentum>0.8 + isFinalTurn → 归航
  * 4. Implementing: confidence>0.6 + isWriting → 铸形
  * 5. Decomposing: complexity>0.5 → 排阵
- * 6. Contracting: confidence>0.7 + complexity<0.4 + !writing + !testing → 立约
+ * 6. Contracting: wasHighComplexity + confidence>0.7 + complexity<0.4 + !writing + !testing → 立约
  * 7. Locating: freshness>0.7 → 寻迹
  * 8. Planning: shouldEscalate + turn===1 / freshness≤0.4 → 请星
  */
@@ -113,8 +116,8 @@ export function mapSensoriumToPhase(
     return 'tianji-decomposing'
   }
 
-  // 6. Contracting: confident + plan clear + not writing yet → 立约
-  if (s.confidence > 0.7 && s.complexity < 0.4 && !ctx.isWriting && !ctx.isRunningTests) {
+  // 6. Contracting: plan was complex, now settled → 立约
+  if (ctx.hasEnteredHighComplexity && s.confidence > 0.7 && s.complexity < 0.4 && !ctx.isWriting && !ctx.isRunningTests) {
     return 'tianquan-contracting'
   }
 

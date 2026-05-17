@@ -138,6 +138,7 @@ export class AgentLoop {
   private thetaState: ThetaState = createThetaState(7)
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
+  private _hasEnteredHighComplexity = false
 
   constructor(
     private config: AgentConfig,
@@ -421,6 +422,7 @@ export class AgentLoop {
     this.strategy = null
     this.thetaState = createThetaState(7)
     this.loadedPheromones = []
+    this._hasEnteredHighComplexity = false
     // Load cross-session pheromones for Sensorium.freshness computation
     this.stigmergyStore.load().then(p => { this.loadedPheromones = p }).catch(() => {})
     this.recordUserInputClaims(userInput)
@@ -492,6 +494,11 @@ export class AgentLoop {
         this.sensorium = computeSensorium(sensoriumInput)
         this.strategy = computeStrategy(this.sensorium)
 
+        // Track whether complexity ever reached high → enables contracting phase
+        if (this.sensorium.complexity > 0.5) {
+          this._hasEnteredHighComplexity = true
+        }
+
         // Wire strategy → harness: reasoning effort, theta interval
         this.setReasoningEffort(this.strategy.reasoningEffort)
         this.thetaState = { ...this.thetaState, interval: this.strategy.thetaCycleInterval }
@@ -507,6 +514,7 @@ export class AgentLoop {
           isRunningTests,
           isFinalTurn,
           shouldEscalate: this.strategy.shouldEscalate,
+          hasEnteredHighComplexity: this._hasEnteredHighComplexity,
         }
         const event = createStarEvent(this.sensorium, starCtx)
         if (callbacks.onPhaseChange) {
