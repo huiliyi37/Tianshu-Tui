@@ -1,0 +1,196 @@
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
+
+import type { PheromoneSignal } from '../agent/sensorium.js'
+
+// ─── Types ──────────────────────────────────────────────────────────
+
+export interface PheromoneDeposit {
+  path: string
+  signal: PheromoneSignal
+  strength: number
+  context?: string
+  /** Custom half-life in ms. Default: 604_800_000 (7 days) */
+  halfLifeMs?: number
+}
+
+export interface Pheromone {
+  path: string
+  signal: PheromoneSignal
+  strength: number
+  depositedAt: number
+  halfLife: number
+  context?: string
+}
+
+/** A stored pheromone with its decayed current strength computed. */
+export interface PheromoneQueryResult extends Pheromone {
+  currentStrength: number
+}
+
+// ─── Constants ──────────────────────────────────────────────────────
+
+const DEFAULT_HALF_LIFE_MS = 604_800_000 // 7 days
+const DECAY_CONSTANT = 0.693 // ln(2)
+const DEFAULT_MAX_CAPACITY = 200
+const PRUNE_THRESHOLD = 0.05
+
+// ─── Pure decay function ────────────────────────────────────────────
+
+/**
+ * Compute the current (decayed) strength of a pheromone.
+ *
+ * Follows exponential decay: strength * e^(-λ * elapsed / halfLife)
+ * where λ = ln(2) ≈ 0.693.
+ *
+ * @param initialStrength - The original deposition strength (0–1)
+ * @param elapsedMs - Time since deposition
+ * @param halfLifeMs - The half-life of this signal
+ * @returns Current strength (0–1)
+ */
+export function computeCurrentStrength(
+  initialStrength: number,
+  elapsedMs: number,
+  halfLifeMs: number,
+): number {
+  if (halfLifeMs <= 0) return 0
+  return initialStrength * Math.exp(-DECAY_CONSTANT * elapsedMs / halfLifeMs)
+}
+
+// ─── StigmergyStore ─────────────────────────────────────────────────
+
+/**
+ * Cross-session spatial memory via pheromone deposition.
+ *
+ * Manages `.rivet/pheromones.json` — a persistent file that
+ * accumulates signals about files across sessions:
+ * - fragile (test failures)
+ * - well-tested (test coverage)
+ * - entry-point (frequently read)
+ * - dead-end (failed approaches)
+ * - coupling-hub (high import degree)
+ * - performance-critical / refactor-candidate
+ *
+ * Pheromones decay exponentially over time and are pruned
+ * when they fall below the strength threshold or exceed
+ * the capacity limit (LRU eviction).
+ */
+export class StigmergyStore {
+  private maxCapacity: number
+
+  constructor(
+    private filePath: string,
+    maxCapacity = DEFAULT_MAX_CAPACITY,
+  ) {
+    this.maxCapacity = maxCapacity
+  }
+
+  // ── File I/O ────────────────────────────────────────────────
+
+  /** Load all pheromones from disk. Returns [] if file missing or corrupt. */
+  async load(): Promise<Pheromone[]> {
+    try {
+      const raw = await readFile(this.filePath, 'utf-8')
+      const parsed: unknown = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter(
+        (e): e is Pheromone =>
+          typeof e === 'object' &&
+          e !== null &&
+          typeof (e as Pheromone).path === 'string' &&
+          typeof (e as Pheromone).signal === 'string' &&
+          typeof (e as Pheromone).strength === 'number' &&
+          typeof (e as Pheromone).depositedAt === 'number' &&
+          typeof (e as Pheromone).halfLife === 'number',
+      )
+    } catch {
+      return []
+    }
+  }
+
+  /** Persist pheromones to disk. Creates parent directory if needed. */
+  async save(entries: Pheromone[]): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true })
+    await writeFile(this.filePath, JSON.stringify(entries, null, 2), 'utf-8')
+  }
+
+  // ── Core operations ──────────────────────────────────────────
+
+  /**
+   * Deposit a new pheromone signal for a file.
+   *
+   * If a matching entry (same path + signal) exists, it is overwritten
+   * with the new strength and timestamp. Otherwise a new entry is appended.
+   *
+   * After deposition, LRU eviction and auto-prune are applied.
+   */
+  async deposit(deposit: PheromoneDeposit): Promise<void> {
+    const entries = await this.load()
+
+    const now = Date.now()
+    const newEntry: Pheromone = {
+      path: deposit.path,
+      signal: deposit.signal,
+      strength: Math.max(0, Math.min(1, deposit.strength)),
+      depositedAt: now,
+      halfLife: deposit.halfLifeMs ?? DEFAULT_HALF_LIFE_MS,
+      ...(deposit.context ? { context: deposit.context.slice(0, 80) } : {}),
+    }
+
+    // Overwrite existing matching entry (same path + signal)
+    const idx = entries.findIndex(
+      e => e.path === deposit.path && e.signal === deposit.signal,
+    )
+    if (idx >= 0) {
+      entries[idx] = newEntry
+    } else {
+      entries.push(newEntry)
+    }
+
+    // Enforce capacity (LRU: drop oldest)
+    const capped = entries.slice(-this.maxCapacity)
+
+    await this.save(capped)
+  }
+
+  /**
+   * Query pheromones with their decayed current strength.
+   *
+   * @param path - Optional file path filter. If omitted, returns all entries.
+   * @returns Entries with `currentStrength` computed (entries below prune
+   *          threshold are NOT excluded — use prune() for cleanup).
+   */
+  async query(path?: string): Promise<PheromoneQueryResult[]> {
+    const entries = await this.load()
+
+    const filtered = path ? entries.filter(e => e.path === path) : entries
+    const now = Date.now()
+
+    return filtered.map(e => ({
+      ...e,
+      currentStrength: computeCurrentStrength(
+        e.strength,
+        now - e.depositedAt,
+        e.halfLife,
+      ),
+    }))
+  }
+
+  /**
+   * Remove entries whose decayed current strength falls below
+   * the prune threshold (0.05). Persists the result.
+   */
+  async prune(): Promise<void> {
+    const entries = await this.load()
+    const now = Date.now()
+
+    const kept = entries.filter(e => {
+      const cs = computeCurrentStrength(e.strength, now - e.depositedAt, e.halfLife)
+      return cs >= PRUNE_THRESHOLD
+    })
+
+    if (kept.length < entries.length) {
+      await this.save(kept)
+    }
+  }
+}
