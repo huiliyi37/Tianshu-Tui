@@ -194,6 +194,8 @@ export class AgentLoop {
 
   getEvidenceState() { return this.evidence.getState() }
 
+  getDecisions(): string[] { return this.decisions }
+
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }
 
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }

@@ -348,11 +348,16 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       try {
         const evidenceState = agent.getEvidenceState()
         const rawTrajectory = agent.getTrajectoryEntries()
+        const decisions = agent.getDecisions()
+        // Gate: only persist if tests passed OR 3+ files modified
+        const hasPassedTests = evidenceState.verifications.some(v => v.status === 'passed')
+        const hasEnoughFiles = evidenceState.filesModified.size >= 3
+        if (!hasPassedTests && !hasEnoughFiles) throw new Error('gate')
         persistDream(process.cwd(), {
           filesModified: [...evidenceState.filesModified],
           filesRead: [...evidenceState.filesRead],
           verifications: evidenceState.verifications,
-          decisions: [],
+          decisions,
           trajectoryEntries: rawTrajectory.map(e => ({
             tool: e.tool,
             target: e.target,

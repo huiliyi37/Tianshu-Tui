@@ -1447,6 +1447,166 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-05-17T02:23:19.846Z"
+    },
+    {
+      "id": "bug-090",
+      "timestamp": "2026-05-17T05:54:32.347Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "7 lines replaced/restructured",
+      "fix": "Rewrote 22→12 lines (7 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T05:54:32.347Z"
+    },
+    {
+      "id": "bug-091",
+      "timestamp": "2026-05-17T06:10:40.098Z",
+      "error_message": "Type error",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:10:40.098Z"
+    },
+    {
+      "id": "bug-092",
+      "timestamp": "2026-05-17T06:12:14.745Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:12:14.745Z"
+    },
+    {
+      "id": "bug-093",
+      "timestamp": "2026-05-17T06:16:26.021Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/agent/dream.ts",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 23→53 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:16:26.021Z"
+    },
+    {
+      "id": "bug-094",
+      "timestamp": "2026-05-17T06:17:15.458Z",
+      "error_message": "Type error",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:17:15.458Z"
+    },
+    {
+      "id": "bug-095",
+      "timestamp": "2026-05-17T06:17:25.805Z",
+      "error_message": "Missing guard clause",
+      "file": "src/main.tsx",
+      "root_cause": "No early return/throw for edge case: !hasPassedTests && !hasEnoughFiles",
+      "fix": "Added guard clause: if (!hasPassedTests && !hasEnoughFiles)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:17:25.805Z"
+    },
+    {
+      "id": "bug-096",
+      "timestamp": "2026-05-17T06:20:48.764Z",
+      "error_message": "Missing error handling in searchKnowledgeFiles",
+      "file": "src/tools/recall.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:20:48.764Z"
+    },
+    {
+      "id": "bug-097",
+      "timestamp": "2026-05-17T06:28:45.073Z",
+      "error_message": "Wrong operator: <= should be ===",
+      "file": "src/prompt/volatile.ts",
+      "root_cause": "Used \"<=\" instead of \"===\"",
+      "fix": "Changed operator <= → ===",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:28:45.073Z"
+    },
+    {
+      "id": "bug-098",
+      "timestamp": "2026-05-17T06:28:54.499Z",
+      "error_message": "Wrong reference: readKnowledgeFile should be readKnowledgeFiles",
+      "file": "src/prompt/volatile.ts",
+      "root_cause": "Used \"readKnowledgeFile\" instead of \"readKnowledgeFiles\"",
+      "fix": "Changed readKnowledgeFile → readKnowledgeFiles",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:28:54.499Z"
+    },
+    {
+      "id": "bug-099",
+      "timestamp": "2026-05-17T06:29:58.109Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/tools/__tests__/recall.test.ts",
+      "root_cause": "Had 'No claims found'",
+      "fix": "Changed to 'No claims or knowledge found'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:29:58.109Z"
     }
   ]
 }

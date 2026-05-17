@@ -156,4 +156,58 @@ describe('persistDream', () => {
     // Most recent entry (b) should come first
     assert.ok(idxB < idxA, `b.ts should come before a.ts, got b at ${idxB} a at ${idxA}`)
   })
+
+  it('truncates at entry boundary, not mid-line', () => {
+    // Use a fresh tmpDir for this test
+    const truncDir = mkdtempSync(join(tmpdir(), 'dream-trunc-'))
+    try {
+      for (let i = 0; i < 15; i++) {
+        persistDream(truncDir, {
+          filesModified: Array.from({ length: 8 }, (_, j) => `src/module${i}/file${j}.ts`),
+          filesRead: [],
+          verifications: [{ command: 'npm test', status: 'passed', scope: 'full' as const, exitCode: 0, passed: 10, failed: 0, skipped: 0, durationMs: 100 }],
+          decisions: [`Decision for session ${i}`],
+          trajectoryEntries: [{ tool: 'edit_file', target: `src/module${i}/file0.ts`, status: 'success' as const }],
+          sessionId: `session-${String(i).padStart(4, '0')}`,
+        })
+      }
+      const path = join(truncDir, '.rivet', 'knowledge', 'project-memory.md')
+      const content = readFileSync(path, 'utf-8')
+      // File should not exceed MAX_FILE_SIZE (8000)
+      assert.ok(content.length <= 8000, `content length ${content.length} exceeds 8000`)
+      // Every ### header should be complete
+      const lines = content.split('\n')
+      for (const line of lines) {
+        if (line.startsWith('### ')) {
+          assert.match(line, /^### \d{4}-\d{2}-\d{2}/)
+        }
+      }
+    } finally {
+      rmSync(truncDir, { recursive: true, force: true })
+    }
+  })
+
+  it('deduplicates entries with same files in same day', () => {
+    const dedupDir = mkdtempSync(join(tmpdir(), 'dream-dedup-'))
+    try {
+      const baseInput: DreamInput = {
+        filesModified: ['src/same-file.ts'],
+        filesRead: [],
+        verifications: [{ command: 'npm test', status: 'passed', scope: 'full' as const, exitCode: 0, passed: 5, failed: 0, skipped: 0, durationMs: 100 }],
+        decisions: [],
+        trajectoryEntries: [],
+        sessionId: 'session-dup1',
+      }
+      persistDream(dedupDir, baseInput)
+      persistDream(dedupDir, { ...baseInput, sessionId: 'session-dup2' })
+      persistDream(dedupDir, { ...baseInput, sessionId: 'session-dup3' })
+
+      const path = join(dedupDir, '.rivet', 'knowledge', 'project-memory.md')
+      const content = readFileSync(path, 'utf-8')
+      const entryCount = (content.match(/^### /gm) || []).length
+      assert.ok(entryCount <= 2, `expected <=2 entries but got ${entryCount}`)
+    } finally {
+      rmSync(dedupDir, { recursive: true, force: true })
+    }
+  })
 })

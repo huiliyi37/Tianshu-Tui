@@ -1960,3 +1960,38 @@ Aligned `src/tui/activity-status.ts` with the plan exactly: removed comments, pr
 
 Added six pure display functions to `src/tui/activity-status.ts`: `formatActivityDuration` (ms to "0s"/"59s"/"1m 1s"), `formatThinkingSize` (chars to "N chars" or "N.Nk"), `activityPhaseLabel` (phase to concise label), `formatActivitySummary` (full summary string with stale/completed/failed variants), `classifyToolActivity` (MCP vs generic tool phase), and `shouldBeginAnalyzing` (conservative large-result heuristic for read_file/bash). Eight new tests in `src/tui/__tests__/activity-status.test.ts` (14 total). Full test suite (1057 tests) and typecheck pass.
 
+| 13:54 | Edited src/tui/app.tsx | modified if() | ~194 |
+| 13:58 | Session end: 47 writes across 17 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 67 reads | ~170916 tok |
+| 14:00 | Session end: 47 writes across 17 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 68 reads | ~170916 tok |
+| 14:01 | Session end: 47 writes across 17 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 68 reads | ~170916 tok |
+| 14:02 | Created src/tui/fluency-policy.ts | — | ~858 |
+| 14:02 | Created src/tui/__tests__/fluency-policy.test.ts | — | ~3858 |
+| 14:03 | Session end: 49 writes across 19 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 69 reads | ~176490 tok |
+| 14:04 | Session end: 49 writes across 19 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 69 reads | ~176490 tok |
+| 14:06 | Created docs/superpowers/plans/2026-05-17-session-fluency-layer-p2.md | — | ~2872 |
+| 14:07 | Session end: 50 writes across 20 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 72 reads | ~185818 tok |
+| 14:08 | Created src/tui/fluency-hook.ts | — | ~542 |
+| 14:09 | Edited src/tui/app.tsx | added 1 import(s) | ~29 |
+| 14:09 | Created src/tui/__tests__/fluency-hook.test.ts | — | ~2296 |
+| 14:09 | Edited src/tui/app.tsx | 1→3 lines | ~39 |
+| 14:09 | Edited src/tui/__tests__/fluency-hook.test.ts | 5→5 lines | ~46 |
+| 14:09 | Edited src/tui/app.tsx | CSS: Fluency, isError, resultLength | ~253 |
+| 14:10 | Edited src/tui/app.tsx | 3→4 lines | ~83 |
+| 14:10 | Edited src/tui/app.tsx | CSS: type, content | ~99 |
+| 14:11 | Edited src/tui/app.tsx | 4→5 lines | ~90 |
+| 14:12 | Edited src/tui/app.tsx | added nullish coalescing | ~115 |
+| 14:12 | Edited src/tui/app.tsx | 3→8 lines | ~85 |
+| 14:13 | Session end: 61 writes across 22 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 74 reads | ~194227 tok |
+| 14:16 | Edited src/agent/dream.ts | added 5 condition(s) | ~545 |
+| 14:17 | Edited src/agent/loop.ts | modified getEvidenceState() | ~32 |
+| 14:17 | Edited src/main.tsx | CSS: Gate | ~196 |
+| 14:18 | Edited src/agent/__tests__/dream.test.ts | added 1 condition(s) | ~977 |
+| 14:19 | Created src/agent/dream-classify.ts | — | ~361 |
+| 14:19 | Edited src/agent/dream.ts | added 1 import(s) | ~64 |
+| 14:20 | Edited src/agent/dream.ts | added 1 condition(s) | ~280 |
+| 14:20 | Edited src/tools/recall.ts | added 2 import(s) | ~99 |
+| 14:20 | Edited src/tools/recall.ts | added error handling | ~737 |
+| 14:21 | Edited src/prompt/volatile.ts | inline fix | ~17 |
+| 14:28 | Edited src/prompt/volatile.ts | added 2 condition(s) | ~216 |
+| 14:28 | Edited src/prompt/volatile.ts | inline fix | ~14 |
+| 14:29 | Edited src/tools/__tests__/recall.test.ts | "No claims found" → "No claims or knowledge fo" | ~19 |

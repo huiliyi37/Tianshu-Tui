@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, readdirSync } from 'fs'
 import { join } from 'path'
 import os from 'os'
 import { gitStatusCache } from './volatile-git.js'
@@ -78,18 +78,23 @@ function escapeXml(text: string): string {
 
 const KNOWLEDGE_MAX_CHARS = 2000
 
-function readKnowledgeFile(cwd: string): string | undefined {
-  const path = join(cwd, '.rivet', 'knowledge', 'project-memory.md')
+function readKnowledgeFiles(cwd: string): string | undefined {
+  const dir = join(cwd, '.rivet', 'knowledge')
   try {
-    if (existsSync(path)) {
-      const content = readFileSync(path, 'utf-8').trim()
-      if (!content) return undefined
-      return content.length <= KNOWLEDGE_MAX_CHARS
-        ? content
-        : content.slice(0, KNOWLEDGE_MAX_CHARS)
+    if (!existsSync(dir)) return undefined
+    const files = readdirSync(dir).filter(f => f.endsWith('.md'))
+    if (files.length === 0) return undefined
+    files.sort((a, b) => (a === 'project-memory.md' ? -1 : b === 'project-memory.md' ? 1 : a.localeCompare(b)))
+
+    let combined = ''
+    for (const file of files) {
+      const content = readFileSync(join(dir, file), 'utf-8').trim()
+      if (!content) continue
+      if (combined.length + content.length + 10 > KNOWLEDGE_MAX_CHARS) break
+      combined += (combined ? `\n\n<!-- ${file} -->\n` : '') + content
     }
-  } catch { /* ignore */ }
-  return undefined
+    return combined || undefined
+  } catch { return undefined }
 }
 
 /** Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (lazy injection). */
@@ -126,7 +131,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   }
 
   // Inject project memory from previous sessions (Dream distillation)
-  const knowledge = readKnowledgeFile(ctx.cwd)
+  const knowledge = readKnowledgeFiles(ctx.cwd)
   if (knowledge) {
     parts.push(`<project-memory>\n${escapeXml(knowledge)}\n</project-memory>`)
   }

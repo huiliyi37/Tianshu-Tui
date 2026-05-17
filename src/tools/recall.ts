@@ -2,6 +2,8 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimKind } from '../context/claims.js'
 import type { ToolDefinition } from '../api/types.js'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 interface RecallInput {
   query: string
@@ -28,7 +30,30 @@ const DEFINITION: ToolDefinition = {
   },
 }
 
-export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext): Tool {
+export function searchKnowledgeFiles(cwd: string, query: string): string[] {
+  const dir = join(cwd, '.rivet', 'knowledge')
+  if (!existsSync(dir)) return []
+
+  const results: string[] = []
+  const lowerQuery = query.toLowerCase()
+
+  try {
+    const files = readdirSync(dir).filter(f => f.endsWith('.md'))
+    for (const file of files) {
+      const content = readFileSync(join(dir, file), 'utf-8')
+      const entries = content.split(/(?=^### )/m)
+      for (const entry of entries) {
+        if (entry.toLowerCase().includes(lowerQuery)) {
+          results.push(entry.trim())
+        }
+      }
+    }
+  } catch {}
+
+  return results.slice(0, 10)
+}
+
+export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext & { cwd?: string }): Tool {
   return {
     definition: DEFINITION,
     async execute(params: ToolCallParams): Promise<ToolResult> {
@@ -41,10 +66,6 @@ export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext):
         .sort((a, b) => b.fitness - a.fitness || b.confidence - a.confidence)
         .slice(0, limit)
 
-      if (matches.length === 0) {
-        return { content: 'No claims found matching query.' }
-      }
-
       if (ctx) {
         const turn = ctx.getTurn()
         const usedAt = Date.now()
@@ -54,11 +75,29 @@ export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext):
         }
       }
 
-      const formatted = matches.map(c =>
-        `[claim:${c.id.slice(0, 8)}] (${c.kind}, ${c.status}, confidence=${c.confidence.toFixed(2)})\n  ${c.text.slice(0, 200)}`
-      ).join('\n')
+      const parts: string[] = []
 
-      return { content: `Found ${matches.length} claim(s):\n${formatted}` }
+      if (matches.length > 0) {
+        const formatted = matches.map(c =>
+          `[claim:${c.id.slice(0, 8)}] (${c.kind}, ${c.status}, confidence=${c.confidence.toFixed(2)})\n  ${c.text.slice(0, 200)}`
+        ).join('\n')
+        parts.push(`Claims (${matches.length}):\n${formatted}`)
+      }
+
+      // Knowledge file search
+      if (ctx?.cwd) {
+        const knowledgeHits = searchKnowledgeFiles(ctx.cwd, input.query)
+        if (knowledgeHits.length > 0) {
+          const knowledgeFormatted = knowledgeHits.slice(0, 3).map(e => e.slice(0, 300)).join('\n---\n')
+          parts.push(`\nProject knowledge (${knowledgeHits.length} entries):\n${knowledgeFormatted}`)
+        }
+      }
+
+      if (parts.length === 0) {
+        return { content: 'No claims or knowledge found matching query.' }
+      }
+
+      return { content: parts.join('\n') }
     },
     requiresApproval(): boolean { return false },
     isConcurrencySafe(): boolean { return true },

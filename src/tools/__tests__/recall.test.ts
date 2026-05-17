@@ -63,7 +63,7 @@ describe('recall tool', () => {
       const tool = createRecallTool(store)
       const result = await tool.execute({ toolUseId: 't1', input: { query: 'nonexistent' }, cwd: '/tmp' })
 
-      assert.ok(result.content.includes('No claims found'))
+      assert.ok(result.content.includes('No claims or knowledge found'))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

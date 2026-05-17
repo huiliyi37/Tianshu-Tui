@@ -1,31 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T01:22:58.046Z
-> Files: 374 tracked | Anatomy hits: 0 | Misses: 0
->
-> Manual update 2026-05-17: Session HA Task 1 added recoverable session loading and dynamic session-dir resolution in `src/agent/session-persist.ts`, restore recovery notes in `src/tui/app.tsx`, targeted coverage in `src/agent/__tests__/session-persist.test.ts`, standardized synthetic resume repair text in `src/context/resume-preflight.ts`, and buglog entry `bug-079` for session-dir test isolation.
-> Manual update 2026-05-17: Recorded user delegation preference in `.wolf/cerebrum.md`, `.wolf/memory.md`, and persistent memory `feedback_model-delegation.md`; main implementation remains in the primary assistant session.
-> Manual update 2026-05-17: Session HA Task 2 added partial assistant persistence on stream errors in `src/agent/loop.ts`, regression coverage in `src/agent/__tests__/loop.test.ts`, and buglog entry `bug-080`.
-> Manual update 2026-05-17: Session HA Task 3 added `src/tools/process-kill.ts`, process-tree timeout cleanup in `src/tools/bash.ts` and `src/tools/process-tracker.ts`, tests in `src/tools/__tests__/bash.test.ts` and `src/tools/__tests__/process-kill.test.ts`, timeout single-settle protection in `src/tools/bash.ts`, and buglog entry `bug-081`.
-> Manual update 2026-05-17: Session HA Task 4 added configurable MCP operation timeouts and degraded callTool state in `src/mcp/manager.ts`, `degraded` status in `src/mcp/types.ts`, `timeoutMs` config parsing in `src/mcp/config.ts`, tests in `src/mcp/__tests__/manager.test.ts`, and buglog entry `bug-082`.
-> Manual update 2026-05-17: Session HA Task 5 added smart compaction summary quality gates in `src/compact/auto.ts`, fallback coverage in `src/compact/__tests__/auto.test.ts`, and buglog entry `bug-083`.
-> Manual update 2026-05-17: Session HA Task 6 escaped volatile `repairHint` and `sessionMemoryBlock` inside fixed XML tags in `src/prompt/volatile.ts`, added injection regression tests in `src/prompt/__tests__/volatile.test.ts`, and buglog entry `bug-084`.
-> Manual update 2026-05-17: Session HA Task 7 added bounded live stream tail helper in `src/tui/stream-window.ts`, covered it in `src/tui/__tests__/stream-window.test.ts`, connected `src/tui/app.tsx` live display state without truncating final assistant content, and buglog entry `bug-085`.
-> Manual update 2026-05-17: Session HA Task 8 added `resetAccumulator()` and single-step `escalate` behavior in `src/agent/prediction-error.ts`, wired tipping-point recovery in `src/agent/loop.ts`, strengthened `src/agent/__tests__/prediction-error.test.ts`, exported ThinkingCollapser format helpers in `src/tui/thinking.tsx`, added `src/tui/__tests__/thinking.test.tsx`, and buglog entries `bug-086`/`bug-087`.
-> Manual update 2026-05-17: Session HA Task 9 updated `CHANGELOG.md` and `README.md` for Session HA Closure, aligned `src/prompt/__tests__/engine.test.ts` with escaped session-memory volatile context, logged bug `bug-088`, and final validation passed typecheck, 1043 tests, and build.
-> Manual update 2026-05-17: Main merge resolved duplicate Session HA/cerebellar helper definitions in `src/agent/prediction-error.ts` and `src/tui/thinking.tsx`, reran typecheck/tests/build successfully, and logged bug `bug-089`.
-> Manual update 2026-05-17: Documentation refresh expanded `README.md` Session HA Closure status into a completed-this-round checklist, updated architecture entries for restore/process/MCP/compaction/prompt/TUI streaming, and added a CHANGELOG completed/validation section.
-> Manual update 2026-05-17: Activity Status Layer brainstorming produced `docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-design.md` and separate process asset `docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-brainstorm.md` for long-task observability beyond thinking.
-> Manual update 2026-05-17: Activity Status Layer implementation plan added `docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md` with TDD tasks for `src/tui/activity-status.ts`, AgentStatus, ThinkingCollapser, App projection, tool/MCP/analyzing activity, docs, and validation.
-> Manual update 2026-05-17: Activity Status Layer Task 1 created pure lifecycle module `src/tui/activity-status.ts` with ActivityPhase/ActivityLifecycleStatus/ActivityState types and immutable transition functions (createIdleActivity, beginActivity, heartbeatActivity, completeActivity, failActivity, clearActivity), covered in `src/tui/__tests__/activity-status.test.ts` (5 tests), typecheck/tests pass.
-> Manual update 2026-05-17: Activity Status Layer Task 1 follow-up aligned `src/tui/activity-status.ts` with the plan: no idle begin type, shared HeartbeatOptions, idle no-op transitions, completion/failure label and sizeHint updates, with expanded tests in `src/tui/__tests__/activity-status.test.ts`.
-> Manual update 2026-05-17: Activity Status Layer Task 2 added display formatting helpers `formatActivityDuration`, `formatThinkingSize`, `activityPhaseLabel`, `formatActivitySummary`, `classifyToolActivity`, and `shouldBeginAnalyzing` in `src/tui/activity-status.ts`, with eight new tests in `src/tui/__tests__/activity-status.test.ts` (14 total); typecheck and 1057 tests pass.
-> Manual update 2026-05-17: Activity Status Layer Task 3 added `activitySummary` prop to `AgentStatusProps`, exported `statusPhaseText` helper that overrides `phaseLabel` when an activity summary is provided, updated `AgentStatus` component to use it, and added two tests in `src/tui/__tests__/agent-status.test.ts`; typecheck and 133 agent-status tests pass.
-> Manual update 2026-05-17: Activity Status Layer Task 4 added `thinkingStatusLabel` pure helper and `completedDurationMs` prop to `ThinkingCollapser` in `src/tui/thinking.tsx`, extended `src/tui/__tests__/thinking.test.tsx` with three status label tests; typecheck and 19 combined thinking/activity-status tests pass.
-> Manual update 2026-05-17: Activity Status Layer Task 5 added `shouldProjectActivity` cadence guard in `src/tui/activity-status.ts`, wired low-frequency (1Hz) activity projection in `src/tui/app.tsx` for thinking/answer streaming with begin/heartbeat/complete/fail lifecycle, projected activity summary to AgentStatus and completed thinking duration to ThinkingCollapser, added three projection cadence tests; typecheck and 1067 tests pass.
-> Manual update 2026-05-17: Activity Status Layer Task 6 added `toolActivityLabel` and `analysisLabelForTool` helpers in `src/tui/activity-status.ts`, wired tool/MCP activity lifecycle with heartbeat during live output, completion/failure on final result, and analyzing phase for large read_file/bash results in `src/tui/app.tsx`, added three tool label tests in `src/tui/__tests__/activity-status.test.ts`; typecheck and 1067 tests pass.
-> Manual update 2026-05-17: Activity Status Layer Task 6 follow-up renamed the final tool-result local label variable in `src/tui/app.tsx` to `resolvedLabel` to avoid shadowing the imported `toolLabel` helper; focused activity/agent status tests and typecheck pass.
-> Manual update 2026-05-17: Activity Status Layer documentation complete — updated `README.md` with section describing activity coverage and non-goals, added `CHANGELOG.md` entry with validation commands, staged implementation plan, final validation passed typecheck, 1067 tests, and build.
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T06:29:58.095Z
+> Files: 382 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -175,6 +151,7 @@
 - `2026-05-17-project-memory-phase1.md` — Project Memory Phase 1 实现计划 (~4191 tok)
 - `2026-05-17-rivet-ecf-phase5-recall-feedback.md` — ECF Phase 5: Recall 正反馈 + Claim 质量信号 实现计划 (~2705 tok)
 - `2026-05-17-rivet-wave9-defect-fixes.md` — Wave 9: 内部缺陷修复 + 结构优化 实施计划 (~4239 tok)
+- `2026-05-17-session-fluency-layer-p2.md` — Session Fluency Layer Phase 2: UI 接入实现计划 (~2692 tok)
 - `2026-05-17-session-ha-closure.md` — Session HA 闭环补强实现计划 (~8205 tok)
 - `2026-05-17-session-rendering-p0.md` — 会话渲染 P0 实现计划 (~8138 tok)
 - `2026-05-17-session-rendering-p1p2.md` — Session Rendering P1/P2 实现计划 (~2385 tok)
@@ -238,7 +215,7 @@
 - `fs-atomic.ts` — Atomically write a file: write to a temp file in the same directory, (~235 tok)
 - `goal-loop.ts` — Exports GoalLoopAgent, GoalLoopConfig, GoalLoopResult, runGoalLoop (~874 tok)
 - `headless.ts` — Exports HeadlessCliArgs, HeadlessJsonOutput, HeadlessRunResult, HeadlessAgent + 3 more (~1052 tok)
-- `main.tsx` — deepMerge (~6592 tok)
+- `main.tsx` — deepMerge (~6910 tok)
 - `validation.ts` — Exports isValidSessionId, assertValidSessionId (~78 tok)
 
 ## src/__tests__/
@@ -265,6 +242,8 @@
 - `coordinator.ts` — Exports DelegationRequest, CoordinatorRun, WorkerRuntimeFactory, DelegationCoordinatorConfig + 2 mor (~1550 tok)
 - `create-agent-config.ts` — Exports ModelSpec, AgentConfigInput, createAgentConfig (~625 tok)
 - `delivery-gate.ts` — Exports DeliveryGateSeverity, DeliveryGateResult, buildDeliveryGate (~641 tok)
+- `dream-classify.ts` — Exports KnowledgeTopic, classifyEntry (~361 tok)
+- `dream.ts` — Dream distillation — session-end knowledge extraction. (~1546 tok)
 - `evidence.ts` — Exports DeliveryVerificationStatus, EvidenceState, EvidenceTracker (~1212 tok)
 - `execution-guidance.ts` — Exports GuidanceTrajectoryEntry, ExecutionGuidanceInput, ExecutionGuidance, buildExecutionGuidance (~1292 tok)
 - `failure-classifier.ts` — Classify all failures found in a test run output (~1162 tok)
@@ -273,7 +252,7 @@
 - `impact-hint.ts` — Exports ImpactHint, generateImpactHint (~764 tok)
 - `import-graph.ts` — Exports ImportGraph, buildImportGraph, getReverseDeps, invalidateFile (~1122 tok)
 - `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6670 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6912 tok)
 - `prediction-error.ts` — Exports InterventionLevel, PredictionAccumulator, createPredictionAccumulator, recordPrediction + 5 (~610 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
 - `repair-hint.ts` — Exports RepairHintTracker (~368 tok)
@@ -306,6 +285,7 @@
 - `coordinator-state.test.ts` — Declares state (~791 tok)
 - `coordinator.test.ts` — WorkerRuntimeFactory: fakeTool, makeRegistry, resultFor (~2588 tok)
 - `delivery-gate.test.ts` — Declares state (~676 tok)
+- `dream.test.ts` — Declares DreamInput (~2191 tok)
 - `execution-guidance.test.ts` — Declares guidance (~473 tok)
 - `failure-classifier.test.ts` — Declares errors (~1068 tok)
 - `file-history.test.ts` — Declares TMP (~742 tok)
@@ -449,7 +429,7 @@
 - `fingerprint.ts` — Exports PrefixFingerprint, DriftEvent, computeFingerprint, detectDrift (~400 tok)
 - `static.ts` — Exports StaticPromptContext, buildSystemPrompt (~946 tok)
 - `volatile-git.ts` — Exports formatGitStatus, createGitStatusCache, gitStatusCache (~809 tok)
-- `volatile.ts` — Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (laz (~1877 tok)
+- `volatile.ts` — Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (laz (~2243 tok)
 
 ## src/prompt/__tests__/
 
@@ -487,7 +467,7 @@
 - `path-validate.ts` — Exports ValidatedPath, InvalidPath, PathValidationResult, validatePathSafe, validatePath (~241 tok)
 - `process-tracker.ts` — Exports track, killAll, getActiveCount (~322 tok)
 - `read-file.ts` — TUI display: head + tail with line numbers, compact for large files. (~1530 tok)
-- `recall.ts` — Exports RecallContext, createRecallTool (~720 tok)
+- `recall.ts` — Exports RecallContext, searchKnowledgeFiles, createRecallTool (~1086 tok)
 - `registry.ts` — Exports ToolRegistry (~304 tok)
 - `run-tests.ts` — Exports RUN_TESTS_TOOL (~3052 tok)
 - `todo.ts` — Zod schemas: todoItemSchema, todoActionSchema (~880 tok)
@@ -508,7 +488,7 @@
 - `grep.test.ts` — Exports helper (~1243 tok)
 - `output-store.test.ts` — Declares meta (~1015 tok)
 - `path-validate.test.ts` — Declares result (~621 tok)
-- `recall.test.ts` — RecallContext: proposal (~1516 tok)
+- `recall.test.ts` — RecallContext: proposal (~1520 tok)
 - `registry-filter.test.ts` — filterToolRegistry: allowlist, unknown tool, isolation tests (~1819 tok)
 - `run-tests.test.ts` — makeParams: setupProject (~993 tok)
 - `todo.test.ts` — Declares result (~596 tok)
@@ -518,11 +498,13 @@
 ## src/tui/
 
 - `agent-status.tsx` — SPINNER_FRAMES (~1461 tok)
-- `app.tsx` — THINKING_FLUSH_MS (~9578 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~12325 tok)
 - `assistant-message.tsx` — AssistantMessage (~212 tok)
 - `base-text-input.tsx` — Get line/column info from a flat cursor position in a multi-line string (~2889 tok)
 - `block-stream-writer.ts` — Exports BlockStreamConfig, BlockStreamWriter (~729 tok)
 - `error-boundary.tsx` — Increment to force remount children after error recovery (~267 tok)
+- `fluency-hook.ts` — Exports ToolResultEvent, FluencyTracker (~542 tok)
+- `fluency-policy.ts` — --- Fluency Policy --- (~858 tok)
 - `group-logs.ts` — Exports groupLogs (~332 tok)
 - `history-replay.ts` — Exports ReplayResult, replayMessagesToLogEntries (~527 tok)
 - `history.ts` — Exports MAX_HISTORY, loadHistory, nextHistoryAfterSubmit, appendHistory (~251 tok)
@@ -548,6 +530,8 @@
 
 - `assistant-message.test.ts` (~103 tok)
 - `base-text-input.test.ts` — Replicate the helper functions from base-text-input.tsx for testing (~1532 tok)
+- `fluency-hook.test.ts` — --------------------------------------------------------------------------- (~2310 tok)
+- `fluency-policy.test.ts` — Declares baseline (~3858 tok)
 - `group-logs.test.ts` — Declares LogEntry (~1017 tok)
 - `history-replay.test.ts` — Declares result (~763 tok)
 - `interview.test.ts` — INTERVIEW_MARKER_RE: parseInterviewMarker, clarityColor, clarityTrend, formatTok (~1521 tok)

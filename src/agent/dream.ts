@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { VerificationMetadata } from '../tools/types.js'
+import { classifyEntry } from './dream-classify.js'
 
 export interface TrajectoryEntry {
   tool: string
@@ -117,19 +118,54 @@ export function persistDream(cwd: string, input: DreamInput): void {
 
   const dir = join(cwd, '.rivet', 'knowledge')
   ensureDir(dir)
-  const path = join(dir, 'project-memory.md')
 
-  let existing = ''
-  try {
-    existing = readFileSync(path, 'utf-8')
-  } catch {
-    // file doesn't exist yet — start fresh
+  // Always write to main index
+  writeToKnowledgeFile(join(dir, 'project-memory.md'), entry, input)
+
+  // Also write to topic-specific file
+  const topic = classifyEntry(entry)
+  if (topic !== 'general') {
+    writeToKnowledgeFile(join(dir, `${topic}.md`), entry, input)
   }
+}
 
-  const combined = entry + '\n' + existing
-  const trimmed = combined.length > MAX_FILE_SIZE
-    ? combined.slice(0, MAX_FILE_SIZE)
-    : combined
+function writeToKnowledgeFile(path: string, entry: string, input: DreamInput): void {
+  let existing = ''
+  try { existing = readFileSync(path, 'utf-8') } catch {}
 
+  const dedupKey = buildDedupKey(input)
+  const deduped = dedupKey ? removeMatchingEntry(existing, dedupKey) : existing
+
+  const combined = entry + '\n' + deduped
+  const trimmed = trimToEntryBoundary(combined, MAX_FILE_SIZE)
   writeFileSync(path, trimmed, 'utf-8')
+}
+
+function trimToEntryBoundary(content: string, maxSize: number): string {
+  if (content.length <= maxSize) return content
+  const cut = content.slice(0, maxSize)
+  const lastEntry = cut.lastIndexOf('\n### ')
+  if (lastEntry <= 0) return cut
+  return cut.slice(0, lastEntry).trimEnd() + '\n'
+}
+
+function buildDedupKey(input: DreamInput): string | null {
+  if (input.filesModified.length === 0) return null
+  const date = new Date().toISOString().slice(0, 10)
+  const files = [...input.filesModified].sort().join(',')
+  return `${date}:${files}`
+}
+
+function removeMatchingEntry(content: string, dedupKey: string): string {
+  const date = dedupKey.split(':')[0]!
+  const files = dedupKey.split(':').slice(1).join(':')
+  const entries = content.split(/(?=^### )/m)
+  return entries.filter(entry => {
+    if (!entry.startsWith('### ' + date)) return true
+    // Check if same files
+    const modifiedMatch = entry.match(/\*\*Modified\*\*[^:]*:\s*(.+)/)
+    if (!modifiedMatch) return true
+    const entryFiles = modifiedMatch[1]!.replace(/\s*\+\d+ more$/, '').split(', ').sort().join(',')
+    return entryFiles !== files
+  }).join('')
 }
