@@ -1607,6 +1607,22 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-17T06:29:58.109Z"
+    },
+    {
+      "id": "bug-100",
+      "timestamp": "2026-05-17T06:36:06.019Z",
+      "error_message": "Wrong reference: writeFileSync should be writeFileAtomicSync",
+      "file": "src/agent/dream.ts",
+      "root_cause": "Used \"writeFileSync\" instead of \"writeFileAtomicSync\"",
+      "fix": "Changed writeFileSync → writeFileAtomicSync",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T06:36:06.019Z"
     }
   ]
 }

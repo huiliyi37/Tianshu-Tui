@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T06:29:58.095Z
-> Files: 382 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T06:39:20.742Z
+> Files: 383 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -194,6 +194,7 @@
 
 - `2026-05-16-subagent-phase1-validation.md` — 子代理协同 Phase 1 — 自主执行验证报告 (~1377 tok)
 - `2026-05-17-cerebellar-loop-validation.md` — Cerebellar Loop — 自主执行验证报告 (~806 tok)
+- `2026-05-17-fluency-dream-code-review.md` — Session Fluency + Project Memory — Code Review & 修复记录 (~439 tok)
 
 ## prompts/
 
@@ -243,7 +244,7 @@
 - `create-agent-config.ts` — Exports ModelSpec, AgentConfigInput, createAgentConfig (~625 tok)
 - `delivery-gate.ts` — Exports DeliveryGateSeverity, DeliveryGateResult, buildDeliveryGate (~641 tok)
 - `dream-classify.ts` — Exports KnowledgeTopic, classifyEntry (~361 tok)
-- `dream.ts` — Dream distillation — session-end knowledge extraction. (~1546 tok)
+- `dream.ts` — Dream distillation — session-end knowledge extraction. (~1556 tok)
 - `evidence.ts` — Exports DeliveryVerificationStatus, EvidenceState, EvidenceTracker (~1212 tok)
 - `execution-guidance.ts` — Exports GuidanceTrajectoryEntry, ExecutionGuidanceInput, ExecutionGuidance, buildExecutionGuidance (~1292 tok)
 - `failure-classifier.ts` — Classify all failures found in a test run output (~1162 tok)
@@ -498,7 +499,7 @@
 ## src/tui/
 
 - `agent-status.tsx` — SPINNER_FRAMES (~1461 tok)
-- `app.tsx` — THINKING_FLUSH_MS (~12325 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~12370 tok)
 - `assistant-message.tsx` — AssistantMessage (~212 tok)
 - `base-text-input.tsx` — Get line/column info from a flat cursor position in a multi-line string (~2889 tok)
 - `block-stream-writer.ts` — Exports BlockStreamConfig, BlockStreamWriter (~729 tok)
