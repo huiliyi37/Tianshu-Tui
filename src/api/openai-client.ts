@@ -7,6 +7,7 @@ export interface OpenAIClientConfig {
   apiKey: string
   model: string
   maxTokens: number
+  reasoningEffort?: string
 }
 
 interface OpenAIToolCall {
@@ -22,10 +23,34 @@ interface ToolCallChunk {
   function?: { name?: string; arguments?: string }
 }
 
+const MAX_RETRIES = 3
+const BASE_DELAY_MS = 1000
+const READ_TIMEOUT_MS = 120_000
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
+  private pendingStopReason: string | null = null
 
   constructor(private config: OpenAIClientConfig) {}
+
+  setReasoningEffort(effort: string): void {
+    // OpenAI uses reasoning_effort in request body — store for next request
+    this.config = { ...this.config, reasoningEffort: effort }
+  }
 
   async stream(
     request: MessageRequest,
@@ -33,26 +58,61 @@ export class OpenAIClient implements StreamClient {
     signal?: AbortSignal,
   ): Promise<void> {
     const body = this.buildRequestBody(request)
-    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal,
-    })
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '')
-      const msg = parseOpenAIError(response.status, errorBody)
-      throw new Error(msg)
+    let lastError: Error | null = null
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.config.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal,
+        })
+
+        if (!response.ok) {
+          const errorBody = await response.text().catch(() => '')
+          const status = response.status
+
+          // Don't retry on 4xx (except 429)
+          if (status >= 400 && status < 500 && status !== 429) {
+            throw new Error(parseOpenAIError(status, errorBody))
+          }
+
+          lastError = new Error(parseOpenAIError(status, errorBody))
+
+          if (attempt < MAX_RETRIES) {
+            const retryAfter = response.headers.get('retry-after')
+            const delay = retryAfter
+              ? (parseFloat(retryAfter) || BASE_DELAY_MS) * 1000
+              : BASE_DELAY_MS * Math.pow(2, attempt - 1)
+            await abortableDelay(delay, signal)
+            continue
+          }
+          throw lastError
+        }
+
+        const reader = response.body?.getReader()
+        if (!reader) throw new Error('Response body is not readable')
+
+        await this.parseStreamFromReader(reader, callbacks, signal)
+        return // success — exit retry loop
+      } catch (err) {
+        if (signal?.aborted) throw err
+        lastError = err as Error
+
+        // Don't retry if it's an API error (already parsed above)
+        if (lastError.message.startsWith('OpenAI API error')) throw lastError
+
+        if (attempt < MAX_RETRIES) {
+          await abortableDelay(BASE_DELAY_MS * Math.pow(2, attempt - 1), signal)
+          continue
+        }
+        throw lastError
+      }
     }
-
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('Response body is not readable')
-
-    await this.parseStreamFromReader(reader, callbacks, signal)
   }
 
   /** Convert Anthropic MessageRequest to OpenAI chat completions body */
@@ -135,6 +195,7 @@ export class OpenAIClient implements StreamClient {
       messages,
       max_tokens: this.config.maxTokens,
       stream: true,
+      stream_options: { include_usage: true },
     }
   }
 
@@ -146,47 +207,88 @@ export class OpenAIClient implements StreamClient {
   ): Promise<void> {
     const decoder = new TextDecoder()
     let buffer = ''
+    let streamTimedOut = false
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
 
-    while (true) {
-      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || !trimmed.startsWith('data: ')) continue
-
-        const payload = trimmed.slice(6)
-        if (payload === '[DONE]') return
-
-        try {
-          const parsed = JSON.parse(payload)
-          this.processDelta(parsed, callbacks)
-        } catch {
-          // Skip malformed SSE lines
-        }
-      }
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => {
+        streamTimedOut = true
+        reader.cancel().catch(() => {})
+      }, READ_TIMEOUT_MS)
     }
 
-    this.flushToolCalls(callbacks)
+    try {
+      resetIdleTimer()
+      let streamDone = false
+      while (!streamDone) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        if (streamTimedOut) throw new Error('OpenAI SSE stream idle timeout')
+
+        const { done, value } = await reader.read()
+        if (done) break
+
+        resetIdleTimer()
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith('data: ')) continue
+
+          const payload = trimmed.slice(6)
+          if (payload === '[DONE]') { streamDone = true; break }
+
+          try {
+            const parsed = JSON.parse(payload)
+            this.processDelta(parsed, callbacks)
+          } catch {
+            // Skip malformed SSE lines
+          }
+        }
+      }
+
+      this.flushToolCalls(callbacks)
+
+      // If no usage chunk arrived, emit stop reason now
+      if (this.pendingStopReason) {
+        callbacks.onStopReason?.(mapFinishReason(this.pendingStopReason), {})
+        this.pendingStopReason = null
+      }
+    } finally {
+      if (idleTimer) clearTimeout(idleTimer)
+    }
   }
 
   /** Process a single SSE delta chunk — exposed for testing */
   processDelta(
     chunk: {
-      choices: Array<{
+      choices?: Array<{
         delta: { content?: string; tool_calls?: Array<ToolCallChunk> }
         finish_reason?: string | null
       }>
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
     },
     callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onContentBlock' | 'onStopReason'>>,
   ): void {
     const choice = chunk.choices?.[0]
+
+    // Usage-only chunk (final chunk with include_usage)
+    if (chunk.usage && choice === undefined) {
+      const usage = chunk.usage
+      const stopReason = this.pendingStopReason ?? 'end_turn'
+      this.pendingStopReason = null
+      callbacks.onStopReason?.(mapFinishReason(stopReason), {
+        input_tokens: usage.prompt_tokens ?? 0,
+        output_tokens: usage.completion_tokens ?? 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      })
+      return
+    }
+
     if (!choice) return
 
     const delta = choice.delta
@@ -213,7 +315,8 @@ export class OpenAIClient implements StreamClient {
 
     if (choice.finish_reason) {
       this.flushToolCalls(callbacks)
-      callbacks.onStopReason?.(mapFinishReason(choice.finish_reason), {})
+      // Buffer the stop reason — will be emitted when usage chunk arrives
+      this.pendingStopReason = choice.finish_reason
     }
   }
 
