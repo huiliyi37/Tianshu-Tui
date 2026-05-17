@@ -599,15 +599,23 @@ export class AgentLoop {
 
         // Thinking-only turn detection: model produced reasoning but no text or tool calls.
         // Auto-retry with "continue" prompt, but stop if thinking is looping (similar content).
-        if (this.streamedText.length === 0 && collectedBlocks.length === 0 && this.thinkingOnlyRetries < 2) {
-          const isLooping = this.lastThinkingContent.length > 0 &&
-            thinkingAccum.slice(0, 200) === this.lastThinkingContent.slice(0, 200)
+        if (this.streamedText.length === 0 && collectedBlocks.length === 0 && this.thinkingOnlyRetries < 1) {
+          // Detect repetition within this thinking block (e.g. same 100-char chunk repeats 3+ times)
+          const midChunk = thinkingAccum.length > 400 ? thinkingAccum.slice(150, 250) : ''
+          const repeatsInBlock = midChunk.length > 0 &&
+            (thinkingAccum.split(midChunk).length - 1) >= 3
+
+          const isLooping = (this.lastThinkingContent.length > 0 &&
+            thinkingAccum.slice(0, 600) === this.lastThinkingContent.slice(0, 600)) ||
+            repeatsInBlock
+
           if (isLooping) {
             // Thinking loop detected — don't retry, fall through to turn-end
           } else {
             this.lastThinkingContent = thinkingAccum
             this.thinkingOnlyRetries++
-            this.session.addUserMessage('Please continue your response.')
+            // Specific prompt to break the thinking pattern and force direct output
+            this.session.addUserMessage('Please respond directly without additional thinking. Just output your answer.')
             continue
           }
         }

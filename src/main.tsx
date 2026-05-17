@@ -33,6 +33,7 @@ import { runConfigCLI } from './config/manager.js'
 import { McpManager } from './mcp/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
+import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import type { Config, ProviderConfig } from './config/schema.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
@@ -136,6 +137,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         return _coordinatorRef.delegateBatch(requests, policy)
       },
     }))
+    reg.register(ASK_USER_QUESTION_TOOL)
     return reg
   })
 

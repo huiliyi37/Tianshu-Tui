@@ -513,6 +513,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
     }
 
+    // Save original input before any slash-command transformation for display
+    const originalUserInput = userInput
+
     if (userInput.startsWith('/')) {
       const parts = userInput.split(/\s+/)
       const cmd = parts[0]!.toLowerCase()
@@ -526,12 +529,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         pushStatic(createLogEntry({ type: 'system', content: `⚡ Interview mode activated for: ${topic}` }))
         setInterviewState({ intent: topic, clarity: 0, round: 0, maxRounds: 5, tokensUsed: 0, confirmed: false })
-        // Transform input and fall through to main agent.run below
-        const interviewInput = `[interview-mode] ${topic}\n\n[interview-instructions]\nActivate interview mode. Before implementing:\n1. Save my original intent verbatim\n2. Ask ONE clarifying question at a time (prefer A/B/C choices)\n3. Track clarity across: intent clarity, constraints, success criteria, edge cases\n4. After each round, append: <!-- interview:{"intent":"<summary>","clarity":<0-1>,"round":<n>,"maxRounds":5,"tokensUsed":<estimate>} -->\n5. When clarity >= 0.8 OR after 5 rounds, present a cognitive sync summary\n6. Wait for user confirmation before proceeding\n\nClarity base = weighted average of 4 dimensions (each 0 or 1, weight 25%)\n+0.1 if user volunteers edge cases, +0.1 if maps to BDD scenario\n-0.15 if contradictory assumptions, -0.1 if user answers unsure twice\nDegradation: hard cap 5 rounds, if 2 consecutive uncertain answers switch to best-effort mode`
-        pushStatic(createLogEntry({ type: 'user_message', content: userInput }))
-        // Use interview prompt as input, fall through to shared agent.run
+        // Transform input and fall through to shared agent.run below
+        // The long interview prompt is sent to the model only, not displayed to the user
+        const interviewInput = `[interview-mode] ${topic}\n\n[interview-instructions]\nActivate interview mode:\n1. Save my original intent verbatim\n2. Ask ONE clarifying question at a time (prefer A/B/C choices). Keep your reasoning brief — output the question directly.\n3. Track clarity across: intent clarity, constraints, success criteria, edge cases\n4. After each round, append: <!-- interview:{"intent":"<summary>","clarity":<0-1>,"round":<n>,"maxRounds":5,"tokensUsed":<estimate>} -->\n5. When clarity >= 0.8 OR after 5 rounds, present a cognitive sync summary\n6. Wait for user confirmation before proceeding\n\nIMPORTANT: Keep thinking minimal. Do not repeat the same analysis across rounds. Just ask the question concisely.`
         userInput = interviewInput
-        // Skip remaining slash command handling
       } else
       if (cmd === '/rollback') {
         const subcmd = parts[1]
@@ -569,7 +570,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
 
     const promptInput = resolveAppPromptInput(userInput, process.cwd())
-    pushStatic(createLogEntry({ type: 'user_message', content: userInput }))
+    pushStatic(createLogEntry({ type: 'user_message', content: originalUserInput }))
 
     await agent.run(promptInput, {
       onTextDelta: (text) => {

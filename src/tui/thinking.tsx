@@ -43,9 +43,45 @@ export function formatThinkingSize(chars: number): string {
   return `${(chars / 1000).toFixed(1).replace(/\.0$/, '')}k`
 }
 
+function detectRepetition(text: string): { text: string; trimmed: number } {
+  // Detect if a ~100-char paragraph repeats 3+ times in the thinking content.
+  // This catches within-response thinking loops and trims the repetitive tail.
+  const lines = text.split('\n')
+  if (lines.length < 6) return { text, trimmed: 0 }
+
+  // Sample 3 evenly-spaced paragraphs and check for repeats
+  const mid = Math.floor(lines.length / 2)
+  const candidates = [
+    lines.slice(1, Math.min(5, lines.length)).join('\n'),        // near start
+    lines.slice(mid, Math.min(mid + 3, lines.length)).join('\n'), // middle
+    lines.slice(-4, -1).join('\n'),                               // near end
+  ]
+
+  for (const c of candidates) {
+    if (c.length < 40) continue
+    const count = text.split(c).length - 1
+    if (count >= 3) {
+      // Find the first occurrence and truncate after the second repeat
+      let idx = text.indexOf(c)
+      idx = text.indexOf(c, idx + c.length)
+      idx = text.indexOf(c, idx + c.length)
+      if (idx > 0) {
+        const trimmed = text.length - idx
+        return { text: text.slice(0, idx) + `\n... (${trimmed} repetitive characters trimmed)`, trimmed }
+      }
+    }
+  }
+  return { text, trimmed: 0 }
+}
+
 function truncateThinking(text: string): string {
-  if (text.length <= MAX_THINKING_DISPLAY) return text
-  return text.slice(0, MAX_THINKING_DISPLAY) + `\n... (${text.length - MAX_THINKING_DISPLAY} more characters)`
+  // First compress repetitive patterns, then enforce size limit
+  const deduped = detectRepetition(text)
+  let result = deduped.text
+  if (result.length > MAX_THINKING_DISPLAY) {
+    result = result.slice(0, MAX_THINKING_DISPLAY) + `\n... (${result.length - MAX_THINKING_DISPLAY} more characters)`
+  }
+  return result
 }
 
 export function ThinkingCollapser({ thinking, isStreaming, focused = false, completedDurationMs }: ThinkingCollapserProps) {
