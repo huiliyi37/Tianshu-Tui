@@ -51,7 +51,6 @@ export const DEEPSEEK_CAPABILITIES: ProviderCapabilities = {
   stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
   hasToolJsonInContentBug: true,
   effortFormat: 'reasoning_effort',
-  mapUsage: mapDeepSeekUsage,
   prefixCacheStrategy: 'deepseek-native',
 }
 

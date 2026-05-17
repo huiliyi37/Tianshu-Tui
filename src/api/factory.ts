@@ -1,5 +1,6 @@
 import { ApiClient, type ClientConfig } from './client.js'
 import { OpenAIClient } from './openai-client.js'
+import { CodexClient } from './codex-client.js'
 import type { StreamClient } from './stream-client.js'
 import type { ProviderCapabilities } from './provider.js'
 import type { ProviderConfig } from '../config/schema.js'
@@ -41,6 +42,16 @@ export function createProviderClient(
   capabilities: ProviderCapabilities,
   params: RuntimeParams,
 ): StreamClient {
+  // Codex OAuth uses the Responses API, not chat/completions
+  if (provider.name === 'codex' && provider.auth?.type === 'oauth') {
+    return new CodexClient({
+      baseUrl: provider.baseUrl,
+      model: params.model,
+      maxTokens: params.maxTokens,
+      auth: params.auth,
+    })
+  }
+
   if (provider.protocol === 'openai') {
     return new OpenAIClient({
       baseUrl: provider.baseUrl,

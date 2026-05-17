@@ -1623,23 +1623,6 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-17T06:36:06.019Z"
-    },
-    {
-      "id": "bug-101",
-      "timestamp": "2026-05-17T08:28:00Z",
-      "error_message": "DeepSeek cache hit status could stay at 100% when latest turn usage lacked normalized cache metrics",
-      "file": "src/api/provider.ts, src/tui/app.tsx, src/tui/status-bar.tsx, src/tui/slash-commands.ts",
-      "root_cause": "DeepSeek native prompt_cache_hit_tokens/prompt_cache_miss_tokens were not wired through provider capabilities, and the TUI reused historical cache hit rate when the latest turn had no cache counters.",
-      "fix": "Wired mapDeepSeekUsage into DeepSeek capabilities, added cache telemetry projection with stale status, rendered cache:stale in the status bar, and updated /debug cache to report stale/no-current-metrics state.",
-      "tags": [
-        "cache-telemetry",
-        "deepseek",
-        "status-bar",
-        "test-failure"
-      ],
-      "related_bugs": [],
-      "occurrences": 1,
-      "last_seen": "2026-05-17T08:28:00Z"
     }
   ]
 }
