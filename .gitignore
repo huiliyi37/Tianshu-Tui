@@ -9,3 +9,7 @@ findings.md
 progress.md
 task_plan.md
 .superpowers/
+
+# Local agent runtime state
+.claude/worktrees/
+.wolf/
