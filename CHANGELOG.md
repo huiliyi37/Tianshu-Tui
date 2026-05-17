@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-05-17 — Session Fluency + Recall Baseline Closure
+
+### Fixed
+- Folded routine tools now still emit bounded tool evidence in the TUI transcript instead of disappearing behind the fold counter.
+- Fluency stale state is reset at turn boundaries and heartbeated during thinking, answer streaming, tool start, and live tool output.
+- High-volume tool results now drive `inspect` visibility with stronger coalescing through `resultLength` and `outputRate` signals.
+- Recall searches project knowledge through `ToolCallParams.cwd` when no explicit recall context exists, so `.rivet/knowledge/` works in normal TUI execution.
+
+### Documentation
+- README status now treats Session HA, Activity Status, Session Fluency, and Project Memory recall as the closed `main` baseline.
+- The fluency/dream validation report now records the follow-up closure instead of leaving high-volume policy and recall cwd as open risks.
+
+### Validation
+- `npx tsx --test "src/tui/__tests__/fluency-policy.test.ts" "src/tui/__tests__/fluency-hook.test.ts" "src/tools/__tests__/recall.test.ts"` — 77 pass
+- `npm run typecheck`
+- `npm test` — 1195 pass
+- `npm run build`
+
+---
+
 ## 2026-05-17 — Activity Status Layer
 
 ### Added

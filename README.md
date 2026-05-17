@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 12 (Session HA Closure) + ECF Phase 5 complete and merged to `main` — 1043 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, and cerebellar/thinking edge cases are covered by tests.
+Wave 12 (Session HA Closure) + ECF Phase 5 + Session Fluency baseline complete on `main` — 1195 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, cerebellar/thinking edge cases, fluency evidence preservation, and recall project-knowledge lookup are covered by tests.
 
 ### Session HA Closure — completed this round
 
@@ -20,6 +20,14 @@ This round closed the remaining high-availability gaps for interrupted, long-run
 - **Cerebellar/thinking coverage:** prediction-error reset/escalation behavior and ThinkingCollapser formatting have focused regression coverage.
 
 Merge validation for this round passed `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
+
+### Session Fluency + Project Memory baseline closure
+
+This baseline layers flow visibility on top of content preservation without making the terminal heavier. Routine tool output can be folded, but Rivet still emits a bounded tool log summary so the user has evidence in the transcript; high-volume tool output switches the policy into inspect mode with stronger coalescing instead of flooding Ink state. The fluency tracker heartbeats during thinking, answer streaming, tool start, and live tool output so stale warnings age from the current active phase rather than an old event.
+
+Project-memory recall now searches `.rivet/knowledge/` through the tool call `cwd` when no explicit recall context is provided. That keeps recall useful in normal TUI execution, not only in tests or manually constructed contexts.
+
+Closure validation passed focused fluency/recall tests, `npm run typecheck`, `npm test` (1195 pass), and `npm run build`.
 
 ### Activity Status Layer
 
@@ -179,6 +187,9 @@ src/
     ├── status-bar.tsx     Model, cache hit rate, cost, token bar, theme colors
     ├── summary-bar.tsx    Live 3-line cockpit: phase, context%, last action, risk, token/cost
     ├── phase-tracker.ts   Tool→phase state machine (searching/coding/testing/…)
+    ├── activity-status.ts Activity lifecycle, status text, stale cadence, tool/MCP/analyzing labels
+    ├── fluency-policy.ts  Pure visibility policy for quiet/normal/inspect/stress projection
+    ├── fluency-hook.ts    Ref-backed TUI fluency tracker for routine folding, stale, and high-volume signals
     ├── theme.ts           Truecolor/fallback color palette with tool-specific colors
     ├── stream.tsx         Streaming text output (memoized)
     ├── stream-window.ts   Bounded live stream tail window for React state

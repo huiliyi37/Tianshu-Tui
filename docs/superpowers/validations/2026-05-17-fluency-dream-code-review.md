@@ -1,14 +1,14 @@
 # Session Fluency + Project Memory — Code Review & 修复记录
 
 > **日期**: 2026-05-17
-> **审查范围**: `bbc5f8b` ~ `537c4b4` — 13 源文件, ~1000 行新增
+> **审查范围**: `bbc5f8b` ~ `a8bf8ab` — Session Fluency P1/P2, Project Memory Dream P2/P3, recall cwd closure, and TUI evidence preservation
 > **审查者**: Claude Code
 
 ---
 
 ## 1. 审查结论
 
-**APPROVE** — 核心逻辑正确，测试覆盖充分，2 个会话影响的已修复。
+**APPROVE** — 核心逻辑正确，测试覆盖充分，会话影响项已收口到 `main` 基线。
 
 ---
 
@@ -20,6 +20,7 @@
 | `d64eb1e` | Fluency P2: UI integration — fold routine tools + stale warning | ✅ |
 | `99a5a28` | Dream P2/P3: gate+dedup+decisions + topic-classify+recall+volatile | ✅ |
 | `537c4b4` | Fix: atomic write + abort reset | ✅ |
+| `a8bf8ab` | Closure fix: folded tool evidence, high-volume fluency signals, active-phase heartbeat, recall cwd knowledge lookup | ✅ |
 
 ---
 
@@ -36,15 +37,17 @@
 
 | # | 文件 | 问题 | 处理 |
 |---|------|------|------|
-| 3 | `fluency-policy.ts` | `outputRate`/`resultLength` 字段定义了但 computeFluencyPolicy 未使用 | 后续移除 |
-| 4 | `dream.ts` | `dedupKey.split(':')` — Windows 路径含 `:` 时拆分错误 | macOS/Linux 无影响，后续修复 |
+| 3 | `fluency-policy.ts` / `fluency-hook.ts` | `outputRate`/`resultLength` 字段定义了但未进入策略决策 | `a8bf8ab` 已接入 high-volume inspect + coalescing 策略，并补回归测试 |
+| 4 | `app.tsx` | routine tool folding 只递增计数，缺少 bounded evidence | `a8bf8ab` 已保留摘要型 tool log entry，避免“折叠=证据消失” |
+| 5 | `recall.ts` | project knowledge 只读 `ctx.cwd`，正常 tool execution 未传 ctx 时查不到 `.rivet/knowledge/` | `a8bf8ab` 已回退到 `ToolCallParams.cwd`，并补测试 |
+| 6 | `dream.ts` | `dedupKey.split(':')` — Windows 路径含 `:` 时拆分错误 | macOS/Linux 无影响，后续修复 |
 
 ### LOW
 
 | # | 文件 | 问题 | 处理 |
 |---|------|------|------|
-| 5 | `fluency-hook.ts` | `updateSilence` 仅测试用，标记 `@internal` | 后续加注释 |
-| 6 | `recall.ts` | `searchKnowledgeFiles` 无结果缓存 | 总文件 < 56KB，可接受 |
+| 7 | `fluency-hook.ts` | `updateSilence` 仅测试用，标记 `@internal` | 后续加注释 |
+| 8 | `recall.ts` | `searchKnowledgeFiles` 无结果缓存 | 总文件 < 56KB，可接受 |
 
 ---
 
@@ -52,8 +55,10 @@
 
 | 检查 | 结果 |
 |------|------|
+| Focused fluency/recall tests | ✅ 77 pass, 0 fail |
 | Type check | ✅ Pass |
-| Tests | ✅ 1193 pass, 0 fail |
+| Full tests | ✅ 1195 pass, 0 fail |
+| Build | ✅ Pass |
 
 ---
 
@@ -67,5 +72,5 @@
 
 ### 需要注意
 
-- `FluencyTracker` 是 `useRef` 实例，不触发 React 重渲染，由 2s 轮询 interval 驱动 stale 检测 — 有效但有 2s 延迟
-- `foldRoutine` 在 verbose 模式下不自动禁用 — 后续可能需要 `/verbose` 联动
+- `FluencyTracker` 是 `useRef` 实例，不触发 React 重渲染；closure fix 已在 thinking/streaming/tool/live-output 路径 heartbeat，避免 stale 计时沿用旧事件。
+- `foldRoutine` 在 verbose 模式下仍会保留 bounded evidence；后续如果要做 `/verbose` 联动，应只调整展开策略，不应回到无界 live rendering。
