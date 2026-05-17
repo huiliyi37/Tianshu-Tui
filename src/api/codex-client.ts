@@ -130,7 +130,8 @@ export class CodexClient implements StreamClient {
                 arguments: JSON.stringify(block.input),
               })
             } else {
-              textParts.push(this.convertAssistantBlock(block))
+              const converted = this.convertAssistantBlock(block)
+              if (converted) textParts.push(converted)
             }
           }
           if (textParts.length > 0) {
@@ -190,7 +191,7 @@ export class CodexClient implements StreamClient {
       case 'text':
         return { type: 'output_text', text: block.text }
       case 'thinking':
-        return { type: 'output_text', text: block.thinking }
+        return null as unknown as Record<string, unknown>
       case 'tool_use':
         return {
           type: 'function_call',

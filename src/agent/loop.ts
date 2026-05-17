@@ -96,6 +96,7 @@ export class AgentLoop {
   private streamedText = ''
   private thinkingOnlyRetries = 0
   private lastThinkingContent = ''
+  private lastTurnText = ''
   private lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
@@ -446,6 +447,7 @@ export class AgentLoop {
         const collectedBlocks: ContentBlock[] = []
         let thinkingAccum = ''
         let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
+        let turnDisplayBuffer = ''
         const streamCallbacks: StreamCallbacks = {
           onTextDelta: (text) => {
             this.streamedText += text
@@ -453,7 +455,7 @@ export class AgentLoop {
               this.lastPrewarmAt = this.streamedText.length
               this.maybePrewarm(this.streamedText)
             }
-            callbacks.onTextDelta(text)
+            turnDisplayBuffer += text
           },
           onThinkingDelta: (thinking) => {
             thinkingAccum += thinking
@@ -494,6 +496,12 @@ export class AgentLoop {
           streamError = err as Error
         }
 
+        // Flush display buffer: skip if identical to previous turn (suppresses repeated intro text)
+        if (turnDisplayBuffer && turnDisplayBuffer !== this.lastTurnText) {
+          callbacks.onTextDelta(turnDisplayBuffer)
+        }
+        this.lastTurnText = this.streamedText
+
         if (this.abortController.signal.aborted) {
           // Estimate output usage from what was streamed before abort
           const estimatedOut = this.streamedText.length
@@ -511,11 +519,6 @@ export class AgentLoop {
           }
           callbacks.onError(streamError)
           return
-        }
-
-        // Store thinking in session for DeepSeek reasoning_content round-trip
-        if (thinkingAccum) {
-          collectedBlocks.unshift({ type: 'thinking', thinking: thinkingAccum } as ContentBlock)
         }
 
         if (collectedBlocks.length > 0) {
