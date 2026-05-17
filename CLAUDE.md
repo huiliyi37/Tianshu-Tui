@@ -19,8 +19,10 @@ Key paths:
 - `src/main.tsx` — Entry point + CLI routing
 - `src/tui/` — Terminal UI (Ink 6 + React), SummaryBar, PhaseTracker, theme system, cockpit panels, markdown/diff renderer, scroll pager
 - `src/tui/cockpit/` — Multi-panel cockpit (TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, CockpitRail)
-- `src/api/` — SSE streaming client + provider abstraction
-- `src/agent/` — Agent loop + session management + sub-agent coordinator + TurnHarness (retry/trajectory) + task-state extraction + TraceStore + approval-risk
+- `src/api/` — SSE streaming client + provider abstraction + error classifier + structured retry engine
+- `src/agent/` — Agent loop + session management + sub-agent coordinator + TurnHarness (retry/trajectory) + task-state extraction + TraceStore + approval-risk + output token escalation + steer guidance injection
+- `src/tui/render-batch.ts` — Microtask-aligned text delta batching for render efficiency
+- `src/tui/steer-buffer.ts` — User guidance buffer for non-interrupting steer injection during execution
 - `src/tools/` — bash, read_file, write_file, edit_file, git, todo, web_fetch, undo, delegate_task
 - `src/hooks/` — Agent hooks (PreToolUse/PostToolUse/Notification/SubagentStop)
 - `src/mcp/` — MCP client (Model Context Protocol) — config, wrapper, manager, tool discovery
