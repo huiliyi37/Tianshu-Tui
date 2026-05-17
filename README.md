@@ -4,7 +4,22 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 12 (Session HA Closure) + ECF Phase 5 complete — 1043 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, and cerebellar/thinking edge cases are covered by tests.
+Wave 12 (Session HA Closure) + ECF Phase 5 complete and merged to `main` — 1043 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, and cerebellar/thinking edge cases are covered by tests.
+
+### Session HA Closure — completed this round
+
+This round closed the remaining high-availability gaps for interrupted, long-running, or degraded sessions:
+
+- **Recoverable session restore:** `/resume` repairs interrupted tool transcripts with synthetic recovered `tool_result` blocks, and rolls back to the last valid turn snapshot when a transcript is unsafe.
+- **Durable partial assistant output:** stream failures persist already-received assistant content before surfacing the error, so visible work is not lost after a dropped SSE connection.
+- **Process-tree timeout cleanup:** bash timeouts terminate the whole spawned process group, including background descendants, instead of only killing the shell wrapper.
+- **MCP degradation boundaries:** MCP connect, tool discovery, and tool calls have timeout limits; hung calls mark the server degraded instead of hanging the agent loop indefinitely.
+- **Compaction safety gate:** smart compaction rejects empty, oversized, or prompt-like unsafe summaries and falls back to deterministic micro-compaction.
+- **Prompt boundary hardening:** volatile repair hints and session-memory blocks are escaped inside fixed XML tags before injection into the prompt context.
+- **Bounded live TUI state:** live assistant rendering keeps a capped tail window in React state while preserving the full final assistant content outside render state.
+- **Cerebellar/thinking coverage:** prediction-error reset/escalation behavior and ThinkingCollapser formatting have focused regression coverage.
+
+Merge validation for this round passed `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
 
 ## Quick Start
 
@@ -32,7 +47,7 @@ src/
 ├── agent/
 │   ├── loop.ts           Agent loop: LLM call → tool execution → repeat
 │   ├── context.ts        Session state: messages, usage, turn count
-│   ├── session-persist.ts JSONL session persistence + turn snapshots + eviction (~/.rivet/sessions/)
+│   ├── session-persist.ts JSONL session persistence + recoverable restore + turn snapshots + eviction (~/.rivet/sessions/)
 │   ├── checkpoint.ts     Per-project git checkpoint + rollback v2 (agent-owned files only)
 │   ├── file-history.ts   Per-file snapshot backup + rewind (undo backbone)
 │   ├── evidence.ts       File tracking + test result badge + impacted files/tests
@@ -70,7 +85,7 @@ src/
 ├── prompt/
 │   ├── engine.ts         PromptEngine: frozen system prompt + volatile context + XML protocol
 │   ├── static.ts         System prompt builder with 天枢 persona
-│   ├── volatile.ts       Volatile context: .rivet.md, git status, ledger, session memory (stable/latest split)
+│   ├── volatile.ts       Volatile context: .rivet.md, git status, ledger, escaped repair/session-memory blocks
 │   ├── volatile-git.ts   Non-blocking git status: stale cache + async refresh
 │   ├── context-layer.ts  Typed context layer model: stability, channel, fingerprint, stable digest
 │   ├── fingerprint.ts    SHA-256 fingerprint for cache drift detection
@@ -84,7 +99,7 @@ src/
 │   ├── import-graph.ts   Relative import edge graph
 │   └── context-bundle.ts Task context assembly (symbols + tests + risks)
 ├── tools/
-│   ├── bash.ts           Shell execution (spawn), live output streaming
+│   ├── bash.ts           Shell execution (detached spawn), live output streaming, process-tree timeout cleanup
 │   ├── edit.ts           Search-and-replace with uniqueness check
 │   ├── read-file.ts      File reading with offset/limit, .gitignore filter, three-layer output
 │   ├── write-file.ts     File creation/overwrite
@@ -105,12 +120,13 @@ src/
 │   ├── default-registry.ts  Default tool registry factory (11 core tools)
 │   ├── delegate-task.ts  delegate_task tool: Phase 1 read-only worker delegation
 │   ├── gitignore.ts      .gitignore parser + default ignore patterns
-│   ├── process-tracker.ts Child process tracker (killAll on abort)
+│   ├── process-kill.ts    Process-group kill helper with child.kill fallback
+│   ├── process-tracker.ts Child process tracker (killAll on abort/timeout cleanup)
 │   ├── path-validate.ts  Path traversal protection
 │   └── truncation.ts     Output truncation (head + tail)
 ├── compact/
 │   ├── micro.ts          Micro-compact: round-safe truncation with early-return optimization
-│   ├── auto.ts           Smart compact: reactive round selection + boundary message
+│   ├── auto.ts           Smart compact: reactive round selection + boundary message + summary quality gate
 │   └── constants.ts      Compaction thresholds per context window size
 ├── context/
 │   ├── compact-policy.ts Progressive ratio-based compaction (tier 0-4) + circuit breaker
@@ -142,7 +158,7 @@ src/
 ├── mcp/
 │   ├── config.ts         MCP server config schema (stdio/SSE validation)
 │   ├── wrapper.ts        MCP tool → Rivet Tool adapter (mcp__<server>__<tool> naming, __ sanitization, error classification)
-│   ├── manager.ts        Connection lifecycle, parallel tool discovery, error handling
+│   ├── manager.ts        Connection lifecycle, parallel tool discovery, timeouts, degraded state
 │   ├── failure-classifier.ts MCP error taxonomy (config/auth/network/protocol/tool_error, retryable hints)
 │   └── types.ts          McpConnectionState type (with lastErrorClass)
 └── tui/
@@ -154,6 +170,7 @@ src/
     ├── phase-tracker.ts   Tool→phase state machine (searching/coding/testing/…)
     ├── theme.ts           Truecolor/fallback color palette with tool-specific colors
     ├── stream.tsx         Streaming text output (memoized)
+    ├── stream-window.ts   Bounded live stream tail window for React state
     ├── block-stream-writer.ts Semantic break-point streaming (paragraph/newline/space boundaries)
     ├── history-replay.ts  Session history visual replay bridge (Message[] → LogEntry[])
     ├── thinking.tsx       Thinking block with Tab expand/collapse

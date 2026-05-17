@@ -2,6 +2,11 @@
 
 ## 2026-05-17 — Session HA Closure
 
+### Completed
+- Merged the Session HA closure work into `main` after resolving the newer cerebellar/thinking helper changes already present on `main`.
+- Documented the operational guarantee: interrupted sessions should recover, preserve visible partial work, bound long-running operations, and avoid unbounded live render state.
+- Verified the merged result with `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
+
 ### Fixed
 - Restore path now repairs interrupted tool transcripts and rolls back to the last valid turn snapshot when needed.
 - Stream errors persist partial assistant output before surfacing the error.
