@@ -82,12 +82,12 @@ export class CodexClient implements StreamClient {
   private buildRequestBody(request: MessageRequest): Record<string, unknown> {
     const input: Record<string, unknown>[] = []
 
-    // System message
+    // System message → top-level `instructions` (Codex Responses API requirement)
+    let instructions: string | undefined
     if (request.system) {
-      const text = typeof request.system === 'string'
+      instructions = typeof request.system === 'string'
         ? request.system
         : request.system.map(b => b.text).join('\n')
-      input.push({ role: 'developer', content: [{ type: 'input_text', text }] })
     }
 
     // Messages
@@ -122,15 +122,17 @@ export class CodexClient implements StreamClient {
       model: this.config.model,
       input,
       stream: true,
-      max_output_tokens: request.max_tokens ?? this.config.maxTokens,
+      store: false,
+      parallel_tool_calls: true,
+      include: ['reasoning.encrypted_content'],
+    }
+
+    if (instructions) {
+      body.instructions = instructions
     }
 
     if (tools.length > 0) {
       body.tools = tools
-    }
-
-    if (request.temperature !== undefined) {
-      body.temperature = request.temperature
     }
 
     return body
