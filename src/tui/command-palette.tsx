@@ -105,6 +105,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/fork', description: 'Fork current session' },
     { name: '/vim', description: 'Toggle vim keybindings' },
     { name: '/effort', description: 'Set reasoning effort (off|low|medium|high|max)' },
+    { name: '/interview', description: 'Deep interview to clarify requirements' },
     { name: '/exit', description: 'Save session and exit' },
   ]
 }

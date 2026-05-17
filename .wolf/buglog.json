@@ -1248,6 +1248,454 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-17T01:22:21.961Z"
+    },
+    {
+      "id": "bug-079",
+      "timestamp": "2026-05-17T01:26:19.341Z",
+      "error_message": "Missing import: ../agent/auto-reasoning.js",
+      "file": "src/tui/slash-commands.ts",
+      "root_cause": "Module(s) not imported: ../agent/auto-reasoning.js",
+      "fix": "Added import(s) for ../agent/auto-reasoning.js",
+      "tags": [
+        "auto-detected",
+        "missing-import",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:26:19.341Z"
+    },
+    {
+      "id": "bug-080",
+      "timestamp": "2026-05-17T01:26:24.137Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/slash-commands.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:26:24.137Z"
+    },
+    {
+      "id": "bug-081",
+      "timestamp": "2026-05-17T01:26:42.183Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/tui/command-palette.tsx",
+      "root_cause": "Had '/exit'",
+      "fix": "Changed to '/effort'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:26:42.183Z"
+    },
+    {
+      "id": "bug-082",
+      "timestamp": "2026-05-17T01:28:30.287Z",
+      "error_message": "Missing guard clause",
+      "file": ".claude/worktrees/session-ha-closure/src/tools/bash.ts",
+      "root_cause": "No early return/throw for edge case: settled",
+      "fix": "Added guard clause: if (settled)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:28:30.287Z"
+    },
+    {
+      "id": "bug-083",
+      "timestamp": "2026-05-17T01:29:08.835Z",
+      "error_message": "Incorrect value in code",
+      "file": ".claude/worktrees/session-ha-closure/.wolf/anatomy.md",
+      "root_cause": "Had `bug-054`",
+      "fix": "Changed to `src/tools/bash.ts`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:29:08.835Z"
+    },
+    {
+      "id": "bug-084",
+      "timestamp": "2026-05-17T01:31:45.109Z",
+      "error_message": "Null/undefined access in ",
+      "file": ".claude/worktrees/session-ha-closure/src/mcp/__tests__/manager.test.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:31:45.109Z"
+    },
+    {
+      "id": "bug-085",
+      "timestamp": "2026-05-17T01:32:09.965Z",
+      "error_message": "Incorrect value in code",
+      "file": ".claude/worktrees/session-ha-closure/src/mcp/types.ts",
+      "root_cause": "Had 'error'",
+      "fix": "Changed to 'degraded'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:32:09.965Z"
+    },
+    {
+      "id": "bug-086",
+      "timestamp": "2026-05-17T01:32:25.916Z",
+      "error_message": "Null/undefined access in ",
+      "file": ".claude/worktrees/session-ha-closure/src/mcp/manager.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:32:25.916Z"
+    },
+    {
+      "id": "bug-087",
+      "timestamp": "2026-05-17T01:32:39.057Z",
+      "error_message": "Missing error handling in unknown",
+      "file": ".claude/worktrees/session-ha-closure/src/mcp/manager.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:32:39.057Z"
+    },
+    {
+      "id": "bug-088",
+      "timestamp": "2026-05-17T01:35:12.112Z",
+      "error_message": "Null/undefined access in ",
+      "file": ".claude/worktrees/session-ha-closure/src/compact/__tests__/auto.test.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:35:12.112Z"
+    },
+    {
+      "id": "bug-089",
+      "timestamp": "2026-05-17T01:35:37.369Z",
+      "error_message": "Missing guard clause",
+      "file": ".claude/worktrees/session-ha-closure/src/compact/auto.ts",
+      "root_cause": "No early return/throw for edge case: !trimmed",
+      "fix": "Added guard clause: if (!trimmed)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:35:37.369Z"
+    },
+    {
+      "id": "bug-090",
+      "timestamp": "2026-05-17T01:35:44.773Z",
+      "error_message": "Type error",
+      "file": ".claude/worktrees/session-ha-closure/src/compact/auto.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:35:44.773Z"
+    },
+    {
+      "id": "bug-091",
+      "timestamp": "2026-05-17T01:38:42.738Z",
+      "error_message": "Significant refactor of ",
+      "file": ".claude/worktrees/session-ha-closure/src/prompt/__tests__/volatile.test.ts",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 12→28 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:38:42.738Z"
+    },
+    {
+      "id": "bug-092",
+      "timestamp": "2026-05-17T01:43:31.749Z",
+      "error_message": "Incorrect value in code",
+      "file": "CLAUDE.md",
+      "root_cause": "Had `/sessions`",
+      "fix": "Changed to `/clear`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:43:31.749Z"
+    },
+    {
+      "id": "bug-093",
+      "timestamp": "2026-05-17T01:50:42.109Z",
+      "error_message": "Significant refactor of ",
+      "file": ".claude/worktrees/session-ha-closure/src/agent/__tests__/prediction-error.test.ts",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 18→32 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:50:42.109Z"
+    },
+    {
+      "id": "bug-094",
+      "timestamp": "2026-05-17T01:51:08.058Z",
+      "error_message": "Wrong return value",
+      "file": ".claude/worktrees/session-ha-closure/src/agent/prediction-error.ts",
+      "root_cause": "Was returning: order[Math.min(idx + 2, order.length - 1)]!",
+      "fix": "Now returns: order[Math.min(idx + 1, order.length - 1)]!",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:51:08.058Z"
+    },
+    {
+      "id": "bug-095",
+      "timestamp": "2026-05-17T01:52:19.876Z",
+      "error_message": "Missing guard clause",
+      "file": ".claude/worktrees/session-ha-closure/src/tui/thinking.tsx",
+      "root_cause": "No early return/throw for edge case: chars < 1000",
+      "fix": "Added guard clause: if (chars < 1000)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:52:19.876Z"
+    },
+    {
+      "id": "bug-096",
+      "timestamp": "2026-05-17T01:56:52.785Z",
+      "error_message": "Wrong reference: maxTokens should be max_tokens",
+      "file": "src/api/__tests__/openai-client.test.ts",
+      "root_cause": "Used \"maxTokens\" instead of \"max_tokens\"",
+      "fix": "Changed maxTokens → max_tokens",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:56:52.785Z"
+    },
+    {
+      "id": "bug-097",
+      "timestamp": "2026-05-17T01:57:24.624Z",
+      "error_message": "Type error",
+      "file": "src/api/openai-client.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:57:24.624Z"
+    },
+    {
+      "id": "bug-098",
+      "timestamp": "2026-05-17T02:01:59.373Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/compact/auto.ts",
+      "root_cause": "Had '../api/client.js'",
+      "fix": "Changed to '../api/stream-client.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:01:59.373Z"
+    },
+    {
+      "id": "bug-099",
+      "timestamp": "2026-05-17T02:02:03.308Z",
+      "error_message": "Wrong reference: ApiClient should be StreamClient",
+      "file": "src/compact/auto.ts",
+      "root_cause": "Used \"ApiClient\" instead of \"StreamClient\"",
+      "fix": "Changed ApiClient → StreamClient",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:02:03.308Z"
+    },
+    {
+      "id": "bug-100",
+      "timestamp": "2026-05-17T02:02:07.943Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:02:07.943Z"
+    },
+    {
+      "id": "bug-101",
+      "timestamp": "2026-05-17T02:02:39.070Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/agent/worker-session.ts",
+      "root_cause": "Had '../api/client.js'",
+      "fix": "Changed to '../api/stream-client.js'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:02:39.070Z"
+    },
+    {
+      "id": "bug-102",
+      "timestamp": "2026-05-17T02:02:42.877Z",
+      "error_message": "Wrong reference: ApiClient should be StreamClient",
+      "file": "src/agent/worker-session.ts",
+      "root_cause": "Used \"ApiClient\" instead of \"StreamClient\"",
+      "fix": "Changed ApiClient → StreamClient",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:02:42.877Z"
+    },
+    {
+      "id": "bug-103",
+      "timestamp": "2026-05-17T02:05:30.670Z",
+      "error_message": "Incorrect value in code",
+      "file": ".claude/worktrees/session-ha-closure/.wolf/anatomy.md",
+      "root_cause": "Had `src/agent/__tests__/prediction-error.test.ts`",
+      "fix": "Changed to `src/agent/loop.ts`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:05:30.670Z"
+    },
+    {
+      "id": "bug-104",
+      "timestamp": "2026-05-17T02:11:45.130Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/api/openai-client.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:11:45.130Z"
+    },
+    {
+      "id": "bug-105",
+      "timestamp": "2026-05-17T02:18:06.531Z",
+      "error_message": "Significant refactor of ",
+      "file": ".claude/worktrees/session-ha-closure/src/agent/__tests__/prediction-error.test.ts",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 10→6 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:18:06.531Z"
+    },
+    {
+      "id": "bug-106",
+      "timestamp": "2026-05-17T02:26:50.959Z",
+      "error_message": "Incorrect value in code",
+      "file": "src/tui/command-palette.tsx",
+      "root_cause": "Had '/exit'",
+      "fix": "Changed to '/interview'",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:26:50.959Z"
     }
   ]
 }

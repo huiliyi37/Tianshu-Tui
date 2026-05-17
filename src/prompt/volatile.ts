@@ -76,6 +76,22 @@ function escapeXml(text: string): string {
     .replaceAll('"', '&quot;')
 }
 
+const KNOWLEDGE_MAX_CHARS = 2000
+
+function readKnowledgeFile(cwd: string): string | undefined {
+  const path = join(cwd, '.rivet', 'knowledge', 'project-memory.md')
+  try {
+    if (existsSync(path)) {
+      const content = readFileSync(path, 'utf-8').trim()
+      if (!content) return undefined
+      return content.length <= KNOWLEDGE_MAX_CHARS
+        ? content
+        : content.slice(0, KNOWLEDGE_MAX_CHARS)
+    }
+  } catch { /* ignore */ }
+  return undefined
+}
+
 /** Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (lazy injection). */
 export function buildStableVolatileBlock(ctx: VolatileContext): string {
   return buildVolatileBlockInternal({
@@ -107,6 +123,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)
   if (md) {
     parts.push(`<project-instructions>\n${escapeXml(md)}\n</project-instructions>`)
+  }
+
+  // Inject project memory from previous sessions (Dream distillation)
+  const knowledge = readKnowledgeFile(ctx.cwd)
+  if (knowledge) {
+    parts.push(`<project-memory>\n${escapeXml(knowledge)}\n</project-memory>`)
   }
 
   const git = ctx.gitStatus ?? gitStatusCache.get(ctx.cwd)

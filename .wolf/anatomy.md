@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T01:22:58.046Z
-> Files: 374 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T02:29:02.060Z
+> Files: 398 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -15,15 +15,19 @@
 
 - `config.yaml` (~2172 tok)
 
+## ../../../.rivet/
+
+- `config.json` (~496 tok)
+
 ## ./
 
 - `.gitignore` — Git ignore rules (~23 tok)
 - `CHANGELOG.md` — Changelog (~6162 tok)
-- `CLAUDE.md` — Rivet (~310 tok)
+- `CLAUDE.md` — Rivet (~417 tok)
 - `config.example.toml` — ~/.opencode/config.toml (~232 tok)
 - `package-lock.json` — npm lock file (~19981 tok)
 - `package.json` — Node.js package manifest (~164 tok)
-- `README.md` — Project documentation (~13658 tok)
+- `README.md` — Project documentation (~13718 tok)
 - `tsconfig.json` — TypeScript configuration (~153 tok)
 - `tsup.config.ts` (~65 tok)
 
@@ -31,38 +35,73 @@
 
 - `settings.json` (~441 tok)
 
+## .claude/PRPs/reviews/
+
+- `pr-openai-client-review.md` — Code Review: feat/openai-client — OpenAI Protocol Client (~910 tok)
+
 ## .claude/rules/
 
 - `openwolf.md` (~313 tok)
 
 ## .claude/worktrees/session-ha-closure/
 
+- `CHANGELOG.md` — Changelog (~6464 tok)
 - `package-lock.json` (~19976 tok)
+- `README.md` — Project documentation (~14202 tok)
 
 ## .claude/worktrees/session-ha-closure/.wolf/
 
-- `anatomy.md` — anatomy.md (~7130 tok)
+- `anatomy.md` — anatomy.md (~8350 tok)
 - `buglog.json` — Declares annotation (~7919 tok)
 - `cerebrum.md` — Cerebrum (~616 tok)
-- `memory.md` — Memory (~34104 tok)
+- `memory.md` — Memory (~38548 tok)
 
 ## .claude/worktrees/session-ha-closure/src/agent/
 
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6684 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6766 tok)
+- `prediction-error.ts` — Exports InterventionLevel, PredictionAccumulator, createPredictionAccumulator, resetAccumulator + 5 (~610 tok)
 - `session-persist.ts` — Append a single message to the session file (~2560 tok)
 
 ## .claude/worktrees/session-ha-closure/src/agent/__tests__/
 
 - `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~7485 tok)
+- `prediction-error.test.ts` — Declares acc (~1582 tok)
 - `session-persist.test.ts` — Declares persist (~2085 tok)
+
+## .claude/worktrees/session-ha-closure/src/compact/
+
+- `auto.ts` — Decide whether automatic compaction should fire. (~1935 tok)
+
+## .claude/worktrees/session-ha-closure/src/compact/__tests__/
+
+- `auto.test.ts` — Declares baseConfig (~1409 tok)
 
 ## .claude/worktrees/session-ha-closure/src/context/
 
 - `resume-preflight.ts` — Exports runResumePreflight (~681 tok)
 
+## .claude/worktrees/session-ha-closure/src/mcp/
+
+- `config.ts` — Zod schemas: mcpServerConfigSchema, mcpConfigSchema (~283 tok)
+- `manager.ts` — Exports McpToolDef, ConnectedServer, McpManager (~1792 tok)
+- `types.ts` — Exports McpConnectionState (~72 tok)
+
+## .claude/worktrees/session-ha-closure/src/mcp/__tests__/
+
+- `manager.test.ts` — makeConfig: wait (~1626 tok)
+
+## .claude/worktrees/session-ha-closure/src/prompt/
+
+- `volatile.ts` — Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (laz (~1950 tok)
+
+## .claude/worktrees/session-ha-closure/src/prompt/__tests__/
+
+- `engine.test.ts` — Declares makeEngine (~1924 tok)
+- `volatile.test.ts` — VolatileContext: ledger (~3257 tok)
+
 ## .claude/worktrees/session-ha-closure/src/tools/
 
-- `bash.ts` — Exports BASH_TOOL (~1411 tok)
+- `bash.ts` — Exports BASH_TOOL (~1565 tok)
 - `process-kill.ts` — Exports killProcessTree (~119 tok)
 - `process-tracker.ts` — Exports track, killAll, getActiveCount (~205 tok)
 
@@ -73,7 +112,14 @@
 
 ## .claude/worktrees/session-ha-closure/src/tui/
 
-- `app.tsx` — THINKING_FLUSH_MS (~9654 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~9693 tok)
+- `stream-window.ts` — Exports appendStreamWindow (~93 tok)
+- `thinking.tsx` — MAX_THINKING_DISPLAY (~894 tok)
+
+## .claude/worktrees/session-ha-closure/src/tui/__tests__/
+
+- `stream-window.test.ts` — Declares result (~192 tok)
+- `thinking.test.tsx` (~153 tok)
 
 ## .omc/
 
@@ -249,7 +295,7 @@
 - `impact-hint.ts` — Exports ImpactHint, generateImpactHint (~764 tok)
 - `import-graph.ts` — Exports ImportGraph, buildImportGraph, getReverseDeps, invalidateFile (~1122 tok)
 - `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6670 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6738 tok)
 - `prediction-error.ts` — Exports InterventionLevel, PredictionAccumulator, createPredictionAccumulator, recordPrediction + 5 (~610 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
 - `repair-hint.ts` — Exports RepairHintTracker (~368 tok)
@@ -269,7 +315,7 @@
 - `work-queue.ts` — Exports QueueEntry, WorkOrderQueue (~472 tok)
 - `worker-evidence.ts` — Exports verifyWorkerEvidence (~385 tok)
 - `worker-prompts.ts` — buildWorkerPrompt, buildWorkerRepairPrompt, buildPrimaryWorkerPacket (~2263 tok)
-- `worker-session.ts` — Exports WorkerSessionConfig, WorkerTranscript, WorkerSessionRun, runWorkerSession (~1132 tok)
+- `worker-session.ts` — Exports WorkerSessionConfig, WorkerTranscript, WorkerSessionRun, runWorkerSession (~1136 tok)
 
 ## src/agent/__tests__/
 
@@ -309,21 +355,25 @@
 
 ## src/api/
 
-- `client.ts` — Whether the provider has a known bug where tool JSON appears in text content (~3998 tok)
+- `client.ts` — Whether the provider has a known bug where tool JSON appears in text content (~4024 tok)
 - `deepseek.ts` — Generic factory: create an ApiClient for any provider described by a (~572 tok)
-- `factory.ts` — Runtime parameters that vary per-model or per-call, not stored in config (~663 tok)
+- `factory.ts` — Runtime parameters that vary per-model or per-call, not stored in config (~671 tok)
+- `openai-client.ts` — Convert Anthropic MessageRequest to OpenAI chat completions body (~3164 tok)
 - `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~459 tok)
 - `sse.ts` — Exports SSEEvent, SSEParser (~635 tok)
+- `stream-client.ts` — Canonical streaming interface shared by all provider clients (~124 tok)
 - `types.ts` — Exports ContentBlockText, ContentBlockThinking, ContentBlockToolUse, ContentBlockToolResult + 7 more (~552 tok)
 
 ## src/api/__tests__/
 
+- `factory.test.ts` — Declares RuntimeParams (~970 tok)
+- `openai-client.test.ts` — OpenAIClientConfig: makeRequest (~4300 tok)
 - `schema-gate.test.ts` (~205 tok)
 - `sse.test.ts` — Declares parser (~1419 tok)
 
 ## src/compact/
 
-- `auto.ts` — Decide whether automatic compaction should fire. (~1732 tok)
+- `auto.ts` — Decide whether automatic compaction should fire. (~1735 tok)
 - `constants.ts` — Compaction constants ported from DeepSeek TUI compaction.rs (v0.8.11+). (~485 tok)
 - `index.ts` — Declares CompactionDecision (~104 tok)
 - `micro.ts` — MicroCompact: lightweight round-safe truncation without API calls. (~1270 tok)
@@ -494,10 +544,11 @@
 ## src/tui/
 
 - `agent-status.tsx` — SPINNER_FRAMES (~1461 tok)
-- `app.tsx` — THINKING_FLUSH_MS (~9578 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~9646 tok)
 - `assistant-message.tsx` — AssistantMessage (~212 tok)
 - `base-text-input.tsx` — Get line/column info from a flat cursor position in a multi-line string (~2889 tok)
 - `block-stream-writer.ts` — Exports BlockStreamConfig, BlockStreamWriter (~729 tok)
+- `command-palette.tsx` — filterCommands (~1117 tok)
 - `error-boundary.tsx` — Increment to force remount children after error recovery (~267 tok)
 - `group-logs.ts` — Exports groupLogs (~332 tok)
 - `history-replay.ts` — Exports ReplayResult, replayMessagesToLogEntries (~527 tok)
@@ -506,7 +557,7 @@
 - `log-state.ts` — Exports LogEntryType, LogEntry, createLogEntry, appendLogInPlace + 3 more (~650 tok)
 - `phase-tracker.ts` — Exports Phase, LastAction, PhaseTracker (~486 tok)
 - `ring-buffer.ts` — Exports RingBuffer, createRingBuffer (~278 tok)
-- `slash-commands.ts` — Exports SlashHandlerContext, formatContextClaimsCommand, resolveAppPromptInput, handleSlashCommand (~6774 tok)
+- `slash-commands.ts` — Exports SlashHandlerContext, formatContextClaimsCommand, resolveAppPromptInput, handleSlashCommand (~7047 tok)
 - `slash-hint.tsx` — SlashHint (~319 tok)
 - `status-bar.tsx` — tokenBar (~1255 tok)
 - `stream.tsx` — StreamOutput (~124 tok)
