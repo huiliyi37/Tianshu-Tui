@@ -94,6 +94,7 @@ export class AgentLoop {
   private recentToolHistory: ToolHistoryEntry[] = []
   private prewarm = new PrewarmCache(60_000, 50)
   private streamedText = ''
+  private thinkingOnlyRetries = 0
   private lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
@@ -378,6 +379,7 @@ export class AgentLoop {
     this.traceStore = createTraceStore()
     this.predictionAccumulator = createPredictionAccumulator()
     // Reset accumulations from previous run
+    this.thinkingOnlyRetries = 0
     this.evidence.reset()
     this.repairHintTracker = new RepairHintTracker()
     this.userAnchors = []
@@ -440,6 +442,7 @@ export class AgentLoop {
         this.refreshActiveClaims()
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const collectedBlocks: ContentBlock[] = []
+        let thinkingAccum = ''
         let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
         const streamCallbacks: StreamCallbacks = {
           onTextDelta: (text) => {
@@ -451,6 +454,7 @@ export class AgentLoop {
             callbacks.onTextDelta(text)
           },
           onThinkingDelta: (thinking) => {
+            thinkingAccum += thinking
             callbacks.onThinkingDelta(thinking)
           },
           onContentBlock: (block) => {
@@ -505,6 +509,11 @@ export class AgentLoop {
           }
           callbacks.onError(streamError)
           return
+        }
+
+        // Store thinking in session for DeepSeek reasoning_content round-trip
+        if (thinkingAccum) {
+          collectedBlocks.unshift({ type: 'thinking', thinking: thinkingAccum } as ContentBlock)
         }
 
         if (collectedBlocks.length > 0) {
@@ -585,6 +594,15 @@ export class AgentLoop {
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount())
           continue
         }
+
+        // Thinking-only turn detection: model produced reasoning but no text or tool calls.
+        // Auto-retry with a "continue" prompt (up to 2 times).
+        if (this.streamedText.length === 0 && collectedBlocks.length === 0 && this.thinkingOnlyRetries < 2) {
+          this.thinkingOnlyRetries++
+          this.session.addUserMessage('Please continue your response.')
+          continue
+        }
+        this.thinkingOnlyRetries = 0
 
         const finalResult = processTurnEnd({
           config: this.config,
