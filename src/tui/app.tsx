@@ -85,7 +85,7 @@ function renderStaticEntry(entry: LogEntry, verbose: boolean) {
     case 'user_message':
       return <UserMessage key={entry.id} content={entry.content} />
     case 'assistant_message':
-      return <AssistantMessage key={entry.id} content={entry.content} />
+      return <AssistantMessage key={entry.id} content={entry.content} thinking={entry.thinking} />
     case 'tool':
       return <ToolCard key={entry.id} name={entry.toolName ?? ''} result={entry.content} isError={entry.isError} verbose={verbose} rawPath={entry.rawPath} />
     case 'tool_group':
@@ -466,6 +466,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setFluencyStale(null)
     fluencyRef.current.onTurnComplete()
     foldedCountRef.current = 0
+    migrateToFrozen()
 
     streamBuf.current = ''
     thinkBuf.current = ''
@@ -782,7 +783,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             pushStatic(createLogEntry({ type: 'assistant_message', content: '', thinking: thinkBuf.current }))
           }
         }
-        streamBuf.current = ''
+        // Stop streaming FIRST so StreamOutput unmounts while text is still present,
+        // then clear text — prevents blank-cursor flash frame on turn completion.
+        setIsStreaming(false)
         setStreamingText('')
 
         if (thinkTimer.current) {
@@ -799,8 +802,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         liveToolsRef.current = []
         setLiveTools([])
-
-        setIsStreaming(false)
 
         // Turn-level cache hit rate for StatusBar (last 3 turns)
         const recentHitRate = session.getRecentTurnHitRate(3) ?? session.getCacheHitRate()
@@ -838,7 +839,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const estimatedCost = (normalInput * 1 + usage.cache_read_input_tokens * 0.1 + usage.output_tokens * 4) / 1_000_000
         setCost(estimatedCost)
 
-        migrateToFrozen()
 
       },
       onError: (error) => {
@@ -861,6 +861,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           pushStatic(createLogEntry({ type: 'assistant_message', content: streamBuf.current, thinking: thinkBuf.current || undefined }))
         }
         streamBuf.current = ''
+        // Stop streaming FIRST, then clear text — prevents flash frame on error.
+        setIsStreaming(false)
         setStreamingText('')
         thinkBuf.current = ''
         setStreamingThinking('')
@@ -873,7 +875,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: `Error: ${error.message}`, isError: true }))
-        setIsStreaming(false)
       },
       onAbort: () => {
         // Mark current activity as failed and project before cleanup
@@ -894,6 +895,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           pushStatic(createLogEntry({ type: 'assistant_message', content: streamBuf.current, thinking: thinkBuf.current || undefined }))
         }
         streamBuf.current = ''
+        // Stop streaming FIRST, then clear text — prevents flash frame on abort.
+        setIsStreaming(false)
         setStreamingText('')
         thinkBuf.current = ''
         setStreamingThinking('')
@@ -906,7 +909,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
-        setIsStreaming(false)
       },
       onApprovalRequired: async (id, name, input) => {
         fluencyRef.current.recordApproval()
