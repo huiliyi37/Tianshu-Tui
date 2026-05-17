@@ -23,6 +23,7 @@ const TOOL_MAP: Record<string, ToolFamilyInfo> = {
   repo_map:        { family: 'find',  glyph: '⌕', verb: 'map'      },
   todo:            { family: 'other', glyph: '•', verb: 'todo'     },
   recall:          { family: 'find',  glyph: '⌕', verb: 'recall'   },
+  ask_user_question: { family: 'other', glyph: '?', verb: 'ask'    },
 }
 
 const DEFAULT: ToolFamilyInfo = { family: 'other', glyph: '•', verb: 'tool' }

@@ -69,7 +69,7 @@ export function createDelegateBatchTool(coordinator: DelegateBatchCoordinator): 
       }
     },
     requiresApproval: () => false,
-    isConcurrencySafe: () => false,
+    isConcurrencySafe: () => true,
     isEnabled: () => true,
   }
 }

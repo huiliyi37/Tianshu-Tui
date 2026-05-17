@@ -44,30 +44,50 @@ export function formatThinkingSize(chars: number): string {
 }
 
 function detectRepetition(text: string): { text: string; trimmed: number } {
-  // Detect if a ~100-char paragraph repeats 3+ times in the thinking content.
-  // This catches within-response thinking loops and trims the repetitive tail.
+  // Detect within-response thinking loops at line and paragraph level.
+  // Trims after the 3rd+ repetition so the user sees a clean summary.
   const lines = text.split('\n')
   if (lines.length < 6) return { text, trimmed: 0 }
 
-  // Sample 3 evenly-spaced paragraphs and check for repeats
+  // Strategy 1: single non-blank line repeating 5+ times
+  const freq = new Map<string, number>()
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.length < 20) continue
+    freq.set(trimmed, (freq.get(trimmed) ?? 0) + 1)
+  }
+  for (const [l, count] of freq) {
+    if (count >= 5) {
+      // Find the first 3 occurrences and truncate after the 3rd
+      const needle = lines.find(l2 => l2.trim() === l) ?? l
+      let idx = text.indexOf(needle)
+      idx = text.indexOf(needle, idx + needle.length)
+      idx = text.indexOf(needle, idx + needle.length)
+      if (idx > 0) {
+        idx += needle.length // truncate after the 3rd occurrence's full line
+        const trimmed = text.length - idx
+        return { text: text.slice(0, idx) + `\n... (${trimmed} repetitive characters trimmed)`, trimmed }
+      }
+    }
+  }
+
+  // Strategy 2: 3-line segment repeating 3+ times
   const mid = Math.floor(lines.length / 2)
-  const candidates = [
+  const segmentCandidates = [
     lines.slice(1, Math.min(5, lines.length)).join('\n'),        // near start
-    lines.slice(mid, Math.min(mid + 3, lines.length)).join('\n'), // middle
-    lines.slice(-4, -1).join('\n'),                               // near end
+    lines.slice(mid, Math.min(mid + 4, lines.length)).join('\n'), // middle (4 lines for better hit rate)
+    lines.slice(-5, -1).join('\n'),                               // near end
   ]
 
-  for (const c of candidates) {
+  for (const c of segmentCandidates) {
     if (c.length < 40) continue
     const count = text.split(c).length - 1
-    if (count >= 3) {
-      // Find the first occurrence and truncate after the second repeat
+    if (count >= 2) {
       let idx = text.indexOf(c)
-      idx = text.indexOf(c, idx + c.length)
       idx = text.indexOf(c, idx + c.length)
       if (idx > 0) {
         const trimmed = text.length - idx
-        return { text: text.slice(0, idx) + `\n... (${trimmed} repetitive characters trimmed)`, trimmed }
+        return { text: text.slice(0, idx + c.length) + `\n... (${trimmed} repetitive characters trimmed)`, trimmed }
       }
     }
   }

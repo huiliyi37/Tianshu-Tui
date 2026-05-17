@@ -109,7 +109,7 @@ export function createDelegateTaskTool(
       }
     },
     requiresApproval: () => false,
-    isConcurrencySafe: () => false,
+    isConcurrencySafe: () => true,
     isEnabled: () => true,
   }
 }
