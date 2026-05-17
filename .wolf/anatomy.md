@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T03:59:49.839Z
-> Files: 407 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T04:23:40.983Z
+> Files: 410 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -204,6 +204,7 @@
 - `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5642 tok)
 - `2026-05-17-cerebellar-loop.md` — Cerebellar Loop: Prediction-Error Accumulator 实现计划 (~4838 tok)
 - `2026-05-17-deep-interview-plan.md` — Deep Interview 实施计划 (~196 tok)
+- `2026-05-17-failure-classifier-expansion.md` — Failure Classifier Expansion + Activity Status Integration 实现计划 (~4594 tok)
 - `2026-05-17-multi-provider-phase1.md` — Multi-Provider Integration Phase 1 实现计划 (~4349 tok)
 - `2026-05-17-multi-provider-phase2.md` — Multi-Provider Phase 2: OpenAIClient 实现计划 (~7193 tok)
 - `2026-05-17-project-memory-dream-p2p3.md` — Project Memory Dream Phase 2 + Phase 3 实现计划 (~5864 tok)
@@ -239,6 +240,7 @@
 - `2026-05-16-rivet-xml-protocol-speculative-engine-design.md` — Rivet XML Protocol Layer + Speculative Pre-warming 设计 (~2060 tok)
 - `2026-05-17-cerebellar-loop-brainstorm.md` — Cerebellar Loop: Deep Brainstorm 过程记录 (~1245 tok)
 - `2026-05-17-deep-interview-design.md` — Deep Interview — 认知对齐模式 (~1212 tok)
+- `2026-05-17-failure-classifier-expansion-design.md` — Failure Classifier Expansion + Activity Status Integration (~3228 tok)
 - `2026-05-17-multi-provider-integration-design.md` — Multi-Provider Integration: Design (v2 — Deep Brainstorm) (~4366 tok)
 - `2026-05-17-multi-provider-integration.md` — Multi-Provider Integration: Session Rendering P1/P2 + Cross-Provider Switching (~1031 tok)
 - `2026-05-17-project-memory-brainstorm.md` — 项目记忆系统：深度头脑风暴过程 (~963 tok)
@@ -307,13 +309,13 @@
 - `delivery-gate.ts` — Exports DeliveryGateSeverity, DeliveryGateResult, buildDeliveryGate (~641 tok)
 - `evidence.ts` — Exports DeliveryVerificationStatus, EvidenceState, EvidenceTracker (~1212 tok)
 - `execution-guidance.ts` — Exports GuidanceTrajectoryEntry, ExecutionGuidanceInput, ExecutionGuidance, buildExecutionGuidance (~1292 tok)
-- `failure-classifier.ts` — Classify all failures found in a test run output (~1162 tok)
+- `failure-classifier.ts` — Classify all failures found in a test run output (~1708 tok)
 - `file-history-persist.ts` — Exports FileSnapshot, HistoryEntry, persistFileHistory, loadFileHistory (~213 tok)
 - `file-history.ts` — Exports FileBackup, FileSnapshot, DiffStats, FileHistory (~1780 tok)
 - `impact-hint.ts` — Exports ImpactHint, generateImpactHint (~764 tok)
 - `import-graph.ts` — Exports ImportGraph, buildImportGraph, getReverseDeps, invalidateFile (~1122 tok)
 - `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6738 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6802 tok)
 - `prediction-error.ts` — Exports InterventionLevel, PredictionAccumulator, createPredictionAccumulator, recordPrediction + 5 (~610 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
 - `repair-hint.ts` — Exports RepairHintTracker (~368 tok)
@@ -323,7 +325,7 @@
 - `session-persist.ts` — Append a single message to the session file (~2266 tok)
 - `strategy-shift.ts` — Exports TrajectorySummary, suggestStrategyShift (~103 tok)
 - `task-state.ts` — Exports TaskState, extractTaskState (~326 tok)
-- `tool-pipeline.ts` — Exports ToolPipelineDeps, ToolExecResult, executeToolUse (~5131 tok)
+- `tool-pipeline.ts` — Failure classes that trigger onPhaseChange('blocked') — user-visible state. (~5315 tok)
 - `trace-store.ts` — Exports TraceEventKind, TraceEventStatus, DoomLoopLevel, TraceEvent + 9 more (~718 tok)
 - `trajectory.ts` — Exports TrajectoryEntry, TrajectoryRecorder (~312 tok)
 - `turn-end.ts` — Exports TurnEndDeps, TurnEndResult, processTurnEnd (~781 tok)
@@ -347,7 +349,7 @@
 - `coordinator.test.ts` — WorkerRuntimeFactory: fakeTool, makeRegistry, resultFor (~2588 tok)
 - `delivery-gate.test.ts` — Declares state (~676 tok)
 - `execution-guidance.test.ts` — Declares guidance (~473 tok)
-- `failure-classifier.test.ts` — Declares errors (~1068 tok)
+- `failure-classifier.test.ts` — Declares errors (~2209 tok)
 - `file-history.test.ts` — Declares TMP (~742 tok)
 - `impact-hint.test.ts` — Exports a, b, mod (~524 tok)
 - `intent-extractor.test.ts` — Declares Intent (~812 tok)
@@ -355,6 +357,7 @@
 - `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~5646 tok)
 - `prediction-error.test.ts` — Declares PredictionAccumulator (~1590 tok)
 - `prewarm.test.ts` — API routes: GET (9 endpoints) (~443 tok)
+- `repair-hint.test.ts` — Declares failures (~722 tok)
 - `repair-pipeline.test.ts` — --- Pipeline skeleton tests --- (~1683 tok)
 - `retry-policy.test.ts` — Declares result (~457 tok)
 - `session-persist.test.ts` — Declares persist (~1578 tok)

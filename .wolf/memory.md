@@ -2145,3 +2145,25 @@
 | 11:59 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/agent-status.test.ts | expanded (+17 lines) | ~222 |
 | 11:59 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~198 |
 | 11:59 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~183 |
+| 12:01 | Session end: 33 writes across 9 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 50 reads | ~142590 tok |
+| 12:03 | Created docs/superpowers/specs/2026-05-17-failure-classifier-expansion-design.md | — | ~3443 |
+| 12:04 | Session end: 34 writes across 10 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 50 reads | ~146279 tok |
+| 12:10 | Created docs/superpowers/plans/2026-05-17-failure-classifier-expansion.md | — | ~4900 |
+| 12:10 | Session end: 35 writes across 11 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 50 reads | ~151529 tok |
+| 12:13 | Session end: 35 writes across 11 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 55 reads | ~154757 tok |
+| 12:13 | Session end: 35 writes across 11 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 56 reads | ~155825 tok |
+| 12:14 | Edited src/agent/__tests__/failure-classifier.test.ts | expanded (+95 lines) | ~1003 |
+| 12:15 | Edited src/agent/failure-classifier.ts | expanded (+6 lines) | ~84 |
+| 12:16 | Edited src/agent/failure-classifier.ts | added error handling | ~1271 |
+| 12:16 | Edited src/agent/failure-classifier.ts | inline fix | ~28 |
+| 12:18 | Edited src/agent/failure-classifier.ts | 4→4 lines | ~102 |
+| 12:18 | Edited src/agent/failure-classifier.ts | 4→4 lines | ~99 |
+| 12:19 | Edited src/agent/failure-classifier.ts | 4→4 lines | ~71 |
+| 12:19 | Session end: 42 writes across 13 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 62 reads | ~158483 tok |
+| 12:21 | Session end: 42 writes across 13 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 64 reads | ~159029 tok |
+| 12:21 | Session end: 42 writes across 13 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 64 reads | ~160170 tok |
+| 12:23 | Session end: 42 writes across 13 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 64 reads | ~160170 tok |
+| 12:23 | Created src/agent/__tests__/repair-hint.test.ts | — | ~722 |
+| 12:23 | Edited src/agent/loop.ts | 2→3 lines | ~43 |
+| 12:23 | Edited src/agent/tool-pipeline.ts | expanded (+7 lines) | ~73 |
+| 12:23 | Edited src/agent/tool-pipeline.ts | added 2 condition(s) | ~136 |

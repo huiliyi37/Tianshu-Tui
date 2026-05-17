@@ -27,6 +27,13 @@ import { PrewarmCache } from './prewarm.js'
 import { compactThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 
+/** Failure classes that trigger onPhaseChange('blocked') — user-visible state. */
+const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
+  'context_window_exceeded',
+  'api_error',
+  'permission_denied',
+])
+
 const TOOL_TIMEOUT_MS = 120_000 // 2 minutes
 
 function withToolTimeout<T>(
@@ -341,6 +348,18 @@ ${check.formatted}`
           eventId: `turn-${deps.sessionTurnCount}:${tu.name}:${tu.id}`,
         })
         deps.config.contextClaimStore.propose(proposal)
+      }
+    }
+
+    // Activity status: notify TUI when tool is blocked by critical failure
+    if (harnessResult.isError && callbacks.onPhaseChange) {
+      const failureClass = classifyFailure(harnessResult.content)
+      if (BLOCKED_CLASSES.has(failureClass.class)) {
+        callbacks.onPhaseChange('blocked', {
+          tool: tu.name,
+          reason: failureClass.class,
+          suggestion: failureClass.suggestion,
+        })
       }
     }
 

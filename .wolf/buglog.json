@@ -1792,6 +1792,54 @@
       "related_bugs": [],
       "occurrences": 2,
       "last_seen": "2026-05-17T03:59:08.043Z"
+    },
+    {
+      "id": "bug-113",
+      "timestamp": "2026-05-17T04:16:16.124Z",
+      "error_message": "Missing error handling in classifyFailure",
+      "file": "src/agent/failure-classifier.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T04:16:16.124Z"
+    },
+    {
+      "id": "bug-114",
+      "timestamp": "2026-05-17T04:18:05.245Z",
+      "error_message": "Wrong condition in logic",
+      "file": "src/agent/failure-classifier.ts",
+      "root_cause": "Condition was: if (/assert|expect|AssertionError|Expected|expected.*b)",
+      "fix": "Changed to: if (/\\bassert|\\bexpect\\b|AssertionError|\\bExpected\\b|e)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 3,
+      "last_seen": "2026-05-17T04:19:45.337Z"
+    },
+    {
+      "id": "bug-115",
+      "timestamp": "2026-05-17T04:23:34.028Z",
+      "error_message": "Type error",
+      "file": "src/agent/tool-pipeline.ts",
+      "root_cause": "Missing or incorrect type annotation",
+      "fix": "Added type assertion/annotation | Also: // Activity status: notify TUI when tool is blocked by criti; if (harnessResult.isError && callbacks.onPhaseChange) {",
+      "tags": [
+        "auto-detected",
+        "type-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-17T04:23:41.120Z"
     }
   ]
 }
