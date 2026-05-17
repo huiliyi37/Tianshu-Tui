@@ -15,6 +15,11 @@ interface BaseTextInputProps {
   placeholder?: string
   history?: string[]
   vimEnabled?: boolean
+  onTabComplete?: () => boolean
+  isSlashMode?: boolean
+  slashSelectedIdx?: number
+  slashFilteredCount?: number
+  onSlashNavigate?: (idx: number) => void
 }
 
 /** Get line/column info from a flat cursor position in a multi-line string */
@@ -44,7 +49,7 @@ function posFromLineCol(lines: string[], line: number, col: number): number {
   return pos
 }
 
-export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder, history, vimEnabled }: BaseTextInputProps) {
+export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder, history, vimEnabled, onTabComplete, isSlashMode, slashSelectedIdx = 0, slashFilteredCount = 0, onSlashNavigate }: BaseTextInputProps) {
   const [cursorPos, setCursorPos] = useState(0)
   const [cursorShown, setCursorShown] = useState(true)
   const historyIndexRef = useRef(-1)
@@ -125,6 +130,10 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
 
     // Multi-line navigation — Up/Down arrows move between lines
     if (key.upArrow) {
+      if (isSlashMode && onSlashNavigate && slashFilteredCount > 0) {
+        onSlashNavigate(Math.max(0, slashSelectedIdx - 1))
+        return
+      }
       if (hasMultipleLines) {
         const lines = value.split('\n')
         const { line, col } = getLineCol(value, cursorPos)
@@ -146,6 +155,10 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       return
     }
     if (key.downArrow) {
+      if (isSlashMode && onSlashNavigate && slashFilteredCount > 0) {
+        onSlashNavigate(Math.min(slashFilteredCount - 1, slashSelectedIdx + 1))
+        return
+      }
       if (hasMultipleLines) {
         const lines = value.split('\n')
         const { line, col } = getLineCol(value, cursorPos)
@@ -162,6 +175,12 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         onChange(restored)
         setCursorPos(restored.length)
       }
+      return
+    }
+
+    // Tab — slash command completion
+    if (key.tab) {
+      if (onTabComplete && onTabComplete()) return
       return
     }
 
@@ -282,11 +301,23 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
     <Text>
       {value.length > 0 ? (
         <>
-          <Text>{before}</Text>
-          <Text bold backgroundColor={cursorShown ? 'white' : undefined} color={cursorShown ? 'black' : undefined}>
-            {at}
-          </Text>
-          <Text>{after}</Text>
+          {value.startsWith('/') ? (
+            <>
+              <Text color="cyan">{before}</Text>
+              <Text bold backgroundColor={cursorShown ? 'white' : undefined} color={cursorShown ? 'black' : undefined}>
+                {at}
+              </Text>
+              <Text color="cyan">{after}</Text>
+            </>
+          ) : (
+            <>
+              <Text>{before}</Text>
+              <Text bold backgroundColor={cursorShown ? 'white' : undefined} color={cursorShown ? 'black' : undefined}>
+                {at}
+              </Text>
+              <Text>{after}</Text>
+            </>
+          )}
         </>
       ) : (
         <Text dimColor>{placeholder ?? ''}{cursorShown ? '█' : ' '}</Text>
