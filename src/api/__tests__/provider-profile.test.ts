@@ -26,4 +26,20 @@ describe('getProviderProfile', () => {
     const p = getProviderProfile('unknown-local')
     assert.equal(p.cacheType, 'none')
   })
+
+  it('returns minimax profile', () => {
+    const p = getProviderProfile('minimax')
+    assert.equal(p.cacheType, 'none')
+    assert.equal(p.persistent, false)
+  })
+
+  it('returns mimo profile', () => {
+    const p = getProviderProfile('mimo')
+    assert.equal(p.cacheType, 'none')
+  })
+
+  it('returns opencode-go profile', () => {
+    const p = getProviderProfile('opencode-go')
+    assert.equal(p.cacheType, 'none')
+  })
 })
