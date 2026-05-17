@@ -25,6 +25,7 @@
 > Manual update 2026-05-17: Activity Status Layer Task 5 added `shouldProjectActivity` cadence guard in `src/tui/activity-status.ts`, wired low-frequency (1Hz) activity projection in `src/tui/app.tsx` for thinking/answer streaming with begin/heartbeat/complete/fail lifecycle, projected activity summary to AgentStatus and completed thinking duration to ThinkingCollapser, added three projection cadence tests; typecheck and 1067 tests pass.
 > Manual update 2026-05-17: Activity Status Layer Task 6 added `toolActivityLabel` and `analysisLabelForTool` helpers in `src/tui/activity-status.ts`, wired tool/MCP activity lifecycle with heartbeat during live output, completion/failure on final result, and analyzing phase for large read_file/bash results in `src/tui/app.tsx`, added three tool label tests in `src/tui/__tests__/activity-status.test.ts`; typecheck and 1067 tests pass.
 > Manual update 2026-05-17: Activity Status Layer Task 6 follow-up renamed the final tool-result local label variable in `src/tui/app.tsx` to `resolvedLabel` to avoid shadowing the imported `toolLabel` helper; focused activity/agent status tests and typecheck pass.
+> Manual update 2026-05-17: Activity Status Layer documentation complete — updated `README.md` with section describing activity coverage and non-goals, added `CHANGELOG.md` entry with validation commands, staged implementation plan, final validation passed typecheck, 1067 tests, and build.
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 

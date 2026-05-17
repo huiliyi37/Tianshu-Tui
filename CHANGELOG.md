@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-05-17 — Activity Status Layer
+
+### Added
+- Activity Status Layer for long Rivet turns: thinking duration/final duration, stale/no-update display, tool/MCP wait labels, conservative large-result analysis status, and low-frequency (1 Hz) projection to existing TUI surfaces.
+
+### Validation
+- `npm run typecheck`
+- `npm test`
+- `npm run build`
+- `git diff --check`
+
+---
+
 ## 2026-05-17 — Session HA Closure
 
 ### Completed

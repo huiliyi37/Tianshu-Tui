@@ -21,6 +21,17 @@ This round closed the remaining high-availability gaps for interrupted, long-run
 
 Merge validation for this round passed `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
 
+### Activity Status Layer
+
+Rivet now surfaces the current long-running activity instead of leaving the terminal looking idle. The TUI shows elapsed time and stale/no-update indicators for thinking, streaming answers, tool execution, MCP waits, large-result analysis, compaction, and restore/preflight phases. Activity is projected to existing `AgentStatus` and `ThinkingCollapser` surfaces at low frequency (1 Hz max) without adding a trace timeline, fake percentages, or a high-frequency render loop.
+
+Examples:
+
+- `Thinking… 42s · 655 chars`
+- `Reading src/tui/app.tsx… 52s · no update 14s`
+- `Waiting for MCP context7… 24s`
+- `Analyzing tool results… 46s`
+
 ## Quick Start
 
 ```bash

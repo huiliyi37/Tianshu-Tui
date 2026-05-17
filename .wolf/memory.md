@@ -25,6 +25,7 @@
 | 13:45 | Activity Status Task 5 — low-frequency App projection | src/tui/activity-status.ts, src/tui/app.tsx, src/tui/__tests__/activity-status.test.ts, .wolf/anatomy.md | Added shouldProjectActivity cadence guard, wired 1Hz activity projection in app.tsx for thinking/answer streaming with begin/heartbeat/complete/fail lifecycle, 3 projection cadence tests; typecheck and 1067 tests pass | ~900 |
 | 14:00 | Activity Status Task 6 — tool/MCP/analysis activity | src/tui/activity-status.ts, src/tui/app.tsx, src/tui/__tests__/activity-status.test.ts, .wolf/anatomy.md | Added toolActivityLabel and analysisLabelForTool helpers, wired tool activity lifecycle with heartbeat/completion/failure in App callbacks, added analyzing phase for large read_file/bash results, 3 new tests; typecheck and 1067 tests pass | ~800 |
 | 14:10 | Activity Status Task 6 follow-up — avoid label shadowing | src/tui/app.tsx, .wolf/anatomy.md, .wolf/memory.md | Renamed final onToolResult local label variable to resolvedLabel to avoid shadowing imported toolLabel; focused tests and typecheck pass | ~200 |
+| 14:30 | Activity Status Layer docs and final validation | README.md, CHANGELOG.md, .wolf/anatomy.md, .wolf/memory.md | Documented Activity Status Layer in README/CHANGELOG, staged implementation plan, final typecheck/tests/build pass | ~400 |
 
 ## Session: 2026-05-16 Execution Trust Closure
 
