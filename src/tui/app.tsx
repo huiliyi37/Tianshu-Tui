@@ -579,7 +579,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           activityRef.current = completeActivity(activityRef.current, completedAt, {
             sizeHint: formatThinkingSize(thinkBuf.current.length),
           })
-          setCompletedThinkingDurationMs(completedAt - thinkingStartedAtRef.current)
+          // Only mark thinking as completed if thinking was actually received
+          if (thinkingStartedAtRef.current > 0) {
+            setCompletedThinkingDurationMs(completedAt - thinkingStartedAtRef.current)
+          }
           projectActivity(now)
           activityRef.current = beginActivity(activityRef.current, 'streaming', 'Streaming answer', now)
         } else if (activityRef.current.phase !== 'streaming') {

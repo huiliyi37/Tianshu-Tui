@@ -274,6 +274,16 @@ export class CodexClient implements StreamClient {
                   const input = JSON.parse(args)
                   callbacks.onContentBlock({ type: 'tool_use', id: callId, name, input })
                 } catch {}
+              } else if (item?.type === 'reasoning') {
+                // Reasoning item — emit BEFORE text so TUI captures thinking first
+                const summary = item.summary as Array<Record<string, unknown>> | undefined
+                if (summary) {
+                  for (const s of summary) {
+                    if (typeof s.text === 'string') {
+                      callbacks.onThinkingDelta(s.text)
+                    }
+                  }
+                }
               } else if (item?.type === 'message') {
                 // Text message — extract content
                 const content = item.content as Array<Record<string, unknown>> | undefined
@@ -291,16 +301,6 @@ export class CodexClient implements StreamClient {
                   usage = {
                     input_tokens: msgUsage.input_tokens as number,
                     output_tokens: msgUsage.output_tokens as number,
-                  }
-                }
-              } else if (item?.type === 'reasoning') {
-                // Reasoning item — extract summary text
-                const summary = item.summary as Array<Record<string, unknown>> | undefined
-                if (summary) {
-                  for (const s of summary) {
-                    if (typeof s.text === 'string') {
-                      callbacks.onThinkingDelta(s.text)
-                    }
                   }
                 }
               }
