@@ -19,7 +19,7 @@ import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
-import { createProviderClient } from './api/factory.js'
+import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
@@ -263,13 +263,38 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       recommendedTasks: ['code_search'],
     }]
 
+    const workerRouting = config.workers?.profiles && Object.keys(config.workers.profiles).length > 0
+      ? { profiles: config.workers.profiles, routing: config.workers.routing }
+      : undefined
+
     const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
       const writeProfiles = ['patcher', 'verifier']
       const isWrite = writeProfiles.includes(_order.profile)
+
+      // Resolve worker provider: routing config → fallback to active provider
+      let workerProvider = activeProvider
+      let workerApiKey = activeApiKey
+      if (workerRouting) {
+        const task = _order.kind === 'code_search' || _order.kind === 'doc_research' || _order.kind === 'plan'
+          ? 'repo_summarization'
+          : _order.kind === 'review' || _order.kind === 'patch_proposal'
+            ? 'risky_refactor'
+            : 'code_edit'
+        const routeName = workerRouting.routing[task]
+        if (routeName && workerRouting.profiles[routeName]) {
+          const routeProfile = workerRouting.profiles[routeName]
+          const resolved = config.provider.providers[routeProfile.provider]
+          if (resolved) {
+            workerProvider = resolved
+            workerApiKey = resolveApiKey(resolved)
+          }
+        }
+      }
+
       return {
         order: _order,
-        client: createProviderClient(activeProvider, resolveCapabilities(activeProvider.name, activeProvider.capabilities), {
-          apiKey: activeApiKey,
+        client: createProviderClient(workerProvider, resolveCapabilities(workerProvider.name, workerProvider.capabilities), {
+          apiKey: workerApiKey,
           model: card.model,
           reasoningEffort: undefined,
           maxTokens: isWrite ? Math.min(8192, card.contextWindow) : Math.min(4096, card.contextWindow),
@@ -295,6 +320,7 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       modelCards,
       maxWorkers: 3,
       runtimeFactory,
+      routing: workerRouting,
     })
 
     return new AgentLoop(
