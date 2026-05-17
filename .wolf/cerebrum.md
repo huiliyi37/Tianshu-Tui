@@ -19,6 +19,7 @@
 
 <!-- Mistakes made and corrected. Each entry prevents the same mistake recurring. -->
 <!-- Format: [YYYY-MM-DD] Description of what went wrong and what to do instead. -->
+- [2026-05-17] Do not frame DeepSeek prefix cache preservation as primarily a compaction-policy problem or as requiring CTCL. Claude Code + CTCL can keep ~99.7% cache hit even with compression, and DeepSeek-Reasonix reports 99.82% without CTCL by using ImmutablePrefix + AppendOnlyLog + VolatileScratch. Focus on canonical prefix contract, stable request shape, provider normalization, and session routing. Treat CTCL as Rivet's compatibility enforcement layer, not the root cause of cache hits; treat compaction only as a cache boundary when it rewrites cache-sensitive prefix bytes.
 - [2026-05-15] Do not paste real API keys or credential fragments into handoff docs, bug logs, memory logs, or summaries; always use placeholders and verify with secret-pattern search after sanitizing.
 
 ## Key Learnings

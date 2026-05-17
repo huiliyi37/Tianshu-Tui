@@ -1,12 +1,13 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T06:39:20.742Z
-> Files: 383 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T09:39:39.716Z
+> Files: 432 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
 - `feedback_model-delegation.md` — Declares models (~217 tok)
 - `MEMORY.md` — Memory (~317 tok)
+- `project_main-business-baseline.md` (~216 tok)
 - `project_open_model_agent_goal.md` (~234 tok)
 - `project_subagent-phase1-validation.md` — 子代理协同 Phase 1 — 自主执行验证记录 (~487 tok)
 - `reference_rivet-codebase-index.md` — Rivet Codebase Module Map (~1188 tok)
@@ -15,15 +16,19 @@
 
 - `config.yaml` (~2172 tok)
 
+## ../../../.rivet/
+
+- `config.json` (~1655 tok)
+
 ## ./
 
 - `.gitignore` — Git ignore rules (~23 tok)
-- `CHANGELOG.md` — Changelog (~6162 tok)
+- `CHANGELOG.md` — Changelog (~7099 tok)
 - `CLAUDE.md` — Rivet (~310 tok)
 - `config.example.toml` — ~/.opencode/config.toml (~232 tok)
 - `package-lock.json` — npm lock file (~19981 tok)
 - `package.json` — Node.js package manifest (~164 tok)
-- `README.md` — Project documentation (~13658 tok)
+- `README.md` — Project documentation (~14927 tok)
 - `tsconfig.json` — TypeScript configuration (~153 tok)
 - `tsup.config.ts` (~65 tok)
 
@@ -37,14 +42,28 @@
 
 ## .claude/worktrees/session-ha-closure/
 
+- `CHANGELOG.md` — Changelog (~6847 tok)
 - `package-lock.json` (~19976 tok)
+- `README.md` — Project documentation (~14698 tok)
 
 ## .claude/worktrees/session-ha-closure/.wolf/
 
-- `anatomy.md` — anatomy.md (~7130 tok)
-- `buglog.json` — Declares annotation (~7919 tok)
+- `anatomy.md` — anatomy.md (~7759 tok)
+- `buglog.json` — Declares annotation (~16077 tok)
 - `cerebrum.md` — Cerebrum (~616 tok)
-- `memory.md` — Memory (~34104 tok)
+- `memory.md` — Memory (~40769 tok)
+
+## .claude/worktrees/session-ha-closure/docs/superpowers/plans/
+
+- `2026-05-17-multi-provider-adapter.md` — Multi-Provider Adapter 实现计划 (~8487 tok)
+
+## .claude/worktrees/session-ha-closure/docs/superpowers/specs/
+
+- `2026-05-17-rivet-tui-session-fluency-layer-design.md` — Rivet TUI Session Fluency Layer 深度头脑风暴结果 (~2653 tok)
+
+## .claude/worktrees/session-ha-closure/docs/superpowers/validations/
+
+- `2026-05-17-fluency-dream-code-review.md` — Session Fluency + Project Memory — Code Review & 修复记录 (~615 tok)
 
 ## .claude/worktrees/session-ha-closure/src/agent/
 
@@ -56,6 +75,14 @@
 - `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~7485 tok)
 - `session-persist.test.ts` — Declares persist (~2085 tok)
 
+## .claude/worktrees/session-ha-closure/src/api/
+
+- `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~1634 tok)
+
+## .claude/worktrees/session-ha-closure/src/api/__tests__/
+
+- `provider.test.ts` — Declares capabilities (~305 tok)
+
 ## .claude/worktrees/session-ha-closure/src/context/
 
 - `resume-preflight.ts` — Exports runResumePreflight (~681 tok)
@@ -65,15 +92,30 @@
 - `bash.ts` — Exports BASH_TOOL (~1411 tok)
 - `process-kill.ts` — Exports killProcessTree (~119 tok)
 - `process-tracker.ts` — Exports track, killAll, getActiveCount (~205 tok)
+- `recall.ts` — Exports RecallContext, searchKnowledgeFiles, createRecallTool (~1103 tok)
 
 ## .claude/worktrees/session-ha-closure/src/tools/__tests__/
 
 - `bash.test.ts` — Declares wait (~328 tok)
 - `process-kill.test.ts` — Declares calls (~257 tok)
+- `recall.test.ts` — RecallContext: proposal (~1785 tok)
 
 ## .claude/worktrees/session-ha-closure/src/tui/
 
-- `app.tsx` — THINKING_FLUSH_MS (~9654 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~12425 tok)
+- `cache-telemetry.ts` — Exports CacheTelemetrySession, CacheTelemetryProjection, projectCacheTelemetry (~530 tok)
+- `fluency-hook.ts` — Exports ToolResultEvent, FluencyTracker (~645 tok)
+- `fluency-policy.ts` — --- Fluency Policy --- (~931 tok)
+- `slash-commands.ts` — Exports SlashHandlerContext, formatContextClaimsCommand, resolveAppPromptInput, handleSlashCommand (~7151 tok)
+- `status-bar.tsx` — tokenBar (~1288 tok)
+
+## .claude/worktrees/session-ha-closure/src/tui/__tests__/
+
+- `cache-telemetry.test.ts` — CacheTelemetrySession: session (~581 tok)
+- `fluency-hook.test.ts` — --------------------------------------------------------------------------- (~2419 tok)
+- `fluency-policy.test.ts` — Declares baseline (~4020 tok)
+- `slash-commands.test.ts` — SlashHandlerContext: makeCtx (~981 tok)
+- `status-bar.test.ts` — contextColor: roundsColor, usageColor, cacheColor, cacheStatusColor (~626 tok)
 
 ## .omc/
 
@@ -145,6 +187,7 @@
 - `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5642 tok)
 - `2026-05-17-cerebellar-loop.md` — Cerebellar Loop: Prediction-Error Accumulator 实现计划 (~4838 tok)
 - `2026-05-17-deep-interview-plan.md` — Deep Interview 实施计划 (~196 tok)
+- `2026-05-17-multi-provider-adapter.md` — Multi-Provider Adapter 实现计划 (~8487 tok)
 - `2026-05-17-multi-provider-phase1.md` — Multi-Provider Integration Phase 1 实现计划 (~4349 tok)
 - `2026-05-17-multi-provider-phase2.md` — Multi-Provider Phase 2: OpenAIClient 实现计划 (~7193 tok)
 - `2026-05-17-project-memory-dream.md` — Project Memory: Dream 蒸馏 Phase 1 实现计划 (~3733 tok)
@@ -175,7 +218,9 @@
 - `2026-05-16-rivet-subagent-orchestration-design.md` — Rivet 主控模型子代理协同能力深度头脑风暴结果 (~7664 tok)
 - `2026-05-16-rivet-xml-protocol-speculative-engine-design.md` — Rivet XML Protocol Layer + Speculative Pre-warming 设计 (~2060 tok)
 - `2026-05-17-cerebellar-loop-brainstorm.md` — Cerebellar Loop: Deep Brainstorm 过程记录 (~1245 tok)
+- `2026-05-17-ctcl-cache-preservation-spine-design.md` — Canonical Prefix Contract + CTCL/Reasonix cache 对照方案记录 (~2374 tok)
 - `2026-05-17-deep-interview-design.md` — Deep Interview — 认知对齐模式 (~1212 tok)
+- `2026-05-17-multi-provider-adapter-design.md` — Multi-Provider Adapter Design (~1367 tok)
 - `2026-05-17-multi-provider-integration-design.md` — Multi-Provider Integration: Design (v2 — Deep Brainstorm) (~4366 tok)
 - `2026-05-17-multi-provider-integration.md` — Multi-Provider Integration: Session Rendering P1/P2 + Cross-Provider Switching (~1031 tok)
 - `2026-05-17-project-memory-brainstorm.md` — 项目记忆系统：深度头脑风暴过程 (~963 tok)
@@ -216,13 +261,14 @@
 - `fs-atomic.ts` — Atomically write a file: write to a temp file in the same directory, (~235 tok)
 - `goal-loop.ts` — Exports GoalLoopAgent, GoalLoopConfig, GoalLoopResult, runGoalLoop (~874 tok)
 - `headless.ts` — Exports HeadlessCliArgs, HeadlessJsonOutput, HeadlessRunResult, HeadlessAgent + 3 more (~1052 tok)
-- `main.tsx` — deepMerge (~6910 tok)
+- `main.tsx` — deepMerge (~7956 tok)
 - `validation.ts` — Exports isValidSessionId, assertValidSessionId (~78 tok)
 
 ## src/__tests__/
 
 - `claim-store-durable.test.ts` — Declares dir (~1178 tok)
 - `commands-loader.test.ts` — Declares makeProject (~716 tok)
+- `config-schema-integration.test.ts` — Declares configPath (~709 tok)
 - `create-agent-config.test.ts` — Declares AgentConfigInput (~636 tok)
 - `delegate-batch.test.ts` — Declares tool (~472 tok)
 - `delegate-task.test.ts` — Declares tool (~488 tok)
@@ -230,6 +276,7 @@
 - `goal-loop-integration.test.ts` — Declares result (~773 tok)
 - `goal-loop.test.ts` — Declares GoalLoopConfig (~1554 tok)
 - `headless.test.ts` — Declares result (~840 tok)
+- `user-config.test.ts` — Declares configPath (~568 tok)
 - `wave5-integration.test.ts` — Declares reg (~930 tok)
 
 ## src/agent/
@@ -240,8 +287,8 @@
 - `checkpoint.ts` — Returns the checkpoint file path scoped to a session ID. (~2353 tok)
 - `context.ts` — Replace all messages (used after compaction) (~2024 tok)
 - `coordinator-state.ts` — Cumulative event counts — each completed work order increments queued, running, AND its terminal sta (~490 tok)
-- `coordinator.ts` — Exports DelegationRequest, CoordinatorRun, WorkerRuntimeFactory, DelegationCoordinatorConfig + 2 mor (~1550 tok)
-- `create-agent-config.ts` — Exports ModelSpec, AgentConfigInput, createAgentConfig (~625 tok)
+- `coordinator.ts` — Exports DelegationRequest, CoordinatorRun, WorkerRuntimeFactory, WorkerRouteConfig + 3 more (~1740 tok)
+- `create-agent-config.ts` — Exports ModelSpec, AgentConfigInput, createAgentConfig (~732 tok)
 - `delivery-gate.ts` — Exports DeliveryGateSeverity, DeliveryGateResult, buildDeliveryGate (~641 tok)
 - `dream-classify.ts` — Exports KnowledgeTopic, classifyEntry (~361 tok)
 - `dream.ts` — Dream distillation — session-end knowledge extraction. (~1556 tok)
@@ -284,7 +331,7 @@
 - `context-ledger-state.test.ts` — Declares makeLedger (~543 tok)
 - `context.test.ts` — Declares ctx (~1222 tok)
 - `coordinator-state.test.ts` — Declares state (~791 tok)
-- `coordinator.test.ts` — WorkerRuntimeFactory: fakeTool, makeRegistry, resultFor (~2588 tok)
+- `coordinator.test.ts` — WorkerRuntimeFactory: fakeTool, makeRegistry, resultFor (~4382 tok)
 - `delivery-gate.test.ts` — Declares state (~676 tok)
 - `dream.test.ts` — Declares DreamInput (~2191 tok)
 - `execution-guidance.test.ts` — Declares guidance (~473 tok)
@@ -315,16 +362,43 @@
 ## src/api/
 
 - `client.ts` — Whether the provider has a known bug where tool JSON appears in text content (~3998 tok)
+- `codex-client.ts` — Exports CodexClientConfig, CodexClient (~3537 tok)
 - `deepseek.ts` — Generic factory: create an ApiClient for any provider described by a (~572 tok)
-- `factory.ts` — Runtime parameters that vary per-model or per-call, not stored in config (~663 tok)
-- `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~459 tok)
+- `factory.ts` — Runtime parameters that vary per-model or per-call, not stored in config (~797 tok)
+- `openai-client.ts` — Convert Anthropic MessageRequest to OpenAI chat completions body (~3237 tok)
+- `provider-profile.ts` — Exports CacheType, ProviderProfile, getProviderProfile (~426 tok)
+- `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~1626 tok)
 - `sse.ts` — Exports SSEEvent, SSEParser (~635 tok)
 - `types.ts` — Exports ContentBlockText, ContentBlockThinking, ContentBlockToolUse, ContentBlockToolResult + 7 more (~552 tok)
 
 ## src/api/__tests__/
 
+- `codex-client.test.ts` — Declares const (~1282 tok)
+- `factory.test.ts` — Declares RuntimeParams (~1122 tok)
+- `provider-profile.test.ts` — Declares p (~380 tok)
 - `schema-gate.test.ts` (~205 tok)
 - `sse.test.ts` — Declares parser (~1419 tok)
+
+## src/auth/
+
+- `api-key.ts` — Exports ApiKeyAuth (~110 tok)
+- `device-flow.ts` — Exports DeviceCodeResponse, buildDeviceCodeRequest, parseDeviceCodeResponse, parseTokenResponse (~458 tok)
+- `oauth-auth.ts` — API routes: GET (3 endpoints) (~2153 tok)
+- `oauth.ts` — Exports PKCEPair, generatePKCE, AuthorizeUrlParams, buildAuthorizeUrl (~310 tok)
+- `refresh.ts` — Exports shouldRefresh (~67 tok)
+- `registry.ts` — Create an AuthProvider from config. (~461 tok)
+- `token-store.ts` — Exports TokenData, TokenStore (~262 tok)
+- `types.ts` — Return HTTP headers needed for authentication (~120 tok)
+
+## src/auth/__tests__/
+
+- `api-key.test.ts` — Declares auth (~270 tok)
+- `device-flow.test.ts` — Declares body (~514 tok)
+- `oauth-auth.test.ts` — API routes: GET (4 endpoints) (~1434 tok)
+- `oauth.test.ts` — Declares pkce (~391 tok)
+- `refresh.test.ts` — Declares TokenData (~306 tok)
+- `registry.test.ts` — Declares auth (~542 tok)
+- `token-store.test.ts` — Declares store (~503 tok)
 
 ## src/compact/
 
@@ -341,9 +415,14 @@
 
 ## src/config/
 
-- `default.ts` — Exports DEFAULT_CONFIG (~775 tok)
+- `default.ts` — Exports DEFAULT_CONFIG (~790 tok)
 - `manager.ts` — Exports loadConfig, listProviders, getProvider, getDefaultProvider + 10 more (~3332 tok)
-- `schema.ts` — Zod schemas: modelConfigSchema, providerSchema, agentSchema, compactSchema + 2 more (~623 tok)
+- `schema.ts` — Zod schemas: modelConfigSchema, authConfigSchema, providerCapabilitiesSchema, providerSchema + 9 mor (~1124 tok)
+
+## src/config/__tests__/
+
+- `config-schema-integration.test.ts` — Declares configPath (~720 tok)
+- `user-config.test.ts` — Declares configPath (~580 tok)
 
 ## src/context/
 
