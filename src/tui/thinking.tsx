@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Box, Text, useInput } from 'ink'
 
 interface ThinkingCollapserProps {
@@ -14,8 +14,58 @@ function truncateThinking(text: string): string {
   return text.slice(0, MAX_THINKING_DISPLAY) + `\n... (${text.length - MAX_THINKING_DISPLAY} more characters)`
 }
 
+function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / 1000))
+  if (totalSec < 60) return `${totalSec}s`
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return `${m}m ${s}s`
+}
+
 export function ThinkingCollapser({ thinking, isStreaming, focused }: ThinkingCollapserProps) {
   const [expanded, setExpanded] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const [stale, setStale] = useState(false)
+  const startRef = useRef(0)
+  const thinkingRef = useRef(thinking)
+  const staleCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (isStreaming && thinking && startRef.current === 0) {
+      startRef.current = Date.now()
+      setElapsed(0)
+      setExpanded(true) // auto-expand on new thinking
+    }
+    if (!isStreaming) {
+      startRef.current = 0
+      setStale(false)
+    }
+  }, [isStreaming, thinking])
+
+  // Track if thinking content stops arriving while streaming is active
+  useEffect(() => {
+    thinkingRef.current = thinking
+    if (isStreaming && thinking) {
+      setStale(false)
+      if (staleCheckRef.current) clearTimeout(staleCheckRef.current)
+      staleCheckRef.current = setTimeout(() => {
+        setStale(true)
+      }, 5000)
+    }
+    return () => {
+      if (staleCheckRef.current) clearTimeout(staleCheckRef.current)
+    }
+  }, [isStreaming, thinking])
+
+  useEffect(() => {
+    if (!isStreaming) return
+    const id = setInterval(() => {
+      if (startRef.current > 0) {
+        setElapsed(Date.now() - startRef.current)
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [isStreaming])
 
   useInput((_input, key) => {
     if (focused && key.tab) {
@@ -25,10 +75,15 @@ export function ThinkingCollapser({ thinking, isStreaming, focused }: ThinkingCo
 
   if (!thinking && !isStreaming) return null
 
+  const spinner = isStreaming ? (elapsed % 2000 < 1000 ? '⠋' : '⠙') : ''
+  const statusLabel = stale ? 'waiting for response…' : isStreaming ? formatDuration(elapsed) : 'completed'
+
   return (
     <Box flexDirection="column" paddingX={2}>
       <Text dimColor>
-        {expanded ? '▾' : '▸'} Thinking{isStreaming ? '...' : ''} (Tab to {expanded ? 'collapse' : 'expand'})
+        {expanded ? '▾' : '▸'} {spinner} Thinking{isStreaming ? ` ${statusLabel}` : ` ${statusLabel}`}
+        {thinking ? ` (${formatThinkingSize(thinking.length)})` : ''}
+        {' '}(Tab to {expanded ? 'collapse' : 'expand'})
       </Text>
       {expanded && (
         <Box paddingLeft={2} borderStyle="single" borderColor="gray">
@@ -37,4 +92,9 @@ export function ThinkingCollapser({ thinking, isStreaming, focused }: ThinkingCo
       )}
     </Box>
   )
+}
+
+function formatThinkingSize(chars: number): string {
+  if (chars < 1000) return `${chars} chars`
+  return `${(chars / 1000).toFixed(1)}k`
 }

@@ -816,6 +816,438 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-16T22:10:05.723Z"
+    },
+    {
+      "id": "bug-052",
+      "timestamp": "2026-05-16T22:11:10.478Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/app.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:11:10.478Z"
+    },
+    {
+      "id": "bug-053",
+      "timestamp": "2026-05-16T22:13:32.997Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "src/api/client.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:13:32.997Z"
+    },
+    {
+      "id": "bug-054",
+      "timestamp": "2026-05-16T22:14:12.227Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/agent/tool-pipeline.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:14:12.227Z"
+    },
+    {
+      "id": "bug-055",
+      "timestamp": "2026-05-16T22:14:33.267Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:14:33.267Z"
+    },
+    {
+      "id": "bug-056",
+      "timestamp": "2026-05-16T22:16:56.327Z",
+      "error_message": "Missing guard clause",
+      "file": "src/main.tsx",
+      "root_cause": "No early return/throw for edge case: isShuttingDown",
+      "fix": "Added guard clause: if (isShuttingDown)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:16:56.327Z"
+    },
+    {
+      "id": "bug-057",
+      "timestamp": "2026-05-16T22:17:03.116Z",
+      "error_message": "Wrong operator: ?? should be ||",
+      "file": "src/tui/slash-commands.ts",
+      "root_cause": "Used \"??\" instead of \"||\"",
+      "fix": "Changed operator ?? → ||",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:17:03.116Z"
+    },
+    {
+      "id": "bug-058",
+      "timestamp": "2026-05-16T22:17:06.921Z",
+      "error_message": "Missing guard clause",
+      "file": "src/tui/base-text-input.tsx",
+      "root_cause": "No early return/throw for edge case: available <= 0",
+      "fix": "Added guard clause: if (available <= 0)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:17:06.921Z"
+    },
+    {
+      "id": "bug-059",
+      "timestamp": "2026-05-16T22:17:11.542Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/tui/base-text-input.tsx",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 9→13 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:17:11.542Z"
+    },
+    {
+      "id": "bug-060",
+      "timestamp": "2026-05-16T22:17:20.768Z",
+      "error_message": "Missing guard clause",
+      "file": "src/tui/thinking.tsx",
+      "root_cause": "No early return/throw for edge case: text.length <= MAX_THINKING_DISPLAY",
+      "fix": "Added guard clause: if (text.length <= MAX_THINKING_DISPLAY)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:17:20.768Z"
+    },
+    {
+      "id": "bug-061",
+      "timestamp": "2026-05-16T22:21:14.401Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/status-bar.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:21:14.401Z"
+    },
+    {
+      "id": "bug-062",
+      "timestamp": "2026-05-16T22:21:23.841Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/tui/status-bar.tsx",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 25→36 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:21:23.841Z"
+    },
+    {
+      "id": "bug-063",
+      "timestamp": "2026-05-16T22:26:23.609Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/agent/session-persist.ts",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 28→37 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:26:23.609Z"
+    },
+    {
+      "id": "bug-064",
+      "timestamp": "2026-05-16T22:27:02.370Z",
+      "error_message": "Missing guard clause",
+      "file": "src/tools/process-tracker.ts",
+      "root_cause": "No early return/throw for edge case: !child.pid",
+      "fix": "Added guard clause: if (!child.pid)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-16T22:27:02.370Z"
+    },
+    {
+      "id": "bug-065",
+      "timestamp": "2026-05-17T00:09:57.583Z",
+      "error_message": "Missing guard clause",
+      "file": "src/api/client.ts",
+      "root_cause": "No early return/throw for edge case: streamIdleTimeout",
+      "fix": "Added guard clause: if (streamIdleTimeout)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T00:09:57.583Z"
+    },
+    {
+      "id": "bug-066",
+      "timestamp": "2026-05-17T00:16:45.111Z",
+      "error_message": "Wrong return value",
+      "file": "src/agent/prediction-error.ts",
+      "root_cause": "Was returning: order[Math.min(idx + 2, order.length - 1)]!",
+      "fix": "Now returns: order[Math.min(idx + 1, order.length - 1)]!",
+      "tags": [
+        "auto-detected",
+        "return-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T00:16:45.111Z"
+    },
+    {
+      "id": "bug-067",
+      "timestamp": "2026-05-17T00:25:20.138Z",
+      "error_message": "Significant refactor of ",
+      "file": "src/tui/thinking.tsx",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 40→79 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T00:25:20.138Z"
+    },
+    {
+      "id": "bug-068",
+      "timestamp": "2026-05-17T00:51:01.033Z",
+      "error_message": "Significant refactor of ",
+      "file": "docs/superpowers/plans/2026-05-17-project-memory-phase1.md",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 10→13 lines (2 removed) | Also: /** Load durable claims from ALL previous sessions; // Deduplicate by claim id across sessions | Also: | 风险 | 应对 |; |------|------|",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 3,
+      "last_seen": "2026-05-17T00:51:29.092Z"
+    },
+    {
+      "id": "bug-069",
+      "timestamp": "2026-05-17T00:59:28.475Z",
+      "error_message": "Null/undefined access in ",
+      "file": "src/tui/input.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T00:59:28.475Z"
+    },
+    {
+      "id": "bug-070",
+      "timestamp": "2026-05-17T00:59:39.811Z",
+      "error_message": "Wrong reference: BaseTextInputProps should be onTabComplete",
+      "file": "src/tui/base-text-input.tsx",
+      "root_cause": "Used \"BaseTextInputProps\" instead of \"onTabComplete\"",
+      "fix": "Changed BaseTextInputProps → onTabComplete",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T00:59:39.811Z"
+    },
+    {
+      "id": "bug-071",
+      "timestamp": "2026-05-17T01:04:55.122Z",
+      "error_message": "Significant refactor of ",
+      "file": ".claude/worktrees/session-ha-closure/src/tui/app.tsx",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 11→17 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:04:55.122Z"
+    },
+    {
+      "id": "bug-072",
+      "timestamp": "2026-05-17T01:04:59.691Z",
+      "error_message": "Incorrect value in code",
+      "file": ".claude/worktrees/session-ha-closure/src/context/resume-preflight.ts",
+      "root_cause": "Had 'Tool result unavailable: recovered from interrupt",
+      "fix": "Changed to '[recovered] Tool result missing after interrupted",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:04:59.691Z"
+    },
+    {
+      "id": "bug-073",
+      "timestamp": "2026-05-17T01:07:20.557Z",
+      "error_message": "Wrong reference: SESSION_DIR should be getSessionDir",
+      "file": ".claude/worktrees/session-ha-closure/src/agent/session-persist.ts",
+      "root_cause": "Used \"SESSION_DIR\" instead of \"getSessionDir\"",
+      "fix": "Changed SESSION_DIR → getSessionDir",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-17T01:07:43.639Z"
+    },
+    {
+      "id": "bug-074",
+      "timestamp": "2026-05-17T01:07:48.260Z",
+      "error_message": "Incorrect value in code",
+      "file": ".claude/worktrees/session-ha-closure/src/agent/session-persist.ts",
+      "root_cause": "Had '.rivet'",
+      "fix": "Changed to `${this.sessionId}.memory.json`",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:07:48.260Z"
+    },
+    {
+      "id": "bug-075",
+      "timestamp": "2026-05-17T01:11:36.928Z",
+      "error_message": "CSS fix: mcpManagerRef, claimStoreRef",
+      "file": ".claude/worktrees/session-ha-closure/src/tui/app.tsx",
+      "root_cause": "mcpManagerRef: React.MutableRefObject<McpManager | null> → RefObject<McpManager | null>; claimStoreRef: React.MutableRefObject<import('../context/claim-store.js').ContextClaimStore | null> → RefObject<import('../context/claim-store.js').ContextClaimStore | null>",
+      "fix": "Changed mcpManagerRef: React.MutableRefObject<McpManager | null> → RefObject<McpManager | null>; claimStoreRef: React.MutableRefObject<import('../context/claim-store.js').ContextClaimStore | null> → RefObject<import('../context/claim-store.js').ContextClaimStore | null>",
+      "tags": [
+        "auto-detected",
+        "style-fix",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-17T01:11:41.685Z"
+    },
+    {
+      "id": "bug-076",
+      "timestamp": "2026-05-17T01:14:37.099Z",
+      "error_message": "Missing error handling in distillSession",
+      "file": "docs/superpowers/plans/2026-05-17-project-memory-dream.md",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:14:37.099Z"
+    },
+    {
+      "id": "bug-077",
+      "timestamp": "2026-05-17T01:17:58.727Z",
+      "error_message": "Null/undefined access in ",
+      "file": ".claude/worktrees/session-ha-closure/src/agent/__tests__/loop.test.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:17:58.727Z"
+    },
+    {
+      "id": "bug-078",
+      "timestamp": "2026-05-17T01:22:21.961Z",
+      "error_message": "Significant refactor of ",
+      "file": ".claude/worktrees/session-ha-closure/src/tools/process-tracker.ts",
+      "root_cause": "13 lines replaced/restructured",
+      "fix": "Rewrote 25→12 lines (13 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:22:21.961Z"
     }
   ]
 }

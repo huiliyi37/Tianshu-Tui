@@ -38,7 +38,7 @@ import { selectReasoningEffort } from './auto-reasoning.js'
 import { extractTaskState } from './task-state.js'
 import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import { processTurnEnd } from './turn-end.js'
-import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, adjustReasoningEffort } from './prediction-error.js'
+import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, resetAccumulator, adjustReasoningEffort } from './prediction-error.js'
 import type { PredictionAccumulator } from './prediction-error.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
@@ -542,6 +542,7 @@ export class AgentLoop {
           }
           if (shouldTippingPointReset(this.predictionAccumulator)) {
             this.config.promptEngine.setCerebellarHint(null)
+            this.predictionAccumulator = resetAccumulator(this.predictionAccumulator)
           }
           if (this.config.autoReasoning && this.config.reasoningEffort) {
             this.config.reasoningEffort = adjustReasoningEffort(this.config.reasoningEffort, level)

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   createPredictionAccumulator,
   recordPrediction,
+  resetAccumulator,
   getErrorRate,
   getInterventionLevel,
   shouldTippingPointReset,
@@ -115,9 +116,21 @@ describe('PredictionAccumulator', () => {
     assert.equal(acc.consecutiveCorrect, 0)
   })
 
-  it('adjustReasoningEffort: escalate bumps 2 levels', () => {
-    assert.equal(adjustReasoningEffort('low', 'escalate'), 'high')
-    assert.equal(adjustReasoningEffort('medium', 'escalate'), 'max')
+  it('resetAccumulator clears predictions and consecutiveCorrect', () => {
+    let acc = createPredictionAccumulator()
+    acc = recordPrediction(acc, false)
+    acc = recordPrediction(acc, false)
+    acc = recordPrediction(acc, true)
+    assert.equal(acc.predictions.length, 3)
+    assert.equal(acc.consecutiveCorrect, 1)
+    acc = resetAccumulator(acc)
+    assert.equal(acc.predictions.length, 0)
+    assert.equal(acc.consecutiveCorrect, 0)
+  })
+
+  it('adjustReasoningEffort: escalate bumps 1 level', () => {
+    assert.equal(adjustReasoningEffort('low', 'escalate'), 'medium')
+    assert.equal(adjustReasoningEffort('medium', 'escalate'), 'high')
     assert.equal(adjustReasoningEffort('high', 'escalate'), 'max')
   })
 

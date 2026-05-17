@@ -38,6 +38,10 @@ export function shouldTippingPointReset(acc: PredictionAccumulator): boolean {
   return acc.consecutiveCorrect >= 3
 }
 
+export function resetAccumulator(acc: PredictionAccumulator): PredictionAccumulator {
+  return { ...acc, predictions: [], consecutiveCorrect: 0 }
+}
+
 export function adjustReasoningEffort(
   current: import('./auto-reasoning.js').ReasoningEffort,
   level: InterventionLevel,
@@ -46,7 +50,7 @@ export function adjustReasoningEffort(
   const idx = order.indexOf(current)
 
   if (level === 'escalate') {
-    return order[Math.min(idx + 2, order.length - 1)]!
+    return order[Math.min(idx + 1, order.length - 1)]!
   }
   if (level === 'gate') {
     return order[Math.min(idx + 1, order.length - 1)]!
