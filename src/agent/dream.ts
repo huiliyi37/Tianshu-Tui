@@ -5,7 +5,8 @@
  * to LLM-powered distillation via compactClient.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'node:path'
 import type { VerificationMetadata } from '../tools/types.js'
 import { classifyEntry } from './dream-classify.js'
@@ -138,7 +139,7 @@ function writeToKnowledgeFile(path: string, entry: string, input: DreamInput): v
 
   const combined = entry + '\n' + deduped
   const trimmed = trimToEntryBoundary(combined, MAX_FILE_SIZE)
-  writeFileSync(path, trimmed, 'utf-8')
+  writeFileAtomicSync(path, trimmed)
 }
 
 function trimToEntryBoundary(content: string, maxSize: number): string {

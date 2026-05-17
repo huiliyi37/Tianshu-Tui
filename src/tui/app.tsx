@@ -841,6 +841,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
         blockWriterRef.current?.flush()
         blockWriterRef.current = null
+        foldedCountRef.current = 0
+        fluencyRef.current.onTurnComplete()
         // Preserve any partial text/thinking before clearing
         if (streamBuf.current || thinkBuf.current) {
           pushStatic(createLogEntry({ type: 'assistant_message', content: streamBuf.current, thinking: thinkBuf.current || undefined }))
@@ -871,6 +873,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
         blockWriterRef.current?.flush()
         blockWriterRef.current = null
+        foldedCountRef.current = 0
+        fluencyRef.current.onTurnComplete()
         // Preserve any partial text/thinking before clearing
         if (streamBuf.current || thinkBuf.current) {
           pushStatic(createLogEntry({ type: 'assistant_message', content: streamBuf.current, thinking: thinkBuf.current || undefined }))
