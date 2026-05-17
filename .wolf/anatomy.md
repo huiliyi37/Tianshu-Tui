@@ -1,6 +1,6 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T03:47:19.430Z
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T03:51:47.585Z
 > Files: 404 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
@@ -51,10 +51,10 @@
 
 ## .claude/worktrees/session-ha-closure/.wolf/
 
-- `anatomy.md` — anatomy.md (~8599 tok)
+- `anatomy.md` — anatomy.md (~8674 tok)
 - `buglog.json` — Declares annotation (~7919 tok)
 - `cerebrum.md` — Cerebrum (~616 tok)
-- `memory.md` — Memory (~38883 tok)
+- `memory.md` — Memory (~39008 tok)
 
 ## .claude/worktrees/session-ha-closure/docs/superpowers/plans/
 
@@ -121,14 +121,14 @@
 
 ## .claude/worktrees/session-ha-closure/src/tui/
 
-- `activity-status.ts` — Pure Activity Status Lifecycle (~637 tok)
+- `activity-status.ts` — Exports ActivityPhase, ActivityLifecycleStatus, ActivityState, HeartbeatOptions + 6 more (~664 tok)
 - `app.tsx` — THINKING_FLUSH_MS (~9693 tok)
 - `stream-window.ts` — Exports appendStreamWindow (~93 tok)
 - `thinking.tsx` — MAX_THINKING_DISPLAY (~894 tok)
 
 ## .claude/worktrees/session-ha-closure/src/tui/__tests__/
 
-- `activity-status.test.ts` — Declares activity (~626 tok)
+- `activity-status.test.ts` — Declares activity (~812 tok)
 - `stream-window.test.ts` — Declares result (~192 tok)
 - `thinking.test.tsx` (~153 tok)
 

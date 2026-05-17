@@ -1712,6 +1712,38 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-17T03:47:19.447Z"
+    },
+    {
+      "id": "bug-108",
+      "timestamp": "2026-05-17T03:50:38.445Z",
+      "error_message": "Significant refactor of ",
+      "file": ".claude/worktrees/session-ha-closure/src/tui/activity-status.ts",
+      "root_cause": "4 lines replaced/restructured",
+      "fix": "Rewrote 57→73 lines (4 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T03:50:38.445Z"
+    },
+    {
+      "id": "bug-109",
+      "timestamp": "2026-05-17T03:50:52.053Z",
+      "error_message": "Significant refactor of ",
+      "file": ".claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 18→30 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T03:50:52.053Z"
     }
   ]
 }
