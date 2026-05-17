@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createProviderClient, resolveApiKey, type RuntimeParams } from '../factory.js'
 import { resolveCapabilities, DEEPSEEK_CAPABILITIES, WELL_KNOWN_DEFAULTS } from '../provider.js'
 import { OpenAIClient } from '../openai-client.js'
+import { ApiKeyAuth } from '../../auth/api-key.js'
 import type { ProviderConfig } from '../../config/schema.js'
 
 const deepseekProvider: ProviderConfig = {
@@ -84,6 +85,22 @@ describe('createProviderClient', () => {
     const caps = resolveCapabilities('deepseek')
     const client = createProviderClient(providerWithUnsupported, caps, runtimeParams)
     assert.ok(client)
+  })
+
+  it('accepts AuthProvider in runtime params', () => {
+    const auth = new ApiKeyAuth('sk-from-auth')
+    const openaiProvider: ProviderConfig = {
+      ...deepseekProvider,
+      name: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      protocol: 'openai',
+    }
+    const caps = resolveCapabilities('openai')
+    const client = createProviderClient(openaiProvider, caps, {
+      ...runtimeParams,
+      auth,
+    })
+    assert.ok(client instanceof OpenAIClient)
   })
 })
 

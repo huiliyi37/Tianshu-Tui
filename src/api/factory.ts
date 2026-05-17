@@ -3,6 +3,7 @@ import { OpenAIClient } from './openai-client.js'
 import type { StreamClient } from './stream-client.js'
 import type { ProviderCapabilities } from './provider.js'
 import type { ProviderConfig } from '../config/schema.js'
+import type { AuthProvider } from '../auth/types.js'
 
 /** Runtime parameters that vary per-model or per-call, not stored in config */
 export interface RuntimeParams {
@@ -11,6 +12,7 @@ export interface RuntimeParams {
   maxTokens: number
   reasoningEffort?: string
   thinkingBudget?: number
+  auth?: AuthProvider
 }
 
 /**
