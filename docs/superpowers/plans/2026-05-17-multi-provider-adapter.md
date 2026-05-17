@@ -791,7 +791,7 @@ import { ApiKeyAuth } from '../../auth/api-key.js'
 
 describe('createProviderClient with AuthProvider', () => {
   it('uses AuthProvider headers when auth is provided', async () => {
-    const auth = new ApiKeyAuth('TEST_AUTH_PROVIDER_TOKEN')
+    const auth = new ApiKeyAuth('sk-from-auth-provider')
     const openaiProvider: ProviderConfig = {
       ...deepseekProvider,
       name: 'openai',
