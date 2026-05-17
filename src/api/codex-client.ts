@@ -90,21 +90,52 @@ export class CodexClient implements StreamClient {
         : request.system.map(b => b.text).join('\n')
     }
 
-    // Messages
+    // Messages — function_call and function_call_output are top-level input items
     for (const msg of request.messages) {
       if (msg.role === 'user') {
         if (typeof msg.content === 'string') {
-          input.push({ role: 'user', content: [{ type: 'input_text', text: msg.content }] })
+          input.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: msg.content }] })
         } else {
-          const parts = msg.content.map(block => this.convertInputBlock(block))
-          input.push({ role: 'user', content: parts })
+          // Separate tool results from text content
+          const textParts: Record<string, unknown>[] = []
+          for (const block of msg.content) {
+            if (block.type === 'tool_result') {
+              // Top-level function_call_output
+              input.push({
+                type: 'function_call_output',
+                call_id: block.tool_use_id,
+                output: block.content,
+              })
+            } else {
+              textParts.push(this.convertInputBlock(block))
+            }
+          }
+          if (textParts.length > 0) {
+            input.push({ type: 'message', role: 'user', content: textParts })
+          }
         }
       } else if (msg.role === 'assistant') {
         if (typeof msg.content === 'string') {
-          input.push({ role: 'assistant', content: [{ type: 'output_text', text: msg.content }] })
+          input.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: msg.content }] })
         } else {
-          const parts = msg.content.map(block => this.convertAssistantBlock(block))
-          input.push({ role: 'assistant', content: parts })
+          // Separate tool calls from text content
+          const textParts: Record<string, unknown>[] = []
+          for (const block of msg.content) {
+            if (block.type === 'tool_use') {
+              // Top-level function_call
+              input.push({
+                type: 'function_call',
+                call_id: block.id,
+                name: block.name,
+                arguments: JSON.stringify(block.input),
+              })
+            } else {
+              textParts.push(this.convertAssistantBlock(block))
+            }
+          }
+          if (textParts.length > 0) {
+            input.push({ type: 'message', role: 'assistant', content: textParts })
+          }
         }
       }
     }
