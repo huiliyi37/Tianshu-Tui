@@ -403,6 +403,72 @@ describe('DelegationCoordinator', () => {
     assert.equal(selectedModels[0], 'MiniMax-M2.7')
   })
 
+  it('falls back to recommendModelForTask when routed provider lacks credentials', async () => {
+    const selectedModels: string[] = []
+    const previous = process.env.MISSING_WORKER_KEY
+    delete process.env.MISSING_WORKER_KEY
+
+    try {
+      const coordinator = new DelegationCoordinator({
+        baseToolRegistry: makeRegistry(),
+        modelCards: [
+          ...cards,
+          { model: 'unavailable-routed', toolUseReliability: 0.9, jsonStability: 0.9, editSuccessRate: 0.9, testRepairRate: 0.8, contextWindow: 1_000_000, cacheEconomics: 'medium', recommendedTasks: [] },
+        ],
+        maxWorkers: 2,
+        runtimeFactory: (order, card, workerRegistry) => {
+          selectedModels.push(card.model)
+          return {
+            order,
+            client: {} as ApiClient,
+            promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+            toolRegistry: workerRegistry,
+            cwd: '/repo',
+            maxTurns: 2,
+            contextWindow: card.contextWindow,
+            compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+          }
+        },
+        routing: {
+          providers: {
+            unavailable: {
+              name: 'unavailable',
+              apiKeyEnv: 'MISSING_WORKER_KEY',
+              baseUrl: 'https://example.com/v1',
+              protocol: 'openai',
+              capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none' },
+              thinking: 'enabled',
+              maxTokens: 4096,
+              models: [{ id: 'unavailable-routed', contextWindow: 128_000, maxTokens: 4096 }],
+              unsupported: [],
+            },
+          },
+          profiles: { cheap: { provider: 'unavailable', model: 'unavailable-routed' } },
+          routing: { repo_summarization: 'cheap' },
+        },
+        runWorker: async config => ({
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }),
+      })
+
+      await coordinator.delegate({
+        parentTurnId: 'turn_r3',
+        objective: 'Research the documentation structure and key modules for onboarding.',
+        kind: 'doc_research',
+        profile: 'code_scout',
+        scope: {},
+      })
+
+      assert.equal(selectedModels[0], 'large-cache')
+    } finally {
+      if (previous === undefined) delete process.env.MISSING_WORKER_KEY
+      else process.env.MISSING_WORKER_KEY = previous
+    }
+  })
+
   it('falls back to recommendModelForTask when routing has no match', async () => {
     const selectedModels: string[] = []
 

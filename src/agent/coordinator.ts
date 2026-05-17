@@ -1,5 +1,6 @@
 import type { ModelCapabilityCard, CapabilityTask } from '../model/capability.js'
 import { recommendModelForTask } from '../model/capability.js'
+import type { ProviderConfig } from '../config/schema.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import {
   createReadOnlyWorkOrder,
@@ -46,6 +47,7 @@ export type WorkerRuntimeFactory = (
 export interface WorkerRouteConfig {
   profiles: Record<string, { provider: string; model: string }>
   routing: Record<string, string>
+  providers?: Record<string, ProviderConfig>
 }
 
 export interface DelegationCoordinatorConfig {
@@ -95,8 +97,13 @@ export class DelegationCoordinator {
       const routeName = this.config.routing.routing[task]
       if (routeName && this.config.routing.profiles[routeName]) {
         const routeProfile = this.config.routing.profiles[routeName]
-        const routed = this.config.modelCards.find(c => c.model === routeProfile.model)
-        if (routed) return routed
+        const provider = this.config.routing.providers?.[routeProfile.provider]
+        const routeModelExists = !provider || provider.models.some(m => m.id === routeProfile.model || m.alias === routeProfile.model)
+        const routeHasCredentials = !provider || provider.auth?.type === 'oauth' || Boolean(provider.apiKey || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]))
+        if (routeModelExists && routeHasCredentials) {
+          const routed = this.config.modelCards.find(c => c.model === routeProfile.model)
+          if (routed) return routed
+        }
       }
     }
     return recommendModelForTask(task, this.config.modelCards)

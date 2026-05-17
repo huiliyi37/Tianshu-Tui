@@ -14,3 +14,4 @@ task_plan.md
 .claude/worktrees/
 .wolf/
 .rivet/sensorium.jsonl
+.rivet/pheromones.json

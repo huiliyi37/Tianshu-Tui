@@ -525,3 +525,35 @@ git commit -m "test(star-event): add contracting phase trigger verification"
 - `ThetaCheckResult.errors: string[]` → 传入 `repairHintTracker.recordFailure(file, reason)`（任务 2）
 - `kickActions.deadEndPaths` → `stigmergyStore.deposit({ path, signal: 'dead-end', strength: 0.9 })`（任务 3）
 - `_hasEnteredHighComplexity` → `StarPhaseContext.hasEnteredHighComplexity`（任务 4，已实现）
+
+---
+
+## Implementation Result
+
+> 实施提交：`d6c88a0 fix(starflow): wire closed-loop strategy consumers`  
+> 复盘资产：`docs/analysis/2026-05-18-starflow-v2-closed-loop-retrospective.md`
+
+### 验证结果
+
+- `npx tsx --test src/context/__tests__/stigmergy.test.ts` → 21 pass
+- `npx tsx --test src/agent/__tests__/dissipative-kick.test.ts` → 23 pass
+- `npx tsx --test src/agent/__tests__/theta-check.test.ts` → 3 pass
+- `npx tsx --test src/agent/__tests__/star-event.test.ts` → 25 pass
+- `npx tsc --noEmit` → 0 errors
+- `npx tsx --test src/**/__tests__/*.test.ts` → 1521 pass, 0 fail
+
+### 与计划相比的工程修正
+
+1. `runThetaCheck()` 去掉 `shell: true`，直接 `spawn('npx', args)`，贴合项目工具惯例并降低注入面。
+2. 同时收集 stdout + stderr，避免 tsc/npx 在不同环境下输出位置差异导致漏报。
+3. 使用手写 timer + SIGTERM/SIGKILL，而不是依赖 spawn timeout。
+4. “No tsconfig” 测试调整为 “non-project returns empty”，表达真实契约：无可解析 TypeScript file errors 时不阻塞 agent。
+5. theta 检测失败记录复用现有 `type_error` failure class，而不是新增无模板的 `type-inconsistency`。
+6. Kick recentFailed 保守跟计划，不额外过滤非路径，保持与已有 bash dead-end 行为一致。
+7. 未新增高成本 loop harness；以单元测试覆盖 action/data contract，全量测试兜底中心 loop。
+
+### 后续建议
+
+- `.rivet/pheromones.json` 应作为 runtime artifact 加入 `.gitignore`。
+- delegate worker provider 缺失时应显式降级为 skipped/unavailable，而不是表现为普通 worker failure。
+- `runThetaCheck()` 后续可增加 in-flight guard 与 telemetry。

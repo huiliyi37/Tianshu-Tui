@@ -301,47 +301,83 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     })
 
     const workerRouting = config.workers?.profiles && Object.keys(config.workers.profiles).length > 0
-      ? { profiles: config.workers.profiles, routing: config.workers.routing }
+      ? { profiles: config.workers.profiles, routing: config.workers.routing, providers: config.provider.providers }
       : undefined
 
     const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
       const writeProfiles = ['patcher', 'verifier']
       const isWrite = writeProfiles.includes(_order.profile)
 
-      // Resolve worker provider: routing config → fallback to active provider
+      // Resolve worker provider: routing config → fallback to active provider.
+      // Important: model selection happens in DelegationCoordinator. Only switch
+      // providers when the selected card actually matches the routed profile;
+      // otherwise stale user routing (e.g. codex without credentials) can pair an
+      // active-provider model with an unavailable routed provider.
       let workerProvider = activeProvider
       let workerApiKey = activeApiKey
+      let workerAuth = activeAuth
+      let workerModel = card.model
       if (workerRouting) {
         const routeName = workerRouting.routing[mapWorkOrderKindToCapabilityTask(_order.kind)]
         if (routeName && workerRouting.profiles[routeName]) {
           const routeProfile = workerRouting.profiles[routeName]
           const resolved = config.provider.providers[routeProfile.provider]
-          if (resolved) {
-            workerProvider = resolved
-            workerApiKey = resolveApiKey(resolved)
+          if (resolved && routeProfile.model === card.model) {
+            try {
+              if (resolved.auth?.type === 'oauth') {
+                const routedAuth = resolved.name === activeProvider.name
+                  ? activeAuth
+                  : createAuthProvider(resolved.auth, process.env)
+                if (routedAuth?.isAuthenticated()) {
+                  workerProvider = resolved
+                  workerApiKey = ''
+                  workerAuth = routedAuth
+                }
+              } else {
+                workerProvider = resolved
+                workerApiKey = resolveApiKey(resolved)
+                workerAuth = undefined
+              }
+            } catch {
+              // Provider route is configured but unavailable in this environment.
+              // Fall back to the active provider so delegation remains useful.
+              workerProvider = activeProvider
+              workerApiKey = activeApiKey
+              workerAuth = activeAuth
+            }
           }
         }
       }
+
+      if (!workerProvider.models.some(m => m.id === workerModel || m.alias === workerModel)) {
+        workerModel = currentModel.id
+      }
+      const workerModelSpec = workerProvider.models.find(m => m.id === workerModel || m.alias === workerModel)
+      const workerContextWindow = workerModelSpec?.contextWindow ?? card.contextWindow
+      const workerMaxTokens = isWrite
+        ? Math.min(8192, workerModelSpec?.maxTokens ?? workerContextWindow)
+        : Math.min(4096, workerModelSpec?.maxTokens ?? workerContextWindow)
 
       return {
         order: _order,
         client: createProviderClient(workerProvider, resolveCapabilities(workerProvider.name, workerProvider.capabilities), {
           apiKey: workerApiKey,
-          model: card.model,
+          model: workerModel,
           reasoningEffort: undefined,
-          maxTokens: isWrite ? Math.min(8192, card.contextWindow) : Math.min(4096, card.contextWindow),
+          maxTokens: workerMaxTokens,
           thinkingBudget: isWrite ? 8192 : 4096,
+          auth: workerAuth,
         }),
         promptEngine: new PromptEngine({
-          model: card.model,
-          maxTokens: isWrite ? 8192 : 4096,
+          model: workerModel,
+          maxTokens: workerMaxTokens,
           staticCtx: { tools: workerRegistry.getDefinitions() },
           volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
         }),
         toolRegistry: workerRegistry,
         cwd,
         maxTurns: isWrite ? 8 : 4,
-        contextWindow: card.contextWindow,
+        contextWindow: workerContextWindow,
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
         activeClaims: _claimStoreRef?.listActiveClaims() ?? [],
       }
