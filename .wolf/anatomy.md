@@ -21,6 +21,7 @@
 > Manual update 2026-05-17: Activity Status Layer Task 1 follow-up aligned `src/tui/activity-status.ts` with the plan: no idle begin type, shared HeartbeatOptions, idle no-op transitions, completion/failure label and sizeHint updates, with expanded tests in `src/tui/__tests__/activity-status.test.ts`.
 > Manual update 2026-05-17: Activity Status Layer Task 2 added display formatting helpers `formatActivityDuration`, `formatThinkingSize`, `activityPhaseLabel`, `formatActivitySummary`, `classifyToolActivity`, and `shouldBeginAnalyzing` in `src/tui/activity-status.ts`, with eight new tests in `src/tui/__tests__/activity-status.test.ts` (14 total); typecheck and 1057 tests pass.
 > Manual update 2026-05-17: Activity Status Layer Task 3 added `activitySummary` prop to `AgentStatusProps`, exported `statusPhaseText` helper that overrides `phaseLabel` when an activity summary is provided, updated `AgentStatus` component to use it, and added two tests in `src/tui/__tests__/agent-status.test.ts`; typecheck and 133 agent-status tests pass.
+> Manual update 2026-05-17: Activity Status Layer Task 4 added `thinkingStatusLabel` pure helper and `completedDurationMs` prop to `ThinkingCollapser` in `src/tui/thinking.tsx`, extended `src/tui/__tests__/thinking.test.tsx` with three status label tests; typecheck and 19 combined thinking/activity-status tests pass.
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 

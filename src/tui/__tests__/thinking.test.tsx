@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatDuration, formatThinkingSize } from '../thinking.js'
+import { formatDuration, formatThinkingSize, thinkingStatusLabel } from '../thinking.js'
 
 describe('thinking helpers', () => {
   it('formats elapsed thinking duration', () => {
@@ -12,5 +12,22 @@ describe('thinking helpers', () => {
   it('formats thinking size', () => {
     assert.equal(formatThinkingSize(999), '999 chars')
     assert.equal(formatThinkingSize(1500), '1.5k')
+  })
+})
+
+describe('thinking status label', () => {
+  it('keeps active thinking duration concise', () => {
+    assert.equal(thinkingStatusLabel({ isStreaming: true, elapsedMs: 42_000 }), '42s')
+  })
+
+  it('shows final thinking duration after completion', () => {
+    assert.equal(
+      thinkingStatusLabel({ isStreaming: false, elapsedMs: 0, completedDurationMs: 128_000 }),
+      'completed in 2m 8s',
+    )
+  })
+
+  it('falls back to completed when no final duration is available', () => {
+    assert.equal(thinkingStatusLabel({ isStreaming: false, elapsedMs: 0 }), 'completed')
   })
 })

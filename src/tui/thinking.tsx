@@ -1,10 +1,25 @@
 import { useState, useEffect, useRef } from 'react'
 import { Box, Text, useInput } from 'ink'
 
+interface ThinkingStatusOptions {
+  isStreaming: boolean
+  elapsedMs: number
+  completedDurationMs?: number
+  stale?: boolean
+}
+
+export function thinkingStatusLabel(options: ThinkingStatusOptions): string {
+  if (options.stale && options.isStreaming) return 'waiting for response…'
+  if (options.isStreaming) return formatDuration(options.elapsedMs)
+  if (options.completedDurationMs !== undefined) return `completed in ${formatDuration(options.completedDurationMs)}`
+  return 'completed'
+}
+
 interface ThinkingCollapserProps {
   thinking: string
   isStreaming: boolean
   focused?: boolean
+  completedDurationMs?: number
 }
 
 const MAX_THINKING_DISPLAY = 50_000
@@ -26,7 +41,7 @@ function truncateThinking(text: string): string {
   return text.slice(0, MAX_THINKING_DISPLAY) + `\n... (${text.length - MAX_THINKING_DISPLAY} more characters)`
 }
 
-export function ThinkingCollapser({ thinking, isStreaming, focused }: ThinkingCollapserProps) {
+export function ThinkingCollapser({ thinking, isStreaming, focused = false, completedDurationMs }: ThinkingCollapserProps) {
   const [expanded, setExpanded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [stale, setStale] = useState(false)
@@ -80,7 +95,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused }: ThinkingCo
   if (!thinking && !isStreaming) return null
 
   const spinner = isStreaming ? (elapsed % 2000 < 1000 ? '⠋' : '⠙') : ''
-  const statusLabel = stale ? 'waiting for response…' : isStreaming ? formatDuration(elapsed) : 'completed'
+  const statusLabel = thinkingStatusLabel({ isStreaming, elapsedMs: elapsed, completedDurationMs, stale })
 
   return (
     <Box flexDirection="column" paddingX={2}>
