@@ -135,7 +135,18 @@ function checkCacheStrategy(entry: ProviderEntry): ConformanceCheck {
     }
   }
 
-  // No strategy but profile has cache — likely missed config
+  // No strategy but profile has cache — likely missed config.
+  // Partial-prefix (OpenAI) is auto-cached without explicit strategy; 'none' is acceptable.
+  if (profile.cacheType === 'partial-prefix') {
+    return {
+      id: 'cache_strategy',
+      name: 'Cache strategy',
+      passed: true,
+      severity: 'info',
+      message: `Prefix cache: partial-prefix (auto, no explicit strategy needed)`,
+    }
+  }
+
   return {
     id: 'cache_strategy',
     name: 'Cache strategy',
@@ -261,11 +272,16 @@ export function runConformanceCheck(
   entry: ProviderEntry,
   opts: ConformanceOptions = {},
 ): ConformanceReport {
+  // Apply config-level capability overrides to produce an effective entry
+  const effectiveEntry = opts.capabilityOverrides
+    ? applyOverrides(entry, opts.capabilityOverrides)
+    : entry
+
   const skipSet = new Set(opts.skip ?? [])
   const checks = ALL_CHECKS
     .filter(fn => !skipSet.has(runCheckId(fn)))
     .map(fn => {
-      const check = fn(entry)
+      const check = fn(effectiveEntry)
       if (opts.strict && check.severity === 'warn' && !check.passed) {
         return { ...check, severity: 'error' as const }
       }
@@ -285,6 +301,23 @@ export function runConformanceCheck(
     failed,
     warned,
     ready: failed === 0,
+  }
+}
+
+/** Apply config-level overrides to produce an effective entry for conformance checking */
+function applyOverrides(
+  entry: ProviderEntry,
+  overrides: Partial<ProviderCapabilities>,
+): ProviderEntry {
+  return {
+    ...entry,
+    capabilities: {
+      ...entry.capabilities,
+      ...overrides,
+    },
+    hasUsageMapping: overrides.mapUsage !== undefined
+      ? true
+      : entry.hasUsageMapping,
   }
 }
 

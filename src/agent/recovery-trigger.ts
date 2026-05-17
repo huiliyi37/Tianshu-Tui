@@ -84,7 +84,13 @@ export function classifyInterrupt(input: InterruptClassifierInput): RecoveryTrig
   const evidence: string[] = []
   const actions: string[] = []
 
-  if (input.interruptCountThisTurn < 2 && !input.hasPendingTools) {
+  // Only trigger when interrupts actually happened — pending tools alone
+  // (e.g. normal in-flight tool execution) are NOT a recovery trigger.
+  // Requires: 2+ interrupts OR (1+ interrupt with pending tools as aggravating factor)
+  const hadInterrupts = input.interruptCountThisTurn >= 2
+  const singleInterruptWithPending = input.interruptCountThisTurn >= 1 && input.hasPendingTools
+
+  if (!hadInterrupts && !singleInterruptWithPending) {
     return null
   }
 
@@ -94,7 +100,7 @@ export function classifyInterrupt(input: InterruptClassifierInput): RecoveryTrig
     actions.push('Cancel current task and start a new prompt')
   }
 
-  if (input.hasPendingTools) {
+  if (input.hasPendingTools && input.interruptCountThisTurn >= 1) {
     const pending = 'Tool execution was interrupted mid-flight — pending tool_use may leave incomplete state'
     evidence.push(pending)
     actions.push('Review pending tool calls before continuing')
@@ -153,9 +159,14 @@ export function classifyThrashing(input: ThrashingClassifierInput): RecoveryTrig
   // Check 2: compact failures >= 3
   const compactBroken = input.consecutiveCompactFailures >= 3
 
-  // Check 3: still > 95% after compaction
+  // Check 3: still > 95% — but only relevant after compaction activity.
+  // High watermark alone is for compact policy, not panic recovery.
+  // "压缩后 >95%" per roadmap: must follow a compaction attempt.
   const ratio = input.contextWindow > 0 ? input.estimatedTokens / input.contextWindow : 1
-  const stillCritical = ratio >= 0.95
+  const hasCompactionActivity = input.compactionTurns.length > 0 ||
+    input.consecutiveCompactFailures > 0 ||
+    input.lastCompactFailed
+  const stillCritical = ratio >= 0.95 && hasCompactionActivity
 
   // Check 4: last compact itself failed
   const lastFailed = input.lastCompactFailed

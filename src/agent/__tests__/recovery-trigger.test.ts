@@ -73,6 +73,16 @@ test('classifyInterrupt error severity overrides warn when pending tools', () =>
   assert.ok(result!.evidence.some(e => e.includes('pending')))
 })
 
+test('classifyInterrupt does NOT trigger on pending tools without interrupts', () => {
+  // Normal in-flight tool execution with zero interrupts is NOT a recovery trigger
+  const input: InterruptClassifierInput = {
+    interruptCountThisTurn: 0,
+    hasPendingTools: true,
+    turn: 3,
+  }
+  assert.equal(classifyInterrupt(input), null)
+})
+
 // ─── Doom Loop Tests ──────────────────────────────────────────
 
 test('classifyDoomLoop returns null when level is none', () => {
@@ -172,7 +182,7 @@ test('classifyThrashing triggers on consecutive compact failures', () => {
 
 test('classifyThrashing triggers on >95% after compaction', () => {
   const input: ThrashingClassifierInput = {
-    compactionTurns: [],
+    compactionTurns: [4, 5],   // has compaction activity
     currentTurn: 5,
     consecutiveCompactFailures: 0,
     estimatedTokens: 960_000,
@@ -185,6 +195,19 @@ test('classifyThrashing triggers on >95% after compaction', () => {
   assert.equal(result!.severity, 'error')
   assert.ok(result!.evidence.some(e => e.includes('96.0%')))
   assert.ok(result!.suggestedActions.some(a => a.includes('checkpoint-resume')))
+})
+
+test('classifyThrashing does NOT trigger on >95% without compaction activity', () => {
+  // High watermark alone belongs to compact policy, not panic recovery
+  const input: ThrashingClassifierInput = {
+    compactionTurns: [],            // no compaction activity
+    currentTurn: 5,
+    consecutiveCompactFailures: 0,
+    estimatedTokens: 960_000,
+    contextWindow: 1_000_000,
+    lastCompactFailed: false,
+  }
+  assert.equal(classifyThrashing(input), null)
 })
 
 test('classifyThrashing triggers on last compact failed', () => {

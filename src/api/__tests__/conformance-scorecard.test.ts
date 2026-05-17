@@ -190,3 +190,57 @@ test('all built-in providers have passing required checks', () => {
     assert.equal(report.failed, 0, `${key}: unexpected errors: ${report.checks.filter(c => !c.passed && c.severity === 'error').map(c => c.message).join('; ')}`)
   }
 })
+
+// ─── capabilityOverrides ─────────────────────────────────────
+
+test('capabilityOverrides are applied to effective entry', () => {
+  const entry = getProviderEntry('deepseek')
+  assert.ok(entry)
+  // Override: pretend DeepSeek doesn't support thinking
+  const report = runConformanceCheck(entry!, {
+    capabilityOverrides: {
+      supportsThinking: false,
+      thinkingFormat: 'none',
+    },
+  })
+  const thinkingCheck = report.checks.find(c => c.id === 'has_thinking')
+  assert.ok(thinkingCheck)
+  // With overrides, thinking should be marked as "not supported" → pass (info)
+  assert.ok(thinkingCheck!.passed, `Thinking check should pass with overrides: ${thinkingCheck!.message}`)
+  assert.ok(thinkingCheck!.message.includes('not supported'))
+})
+
+test('capabilityOverrides with cache control changes score', () => {
+  // Use openai: partial-prefix cache, no prefix strategy
+  const entry = getProviderEntry('openai')
+  assert.ok(entry)
+  const baseReport = runConformanceCheck(entry!)
+  const baseCacheCheck = baseReport.checks.find(c => c.id === 'cache_strategy')
+  assert.ok(baseCacheCheck)
+  assert.ok(baseCacheCheck!.passed, `OpenAI base cache should pass`)
+
+  // Override: set anthropic-cache-control on a partial-prefix profile — mismatch
+  const overrideReport = runConformanceCheck(entry!, {
+    capabilityOverrides: { prefixCacheStrategy: 'anthropic-cache-control' },
+  })
+  const overrideCacheCheck = overrideReport.checks.find(c => c.id === 'cache_strategy')
+  assert.ok(overrideCacheCheck)
+  assert.ok(!overrideCacheCheck!.passed,
+    `Cache check should fail with mismatched override: ${overrideCacheCheck!.message}`)
+})
+
+// ─── OpenAI partial-prefix guidance ──────────────────────────
+
+test('OpenAI partial-prefix cache does not trigger misleading guidance', () => {
+  const entry = getProviderEntry('openai')
+  assert.ok(entry)
+  const report = runConformanceCheck(entry!)
+  const cacheCheck = report.checks.find(c => c.id === 'cache_strategy')
+  assert.ok(cacheCheck)
+  assert.ok(cacheCheck!.passed)
+  // Must not suggest anthropic-cache-control for partial-prefix
+  assert.ok(!cacheCheck!.message.includes('anthropic-cache-control'),
+    `OpenAI should not be advised to use anthropic cache: ${cacheCheck!.message}`)
+  assert.ok(cacheCheck!.suggestion === undefined || !cacheCheck!.suggestion.includes('anthropic-cache-control'),
+    `OpenAI should not suggest anthropic cache: ${cacheCheck!.suggestion}`)
+})
