@@ -411,6 +411,47 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.equal(intermediateCount, 1)
     assert.equal(finalCount, 1)
   })
+
+  it('suppresses repeated pre-tool narration across tool-use turns', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    let callCount = 0
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        callCount++
+        if (callCount === 1) {
+          cb.onTextDelta('审查发现了 4 个中风险问题，全部修复。开始：')
+          cb.onContentBlock(makeTextBlock('审查发现了 4 个中风险问题，全部修复。开始：'))
+          cb.onContentBlock(makeToolUseBlock('tu_1', 'read_file', { file_path: '/test/a.ts' }))
+          cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 50 })
+        } else if (callCount === 2) {
+          cb.onTextDelta('  审查发现了 4 个中风险问题，全部修复。开始：\n')
+          cb.onContentBlock(makeTextBlock('  审查发现了 4 个中风险问题，全部修复。开始：\n'))
+          cb.onContentBlock(makeToolUseBlock('tu_2', 'read_file', { file_path: '/test/b.ts' }))
+          cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 50 })
+        } else {
+          cb.onTextDelta('完成。')
+          cb.onContentBlock(makeTextBlock('完成。'))
+          cb.onStopReason('end_turn', { input_tokens: 200, output_tokens: 40 })
+        }
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+
+    const texts: string[] = []
+
+    await agent.run('fix review issues', {
+      ...makeCallbacks(),
+      onTextDelta: (t) => texts.push(t),
+    })
+
+    const allText = texts.join('')
+    assert.equal(allText.match(/审查发现了 4 个中风险问题/g)?.length, 1)
+    assert.ok(allText.includes('完成。'))
+  })
 })
 
 describe('AgentLoop — error handling', () => {
@@ -784,5 +825,50 @@ describe('AgentLoop — antibody generation', () => {
 
     assert.equal(texts1.join(''), 'Hello! How can I help?')
     assert.equal(texts2.join(''), 'Hello! How can I help?', 'second run text should not be suppressed by dedup')
+  })
+})
+
+describe('AgentLoop — output token escalation', () => {
+  it('continues on max_output_tokens stop reason', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    let callCount = 0
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks) => {
+        callCount++
+        if (callCount === 1) {
+          cb.onTextDelta('Partial response...')
+          cb.onContentBlock(makeTextBlock('Partial response...'))
+          cb.onStopReason('max_output_tokens', { input_tokens: 100, output_tokens: 4096 })
+        } else {
+          cb.onTextDelta(' continued and done.')
+          cb.onContentBlock(makeTextBlock(' continued and done.'))
+          cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 200 })
+        }
+      }),
+    } as unknown as ApiClient
+
+    const texts: string[] = []
+    const agent = new AgentLoop(
+      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
+      session, '/test',
+    )
+
+    await agent.run('test prompt', {
+      onTextDelta: (t) => texts.push(t),
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    assert.equal(callCount, 2)
+    assert.ok(texts.some(t => t.includes('continued and done')))
   })
 })

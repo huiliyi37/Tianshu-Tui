@@ -86,6 +86,10 @@ function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id:
   return b.type === 'tool_use'
 }
 
+function displayTextFingerprint(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
 export class AgentLoop {
   private abortController: AbortController | null = null
   private cwd: string
@@ -96,7 +100,7 @@ export class AgentLoop {
   private streamedText = ''
   private thinkingOnlyRetries = 0
   private lastThinkingContent = ''
-  private lastTurnText = ''
+  private lastTurnTextFingerprint = ''
   private lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
@@ -112,6 +116,8 @@ export class AgentLoop {
   private anchorRegistry = new AnchorRegistry(2_000)
   private lastConflictCheckCount = 0
   private predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
+  private outputTokenEscalationCount = 0
+  private static readonly MAX_OUTPUT_ESCALATION = 3
 
   constructor(
     private config: AgentConfig,
@@ -383,10 +389,11 @@ export class AgentLoop {
     // Reset accumulations from previous run
     this.thinkingOnlyRetries = 0
     this.lastThinkingContent = ''
-    this.lastTurnText = ''
+    this.lastTurnTextFingerprint = ''
     this.evidence.reset()
     this.repairHintTracker = new RepairHintTracker()
     this.userAnchors = []
+    this.outputTokenEscalationCount = 0
     this.recordUserInputClaims(userInput)
     this.session.addUserMessage(userInput)
 
@@ -448,6 +455,7 @@ export class AgentLoop {
         const collectedBlocks: ContentBlock[] = []
         let thinkingAccum = ''
         let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
+        let stopReason = ''
         let turnDisplayBuffer = ''
         const streamCallbacks: StreamCallbacks = {
           onTextDelta: (text) => {
@@ -469,7 +477,8 @@ export class AgentLoop {
               callbacks.onToolUse(block.id, block.name, block.input)
             }
           },
-          onStopReason: (_reason, usage) => {
+          onStopReason: (reason, usage) => {
+            stopReason = reason
             this.session.addUsage(usage)
             if (usage.cache_read_input_tokens !== undefined || usage.cache_creation_input_tokens !== undefined) {
               this.session.recordTurnCache(turn, {
@@ -497,11 +506,11 @@ export class AgentLoop {
           streamError = err as Error
         }
 
-        // Flush display buffer: skip if identical to previous turn (suppresses repeated intro text)
-        if (turnDisplayBuffer && turnDisplayBuffer !== this.lastTurnText) {
+        const displayFingerprint = displayTextFingerprint(turnDisplayBuffer)
+        if (turnDisplayBuffer && displayFingerprint !== this.lastTurnTextFingerprint) {
           callbacks.onTextDelta(turnDisplayBuffer)
         }
-        this.lastTurnText = this.streamedText
+        this.lastTurnTextFingerprint = displayFingerprint
 
         if (this.abortController.signal.aborted) {
           // Estimate output usage from what was streamed before abort
@@ -524,6 +533,13 @@ export class AgentLoop {
 
         if (collectedBlocks.length > 0) {
           this.session.addAssistantBlocks(collectedBlocks)
+        }
+
+        // Output token escalation: silently continue when model hits token limit
+        if (stopReason === 'max_output_tokens' && toolUses.length === 0 && this.outputTokenEscalationCount < AgentLoop.MAX_OUTPUT_ESCALATION) {
+          this.outputTokenEscalationCount++
+          this.session.addUserMessage('Continue your response from where you left off.')
+          continue
         }
 
         if (toolUses.length > 0) {
