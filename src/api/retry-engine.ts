@@ -1,0 +1,157 @@
+/**
+ * Structured Retry Engine — uses the error classifier to decide retry strategy.
+ *
+ * Provides jittered exponential backoff, abort-aware delays, and a
+ * generic `withStructuredRetry` wrapper for any async operation.
+ */
+
+import { classifyApiError } from './error-classifier.js'
+import type { ClassifiedError } from './error-classifier.js'
+
+// ---------------------------------------------------------------------------
+// Jittered exponential backoff
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute a delay with full jitter on top of exponential backoff.
+ *
+ * Formula:
+ *   base = min(baseDelay * 2^(attempt-1), maxDelay)
+ *   jitter = random(0, jitterRatio * base)
+ *   result = base + jitter
+ */
+export function jitteredBackoff(
+  attempt: number,
+  baseDelayMs: number = 1000,
+  maxDelayMs: number = 30_000,
+  jitterRatio: number = 0.5,
+): number {
+  const exponential = baseDelayMs * Math.pow(2, attempt - 1)
+  const capped = Math.min(exponential, maxDelayMs)
+  const jitter = Math.random() * jitterRatio * capped
+  return capped + jitter
+}
+
+// ---------------------------------------------------------------------------
+// Abort-aware delay
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a promise that resolves after `ms` milliseconds.
+ * Rejects immediately with `AbortError` if the signal is already aborted
+ * or becomes aborted while waiting.
+ */
+export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+
+    let settled = false
+
+    const timer = setTimeout(() => {
+      settled = true
+      resolve()
+    }, ms)
+
+    const onAbort = (): void => {
+      if (!settled) {
+        settled = true
+        clearTimeout(timer)
+        reject(new DOMException('Aborted', 'AbortError'))
+      }
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Retry types
+// ---------------------------------------------------------------------------
+
+export interface RetryOptions {
+  /** Upper bound on total retry attempts (default: 5). */
+  maxTotalRetries?: number
+  /** Called before each retry with diagnostic info. */
+  onRetry?: (info: RetryInfo) => void
+}
+
+export interface RetryInfo {
+  /** 1-based attempt number (1 = first retry, not the initial call). */
+  attempt: number
+  /** Classified error that triggered this retry. */
+  classified: ClassifiedError
+  /** Delay in ms before the next attempt. */
+  nextDelayMs: number
+}
+
+// ---------------------------------------------------------------------------
+// Core retry loop
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute `fn` with structured retry based on classified errors.
+ *
+ * - Calls `fn()` once, then retries up to `min(classified.maxRetries, maxTotalRetries)` times.
+ * - If the classifier says `!retryable`, the error is re-thrown immediately.
+ * - Delay uses `classified.retryDelayMs` when > 0, otherwise falls back to `jitteredBackoff`.
+ * - Respects `AbortSignal` — rejects with `AbortError` if aborted during a delay.
+ */
+export async function withStructuredRetry<T>(
+  fn: () => Promise<T>,
+  signal?: AbortSignal,
+  options?: RetryOptions,
+): Promise<T> {
+  const maxTotal = options?.maxTotalRetries ?? 5
+
+  // attempt is 1-based and counts *retries* (not the initial call)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      // Check abort before attempting the call
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError')
+      }
+      return await fn()
+    } catch (err: unknown) {
+      const classified = classifyApiError(err)
+
+      // Non-retryable → propagate immediately
+      if (!classified.retryable) {
+        throw err
+      }
+
+      // The effective ceiling is the lower of the error's maxRetries and
+      // the caller's global maxTotalRetries.
+      const effectiveMax = Math.min(classified.maxRetries, maxTotal)
+
+      // +1 because `attempt` starts at 0 (the initial call is attempt 0,
+      // first retry is attempt 1, etc.)
+      if (attempt + 1 > effectiveMax) {
+        throw err
+      }
+
+      // Compute delay: prefer classifier-provided delay when present,
+      // otherwise fall back to jittered exponential backoff.
+      const nextDelayMs =
+        classified.retryDelayMs > 0
+          ? classified.retryDelayMs
+          : jitteredBackoff(attempt + 1)
+
+      // Notify caller
+      options?.onRetry?.({
+        attempt: attempt + 1,
+        classified,
+        nextDelayMs,
+      })
+
+      // Wait (abort-aware)
+      await abortableDelay(nextDelayMs, signal)
+    }
+  }
+}
