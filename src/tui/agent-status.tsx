@@ -17,6 +17,7 @@ interface AgentStatusProps {
   thinkingTime: number
   hasActiveThinking: boolean
   tools: ToolCallItem[]
+  activitySummary?: string
 }
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
@@ -65,6 +66,10 @@ function phaseLabel(tools: ToolCallItem[], isThinking: boolean): string {
   }
 }
 
+function statusPhaseText(activitySummary: string | undefined, tools: ToolCallItem[], isThinking: boolean): string {
+  return activitySummary ?? phaseLabel(tools, isThinking)
+}
+
 function pathBasename(value: unknown): string {
   return String(value ?? '').replace(/^.*[\/]/, '')
 }
@@ -97,9 +102,9 @@ function toolLabel(name: string, input: Record<string, unknown>): string {
   }
 }
 
-export { toolLabel }
+export { statusPhaseText, toolLabel }
 
-export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tokenEstimate, thinkingTime, hasActiveThinking, tools }: AgentStatusProps) {
+export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tokenEstimate, thinkingTime, hasActiveThinking, tools, activitySummary }: AgentStatusProps) {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
@@ -115,7 +120,7 @@ export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tok
   const elapsed = now - startMs
   const spinner = SPINNER_FRAMES[tick % SPINNER_FRAMES.length]!
   const isThinking = (thinkingTime > 0 || hasActiveThinking) && tools.length === 0
-  const phase = phaseLabel(tools, isThinking)
+  const phase = statusPhaseText(activitySummary, tools, isThinking)
 
   const parts: string[] = [formatDuration(elapsed)]
   if (tokenEstimate > 0) parts.push(`↓ ${formatTokenCount(tokenEstimate)} tokens`)
