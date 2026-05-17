@@ -32,6 +32,7 @@ import { openInEditor } from './external-editor.js'
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from './slash-commands.js'
 import { BlockStreamWriter } from './block-stream-writer.js'
 import { appendStreamWindow } from './stream-window.js'
+import { RenderBatcher } from './render-batch.js'
 import { replayMessagesToLogEntries } from './history-replay.js'
 import {
   beginActivity,
@@ -234,6 +235,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const thinkBuf = useRef('')
   const lastFlushedThink = useRef('')
   const blockWriterRef = useRef<BlockStreamWriter | null>(null)
+  const textBatcher = useRef(new RenderBatcher<string>((texts) => {
+    const combined = texts.join('')
+    streamBuf.current += combined
+    setStreamingText(prev => appendStreamWindow(prev, combined, LIVE_STREAM_MAX_CHARS))
+  }))
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toolAccum = useRef<Map<string, string>>(new Map())
@@ -485,8 +491,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     thinkingStartedAtRef.current = 0
 
     blockWriterRef.current = new BlockStreamWriter({}, (text) => {
-      streamBuf.current += text
-      setStreamingText(prev => appendStreamWindow(prev, text, LIVE_STREAM_MAX_CHARS))
+      textBatcher.current.push(text)
     })
 
     streamStartRef.current = Date.now()
@@ -748,6 +753,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
         // Intermediate turn: update activity, freeze tools, reset thinking — but keep writer alive
         if (isFinal === false) {
+          textBatcher.current.flushNow()
           if (thinkStartRef.current > 0) {
             thinkTimeRef.current = Date.now() - thinkStartRef.current
             thinkStartRef.current = 0
@@ -787,6 +793,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           activityRef.current = completeActivity(activityRef.current, turnNow)
           projectActivity(turnNow)
         }
+
+        textBatcher.current.flushNow()
 
         const writer = blockWriterRef.current
         if (writer) {
