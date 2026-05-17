@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 12 (Session HA Closure) + ECF Phase 5 + Session Fluency baseline complete on `main` — 1195 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, cerebellar/thinking edge cases, fluency evidence preservation, and recall project-knowledge lookup are covered by tests.
+Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter complete and merged to `main` — 1248 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, and cerebellar/thinking edge cases are covered by tests.
 
 ### Session HA Closure — completed this round
 
@@ -20,14 +20,6 @@ This round closed the remaining high-availability gaps for interrupted, long-run
 - **Cerebellar/thinking coverage:** prediction-error reset/escalation behavior and ThinkingCollapser formatting have focused regression coverage.
 
 Merge validation for this round passed `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
-
-### Session Fluency + Project Memory baseline closure
-
-This baseline layers flow visibility on top of content preservation without making the terminal heavier. Routine tool output can be folded, but Rivet still emits a bounded tool log summary so the user has evidence in the transcript; high-volume tool output switches the policy into inspect mode with stronger coalescing instead of flooding Ink state. The fluency tracker heartbeats during thinking, answer streaming, tool start, and live tool output so stale warnings age from the current active phase rather than an old event.
-
-Project-memory recall now searches `.rivet/knowledge/` through the tool call `cwd` when no explicit recall context is provided. That keeps recall useful in normal TUI execution, not only in tests or manually constructed contexts.
-
-Closure validation passed focused fluency/recall tests, `npm run typecheck`, `npm test` (1195 pass), and `npm run build`.
 
 ### Activity Status Layer
 
@@ -187,9 +179,6 @@ src/
     ├── status-bar.tsx     Model, cache hit rate, cost, token bar, theme colors
     ├── summary-bar.tsx    Live 3-line cockpit: phase, context%, last action, risk, token/cost
     ├── phase-tracker.ts   Tool→phase state machine (searching/coding/testing/…)
-    ├── activity-status.ts Activity lifecycle, status text, stale cadence, tool/MCP/analyzing labels
-    ├── fluency-policy.ts  Pure visibility policy for quiet/normal/inspect/stress projection
-    ├── fluency-hook.ts    Ref-backed TUI fluency tracker for routine folding, stale, and high-volume signals
     ├── theme.ts           Truecolor/fallback color palette with tool-specific colors
     ├── stream.tsx         Streaming text output (memoized)
     ├── stream-window.ts   Bounded live stream tail window for React state
@@ -456,7 +445,86 @@ rivet config mcp enable fs
 rivet config mcp remove fs
 ```
 
-MCP tools appear as `mcp__<serverId>__<toolName>` and are auto-discovered at startup. Use `/mcp` or `/debug mcp` to check connection status.
+MCP tools appear as `mcp__<serverId>__<toolName}` and are auto-discovered at startup. Use `/mcp` or `/debug mcp` to check connection status.
+
+### Multi-Provider Configuration
+
+Rivet supports multiple model providers with different authentication methods:
+
+| Provider | Protocol | Auth | Models |
+|----------|----------|------|--------|
+| DeepSeek | Anthropic | API key | v4-pro, v4-flash |
+| GLM | Anthropic | API key | glm-5.1, glm-4.7 |
+| Codex (GPT-5.5) | Codex Responses | OAuth PKCE | gpt-5.5 |
+| MiniMax | OpenAI | API key | M2.7, M2.5 |
+| MiMo | OpenAI | API key | V2.5-Pro, V2.5 |
+| OpenCode Go | OpenAI | API key | aggregated models |
+
+#### Codex OAuth Login
+
+Codex uses OAuth PKCE authentication with the ChatGPT subscription (not API billing):
+
+```bash
+# First run triggers browser login
+node dist/main.js --provider codex --model gpt-5.5
+
+# Token saved to ~/.rivet/auth/codex.json, auto-refreshes at 55 min
+# Subsequent runs use saved token automatically
+```
+
+#### API Key Providers
+
+Set environment variables for API key providers:
+
+```bash
+export MINIMAX_API_KEY="your-key"
+export MIMO_API_KEY="your-key"
+export OPENCODE_GO_API_KEY="your-key"
+```
+
+#### Worker Routing (Sub-Agent Model Selection)
+
+Configure different providers for main agent vs sub-agents in `~/.rivet/config.json`:
+
+```json
+{
+  "workers": {
+    "profiles": {
+      "capable": { "provider": "codex", "model": "gpt-5.5" },
+      "cheap": { "provider": "minimax", "model": "MiniMax-M2.7" },
+      "mid": { "provider": "mimo", "model": "MiMo-V2.5-Pro" }
+    },
+    "routing": {
+      "code_edit": "capable",
+      "risky_refactor": "capable",
+      "repo_summarization": "cheap",
+      "test_failure_diagnosis": "cheap"
+    }
+  }
+}
+```
+
+Task types: `code_edit`, `risky_refactor`, `repo_summarization`, `test_failure_diagnosis`, `compaction`.
+Compaction is always handled by the main agent's own model (`compact.model`), not delegated.
+
+#### CLI Arguments
+
+```bash
+node dist/main.js                                    # Use default provider
+node dist/main.js --provider codex --model gpt-5.5   # Specific provider + model
+node dist/main.js --provider minimax --model MiniMax-M2.7
+```
+
+#### TUI Model Switching
+
+Inside a session, use `/model <provider>/<model>` to switch:
+
+```
+/model codex/gpt-5.5
+/model minimax/MiniMax-M2.7
+/model mimo/MiMo-V2.5-Pro
+/model deepseek/v4-pro
+```
 
 ## Slash Commands (in TUI)
 

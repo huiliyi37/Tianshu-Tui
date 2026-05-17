@@ -1,22 +1,23 @@
 # Changelog
 
-## 2026-05-17 — Session Fluency + Recall Baseline Closure
+## 2026-05-17 — Multi-Provider Adapter (Codex OAuth + MiniMax + MiMo)
 
-### Fixed
-- Folded routine tools now still emit bounded tool evidence in the TUI transcript instead of disappearing behind the fold counter.
-- Fluency stale state is reset at turn boundaries and heartbeated during thinking, answer streaming, tool start, and live tool output.
-- High-volume tool results now drive `inspect` visibility with stronger coalescing through `resultLength` and `outputRate` signals.
-- Recall searches project knowledge through `ToolCallParams.cwd` when no explicit recall context exists, so `.rivet/knowledge/` works in normal TUI execution.
+### Added
+- **Auth module (`src/auth/`)**: AuthProvider interface with ApiKeyAuth and OAuthAuth implementations. OAuthAuth supports full PKCE flow with local callback server (localhost:1455), device flow for headless environments, automatic token refresh (55 min), and atomic token persistence to `~/.rivet/auth/{provider}.json`.
+- **CodexClient (`src/api/codex-client.ts`)**: Dedicated client for OpenAI Codex Responses API (`/v1/responses` via `chatgpt.com/backend-api/codex`). Handles the Codex-specific SSE event format (`response.output_item.done` with complete items instead of streaming deltas), extracts text from `output_text` content blocks, reasoning from `summary` items, and function calls.
+- **Provider capabilities**: WELL_KNOWN_DEFAULTS for minimax, mimo, opencode-go with thinking support and OpenAI protocol.
+- **CLI arguments**: `--provider <name>` and `--model <id>` for selecting provider/model at startup.
+- **Worker routing**: Config-driven `workers.profiles` and `workers.routing` in `~/.rivet/config.json` maps CapabilityTask types (code_edit, repo_summarization, etc.) to named worker profiles (capable, cheap, mid) backed by different providers. DelegationCoordinator selects model per-task at runtime.
+- **Config schema**: `auth` field on provider (api-key or oauth), `workers` section with profiles and routing.
 
-### Documentation
-- README status now treats Session HA, Activity Status, Session Fluency, and Project Memory recall as the closed `main` baseline.
-- The fluency/dream validation report now records the follow-up closure instead of leaving high-volume policy and recall cwd as open risks.
+### Architecture
+- **Codex OAuth flow**: `chatgpt.com/backend-api/codex/responses` endpoint (NOT `api.openai.com/v1`). Uses ChatGPT subscription quota, not API quota. Requires `instructions` top-level field, strips unsupported params (max_output_tokens, temperature). Headers: `User-Agent: codex_cli_rs/...`, `Originator: codex_cli_rs`.
+- **Provider/protocol/auth orthogonal separation**: Protocol layer (Anthropic/OpenAI/Codex) is independent from auth layer (API key/OAuth). Worker routing operates at a third layer (task type → provider mapping).
 
-### Validation
-- `npx tsx --test "src/tui/__tests__/fluency-policy.test.ts" "src/tui/__tests__/fluency-hook.test.ts" "src/tools/__tests__/recall.test.ts"` — 77 pass
-- `npm run typecheck`
-- `npm test` — 1195 pass
-- `npm run build`
+### Validated
+- 1248 tests passing, typecheck clean, build success
+- Codex OAuth login tested end-to-end with ChatGPT Plus account
+- Config schema parses all 6 providers with worker routing
 
 ---
 
