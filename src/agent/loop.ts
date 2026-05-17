@@ -487,6 +487,10 @@ export class AgentLoop {
         }
 
         if (streamError) {
+          if (collectedBlocks.length > 0) {
+            this.session.addAssistantBlocks(collectedBlocks)
+            this.recordTurnSnapshot()
+          }
           callbacks.onError(streamError)
           return
         }
@@ -546,8 +550,8 @@ export class AgentLoop {
             this.config.promptEngine.setCerebellarHint(null)
           }
           if (shouldTippingPointReset(this.predictionAccumulator)) {
-            this.config.promptEngine.setCerebellarHint(null)
             this.predictionAccumulator = resetAccumulator(this.predictionAccumulator)
+            this.config.promptEngine.setCerebellarHint(null)
           }
           if (this.config.autoReasoning && this.config.reasoningEffort) {
             this.config.reasoningEffort = adjustReasoningEffort(this.config.reasoningEffort, level)

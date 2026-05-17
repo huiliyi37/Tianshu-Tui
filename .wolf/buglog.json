@@ -1248,6 +1248,184 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-17T01:22:21.961Z"
+    },
+    {
+      "id": "bug-079",
+      "timestamp": "2026-05-17T00:00:00.000Z",
+      "error_message": "SessionPersist tests using RIVET_SESSION_DIR could leak into the default session directory across repeated runs",
+      "file": "src/agent/session-persist.ts",
+      "root_cause": "Session directory was captured in a module-level constant before tests set process.env.RIVET_SESSION_DIR",
+      "fix": "Resolved the session directory dynamically via getSessionDir() at construction and static call sites",
+      "tags": [
+        "test-isolation",
+        "session-persist",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T00:00:00.000Z"
+    },
+    {
+      "id": "bug-080",
+      "timestamp": "2026-05-17T01:19:35.161Z",
+      "error_message": "Loop regression test failed: partial stream error left last message as user instead of assistant",
+      "file": "src/agent/loop.ts",
+      "root_cause": "Stream error branch returned before persisting collected assistant content blocks, so visible partial output was not durable in session state.",
+      "fix": "On streamError, add collected assistant blocks to the session and record a turn snapshot before calling onError.",
+      "tags": [
+        "stream-error",
+        "session-ha",
+        "partial-persistence",
+        "test-failure"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:19:35.161Z"
+    },
+    {
+      "id": "bug-081",
+      "timestamp": "2026-05-17T01:25:57.558Z",
+      "error_message": "Bash timeout cleanup could leave background descendants alive and report exit=1 instead of timeout",
+      "file": "src/tools/bash.ts",
+      "root_cause": "The bash tool spawned the shell without a detached process group, killed only the shell on timeout, and allowed the close event to resolve as a normal exit after timeout killing started.",
+      "fix": "Spawn bash commands detached, terminate with shared killProcessTree helper, and preserve timeout semantics in the close handler with a timedOut flag.",
+      "tags": [
+        "bash",
+        "timeout",
+        "process-tree",
+        "session-ha",
+        "test-failure"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:25:57.558Z"
+    },
+    {
+      "id": "bug-082",
+      "timestamp": "2026-05-17T01:33:33.765Z",
+      "error_message": "MCP manager operations could hang indefinitely during listTools or callTool",
+      "file": "src/mcp/manager.ts",
+      "root_cause": "MCP connect, tool discovery, and tool calls awaited SDK promises without timeout boundaries, leaving initialize or tool execution stuck when a server never responded.",
+      "fix": "Added configurable MCP operation timeout, wrapped connect/listTools/callTool with withTimeout, and marked connected servers degraded when callTool times out.",
+      "tags": [
+        "mcp",
+        "timeout",
+        "degraded-state",
+        "session-ha",
+        "test-failure"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:33:33.765Z"
+    },
+    {
+      "id": "bug-083",
+      "timestamp": "2026-05-17T01:36:57.004Z",
+      "error_message": "Smart compaction accepted unsafe or non-useful summaries instead of falling back",
+      "file": "src/compact/auto.ts",
+      "root_cause": "smartCompact used the model summary directly after stream completion without checking for empty output, prompt-like XML tags, or summaries too large to reduce context pressure.",
+      "fix": "Added summary quality gate for empty, unsafe XML-like, and oversized summaries; failures now fall back to microCompact.",
+      "tags": [
+        "compaction",
+        "summary-quality",
+        "prompt-injection",
+        "session-ha",
+        "test-failure"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:36:57.004Z"
+    },
+    {
+      "id": "bug-084",
+      "timestamp": "2026-05-17T01:44:48.809Z",
+      "error_message": "Volatile prompt repairHint/sessionMemory raw XML escaped context boundary",
+      "file": "src/prompt/volatile.ts",
+      "root_cause": "repairHint and sessionMemoryBlock were appended as pre-rendered XML, allowing injected closing context/system tags to become prompt structure",
+      "fix": "Wrap both values in fixed repair-hint/session-memory tags and escape their content before joining the volatile context block",
+      "tags": [
+        "session-ha",
+        "prompt-injection",
+        "volatile-context",
+        "xml-escaping"
+      ],
+      "related_bugs": [
+        "bug-083"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:44:48.814Z"
+    },
+    {
+      "id": "bug-085",
+      "timestamp": "2026-05-17T01:48:41.903Z",
+      "error_message": "Live assistant stream display accumulated unbounded text in React state",
+      "file": "src/tui/app.tsx",
+      "root_cause": "BlockStreamWriter callback appended every emitted text chunk into the same string used for streamingText state, so very long responses could keep growing React render state without a display cap.",
+      "fix": "Added appendStreamWindow tail helper and used it for streamingText updates while keeping streamBuf as the full non-React buffer for final assistant message rendering.",
+      "tags": [
+        "session-ha",
+        "tui",
+        "streaming",
+        "bounded-state",
+        "test-failure"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:48:41.904Z"
+    },
+    {
+      "id": "bug-086",
+      "timestamp": "2026-05-17T01:53:44.766Z",
+      "error_message": "Prediction-error tests exposed missing resetAccumulator export and over-aggressive escalate reasoning bump",
+      "file": "src/agent/prediction-error.ts",
+      "root_cause": "Prediction accumulator had no explicit reset helper for tipping-point recovery and escalate raised reasoning effort by two levels, skipping the intermediate effort state.",
+      "fix": "Added immutable resetAccumulator(), changed escalate adjustment to bump reasoning effort by one level, and wired AgentLoop tipping-point recovery to reset the accumulator after clearing the cerebellar hint.",
+      "tags": [
+        "cerebellar-loop",
+        "prediction-error",
+        "reasoning-effort",
+        "test-failure"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:05:32.133Z"
+    },
+    {
+      "id": "bug-087",
+      "timestamp": "2026-05-17T01:53:44.768Z",
+      "error_message": "Thinking helper tests could not import duration and size format helpers",
+      "file": "src/tui/thinking.tsx",
+      "root_cause": "ThinkingCollapser had formatting behavior embedded only in component presentation and no exported pure helpers for deterministic test coverage.",
+      "fix": "Exported formatDuration() and formatThinkingSize() and added focused tests for seconds/minutes and character/kilobyte formatting.",
+      "tags": [
+        "thinking-collapser",
+        "tui",
+        "test-coverage",
+        "test-failure"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T01:53:44.768Z"
+    },
+    {
+      "id": "bug-088",
+      "timestamp": "2026-05-17T02:01:40.388Z",
+      "error_message": "PromptEngine full suite still expected raw session-memory XML after volatile escaping",
+      "file": "src/prompt/__tests__/engine.test.ts",
+      "root_cause": "The engine projection test asserted the old raw <session-memory session_id> structure even though volatile context now wraps and escapes session memory content for prompt-boundary safety.",
+      "fix": "Updated the test to assert the fixed outer <session-memory> wrapper, escaped inner session-memory tag, preserved text content, and absence of the raw injected tag.",
+      "tags": [
+        "prompt-engine",
+        "volatile-context",
+        "test-expectation",
+        "session-ha",
+        "test-failure"
+      ],
+      "related_bugs": [
+        "bug-084"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T02:01:40.388Z"
     }
   ]
 }

@@ -10,6 +10,10 @@ export function createPredictionAccumulator(windowSize = 10): PredictionAccumula
   return { windowSize, predictions: [], consecutiveCorrect: 0 }
 }
 
+export function resetAccumulator(acc: PredictionAccumulator): PredictionAccumulator {
+  return { ...acc, predictions: [], consecutiveCorrect: 0 }
+}
+
 export function recordPrediction(
   acc: PredictionAccumulator,
   correct: boolean,
@@ -36,10 +40,6 @@ export function getInterventionLevel(acc: PredictionAccumulator): InterventionLe
 
 export function shouldTippingPointReset(acc: PredictionAccumulator): boolean {
   return acc.consecutiveCorrect >= 3
-}
-
-export function resetAccumulator(acc: PredictionAccumulator): PredictionAccumulator {
-  return { ...acc, predictions: [], consecutiveCorrect: 0 }
 }
 
 export function adjustReasoningEffort(

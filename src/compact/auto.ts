@@ -102,6 +102,18 @@ ${history}
 Provide a concise summary (${wordLimit} words max):`
 }
 
+function isUnsafeSummary(summary: string): boolean {
+  return /<\/?(?:context|system|tool_use|tool_result|assistant|user)\b/i.test(summary)
+}
+
+function shouldFallbackSummary(summary: string, tokenCount: number): boolean {
+  const trimmed = summary.trim()
+  if (!trimmed) return true
+  if (isUnsafeSummary(trimmed)) return true
+  const summaryTokens = Math.ceil(trimmed.length / 4)
+  return summaryTokens >= Math.floor(tokenCount * 0.8)
+}
+
 export interface CompactResult {
   summary: string
   messages: Message[]
@@ -155,6 +167,13 @@ export async function smartCompact(
     const { messages: truncated, truncated: removedCount } = microCompact(messages, contextWindow, tokenCount)
     return { summary: '', messages: truncated, truncatedCount: removedCount }
   }
+
+  if (shouldFallbackSummary(summary, tokenCount)) {
+    const { messages: truncated, truncated: removedCount } = microCompact(messages, contextWindow, tokenCount)
+    return { summary: '', messages: truncated, truncatedCount: removedCount }
+  }
+
+  summary = summary.trim()
 
   const selectedRounds = selectReactiveCompactRounds(messages, {
     anchorMessages: CACHE_ANCHOR_MESSAGES,

@@ -7,6 +7,7 @@
 ## User Preferences
 
 <!-- How the user likes things done. Code style, tools, patterns, communication. -->
+- [2026-05-17] During Session HA closure, keep main implementation in the primary assistant session; do not use Opus 4.7 as an execution agent. If helper agents are useful, use Haiku 4 or Sonnet 4.5 for scoped review/lookup.
 
 ## Key Learnings
 

@@ -43,7 +43,7 @@ export function runResumePreflight(messages: Message[]): ResumePreflightReport {
     const syntheticResults = orphanIds.map(id => ({
       type: 'tool_result' as const,
       tool_use_id: id,
-      content: 'Tool result unavailable: recovered from interrupted tool execution.',
+      content: '[recovered] Tool result missing after interrupted session resume.',
       is_error: true,
     }))
 

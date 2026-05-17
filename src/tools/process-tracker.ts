@@ -1,4 +1,5 @@
 import type { ChildProcess } from 'child_process'
+import { killProcessTree } from './process-kill.js'
 
 const activeProcesses = new Set<ChildProcess>()
 
@@ -11,24 +12,11 @@ export function track(child: ChildProcess): ChildProcess {
 
 export function killAll(): void {
   for (const child of activeProcesses) {
-    if (!child.pid) continue
-    try {
-      // Kill process group (negative PID) to catch the entire shell tree,
-      // including &-backgrounded children. Falls back to single-process kill.
-      process.kill(-child.pid, 'SIGTERM')
-    } catch {
-      try { child.kill('SIGTERM') } catch { /* already dead */ }
-    }
+    killProcessTree(child, 'SIGTERM')
   }
-  // Give 2s grace period then force kill
   setTimeout(() => {
     for (const child of activeProcesses) {
-      if (!child.pid) continue
-      try {
-        process.kill(-child.pid, 'SIGKILL')
-      } catch {
-        try { child.kill('SIGKILL') } catch { /* already dead */ }
-      }
+      killProcessTree(child, 'SIGKILL')
     }
     activeProcesses.clear()
   }, 2000)

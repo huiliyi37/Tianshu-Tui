@@ -365,6 +365,39 @@ describe('AgentLoop — multi-turn tool_use', () => {
 })
 
 describe('AgentLoop — error handling', () => {
+  it('persists partial assistant blocks before returning stream error', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        cb.onTextDelta('partial answer')
+        cb.onContentBlock(makeTextBlock('partial answer'))
+        throw new Error('stream dropped')
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 1, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+
+    let errorMessage = ''
+    await agent.run('hello', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (err) => { errorMessage = err.message },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    const messages = session.getMessages()
+    assert.equal(errorMessage, 'stream dropped')
+    assert.equal(messages.at(-1)?.role, 'assistant')
+    assert.deepEqual(messages.at(-1)?.content, [{ type: 'text', text: 'partial answer' }])
+  })
+
   it('handles tool execution errors gracefully and continues', async () => {
     const session = new SessionContext()
     const registry = new ToolRegistry()

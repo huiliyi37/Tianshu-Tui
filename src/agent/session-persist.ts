@@ -5,13 +5,16 @@ import { join } from 'path'
 import { homedir } from 'os'
 import type { Message } from '../api/types.js'
 import type { SessionMetadata } from '../context/types.js'
-import type { LedgerSessionMemoryState, SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
+import type { LedgerSessionMemoryState, ResumePreflightReport, SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
+import { runResumePreflight } from '../context/resume-preflight.js'
 import { appendSessionMemory, buildSessionMemoryBlock, loadSessionMemory } from '../context/session-memory.js'
 import { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaim } from '../context/claims.js'
 import { assertValidSessionId } from '../validation.js'
 
-const SESSION_DIR = process.env.RIVET_SESSION_DIR ?? join(homedir(), '.rivet', 'sessions')
+function getSessionDir(): string {
+  return process.env.RIVET_SESSION_DIR ?? join(homedir(), '.rivet', 'sessions')
+}
 
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) {
@@ -27,15 +30,15 @@ export class SessionPersist {
 
   constructor(sessionId: string) {
     assertValidSessionId(sessionId)
-    ensureDir(SESSION_DIR)
+    ensureDir(getSessionDir())
     this.sessionId = sessionId
-    this.filePath = join(SESSION_DIR, `${sessionId}.jsonl`)
-    this.metadataPath = join(SESSION_DIR, `${sessionId}.meta.json`)
-    this.snapshotPath = join(SESSION_DIR, `${sessionId}.snapshots.jsonl`)
+    this.filePath = join(getSessionDir(), `${sessionId}.jsonl`)
+    this.metadataPath = join(getSessionDir(), `${sessionId}.meta.json`)
+    this.snapshotPath = join(getSessionDir(), `${sessionId}.snapshots.jsonl`)
   }
 
   getBackupDir(): string {
-    const dir = join(SESSION_DIR, this.sessionId, 'backups')
+    const dir = join(getSessionDir(), this.sessionId, 'backups')
     ensureDir(dir)
     return dir
   }
@@ -53,6 +56,36 @@ export class SessionPersist {
     return content.trim().split('\n').filter(Boolean).map(line => {
       try { return JSON.parse(line) as Message } catch { return null }
     }).filter(Boolean) as Message[]
+  }
+
+  /** Load messages repaired for resume, rolling back to the last safe snapshot when needed. */
+  loadRecoverableMessages(): {
+    messages: Message[]
+    preflight: ResumePreflightReport
+    usedSnapshot: boolean
+    snapshotTurn?: number
+  } {
+    const loaded = this.load()
+    const preflight = runResumePreflight(loaded)
+
+    if (preflight.safe) {
+      return { messages: preflight.messages, preflight, usedSnapshot: false }
+    }
+
+    const snapshot = this.loadLastSnapshot()
+    if (!snapshot) {
+      return { messages: preflight.messages, preflight, usedSnapshot: false }
+    }
+
+    const snapshotMessages = this.loadUpToTurn(snapshot.turn)
+    const snapshotPreflight = runResumePreflight(snapshotMessages)
+
+    return {
+      messages: snapshotPreflight.messages,
+      preflight: snapshotPreflight,
+      usedSnapshot: true,
+      snapshotTurn: snapshot.turn,
+    }
   }
 
   /** Compact the session file with the given messages */
@@ -116,11 +149,11 @@ export class SessionPersist {
   }
 
   loadMemory(): SessionMemoryState {
-    return loadSessionMemory(SESSION_DIR, this.sessionId)
+    return loadSessionMemory(getSessionDir(), this.sessionId)
   }
 
   appendMemory(input: { text: string; source: SessionMemoryEntry['source']; createdAt: number }): SessionMemoryState {
-    return appendSessionMemory(SESSION_DIR, this.sessionId, input)
+    return appendSessionMemory(getSessionDir(), this.sessionId, input)
   }
 
   buildMemoryBlock(): string {
@@ -132,7 +165,7 @@ export class SessionPersist {
     if (memory.entries.length === 0) return undefined
     const block = buildSessionMemoryBlock(memory)
     return {
-      path: join(join(homedir(), '.rivet', 'sessions'), `${this.sessionId}.memory.json`),
+      path: join(getSessionDir(), `${this.sessionId}.memory.json`),
       lastSummarizedRoundIndex: -1,
       lastUpdatedAt: memory.entries[memory.entries.length - 1]?.createdAt ?? Date.now(),
       digest: block.length > 200 ? block.slice(0, 197) + '...' : block,
@@ -143,7 +176,7 @@ export class SessionPersist {
 
   /** Create a claim store for the current session. */
   createClaimStore(): ContextClaimStore {
-    return new ContextClaimStore(SESSION_DIR, this.sessionId)
+    return new ContextClaimStore(getSessionDir(), this.sessionId)
   }
 
   /** Load durable claims from the most recent previous session. */
@@ -154,7 +187,7 @@ export class SessionPersist {
       .sort()
       .pop()
     if (!previous) return []
-    return ContextClaimStore.loadDurableClaims(SESSION_DIR, previous)
+    return ContextClaimStore.loadDurableClaims(getSessionDir(), previous)
   }
 
   /** Inject durable claims from previous session into a claim store with confidence decay. */
@@ -177,9 +210,9 @@ export class SessionPersist {
 
   /** List all session files */
   static listSessions(): string[] {
-    ensureDir(SESSION_DIR)
+    ensureDir(getSessionDir())
     try {
-      return readdirSync(SESSION_DIR)
+      return readdirSync(getSessionDir())
         .filter((f: string) => f.endsWith('.jsonl'))
         .map((f: string) => f.replace('.jsonl', ''))
     } catch {
@@ -191,7 +224,7 @@ export class SessionPersist {
 const MAX_SESSIONS = 50
 
 export function evictOldSessions(keepSessionId: string): string[] {
-  return evictOldSessionsInternal(SESSION_DIR, keepSessionId, MAX_SESSIONS)
+  return evictOldSessionsInternal(getSessionDir(), keepSessionId, MAX_SESSIONS)
 }
 
 export function evictOldSessionsInternal(dir: string, keepSessionId: string, limit: number): string[] {

@@ -165,7 +165,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   }
 
   if (ctx.repairHint) {
-    parts.push(ctx.repairHint)
+    parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
   }
 
   if (ctx.decisions && ctx.decisions.length > 0) {
@@ -184,7 +184,7 @@ ${escapeXml(ctx.cerebellarHint)}
   }
 
   if (ctx.sessionMemoryBlock) {
-    parts.push(ctx.sessionMemoryBlock)
+    parts.push(`<session-memory>\n${escapeXml(ctx.sessionMemoryBlock)}\n</session-memory>`)
   }
 
   return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''
