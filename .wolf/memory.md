@@ -19,6 +19,7 @@
 | 11:25 | Final validation and docs update | CHANGELOG.md, README.md, src/prompt/__tests__/engine.test.ts | Fixed stale session-memory expectation after volatile escaping; final typecheck, 1043-test suite, and build pass; logged bug-088 | ~1000 |
 | 11:45 | Resolved main merge typecheck duplicate helpers | src/agent/prediction-error.ts, src/tui/thinking.tsx, .wolf/buglog.json | Removed duplicate resetAccumulator and thinking helper definitions from merge resolution; typecheck/tests/build pass; logged bug-089 | ~400 |
 | 11:55 | Refreshed Session HA docs | README.md, CHANGELOG.md, .wolf/anatomy.md | Added completed-this-round checklist, architecture doc updates, and changelog completion/validation notes | ~500 |
+| 12:10 | Designed Activity Status Layer | docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-design.md, docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-brainstorm.md | Captured approved long-task observability design and separate brainstorming asset covering thinking, large-file analysis, tool/MCP waits, compaction, and preflight | ~1200 |
 
 ## Session: 2026-05-16 Execution Trust Closure
 
