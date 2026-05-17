@@ -1,7 +1,31 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T04:23:40.983Z
-> Files: 410 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T01:22:58.046Z
+> Files: 374 tracked | Anatomy hits: 0 | Misses: 0
+>
+> Manual update 2026-05-17: Session HA Task 1 added recoverable session loading and dynamic session-dir resolution in `src/agent/session-persist.ts`, restore recovery notes in `src/tui/app.tsx`, targeted coverage in `src/agent/__tests__/session-persist.test.ts`, standardized synthetic resume repair text in `src/context/resume-preflight.ts`, and buglog entry `bug-079` for session-dir test isolation.
+> Manual update 2026-05-17: Recorded user delegation preference in `.wolf/cerebrum.md`, `.wolf/memory.md`, and persistent memory `feedback_model-delegation.md`; main implementation remains in the primary assistant session.
+> Manual update 2026-05-17: Session HA Task 2 added partial assistant persistence on stream errors in `src/agent/loop.ts`, regression coverage in `src/agent/__tests__/loop.test.ts`, and buglog entry `bug-080`.
+> Manual update 2026-05-17: Session HA Task 3 added `src/tools/process-kill.ts`, process-tree timeout cleanup in `src/tools/bash.ts` and `src/tools/process-tracker.ts`, tests in `src/tools/__tests__/bash.test.ts` and `src/tools/__tests__/process-kill.test.ts`, timeout single-settle protection in `src/tools/bash.ts`, and buglog entry `bug-081`.
+> Manual update 2026-05-17: Session HA Task 4 added configurable MCP operation timeouts and degraded callTool state in `src/mcp/manager.ts`, `degraded` status in `src/mcp/types.ts`, `timeoutMs` config parsing in `src/mcp/config.ts`, tests in `src/mcp/__tests__/manager.test.ts`, and buglog entry `bug-082`.
+> Manual update 2026-05-17: Session HA Task 5 added smart compaction summary quality gates in `src/compact/auto.ts`, fallback coverage in `src/compact/__tests__/auto.test.ts`, and buglog entry `bug-083`.
+> Manual update 2026-05-17: Session HA Task 6 escaped volatile `repairHint` and `sessionMemoryBlock` inside fixed XML tags in `src/prompt/volatile.ts`, added injection regression tests in `src/prompt/__tests__/volatile.test.ts`, and buglog entry `bug-084`.
+> Manual update 2026-05-17: Session HA Task 7 added bounded live stream tail helper in `src/tui/stream-window.ts`, covered it in `src/tui/__tests__/stream-window.test.ts`, connected `src/tui/app.tsx` live display state without truncating final assistant content, and buglog entry `bug-085`.
+> Manual update 2026-05-17: Session HA Task 8 added `resetAccumulator()` and single-step `escalate` behavior in `src/agent/prediction-error.ts`, wired tipping-point recovery in `src/agent/loop.ts`, strengthened `src/agent/__tests__/prediction-error.test.ts`, exported ThinkingCollapser format helpers in `src/tui/thinking.tsx`, added `src/tui/__tests__/thinking.test.tsx`, and buglog entries `bug-086`/`bug-087`.
+> Manual update 2026-05-17: Session HA Task 9 updated `CHANGELOG.md` and `README.md` for Session HA Closure, aligned `src/prompt/__tests__/engine.test.ts` with escaped session-memory volatile context, logged bug `bug-088`, and final validation passed typecheck, 1043 tests, and build.
+> Manual update 2026-05-17: Main merge resolved duplicate Session HA/cerebellar helper definitions in `src/agent/prediction-error.ts` and `src/tui/thinking.tsx`, reran typecheck/tests/build successfully, and logged bug `bug-089`.
+> Manual update 2026-05-17: Documentation refresh expanded `README.md` Session HA Closure status into a completed-this-round checklist, updated architecture entries for restore/process/MCP/compaction/prompt/TUI streaming, and added a CHANGELOG completed/validation section.
+> Manual update 2026-05-17: Activity Status Layer brainstorming produced `docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-design.md` and separate process asset `docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-brainstorm.md` for long-task observability beyond thinking.
+> Manual update 2026-05-17: Activity Status Layer implementation plan added `docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md` with TDD tasks for `src/tui/activity-status.ts`, AgentStatus, ThinkingCollapser, App projection, tool/MCP/analyzing activity, docs, and validation.
+> Manual update 2026-05-17: Activity Status Layer Task 1 created pure lifecycle module `src/tui/activity-status.ts` with ActivityPhase/ActivityLifecycleStatus/ActivityState types and immutable transition functions (createIdleActivity, beginActivity, heartbeatActivity, completeActivity, failActivity, clearActivity), covered in `src/tui/__tests__/activity-status.test.ts` (5 tests), typecheck/tests pass.
+> Manual update 2026-05-17: Activity Status Layer Task 1 follow-up aligned `src/tui/activity-status.ts` with the plan: no idle begin type, shared HeartbeatOptions, idle no-op transitions, completion/failure label and sizeHint updates, with expanded tests in `src/tui/__tests__/activity-status.test.ts`.
+> Manual update 2026-05-17: Activity Status Layer Task 2 added display formatting helpers `formatActivityDuration`, `formatThinkingSize`, `activityPhaseLabel`, `formatActivitySummary`, `classifyToolActivity`, and `shouldBeginAnalyzing` in `src/tui/activity-status.ts`, with eight new tests in `src/tui/__tests__/activity-status.test.ts` (14 total); typecheck and 1057 tests pass.
+> Manual update 2026-05-17: Activity Status Layer Task 3 added `activitySummary` prop to `AgentStatusProps`, exported `statusPhaseText` helper that overrides `phaseLabel` when an activity summary is provided, updated `AgentStatus` component to use it, and added two tests in `src/tui/__tests__/agent-status.test.ts`; typecheck and 133 agent-status tests pass.
+> Manual update 2026-05-17: Activity Status Layer Task 4 added `thinkingStatusLabel` pure helper and `completedDurationMs` prop to `ThinkingCollapser` in `src/tui/thinking.tsx`, extended `src/tui/__tests__/thinking.test.tsx` with three status label tests; typecheck and 19 combined thinking/activity-status tests pass.
+> Manual update 2026-05-17: Activity Status Layer Task 5 added `shouldProjectActivity` cadence guard in `src/tui/activity-status.ts`, wired low-frequency (1Hz) activity projection in `src/tui/app.tsx` for thinking/answer streaming with begin/heartbeat/complete/fail lifecycle, projected activity summary to AgentStatus and completed thinking duration to ThinkingCollapser, added three projection cadence tests; typecheck and 1067 tests pass.
+> Manual update 2026-05-17: Activity Status Layer Task 6 added `toolActivityLabel` and `analysisLabelForTool` helpers in `src/tui/activity-status.ts`, wired tool/MCP activity lifecycle with heartbeat during live output, completion/failure on final result, and analyzing phase for large read_file/bash results in `src/tui/app.tsx`, added three tool label tests in `src/tui/__tests__/activity-status.test.ts`; typecheck and 1067 tests pass.
+> Manual update 2026-05-17: Activity Status Layer Task 6 follow-up renamed the final tool-result local label variable in `src/tui/app.tsx` to `resolvedLabel` to avoid shadowing the imported `toolLabel` helper; focused activity/agent status tests and typecheck pass.
+> Manual update 2026-05-17: Activity Status Layer documentation complete — updated `README.md` with section describing activity coverage and non-goals, added `CHANGELOG.md` entry with validation commands, staged implementation plan, final validation passed typecheck, 1067 tests, and build.
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -15,19 +39,15 @@
 
 - `config.yaml` (~2172 tok)
 
-## ../../../.rivet/
-
-- `config.json` (~496 tok)
-
 ## ./
 
 - `.gitignore` — Git ignore rules (~23 tok)
 - `CHANGELOG.md` — Changelog (~6162 tok)
-- `CLAUDE.md` — Rivet (~417 tok)
+- `CLAUDE.md` — Rivet (~310 tok)
 - `config.example.toml` — ~/.opencode/config.toml (~232 tok)
 - `package-lock.json` — npm lock file (~19981 tok)
 - `package.json` — Node.js package manifest (~164 tok)
-- `README.md` — Project documentation (~13718 tok)
+- `README.md` — Project documentation (~13658 tok)
 - `tsconfig.json` — TypeScript configuration (~153 tok)
 - `tsup.config.ts` (~65 tok)
 
@@ -35,82 +55,38 @@
 
 - `settings.json` (~441 tok)
 
-## .claude/PRPs/reviews/
-
-- `pr-openai-client-review.md` — Code Review: feat/openai-client — OpenAI Protocol Client (~910 tok)
-
 ## .claude/rules/
 
 - `openwolf.md` (~313 tok)
 
 ## .claude/worktrees/session-ha-closure/
 
-- `CHANGELOG.md` — Changelog (~6464 tok)
 - `package-lock.json` (~19976 tok)
-- `README.md` — Project documentation (~14202 tok)
 
 ## .claude/worktrees/session-ha-closure/.wolf/
 
-- `anatomy.md` — anatomy.md (~8859 tok)
+- `anatomy.md` — anatomy.md (~7130 tok)
 - `buglog.json` — Declares annotation (~7919 tok)
 - `cerebrum.md` — Cerebrum (~616 tok)
-- `memory.md` — Memory (~39248 tok)
-
-## .claude/worktrees/session-ha-closure/docs/superpowers/plans/
-
-- `2026-05-17-rivet-activity-status-layer.md` — Rivet Activity Status Layer 实现计划 (~7887 tok)
-
-## .claude/worktrees/session-ha-closure/docs/superpowers/specs/
-
-- `2026-05-17-rivet-activity-status-layer-brainstorm.md` — Rivet Activity Status Layer Brainstorm Asset (~1589 tok)
-- `2026-05-17-rivet-activity-status-layer-design.md` — Rivet Activity Status Layer Design (~2898 tok)
+- `memory.md` — Memory (~34104 tok)
 
 ## .claude/worktrees/session-ha-closure/src/agent/
 
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6766 tok)
-- `prediction-error.ts` — Exports InterventionLevel, PredictionAccumulator, createPredictionAccumulator, resetAccumulator + 5 (~610 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6684 tok)
 - `session-persist.ts` — Append a single message to the session file (~2560 tok)
 
 ## .claude/worktrees/session-ha-closure/src/agent/__tests__/
 
 - `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~7485 tok)
-- `prediction-error.test.ts` — Declares acc (~1582 tok)
 - `session-persist.test.ts` — Declares persist (~2085 tok)
-
-## .claude/worktrees/session-ha-closure/src/compact/
-
-- `auto.ts` — Decide whether automatic compaction should fire. (~1935 tok)
-
-## .claude/worktrees/session-ha-closure/src/compact/__tests__/
-
-- `auto.test.ts` — Declares baseConfig (~1409 tok)
 
 ## .claude/worktrees/session-ha-closure/src/context/
 
 - `resume-preflight.ts` — Exports runResumePreflight (~681 tok)
 
-## .claude/worktrees/session-ha-closure/src/mcp/
-
-- `config.ts` — Zod schemas: mcpServerConfigSchema, mcpConfigSchema (~283 tok)
-- `manager.ts` — Exports McpToolDef, ConnectedServer, McpManager (~1792 tok)
-- `types.ts` — Exports McpConnectionState (~72 tok)
-
-## .claude/worktrees/session-ha-closure/src/mcp/__tests__/
-
-- `manager.test.ts` — makeConfig: wait (~1626 tok)
-
-## .claude/worktrees/session-ha-closure/src/prompt/
-
-- `volatile.ts` — Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (laz (~1950 tok)
-
-## .claude/worktrees/session-ha-closure/src/prompt/__tests__/
-
-- `engine.test.ts` — Declares makeEngine (~1924 tok)
-- `volatile.test.ts` — VolatileContext: ledger (~3257 tok)
-
 ## .claude/worktrees/session-ha-closure/src/tools/
 
-- `bash.ts` — Exports BASH_TOOL (~1565 tok)
+- `bash.ts` — Exports BASH_TOOL (~1411 tok)
 - `process-kill.ts` — Exports killProcessTree (~119 tok)
 - `process-tracker.ts` — Exports track, killAll, getActiveCount (~205 tok)
 
@@ -121,18 +97,7 @@
 
 ## .claude/worktrees/session-ha-closure/src/tui/
 
-- `activity-status.ts` — Exports ActivityPhase, ActivityLifecycleStatus, ActivityState, HeartbeatOptions + 12 more (~1495 tok)
-- `agent-status.tsx` — SPINNER_FRAMES (~1535 tok)
-- `app.tsx` — THINKING_FLUSH_MS (~9693 tok)
-- `stream-window.ts` — Exports appendStreamWindow (~93 tok)
-- `thinking.tsx` — MAX_THINKING_DISPLAY (~894 tok)
-
-## .claude/worktrees/session-ha-closure/src/tui/__tests__/
-
-- `activity-status.test.ts` — Declares activity (~1534 tok)
-- `agent-status.test.ts` (~380 tok)
-- `stream-window.test.ts` — Declares result (~192 tok)
-- `thinking.test.tsx` (~153 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~9654 tok)
 
 ## .omc/
 
@@ -204,10 +169,8 @@
 - `2026-05-16-rivet-xml-protocol-speculative-engine-implementation.md` — Rivet XML Protocol Layer + Speculative Pre-warming 实现计划 (~5642 tok)
 - `2026-05-17-cerebellar-loop.md` — Cerebellar Loop: Prediction-Error Accumulator 实现计划 (~4838 tok)
 - `2026-05-17-deep-interview-plan.md` — Deep Interview 实施计划 (~196 tok)
-- `2026-05-17-failure-classifier-expansion.md` — Failure Classifier Expansion + Activity Status Integration 实现计划 (~4594 tok)
 - `2026-05-17-multi-provider-phase1.md` — Multi-Provider Integration Phase 1 实现计划 (~4349 tok)
 - `2026-05-17-multi-provider-phase2.md` — Multi-Provider Phase 2: OpenAIClient 实现计划 (~7193 tok)
-- `2026-05-17-project-memory-dream-p2p3.md` — Project Memory Dream Phase 2 + Phase 3 实现计划 (~5864 tok)
 - `2026-05-17-project-memory-dream.md` — Project Memory: Dream 蒸馏 Phase 1 实现计划 (~3733 tok)
 - `2026-05-17-project-memory-phase1.md` — Project Memory Phase 1 实现计划 (~4191 tok)
 - `2026-05-17-rivet-ecf-phase5-recall-feedback.md` — ECF Phase 5: Recall 正反馈 + Claim 质量信号 实现计划 (~2705 tok)
@@ -217,10 +180,6 @@
 - `2026-05-17-session-rendering-p1p2.md` — Session Rendering P1/P2 实现计划 (~2385 tok)
 - `2026-05-17-wave10-test-loop-split.md` — Wave 10: 测试补强 + loop.ts 拆分 实施计划 (~10180 tok)
 - `2026-05-17-wave11-cache-perf.md` — Wave 11: Cache 效率 + Token 节约 实现计划 (~3516 tok)
-
-## docs/superpowers/reports/
-
-- `2026-05-17-dream-p1-execution-report.md` — Dream Phase 1 执行观测报告 (~706 tok)
 
 ## docs/superpowers/specs/
 
@@ -240,7 +199,6 @@
 - `2026-05-16-rivet-xml-protocol-speculative-engine-design.md` — Rivet XML Protocol Layer + Speculative Pre-warming 设计 (~2060 tok)
 - `2026-05-17-cerebellar-loop-brainstorm.md` — Cerebellar Loop: Deep Brainstorm 过程记录 (~1245 tok)
 - `2026-05-17-deep-interview-design.md` — Deep Interview — 认知对齐模式 (~1212 tok)
-- `2026-05-17-failure-classifier-expansion-design.md` — Failure Classifier Expansion + Activity Status Integration (~3228 tok)
 - `2026-05-17-multi-provider-integration-design.md` — Multi-Provider Integration: Design (v2 — Deep Brainstorm) (~4366 tok)
 - `2026-05-17-multi-provider-integration.md` — Multi-Provider Integration: Session Rendering P1/P2 + Cross-Provider Switching (~1031 tok)
 - `2026-05-17-project-memory-brainstorm.md` — 项目记忆系统：深度头脑风暴过程 (~963 tok)
@@ -309,13 +267,13 @@
 - `delivery-gate.ts` — Exports DeliveryGateSeverity, DeliveryGateResult, buildDeliveryGate (~641 tok)
 - `evidence.ts` — Exports DeliveryVerificationStatus, EvidenceState, EvidenceTracker (~1212 tok)
 - `execution-guidance.ts` — Exports GuidanceTrajectoryEntry, ExecutionGuidanceInput, ExecutionGuidance, buildExecutionGuidance (~1292 tok)
-- `failure-classifier.ts` — Classify all failures found in a test run output (~1708 tok)
+- `failure-classifier.ts` — Classify all failures found in a test run output (~1162 tok)
 - `file-history-persist.ts` — Exports FileSnapshot, HistoryEntry, persistFileHistory, loadFileHistory (~213 tok)
 - `file-history.ts` — Exports FileBackup, FileSnapshot, DiffStats, FileHistory (~1780 tok)
 - `impact-hint.ts` — Exports ImpactHint, generateImpactHint (~764 tok)
 - `import-graph.ts` — Exports ImportGraph, buildImportGraph, getReverseDeps, invalidateFile (~1122 tok)
 - `intent-extractor.ts` — Exports IntentType, Intent, extractIntents (~362 tok)
-- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6802 tok)
+- `loop.ts` — Exports ApprovalMode, AgentConfig, AgentCallbacks, AgentLoop (~6670 tok)
 - `prediction-error.ts` — Exports InterventionLevel, PredictionAccumulator, createPredictionAccumulator, recordPrediction + 5 (~610 tok)
 - `prewarm.ts` — Exports PrewarmCache (~323 tok)
 - `repair-hint.ts` — Exports RepairHintTracker (~368 tok)
@@ -325,7 +283,7 @@
 - `session-persist.ts` — Append a single message to the session file (~2266 tok)
 - `strategy-shift.ts` — Exports TrajectorySummary, suggestStrategyShift (~103 tok)
 - `task-state.ts` — Exports TaskState, extractTaskState (~326 tok)
-- `tool-pipeline.ts` — Failure classes that trigger onPhaseChange('blocked') — user-visible state. (~5315 tok)
+- `tool-pipeline.ts` — Exports ToolPipelineDeps, ToolExecResult, executeToolUse (~5131 tok)
 - `trace-store.ts` — Exports TraceEventKind, TraceEventStatus, DoomLoopLevel, TraceEvent + 9 more (~718 tok)
 - `trajectory.ts` — Exports TrajectoryEntry, TrajectoryRecorder (~312 tok)
 - `turn-end.ts` — Exports TurnEndDeps, TurnEndResult, processTurnEnd (~781 tok)
@@ -335,7 +293,7 @@
 - `work-queue.ts` — Exports QueueEntry, WorkOrderQueue (~472 tok)
 - `worker-evidence.ts` — Exports verifyWorkerEvidence (~385 tok)
 - `worker-prompts.ts` — buildWorkerPrompt, buildWorkerRepairPrompt, buildPrimaryWorkerPacket (~2263 tok)
-- `worker-session.ts` — Exports WorkerSessionConfig, WorkerTranscript, WorkerSessionRun, runWorkerSession (~1136 tok)
+- `worker-session.ts` — Exports WorkerSessionConfig, WorkerTranscript, WorkerSessionRun, runWorkerSession (~1132 tok)
 
 ## src/agent/__tests__/
 
@@ -349,7 +307,7 @@
 - `coordinator.test.ts` — WorkerRuntimeFactory: fakeTool, makeRegistry, resultFor (~2588 tok)
 - `delivery-gate.test.ts` — Declares state (~676 tok)
 - `execution-guidance.test.ts` — Declares guidance (~473 tok)
-- `failure-classifier.test.ts` — Declares errors (~2209 tok)
+- `failure-classifier.test.ts` — Declares errors (~1068 tok)
 - `file-history.test.ts` — Declares TMP (~742 tok)
 - `impact-hint.test.ts` — Exports a, b, mod (~524 tok)
 - `intent-extractor.test.ts` — Declares Intent (~812 tok)
@@ -357,7 +315,6 @@
 - `loop.test.ts` — Creates a mock client that delivers content blocks and then stops (~5646 tok)
 - `prediction-error.test.ts` — Declares PredictionAccumulator (~1590 tok)
 - `prewarm.test.ts` — API routes: GET (9 endpoints) (~443 tok)
-- `repair-hint.test.ts` — Declares failures (~722 tok)
 - `repair-pipeline.test.ts` — --- Pipeline skeleton tests --- (~1683 tok)
 - `retry-policy.test.ts` — Declares result (~457 tok)
 - `session-persist.test.ts` — Declares persist (~1578 tok)
@@ -376,25 +333,21 @@
 
 ## src/api/
 
-- `client.ts` — Whether the provider has a known bug where tool JSON appears in text content (~4024 tok)
+- `client.ts` — Whether the provider has a known bug where tool JSON appears in text content (~3998 tok)
 - `deepseek.ts` — Generic factory: create an ApiClient for any provider described by a (~572 tok)
-- `factory.ts` — Runtime parameters that vary per-model or per-call, not stored in config (~671 tok)
-- `openai-client.ts` — Convert Anthropic MessageRequest to OpenAI chat completions body (~3164 tok)
+- `factory.ts` — Runtime parameters that vary per-model or per-call, not stored in config (~663 tok)
 - `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~459 tok)
 - `sse.ts` — Exports SSEEvent, SSEParser (~635 tok)
-- `stream-client.ts` — Canonical streaming interface shared by all provider clients (~124 tok)
 - `types.ts` — Exports ContentBlockText, ContentBlockThinking, ContentBlockToolUse, ContentBlockToolResult + 7 more (~552 tok)
 
 ## src/api/__tests__/
 
-- `factory.test.ts` — Declares RuntimeParams (~970 tok)
-- `openai-client.test.ts` — OpenAIClientConfig: makeRequest (~4300 tok)
 - `schema-gate.test.ts` (~205 tok)
 - `sse.test.ts` — Declares parser (~1419 tok)
 
 ## src/compact/
 
-- `auto.ts` — Decide whether automatic compaction should fire. (~1735 tok)
+- `auto.ts` — Decide whether automatic compaction should fire. (~1732 tok)
 - `constants.ts` — Compaction constants ported from DeepSeek TUI compaction.rs (v0.8.11+). (~485 tok)
 - `index.ts` — Declares CompactionDecision (~104 tok)
 - `micro.ts` — MicroCompact: lightweight round-safe truncation without API calls. (~1270 tok)
@@ -565,11 +518,10 @@
 ## src/tui/
 
 - `agent-status.tsx` — SPINNER_FRAMES (~1461 tok)
-- `app.tsx` — THINKING_FLUSH_MS (~9646 tok)
+- `app.tsx` — THINKING_FLUSH_MS (~9578 tok)
 - `assistant-message.tsx` — AssistantMessage (~212 tok)
 - `base-text-input.tsx` — Get line/column info from a flat cursor position in a multi-line string (~2889 tok)
 - `block-stream-writer.ts` — Exports BlockStreamConfig, BlockStreamWriter (~729 tok)
-- `command-palette.tsx` — filterCommands (~1117 tok)
 - `error-boundary.tsx` — Increment to force remount children after error recovery (~267 tok)
 - `group-logs.ts` — Exports groupLogs (~332 tok)
 - `history-replay.ts` — Exports ReplayResult, replayMessagesToLogEntries (~527 tok)
@@ -578,7 +530,7 @@
 - `log-state.ts` — Exports LogEntryType, LogEntry, createLogEntry, appendLogInPlace + 3 more (~650 tok)
 - `phase-tracker.ts` — Exports Phase, LastAction, PhaseTracker (~486 tok)
 - `ring-buffer.ts` — Exports RingBuffer, createRingBuffer (~278 tok)
-- `slash-commands.ts` — Exports SlashHandlerContext, formatContextClaimsCommand, resolveAppPromptInput, handleSlashCommand (~7047 tok)
+- `slash-commands.ts` — Exports SlashHandlerContext, formatContextClaimsCommand, resolveAppPromptInput, handleSlashCommand (~6774 tok)
 - `slash-hint.tsx` — SlashHint (~319 tok)
 - `status-bar.tsx` — tokenBar (~1255 tok)
 - `stream.tsx` — StreamOutput (~124 tok)

@@ -7,6 +7,10 @@ function makeConfig(servers: Record<string, McpServerConfig> = {}): McpConfig {
   return { enabled: true, servers }
 }
 
+function wait(ms: number): Promise<'hung'> {
+  return new Promise(resolve => setTimeout(() => resolve('hung'), ms))
+}
+
 describe('McpManager', () => {
   it('starts with no connections', () => {
     const mgr = new McpManager(makeConfig())
@@ -93,6 +97,63 @@ describe('McpManager', () => {
     assert.equal(states.length, 1)
     assert.equal(states[0]!.status, 'error')
     assert.ok(states[0]!.error!.includes('ENOENT'))
+  })
+
+  it('marks server error when tool discovery times out', async () => {
+    class HangingManager extends McpManager {
+      async _connectServer(serverId: string): Promise<any> {
+        return {
+          serverId,
+          transport: { close: async () => {} },
+          client: { listTools: () => new Promise(() => {}) },
+        }
+      }
+    }
+
+    const mgr = new HangingManager({
+      enabled: true,
+      servers: { slow: { command: 'node', args: ['slow.js'] } },
+      timeoutMs: 10,
+    } as any)
+
+    const outcome = await Promise.race([mgr.initialize().then(() => 'done' as const), wait(100)])
+
+    assert.equal(outcome, 'done')
+    const state = mgr.getStates().find(s => s.serverId === 'slow')
+    assert.equal(state?.status, 'error')
+    assert.match(state?.error ?? '', /timed out/i)
+  })
+
+  it('marks connected server degraded when callTool times out', async () => {
+    const mgr = new McpManager({
+      enabled: true,
+      servers: { slow: { command: 'node', args: ['slow.js'] } },
+      timeoutMs: 10,
+    } as any)
+
+    mgr['_connectServer'] = async (serverId: string) => ({
+      serverId,
+      transport: { close: async () => {} },
+      client: {
+        listTools: async () => ({ tools: [{ name: 'slowTool', description: 'Slow', inputSchema: { type: 'object' as const, properties: {} } }] }),
+        callTool: () => new Promise(() => {}),
+      } as any,
+    })
+
+    await mgr.initialize()
+    const tool = mgr.getAllTools()[0]!
+    const outcome = await Promise.race([
+      tool.execute({ input: {}, toolUseId: 'mcp-call-timeout', cwd: process.cwd() }).then(result => ({ status: 'done' as const, result })),
+      wait(100).then(() => ({ status: 'hung' as const })),
+    ])
+
+    assert.equal(outcome.status, 'done')
+    if (outcome.status !== 'done') return
+    assert.equal(outcome.result.isError, true)
+    assert.match(outcome.result.content, /timed out/i)
+    const state = mgr.getStates().find(s => s.serverId === 'slow')
+    assert.equal(state?.status, 'degraded')
+    assert.match(state?.error ?? '', /timed out/i)
   })
 
   it('shuts down all connections', async () => {

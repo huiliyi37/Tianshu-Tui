@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-05-17 — Activity Status Layer
+
+### Added
+- Activity Status Layer for long Rivet turns: thinking duration/final duration, stale/no-update display, tool/MCP wait labels, conservative large-result analysis status, and low-frequency (1 Hz) projection to existing TUI surfaces.
+
+### Validation
+- `npm run typecheck`
+- `npm test`
+- `npm run build`
+- `git diff --check`
+
+---
+
+## 2026-05-17 — Session HA Closure
+
+### Completed
+- Merged the Session HA closure work into `main` after resolving the newer cerebellar/thinking helper changes already present on `main`.
+- Documented the operational guarantee: interrupted sessions should recover, preserve visible partial work, bound long-running operations, and avoid unbounded live render state.
+- Verified the merged result with `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
+
+### Fixed
+- Restore path now repairs interrupted tool transcripts and rolls back to the last valid turn snapshot when needed.
+- Stream errors persist partial assistant output before surfacing the error.
+- Bash timeouts terminate the process tree instead of only the shell child.
+- MCP servers time out hung connect/listTools/callTool operations and expose degraded state.
+- Smart compaction rejects empty, oversized, or unsafe summaries and falls back to micro compaction.
+- Volatile prompt repair and memory blocks escape untrusted content.
+- Live TUI stream rendering keeps a bounded tail window to avoid unbounded React state growth.
+- Cerebellar prediction-error and ThinkingCollapser edge cases have focused regression coverage.
+
 ## 2026-05-17 — Wave 12: Session High Availability
 
 ### Added — BlockStreamWriter

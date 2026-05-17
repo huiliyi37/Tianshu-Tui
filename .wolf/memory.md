@@ -3,12 +3,29 @@
 > Chronological action log. Hooks and AI append to this file automatically.
 > Old sessions are consolidated by the daemon weekly.
 
-## Session: 2026-05-17 Task 4 — onError/onAbort tool-map cleanup + Promise queue
+## Session: 2026-05-17 Session HA Closure
 
 | Time | Action | File(s) | Outcome | ~Tokens |
 |------|--------|---------|---------|--------|
-| -- | Added 5 `.clear()` calls in `onError` and `onAbort` for toolAccum, toolNames, dirtyTools, toolTargetMap, toolCallTracker | src/tui/app.tsx | 1089/1089 tests pass, typecheck clean | ~500 |
-| -- | Replaced Promise `.then()` chain (`promptQueueRef`) with running-flag guard + `.catch().finally()` | src/tui/app.tsx | eliminates ~60KB Promise chain growth over 500 rounds | — |
+| 09:20 | Recorded model delegation preference | .wolf/cerebrum.md, memory/feedback_model-delegation.md | Main assistant owns implementation; helper agents limited to Haiku/Sonnet review or lookup | ~500 |
+| 09:35 | Implemented stream-error partial persistence | src/agent/loop.ts, src/agent/__tests__/loop.test.ts, .wolf/buglog.json | RED loop test reproduced missing assistant partial; GREEN precise loop tests, planned npm test, and typecheck pass; logged bug-080 | ~1800 |
+| 09:50 | Implemented bash process-tree timeout cleanup | src/tools/bash.ts, src/tools/process-tracker.ts, src/tools/process-kill.ts, src/tools/__tests__/bash.test.ts, src/tools/__tests__/process-kill.test.ts | RED missing helper and timeout race reproduced; GREEN precise tests, planned npm test, and typecheck pass; logged bug-081 | ~2200 |
+| 09:55 | Hardened bash timeout settle path | src/tools/bash.ts | Added single-settle guard so timeout and close cannot both persist raw output; precise process cleanup tests and typecheck pass | ~500 |
+| 10:10 | Implemented MCP timeout degraded state | src/mcp/manager.ts, src/mcp/types.ts, src/mcp/config.ts, src/mcp/__tests__/manager.test.ts | RED listTools/callTool hang tests reproduced; GREEN precise MCP tests, planned npm test, and typecheck pass; logged bug-082 | ~2200 |
+| 10:25 | Implemented smart compaction summary quality gate | src/compact/auto.ts, src/compact/__tests__/auto.test.ts | RED unsafe XML summary accepted; GREEN empty/unsafe/oversized fallback tests, planned npm test, and typecheck pass; logged bug-083 | ~1800 |
+| 10:40 | Escaped volatile prompt raw blocks | src/prompt/volatile.ts, src/prompt/__tests__/volatile.test.ts | RED repairHint/sessionMemory XML injection reproduced; GREEN volatile tests and typecheck pass; logged bug-084 | ~900 |
+| 10:55 | Bounded live stream React state | src/tui/stream-window.ts, src/tui/app.tsx, src/tui/__tests__/stream-window.test.ts | RED missing helper reproduced; GREEN stream-window/block-writer tests and typecheck pass; final assistant content kept full outside bounded live display | ~1200 |
+| 11:10 | Covered cerebellar and thinking edge cases | src/agent/prediction-error.ts, src/agent/loop.ts, src/agent/__tests__/prediction-error.test.ts, src/tui/thinking.tsx, src/tui/__tests__/thinking.test.tsx | RED reset/thinking helper gaps reproduced; GREEN prediction/loop/thinking focused tests and typecheck pass; logged bug-086/bug-087 | ~1600 |
+| 11:25 | Final validation and docs update | CHANGELOG.md, README.md, src/prompt/__tests__/engine.test.ts | Fixed stale session-memory expectation after volatile escaping; final typecheck, 1043-test suite, and build pass; logged bug-088 | ~1000 |
+| 11:45 | Resolved main merge typecheck duplicate helpers | src/agent/prediction-error.ts, src/tui/thinking.tsx, .wolf/buglog.json | Removed duplicate resetAccumulator and thinking helper definitions from merge resolution; typecheck/tests/build pass; logged bug-089 | ~400 |
+| 11:55 | Refreshed Session HA docs | README.md, CHANGELOG.md, .wolf/anatomy.md | Added completed-this-round checklist, architecture doc updates, and changelog completion/validation notes | ~500 |
+| 12:10 | Designed Activity Status Layer | docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-design.md, docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-brainstorm.md | Captured approved long-task observability design and separate brainstorming asset covering thinking, large-file analysis, tool/MCP waits, compaction, and preflight | ~1200 |
+| 13:00 | Activity Status Task 3 — activity summary override in AgentStatus | src/tui/agent-status.tsx, src/tui/__tests__/agent-status.test.ts, .wolf/anatomy.md | Added activitySummary prop, exported statusPhaseText helper, updated AgentStatus to use it, 2 new tests; typecheck and 133 agent-status tests pass | ~600 |
+| 13:15 | Activity Status Task 4 — thinkingStatusLabel + completedDurationMs | src/tui/thinking.tsx, src/tui/__tests__/thinking.test.tsx, .wolf/anatomy.md | Added thinkingStatusLabel pure helper and completedDurationMs prop to ThinkingCollapser; 3 new status label tests; typecheck and 19 combined thinking/activity-status tests pass | ~500 |
+| 13:45 | Activity Status Task 5 — low-frequency App projection | src/tui/activity-status.ts, src/tui/app.tsx, src/tui/__tests__/activity-status.test.ts, .wolf/anatomy.md | Added shouldProjectActivity cadence guard, wired 1Hz activity projection in app.tsx for thinking/answer streaming with begin/heartbeat/complete/fail lifecycle, 3 projection cadence tests; typecheck and 1067 tests pass | ~900 |
+| 14:00 | Activity Status Task 6 — tool/MCP/analysis activity | src/tui/activity-status.ts, src/tui/app.tsx, src/tui/__tests__/activity-status.test.ts, .wolf/anatomy.md | Added toolActivityLabel and analysisLabelForTool helpers, wired tool activity lifecycle with heartbeat/completion/failure in App callbacks, added analyzing phase for large read_file/bash results, 3 new tests; typecheck and 1067 tests pass | ~800 |
+| 14:10 | Activity Status Task 6 follow-up — avoid label shadowing | src/tui/app.tsx, .wolf/anatomy.md, .wolf/memory.md | Renamed final onToolResult local label variable to resolvedLabel to avoid shadowing imported toolLabel; focused tests and typecheck pass | ~200 |
+| 14:30 | Activity Status Layer docs and final validation | README.md, CHANGELOG.md, .wolf/anatomy.md, .wolf/memory.md | Documented Activity Status Layer in README/CHANGELOG, staged implementation plan, final typecheck/tests/build pass | ~400 |
 
 ## Session: 2026-05-16 Execution Trust Closure
 
@@ -1926,359 +1943,20 @@
 | 09:22 | Edited .claude/worktrees/session-ha-closure/src/tools/process-tracker.ts | modified killAll() | ~77 |
 | 09:22 | Edited .claude/worktrees/session-ha-closure/src/tools/bash.ts | 3→4 lines | ~21 |
 | 09:22 | Edited .claude/worktrees/session-ha-closure/src/tools/bash.ts | 11→12 lines | ~108 |
-| 09:23 | Session end: 39 writes across 19 files (session-persist.ts, app.tsx, resume-preflight.ts, session-persist.test.ts, anatomy.md) | 42 reads | ~100886 tok |
-| 09:26 | Edited src/api/client.ts | modified constructor() | ~54 |
-| 09:26 | Edited src/agent/loop.ts | modified setApprovalMode() | ~76 |
-| 09:26 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→3 lines | ~164 |
-| 09:26 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→3 lines | ~134 |
-| 09:26 | Edited src/tui/slash-commands.ts | 3→5 lines | ~79 |
-| 09:26 | Edited src/tui/slash-commands.ts | added optional chaining | ~221 |
-| 09:26 | Edited src/tui/command-palette.tsx | 2→3 lines | ~60 |
-| 09:26 | Edited src/tui/slash-commands.ts | 2→3 lines | ~61 |
-| 09:27 | Edited src/tui/app.tsx | 1→2 lines | ~37 |
-| 09:27 | Edited src/tui/app.tsx | CSS: setReasoningEffort | ~174 |
-| 09:28 | Session end: 49 writes across 22 files (session-persist.ts, app.tsx, resume-preflight.ts, session-persist.test.ts, anatomy.md) | 52 reads | ~132749 tok |
-| 09:28 | Edited .claude/worktrees/session-ha-closure/src/tools/bash.ts | added 6 condition(s) | ~299 |
-| 09:29 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→3 lines | ~146 |
-| 09:29 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→2 lines | ~93 |
-| 09:30 | Session end: 52 writes across 22 files (session-persist.ts, app.tsx, resume-preflight.ts, session-persist.test.ts, anatomy.md) | 59 reads | ~140095 tok |
-| 09:31 | Edited .claude/worktrees/session-ha-closure/src/mcp/__tests__/manager.test.ts | modified makeConfig() | ~68 |
-| 09:31 | Edited .claude/worktrees/session-ha-closure/src/mcp/__tests__/manager.test.ts | added optional chaining | ~737 |
-| 09:32 | Edited .claude/worktrees/session-ha-closure/src/mcp/config.ts | 5→6 lines | ~59 |
-| 09:32 | Edited .claude/worktrees/session-ha-closure/src/mcp/types.ts | 2→2 lines | ~22 |
-| 09:32 | Edited .claude/worktrees/session-ha-closure/src/mcp/manager.ts | modified withTimeout() | ~147 |
-| 09:32 | Edited .claude/worktrees/session-ha-closure/src/mcp/manager.ts | added nullish coalescing | ~71 |
-| 09:32 | Edited .claude/worktrees/session-ha-closure/src/mcp/manager.ts | added error handling | ~312 |
-| 09:32 | Edited .claude/worktrees/session-ha-closure/src/mcp/manager.ts | 2→2 lines | ~27 |
-| 09:32 | Edited .claude/worktrees/session-ha-closure/src/mcp/manager.ts | 2→2 lines | ~31 |
-| 09:33 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→3 lines | ~129 |
-| 09:33 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→3 lines | ~175 |
-| 09:34 | Session end: 63 writes across 26 files (session-persist.ts, app.tsx, resume-preflight.ts, session-persist.test.ts, anatomy.md) | 62 reads | ~145735 tok |
-| 09:34 | Edited .claude/worktrees/session-ha-closure/src/compact/__tests__/auto.test.ts | 2→2 lines | ~24 |
-| 09:35 | Edited .claude/worktrees/session-ha-closure/src/compact/__tests__/auto.test.ts | added optional chaining | ~439 |
-| 09:35 | Edited .claude/worktrees/session-ha-closure/src/compact/auto.ts | added 2 condition(s) | ~264 |
-| 09:35 | Edited .claude/worktrees/session-ha-closure/src/compact/auto.ts | added 1 condition(s) | ~97 |
-| 09:36 | Edited .claude/worktrees/session-ha-closure/src/compact/__tests__/auto.test.ts | expanded (+15 lines) | ~396 |
-| 09:37 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→3 lines | ~144 |
-| 09:37 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→3 lines | ~137 |
-| 09:38 | Edited .claude/worktrees/session-ha-closure/src/prompt/__tests__/volatile.test.ts | expanded (+16 lines) | ~310 |
-| 09:40 | Session end: 71 writes across 29 files (session-persist.ts, app.tsx, resume-preflight.ts, session-persist.test.ts, anatomy.md) | 68 reads | ~160921 tok |
 
-## Session: 2026-05-17 09:42
+## 2026-05-17 — Activity Status Layer implementation plan
 
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 09:43 | Edited .claude/worktrees/session-ha-closure/src/prompt/volatile.ts | modified if() | ~31 |
-| 09:43 | Edited CLAUDE.md | inline fix | ~89 |
-| 09:43 | Edited README.md | 1→2 lines | ~93 |
-| 09:43 | Edited .claude/worktrees/session-ha-closure/src/prompt/volatile.ts | modified if() | ~37 |
-| 09:43 | Session end: 4 writes across 3 files (volatile.ts, CLAUDE.md, README.md) | 5 reads | ~31372 tok |
-| 09:44 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→3 lines | ~132 |
-| 09:44 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→3 lines | ~123 |
+Created `docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md` for the approved lightweight long-task observability layer. The plan defines TDD tasks for pure activity state helpers, AgentStatus rendering, ThinkingCollapser completed duration, low-frequency App projection, tool/MCP/analyzing activity events, documentation, OpenWolf updates, and final validation.
 
-## Session: 2026-05-17 09:46
+## 2026-05-17 — Activity Status Layer Task 1: pure lifecycle module
 
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 09:47 | Created .claude/worktrees/session-ha-closure/src/tui/__tests__/stream-window.test.ts | — | ~192 |
-| 09:47 | Created .claude/worktrees/session-ha-closure/src/tui/stream-window.ts | — | ~93 |
-| 09:47 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 import(s) | ~52 |
-| 09:47 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | 4→5 lines | ~35 |
-| 09:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | 5→5 lines | ~55 |
-| 09:48 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→3 lines | ~147 |
-| 09:48 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→3 lines | ~140 |
-| 09:49 | Session end: 7 writes across 5 files (stream-window.test.ts, stream-window.ts, app.tsx, anatomy.md, memory.md) | 6 reads | ~26110 tok |
-| 09:50 | Edited .claude/worktrees/session-ha-closure/src/agent/__tests__/prediction-error.test.ts | 4→5 lines | ~30 |
-| 09:50 | Edited .claude/worktrees/session-ha-closure/src/agent/__tests__/prediction-error.test.ts | expanded (+14 lines) | ~326 |
-| 09:50 | Edited .claude/worktrees/session-ha-closure/src/agent/__tests__/prediction-error.test.ts | 4→3 lines | ~13 |
-| 09:51 | Edited .claude/worktrees/session-ha-closure/src/agent/prediction-error.ts | modified createPredictionAccumulator() | ~96 |
-| 09:51 | Edited .claude/worktrees/session-ha-closure/src/agent/prediction-error.ts | modified if() | ~26 |
-| 09:51 | Created src/api/__tests__/openai-client.test.ts | — | ~3656 |
-| 09:51 | Created .claude/worktrees/session-ha-closure/src/tui/__tests__/thinking.test.tsx | — | ~153 |
-| 09:52 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | CSS: ms, chars | ~145 |
-| 09:53 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→3 lines | ~174 |
-| 09:53 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→3 lines | ~161 |
-| 09:56 | Edited src/api/__tests__/openai-client.test.ts | modified makeRequest() | ~174 |
-| 09:56 | Edited src/api/__tests__/openai-client.test.ts | inline fix | ~7 |
-| 09:57 | Created src/api/openai-client.ts | — | ~2100 |
-| 09:57 | Edited src/api/openai-client.ts | modified for() | ~560 |
-| 09:57 | Edited src/api/openai-client.ts | inline fix | ~14 |
-| 09:57 | Edited src/api/__tests__/openai-client.test.ts | 6→7 lines | ~53 |
-| 09:57 | Edited src/api/__tests__/openai-client.test.ts | 13→14 lines | ~120 |
-| 09:57 | Edited .claude/worktrees/session-ha-closure/src/prompt/__tests__/engine.test.ts | 3→5 lines | ~68 |
-| 09:57 | Edited src/api/__tests__/openai-client.test.ts | 13→14 lines | ~116 |
-| 09:57 | Edited src/api/__tests__/openai-client.test.ts | 11→12 lines | ~84 |
-| 09:57 | Edited src/api/__tests__/openai-client.test.ts | 13→14 lines | ~114 |
-| 09:57 | Edited src/api/__tests__/openai-client.test.ts | 11→12 lines | ~86 |
-| 10:00 | Edited src/api/factory.ts | added 2 import(s) | ~80 |
-| 10:00 | Edited src/api/factory.ts | Error() → OpenAIClient() | ~101 |
-| 10:00 | Edited src/api/__tests__/factory.test.ts | added 1 import(s) | ~108 |
-| 10:01 | Edited .claude/worktrees/session-ha-closure/CHANGELOG.md | expanded (+12 lines) | ~223 |
-| 10:01 | Edited .claude/worktrees/session-ha-closure/README.md | 2→2 lines | ~88 |
-| 10:01 | Edited src/api/stream-client.ts | modified stream() | ~124 |
-| 10:01 | Edited src/agent/loop.ts | added 1 import(s) | ~33 |
-| 10:01 | Edited src/agent/loop.ts | 7→7 lines | ~52 |
-| 10:01 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→3 lines | ~172 |
-| 10:01 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→3 lines | ~149 |
-| 10:01 | Edited src/compact/auto.ts | "../api/client.js" → "../api/stream-client.js" | ~17 |
-| 10:02 | Edited src/compact/auto.ts | modified smartCompact() | ~17 |
-| 10:02 | Edited src/agent/loop.ts | added optional chaining | ~15 |
-| 10:02 | Edited src/agent/worker-session.ts | "../api/client.js" → "../api/stream-client.js" | ~17 |
-| 10:02 | Edited src/agent/worker-session.ts | inline fix | ~7 |
-| 10:03 | Edited src/api/openai-client.ts | inline fix | ~24 |
-| 10:03 | Edited src/api/openai-client.ts | inline fix | ~19 |
-| 10:04 | Edited .claude/worktrees/session-ha-closure/src/agent/loop.ts | 2→2 lines | ~50 |
-| 10:04 | Edited .claude/worktrees/session-ha-closure/src/agent/loop.ts | 4→5 lines | ~66 |
-| 10:04 | Edited src/api/__tests__/factory.test.ts | 12→11 lines | ~120 |
-| 10:05 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→2 lines | ~103 |
-| 10:05 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→2 lines | ~94 |
-| 10:05 | Session end: 51 writes across 20 files (stream-window.test.ts, stream-window.ts, app.tsx, anatomy.md, memory.md) | 30 reads | ~96050 tok |
-| 10:09 | Created .claude/PRPs/reviews/pr-openai-client-review.md | — | ~971 |
-| 10:09 | Session end: 52 writes across 21 files (stream-window.test.ts, stream-window.ts, app.tsx, anatomy.md, memory.md) | 34 reads | ~97855 tok |
-| 10:10 | Created src/api/openai-client.ts | — | ~3019 |
-| 10:10 | Edited src/api/openai-client.ts | 10→11 lines | ~84 |
-| 10:11 | Edited src/api/openai-client.ts | modified constructor() | ~80 |
-| 10:11 | Edited src/api/openai-client.ts | modified processDelta() | ~534 |
-| 10:11 | Edited src/api/openai-client.ts | added optional chaining | ~78 |
-| 10:12 | Edited src/api/openai-client.ts | modified while() | ~360 |
-| 10:12 | Edited src/api/__tests__/openai-client.test.ts | expanded (+12 lines) | ~604 |
+Created `src/tui/activity-status.ts` with immutable ActivityState lifecycle: ActivityPhase (idle/thinking/streaming/analyzing/tool/mcp/compacting/preflight), ActivityLifecycleStatus (idle/active/stale/completed/failed), and transition functions createIdleActivity, beginActivity, heartbeatActivity, completeActivity, failActivity, clearActivity. Covered by 5 tests in `src/tui/__tests__/activity-status.test.ts`. Typecheck and full test suite (1048 tests) pass.
 
-## Session: 2026-05-17 10:12
+## 2026-05-17 — Activity Status Layer Task 1 follow-up
 
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 10:13 | Edited src/api/__tests__/openai-client.test.ts | expanded (+59 lines) | ~529 |
-| 10:14 | Session end: 1 writes across 1 files (openai-client.test.ts) | 1 reads | ~4330 tok |
-| 10:14 | Session end: 1 writes across 1 files (openai-client.test.ts) | 2 reads | ~8354 tok |
-| 10:17 | Edited .claude/worktrees/session-ha-closure/src/agent/loop.ts | 5→1 lines | ~50 |
-| 10:17 | Edited .claude/worktrees/session-ha-closure/src/agent/loop.ts | 5→4 lines | ~65 |
-| 10:17 | Edited .claude/worktrees/session-ha-closure/src/agent/__tests__/prediction-error.test.ts | 10→9 lines | ~58 |
-| 10:18 | Edited .claude/worktrees/session-ha-closure/src/agent/__tests__/prediction-error.test.ts | 10→6 lines | ~48 |
-| 10:18 | Session end: 5 writes across 3 files (openai-client.test.ts, loop.ts, prediction-error.test.ts) | 9 reads | ~68183 tok |
-| 10:18 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 18→13 lines | ~816 |
-| 10:19 | Session end: 6 writes across 4 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md) | 9 reads | ~69058 tok |
-| 10:19 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 10→10 lines | ~716 |
-| 10:20 | Edited .claude/worktrees/session-ha-closure/src/agent/prediction-error.ts | modified adjustReasoningEffort() | ~12 |
-| 10:20 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | modified formatDuration() | ~75 |
-| 10:20 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | removed 10 lines | ~10 |
-| 10:20 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | removed 6 lines | ~1 |
-| 10:21 | Edited ../../../.rivet/config.json | expanded (+24 lines) | ~204 |
-| 10:21 | Session end: 12 writes across 8 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 12 reads | ~71177 tok |
-| 10:23 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~138 |
-| 10:23 | Edited ../../../.rivet/config.json | 13→13 lines | ~97 |
-| 10:23 | Session end: 14 writes across 8 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 13 reads | ~78013 tok |
-| 10:23 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~139 |
-| 10:24 | Session end: 15 writes across 8 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 13 reads | ~82067 tok |
-| 10:26 | Edited src/tui/command-palette.tsx | 2→3 lines | ~66 |
-| 10:27 | Session end: 16 writes across 9 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 17 reads | ~104348 tok |
-| 10:27 | Edited .claude/worktrees/session-ha-closure/README.md | expanded (+15 lines) | ~536 |
-| 10:27 | Edited .claude/worktrees/session-ha-closure/README.md | inline fix | ~33 |
-| 10:27 | Edited .claude/worktrees/session-ha-closure/README.md | inline fix | ~30 |
-| 10:27 | Edited .claude/worktrees/session-ha-closure/README.md | inline fix | ~30 |
-| 10:28 | Edited .claude/worktrees/session-ha-closure/README.md | 1→2 lines | ~43 |
-| 10:28 | Edited .claude/worktrees/session-ha-closure/README.md | inline fix | ~29 |
-| 10:28 | Edited .claude/worktrees/session-ha-closure/README.md | inline fix | ~26 |
-| 10:28 | Edited .claude/worktrees/session-ha-closure/README.md | 2→3 lines | ~63 |
-| 10:28 | Edited .claude/worktrees/session-ha-closure/CHANGELOG.md | 4→9 lines | ~160 |
-| 10:28 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~135 |
-| 10:29 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~126 |
-| 10:29 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 17 reads | ~105645 tok |
-| 10:30 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 17 reads | ~105645 tok |
-| 10:31 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 17 reads | ~105645 tok |
-| 10:31 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 17 reads | ~105645 tok |
-| 10:32 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 17 reads | ~105645 tok |
-| 10:40 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 17 reads | ~105645 tok |
-| 10:47 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 19 reads | ~117253 tok |
-| 10:49 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 19 reads | ~117253 tok |
-| 11:01 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 23 reads | ~125691 tok |
-| 11:02 | Session end: 27 writes across 11 files (openai-client.test.ts, loop.ts, prediction-error.test.ts, anatomy.md, memory.md) | 23 reads | ~125691 tok |
-| 11:05 | Created .claude/worktrees/session-ha-closure/docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-design.md | — | ~3091 |
-| 11:06 | Created .claude/worktrees/session-ha-closure/docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-brainstorm.md | — | ~1695 |
-| 11:06 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~152 |
-| 11:06 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~151 |
+Aligned `src/tui/activity-status.ts` with the plan exactly: removed comments, prevented beginning idle via `Exclude<ActivityPhase, 'idle'>`, introduced shared `HeartbeatOptions`, made heartbeat/complete/fail no-op for idle, and allowed complete/fail label and sizeHint updates. Expanded `src/tui/__tests__/activity-status.test.ts` for idle no-ops and terminal optional updates. Targeted tests (1049 tests via project runner) and typecheck pass.
 
-## Session: 2026-05-17 11:06
+## 2026-05-17 — Activity Status Layer Task 2: display formatting helpers
 
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
+Added six pure display functions to `src/tui/activity-status.ts`: `formatActivityDuration` (ms to "0s"/"59s"/"1m 1s"), `formatThinkingSize` (chars to "N chars" or "N.Nk"), `activityPhaseLabel` (phase to concise label), `formatActivitySummary` (full summary string with stale/completed/failed variants), `classifyToolActivity` (MCP vs generic tool phase), and `shouldBeginAnalyzing` (conservative large-result heuristic for read_file/bash). Eight new tests in `src/tui/__tests__/activity-status.test.ts` (14 total). Full test suite (1057 tests) and typecheck pass.
 
-## Session: 2026-05-17 11:17
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-
-## Session: 2026-05-17 11:23
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 11:33 | Created .claude/worktrees/session-ha-closure/docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md | — | ~8416 |
-| 11:33 | Session end: 1 writes across 1 files (2026-05-17-rivet-activity-status-layer.md) | 34 reads | ~42971 tok |
-| 11:33 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 2→3 lines | ~157 |
-| 11:33 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 3→7 lines | ~143 |
-| 11:33 | Edited .claude/worktrees/session-ha-closure/docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md | 2→2 lines | ~8 |
-| 11:34 | Edited .claude/worktrees/session-ha-closure/docs/superpowers/plans/2026-05-17-rivet-activity-status-layer.md | 3→3 lines | ~12 |
-| 11:34 | Session end: 5 writes across 3 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md) | 35 reads | ~81953 tok |
-| 11:34 | Session end: 5 writes across 3 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md) | 35 reads | ~81953 tok |
-| 11:38 | Session end: 5 writes across 3 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md) | 35 reads | ~81953 tok |
-| 11:42 | Session end: 5 writes across 3 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md) | 35 reads | ~81953 tok |
-| 11:44 | Created .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | — | ~626 |
-| 11:45 | Created .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | — | ~637 |
-| 11:45 | Created docs/superpowers/plans/2026-05-17-project-memory-dream-p2p3.md | — | ~2538 |
-| 11:47 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 3→4 lines | ~194 |
-| 11:47 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→5 lines | ~243 |
-| 11:47 | Edited docs/superpowers/plans/2026-05-17-project-memory-dream-p2p3.md | added error handling | ~3765 |
-| 11:48 | Session end: 11 writes across 6 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 42 reads | ~123826 tok |
-| 11:49 | Session end: 11 writes across 6 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 45 reads | ~133110 tok |
-| 11:50 | Edited .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | reduced (-6 lines) | ~171 |
-| 11:50 | Edited .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | added 3 condition(s) | ~392 |
-| 11:50 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | expanded (+12 lines) | ~323 |
-| 11:51 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 3→4 lines | ~197 |
-| 11:51 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→5 lines | ~257 |
-| 11:54 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | expanded (+6 lines) | ~108 |
-| 11:54 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | expanded (+56 lines) | ~772 |
-| 11:54 | Edited .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | added nullish coalescing | ~900 |
-| 11:55 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | 4→4 lines | ~74 |
-| 11:55 | Edited .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | modified formatThinkingSize() | ~55 |
-| 11:55 | Created docs/superpowers/reports/2026-05-17-dream-p1-execution-report.md | — | ~753 |
-| 11:55 | Session end: 22 writes across 7 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 46 reads | ~139188 tok |
-| 11:56 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→5 lines | ~289 |
-| 11:56 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~182 |
-| 11:58 | Edited .claude/worktrees/session-ha-closure/src/tui/agent-status.tsx | 8→9 lines | ~57 |
-| 11:59 | Edited .claude/worktrees/session-ha-closure/src/tui/agent-status.tsx | added nullish coalescing | ~64 |
-| 11:59 | Edited .claude/worktrees/session-ha-closure/src/tui/agent-status.tsx | inline fix | ~11 |
-| 11:59 | Edited .claude/worktrees/session-ha-closure/src/tui/agent-status.tsx | inline fix | ~49 |
-| 11:59 | Edited .claude/worktrees/session-ha-closure/src/tui/agent-status.tsx | inline fix | ~20 |
-| 11:59 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/agent-status.test.ts | inline fix | ~18 |
-| 11:59 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/agent-status.test.ts | expanded (+17 lines) | ~222 |
-| 11:59 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~198 |
-| 11:59 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~183 |
-| 12:01 | Session end: 33 writes across 9 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 50 reads | ~142590 tok |
-| 12:03 | Created docs/superpowers/specs/2026-05-17-failure-classifier-expansion-design.md | — | ~3443 |
-| 12:04 | Session end: 34 writes across 10 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 50 reads | ~146279 tok |
-| 12:10 | Created docs/superpowers/plans/2026-05-17-failure-classifier-expansion.md | — | ~4900 |
-| 12:10 | Session end: 35 writes across 11 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 50 reads | ~151529 tok |
-| 12:13 | Session end: 35 writes across 11 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 55 reads | ~154757 tok |
-| 12:13 | Session end: 35 writes across 11 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 56 reads | ~155825 tok |
-| 12:14 | Edited src/agent/__tests__/failure-classifier.test.ts | expanded (+95 lines) | ~1003 |
-| 12:15 | Edited src/agent/failure-classifier.ts | expanded (+6 lines) | ~84 |
-| 12:16 | Edited src/agent/failure-classifier.ts | added error handling | ~1271 |
-| 12:16 | Edited src/agent/failure-classifier.ts | inline fix | ~28 |
-| 12:18 | Edited src/agent/failure-classifier.ts | 4→4 lines | ~102 |
-| 12:18 | Edited src/agent/failure-classifier.ts | 4→4 lines | ~99 |
-| 12:19 | Edited src/agent/failure-classifier.ts | 4→4 lines | ~71 |
-| 12:19 | Session end: 42 writes across 13 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 62 reads | ~158483 tok |
-| 12:21 | Session end: 42 writes across 13 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 64 reads | ~159029 tok |
-| 12:21 | Session end: 42 writes across 13 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 64 reads | ~160170 tok |
-| 12:23 | Session end: 42 writes across 13 files (2026-05-17-rivet-activity-status-layer.md, anatomy.md, memory.md, activity-status.test.ts, activity-status.ts) | 64 reads | ~160170 tok |
-| 12:23 | Created src/agent/__tests__/repair-hint.test.ts | — | ~722 |
-| 12:23 | Edited src/agent/loop.ts | 2→3 lines | ~43 |
-| 12:23 | Edited src/agent/tool-pipeline.ts | expanded (+7 lines) | ~73 |
-| 12:23 | Edited src/agent/tool-pipeline.ts | added 2 condition(s) | ~136 |
-
-## Session: 2026-05-17 12:34
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | CSS: elapsedMs, options | ~178 |
-| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | inline fix | ~36 |
-| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/thinking.tsx | inline fix | ~31 |
-| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/thinking.test.tsx | inline fix | ~26 |
-| 12:37 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/thinking.test.tsx | expanded (+17 lines) | ~209 |
-| 12:38 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~181 |
-| 12:38 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~177 |
-| 12:39 | Session end: 7 writes across 4 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md) | 7 reads | ~61955 tok |
-| 12:40 | Session end: 7 writes across 4 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md) | 7 reads | ~61955 tok |
-| 12:41 | Session end: 7 writes across 4 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md) | 8 reads | ~62833 tok |
-| 12:41 | Edited .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | added 1 condition(s) | ~132 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | 14→15 lines | ~92 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | expanded (+14 lines) | ~297 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | expanded (+12 lines) | ~122 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | expanded (+9 lines) | ~240 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | CSS: previousText, previousAt | ~318 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 3 condition(s) | ~216 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | expanded (+8 lines) | ~149 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | CSS: sizeHint | ~207 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | CSS: sizeHint | ~255 |
-| 12:42 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 condition(s) | ~160 |
-| 12:43 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 condition(s) | ~103 |
-| 12:43 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 condition(s) | ~141 |
-| 12:43 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | 9→10 lines | ~150 |
-| 12:43 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | inline fix | ~69 |
-| 12:44 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~203 |
-| 12:45 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~198 |
-| 12:47 | Edited .claude/worktrees/session-ha-closure/src/tui/activity-status.ts | added 1 condition(s) | ~348 |
-| 12:47 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | 15→17 lines | ~105 |
-| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/__tests__/activity-status.test.ts | expanded (+15 lines) | ~355 |
-| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | 12→16 lines | ~97 |
-| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | modified slice() | ~358 |
-| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added 1 condition(s) | ~219 |
-| 12:48 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | added optional chaining | ~379 |
-| 12:49 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~235 |
-| 12:49 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~219 |
-| 12:51 | Session end: 33 writes across 7 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 11 reads | ~82049 tok |
-| 12:52 | Edited .claude/worktrees/session-ha-closure/src/tui/app.tsx | modified if() | ~193 |
-| 12:52 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~188 |
-| 12:53 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~183 |
-| 12:54 | Session end: 36 writes across 7 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 34 reads | ~130529 tok |
-| 12:57 | Created docs/superpowers/plans/2026-05-17-tui-content-preservation.md | — | ~2828 |
-| 12:57 | Edited .claude/worktrees/session-ha-closure/README.md | expanded (+11 lines) | ~211 |
-| 12:57 | Edited .claude/worktrees/session-ha-closure/CHANGELOG.md | expanded (+13 lines) | ~114 |
-| 12:57 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | 1→2 lines | ~149 |
-| 12:57 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 1→2 lines | ~137 |
-| 12:57 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164765 tok |
-| 12:58 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164765 tok |
-| 13:02 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164901 tok |
-| 13:03 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164901 tok |
-| 13:04 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 38 reads | ~164901 tok |
-| 13:08 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 39 reads | ~164901 tok |
-| 13:08 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 39 reads | ~164901 tok |
-| 13:09 | Session end: 41 writes across 10 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 39 reads | ~164901 tok |
-| 13:09 | Edited src/tui/log-state.ts | 2→3 lines | ~13 |
-| 13:10 | Session end: 42 writes across 11 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 40 reads | ~165677 tok |
-| 13:10 | Edited src/tui/app.tsx | CSS: thinking, thinking, thinking | ~316 |
-| 13:10 | Edited src/tui/__tests__/history-replay.test.ts | expanded (+33 lines) | ~357 |
-| 13:10 | Edited src/tui/history-replay.ts | added 2 condition(s) | ~193 |
-| 13:12 | Session end: 45 writes across 13 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 48 reads | ~183173 tok |
-| 13:12 | Session end: 45 writes across 13 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 70 reads | ~208107 tok |
-| 13:12 | Edited src/tui/app.tsx | CSS: type, content, thinking | ~183 |
-| 13:12 | Edited src/tui/app.tsx | CSS: type, content, thinking | ~167 |
-| 13:14 | Session end: 47 writes across 13 files (thinking.tsx, thinking.test.tsx, anatomy.md, memory.md, activity-status.ts) | 76 reads | ~211719 tok |
-
-## Session: 2026-05-17 13:17
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-
-## Session: 2026-05-17 13:18
-
-| Time | Action | File(s) | Outcome | ~Tokens |
-|------|--------|---------|---------|--------|
-| 13:20 | Created .claude/worktrees/session-ha-closure/.superpowers/brainstorm/2026-05-17-tui-session-fluency-fragments.json | — | ~3053 |
-| 13:23 | Created .claude/worktrees/session-ha-closure/docs/superpowers/specs/2026-05-17-rivet-tui-session-fluency-layer-design.md | — | ~2659 |
-| 13:23 | Edited .claude/worktrees/session-ha-closure/.wolf/anatomy.md | expanded (+8 lines) | ~150 |
-| 13:24 | Edited .claude/worktrees/session-ha-closure/.wolf/memory.md | 2→6 lines | ~289 |
-| 13:24 | Session end: 4 writes across 4 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md) | 72 reads | ~144805 tok |
-| 13:24 | Session end: 4 writes across 4 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md) | 72 reads | ~144805 tok |
-| 13:26 | Session end: 4 writes across 4 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md) | 72 reads | ~144805 tok |
-| 13:31 | Created docs/superpowers/plans/2026-05-17-session-fluency-layer-p1.md | — | ~3475 |
-| 13:31 | Created docs/superpowers/plans/2026-05-17-memory-leak-fixes.md | — | ~4029 |
-| 13:31 | Session end: 6 writes across 6 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md, 2026-05-17-session-fluency-layer-p1.md) | 77 reads | ~165399 tok |
-| 13:32 | Edited docs/superpowers/plans/2026-05-17-memory-leak-fixes.md | added 2 condition(s) | ~538 |
-| 13:32 | Edited docs/superpowers/plans/2026-05-17-memory-leak-fixes.md | inline fix | ~18 |
-| 13:32 | Session end: 8 writes across 6 files (2026-05-17-tui-session-fluency-fragments.json, 2026-05-17-rivet-tui-session-fluency-layer-design.md, anatomy.md, memory.md, 2026-05-17-session-fluency-layer-p1.md) | 78 reads | ~169924 tok |
-| 13:33 | Edited src/agent/__tests__/trajectory.test.ts | modified for() | ~480 |
-| 13:33 | Created src/agent/trajectory.ts | — | ~390 |
-| 13:37 | Edited src/context/__tests__/claim-store.test.ts | modified for() | ~551 |
-| 13:37 | Edited src/context/claim-store.ts | 1→4 lines | ~28 |
-| 13:37 | Edited src/context/claim-store.ts | modified if() | ~190 |
-| 13:37 | Edited src/context/claim-store.ts | 5→7 lines | ~73 |
-| 13:37 | Edited src/context/claim-store.ts | added 1 condition(s) | ~166 |
-| 13:38 | Edited src/context/claim-store.ts | 8→10 lines | ~82 |
-| 13:41 | Edited src/context/claim-store.ts | modified evictExcessActiveClaims() | ~166 |
-| 13:41 | Edited src/context/claim-store.ts | modified appendEvent() | ~76 |
-| 13:42 | Edited src/agent/loop.ts | 2→6 lines | ~73 |
-| 13:42 | Edited src/agent/loop.ts | modified catch() | ~28 |
-| 13:44 | Edited src/tui/app.tsx | inline fix | ~15 |
-| 13:44 | Edited src/tui/app.tsx | expanded (+6 lines) | ~130 |
-| 13:44 | Edited src/tui/app.tsx | expanded (+6 lines) | ~123 |
-| 13:44 | Edited src/tui/app.tsx | added 1 condition(s) | ~125 |

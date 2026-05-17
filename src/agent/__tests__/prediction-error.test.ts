@@ -8,7 +8,6 @@ import {
   getInterventionLevel,
   shouldTippingPointReset,
   adjustReasoningEffort,
-  type PredictionAccumulator,
 } from '../prediction-error.js'
 
 describe('PredictionAccumulator', () => {
@@ -123,7 +122,9 @@ describe('PredictionAccumulator', () => {
     acc = recordPrediction(acc, true)
     assert.equal(acc.predictions.length, 3)
     assert.equal(acc.consecutiveCorrect, 1)
+
     acc = resetAccumulator(acc)
+
     assert.equal(acc.predictions.length, 0)
     assert.equal(acc.consecutiveCorrect, 0)
   })

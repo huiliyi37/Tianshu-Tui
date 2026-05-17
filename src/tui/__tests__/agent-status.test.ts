@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { toolLabel } from '../agent-status.js'
+import { toolLabel, statusPhaseText } from '../agent-status.js'
 
 describe('toolLabel', () => {
   it('keeps plain read_file labels concise', () => {
@@ -18,6 +18,23 @@ describe('toolLabel', () => {
     assert.equal(
       toolLabel('read_file', { file_path: '/repo/.wolf/anatomy.md', pages: '' }),
       'read anatomy.md · pages=""',
+    )
+  })
+})
+
+describe('statusPhaseText', () => {
+  it('prefers activity summary over derived phase labels', () => {
+    assert.equal(
+      statusPhaseText('Thinking… 42s · 655 chars', [], false),
+      'Thinking… 42s · 655 chars',
+    )
+  })
+
+  it('falls back to existing phase labels when activity summary is absent', () => {
+    assert.equal(statusPhaseText(undefined, [], true), 'Thinking…')
+    assert.equal(
+      statusPhaseText(undefined, [{ id: '1', name: 'bash', label: 'npm test', done: false, error: false }], false),
+      'Running…',
     )
   })
 })
