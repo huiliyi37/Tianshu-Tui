@@ -328,3 +328,48 @@ test('boostFitness returns null for nonexistent claim', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('caps consumers array per claim at MAX_CONSUMERS (50)', () => {
+  const dir = tempDir()
+  try {
+    const store = new ContextClaimStore(dir, 'session-123')
+    const claim = store.propose(proposal('Consumer cap test'))
+
+    // Record 60 usage events
+    for (let i = 0; i < 60; i++) {
+      store.recordClaimUsed(claim.id, {
+        consumerId: `turn-${i}:prompt`,
+        consumerKind: 'prompt',
+        usedAt: Date.now() + i,
+      })
+    }
+
+    const claims = store.listActiveClaims()
+    const updated = claims.find(c => c.id === claim.id)!
+    assert.ok(updated.consumers.length <= 50, `consumers length ${updated.consumers.length} should be <= 50`)
+    // Most recent consumers should be kept
+    assert.equal(updated.consumers[updated.consumers.length - 1]!.id, 'turn-59:prompt')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('evicts stale claims beyond MAX_ACTIVE_CLAIMS (50)', () => {
+  const dir = tempDir()
+  try {
+    const store = new ContextClaimStore(dir, 'session-123')
+
+    // Create 55 active claims with distinct createdAt
+    for (let i = 0; i < 55; i++) {
+      store.propose({ ...proposal(`Claim ${i}`), createdAt: i * 1000 })
+    }
+
+    const active = store.listActiveClaims()
+    // After eviction, should be <= 50
+    assert.ok(active.length <= 50, `active claims ${active.length} should be <= 50`)
+    // Oldest claims (lowest createdAt) should be evicted — Claim 0..4 gone, Claim 5 first remaining
+    assert.equal(active[0]!.text, 'Claim 5')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

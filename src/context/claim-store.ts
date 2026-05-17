@@ -11,6 +11,9 @@ import {
 } from './claims.js'
 import { claimHasFileEvidence, countClaimsByStatus, evaluatePromotion, type ClaimStatusCounts } from './promotion.js'
 
+const MAX_CONSUMERS_PER_CLAIM = 50
+const MAX_ACTIVE_CLAIMS = 50
+
 export type ContextClaimEvent =
   | { type: 'claim_proposed'; eventId: string; createdAt: number; claim: ContextClaim }
   | { type: 'claim_status_changed'; eventId: string; createdAt: number; claimId: string; status: ContextClaimStatus; reason: string }
@@ -64,6 +67,8 @@ export class ContextClaimStore {
       createdAt: proposal.createdAt,
       claim,
     })
+    // Evict excess active claims after proposing new one
+    this.evictExcessActiveClaims()
     return claim
   }
 
@@ -152,7 +157,21 @@ export class ContextClaimStore {
       const updated = this.updateClaimStatus(claim.id, next, 'promotion threshold met')
       if (updated) promoted.push(updated)
     }
+    // Evict excess active claims (cap at MAX_ACTIVE_CLAIMS)
+    this.evictExcessActiveClaims()
     return promoted
+  }
+
+  private evictExcessActiveClaims(): void {
+    const active = this.listActiveClaims()
+    if (active.length <= MAX_ACTIVE_CLAIMS) return
+    // Evict oldest (lowest createdAt) excess claims
+    const toEvict = active
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(0, active.length - MAX_ACTIVE_CLAIMS)
+    for (const claim of toEvict) {
+      this.updateClaimStatus(claim.id, 'stale', 'evicted-overflow')
+    }
   }
 
   exportSession(): string {
@@ -266,14 +285,19 @@ export class ContextClaimStore {
       if (event.type === 'claim_used') {
         const claim = claims.get(event.claimId)
         if (!claim) continue
+        const newConsumers = [...claim.consumers, {
+          id: event.consumerId,
+          kind: event.consumerKind,
+          usedAt: event.createdAt,
+        }]
+        // Cap consumers array — keep most recent
+        const cappedConsumers = newConsumers.length > MAX_CONSUMERS_PER_CLAIM
+          ? newConsumers.slice(-MAX_CONSUMERS_PER_CLAIM)
+          : newConsumers
         claims.set(event.claimId, {
           ...claim,
           lastUsedAt: event.createdAt,
-          consumers: [...claim.consumers, {
-            id: event.consumerId,
-            kind: event.consumerKind,
-            usedAt: event.createdAt,
-          }],
+          consumers: cappedConsumers,
         })
         continue
       }
