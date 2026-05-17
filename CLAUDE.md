@@ -1,36 +1,31 @@
 # Rivet
 
-A terminal coding agent optimized for DeepSeek V4 prefix cache.
+Terminal coding agent optimized for DeepSeek V4 prefix cache.
 
 ## Development
 
 ```bash
-npm install
-npm run build
-npm test
-npm run typecheck
+npm install && npm run build
+npm test          # node:test runner
+npm run typecheck # tsc --noEmit
 ```
 
 ## Architecture
 
-See [README.md](README.md) for full architecture overview.
+Entry: `src/main.tsx` → `src/agent/loop.ts` (AgentLoop) → `src/api/` (SSE streaming) → `src/tui/` (Ink 6 + React)
 
-Key paths:
-- `src/main.tsx` — Entry point + CLI routing
-- `src/tui/` — Terminal UI (Ink 6 + React), SummaryBar, PhaseTracker, theme system, cockpit panels, markdown/diff renderer, scroll pager
-- `src/tui/cockpit/` — Multi-panel cockpit (TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, CockpitRail)
-- `src/api/` — SSE streaming client + provider abstraction + error classifier + structured retry engine
-- `src/agent/` — Agent loop + session management + sub-agent coordinator + TurnHarness (retry/trajectory) + task-state extraction + TraceStore + approval-risk + output token escalation + steer guidance injection
-- `src/tui/render-batch.ts` — Microtask-aligned text delta batching for render efficiency
-- `src/tui/steer-buffer.ts` — User guidance buffer for non-interrupting steer injection during execution
-- `src/tools/` — bash, read_file, write_file, edit_file, git, todo, web_fetch, undo, delegate_task
-- `src/hooks/` — Agent hooks (PreToolUse/PostToolUse/Notification/SubagentStop)
-- `src/mcp/` — MCP client (Model Context Protocol) — config, wrapper, manager, tool discovery
-- `src/prompt/` — System prompt assembly + cache fingerprinting
-- `src/compact/` — Context compaction (micro + smart)
-- `src/context/` — Progressive Context Engine (rounds, ledger, resume-preflight, session-memory)
-- `src/config/` — Configuration schema + CLI manager
+Key modules: `src/agent/` (loop, session, sub-agent, trace-store), `src/api/` (client, codex-client, error-classifier, retry-engine), `src/tui/` (app, stream, render-batch, steer-buffer), `src/tools/`, `src/compact/`, `src/context/`
 
-## Slash Commands
+## Conventions
 
-`/help`, `/exit`, `/compact`, `/model`, `/verbose`, `/debug`, `/clear`, `/sessions`, `/resume`, `/memory`, `/rollback`, `/undo`, `/context`, `/evidence`, `/auto`, `/mcp`, `/scroll`, `/cockpit [summary|trace|verify|context|safety|model|off]`, `/theme [pastel|cyberpunk|list]`, `/interview <topic>`, `/effort [off|low|medium|high|max]`
+- Node.js test runner (`node:test` + `node:assert/strict`), not Vitest or Jest
+- ESM with `.js` extension in imports
+- Immutable patterns — spread operator, no mutation
+- Error classification via `classifyApiError()` — no ad-hoc status code checks in clients
+
+## Known Constraints
+
+- DeepSeek V4 may emit tool JSON in text content (`hasToolJsonInContentBug` in client config)
+- Codex client receives text via both `output_text.delta` and `output_item.done` — `seenTextDelta` dedup handles this
+- Agent loop `onTurnComplete(usage, turn, isFinal)` — intermediate turns keep writer alive, only final turn destroys it
+- User input during streaming goes to SteerBuffer (not direct interrupt), injected at next tool result
