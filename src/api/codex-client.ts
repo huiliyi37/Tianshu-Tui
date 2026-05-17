@@ -219,11 +219,28 @@ export class CodexClient implements StreamClient {
     // Track function calls by index
     const functionCalls = new Map<number, { id: string; name: string; arguments: string }>()
 
+    // SSE idle timeout — same pattern as ApiClient and OpenAIClient
+    const READ_TIMEOUT_MS = 180_000
+    let streamTimedOut = false
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => {
+        streamTimedOut = true
+        reader.cancel().catch(() => {})
+      }, READ_TIMEOUT_MS)
+    }
+
     try {
+      resetIdleTimer()
       while (true) {
         if (signal?.aborted) break
+        if (streamTimedOut) throw new Error('Codex SSE stream idle timeout (180s)')
+
         const { done, value } = await reader.read()
         if (done) break
+        resetIdleTimer()
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
@@ -335,6 +352,7 @@ export class CodexClient implements StreamClient {
         }
       }
     } finally {
+      if (idleTimer) clearTimeout(idleTimer)
       reader.releaseLock()
     }
 
