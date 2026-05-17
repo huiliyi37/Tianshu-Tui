@@ -1,4 +1,4 @@
-import type { ModelCapabilityCard } from '../model/capability.js'
+import type { ModelCapabilityCard, CapabilityTask } from '../model/capability.js'
 import { recommendModelForTask } from '../model/capability.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import {
@@ -42,11 +42,17 @@ export type WorkerRuntimeFactory = (
   workerRegistry: ToolRegistry,
 ) => WorkerSessionConfig
 
+export interface WorkerRouteConfig {
+  profiles: Record<string, { provider: string; model: string }>
+  routing: Record<string, string>
+}
+
 export interface DelegationCoordinatorConfig {
   baseToolRegistry: ToolRegistry
   modelCards: ModelCapabilityCard[]
   maxWorkers: number
   runtimeFactory: WorkerRuntimeFactory
+  routing?: WorkerRouteConfig
   runWorker?: (config: WorkerSessionConfig) => Promise<WorkerSessionRun>
 }
 
@@ -66,6 +72,18 @@ export class DelegationCoordinator {
 
   getState(): CoordinatorState {
     return this.state
+  }
+
+  private selectModelForTask(task: CapabilityTask): ModelCapabilityCard {
+    if (this.config.routing) {
+      const routeName = this.config.routing.routing[task]
+      if (routeName && this.config.routing.profiles[routeName]) {
+        const routeProfile = this.config.routing.profiles[routeName]
+        const routed = this.config.modelCards.find(c => c.model === routeProfile.model)
+        if (routed) return routed
+      }
+    }
+    return recommendModelForTask(task, this.config.modelCards)
   }
 
   async delegate(request: DelegationRequest): Promise<CoordinatorRun> {
@@ -97,7 +115,7 @@ export class DelegationCoordinator {
     this.state.recordEvent({ type: 'queued', workOrderId: order.id, timestamp: Date.now() })
 
     const task = mapWorkOrderKindToCapabilityTask(order.kind)
-    const selected = recommendModelForTask(task, this.config.modelCards)
+    const selected = this.selectModelForTask(task)
     const toolSet = isWrite ? WRITE_WORKER_TOOLS : READ_ONLY_WORKER_TOOLS
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, toolSet)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
