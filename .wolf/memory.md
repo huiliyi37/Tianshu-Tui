@@ -22,6 +22,7 @@
 | 12:10 | Designed Activity Status Layer | docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-design.md, docs/superpowers/specs/2026-05-17-rivet-activity-status-layer-brainstorm.md | Captured approved long-task observability design and separate brainstorming asset covering thinking, large-file analysis, tool/MCP waits, compaction, and preflight | ~1200 |
 | 13:00 | Activity Status Task 3 — activity summary override in AgentStatus | src/tui/agent-status.tsx, src/tui/__tests__/agent-status.test.ts, .wolf/anatomy.md | Added activitySummary prop, exported statusPhaseText helper, updated AgentStatus to use it, 2 new tests; typecheck and 133 agent-status tests pass | ~600 |
 | 13:15 | Activity Status Task 4 — thinkingStatusLabel + completedDurationMs | src/tui/thinking.tsx, src/tui/__tests__/thinking.test.tsx, .wolf/anatomy.md | Added thinkingStatusLabel pure helper and completedDurationMs prop to ThinkingCollapser; 3 new status label tests; typecheck and 19 combined thinking/activity-status tests pass | ~500 |
+| 13:45 | Activity Status Task 5 — low-frequency App projection | src/tui/activity-status.ts, src/tui/app.tsx, src/tui/__tests__/activity-status.test.ts, .wolf/anatomy.md | Added shouldProjectActivity cadence guard, wired 1Hz activity projection in app.tsx for thinking/answer streaming with begin/heartbeat/complete/fail lifecycle, 3 projection cadence tests; typecheck and 1067 tests pass | ~900 |
 
 ## Session: 2026-05-16 Execution Trust Closure
 

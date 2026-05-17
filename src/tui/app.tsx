@@ -32,6 +32,18 @@ import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } f
 import { BlockStreamWriter } from './block-stream-writer.js'
 import { appendStreamWindow } from './stream-window.js'
 import { replayMessagesToLogEntries } from './history-replay.js'
+import {
+  beginActivity,
+  heartbeatActivity,
+  completeActivity,
+  clearActivity,
+  failActivity,
+  createIdleActivity,
+  formatActivitySummary,
+  formatThinkingSize,
+  shouldProjectActivity,
+  type ActivityState,
+} from './activity-status.js'
 
 interface PendingApproval {
   id: string
@@ -221,6 +233,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const dirtyTools = useRef<Set<string>>(new Set())
   const toolTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Activity status projection refs
+  const activityRef = useRef<ActivityState>(createIdleActivity(Date.now()))
+  const activityTextRef = useRef<string | undefined>(undefined)
+  const activityProjectedAtRef = useRef(0)
+  const activityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [activitySummary, setActivitySummary] = useState<string | undefined>(undefined)
+  const [completedThinkingDurationMs, setCompletedThinkingDurationMs] = useState<number | undefined>(undefined)
+  const thinkingStartedAtRef = useRef(0)
+
   const rollbackTokenRef = useRef<string | null>(null)
   const lastCtrlCRef = useRef(0)
   const lastEscRef = useRef(0)
@@ -269,6 +290,20 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
   }, [])
 
+  const projectActivity = useCallback((now = Date.now()) => {
+    const nextText = formatActivitySummary(activityRef.current, now)
+    if (!shouldProjectActivity({
+      previousText: activityTextRef.current,
+      nextText,
+      previousAt: activityProjectedAtRef.current,
+      now,
+    })) return
+
+    activityTextRef.current = nextText
+    activityProjectedAtRef.current = now
+    setActivitySummary(nextText)
+  }, [])
+
   useEffect(() => {
     const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
     if (sessions.length > 0) {
@@ -287,6 +322,26 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       handleSubmit(initialInput)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Low-frequency activity projection timer (1Hz while streaming)
+  useEffect(() => {
+    if (!isStreaming) {
+      if (activityIntervalRef.current) {
+        clearInterval(activityIntervalRef.current)
+        activityIntervalRef.current = null
+      }
+      return
+    }
+    activityIntervalRef.current = setInterval(() => {
+      projectActivity(Date.now())
+    }, 1000)
+    return () => {
+      if (activityIntervalRef.current) {
+        clearInterval(activityIntervalRef.current)
+        activityIntervalRef.current = null
+      }
+    }
+  }, [isStreaming, projectActivity])
 
   useInput((_input, _key) => {
     // Ctrl+C — soft interrupt or exit
@@ -399,6 +454,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     toolNames.current.clear()
     toolTargetMap.current.clear()
 
+    // Reset activity projection state
+    activityRef.current = clearActivity(activityRef.current, Date.now())
+    activityTextRef.current = undefined
+    activityProjectedAtRef.current = 0
+    setActivitySummary(undefined)
+    setCompletedThinkingDurationMs(undefined)
+    thinkingStartedAtRef.current = 0
+
     blockWriterRef.current = new BlockStreamWriter({}, (text) => {
       streamBuf.current += text
       setStreamingText(prev => appendStreamWindow(prev, text, LIVE_STREAM_MAX_CHARS))
@@ -488,14 +551,37 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     await agent.run(promptInput, {
       onTextDelta: (text) => {
+        const now = Date.now()
+        if (activityRef.current.phase === 'thinking') {
+          const completedAt = now
+          activityRef.current = completeActivity(activityRef.current, completedAt, {
+            sizeHint: formatThinkingSize(thinkBuf.current.length),
+          })
+          setCompletedThinkingDurationMs(completedAt - thinkingStartedAtRef.current)
+          projectActivity(now)
+          activityRef.current = beginActivity(activityRef.current, 'streaming', 'Streaming answer', now)
+        } else if (activityRef.current.phase !== 'streaming') {
+          activityRef.current = beginActivity(activityRef.current, 'streaming', 'Streaming answer', now)
+        } else {
+          activityRef.current = heartbeatActivity(activityRef.current, now)
+        }
+        projectActivity(now)
         blockWriterRef.current?.push(text)
       },
       onThinkingDelta: (thinking) => {
+        const now = Date.now()
         if (thinkStartRef.current === 0) {
-          thinkStartRef.current = Date.now()
+          thinkStartRef.current = now
+          thinkingStartedAtRef.current = now
           setIsThinkingActive(true)
+          activityRef.current = beginActivity(activityRef.current, 'thinking', 'Thinking', now)
+        } else {
+          activityRef.current = heartbeatActivity(activityRef.current, now, {
+            sizeHint: formatThinkingSize(thinkBuf.current.length + thinking.length),
+          })
         }
         thinkBuf.current += thinking
+        projectActivity(now)
         if (!thinkTimer.current) {
           thinkTimer.current = setTimeout(flushThink, THINKING_FLUSH_MS)
         }
@@ -588,6 +674,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           thinkStartRef.current = 0
         }
 
+        // Complete any active activity and project final summary
+        const turnNow = Date.now()
+        if (activityRef.current.phase !== 'idle') {
+          activityRef.current = completeActivity(activityRef.current, turnNow)
+          projectActivity(turnNow)
+        }
+
         const writer = blockWriterRef.current
         if (writer) {
           writer.flush()
@@ -662,6 +755,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
       },
       onError: (error) => {
+        // Mark current activity as failed and project before cleanup
+        const errorNow = Date.now()
+        if (activityRef.current.phase !== 'idle') {
+          activityRef.current = failActivity(activityRef.current, errorNow)
+          projectActivity(errorNow)
+        }
         // Clean up stale timers and writer on error
         if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
@@ -677,6 +776,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setIsStreaming(false)
       },
       onAbort: () => {
+        // Mark current activity as failed and project before cleanup
+        const abortNow = Date.now()
+        if (activityRef.current.phase !== 'idle') {
+          activityRef.current = failActivity(activityRef.current, abortNow)
+          projectActivity(abortNow)
+        }
         if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
         blockWriterRef.current?.flush()
@@ -706,7 +811,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
         setIsStreaming(false)
       })
-  }, [agent, session, pushStatic, pushStaticBatch, migrateToFrozen, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+  }, [agent, session, pushStatic, pushStaticBatch, migrateToFrozen, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   const currentTokens = session.getEstimatedTokens()
   const tokenEstimate = Math.floor(streamingText.length / 4)
@@ -747,7 +852,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {(streamingText || isStreaming) && (
           <StreamOutput text={streamingText} isStreaming={isStreaming} />
         )}
-        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking} />
+        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking} completedDurationMs={completedThinkingDurationMs} />
         <AgentStatus
           isStreaming={isStreaming}
           startMs={streamStartRef.current || Date.now()}
@@ -755,6 +860,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           thinkingTime={thinkTimeRef.current}
           hasActiveThinking={isThinkingActive}
           tools={toolCallsDisplay}
+          activitySummary={activitySummary}
         />
         {pendingApproval && (
           <Box paddingX={2} borderStyle="single" borderColor="yellow">

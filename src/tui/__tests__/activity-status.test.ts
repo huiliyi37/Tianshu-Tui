@@ -13,6 +13,7 @@ import {
   formatActivitySummary,
   classifyToolActivity,
   shouldBeginAnalyzing,
+  shouldProjectActivity,
 } from '../activity-status.js'
 
 describe('activity status lifecycle', () => {
@@ -142,5 +143,19 @@ describe('activity status formatting', () => {
     assert.equal(shouldBeginAnalyzing({ toolName: 'read_file', resultLength: 20_000 }), true)
     assert.equal(shouldBeginAnalyzing({ toolName: 'read_file', resultLength: 500 }), false)
     assert.equal(shouldBeginAnalyzing({ toolName: 'bash', resultLength: 25_000 }), true)
+  })
+})
+
+describe('activity projection cadence', () => {
+  it('projects immediately when the text changes', () => {
+    assert.equal(shouldProjectActivity({ previousText: 'Thinking… 1s', nextText: 'Thinking… 2s', previousAt: 1000, now: 1200 }), true)
+  })
+
+  it('skips unchanged text within the projection interval', () => {
+    assert.equal(shouldProjectActivity({ previousText: 'Thinking… 1s', nextText: 'Thinking… 1s', previousAt: 1000, now: 1500 }), false)
+  })
+
+  it('allows unchanged text after one second for timer-driven stale updates', () => {
+    assert.equal(shouldProjectActivity({ previousText: 'Thinking… 1s', nextText: 'Thinking… 1s', previousAt: 1000, now: 2200 }), true)
   })
 })

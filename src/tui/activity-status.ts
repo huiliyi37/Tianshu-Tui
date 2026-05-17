@@ -194,6 +194,20 @@ export function formatActivitySummary(
   return parts.join(' · ')
 }
 
+// ── Projection cadence guard ──────────────────────────────────────────
+
+export interface ProjectionDecisionInput {
+  previousText?: string
+  nextText?: string
+  previousAt: number
+  now: number
+}
+
+export function shouldProjectActivity(input: ProjectionDecisionInput): boolean {
+  if (input.previousText !== input.nextText) return true
+  return input.now - input.previousAt >= 1000
+}
+
 // ── Tool classification helpers ───────────────────────────────────────
 
 export function classifyToolActivity(
