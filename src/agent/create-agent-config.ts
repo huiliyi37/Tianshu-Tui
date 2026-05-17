@@ -45,6 +45,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     maxTokens: model.maxTokens,
     thinkingBudget,
     auth: input.auth,
+    sessionId: input.sessionId,
   })
 
   const promptEngine = new PromptEngine({

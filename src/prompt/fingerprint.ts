@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import type { ToolDefinition } from '../api/types.js'
+import { stableStringify } from '../api/stable-json.js'
 
 export interface PrefixFingerprint {
   systemSha256: string
@@ -17,17 +18,6 @@ export interface DriftEvent {
 
 function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex')
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(',')}]`
-  }
-  if (value && typeof value === 'object') {
-    const obj = value as Record<string, unknown>
-    return `{${Object.keys(obj).sort().map(key => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(',')}}`
-  }
-  return JSON.stringify(value)
 }
 
 export function computeFingerprint(

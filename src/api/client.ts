@@ -2,6 +2,7 @@ import type { MessageRequest, ContentBlock, Usage } from './types.js'
 import type { StreamClient } from './stream-client.js'
 import { SSEParser } from './sse.js'
 import { withStructuredRetry } from './retry-engine.js'
+import { stableStringify } from './stable-json.js'
 
 class ApiError extends Error {
   constructor(
@@ -177,7 +178,7 @@ export class ApiClient implements StreamClient {
           'x-api-key': this.config.apiKey,
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify(finalRequest),
+        body: stableStringify(finalRequest),
         signal,
       }).then(async (res) => {
         if (!res.ok) {

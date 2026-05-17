@@ -154,7 +154,9 @@ export class PromptEngine {
       messages: result,
       max_tokens: this.config.maxTokens,
       system: this.systemPrompt,  // plain string, DeepSeek-compatible
-      tools: this.config.staticCtx.tools.length > 0 ? this.config.staticCtx.tools : undefined,
+      tools: this.config.staticCtx.tools.length > 0
+        ? [...this.config.staticCtx.tools].sort((a, b) => a.name.localeCompare(b.name))
+        : undefined,
       tool_choice: this.config.staticCtx.tools.length > 0 ? { type: 'auto' } : undefined,
       stream: true,
     }

@@ -14,6 +14,8 @@ export interface RuntimeParams {
   reasoningEffort?: string
   thinkingBudget?: number
   auth?: AuthProvider
+  /** Stable session identifier for cache routing affinity */
+  sessionId?: string
 }
 
 /**
@@ -61,6 +63,7 @@ export function createProviderClient(
       auth: params.auth,
       thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
       reasoningEffort: params.reasoningEffort,
+      sessionId: params.sessionId,
     })
   }
 

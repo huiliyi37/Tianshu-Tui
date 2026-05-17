@@ -1,6 +1,7 @@
 import type { StreamClient } from './stream-client.js'
-import type { MessageRequest } from './types.js'
+import type { MessageRequest, ToolDefinition } from './types.js'
 import type { StreamCallbacks } from './client.js'
+import { stableStringify } from './stable-json.js'
 
 export interface OpenAIClientConfig {
   baseUrl: string
@@ -10,6 +11,8 @@ export interface OpenAIClientConfig {
   reasoningEffort?: string
   thinking?: 'enabled' | 'disabled'
   auth?: import('../auth/types.js').AuthProvider
+  /** Stable session identifier for cache routing affinity */
+  sessionId?: string
 }
 
 interface OpenAIToolCall {
@@ -28,6 +31,13 @@ interface ToolCallChunk {
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
 const READ_TIMEOUT_MS = 120_000
+
+function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
+  return {
+    type: 'function',
+    function: { name: tool.name, description: tool.description, parameters: tool.input_schema },
+  }
+}
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -73,9 +83,11 @@ export class OpenAIClient implements StreamClient {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Connection': 'keep-alive',
             ...authHeaders,
+            ...(this.config.sessionId ? { 'X-Request-Session': this.config.sessionId } : {}),
           },
-          body: JSON.stringify(body),
+          body: stableStringify(body),
           signal,
         })
 
@@ -210,6 +222,13 @@ export class OpenAIClient implements StreamClient {
       max_tokens: this.config.maxTokens,
       stream: true,
       stream_options: { include_usage: true },
+    }
+
+    if (request.tools && request.tools.length > 0) {
+      body.tools = [...request.tools]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(toOpenAITool)
+      body.tool_choice = 'auto'
     }
 
     // DeepSeek thinking mode
