@@ -8,6 +8,7 @@ export interface OpenAIClientConfig {
   model: string
   maxTokens: number
   reasoningEffort?: string
+  thinking?: 'enabled' | 'disabled'
   auth?: import('../auth/types.js').AuthProvider
 }
 
@@ -164,6 +165,7 @@ export class OpenAIClient implements StreamClient {
         }
       } else if (msg.role === 'assistant') {
         const textParts: string[] = []
+        const thinkingParts: string[] = []
         const toolCalls: OpenAIToolCall[] = []
 
         const blocks = typeof msg.content === 'string'
@@ -173,6 +175,8 @@ export class OpenAIClient implements StreamClient {
         for (const block of blocks) {
           if (block.type === 'text') {
             textParts.push(block.text)
+          } else if (block.type === 'thinking') {
+            thinkingParts.push(block.thinking)
           } else if (block.type === 'tool_use') {
             toolCalls.push({
               id: block.id,
@@ -189,6 +193,10 @@ export class OpenAIClient implements StreamClient {
         if (textParts.length > 0) {
           assistant.content = textParts.join('')
         }
+        // DeepSeek requires reasoning_content to be passed back in tool-call rounds
+        if (thinkingParts.length > 0) {
+          assistant.reasoning_content = thinkingParts.join('')
+        }
         if (toolCalls.length > 0) {
           assistant.tool_calls = toolCalls
         }
@@ -196,13 +204,23 @@ export class OpenAIClient implements StreamClient {
       }
     }
 
-    return {
+    const body: Record<string, unknown> = {
       model: this.config.model,
       messages,
       max_tokens: this.config.maxTokens,
       stream: true,
       stream_options: { include_usage: true },
     }
+
+    // DeepSeek thinking mode
+    if (this.config.thinking) {
+      body.thinking = { type: this.config.thinking }
+    }
+    if (this.config.reasoningEffort) {
+      body.reasoning_effort = this.config.reasoningEffort
+    }
+
+    return body
   }
 
   /** Parse SSE stream from a reader — exposed for testing */
@@ -272,12 +290,12 @@ export class OpenAIClient implements StreamClient {
   processDelta(
     chunk: {
       choices?: Array<{
-        delta: { content?: string; tool_calls?: Array<ToolCallChunk> }
+        delta: { content?: string | null; reasoning_content?: string | null; tool_calls?: Array<ToolCallChunk> }
         finish_reason?: string | null
       }>
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } }
     },
-    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onContentBlock' | 'onStopReason'>>,
+    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onThinkingDelta' | 'onContentBlock' | 'onStopReason'>>,
   ): void {
     const choice = chunk.choices?.[0]
 
@@ -286,11 +304,12 @@ export class OpenAIClient implements StreamClient {
       const usage = chunk.usage
       const stopReason = this.pendingStopReason ?? 'end_turn'
       this.pendingStopReason = null
+      const cacheRead = usage.prompt_cache_hit_tokens ?? 0
       callbacks.onStopReason?.(mapFinishReason(stopReason), {
         input_tokens: usage.prompt_tokens ?? 0,
         output_tokens: usage.completion_tokens ?? 0,
-        cache_read_input_tokens: 0,
-        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: cacheRead,
+        cache_creation_input_tokens: usage.prompt_cache_miss_tokens ?? 0,
       })
       return
     }
@@ -298,6 +317,11 @@ export class OpenAIClient implements StreamClient {
     if (!choice) return
 
     const delta = choice.delta
+
+    // DeepSeek reasoning_content → thinking delta
+    if (delta.reasoning_content) {
+      callbacks.onThinkingDelta?.(delta.reasoning_content)
+    }
 
     if (delta.content) {
       callbacks.onTextDelta?.(delta.content)
@@ -351,6 +375,7 @@ function mapFinishReason(reason: string): string {
     case 'stop': return 'end_turn'
     case 'tool_calls': return 'tool_use'
     case 'length': return 'max_tokens'
+    case 'insufficient_system_resource': return 'end_turn'  // DeepSeek-specific
     default: return 'end_turn'
   }
 }

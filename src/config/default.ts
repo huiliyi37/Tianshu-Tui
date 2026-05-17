@@ -10,8 +10,8 @@ export const DEFAULT_CONFIG: Config = {
       deepseek: {
         name: 'deepseek',
         apiKeyEnv: 'DEEPSEEK_API_KEY',
-        baseUrl: 'https://api.deepseek.com/anthropic',
-        protocol: 'anthropic' as const,
+        baseUrl: 'https://api.deepseek.com/v1',
+        protocol: 'openai' as const,
         capabilities: {
           cacheControl: false,
           stripParams: [],
