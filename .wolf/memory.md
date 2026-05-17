@@ -26,6 +26,7 @@
 | 14:00 | Activity Status Task 6 — tool/MCP/analysis activity | src/tui/activity-status.ts, src/tui/app.tsx, src/tui/__tests__/activity-status.test.ts, .wolf/anatomy.md | Added toolActivityLabel and analysisLabelForTool helpers, wired tool activity lifecycle with heartbeat/completion/failure in App callbacks, added analyzing phase for large read_file/bash results, 3 new tests; typecheck and 1067 tests pass | ~800 |
 | 14:10 | Activity Status Task 6 follow-up — avoid label shadowing | src/tui/app.tsx, .wolf/anatomy.md, .wolf/memory.md | Renamed final onToolResult local label variable to resolvedLabel to avoid shadowing imported toolLabel; focused tests and typecheck pass | ~200 |
 | 14:30 | Activity Status Layer docs and final validation | README.md, CHANGELOG.md, .wolf/anatomy.md, .wolf/memory.md | Documented Activity Status Layer in README/CHANGELOG, staged implementation plan, final typecheck/tests/build pass | ~400 |
+| 16:28 | Fixed cache telemetry stale status | src/api/provider.ts, src/tui/cache-telemetry.ts, src/tui/app.tsx, src/tui/status-bar.tsx, src/tui/slash-commands.ts, tests | Wired DeepSeek native cache usage mapping, added stale/no-current-metrics projection for status bar and /debug cache; typecheck and 1248-test suite pass; logged bug-101 | ~1200 |
 
 ## Session: 2026-05-16 Execution Trust Closure
 

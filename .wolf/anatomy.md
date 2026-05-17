@@ -317,12 +317,13 @@
 - `client.ts` — Whether the provider has a known bug where tool JSON appears in text content (~3998 tok)
 - `deepseek.ts` — Generic factory: create an ApiClient for any provider described by a (~572 tok)
 - `factory.ts` — Runtime parameters that vary per-model or per-call, not stored in config (~663 tok)
-- `provider.ts` — Describes what a provider supports and how to adapt requests/responses. (~459 tok)
+- `provider.ts` — Provider capabilities and usage normalization; DeepSeek native cache counters map into standard Usage. (~470 tok)
 - `sse.ts` — Exports SSEEvent, SSEParser (~635 tok)
 - `types.ts` — Exports ContentBlockText, ContentBlockThinking, ContentBlockToolUse, ContentBlockToolResult + 7 more (~552 tok)
 
 ## src/api/__tests__/
 
+- `provider.test.ts` — DeepSeek native usage mapping and resolved capability coverage (~284 tok)
 - `schema-gate.test.ts` (~205 tok)
 - `sse.test.ts` — Declares parser (~1419 tok)
 
@@ -503,6 +504,7 @@
 - `assistant-message.tsx` — AssistantMessage (~212 tok)
 - `base-text-input.tsx` — Get line/column info from a flat cursor position in a multi-line string (~2889 tok)
 - `block-stream-writer.ts` — Exports BlockStreamConfig, BlockStreamWriter (~729 tok)
+- `cache-telemetry.ts` — Projects cache hit/status display, including stale no-current-metrics detection (~449 tok)
 - `error-boundary.tsx` — Increment to force remount children after error recovery (~267 tok)
 - `fluency-hook.ts` — Exports ToolResultEvent, FluencyTracker (~542 tok)
 - `fluency-policy.ts` — --- Fluency Policy --- (~858 tok)
@@ -531,6 +533,7 @@
 
 - `assistant-message.test.ts` (~103 tok)
 - `base-text-input.test.ts` — Replicate the helper functions from base-text-input.tsx for testing (~1532 tok)
+- `cache-telemetry.test.ts` — Cache telemetry stale/degraded projection tests (~553 tok)
 - `fluency-hook.test.ts` — --------------------------------------------------------------------------- (~2310 tok)
 - `fluency-policy.test.ts` — Declares baseline (~3858 tok)
 - `group-logs.test.ts` — Declares LogEntry (~1017 tok)

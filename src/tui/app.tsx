@@ -30,6 +30,7 @@ import type { Panel } from './cockpit/types.js'
 import { CommandPalette, getPaletteCommands } from './command-palette.js'
 import { openInEditor } from './external-editor.js'
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from './slash-commands.js'
+import { projectCacheTelemetry } from './cache-telemetry.js'
 import { BlockStreamWriter } from './block-stream-writer.js'
 import { appendStreamWindow } from './stream-window.js'
 import { replayMessagesToLogEntries } from './history-replay.js'
@@ -799,24 +800,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
         setIsStreaming(false)
 
-        // Turn-level cache hit rate for StatusBar (last 3 turns)
-        const recentHitRate = session.getRecentTurnHitRate(3) ?? session.getCacheHitRate()
-        setCacheHitRate(recentHitRate)
-
-        // Detect cache degradation after compaction
-        const latestHitRate = session.getLatestTurnHitRate()
-        const wasCompacted = turnNumber > 1 && session.wasCompactedAt(turnNumber - 1)
-        if (latestHitRate !== null && latestHitRate < 0.4 && turnNumber > 1) {
-          if (wasCompacted) {
-            setCacheStatus('degraded')
-            pushStatic(createLogEntry({ type: 'system', content: `Cache degraded (${(latestHitRate * 100).toFixed(0)}%) — compaction restructured prefix. Normal on next turn.` }))
-          } else {
-            setCacheStatus('degraded')
-          }
-        } else if (latestHitRate !== null && latestHitRate >= 0.6) {
-          setCacheStatus(cacheStatus === 'degraded' ? 'recovering' : 'healthy')
-        } else {
-          setCacheStatus('healthy')
+        const cacheTelemetry = projectCacheTelemetry(session, turnNumber, cacheStatus)
+        setCacheHitRate(cacheTelemetry.hitRate)
+        setCacheStatus(cacheTelemetry.status)
+        if (cacheTelemetry.status === 'degraded' && cacheTelemetry.wasCompacted && cacheTelemetry.latestHitRate !== null) {
+          pushStatic(createLogEntry({ type: 'system', content: `Cache degraded (${(cacheTelemetry.latestHitRate * 100).toFixed(0)}%) — compaction restructured prefix. Normal on next turn.` }))
         }
 
         phaseTracker.current.onTurnComplete()
@@ -927,7 +915,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }).finally(() => {
       promptQueueRef.current.running = false
     })
-  }, [agent, session, pushStatic, pushStaticBatch, migrateToFrozen, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+  }, [agent, session, pushStatic, pushStaticBatch, migrateToFrozen, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, cacheStatus, setVerbose, setAutoSafe, pushTokenHistory])
 
   const currentTokens = session.getEstimatedTokens()
   const tokenEstimate = Math.floor(streamingText.length / 4)

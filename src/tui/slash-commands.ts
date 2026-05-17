@@ -10,6 +10,7 @@ import { PhaseTracker } from './phase-tracker.js'
 import { createLogEntry, type LogEntry } from './log-state.js'
 import { getPaletteCommands } from './command-palette.js'
 import { openInEditor } from './external-editor.js'
+import { projectCacheTelemetry } from './cache-telemetry.js'
 import { PANEL_LABELS, type Panel } from './cockpit/types.js'
 import type { SummaryState } from './summary-bar.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
@@ -195,9 +196,12 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         pushStatic(createLogEntry({ type: 'system', content: `Fingerprint:\n  system:  ${fp.systemSha256.slice(0, 16)}...\n  tools:   ${fp.toolsSha256.slice(0, 16)}...\n  combined: ${fp.combinedSha256.slice(0, 16)}...\n\nDrift: ${drift ? drift.message : 'none (cache stable)'}` }))
       } else if (subcmd === 'cache') {
         const usage = ctx.session.getTotalUsage()
-        const hitRate = ctx.cacheHitRate
+        const telemetry = projectCacheTelemetry(ctx.session, ctx.session.getTurnCount(), 'healthy')
         const totalCached = usage.cache_read_input_tokens + usage.cache_creation_input_tokens
-        pushStatic(createLogEntry({ type: 'system', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${ctx.session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${ctx.cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
+        const latestLine = telemetry.latestHitRate === null
+          ? 'latest turn: no current cache metrics'
+          : `latest turn: ${(telemetry.latestHitRate * 100).toFixed(1)}%`
+        pushStatic(createLogEntry({ type: 'system', content: `Cache:\n  status: ${telemetry.status}\n  hit rate: ${(telemetry.hitRate * 100).toFixed(1)}%\n  ${latestLine}\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${ctx.session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${ctx.cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
       } else if (subcmd === 'mcp') {
         const mgr = ctx.mcpManagerRef.current
         if (!mgr) {

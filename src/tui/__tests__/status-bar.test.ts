@@ -26,7 +26,7 @@ function cacheColor(rate: number): string {
 
 function cacheStatusColor(status: string, rate: number): string {
   if (status === 'degraded') return 'red'
-  if (status === 'recovering') return 'yellow'
+  if (status === 'recovering' || status === 'stale') return 'yellow'
   return cacheColor(rate)
 }
 
@@ -61,5 +61,9 @@ describe('StatusBar color logic', () => {
     assert.equal(cacheStatusColor('recovering', 0.5), 'yellow')
     assert.equal(cacheStatusColor('healthy', 0.2), 'red')
     assert.equal(cacheStatusColor('healthy', 0.9), 'green')
+  })
+
+  it('marks stale cache status as warning instead of healthy cache color', () => {
+    assert.equal(cacheStatusColor('stale', 0.9), 'yellow')
   })
 })

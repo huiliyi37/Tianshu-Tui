@@ -77,4 +77,27 @@ describe('handleSlashCommand', () => {
     assert.equal(handleSlashCommand(ctx), true)
     assert.deepEqual(values, [true])
   })
+
+  it('/debug cache reports stale telemetry instead of only historical hit rate', () => {
+    const entries: LogEntry[] = []
+    const ctx = makeCtx({
+      parts: ['/debug', 'cache'],
+      agent: { getDebugInfo: () => ({}) } as any,
+      session: {
+        getTotalUsage: () => ({ input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 100, cache_creation_input_tokens: 0 }),
+        getCacheHistory: () => [{ turn: 1, cacheRead: 100, cacheCreation: 0, inputTokens: 100, outputTokens: 10 }],
+        getTurnCount: () => 2,
+        getRecentTurnHitRate: () => 1,
+        getCacheHitRate: () => 1,
+        getLatestTurnHitRate: () => 1,
+        wasCompactedAt: () => false,
+        getEstimatedTokens: () => 100,
+      } as any,
+      pushStatic: (entry) => entries.push(entry),
+    })
+
+    assert.equal(handleSlashCommand(ctx), true)
+    assert.match(entries[0]!.content, /status: stale/)
+    assert.match(entries[0]!.content, /latest turn: no current cache metrics/)
+  })
 })

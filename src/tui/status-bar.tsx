@@ -2,7 +2,7 @@ import { Box, Text, useStdout } from 'ink'
 import { memo } from 'react'
 import { getTheme } from './theme.js'
 
-export type CacheStatus = 'healthy' | 'degraded' | 'recovering'
+export type CacheStatus = 'healthy' | 'degraded' | 'recovering' | 'stale'
 
 export interface InterviewState {
   intent: string
@@ -83,7 +83,8 @@ export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheSta
   const healthColor = contextHealth === 'critical' ? theme.error : contextHealth === 'compacting' ? theme.warning : contextHealth === 'warning' ? theme.warning : theme.success
 
   const statusIcon = cacheStatus === 'degraded' ? '▼' : cacheStatus === 'recovering' ? '↗' : ''
-  const statusColor = cacheStatus === 'degraded' ? theme.error : cacheStatus === 'recovering' ? theme.warning : cacheColor
+  const statusColor = cacheStatus === 'degraded' ? theme.error : cacheStatus === 'recovering' || cacheStatus === 'stale' ? theme.warning : cacheColor
+  const cacheText = cacheStatus === 'stale' ? 'cache:stale' : `cache:${statusIcon}${hitPct}%`
 
   const compact = cols < 70
   const narrow = cols < 90
@@ -97,7 +98,7 @@ export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheSta
       <Box gap={1}>
         <Text bold color={theme.primary}>{shortModel}</Text>
         <Text color={statusColor}>
-          cache:{statusIcon}{hitPct}%
+          {cacheText}
         </Text>
         {!compact && (
           <Text color={healthColor}>
