@@ -11,12 +11,24 @@ export function track(child: ChildProcess): ChildProcess {
 
 export function killAll(): void {
   for (const child of activeProcesses) {
-    try { child.kill('SIGTERM') } catch { /* already dead */ }
+    if (!child.pid) continue
+    try {
+      // Kill process group (negative PID) to catch the entire shell tree,
+      // including &-backgrounded children. Falls back to single-process kill.
+      process.kill(-child.pid, 'SIGTERM')
+    } catch {
+      try { child.kill('SIGTERM') } catch { /* already dead */ }
+    }
   }
   // Give 2s grace period then force kill
   setTimeout(() => {
     for (const child of activeProcesses) {
-      try { child.kill('SIGKILL') } catch { /* already dead */ }
+      if (!child.pid) continue
+      try {
+        process.kill(-child.pid, 'SIGKILL')
+      } catch {
+        try { child.kill('SIGKILL') } catch { /* already dead */ }
+      }
     }
     activeProcesses.clear()
   }, 2000)

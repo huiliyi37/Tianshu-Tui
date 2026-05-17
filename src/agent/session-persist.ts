@@ -1,5 +1,5 @@
 import { appendFile } from 'fs/promises'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync, statSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -207,10 +207,19 @@ export function evictOldSessionsInternal(dir: string, keepSessionId: string, lim
 
   if (sessions.length <= limit) return []
 
-  const sorted = [...sessions].sort()
-  const toEvict = sorted
-    .filter(id => id !== keepSessionId)
+  // Sort by mtime (oldest first) so eviction removes least-recently-used sessions.
+  // UUIDs are not time-ordered — lexicographic sort would delete arbitrary sessions.
+  const withMtime = sessions.map(id => {
+    let mtime = 0
+    try { mtime = statSync(join(dir, `${id}.jsonl`)).mtimeMs } catch { /* ignore */ }
+    return { id, mtime }
+  })
+  withMtime.sort((a, b) => a.mtime - b.mtime)
+
+  const toEvict = withMtime
+    .filter(({ id }) => id !== keepSessionId)
     .slice(0, sessions.length - limit)
+    .map(({ id }) => id)
 
   for (const id of toEvict) {
     try { unlinkSync(join(dir, `${id}.jsonl`)) } catch { /* ignore */ }

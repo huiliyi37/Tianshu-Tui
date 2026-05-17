@@ -285,12 +285,21 @@ export class ApiClient implements StreamClient {
 
     const abortHandler = () => { reader.cancel().catch(() => {}) }
 
+    const READ_TIMEOUT_MS = 120_000
+    let streamTimedOut = false
+    let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null
+
     try {
       if (signal) {
         signal.addEventListener('abort', abortHandler, { once: true })
       }
       while (true) {
         if (signal?.aborted) break
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout)
+        streamIdleTimeout = setTimeout(() => {
+          streamTimedOut = true
+          reader.cancel().catch(() => {})
+        }, READ_TIMEOUT_MS)
         const { done, value } = await reader.read()
         if (done) break
 
@@ -397,6 +406,8 @@ export class ApiClient implements StreamClient {
           }
         }
       }
+    if (streamIdleTimeout) clearTimeout(streamIdleTimeout)
+    if (streamTimedOut) throw new Error('SSE stream idle timeout')
     } finally {
       signal?.removeEventListener('abort', abortHandler)
       reader.releaseLock()
