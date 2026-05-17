@@ -587,19 +587,24 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           blockWriterRef.current = null
         }
         const finalText = streamBuf.current
-        if (finalText) {
-          const parsed = parseInterviewMarker(finalText)
-          if (parsed) {
-            setInterviewState(parsed.state)
-            setClarityHistory(prev => [...prev, parsed.state.clarity])
-            if (parsed.state.confirmed) {
-              setSummaryState(prev => ({ ...prev, phase: 'interview' }))
-            }
-            if (parsed.cleanText) {
-              pushStatic(createLogEntry({ type: 'assistant_message', content: parsed.cleanText }))
+        if (finalText || thinkBuf.current) {
+          if (finalText) {
+            const parsed = parseInterviewMarker(finalText)
+            if (parsed) {
+              setInterviewState(parsed.state)
+              setClarityHistory(prev => [...prev, parsed.state.clarity])
+              if (parsed.state.confirmed) {
+                setSummaryState(prev => ({ ...prev, phase: 'interview' }))
+              }
+              if (parsed.cleanText) {
+                pushStatic(createLogEntry({ type: 'assistant_message', content: parsed.cleanText, thinking: thinkBuf.current || undefined }))
+              }
+            } else {
+              pushStatic(createLogEntry({ type: 'assistant_message', content: finalText, thinking: thinkBuf.current || undefined }))
             }
           } else {
-            pushStatic(createLogEntry({ type: 'assistant_message', content: finalText }))
+            // Only thinking, no visible text — still preserve for history
+            pushStatic(createLogEntry({ type: 'assistant_message', content: '', thinking: thinkBuf.current }))
           }
         }
         streamBuf.current = ''
