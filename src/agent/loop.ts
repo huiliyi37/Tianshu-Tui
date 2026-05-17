@@ -80,6 +80,8 @@ export interface AgentCallbacks {
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }) => void
+  /** Called to drain any pending steer guidance for injection into tool results */
+  onSteerDrain?: () => string | null
 }
 
 function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id: string; name: string } {
@@ -581,6 +583,16 @@ export class AgentLoop {
             if (result.checkpointCreated) checkpointCreatedThisTurn = true
 
             toolResults.push(result.toolResult)
+          }
+
+          // Inject steer guidance into last tool result if available
+          const steerText = callbacks.onSteerDrain?.()
+          if (steerText && toolResults.length > 0) {
+            const lastResult = toolResults[toolResults.length - 1]!
+            if (lastResult.type === 'tool_result') {
+              const existing = typeof lastResult.content === 'string' ? lastResult.content : ''
+              toolResults[toolResults.length - 1] = { ...lastResult, content: existing + '\n\n' + steerText }
+            }
           }
 
           this.session.addToolResults(toolResults)

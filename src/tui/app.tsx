@@ -33,6 +33,7 @@ import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } f
 import { BlockStreamWriter } from './block-stream-writer.js'
 import { appendStreamWindow } from './stream-window.js'
 import { RenderBatcher } from './render-batch.js'
+import { SteerBuffer } from './steer-buffer.js'
 import { replayMessagesToLogEntries } from './history-replay.js'
 import {
   beginActivity,
@@ -274,6 +275,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, [])
 
   const promptQueueRef = useRef({ running: false })
+  const steerBuffer = useRef(new SteerBuffer())
+  const [steerPending, setSteerPending] = useState(false)
 
   const flushThink = useCallback(() => {
     thinkTimer.current = null
@@ -336,6 +339,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       handleSubmit(initialInput)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Steer buffer subscription — updates pending indicator
+  useEffect(() => {
+    return steerBuffer.current.subscribe(() => {
+      setSteerPending(steerBuffer.current.hasPending())
+    })
+  }, [])
 
   // Low-frequency activity projection timer (1Hz while streaming)
   useEffect(() => {
@@ -742,6 +752,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           activityRef.current = beginActivity(activityRef.current, 'analyzing', analysisLabelForTool(toolName, resolvedLabel), toolNow)
           projectActivity(toolNow)
         }
+
+        const steerText = steerBuffer.current.drain()
+        if (steerText) {
+          agent.addAnchor('user_constraint', steerText)
+          pushStatic(createLogEntry({ type: 'system', content: 'Steering guidance injected into agent context.' }))
+        }
       },
       onCheckpoint: (hash) => {
         pushStatic(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
@@ -865,6 +881,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         phaseTracker.current.onTurnComplete()
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
+        // Drain any remaining steer guidance at turn boundary (pure-text turns)
+        const turnSteer = steerBuffer.current.drain()
+        if (turnSteer) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Steering guidance will be applied on next turn.' }))
+        }
         // Flush any remaining folded tools
         if (foldedCountRef.current > 0) {
           pushStatic(createLogEntry({ type: 'system', content: `… ${foldedCountRef.current} routine tool calls folded` }))
@@ -1043,7 +1064,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             onCancel={() => setShowPalette(false)}
           />
         )}
-        <InputBar onSubmit={handleSubmit} disabled={isStreaming || !!pendingApproval} vimEnabled={false} />
+        <InputBar onSubmit={isStreaming ? (text: string) => {
+          steerBuffer.current.push(text)
+          pushStatic(createLogEntry({ type: 'system', content: `Guidance queued: "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}" — will be injected at next opportunity` }))
+        } : handleSubmit} disabled={!!pendingApproval} vimEnabled={false} />
+        {steerPending && isStreaming && (
+          <Box paddingX={2}>
+            <Text dimColor color="cyan">Pending guidance queued for injection</Text>
+          </Box>
+        )}
       </Box>
     </>
   )
