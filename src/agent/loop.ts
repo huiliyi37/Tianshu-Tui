@@ -523,7 +523,13 @@ export class AgentLoop {
 
         // Wire strategy → harness: reasoning effort, theta interval
         this.setReasoningEffort(this.strategy.reasoningEffort)
-        this.thetaState = { ...this.thetaState, interval: this.strategy.thetaCycleInterval }
+        // Theta interval is base (from strategy) modulated by git change rate.
+        // Higher code volatility → more frequent cross-file consistency checks.
+        // floor = 2 prevents over-sampling; ceiling = baseInterval.
+        const baseInterval = this.strategy.thetaCycleInterval
+        const gitMod = 1 - this.gitChangeRate * 0.5
+        const adaptiveInterval = Math.max(2, Math.round(baseInterval * gitMod))
+        this.thetaState = { ...this.thetaState, interval: adaptiveInterval }
 
         // Emit StarEvent via existing onPhaseChange callback
         const recentTools = this.recentToolHistory.map(h => h.tool)
