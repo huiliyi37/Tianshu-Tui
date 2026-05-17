@@ -8,6 +8,7 @@ export interface OpenAIClientConfig {
   model: string
   maxTokens: number
   reasoningEffort?: string
+  auth?: import('../auth/types.js').AuthProvider
 }
 
 interface OpenAIToolCall {
@@ -62,11 +63,16 @@ export class OpenAIClient implements StreamClient {
     let lastError: Error | null = null
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
+        // Resolve auth headers: AuthProvider takes precedence over static apiKey
+        const authHeaders = this.config.auth
+          ? await this.config.auth.getHeaders()
+          : { 'Authorization': `Bearer ${this.config.apiKey}` }
+
         const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.config.apiKey}`,
+            ...authHeaders,
           },
           body: JSON.stringify(body),
           signal,

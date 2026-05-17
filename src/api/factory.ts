@@ -47,6 +47,7 @@ export function createProviderClient(
       apiKey: params.apiKey,
       model: params.model,
       maxTokens: params.maxTokens,
+      auth: params.auth,
     })
   }
 
