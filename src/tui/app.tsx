@@ -682,7 +682,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Complete/fail tool activity
         const toolNow = Date.now()
         const toolName = toolNames.current.get(id) ?? 'tool'
-        const toolLabel = toolCallTracker.current.get(id)?.label ?? toolName
+        const resolvedLabel = toolCallTracker.current.get(id)?.label ?? toolName
         const resultLength = result.length
 
         if (isError) {
@@ -694,7 +694,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
         // Begin analyzing activity for large results
         if (!isError && shouldBeginAnalyzing({ toolName, resultLength })) {
-          activityRef.current = beginActivity(activityRef.current, 'analyzing', analysisLabelForTool(toolName, toolLabel), toolNow)
+          activityRef.current = beginActivity(activityRef.current, 'analyzing', analysisLabelForTool(toolName, resolvedLabel), toolNow)
           projectActivity(toolNow)
         }
       },
