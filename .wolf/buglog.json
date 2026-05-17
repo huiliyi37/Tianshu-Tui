@@ -1696,6 +1696,22 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-17T02:26:50.959Z"
+    },
+    {
+      "id": "bug-107",
+      "timestamp": "2026-05-17T03:47:19.447Z",
+      "error_message": "Missing error handling in classifyEntry",
+      "file": "docs/superpowers/plans/2026-05-17-project-memory-dream-p2p3.md",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T03:47:19.447Z"
     }
   ]
 }
