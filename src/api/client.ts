@@ -1,6 +1,7 @@
 import type { MessageRequest, ContentBlock, Usage } from './types.js'
 import type { StreamClient } from './stream-client.js'
 import { SSEParser } from './sse.js'
+import { withStructuredRetry } from './retry-engine.js'
 
 class ApiError extends Error {
   constructor(
@@ -133,56 +134,6 @@ function extractToolJsonFromText(text: string): { name: string; input: Record<st
   return null
 }
 
-const MAX_RETRIES = 3
-const BASE_DELAY_MS = 1000
-
-function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    return Promise.reject(new DOMException('Aborted', 'AbortError'))
-  }
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      reject(new DOMException('Aborted', 'AbortError'))
-    }
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  signal?: AbortSignal,
-): Promise<T> {
-  let lastError: Error | null = null
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await fn()
-    } catch (err) {
-      lastError = err as Error
-
-      // Don't retry if aborted
-      if (signal?.aborted) throw err
-
-      // Don't retry on 4xx (except 429)
-      const apiErr = lastError instanceof ApiError ? lastError : null
-      const status = apiErr?.status ?? null
-      if (status && status >= 400 && status < 500 && status !== 429) {
-        throw err
-      }
-
-      if (attempt < MAX_RETRIES) {
-        const delay = apiErr?.retryAfterMs ?? BASE_DELAY_MS * Math.pow(2, attempt - 1)
-        await abortableDelay(delay, signal)
-      }
-    }
-  }
-
-  throw lastError
-}
-
 export class ApiClient implements StreamClient {
   constructor(private config: ClientConfig) {}
 
@@ -218,7 +169,7 @@ export class ApiClient implements StreamClient {
 
     const finalRequest = this.stripUnsupported({ ...request, stream: true })
 
-    const response = await withRetry(
+    const response = await withStructuredRetry(
       () => fetch(`${this.config.baseUrl}/messages`, {
         method: 'POST',
         headers: {

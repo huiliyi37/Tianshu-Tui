@@ -1,6 +1,7 @@
 import type { StreamClient } from './stream-client.js'
 import type { MessageRequest, ContentBlock } from './types.js'
 import type { StreamCallbacks } from './client.js'
+import { withStructuredRetry } from './retry-engine.js'
 
 export interface CodexClientConfig {
   baseUrl: string
@@ -11,8 +12,6 @@ export interface CodexClientConfig {
 
 const CODEX_USER_AGENT = 'codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9'
 const CODEX_ORIGINATOR = 'codex_cli_rs'
-const MAX_RETRIES = 3
-const BASE_DELAY_MS = 1000
 
 export class CodexClient implements StreamClient {
   constructor(private config: CodexClientConfig) {}
@@ -26,57 +25,36 @@ export class CodexClient implements StreamClient {
   ): Promise<void> {
     const body = this.buildRequestBody(request)
 
-    let lastError: Error | null = null
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const authHeaders = this.config.auth
-          ? await this.config.auth.getHeaders()
-          : {}
+    await withStructuredRetry(async () => {
+      const authHeaders = this.config.auth
+        ? await this.config.auth.getHeaders()
+        : {}
 
-        const url = `${this.config.baseUrl.replace(/\/+$/, '')}/responses`
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': CODEX_USER_AGENT,
-            'Originator': CODEX_ORIGINATOR,
-            'Accept': 'text/event-stream',
-            'Connection': 'Keep-Alive',
-            ...authHeaders,
-          },
-          body: JSON.stringify(body),
-          signal,
-        })
+      const url = `${this.config.baseUrl.replace(/\/+$/, '')}/responses`
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': CODEX_USER_AGENT,
+          'Originator': CODEX_ORIGINATOR,
+          'Accept': 'text/event-stream',
+          'Connection': 'Keep-Alive',
+          ...authHeaders,
+        },
+        body: JSON.stringify(body),
+        signal,
+      })
 
-        if (!response.ok) {
-          const errorBody = await response.text().catch(() => '')
-          const status = response.status
-          if (status >= 400 && status < 500 && status !== 429) {
-            throw new Error(`Codex API error (${status}): ${errorBody}`)
-          }
-          lastError = new Error(`Codex API error (${status}): ${errorBody}`)
-          if (attempt < MAX_RETRIES) {
-            await delay(BASE_DELAY_MS * Math.pow(2, attempt - 1), signal)
-            continue
-          }
-          throw lastError
-        }
-
-        await this.processSSEStream(response, callbacks, signal)
-        return
-      } catch (err) {
-        if (signal?.aborted) throw err
-        if (err instanceof Error && err.message.startsWith('Codex API error (4')) {
-          throw err
-        }
-        lastError = err instanceof Error ? err : new Error(String(err))
-        if (attempt < MAX_RETRIES) {
-          await delay(BASE_DELAY_MS * Math.pow(2, attempt - 1), signal)
-          continue
-        }
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '')
+        throw Object.assign(
+          new Error(`Codex API error (${response.status}): ${errorBody}`),
+          { status: response.status },
+        )
       }
-    }
-    throw lastError ?? new Error('Codex request failed after retries')
+
+      await this.processSSEStream(response, callbacks, signal)
+    }, signal)
   }
 
   private buildRequestBody(request: MessageRequest): Record<string, unknown> {
@@ -423,15 +401,4 @@ export class CodexClient implements StreamClient {
       cache_read_input_tokens: 0,
     })
   }
-}
-
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer)
-      reject(new DOMException('Aborted', 'AbortError'))
-    }, { once: true })
-  })
 }
