@@ -2,6 +2,7 @@ import type { ModelCapabilityCard, CapabilityTask } from '../model/capability.js
 import { recommendModelForTask } from '../model/capability.js'
 import type { ProviderConfig } from '../config/schema.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
+import { ProviderHealthTracker } from './provider-health.js'
 import {
   createReadOnlyWorkOrder,
   createWriteWorkOrder,
@@ -57,6 +58,9 @@ export interface DelegationCoordinatorConfig {
   runtimeFactory: WorkerRuntimeFactory
   routing?: WorkerRouteConfig
   runWorker?: (config: WorkerSessionConfig) => Promise<WorkerSessionRun>
+  /** Optional provider health tracker for Physarum-style routing.
+   *  When set, cold-tier providers are excluded from model selection. */
+  providerHealth?: ProviderHealthTracker
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -97,12 +101,18 @@ export class DelegationCoordinator {
       const routeName = this.config.routing.routing[task]
       if (routeName && this.config.routing.profiles[routeName]) {
         const routeProfile = this.config.routing.profiles[routeName]
-        const provider = this.config.routing.providers?.[routeProfile.provider]
-        const routeModelExists = !provider || provider.models.some(m => m.id === routeProfile.model || m.alias === routeProfile.model)
-        const routeHasCredentials = !provider || provider.auth?.type === 'oauth' || Boolean(provider.apiKey || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]))
-        if (routeModelExists && routeHasCredentials) {
-          const routed = this.config.modelCards.find(c => c.model === routeProfile.model)
-          if (routed) return routed
+
+        // Physarum routing: skip cold-tier providers
+        const skipCold = this.config.providerHealth?.getWeights()
+          .find(h => h.providerId === routeProfile.provider && h.tier === 'cold')
+        if (!skipCold) {
+          const provider = this.config.routing.providers?.[routeProfile.provider]
+          const routeModelExists = !provider || provider.models.some(m => m.id === routeProfile.model || m.alias === routeProfile.model)
+          const routeHasCredentials = !provider || provider.auth?.type === 'oauth' || Boolean(provider.apiKey || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]))
+          if (routeModelExists && routeHasCredentials) {
+            const routed = this.config.modelCards.find(c => c.model === routeProfile.model)
+            if (routed) return routed
+          }
         }
       }
     }

@@ -53,6 +53,7 @@ import { runThetaCheck } from './theta-check.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
+import { ProviderHealthTracker } from './provider-health.js'
 import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
@@ -91,6 +92,9 @@ export interface AgentConfig {
   lspEnabled?: boolean
   permissions?: PermissionConfig
   contextClaimStore?: ContextClaimStore
+  /** Optional provider health tracker for Physarum-style routing.
+   *  Degradation ratio affects sensorium stability dimension. */
+  providerHealth?: ProviderHealthTracker
 }
 
 export interface AgentCallbacks {
@@ -514,6 +518,19 @@ export class AgentLoop {
           gitChangeRate: this.gitChangeRate,
         }
         this.sensorium = computeSensorium(sensoriumInput)
+
+        // Provider health degradation → reduces stability
+        // When providers fail, agent operational stability is genuinely reduced
+        if (this.config.providerHealth) {
+          const degRatio = this.config.providerHealth.getDegradationRatio()
+          if (degRatio > 0) {
+            this.sensorium = {
+              ...this.sensorium,
+              stability: this.sensorium.stability * (1 - 0.3 * degRatio),
+            }
+          }
+        }
+
         this.strategy = computeStrategy(this.sensorium)
 
         // Track whether complexity ever reached high → enables contracting phase
