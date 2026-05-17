@@ -181,6 +181,10 @@ export class AgentLoop {
     return this.trajectory.summarize()
   }
 
+  getTrajectoryEntries(): import('./trajectory.js').TrajectoryEntry[] {
+    return this.trajectory.getEntries()
+  }
+
   resetTrajectory(): void {
     this.trajectory.reset()
   }

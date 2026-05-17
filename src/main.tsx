@@ -347,12 +347,18 @@ function Root({ provider, apiKey, config }: { provider: ProviderConfig; apiKey: 
       persist.compact(session.getMessages())
       try {
         const evidenceState = agent.getEvidenceState()
+        const rawTrajectory = agent.getTrajectoryEntries()
         persistDream(process.cwd(), {
           filesModified: [...evidenceState.filesModified],
           filesRead: [...evidenceState.filesRead],
           verifications: evidenceState.verifications,
           decisions: [],
-          trajectoryEntries: [],
+          trajectoryEntries: rawTrajectory.map(e => ({
+            tool: e.tool,
+            target: e.target,
+            status: e.status.startsWith('retried') || e.status === 'success' ? 'success' as const : 'failed' as const,
+            error: e.errorClass,
+          })),
           sessionId,
         })
       } catch { /* dream distillation is best-effort */ }

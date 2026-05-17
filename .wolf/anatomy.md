@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T02:29:02.060Z
-> Files: 398 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T03:34:19.385Z
+> Files: 401 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -51,10 +51,19 @@
 
 ## .claude/worktrees/session-ha-closure/.wolf/
 
-- `anatomy.md` — anatomy.md (~8350 tok)
+- `anatomy.md` — anatomy.md (~8497 tok)
 - `buglog.json` — Declares annotation (~7919 tok)
 - `cerebrum.md` — Cerebrum (~616 tok)
-- `memory.md` — Memory (~38548 tok)
+- `memory.md` — Memory (~38750 tok)
+
+## .claude/worktrees/session-ha-closure/docs/superpowers/plans/
+
+- `2026-05-17-rivet-activity-status-layer.md` — Rivet Activity Status Layer 实现计划 (~7887 tok)
+
+## .claude/worktrees/session-ha-closure/docs/superpowers/specs/
+
+- `2026-05-17-rivet-activity-status-layer-brainstorm.md` — Rivet Activity Status Layer Brainstorm Asset (~1589 tok)
+- `2026-05-17-rivet-activity-status-layer-design.md` — Rivet Activity Status Layer Design (~2898 tok)
 
 ## .claude/worktrees/session-ha-closure/src/agent/
 
