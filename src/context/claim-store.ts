@@ -53,6 +53,7 @@ export class ContextClaimStore {
     appendFileSync(this.path, JSON.stringify(event) + '\n', 'utf-8')
     if (this.cachedEvents) {
       this.cachedEvents.push(event)
+      this.lastFileSize += Buffer.byteLength(JSON.stringify(event) + '\n')
     }
   }
 
@@ -163,12 +164,13 @@ export class ContextClaimStore {
   }
 
   private evictExcessActiveClaims(): void {
-    const active = this.listActiveClaims()
-    if (active.length <= MAX_ACTIVE_CLAIMS) return
+    // Only evict active/durable_candidate — durable claims are terminal and must not be evicted
+    const evictable = this.listActiveClaims().filter(c => c.status !== 'durable')
+    if (evictable.length <= MAX_ACTIVE_CLAIMS) return
     // Evict oldest (lowest createdAt) excess claims
-    const toEvict = active
+    const toEvict = [...evictable]
       .sort((a, b) => a.createdAt - b.createdAt)
-      .slice(0, active.length - MAX_ACTIVE_CLAIMS)
+      .slice(0, evictable.length - MAX_ACTIVE_CLAIMS)
     for (const claim of toEvict) {
       this.updateClaimStatus(claim.id, 'stale', 'evicted-overflow')
     }
