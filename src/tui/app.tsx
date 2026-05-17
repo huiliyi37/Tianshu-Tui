@@ -15,6 +15,7 @@ import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
 import { SummaryBar, type SummaryState } from './summary-bar.js'
 import type { InterviewState } from './status-bar.js'
 import { PhaseTracker } from './phase-tracker.js'
+import { FluencyTracker } from './fluency-hook.js'
 import { createRingBuffer } from './ring-buffer.js'
 import { getTheme } from './theme.js'
 import { AgentLoop } from '../agent/loop.js'
@@ -174,6 +175,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [streamingThinking, setStreamingThinking] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [isThinkingActive, setIsThinkingActive] = useState(false)
+  const [fluencyStale, setFluencyStale] = useState<string | null>(null)
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
   const [cacheStatus, setCacheStatus] = useState<import('./status-bar.js').CacheStatus>('healthy')
@@ -190,6 +192,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const setAutoSafe = useCallback((v: boolean) => { autoSafeRef.current = v; _setAutoSafe(v) }, [])
 
   const phaseTracker = useRef(new PhaseTracker())
+  const fluencyRef = useRef(new FluencyTracker())
+  const foldedCountRef = useRef(0)
   const [summaryState, setSummaryState] = useState<SummaryState>({
     task: '', phase: 'idle', stepCount: 0, totalSteps: 0,
     contextPct: 0, elapsedMs: 0, lastAction: null, risk: 'none',
@@ -346,6 +350,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
     }
   }, [isStreaming, projectActivity])
+
+  // Fluency stale detection (2Hz while streaming)
+  useEffect(() => {
+    if (!isStreaming) { setFluencyStale(null); return }
+    const id = setInterval(() => {
+      const policy = fluencyRef.current.getPolicy()
+      setFluencyStale(policy.staleMessage ?? null)
+    }, 2000)
+    return () => clearInterval(id)
+  }, [isStreaming])
 
   useInput((_input, _key) => {
     // Ctrl+C — soft interrupt or exit
@@ -658,7 +672,19 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const finalContent = uiContent ?? result
         liveToolsRef.current = liveToolsRef.current.filter(e => e.id !== id)
         setLiveTools(liveToolsRef.current)
-        pushStatic(createLogEntry({ type: 'tool', id, toolName: name, content: finalContent, isError, rawPath }))
+
+        // Fluency: fold routine tools when policy says so
+        fluencyRef.current.recordToolResult({ name, isError: !!isError, resultLength: result.length })
+        const fluencyPolicy = fluencyRef.current.getPolicy()
+        if (fluencyPolicy.foldRoutine && fluencyRef.current.isRoutineTool(name, !!isError)) {
+          foldedCountRef.current++
+        } else {
+          if (foldedCountRef.current > 0) {
+            pushStatic(createLogEntry({ type: 'system', content: `… ${foldedCountRef.current} routine tool calls folded` }))
+            foldedCountRef.current = 0
+          }
+          pushStatic(createLogEntry({ type: 'tool', id, toolName: name, content: finalContent, isError, rawPath }))
+        }
 
         const tcEntry = toolCallTracker.current.get(id)
         if (tcEntry) {
@@ -670,6 +696,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         phaseTracker.current.onToolResult(name, !!isError)
         const risk = (name === 'bash' && !autoSafeRef.current) ? 'medium' as const : 'none' as const
         const trPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
+        fluencyRef.current.setContextPressure(trPct)
         setSummaryState(prev => ({
           ...prev,
           lastAction: phaseTracker.current.lastAction(),
@@ -785,6 +812,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
 
         phaseTracker.current.onTurnComplete()
+        fluencyRef.current.onTurnComplete()
+        // Flush any remaining folded tools
+        if (foldedCountRef.current > 0) {
+          pushStatic(createLogEntry({ type: 'system', content: `… ${foldedCountRef.current} routine tool calls folded` }))
+          foldedCountRef.current = 0
+        }
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current, tokenHistory: pushTokenHistory(tcPct) }))
 
@@ -918,6 +951,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         ))}
         {(streamingText || isStreaming) && (
           <StreamOutput text={streamingText} isStreaming={isStreaming} />
+        )}
+        {fluencyStale && !streamingText && (
+          <Box paddingX={2}>
+            <Text dimColor color="yellow">⚠ {fluencyStale}</Text>
+          </Box>
         )}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking} completedDurationMs={completedThinkingDurationMs} />
         <AgentStatus
