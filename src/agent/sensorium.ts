@@ -63,6 +63,9 @@ export interface SensoriumInput {
   toolCallHistory: string[]
   pheromones: PheromoneRef[]
   doomLevel: DoomLoopLevel
+  /** Git file change rate (0-1), blended into freshness.
+   *  Undefined when git is unavailable — freshness falls back to pure pheromone mode. */
+  gitChangeRate?: number
 }
 
 // ─── Strategy Profile ───────────────────────────────────────────────
@@ -106,10 +109,18 @@ function computeComplexity(toolHistory: string[]): number {
   return clamp(unique / toolHistory.length)
 }
 
-function computeFreshness(pheromones: PheromoneRef[]): number {
-  if (pheromones.length === 0) return 0.5
-  const total = pheromones.reduce((sum, p) => sum + p.strength, 0)
-  return clamp(total / pheromones.length)
+function computeFreshness(pheromones: PheromoneRef[], gitChangeRate?: number): number {
+  // Base: pheromone signal (cross-session memory). Default 0.5 for unknown codebase.
+  const pheromoneAvg = pheromones.length === 0
+    ? 0.5
+    : clamp(pheromones.reduce((sum, p) => sum + p.strength, 0) / pheromones.length)
+
+  if (gitChangeRate === undefined || gitChangeRate < 0) return pheromoneAvg
+
+  // Blend: 70% pheromone memory + 30% git Zeitgeber signal.
+  // Git change rate provides real-time code volatility; pheromones provide
+  // accumulated cross-session familiarity. Higher git change → lower freshness.
+  return clamp(0.7 * pheromoneAvg + 0.3 * (1 - gitChangeRate))
 }
 
 function computeStability(doomLevel: DoomLoopLevel): number {
@@ -134,7 +145,7 @@ export function computeSensorium(input: SensoriumInput): Sensorium {
     pressure: computePressure(input.pressureResult),
     confidence: computeConfidence(input.evidenceState),
     complexity: computeComplexity(input.toolCallHistory),
-    freshness: computeFreshness(input.pheromones),
+    freshness: computeFreshness(input.pheromones, input.gitChangeRate),
     stability: computeStability(input.doomLevel),
   }
 }

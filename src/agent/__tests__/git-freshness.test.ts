@@ -6,9 +6,11 @@ import { tmpdir } from 'node:os'
 import { execSync } from 'node:child_process'
 import { getGitChangeRate, smoothChangeRate } from '../git-freshness.js'
 
+type FileEntry = [string, string]
+
 const tempDirs: string[] = []
 
-function makeGitRepo(commits: string[][]): string {
+function makeGitRepo(commits: FileEntry[][]): string {
   const dir = mkdtempSync(join(tmpdir(), 'git-fresh-test-'))
   tempDirs.push(dir)
   execSync('git init && git config user.email "test@test" && git config user.name "test"', { cwd: dir })

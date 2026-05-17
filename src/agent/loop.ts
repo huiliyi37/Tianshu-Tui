@@ -45,6 +45,7 @@ import { stripIntraTurnRepetition } from './dedup.js'
 import { computeSensorium, computeStrategy } from './sensorium.js'
 import type { Sensorium, SensoriumInput } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
+import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
 import { mapSensoriumToPhase, createStarEvent, createThetaState, tickTheta, completeTheta, advanceThetaCounter } from './star-event.js'
 import type { StarEvent, ThetaState } from './star-event.js'
 import { shouldKick, buildKickActions, shouldEscalateFromKick } from './dissipative-kick.js'
@@ -150,6 +151,7 @@ export class AgentLoop {
   private thetaState: ThetaState = createThetaState(7)
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
+  private gitChangeRate = 0
   private _hasEnteredHighComplexity = false
 
   constructor(
@@ -491,6 +493,11 @@ export class AgentLoop {
         this.lastPrewarmAt = 0
         await this.prewarmRecentReads()
 
+        // ── Git freshness: file change rate (Zeitgeber signal) ──
+        getGitChangeRate(this.cwd).then(rate => {
+          this.gitChangeRate = smoothChangeRate(rate, this.gitChangeRate)
+        }).catch(() => {})
+
         // ── StarFlow v2: Sensorium computation ──
         const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
         const evidenceState = this.evidence.getState()
@@ -504,6 +511,7 @@ export class AgentLoop {
           toolCallHistory: this.recentToolHistory.map(h => h.tool),
           pheromones: this.loadedPheromones,
           doomLevel: getDoomLoopLevel(this.traceStore.toolFingerprints),
+          gitChangeRate: this.gitChangeRate,
         }
         this.sensorium = computeSensorium(sensoriumInput)
         this.strategy = computeStrategy(this.sensorium)
@@ -549,6 +557,7 @@ export class AgentLoop {
             shouldEscalate: this.strategy.shouldEscalate,
             thetaInterval: this.strategy.thetaCycleInterval,
           },
+          gitChangeRate: this.gitChangeRate,
         })
         import('node:fs/promises').then(fs =>
           fs.appendFile(join(this.cwd, '.rivet', 'sensorium.jsonl'), telemetryLine + '\n', 'utf-8')
