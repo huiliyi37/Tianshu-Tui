@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
+import type { ContextClaimStore } from '../context/claim-store.js'
+import type { ClaimProposal } from '../context/claims.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 export interface DelegateBatchCoordinator {
@@ -20,7 +22,44 @@ const inputSchema = z.object({
   policy: z.enum(['all_required', 'first_success', 'majority', 'primary_decides']).optional(),
 })
 
-export function createDelegateBatchTool(coordinator: DelegateBatchCoordinator): Tool {
+function extractClaimsFromRun(run: CoordinatorRun, toolUseId: string, claimStore: ContextClaimStore, sessionId: string): void {
+  const createdAt = Date.now()
+  for (const result of run.results) {
+    if (result.status !== 'passed') continue
+    const evidencePaths = result.changedFiles.slice(0, 3)
+    for (const finding of result.findings) {
+      const claimText = typeof finding === 'string' ? finding : finding.claim
+      const confidence = typeof finding === 'string' ? 0.7
+        : finding.confidence === 'high' ? 0.85
+        : finding.confidence === 'medium' ? 0.7
+        : 0.55
+      const proposal: ClaimProposal = {
+        kind: 'worker_finding',
+        scope: 'session',
+        text: claimText,
+        confidence,
+        fitness: confidence >= 0.85 ? 5 : confidence >= 0.7 ? 3 : 2,
+        source: { actor: 'worker', sessionId, turn: 0, eventId: `${toolUseId}:worker` },
+        evidence: [{
+          id: `${toolUseId}:finding`,
+          kind: 'worker',
+          summary: typeof finding === 'string' ? finding : finding.evidence,
+          path: evidencePaths[0],
+          createdAt,
+        }],
+        createdAt,
+        tags: ['worker', result.workOrderId],
+      }
+      claimStore.propose(proposal)
+    }
+  }
+}
+
+export function createDelegateBatchTool(
+  coordinator: DelegateBatchCoordinator,
+  getClaimStore?: () => ContextClaimStore | undefined,
+  getSessionId?: () => string | undefined,
+): Tool {
   return {
     definition: {
       name: 'delegate_batch',
@@ -61,6 +100,16 @@ export function createDelegateBatchTool(coordinator: DelegateBatchCoordinator): 
       }))
 
       const run = await coordinator.delegateBatch(requests, parsed.data.policy ?? 'primary_decides')
+
+      // Extract worker findings into claim store
+      if (run.status === 'completed') {
+        const claimStore = getClaimStore?.()
+        const sid = getSessionId?.()
+        if (claimStore && sid) {
+          extractClaimsFromRun(run, params.toolUseId, claimStore, sid)
+        }
+      }
+
       const passed = run.results.filter(r => r.status === 'passed').length
       return {
         content: run.packet,

@@ -16,7 +16,7 @@ function toolPhase(toolName: string): Phase {
       return 'searching'
     case 'bash':
       return 'running'
-    case 'delegate_task':
+    case 'delegate_task': case 'delegate_batch':
       return 'delegating'
     default: return 'idle'
   }

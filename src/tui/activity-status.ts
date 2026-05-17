@@ -248,7 +248,7 @@ export function toolActivityLabel(name: string, fallbackLabel: string): string {
     case 'glob':
     case 'diff': return `Searching ${fallbackLabel}`
     case 'run_tests': return 'Running tests'
-    case 'delegate_task': return `Delegating ${fallbackLabel}`
+    case 'delegate_task': case 'delegate_batch': return `Delegating ${fallbackLabel}`
     default: return `Running ${fallbackLabel || name}`
   }
 }

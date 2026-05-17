@@ -70,7 +70,7 @@ function makeToolColor(c: ColorSet) {
       case 'bash': case 'grep': case 'glob': return c.primary
       case 'edit_file': case 'write_file': return c.secondary
       case 'run_tests': return c.success
-      case 'delegate_task': return c.warning
+      case 'delegate_task': case 'delegate_batch': return c.warning
       default: return c.dim
     }
   }

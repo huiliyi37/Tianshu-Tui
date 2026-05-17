@@ -18,6 +18,7 @@ import { buildPrimaryWorkerPacket } from './worker-prompts.js'
 import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
 import { aggregateResults } from './aggregation.js'
 import { CoordinatorState } from './coordinator-state.js'
+import { WorkOrderQueue } from './work-queue.js'
 
 export interface DelegationRequest {
   parentTurnId: string
@@ -112,6 +113,12 @@ export class DelegationCoordinator {
           objective: request.objective,
           scope: request.scope,
         })
+
+    return this.delegateOrder(order)
+  }
+
+  private async delegateOrder(order: WorkOrder): Promise<CoordinatorRun> {
+    const isWrite = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
     this.state.recordEvent({ type: 'queued', workOrderId: order.id, timestamp: Date.now() })
 
     const task = mapWorkOrderKindToCapabilityTask(order.kind)
@@ -152,14 +159,59 @@ export class DelegationCoordinator {
       return { status: 'skipped', results: [], packet: buildPrimaryWorkerPacket([]) }
     }
 
-    const allResults: WorkerResult[] = []
-    for (let i = 0; i < runnables.length; i += this.config.maxWorkers) {
-      const chunk = runnables.slice(i, i + this.config.maxWorkers)
-      const runs = await Promise.all(chunk.map(r => this.delegate(r)))
-      allResults.push(...runs.flatMap(r => r.results))
-    }
-    const aggregated = aggregateResults(allResults, policy)
+    const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
+    const queue = new WorkOrderQueue(this.config.maxWorkers)
 
+    // Pre-create work orders for deduplication and dependency ordering
+    const orders: WorkOrder[] = []
+    for (const r of runnables) {
+      const isWrite = writeProfiles.includes(r.profile)
+      const order = isWrite
+        ? createWriteWorkOrder({
+            parentTurnId: r.parentTurnId,
+            kind: r.kind,
+            profile: r.profile,
+            objective: r.objective,
+            scope: r.scope,
+          })
+        : createReadOnlyWorkOrder({
+            parentTurnId: r.parentTurnId,
+            kind: r.kind,
+            profile: r.profile,
+            objective: r.objective,
+            scope: r.scope,
+          })
+      if (queue.enqueue(order)) {
+        orders.push(order)
+      }
+    }
+
+    // Process queue with concurrency control
+    const allResults: WorkerResult[] = []
+    const inflight: Promise<void>[] = []
+
+    const processNext = async (): Promise<void> => {
+      const order = queue.dequeue()
+      if (!order) return
+      queue.markInFlight(order)
+      try {
+        const run = await this.delegateOrder(order)
+        allResults.push(...run.results)
+        queue.markCompleted(order)
+      } catch {
+        queue.markFailed(order)
+      }
+      // Recurse: try to process next pending order (respecting concurrency limit)
+      await processNext()
+    }
+
+    // Start initial batch of workers
+    for (let i = 0; i < this.config.maxWorkers; i++) {
+      inflight.push(processNext())
+    }
+    await Promise.all(inflight)
+
+    const aggregated = aggregateResults(allResults, policy)
     return {
       status: 'completed',
       results: aggregated,

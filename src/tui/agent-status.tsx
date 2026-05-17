@@ -59,7 +59,7 @@ function phaseLabel(tools: ToolCallItem[], isThinking: boolean): string {
       return 'Running…'
     case 'run_tests':
       return 'Testing…'
-    case 'delegate_task':
+    case 'delegate_task': case 'delegate_batch':
       return 'Delegating…'
     default:
       return 'Working…'
@@ -98,6 +98,7 @@ function toolLabel(name: string, input: Record<string, unknown>): string {
     case 'diff': return 'diff'
     case 'run_tests': return 'run tests'
     case 'delegate_task': return truncate(String(input.objective ?? ''), 50)
+    case 'delegate_batch': return `batch ${Array.isArray(input.tasks) ? input.tasks.length : '?'} tasks`
     default: return name
   }
 }

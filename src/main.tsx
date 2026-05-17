@@ -136,7 +136,10 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
         return _coordinatorRef.delegateBatch(requests, policy)
       },
-    }))
+    },
+      () => _claimStoreRef ?? undefined,
+      () => _sessionIdRef ?? undefined,
+    ))
     reg.register(ASK_USER_QUESTION_TOOL)
     return reg
   })

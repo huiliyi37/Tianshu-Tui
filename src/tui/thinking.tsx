@@ -44,8 +44,7 @@ export function formatThinkingSize(chars: number): string {
 }
 
 function detectRepetition(text: string): { text: string; trimmed: number } {
-  // Detect within-response thinking loops at line and paragraph level.
-  // Trims after the 3rd+ repetition so the user sees a clean summary.
+  // Detect within-response thinking loops and trim to a single copy.
   const lines = text.split('\n')
   if (lines.length < 6) return { text, trimmed: 0 }
 
@@ -58,24 +57,21 @@ function detectRepetition(text: string): { text: string; trimmed: number } {
   }
   for (const [l, count] of freq) {
     if (count >= 5) {
-      // Find the first 3 occurrences and truncate after the 3rd
       const needle = lines.find(l2 => l2.trim() === l) ?? l
-      let idx = text.indexOf(needle)
-      idx = text.indexOf(needle, idx + needle.length)
-      idx = text.indexOf(needle, idx + needle.length)
-      if (idx > 0) {
-        idx += needle.length // truncate after the 3rd occurrence's full line
-        const trimmed = text.length - idx
-        return { text: text.slice(0, idx) + `\n... (${trimmed} repetitive characters trimmed)`, trimmed }
+      const idx = text.indexOf(needle)
+      if (idx >= 0) {
+        const end = idx + needle.length
+        const trimmed = text.length - end
+        return { text: text.slice(0, end) + `\n... (${trimmed} repetitive characters trimmed)`, trimmed }
       }
     }
   }
 
-  // Strategy 2: 3-line segment repeating 3+ times
+  // Strategy 2: 4-line segment repeating 2+ times
   const mid = Math.floor(lines.length / 2)
   const segmentCandidates = [
     lines.slice(1, Math.min(5, lines.length)).join('\n'),        // near start
-    lines.slice(mid, Math.min(mid + 4, lines.length)).join('\n'), // middle (4 lines for better hit rate)
+    lines.slice(mid, Math.min(mid + 4, lines.length)).join('\n'), // middle
     lines.slice(-5, -1).join('\n'),                               // near end
   ]
 
@@ -83,11 +79,11 @@ function detectRepetition(text: string): { text: string; trimmed: number } {
     if (c.length < 40) continue
     const count = text.split(c).length - 1
     if (count >= 2) {
-      let idx = text.indexOf(c)
-      idx = text.indexOf(c, idx + c.length)
-      if (idx > 0) {
-        const trimmed = text.length - idx
-        return { text: text.slice(0, idx + c.length) + `\n... (${trimmed} repetitive characters trimmed)`, trimmed }
+      const idx = text.indexOf(c)
+      if (idx >= 0) {
+        const end = idx + c.length
+        const trimmed = text.length - end
+        return { text: text.slice(0, end) + `\n... (${trimmed} repetitive characters trimmed)`, trimmed }
       }
     }
   }
