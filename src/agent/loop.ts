@@ -491,6 +491,15 @@ export class AgentLoop {
               createdAt: Date.now(),
             })
             this.compactFailures = recordCompactSuccess(this.compactFailures)
+
+            // Cache boundary detection: did compaction touch cache-anchored messages?
+            if (messages.length >= CACHE_ANCHOR_MESSAGES && compacted.length >= CACHE_ANCHOR_MESSAGES) {
+              const anchorTouched = messages[CACHE_ANCHOR_MESSAGES - 1]!.content !== compacted[CACHE_ANCHOR_MESSAGES - 1]!.content
+              if (anchorTouched) {
+                this.pressureMonitor.recordCompaction(this.session.getTurnCount()) // extra signal
+              }
+            }
+
             this.refreshLedger()
           } catch (err) {
             this.compactFailures = recordCompactFailure(this.compactFailures, this.session.getTurnCount())
