@@ -13,3 +13,4 @@ task_plan.md
 # Local agent runtime state
 .claude/worktrees/
 .wolf/
+.rivet/sensorium.jsonl
