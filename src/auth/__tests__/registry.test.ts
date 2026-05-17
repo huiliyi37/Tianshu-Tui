@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createAuthProvider } from '../registry.js'
 import { ApiKeyAuth } from '../api-key.js'
+import { OAuthAuth } from '../oauth-auth.js'
 
 describe('createAuthProvider', () => {
   it('creates ApiKeyAuth for api-key config', () => {
@@ -43,13 +44,22 @@ describe('createAuthProvider', () => {
     )
   })
 
-  it('throws for unimplemented oauth type', () => {
+  it('creates OAuthAuth for codex provider', () => {
+    const auth = createAuthProvider(
+      { type: 'oauth', provider: 'codex' },
+      {},
+    )
+    assert.ok(auth instanceof OAuthAuth)
+    assert.equal(auth.isAuthenticated(), false) // no token yet
+  })
+
+  it('throws for unknown oauth provider', () => {
     assert.throws(
       () => createAuthProvider(
-        { type: 'oauth', provider: 'codex' },
+        { type: 'oauth', provider: 'unknown' as 'codex' },
         {},
       ),
-      /not yet implemented/,
+      /Unknown OAuth provider/,
     )
   })
 })
