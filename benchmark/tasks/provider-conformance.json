@@ -1,0 +1,44 @@
+{
+  "tasks": [
+    {
+      "id": "pc-streaming-response",
+      "title": "Verify streaming response format",
+      "category": "provider_conformance",
+      "prompt": "Send a simple chat completion request to the provider and verify that the response body contains at least one content block with type 'text'. Do not make any changes to the codebase.",
+      "timeoutMs": 30000,
+      "tags": ["api", "streaming"]
+    },
+    {
+      "id": "pc-tool-calling",
+      "title": "Verify tool calling roundtrip",
+      "category": "provider_conformance",
+      "prompt": "Send a prompt that requests using the 'read_file' tool to read README.md. Verify the provider returns a tool_use block. Do not execute the tool or modify code.",
+      "timeoutMs": 30000,
+      "tags": ["api", "tools"]
+    },
+    {
+      "id": "pc-usage-tracking",
+      "title": "Verify usage field mapping",
+      "category": "provider_conformance",
+      "prompt": "Send a single-turn chat completion and verify the response includes usage fields (input_tokens, output_tokens). Check that the tracked cost is a positive number.",
+      "timeoutMs": 30000,
+      "tags": ["api", "usage"]
+    },
+    {
+      "id": "pc-cache-headers",
+      "title": "Verify cache control support",
+      "category": "provider_conformance",
+      "prompt": "Send two identical requests and verify the second response has a lower cost or cache-hit indicator. Do not modify any source files.",
+      "timeoutMs": 30000,
+      "tags": ["api", "cache"]
+    },
+    {
+      "id": "pc-error-handling",
+      "title": "Verify error response format",
+      "category": "provider_conformance",
+      "prompt": "Send a request with an intentionally invalid parameter and verify the provider returns a structured error response (not a 500 HTML page).",
+      "timeoutMs": 30000,
+      "tags": ["api", "error-handling"]
+    }
+  ]
+}

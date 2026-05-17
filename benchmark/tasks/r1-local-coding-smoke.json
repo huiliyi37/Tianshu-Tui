@@ -1,0 +1,91 @@
+{
+  "tasks": [
+    {
+      "id": "ls-inspect",
+      "title": "Read and summarize project structure",
+      "category": "repo_inspection",
+      "prompt": "Look at the current project. Read the package.json and any config files you find. Summarize the tech stack, test framework, and build system in 3-5 bullet points.",
+      "timeoutMs": 30000,
+      "tags": ["inspect", "fast"]
+    },
+    {
+      "id": "ls-find-function",
+      "title": "Find a function definition by name",
+      "category": "repo_inspection",
+      "prompt": "Find where the function 'resolveCapabilities' is defined. Show the file path and a brief description of what it does.",
+      "timeoutMs": 30000,
+      "tags": ["inspect", "grep", "fast"]
+    },
+    {
+      "id": "ls-failing-test",
+      "title": "Find and describe a failing test",
+      "category": "repo_inspection",
+      "prompt": "Run the tests for this project. Identify any failing test and describe what assertion failed. Do NOT modify any code.",
+      "timeoutMs": 60000,
+      "setupCommands": ["npm install"],
+      "tags": ["inspect", "test"]
+    },
+    {
+      "id": "ls-todo-comment",
+      "title": "Add a TODO comment to a source file",
+      "category": "code_edit",
+      "prompt": "Add a single-line TODO comment '// TODO: add input validation' to the top of src/benchmark/types.ts. Do not modify any other code.",
+      "timeoutMs": 30000,
+      "successCommands": ["grep -q 'TODO: add input validation' src/benchmark/types.ts"],
+      "tags": ["edit", "fast"]
+    },
+    {
+      "id": "ls-fix-typo",
+      "title": "Fix a typo in a source comment",
+      "category": "code_edit",
+      "prompt": "In src/benchmark/store.ts, change the word 'parseable' to 'parsable' in the test description. Verify the change was applied.",
+      "timeoutMs": 30000,
+      "successCommands": ["grep -q 'parsable' src/benchmark/__tests__/store.test.ts"],
+      "tags": ["edit", "fast"]
+    },
+    {
+      "id": "ls-repair-test-assertion",
+      "title": "Repair a deliberately broken test assertion",
+      "category": "test_repair",
+      "prompt": "The test file src/benchmark/__tests__/report.test.ts has a broken assertion: the 'handles empty runs gracefully' test expects the wrong value for medianToolCalls. Fix it to expect 0 instead of 1.",
+      "timeoutMs": 60000,
+      "successCommands": ["npx tsx --test src/benchmark/__tests__/report.test.ts"],
+      "tags": ["test", "repair"]
+    },
+    {
+      "id": "ls-refactor-extract-helper",
+      "title": "Extract a repeated helper into a shared function",
+      "category": "multi_file_refactor",
+      "prompt": "Both src/benchmark/store.ts and src/benchmark/report.ts have duplicate median-computation logic. Extract the median function into a new file src/benchmark/median.ts, update both callers to import from it, and run the benchmark tests to verify everything still passes.",
+      "timeoutMs": 60000,
+      "successCommands": ["npx tsx --test src/benchmark/__tests__/store.test.ts", "npx tsx --test src/benchmark/__tests__/report.test.ts"],
+      "tags": ["refactor", "medium"]
+    },
+    {
+      "id": "ls-add-unit-test",
+      "title": "Add a unit test for the benchmark types",
+      "category": "test_repair",
+      "prompt": "Add a new test in src/benchmark/__tests__/types.test.ts that verifies the benchmarkFailureSchema rejects a failure object with a negative exitCode field. Run the test to confirm it passes.",
+      "timeoutMs": 60000,
+      "successCommands": ["npx tsx --test src/benchmark/__tests__/types.test.ts"],
+      "tags": ["test", "medium"]
+    },
+    {
+      "id": "ls-rusty-gear-fix",
+      "title": "Handle edge case: empty strings in task tags",
+      "category": "code_edit",
+      "prompt": "In src/benchmark/types.ts, the taskDefinitionSchema allows empty string tags (tags: ['']). Modify the schema to require each tag to be at least 2 characters long. Update the types.test.ts to test this constraint.",
+      "timeoutMs": 60000,
+      "successCommands": ["npx tsx --test src/benchmark/__tests__/types.test.ts"],
+      "tags": ["edit", "edge-case"]
+    },
+    {
+      "id": "ls-multi-file-read",
+      "title": "Read and cross-reference multiple related files",
+      "category": "repo_inspection",
+      "prompt": "Read src/benchmark/types.ts, src/benchmark/store.ts, and src/benchmark/report.ts. Describe how they relate to each other: which file imports from which, and whether any type is used before it's validated.",
+      "timeoutMs": 30000,
+      "tags": ["inspect", "analysis"]
+    }
+  ]
+}
