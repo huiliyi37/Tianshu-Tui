@@ -108,7 +108,7 @@ function gracefulShutdown() {
   process.exit(0)
 }
 
-function Root({ provider, apiKey, config, auth }: { provider: ProviderConfig; apiKey: string; config: Config; auth?: AuthProvider }) {
+function Root({ provider, apiKey, config, auth, initialModelId }: { provider: ProviderConfig; apiKey: string; config: Config; auth?: AuthProvider; initialModelId?: string }) {
   const initialInput = _pipedInput
   const cwd = process.cwd()
 
@@ -236,7 +236,13 @@ function Root({ provider, apiKey, config, auth }: { provider: ProviderConfig; ap
   const [activeProvider, setActiveProvider] = useState<ProviderConfig>(() => provider)
   const [activeApiKey, setActiveApiKey] = useState(() => apiKey)
   const [activeAuth, setActiveAuth] = useState<AuthProvider | undefined>(() => auth)
-  const [currentModel, setCurrentModel] = useState(() => provider.models[0]!)
+  const [currentModel, setCurrentModel] = useState(() => {
+    if (initialModelId) {
+      const found = provider.models.find(m => m.id === initialModelId || m.alias === initialModelId)
+      if (found) return found
+    }
+    return provider.models[0]!
+  })
 
   const agent = useMemo(() => {
     const compactModelSpec = activeProvider.models.find(m => m.id === config.compact.model || m.alias === config.compact.model)
@@ -642,10 +648,36 @@ async function main() {
   }
 
   const config = loadConfig()
-  const provider = config.provider.providers[config.provider.default]
-  if (!provider) {
-    console.error(`Provider "${config.provider.default}" not configured`)
-    process.exit(1)
+
+  // CLI: --provider <name> --model <id>
+  const providerArg = args.indexOf('--provider')
+  const modelArg = args.indexOf('--model')
+  const requestedProvider = providerArg >= 0 ? args[providerArg + 1] : undefined
+  const requestedModel = modelArg >= 0 ? args[modelArg + 1] : undefined
+
+  let provider: ProviderConfig
+  if (requestedProvider) {
+    const found = config.provider.providers[requestedProvider]
+    if (!found) {
+      console.error(`Provider "${requestedProvider}" not configured. Available: ${Object.keys(config.provider.providers).join(', ')}`)
+      process.exit(1)
+    }
+    provider = found
+  } else {
+    provider = config.provider.providers[config.provider.default]!
+    if (!provider) {
+      console.error(`Provider "${config.provider.default}" not configured`)
+      process.exit(1)
+    }
+  }
+
+  // If --model specified, validate it exists in the selected provider
+  if (requestedModel) {
+    const found = provider.models.find(m => m.id === requestedModel || m.alias === requestedModel)
+    if (!found) {
+      console.error(`Model "${requestedModel}" not found in provider "${provider.name}". Available: ${provider.models.map(m => m.id).join(', ')}`)
+      process.exit(1)
+    }
   }
 
   // Auth resolution: OAuth providers get an AuthProvider, API key providers get a raw key
@@ -671,7 +703,7 @@ async function main() {
   _pipedInput = readPipedStdin()
 
   const { waitUntilExit } = render(
-    createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth })),
+    createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),
     { exitOnCtrlC: false },
   )
 
