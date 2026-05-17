@@ -1950,3 +1950,7 @@ Created `src/tui/activity-status.ts` with immutable ActivityState lifecycle: Act
 
 Aligned `src/tui/activity-status.ts` with the plan exactly: removed comments, prevented beginning idle via `Exclude<ActivityPhase, 'idle'>`, introduced shared `HeartbeatOptions`, made heartbeat/complete/fail no-op for idle, and allowed complete/fail label and sizeHint updates. Expanded `src/tui/__tests__/activity-status.test.ts` for idle no-ops and terminal optional updates. Targeted tests (1049 tests via project runner) and typecheck pass.
 
+## 2026-05-17 — Activity Status Layer Task 2: display formatting helpers
+
+Added six pure display functions to `src/tui/activity-status.ts`: `formatActivityDuration` (ms to "0s"/"59s"/"1m 1s"), `formatThinkingSize` (chars to "N chars" or "N.Nk"), `activityPhaseLabel` (phase to concise label), `formatActivitySummary` (full summary string with stale/completed/failed variants), `classifyToolActivity` (MCP vs generic tool phase), and `shouldBeginAnalyzing` (conservative large-result heuristic for read_file/bash). Eight new tests in `src/tui/__tests__/activity-status.test.ts` (14 total). Full test suite (1057 tests) and typecheck pass.
+

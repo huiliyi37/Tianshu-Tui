@@ -123,3 +123,101 @@ export function clearActivity(
     status: 'idle',
   }
 }
+
+// ── Display formatting helpers ────────────────────────────────────────
+
+export function formatActivityDuration(ms: number): string {
+  if (ms <= 0) return '0s'
+  const totalSeconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes === 0) return `${seconds}s`
+  return `${minutes}m ${seconds}s`
+}
+
+export function formatThinkingSize(chars: number): string {
+  if (chars < 1000) return `${chars} chars`
+  const k = chars / 1000
+  // Drop trailing .0
+  return `${k}k`.replace(/\.0k$/, 'k')
+}
+
+const PHASE_LABELS: Record<ActivityPhase, string> = {
+  idle: 'Idle',
+  thinking: 'Thinking',
+  streaming: 'Streaming answer',
+  analyzing: 'Analyzing tool results',
+  tool: 'Running tool',
+  mcp: 'Waiting for MCP',
+  compacting: 'Compacting context',
+  preflight: 'Restoring session',
+}
+
+export function activityPhaseLabel(phase: ActivityPhase): string {
+  return PHASE_LABELS[phase]
+}
+
+const STALE_THRESHOLD_MS = 10_000
+
+export function formatActivitySummary(
+  activity: ActivityState,
+  now: number,
+): string | undefined {
+  if (activity.status === 'idle') return undefined
+
+  const label = activity.label ?? activityPhaseLabel(activity.phase)
+
+  if (activity.status === 'completed') {
+    const elapsed = (activity.completedAt ?? now) - activity.startedAt
+    const sizePart = activity.sizeHint ? ` (${activity.sizeHint})` : ''
+    return `${label} completed in ${formatActivityDuration(elapsed)}${sizePart}`
+  }
+
+  if (activity.status === 'failed') {
+    const elapsed = (activity.completedAt ?? now) - activity.startedAt
+    return `${label} failed after ${formatActivityDuration(elapsed)}`
+  }
+
+  // active or stale
+  const elapsed = now - activity.startedAt
+  const timeSinceEvent = now - activity.lastEventAt
+  const parts: string[] = [`${label}… ${formatActivityDuration(elapsed)}`]
+
+  if (timeSinceEvent >= STALE_THRESHOLD_MS) {
+    parts.push(`no update ${formatActivityDuration(timeSinceEvent)}`)
+  }
+
+  if (activity.sizeHint) {
+    parts.push(activity.sizeHint)
+  }
+
+  return parts.join(' · ')
+}
+
+// ── Tool classification helpers ───────────────────────────────────────
+
+export function classifyToolActivity(
+  name: string,
+  label?: string,
+): { phase: Exclude<ActivityPhase, 'idle'>; label: string } {
+  if (name.startsWith('mcp__')) {
+    const segments = name.split('__')
+    // mcp__<server>__<tool> — server is second segment, default to "server"
+    const server = segments[1] ?? 'server'
+    return { phase: 'mcp', label: `Waiting for MCP ${server}` }
+  }
+  return { phase: 'tool', label: label ?? 'Running tool' }
+}
+
+const ANALYZING_TOOLS = new Set(['read_file', 'bash'])
+const ANALYZING_THRESHOLD = 12_000
+
+export function shouldBeginAnalyzing({
+  toolName,
+  resultLength,
+}: {
+  toolName: string
+  resultLength: number
+}): boolean {
+  return ANALYZING_TOOLS.has(toolName) && resultLength >= ANALYZING_THRESHOLD
+}
