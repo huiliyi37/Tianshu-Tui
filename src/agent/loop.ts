@@ -49,6 +49,9 @@ import { mapSensoriumToPhase, createStarEvent, createThetaState, tickTheta, comp
 import type { StarEvent, ThetaState } from './star-event.js'
 import { shouldKick, buildKickActions, shouldEscalateFromKick } from './dissipative-kick.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
+import { StigmergyStore } from '../context/stigmergy.js'
+import type { Pheromone } from '../context/stigmergy.js'
+import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -133,6 +136,8 @@ export class AgentLoop {
   private sensorium: Sensorium | null = null
   private strategy: StrategyProfile | null = null
   private thetaState: ThetaState = createThetaState(7)
+  private stigmergyStore: StigmergyStore
+  private loadedPheromones: Pheromone[] = []
 
   constructor(
     private config: AgentConfig,
@@ -147,6 +152,8 @@ export class AgentLoop {
       this.trajectory,
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
+    const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
+    this.stigmergyStore = new StigmergyStore(pheromonesPath)
   }
 
   private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
@@ -413,6 +420,9 @@ export class AgentLoop {
     this.sensorium = null
     this.strategy = null
     this.thetaState = createThetaState(7)
+    this.loadedPheromones = []
+    // Load cross-session pheromones for Sensorium.freshness computation
+    this.stigmergyStore.load().then(p => { this.loadedPheromones = p }).catch(() => {})
     this.recordUserInputClaims(userInput)
     this.session.addUserMessage(userInput)
 
@@ -476,13 +486,14 @@ export class AgentLoop {
             verifiedCount: evidenceState.verifications.filter(v => v.status === 'passed').length,
           },
           toolCallHistory: this.recentToolHistory.map(h => h.tool),
-          pheromones: [],
+          pheromones: this.loadedPheromones,
           doomLevel: getDoomLoopLevel(this.traceStore.toolFingerprints),
         }
         this.sensorium = computeSensorium(sensoriumInput)
         this.strategy = computeStrategy(this.sensorium)
 
-        // Update theta interval from strategy
+        // Wire strategy → harness: reasoning effort, theta interval
+        this.setReasoningEffort(this.strategy.reasoningEffort)
         this.thetaState = { ...this.thetaState, interval: this.strategy.thetaCycleInterval }
 
         // Emit StarEvent via existing onPhaseChange callback
@@ -504,6 +515,23 @@ export class AgentLoop {
             suggestion: event.label,
           })
         }
+
+        // Sensorium telemetry: append snapshot to debug JSONL (~/.rivet/sensorium.jsonl)
+        const telemetryLine = JSON.stringify({
+          ts: Date.now(),
+          turn: this.session.getTurnCount(),
+          phase: event.phase,
+          ...this.sensorium,
+          strategy: {
+            reasoningEffort: this.strategy.reasoningEffort,
+            shouldEscalate: this.strategy.shouldEscalate,
+            thetaInterval: this.strategy.thetaCycleInterval,
+          },
+        })
+        import('node:fs/promises').then(fs =>
+          fs.appendFile(join(this.cwd, '.rivet', 'sensorium.jsonl'), telemetryLine + '\n', 'utf-8')
+            .catch(() => {})
+        )
 
         // Dissipative kick — stagnation breakthrough
         if (shouldKick(this.sensorium)) {
@@ -683,6 +711,47 @@ export class AgentLoop {
           if (this.sensorium && this.sensorium.complexity > 0.5 && tickTheta(this.thetaState, turn)) {
             this.thetaState = completeTheta(this.thetaState)
           }
+
+          // Auto-deposit pheromones from tool execution patterns
+          const evidenceState = this.evidence.getState()
+          for (const tu of toolUses) {
+            if (tu.name === 'read_file') {
+              const path = typeof tu.input?.file_path === 'string' ? tu.input.file_path : ''
+              if (!path) continue
+              const readCount = this.recentToolHistory.filter(
+                h => h.tool === 'read_file' && h.target === path
+              ).length
+              if (readCount >= 3 && !this.recentToolHistory.some(
+                h => (h.tool === 'write_file' || h.tool === 'edit_file') && h.target === path
+              )) {
+                this.stigmergyStore.deposit({ path, signal: 'entry-point', strength: 0.4 }).catch(() => {})
+              }
+            }
+            if (tu.name === 'write_file' || tu.name === 'edit_file') {
+              const path = typeof tu.input?.file_path === 'string' ? tu.input.file_path : ''
+              if (!path) continue
+              const hasPassed = evidenceState.verifications.some(v => v.status === 'passed')
+              const hasFailed = evidenceState.verifications.some(v => v.status === 'failed')
+              if (hasPassed) {
+                this.stigmergyStore.deposit({ path, signal: 'well-tested', strength: 0.6 }).catch(() => {})
+              }
+              if (hasFailed) {
+                this.stigmergyStore.deposit({ path, signal: 'fragile', strength: 0.8 }).catch(() => {})
+              }
+            }
+            if (tu.name === 'bash') {
+              const bashErrors = this.recentToolHistory.filter(
+                h => h.tool === 'bash' && h.status === 'failed'
+              ).length
+              if (bashErrors >= 2) {
+                const deadPath = typeof tu.input?.command === 'string'
+                  ? tu.input.command.slice(0, 50) : 'bash-command'
+                this.stigmergyStore.deposit({ path: deadPath, signal: 'dead-end', strength: 0.9 }).catch(() => {})
+              }
+            }
+          }
+          // Refresh loaded pheromones after deposition
+          this.stigmergyStore.load().then(p => { this.loadedPheromones = p }).catch(() => {})
           if (shouldTippingPointReset(this.predictionAccumulator)) {
             this.predictionAccumulator = resetAccumulator(this.predictionAccumulator)
             this.config.promptEngine.setCerebellarHint(null)
