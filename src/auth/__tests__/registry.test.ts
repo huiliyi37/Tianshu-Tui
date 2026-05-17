@@ -23,15 +23,14 @@ describe('createAuthProvider', () => {
     assert.equal(auth.isAuthenticated(), true)
   })
 
-  it('prefers authConfig over legacy key', () => {
+  it('prefers authConfig keyEnv over legacy apiKey', async () => {
     const auth = createAuthProvider(
       { type: 'api-key', keyEnv: 'MY_KEY' },
       { MY_KEY: 'from-env' },
       'from-legacy',
     )
-    const headers = auth.getHeaders()
-    // Should use env key, not legacy
-    assert.ok(headers instanceof Promise)
+    const headers = await auth.getHeaders()
+    assert.equal(headers['Authorization'], 'Bearer from-env')
   })
 
   it('throws when api-key env var is missing and no legacy key', () => {

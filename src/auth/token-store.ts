@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 export interface TokenData {
@@ -26,7 +26,9 @@ export class TokenStore {
 
   save(data: TokenData): void {
     mkdirSync(this.baseDir, { recursive: true })
-    writeFileSync(this.filePath, JSON.stringify(data, null, 2), { mode: 0o600 })
+    const tmpPath = `${this.filePath}.tmp`
+    writeFileSync(tmpPath, JSON.stringify(data, null, 2), { mode: 0o600 })
+    renameSync(tmpPath, this.filePath)
   }
 
   clear(): void {

@@ -15,7 +15,7 @@ export function createAuthProvider(
 ): AuthProvider {
   if (!authConfig || authConfig.type === 'api-key') {
     const keyEnv = authConfig?.type === 'api-key' ? authConfig.keyEnv : undefined
-    const key = legacyApiKey ?? (keyEnv ? env[keyEnv] : undefined)
+    const key = (keyEnv ? env[keyEnv] : undefined) ?? legacyApiKey
     if (!key) {
       throw new Error(
         `No API key configured. Set apiKey in config or the ${keyEnv ?? 'API_KEY'} environment variable.`,

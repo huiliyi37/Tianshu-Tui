@@ -13,11 +13,14 @@ export async function generatePKCE(): Promise<PKCEPair> {
   return { verifier, challenge }
 }
 
+const DEFAULT_AUTHORIZE_BASE = 'https://auth.openai.com/oauth/authorize'
+
 export interface AuthorizeUrlParams {
   clientId: string
   codeChallenge: string
   redirectUri: string
   state: string
+  authorizeBase?: string
 }
 
 export function buildAuthorizeUrl(params: AuthorizeUrlParams): string {
@@ -30,5 +33,5 @@ export function buildAuthorizeUrl(params: AuthorizeUrlParams): string {
     state: params.state,
     scope: 'openid profile email offline_access',
   })
-  return `https://auth.openai.com/oauth/authorize?${searchParams.toString()}`
+  return `${params.authorizeBase ?? DEFAULT_AUTHORIZE_BASE}?${searchParams.toString()}`
 }
