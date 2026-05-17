@@ -251,7 +251,8 @@ export class CodexClient implements StreamClient {
               break
             }
 
-            case 'response.reasoning_text.delta': {
+            case 'response.reasoning_text.delta':
+            case 'response.reasoning_summary_text.delta': {
               const delta = parsed.delta as Record<string, unknown> | undefined
               const text = delta?.text as string | undefined
               if (text) callbacks.onThinkingDelta(text)
