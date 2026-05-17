@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T03:51:47.585Z
-> Files: 404 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-17T03:59:49.839Z
+> Files: 407 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/projects/-Users-banxia-app-deepseek-tui-opencode-tui/memory/
 
@@ -51,10 +51,10 @@
 
 ## .claude/worktrees/session-ha-closure/.wolf/
 
-- `anatomy.md` — anatomy.md (~8674 tok)
+- `anatomy.md` — anatomy.md (~8859 tok)
 - `buglog.json` — Declares annotation (~7919 tok)
 - `cerebrum.md` — Cerebrum (~616 tok)
-- `memory.md` — Memory (~39008 tok)
+- `memory.md` — Memory (~39248 tok)
 
 ## .claude/worktrees/session-ha-closure/docs/superpowers/plans/
 
@@ -121,14 +121,16 @@
 
 ## .claude/worktrees/session-ha-closure/src/tui/
 
-- `activity-status.ts` — Exports ActivityPhase, ActivityLifecycleStatus, ActivityState, HeartbeatOptions + 6 more (~664 tok)
+- `activity-status.ts` — Exports ActivityPhase, ActivityLifecycleStatus, ActivityState, HeartbeatOptions + 12 more (~1495 tok)
+- `agent-status.tsx` — SPINNER_FRAMES (~1535 tok)
 - `app.tsx` — THINKING_FLUSH_MS (~9693 tok)
 - `stream-window.ts` — Exports appendStreamWindow (~93 tok)
 - `thinking.tsx` — MAX_THINKING_DISPLAY (~894 tok)
 
 ## .claude/worktrees/session-ha-closure/src/tui/__tests__/
 
-- `activity-status.test.ts` — Declares activity (~812 tok)
+- `activity-status.test.ts` — Declares activity (~1534 tok)
+- `agent-status.test.ts` (~380 tok)
 - `stream-window.test.ts` — Declares result (~192 tok)
 - `thinking.test.tsx` (~153 tok)
 
@@ -214,6 +216,10 @@
 - `2026-05-17-session-rendering-p1p2.md` — Session Rendering P1/P2 实现计划 (~2385 tok)
 - `2026-05-17-wave10-test-loop-split.md` — Wave 10: 测试补强 + loop.ts 拆分 实施计划 (~10180 tok)
 - `2026-05-17-wave11-cache-perf.md` — Wave 11: Cache 效率 + Token 节约 实现计划 (~3516 tok)
+
+## docs/superpowers/reports/
+
+- `2026-05-17-dream-p1-execution-report.md` — Dream Phase 1 执行观测报告 (~706 tok)
 
 ## docs/superpowers/specs/
 

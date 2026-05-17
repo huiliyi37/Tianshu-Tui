@@ -1744,6 +1744,54 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-17T03:50:52.053Z"
+    },
+    {
+      "id": "bug-110",
+      "timestamp": "2026-05-17T03:54:56.533Z",
+      "error_message": "Null/undefined access in ",
+      "file": ".claude/worktrees/session-ha-closure/src/tui/activity-status.ts",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "ts"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T03:54:56.533Z"
+    },
+    {
+      "id": "bug-111",
+      "timestamp": "2026-05-17T03:59:02.217Z",
+      "error_message": "Null/undefined access in ",
+      "file": ".claude/worktrees/session-ha-closure/src/tui/agent-status.tsx",
+      "root_cause": "Property access on potentially null/undefined value",
+      "fix": "Added null safety (optional chaining or null check)",
+      "tags": [
+        "auto-detected",
+        "null-safety",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-17T03:59:02.217Z"
+    },
+    {
+      "id": "bug-112",
+      "timestamp": "2026-05-17T03:59:04.960Z",
+      "error_message": "Wrong reference: toolLabel should be statusPhaseText",
+      "file": ".claude/worktrees/session-ha-closure/src/tui/agent-status.tsx",
+      "root_cause": "Used \"toolLabel\" instead of \"statusPhaseText\"",
+      "fix": "Changed toolLabel → statusPhaseText",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "tsx"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-17T03:59:08.043Z"
     }
   ]
 }
