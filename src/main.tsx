@@ -24,6 +24,7 @@ import { createAuthProvider } from './auth/registry.js'
 import type { AuthProvider } from './auth/types.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
+import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 import { killAll } from './tools/process-tracker.js'
@@ -311,12 +312,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       let workerProvider = activeProvider
       let workerApiKey = activeApiKey
       if (workerRouting) {
-        const task = _order.kind === 'code_search' || _order.kind === 'doc_research' || _order.kind === 'plan'
-          ? 'repo_summarization'
-          : _order.kind === 'review' || _order.kind === 'patch_proposal'
-            ? 'risky_refactor'
-            : 'code_edit'
-        const routeName = workerRouting.routing[task]
+        const routeName = workerRouting.routing[mapWorkOrderKindToCapabilityTask(_order.kind)]
         if (routeName && workerRouting.profiles[routeName]) {
           const routeProfile = workerRouting.profiles[routeName]
           const resolved = config.provider.providers[routeProfile.provider]
@@ -638,6 +634,11 @@ async function main() {
         })
         toolRegistry.register(createDelegateTaskTool(
           { delegate: async (req) => goalCoordinator.delegate(req) },
+          () => claimStore,
+          () => sessionId,
+        ))
+        toolRegistry.register(createDelegateBatchTool(
+          { delegateBatch: async (requests, policy) => goalCoordinator.delegateBatch(requests, policy) },
           () => claimStore,
           () => sessionId,
         ))

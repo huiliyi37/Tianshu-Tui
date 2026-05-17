@@ -5,7 +5,7 @@ import type { VerificationMetadata } from '../tools/types.js'
 
 export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff'] as const
 export const WRITE_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
-export const PHASE1_DISALLOWED_WORKER_TOOLS = ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task'] as const
+export const PHASE1_DISALLOWED_WORKER_TOOLS = ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'] as const
 
 export const workOrderKindSchema = z.enum([
   'code_search',
@@ -169,7 +169,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
       'Include verification results if tests were run.',
     ],
     allowedTools: [...WRITE_WORKER_TOOLS],
-    disallowedTools: ['delegate_task'],
+    disallowedTools: ['delegate_task', 'delegate_batch'],
     dedupeKey: `write:${input.scope.files?.join(',') || input.objective}`,
     dependencies: input.dependencies ?? [],
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',

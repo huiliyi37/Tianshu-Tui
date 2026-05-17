@@ -27,21 +27,22 @@ function extractClaimsFromRun(run: CoordinatorRun, toolUseId: string, claimStore
   for (const result of run.results) {
     if (result.status !== 'passed') continue
     const evidencePaths = result.changedFiles.slice(0, 3)
-    for (const finding of result.findings) {
+    result.findings.forEach((finding, findingIndex) => {
       const claimText = typeof finding === 'string' ? finding : finding.claim
       const confidence = typeof finding === 'string' ? 0.7
         : finding.confidence === 'high' ? 0.85
         : finding.confidence === 'medium' ? 0.7
         : 0.55
+      const eventId = `${toolUseId}:worker:${result.workOrderId}:${findingIndex}`
       const proposal: ClaimProposal = {
         kind: 'worker_finding',
         scope: 'session',
         text: claimText,
         confidence,
         fitness: confidence >= 0.85 ? 5 : confidence >= 0.7 ? 3 : 2,
-        source: { actor: 'worker', sessionId, turn: 0, eventId: `${toolUseId}:worker` },
+        source: { actor: 'worker', sessionId, turn: 0, eventId },
         evidence: [{
-          id: `${toolUseId}:finding`,
+          id: `${eventId}:finding`,
           kind: 'worker',
           summary: typeof finding === 'string' ? finding : finding.evidence,
           path: evidencePaths[0],
@@ -51,7 +52,7 @@ function extractClaimsFromRun(run: CoordinatorRun, toolUseId: string, claimStore
         tags: ['worker', result.workOrderId],
       }
       claimStore.propose(proposal)
-    }
+    })
   }
 }
 

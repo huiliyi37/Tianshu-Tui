@@ -35,6 +35,7 @@ export function runBenchmark(opts: BenchmarkRunnerOptions): BenchmarkReport {
       startedAt: new Date().toISOString(),
       endedAt: new Date().toISOString(),
       metrics: { turns: 0, toolCalls: 0, retries: 0 },
+      failures: [],
     }
 
     appendBenchmarkRun(opts.storeFile, run)

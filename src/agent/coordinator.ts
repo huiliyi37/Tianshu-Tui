@@ -62,6 +62,21 @@ export function shouldDelegateObjective(objective: string, scope: WorkOrderScope
   return words >= 6 || (scope.files?.length ?? 0) >= 2 || (scope.symbols?.length ?? 0) >= 2
 }
 
+function workerFailureResult(order: WorkOrder, error: unknown): WorkerResult {
+  const reason = error instanceof Error ? error.message : String(error)
+  return {
+    workOrderId: order.id,
+    status: 'blocked',
+    summary: `Worker failed: ${reason}`,
+    findings: [],
+    artifacts: [{ kind: 'risk', title: 'Worker execution failed', content: reason }],
+    changedFiles: [],
+    risks: [`worker failed: ${reason}`],
+    nextActions: ['Primary should continue without trusting this worker result'],
+    evidenceStatus: 'blocked',
+  }
+}
+
 export class DelegationCoordinator {
   private runWorker: (config: WorkerSessionConfig) => Promise<WorkerSessionRun>
   private state: CoordinatorState
@@ -198,7 +213,8 @@ export class DelegationCoordinator {
         const run = await this.delegateOrder(order)
         allResults.push(...run.results)
         queue.markCompleted(order)
-      } catch {
+      } catch (error) {
+        allResults.push(workerFailureResult(order, error))
         queue.markFailed(order)
       }
       // Recurse: try to process next pending order (respecting concurrency limit)

@@ -211,6 +211,57 @@ describe('DelegationCoordinator', () => {
     assert.ok(run.results.every(r => r.status === 'passed'))
   })
 
+  it('keeps failed batch workers visible in aggregated results', async () => {
+    let calls = 0
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as ApiClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => {
+        calls++
+        if (calls === 1) throw new Error('worker transport failed')
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const run = await coordinator.delegateBatch([
+      {
+        parentTurnId: 'turn_b1',
+        objective: 'Search for routing seams in main module.',
+        kind: 'code_search',
+        profile: 'code_scout',
+        scope: { files: ['src/main.tsx'] },
+      },
+      {
+        parentTurnId: 'turn_b1',
+        objective: 'Review coordinator risk patterns across the delegation module boundary.',
+        kind: 'review',
+        profile: 'reviewer',
+        scope: { files: ['src/agent/coordinator.ts', 'src/agent/work-order.ts'] },
+      },
+    ])
+
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results.length, 2)
+    assert.equal(run.results.filter(r => r.status === 'blocked').length, 1)
+    assert.ok(run.packet.includes('worker transport failed'))
+  })
+
   it('exposes coordinator state with lifecycle events', async () => {
     const coordinator = new DelegationCoordinator({
       baseToolRegistry: makeRegistry(),

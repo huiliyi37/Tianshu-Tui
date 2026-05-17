@@ -26,7 +26,10 @@ describe('runBenchmark (dry-run)', () => {
         title: 'Read a file',
         category: 'repo_inspection',
         prompt: 'Read README.md',
+        setupCommands: [],
+        successCommands: [],
         timeoutMs: 30000,
+        tags: [],
       },
       {
         id: 'task-2',
@@ -34,7 +37,9 @@ describe('runBenchmark (dry-run)', () => {
         category: 'test_repair',
         prompt: 'Fix the failing test',
         setupCommands: ['npm install'],
+        successCommands: [],
         timeoutMs: 60000,
+        tags: [],
       },
     ],
   }

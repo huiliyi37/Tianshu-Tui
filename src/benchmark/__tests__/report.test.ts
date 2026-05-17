@@ -20,25 +20,7 @@ function makeRun(
     startedAt: '2026-05-17T12:00:00.000Z',
     endedAt: '2026-05-17T12:01:00.000Z',
     metrics: { turns, toolCalls, retries: 0, costUsd },
-  }
-}
-
-function makeRunWithProvider(
-  taskId: string,
-  provider: string,
-  model: string,
-  status: BenchmarkRun['status'],
-): BenchmarkRun {
-  return {
-    runId: `run-${taskId}-${provider}`,
-    suiteId: 'r1-local-coding-smoke',
-    taskId,
-    provider,
-    model,
-    status,
-    startedAt: '2026-05-17T12:00:00.000Z',
-    endedAt: '2026-05-17T12:01:00.000Z',
-    metrics: { turns: 4, toolCalls: 5, retries: 0, costUsd: 0.005 },
+    failures: [],
   }
 }
 
