@@ -26,6 +26,9 @@ describe('PHASE_LABELS', () => {
       assert.ok(PHASE_LABELS[p as keyof typeof PHASE_LABELS], `missing label for ${p}`)
       assert.ok(PHASE_GLYPHS[p as keyof typeof PHASE_GLYPHS], `missing glyph for ${p}`)
     }
+    // Verify all 8 are present
+    assert.equal(Object.keys(PHASE_LABELS).length, 8)
+    assert.equal(Object.keys(PHASE_GLYPHS).length, 8)
   })
 })
 
@@ -91,6 +94,12 @@ describe('mapSensoriumToPhase', () => {
     assert.equal(mapSensoriumToPhase(s, ctx), 'tianxuan-locating')
   })
 
+  it('returns tianquan-contracting when confident + low complexity + not writing', () => {
+    const s = makeSensorium({ confidence: 0.8, complexity: 0.3, freshness: 0.5 })
+    const ctx = makeCtx({ isWriting: false, isRunningTests: false })
+    assert.equal(mapSensoriumToPhase(s, ctx), 'tianquan-contracting')
+  })
+
   it('returns tianshu-planning on first turn with escalation', () => {
     const s = makeSensorium()
     const ctx = makeCtx({ turn: 1, shouldEscalate: true })
@@ -123,6 +132,16 @@ describe('mapSensoriumToPhase', () => {
     const s = makeSensorium({ momentum: 0.9, confidence: 0.9 })
     const ctx = makeCtx({ isFinalTurn: true, isWriting: true })
     assert.equal(mapSensoriumToPhase(s, ctx), 'yaoguang-delivering')
+  })
+
+  it('skips contracting when isWriting or isRunningTests', () => {
+    const s = makeSensorium({ confidence: 0.8, complexity: 0.3 })
+    // Writing → should be implementing, not contracting
+    const writingCtx = makeCtx({ isWriting: true, isRunningTests: false })
+    assert.equal(mapSensoriumToPhase(s, writingCtx), 'yuheng-implementing')
+    // Testing → should be testing, not contracting
+    const testingCtx = makeCtx({ isWriting: false, isRunningTests: true })
+    assert.equal(mapSensoriumToPhase(s, testingCtx), 'kaiyang-testing')
   })
 
   it('defaults to locating when freshness above 0.4', () => {

@@ -443,6 +443,7 @@ export class AgentLoop {
             const { messages: compacted } = await this.compactMessages(messages, estTokens)
             this.session.replaceMessages(compacted)
             this.session.markCompacted(turn)
+            this.pressureMonitor.recordCompaction(this.session.getTurnCount())
             const afterTokens = this.session.getEstimatedTokens()
             this.session.recordCompactEvent({
               turn: this.session.getTurnCount(),
@@ -485,11 +486,15 @@ export class AgentLoop {
         this.thetaState = { ...this.thetaState, interval: this.strategy.thetaCycleInterval }
 
         // Emit StarEvent via existing onPhaseChange callback
+        const recentTools = this.recentToolHistory.map(h => h.tool)
+        const isWriting = recentTools.some(t => t === 'write_file' || t === 'edit_file')
+        const isRunningTests = recentTools.some(t => t === 'run_tests')
+        const isFinalTurn = turn >= this.config.maxTurns - 1
         const starCtx = {
           turn: this.session.getTurnCount(),
-          isWriting: false,
-          isRunningTests: false,
-          isFinalTurn: false,
+          isWriting,
+          isRunningTests,
+          isFinalTurn,
           shouldEscalate: this.strategy.shouldEscalate,
         }
         const event = createStarEvent(this.sensorium, starCtx)
@@ -671,6 +676,12 @@ export class AgentLoop {
             this.config.promptEngine.setCerebellarHint(`Prediction error rate elevated (${level}). Mental model may be stale — verify assumptions before proceeding.`)
           } else {
             this.config.promptEngine.setCerebellarHint(null)
+          }
+
+          // Theta-Gamma: advance counter, check if cross-file consistency check is due
+          this.thetaState = advanceThetaCounter(this.thetaState)
+          if (this.sensorium && this.sensorium.complexity > 0.5 && tickTheta(this.thetaState, turn)) {
+            this.thetaState = completeTheta(this.thetaState)
           }
           if (shouldTippingPointReset(this.predictionAccumulator)) {
             this.predictionAccumulator = resetAccumulator(this.predictionAccumulator)

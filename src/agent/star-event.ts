@@ -75,13 +75,14 @@ export interface StarEvent {
  * Map a Sensorium snapshot + runtime context to a StarPhase.
  *
  * Priority order (first match wins):
- * 1. Encore: confidence < 0.3 mid-task → 二次请星
+ * 1. Encore: shouldEscalate + turn>1 + confidence<0.3 → 二次请星
  * 2. Testing: isRunningTests → 试锋
- * 3. Delivering: momentum > 0.8 + final turn → 归航
- * 4. Implementing: confidence > 0.6 + isWriting → 铸形
- * 5. Decomposing: complexity > 0.5 → 排阵
- * 6. Locating: freshness > 0.7 → 寻迹
- * 7. Planning: default / shouldEscalate → 请星
+ * 3. Delivering: momentum>0.8 + isFinalTurn → 归航
+ * 4. Implementing: confidence>0.6 + isWriting → 铸形
+ * 5. Decomposing: complexity>0.5 → 排阵
+ * 6. Contracting: confidence>0.7 + complexity<0.4 + !writing + !testing → 立约
+ * 7. Locating: freshness>0.7 → 寻迹
+ * 8. Planning: shouldEscalate + turn===1 / freshness≤0.4 → 请星
  */
 export function mapSensoriumToPhase(
   s: Sensorium,
@@ -112,12 +113,17 @@ export function mapSensoriumToPhase(
     return 'tianji-decomposing'
   }
 
-  // 6. Locating: high freshness (familiar codebase)
+  // 6. Contracting: confident + plan clear + not writing yet → 立约
+  if (s.confidence > 0.7 && s.complexity < 0.4 && !ctx.isWriting && !ctx.isRunningTests) {
+    return 'tianquan-contracting'
+  }
+
+  // 7. Locating: high freshness (familiar codebase)
   if (s.freshness > 0.7) {
     return 'tianxuan-locating'
   }
 
-  // 7. Planning: default / first-turn escalation
+  // 8. Planning: default / first-turn escalation
   if (ctx.shouldEscalate && ctx.turn === 1) {
     return 'tianshu-planning'
   }
