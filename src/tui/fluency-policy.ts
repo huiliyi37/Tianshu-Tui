@@ -25,6 +25,45 @@ export interface FluencyPolicy {
 const HIGH_VOLUME_RESULT_LENGTH = 50_000
 const HIGH_OUTPUT_RATE = 50_000
 
+// Phase-aware stale tiers: [info threshold, warn threshold, actionable threshold]
+const PHASE_STALE_TIERS: Record<ActivityPhase, [number, number, number]> = {
+  thinking:   [30_000,  90_000, 180_000],
+  streaming:  [15_000,  60_000, 120_000],
+  tool:       [45_000,  90_000, 180_000],
+  mcp:        [15_000,  30_000,  60_000],
+  compacting: [30_000, 120_000, 240_000],
+  analyzing:  [15_000,  60_000, 120_000],
+  idle:       [15_000,  60_000, 120_000],
+  preflight:  [15_000,  60_000, 120_000],
+}
+
+function getPhaseStaleMessage(phase: ActivityPhase, silentMs: number): string | null {
+  const tiers = PHASE_STALE_TIERS[phase] ?? PHASE_STALE_TIERS.streaming
+  const [info, warn, action] = tiers
+  const sec = Math.round(silentMs / 1000)
+  const min = Math.round(silentMs / 60_000)
+
+  if (silentMs >= action) {
+    if (phase === 'thinking') return `Long think — Ctrl+C to stop (${min}m)`
+    if (phase === 'tool') return `Tool may be stuck — Ctrl+C (${min}m)`
+    if (phase === 'compacting') return `Compaction very slow (${min}m)`
+    return `No response — Ctrl+C to interrupt (${min}m)`
+  }
+  if (silentMs >= warn) {
+    if (phase === 'thinking') return `Collecting context... ${min}m`
+    if (phase === 'tool') return `Tool running long... ${min}m`
+    if (phase === 'compacting') return `Compacting... ${min}m`
+    return `Still waiting... ${min}m`
+  }
+  if (silentMs >= info) {
+    if (phase === 'thinking') return `Thinking deeply... ${sec}s`
+    if (phase === 'tool') return `Executing tools... ${sec}s`
+    if (phase === 'compacting') return `Compacting... ${sec}s`
+    return `Waiting for response... ${sec}s`
+  }
+  return null
+}
+
 export function computeFluencyPolicy(signals: FluencySignals): FluencyPolicy {
   // Errors and approvals always surface
   if (signals.isError) {
@@ -39,15 +78,16 @@ export function computeFluencyPolicy(signals: FluencySignals): FluencyPolicy {
     return { visibility: 'stress', foldRoutine: true, coalesceMs: 1000 + Math.round(signals.contextPressure * 2000) }
   }
 
-  // Silent too long → stale inspection
-  if (signals.silentMs >= 10_000) {
-    return {
-      visibility: 'inspect',
-      foldRoutine: false,
-      coalesceMs: 0,
-      staleMessage: signals.silentMs >= 30_000
-        ? `No activity for ${Math.round(signals.silentMs / 1000)}s — may be stuck`
-        : `Waiting ${Math.round(signals.silentMs / 1000)}s…`,
+  // Silent too long → stale inspection (phase-aware thresholds)
+  if (signals.silentMs >= 15_000) {
+    const staleMessage = getPhaseStaleMessage(signals.phase, signals.silentMs)
+    if (staleMessage) {
+      return {
+        visibility: 'inspect',
+        foldRoutine: false,
+        coalesceMs: 0,
+        staleMessage,
+      }
     }
   }
 
@@ -79,9 +119,9 @@ export interface StageHealth {
 }
 
 const STALE_THRESHOLDS: Partial<Record<ActivityPhase, number>> = {
-  thinking: 60_000,
-  streaming: 15_000,
-  tool: 30_000,
+  thinking: 90_000,
+  streaming: 20_000,
+  tool: 60_000,
   mcp: 30_000,
   compacting: 120_000,
   analyzing: 30_000,

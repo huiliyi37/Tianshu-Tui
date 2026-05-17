@@ -63,26 +63,24 @@ describe('computeFluencyPolicy', () => {
     assert.notEqual(policy.visibility, 'stress')
   })
 
-  it('returns inspect with short stale message when silentMs >= 10_000 and < 30_000', () => {
-    const policy = computeFluencyPolicy({ ...baseline, silentMs: 12_000 })
-    assert.equal(policy.visibility, 'inspect')
-    assert.equal(policy.foldRoutine, false)
-    assert.equal(policy.coalesceMs, 0)
-    assert.equal(policy.staleMessage, 'Waiting 12s…')
-  })
-
-  it('returns inspect with long stale message when silentMs >= 30_000', () => {
+  it('returns inspect with phase-aware stale message when silentMs >= 30_000 (thinking)', () => {
     const policy = computeFluencyPolicy({ ...baseline, silentMs: 35_000 })
     assert.equal(policy.visibility, 'inspect')
     assert.equal(policy.foldRoutine, false)
     assert.equal(policy.coalesceMs, 0)
-    assert.equal(policy.staleMessage, 'No activity for 35s — may be stuck')
+    assert.equal(policy.staleMessage, 'Thinking deeply... 35s')
   })
 
-  it('sets stale message for silentMs exactly 30_000', () => {
-    const policy = computeFluencyPolicy({ ...baseline, silentMs: 30_000 })
+  it('returns inspect with warn stale message when silentMs >= 90_000 (thinking)', () => {
+    const policy = computeFluencyPolicy({ ...baseline, silentMs: 95_000 })
     assert.equal(policy.visibility, 'inspect')
-    assert.equal(policy.staleMessage, 'No activity for 30s — may be stuck')
+    assert.equal(policy.staleMessage, 'Collecting context... 2m')
+  })
+
+  it('returns inspect with actionable stale message when silentMs >= 180_000 (thinking)', () => {
+    const policy = computeFluencyPolicy({ ...baseline, silentMs: 190_000 })
+    assert.equal(policy.visibility, 'inspect')
+    assert.equal(policy.staleMessage, 'Long think — Ctrl+C to stop (3m)')
   })
 
   it('returns inspect with coalescing for large results', () => {
@@ -160,7 +158,7 @@ describe('computeFluencyPolicy', () => {
   })
 
   it('respects priority: silent over routine', () => {
-    const policy = computeFluencyPolicy({ ...baseline, silentMs: 10_000, consecutiveRoutine: 10 })
+    const policy = computeFluencyPolicy({ ...baseline, silentMs: 35_000, consecutiveRoutine: 10 })
     assert.equal(policy.visibility, 'inspect')
   })
 
@@ -193,51 +191,52 @@ describe('computeStageHealth', () => {
   })
 
   it('returns slow when silentMs >= 60% of threshold', () => {
-    // thinking threshold = 60_000, 60% = 36_000
+    // thinking threshold = 90_000, 60% = 54_000
     const health = computeStageHealth(
-      { phase: 'thinking', startedAt: 0, lastEventAt: now - 36_000 },
+      { phase: 'thinking', startedAt: 0, lastEventAt: now - 54_000 },
       now,
     )
-    assert.equal(health.silentMs, 36_000)
+    assert.equal(health.silentMs, 54_000)
     assert.equal(health.isStale, false)
     assert.equal(health.healthLabel, 'slow')
   })
 
-  it('returns stale for thinking when silentMs >= 60s', () => {
+  it('returns stale for thinking when silentMs >= 90s', () => {
     const health = computeStageHealth(
-      { phase: 'thinking', startedAt: 0, lastEventAt: now - 60_000 },
+      { phase: 'thinking', startedAt: 0, lastEventAt: now - 90_000 },
       now,
     )
-    assert.equal(health.silentMs, 60_000)
+    assert.equal(health.silentMs, 90_000)
     assert.equal(health.isStale, true)
     assert.ok(health.healthLabel.startsWith('stale'))
   })
 
-  it('returns stale for streaming when silentMs >= 15s', () => {
+  it('returns stale for streaming when silentMs >= 20s', () => {
     const health = computeStageHealth(
-      { phase: 'streaming', startedAt: 0, lastEventAt: now - 15_000 },
+      { phase: 'streaming', startedAt: 0, lastEventAt: now - 20_000 },
       now,
     )
     assert.equal(health.isStale, true)
-    assert.equal(health.healthLabel, 'stale (15s silent)')
+    assert.equal(health.healthLabel, 'stale (20s silent)')
   })
 
-  it('returns slow for streaming when silentMs >= 9s', () => {
+  it('returns slow for streaming when silentMs >= 12s', () => {
+    // streaming threshold = 20_000, 60% = 12_000
     const health = computeStageHealth(
-      { phase: 'streaming', startedAt: 0, lastEventAt: now - 9_000 },
+      { phase: 'streaming', startedAt: 0, lastEventAt: now - 12_000 },
       now,
     )
     assert.equal(health.isStale, false)
     assert.equal(health.healthLabel, 'slow')
   })
 
-  it('returns stale for tool phase when silentMs >= 30s', () => {
+  it('returns stale for tool phase when silentMs >= 60s', () => {
     const health = computeStageHealth(
-      { phase: 'tool', startedAt: 0, lastEventAt: now - 30_000 },
+      { phase: 'tool', startedAt: 0, lastEventAt: now - 60_000 },
       now,
     )
     assert.equal(health.isStale, true)
-    assert.equal(health.healthLabel, 'stale (30s silent)')
+    assert.equal(health.healthLabel, 'stale (60s silent)')
   })
 
   it('returns stale for mcp phase when silentMs >= 30s', () => {

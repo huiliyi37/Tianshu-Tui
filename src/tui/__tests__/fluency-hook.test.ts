@@ -64,15 +64,15 @@ describe('FluencyTracker', () => {
     assert.equal(tracker.getPolicy().visibility, 'normal')
   })
 
-  it('detects stale after silence (updateSilence(15000))', () => {
+  it('detects stale after silence (updateSilence(20000))', () => {
     const tracker = new FluencyTracker()
-    tracker.updateSilence(15_000)
+    tracker.updateSilence(20_000)
     const policy = tracker.getPolicy()
     assert.equal(policy.visibility, 'inspect')
     assert.equal(policy.foldRoutine, false)
     assert.equal(policy.coalesceMs, 0)
-    assert.ok(policy.staleMessage !== undefined && policy.staleMessage.includes('s…'),
-      `expected staleMessage to include 's…', got ${policy.staleMessage}`)
+    assert.ok(policy.staleMessage !== undefined && policy.staleMessage.includes('s'),
+      `expected staleMessage to include 's', got ${policy.staleMessage}`)
   })
 
   it('reports inspect with coalescing for large tool results', () => {
@@ -178,8 +178,8 @@ describe('FluencyTracker', () => {
     assert.equal(policy.visibility, 'normal')
 
     // Verify the phase change is reflected in stale detection
-    // After setPhase, simulate silence and it should show up
-    tracker.updateSilence(15_000)
+    // After setPhase to thinking, need 30s+ for info tier
+    tracker.updateSilence(35_000)
     const stalePolicy = tracker.getPolicy()
     assert.equal(stalePolicy.visibility, 'inspect')
     assert.ok(stalePolicy.staleMessage !== undefined)

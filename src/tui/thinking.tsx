@@ -9,10 +9,17 @@ interface ThinkingStatusOptions {
 }
 
 export function thinkingStatusLabel(options: ThinkingStatusOptions): string {
-  if (options.stale && options.isStreaming) return 'waiting for response…'
-  if (options.isStreaming) return formatDuration(options.elapsedMs)
-  if (options.completedDurationMs !== undefined) return `completed in ${formatDuration(options.completedDurationMs)}`
-  return 'completed'
+  if (!options.isStreaming) {
+    if (options.completedDurationMs !== undefined) return `completed in ${formatDuration(options.completedDurationMs)}`
+    return 'completed'
+  }
+  // Tiered messages based on elapsed time while streaming
+  const sec = Math.round(options.elapsedMs / 1000)
+  const min = Math.round(options.elapsedMs / 60_000)
+  if (options.elapsedMs >= 180_000) return `Long think — Ctrl+C to stop (${min}m)`
+  if (options.elapsedMs >= 90_000) return `Still thinking... ${formatDuration(options.elapsedMs)}`
+  if (options.elapsedMs >= 30_000) return `Collecting context... ${sec}s`
+  return formatDuration(options.elapsedMs)
 }
 
 interface ThinkingCollapserProps {
@@ -69,7 +76,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
       if (staleCheckRef.current) clearTimeout(staleCheckRef.current)
       staleCheckRef.current = setTimeout(() => {
         setStale(true)
-      }, 5000)
+      }, 30_000)
     }
     return () => {
       if (staleCheckRef.current) clearTimeout(staleCheckRef.current)

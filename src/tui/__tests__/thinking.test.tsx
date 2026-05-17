@@ -16,8 +16,20 @@ describe('thinking helpers', () => {
 })
 
 describe('thinking status label', () => {
-  it('keeps active thinking duration concise', () => {
-    assert.equal(thinkingStatusLabel({ isStreaming: true, elapsedMs: 42_000 }), '42s')
+  it('shows plain duration under 30s', () => {
+    assert.equal(thinkingStatusLabel({ isStreaming: true, elapsedMs: 12_000 }), '12s')
+  })
+
+  it('shows Collecting context at 30s+', () => {
+    assert.equal(thinkingStatusLabel({ isStreaming: true, elapsedMs: 42_000 }), 'Collecting context... 42s')
+  })
+
+  it('shows Still thinking at 90s+', () => {
+    assert.equal(thinkingStatusLabel({ isStreaming: true, elapsedMs: 95_000 }), 'Still thinking... 1m 35s')
+  })
+
+  it('shows Long think at 180s+', () => {
+    assert.equal(thinkingStatusLabel({ isStreaming: true, elapsedMs: 190_000 }), 'Long think — Ctrl+C to stop (3m)')
   })
 
   it('shows final thinking duration after completion', () => {
