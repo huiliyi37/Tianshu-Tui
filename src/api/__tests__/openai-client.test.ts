@@ -441,3 +441,156 @@ describe('error handling', () => {
     )
   })
 })
+
+describe('DeepSeek-specific features', () => {
+  it('1: calls onThinkingDelta for reasoning_content delta', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    const thoughts: string[] = []
+
+    client.processDelta(
+      { choices: [{ delta: { reasoning_content: 'Let me think about this...' } }] },
+      { onThinkingDelta: (t: string) => thoughts.push(t) },
+    )
+
+    assert.equal(thoughts.join(''), 'Let me think about this...')
+  })
+
+  it('2: includes thinking param in body when thinking is enabled', () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, thinking: 'enabled' })
+    const body = (client as any).buildRequestBody(makeRequest('Hello'))
+
+    assert.deepEqual(body.thinking, { type: 'enabled' })
+  })
+
+  it('3: includes reasoning_effort in body when configured', () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, reasoningEffort: 'max' })
+    const body = (client as any).buildRequestBody(makeRequest('Hello'))
+
+    assert.equal(body.reasoning_effort, 'max')
+  })
+
+  it('4: converts thinking content block to reasoning_content for tool-call round trips', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    const request: MessageRequest = {
+      model: 'gpt-4o',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'Hello' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'I need to check the time zone.' },
+            { type: 'text', text: 'Let me check' },
+            { type: 'tool_use', id: 'tu_1', name: 'get_time', input: { tz: 'UTC' } },
+          ],
+        },
+      ],
+      max_tokens: 4096,
+    }
+
+    const body = (client as any).buildRequestBody(request)
+    const assistantMsg = body.messages.find((m: any) => m.role === 'assistant')
+
+    assert.ok(assistantMsg, 'assistant message should exist')
+    assert.equal(assistantMsg.reasoning_content, 'I need to check the time zone.')
+    assert.equal(assistantMsg.content, 'Let me check')
+    assert.equal(assistantMsg.tool_calls.length, 1)
+  })
+
+  it('5: extracts DeepSeek cache stats from usage chunk', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+
+    let stopReason: string | undefined
+    let stopUsage: any = null
+
+    const callbacks = {
+      onTextDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: (reason: string, usage: any) => { stopReason = reason; stopUsage = usage },
+    }
+
+    // Buffer finish_reason
+    client.processDelta(
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      callbacks,
+    )
+
+    // Usage with DeepSeek cache fields
+    client.processDelta(
+      { usage: { prompt_tokens: 100, completion_tokens: 20, prompt_cache_hit_tokens: 60, prompt_cache_miss_tokens: 40 } },
+      callbacks,
+    )
+
+    assert.equal(stopReason, 'end_turn')
+    assert.equal(stopUsage.cache_read_input_tokens, 60)
+    assert.equal(stopUsage.cache_creation_input_tokens, 40)
+    assert.equal(stopUsage.input_tokens, 100)
+    assert.equal(stopUsage.output_tokens, 20)
+  })
+
+  it('6: maps insufficient_system_resource finish_reason to end_turn', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+
+    let stopReason: string | undefined
+    const callbacks = {
+      onTextDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: (reason: string) => { stopReason = reason },
+    }
+
+    // Buffer finish_reason
+    client.processDelta(
+      { choices: [{ delta: {}, finish_reason: 'insufficient_system_resource' }] },
+      callbacks,
+    )
+
+    // Trigger emission via usage chunk
+    client.processDelta(
+      { usage: { prompt_tokens: 10, completion_tokens: 5 } },
+      callbacks,
+    )
+
+    assert.equal(stopReason, 'end_turn')
+  })
+
+  it('7: thinking-only turn — onThinkingDelta called, onTextDelta not called', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+
+    const texts: string[] = []
+    const thoughts: string[] = []
+    let stopReason: string | undefined
+
+    const callbacks = {
+      onTextDelta: (t: string) => texts.push(t),
+      onThinkingDelta: (t: string) => thoughts.push(t),
+      onContentBlock: () => {},
+      onStopReason: (reason: string) => { stopReason = reason },
+    }
+
+    // Reasoning content deltas only (no content)
+    client.processDelta(
+      { choices: [{ delta: { reasoning_content: 'Step 1: analyze' }, finish_reason: null }] },
+      callbacks,
+    )
+    client.processDelta(
+      { choices: [{ delta: { reasoning_content: 'Step 2: conclude' }, finish_reason: null }] },
+      callbacks,
+    )
+
+    // finish_reason: stop
+    client.processDelta(
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      callbacks,
+    )
+
+    // Usage chunk triggers emission
+    client.processDelta(
+      { usage: { prompt_tokens: 50, completion_tokens: 0 } },
+      callbacks,
+    )
+
+    assert.equal(texts.length, 0, 'onTextDelta should not be called for thinking-only')
+    assert.equal(thoughts.length, 2, 'onThinkingDelta should be called for each reasoning_content delta')
+    assert.equal(thoughts.join(''), 'Step 1: analyzeStep 2: conclude')
+    assert.equal(stopReason, 'end_turn')
+  })
+})
