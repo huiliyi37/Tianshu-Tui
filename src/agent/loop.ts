@@ -95,6 +95,7 @@ export class AgentLoop {
   private prewarm = new PrewarmCache(60_000, 50)
   private streamedText = ''
   private thinkingOnlyRetries = 0
+  private lastThinkingContent = ''
   private lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
@@ -380,6 +381,7 @@ export class AgentLoop {
     this.predictionAccumulator = createPredictionAccumulator()
     // Reset accumulations from previous run
     this.thinkingOnlyRetries = 0
+    this.lastThinkingContent = ''
     this.evidence.reset()
     this.repairHintTracker = new RepairHintTracker()
     this.userAnchors = []
@@ -596,13 +598,21 @@ export class AgentLoop {
         }
 
         // Thinking-only turn detection: model produced reasoning but no text or tool calls.
-        // Auto-retry with a "continue" prompt (up to 2 times).
+        // Auto-retry with "continue" prompt, but stop if thinking is looping (similar content).
         if (this.streamedText.length === 0 && collectedBlocks.length === 0 && this.thinkingOnlyRetries < 2) {
-          this.thinkingOnlyRetries++
-          this.session.addUserMessage('Please continue your response.')
-          continue
+          const isLooping = this.lastThinkingContent.length > 0 &&
+            thinkingAccum.slice(0, 200) === this.lastThinkingContent.slice(0, 200)
+          if (isLooping) {
+            // Thinking loop detected — don't retry, fall through to turn-end
+          } else {
+            this.lastThinkingContent = thinkingAccum
+            this.thinkingOnlyRetries++
+            this.session.addUserMessage('Please continue your response.')
+            continue
+          }
         }
         this.thinkingOnlyRetries = 0
+        this.lastThinkingContent = ''
 
         const finalResult = processTurnEnd({
           config: this.config,
