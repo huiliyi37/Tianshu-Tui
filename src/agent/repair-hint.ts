@@ -6,6 +6,11 @@ const HINT_TEMPLATES: Record<string, string> = {
   assertion: 'Verify the target content exists before attempting modification.',
   timeout: 'Use shorter commands or break into smaller operations.',
   missing_dep: 'Check that required imports and dependencies are available.',
+  permission_denied: 'Check file permissions or run with appropriate access.',
+  context_window_exceeded: 'Use /compact to reduce context before continuing.',
+  api_error: 'Wait a moment for rate limit cooldown, then retry.',
+  syntax_error: 'Fix the syntax error — check for missing brackets, semicolons, or typos.',
+  format_error: 'The output was malformed. Retry with clearer format instructions.',
 }
 
 export class RepairHintTracker {
