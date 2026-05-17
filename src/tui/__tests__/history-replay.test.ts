@@ -54,6 +54,39 @@ describe('replayMessagesToLogEntries', () => {
     assert.equal(result.entries[1]!.isError, true)
   })
 
+  it('preserves thinking blocks in assistant messages', () => {
+    const messages: Message[] = [
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Let me think about this...' },
+          { type: 'text', text: 'Here is my answer.' },
+        ],
+      },
+    ]
+    const { entries } = replayMessagesToLogEntries(messages)
+    const assistantEntry = entries.find(e => e.type === 'assistant_message')!
+    assert.strictEqual(assistantEntry.content, 'Here is my answer.')
+    assert.strictEqual(assistantEntry.thinking, 'Let me think about this...')
+  })
+
+  it('handles thinking-only messages without text', () => {
+    const messages: Message[] = [
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Analyzing...' },
+        ],
+      },
+    ]
+    const { entries } = replayMessagesToLogEntries(messages)
+    const assistantEntry = entries.find(e => e.type === 'assistant_message')
+    assert.ok(assistantEntry, 'should create entry for thinking-only message')
+    assert.strictEqual(assistantEntry!.thinking, 'Analyzing...')
+  })
+
   it('handles multi-turn conversation', () => {
     const messages: Message[] = [
       { role: 'user', content: 'turn 1' },

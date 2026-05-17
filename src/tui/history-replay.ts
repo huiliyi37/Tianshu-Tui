@@ -31,10 +31,22 @@ export function replayMessagesToLogEntries(messages: Message[]): ReplayResult {
     }
 
     if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+      let text = ''
+      let thinking = ''
       for (const block of msg.content as ContentBlock[]) {
         if (block.type === 'text') {
-          entries.push(createLogEntry({ type: 'assistant_message', content: block.text, turnNumber: turnCount }))
+          text += (text ? '\n' : '') + block.text
+        } else if (block.type === 'thinking') {
+          thinking += (thinking ? '\n' : '') + (block as { type: 'thinking'; thinking: string }).thinking
         }
+      }
+      if (text || thinking) {
+        entries.push(createLogEntry({
+          type: 'assistant_message',
+          content: text,
+          thinking: thinking || undefined,
+          turnNumber: turnCount,
+        }))
       }
       continue
     }
