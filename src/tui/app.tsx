@@ -592,7 +592,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             const parsed = parseInterviewMarker(finalText)
             if (parsed) {
               setInterviewState(parsed.state)
-              setClarityHistory(prev => [...prev, parsed.state.clarity])
+              setClarityHistory(prev => [...prev.slice(-49), parsed.state.clarity])
               if (parsed.state.confirmed) {
                 setSummaryState(prev => ({ ...prev, phase: 'interview' }))
               }
