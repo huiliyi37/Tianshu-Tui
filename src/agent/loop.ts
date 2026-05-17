@@ -55,6 +55,7 @@ import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
 import { ProviderHealthTracker } from './provider-health.js'
+import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
@@ -157,6 +158,7 @@ export class AgentLoop {
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
   private gitChangeRate = 0
+  private baselineFingerprint: PrefixFingerprint | null = null
   private _hasEnteredHighComplexity = false
 
   constructor(
@@ -442,6 +444,8 @@ export class AgentLoop {
     this.thetaState = createThetaState(7)
     this.loadedPheromones = []
     this._hasEnteredHighComplexity = false
+    // Capture baseline canonical prefix fingerprint for drift detection
+    this.baselineFingerprint = this.config.promptEngine.getFingerprint()
     // Load cross-session pheromones for Sensorium.freshness computation.
     // Use query() so Sensorium sees decayed currentStrength, and prune stale entries opportunistically.
     this.stigmergyStore.prune().catch(() => {})
@@ -571,6 +575,10 @@ export class AgentLoop {
         }
 
         // Sensorium telemetry: append snapshot to debug JSONL (~/.rivet/sensorium.jsonl)
+        const currentFP = this.config.promptEngine.getFingerprint()
+        const driftEvent = this.baselineFingerprint
+          ? (currentFP.combinedSha256 !== this.baselineFingerprint.combinedSha256)
+          : false
         const telemetryLine = JSON.stringify({
           ts: Date.now(),
           turn: this.session.getTurnCount(),
@@ -582,6 +590,7 @@ export class AgentLoop {
             thetaInterval: this.strategy.thetaCycleInterval,
           },
           gitChangeRate: this.gitChangeRate,
+          prefixDrift: driftEvent,
         })
         import('node:fs/promises').then(fs =>
           fs.appendFile(join(this.cwd, '.rivet', 'sensorium.jsonl'), telemetryLine + '\n', 'utf-8')
