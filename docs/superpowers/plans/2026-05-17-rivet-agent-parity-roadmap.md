@@ -1752,3 +1752,82 @@ R4 第一版应包含：
 - 主会话：任务 10-11，docs、validation、review。
 
 每个子代理完成后先跑 focused tests，再由主会话跑 full suite。不要让多个子代理同时编辑 `package.json`、`README.md` 或 `src/agent/tool-pipeline.ts`。这些文件由主会话或单一子代理串行处理。
+
+---
+
+## R3 实现进度（Panic Recovery TUI）
+
+> 最后更新：2026-05-17
+
+### Phase 1：Recovery Trigger Classifier — ✅ 完成
+
+**提交：** `f74c90c` feat(agent): add RecoveryTrigger classifier
+
+**文件：**
+- `src/agent/recovery-trigger.ts`（313 行）— 4 个纯函数 classifier + 聚合器
+- `src/agent/__tests__/recovery-trigger.test.ts`（451 行）— 30 个单元测试
+
+**设计决策：** panic ≠ 任何失败。仅 4 类 trigger 触发 recovery panel：
+
+| Trigger | 触发条件 | Severity |
+|---------|---------|----------|
+| `repeated_interrupt` | 同 turn 内 ≥2 次 Ctrl+C，或有 pending tool | warn / error |
+| `doom_loop_blocked` | 同一 fingerprint 重复失败到 blocked 阈值 | error |
+| `context_thrashing` | 4 turn 内 ≥3 次 compaction；连续 3 次 compact 失败；压缩后 >95% | warn / error |
+| `session_integrity` | orphan tool_use/tool_result；session 修复过 | warn / error |
+
+**输出类型：** `RecoveryTriggerResult { trigger, severity, summary, evidence, suggestedActions }`。TUI recovery panel 只消费此结构，不猜业务逻辑。
+
+### Phase 2：Recovery Panel UI — 🔜 下一步
+
+待实现：
+- [ ] recovery state model（聚合 checkpoint / undo / resume 三种恢复路径）
+- [ ] `src/tui/cockpit/recovery-panel.tsx` — 第 8 个 cockpit panel
+- [ ] cockpit types + state + rail 扩展
+- [ ] `ApprovalRiskCard` 交互回调（onApprove / onDeny / onSkip）
+- [ ] session resume status indicator
+- [ ] TUI tests + manual QA
+
+---
+
+## R4 实现进度（Open Model Lab）
+
+> 最后更新：2026-05-17
+
+### Phase 1：Provider Registry + Conformance Scorecard — ✅ 完成
+
+**提交：** `664ccee` feat(api): add provider-registry and conformance-scorecard
+
+**文件：**
+- `src/api/provider-registry.ts`（140 行）— Zod schema + 7 个 built-in provider 注册表
+- `src/api/conformance-scorecard.ts`（348 行）— 6 项 capability 检查 + markdown 报告
+- `src/api/__tests__/provider-registry.test.ts` — 17 个测试
+- `src/api/__tests__/conformance-scorecard.test.ts` — 12 个测试
+
+**provider-registry 特性：**
+- Canonical `PROVIDER_REGISTRY`：deepseek、kimi、glm、minimax、mimo、opencode-go、openai
+- Zod-validated `ProviderEntry` schema
+- 动态注册：`addProviderEntry()`
+- `provider.ts` 保留向后兼容导出，不受影响
+
+**conformance-scorecard 检查项：**
+
+| Check | 说明 | 严重度 |
+|-------|------|--------|
+| `has_thinking` | thinkingFormat 与 supportsThinking 一致性 | error（不匹配时） |
+| `cache_strategy` | prefixCacheStrategy 与 cacheProfile.cacheType 一致性 | warn |
+| `usage_mapping` | 非标准 provider 的 usage 字段映射 | info |
+| `strip_params` | 不支持的参数剥离 | info |
+| `bug_disclosure` | 已知 bug 是否有 notes 记录 | warn |
+| `effort_control` | thinking 支持时 effort 可控性 | warn |
+
+**Isolation seam 验证：** `worker-session.ts:89-96` 已证明 `new AgentLoop(config, session, cwd)` 三参数全部可独立注入。benchmark live runner 直接复用此模式。
+
+### Phase 2：Live Benchmark Runner — 🔜 下一步
+
+待实现：
+- [ ] `src/benchmark/runner.ts` 非 dry-run 模式（使用隔离 AgentLoop 实例）
+- [ ] 运行 benchmark task 的 prompt → 执行 successCommands → 判定 pass/fail
+- [ ] 收集 metrics：turns、toolCalls、cacheHitRate、costUsd
+- [ ] 隔离的 session 持久化路径（`.rivet/benchmark/sessions/`）
+- [ ] runner 集成测试
