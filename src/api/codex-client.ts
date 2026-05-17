@@ -239,12 +239,32 @@ export class CodexClient implements StreamClient {
                   callbacks.onContentBlock({ type: 'tool_use', id: callId, name, input })
                 } catch {}
               } else if (item?.type === 'message') {
-                // Final message with usage
+                // Text message — extract content
+                const content = item.content as Array<Record<string, unknown>> | undefined
+                if (content) {
+                  for (const part of content) {
+                    if (part.type === 'output_text' && typeof part.text === 'string') {
+                      callbacks.onTextDelta(part.text)
+                      callbacks.onContentBlock({ type: 'text', text: part.text })
+                    }
+                  }
+                }
+                // Usage
                 const msgUsage = item.usage as Record<string, unknown> | undefined
                 if (msgUsage) {
                   usage = {
                     input_tokens: msgUsage.input_tokens as number,
                     output_tokens: msgUsage.output_tokens as number,
+                  }
+                }
+              } else if (item?.type === 'reasoning') {
+                // Reasoning item — extract summary text
+                const summary = item.summary as Array<Record<string, unknown>> | undefined
+                if (summary) {
+                  for (const s of summary) {
+                    if (typeof s.text === 'string') {
+                      callbacks.onThinkingDelta(s.text)
+                    }
                   }
                 }
               }
