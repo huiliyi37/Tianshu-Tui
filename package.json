@@ -37,7 +37,8 @@
     "build": "tsup",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/__tests__/*.test.ts"
+    "test": "tsx --test src/**/__tests__/*.test.ts",
+    "benchmark": "tsx scripts/run-benchmark.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
