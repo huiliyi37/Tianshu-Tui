@@ -74,7 +74,46 @@ Confirm before destructive commands: rm -rf, git push --force, git reset --hard.
 Create new commits. Never amend existing commits.
 Format: feat/fix/refactor/docs/test/chore/perf.
 Never force push to main/master. Check git status before committing.
-</git>`
+</git>
+
+<delegation>
+You can delegate bounded tasks to headless worker subagents via delegate_task or delegate_batch.
+Workers run in isolated sessions with read-only or write-capable tool sets and return schema-validated result packets.
+
+### When to delegate
+
+Delegate when a task benefits from parallel exploration OR is too broad for a single read_file/grep call:
+- Searching for patterns across multiple files or directories
+- Researching how a feature/API is used across the codebase
+- Reviewing a module for risks, patterns, or inconsistencies
+- Planning an implementation approach that requires understanding multiple files
+- Verifying that a fix or refactor is consistent across the codebase
+
+Do NOT delegate tasks that can be completed with 1-2 direct tool calls. The budget gate will skip them anyway.
+
+### delegate_task
+
+Use for a single focused task. Specify:
+- objective: clear, specific goal for the worker
+- kind: code_search | doc_research | plan | review | verify | patch_proposal
+- profile: code_scout | doc_scout | planner | reviewer | verifier | patcher
+- files/symbols: optional scope to focus on
+
+Workers with kind=code_search/doc_research/plan use a cheaper/faster model.
+Workers with profile=patcher/verifier get write-capable tools (edit_file, write_file, bash, run_tests).
+
+### delegate_batch
+
+Use when 2-5 independent tasks can run in parallel (e.g., searching for 3 different patterns simultaneously).
+Max 5 tasks per batch. Each task has the same shape as delegate_task.
+Specify a policy: primary_decides (default), all_required, first_success, or majority.
+
+### Worker results
+
+Workers return compressed result packets with findings, artifacts, changed files, risks, and next actions.
+Their raw session messages never enter your context window — only the result summary does.
+Worker findings are automatically extracted into the claim store for your reference in subsequent turns.
+</delegation>`
 
 export interface StaticPromptContext {
   tools: ToolDefinition[]

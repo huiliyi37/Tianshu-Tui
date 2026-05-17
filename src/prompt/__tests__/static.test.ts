@@ -44,7 +44,8 @@ describe('buildSystemPrompt', () => {
 
   it('has no markdown ## headers', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(!prompt.includes('## '))
+    // Match only level-2 headers (## at line start), not ### sub-headers
+    assert.ok(!/^## /m.test(prompt))
   })
 
   it('nesting depth is max 2 levels', () => {

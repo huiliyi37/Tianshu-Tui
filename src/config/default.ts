@@ -113,7 +113,15 @@ export const DEFAULT_CONFIG: Config = {
     servers: {},
   },
   workers: {
-    profiles: {},
-    routing: {},
+    profiles: {
+      cheap: { provider: 'deepseek', model: 'deepseek-v4-flash' },
+      capable: { provider: 'deepseek', model: 'deepseek-v4-pro' },
+    },
+    routing: {
+      repo_summarization: 'cheap',
+      code_edit: 'capable',
+      test_failure_diagnosis: 'capable',
+      risky_refactor: 'capable',
+    },
   },
 }

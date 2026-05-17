@@ -264,16 +264,37 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     })
 
     // --- DelegationCoordinator ---
-    const modelCards: ModelCapabilityCard[] = [{
-      model: currentModel.id,
-      toolUseReliability: 0.8,
-      jsonStability: 0.8,
-      editSuccessRate: 0.7,
-      testRepairRate: 0.6,
-      contextWindow: currentModel.contextWindow,
-      cacheEconomics: 'strong',
-      recommendedTasks: ['code_search'],
-    }]
+    // Build model capability cards for all available models in the active provider.
+    // Workers use this to select the best model per task type (cheap models for search,
+    // capable models for edits/refactors).
+    const modelCards: ModelCapabilityCard[] = activeProvider.models.map(m => {
+      const isPro = m.id.includes('pro') || m.alias?.includes('pro')
+      const isFlash = m.id.includes('flash') || m.alias?.includes('flash')
+      if (isPro || (!isFlash && !isPro)) {
+        // Primary / capable model
+        return {
+          model: m.id,
+          toolUseReliability: 0.8,
+          jsonStability: 0.8,
+          editSuccessRate: 0.7,
+          testRepairRate: 0.6,
+          contextWindow: m.contextWindow,
+          cacheEconomics: 'strong' as const,
+          recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'risky_refactor'],
+        }
+      }
+      // Flash / cheap model
+      return {
+        model: m.id,
+        toolUseReliability: 0.6,
+        jsonStability: 0.65,
+        editSuccessRate: 0.5,
+        testRepairRate: 0.45,
+        contextWindow: m.contextWindow,
+        cacheEconomics: 'strong' as const,
+        recommendedTasks: ['repo_summarization', 'compaction'],
+      }
+    })
 
     const workerRouting = config.workers?.profiles && Object.keys(config.workers.profiles).length > 0
       ? { profiles: config.workers.profiles, routing: config.workers.routing }

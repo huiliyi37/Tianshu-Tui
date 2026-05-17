@@ -68,11 +68,11 @@ describe('DELEGATE_TASK_TOOL', () => {
     assert.ok(result.content.includes('Invalid delegate_task input'))
   })
 
-  it('does not require approval and is not concurrency safe', () => {
+  it('does not require approval and is concurrency safe', () => {
     const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
 
     assert.equal(tool.requiresApproval({ toolUseId: 'x', cwd: '/repo', input: {} }), false)
-    assert.equal(tool.isConcurrencySafe(), false)
+    assert.equal(tool.isConcurrencySafe(), true)
     assert.equal(tool.isEnabled(), true)
   })
 })
