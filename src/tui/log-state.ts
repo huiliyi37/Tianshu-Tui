@@ -16,6 +16,7 @@ export interface LogEntry {
   rawPath?: string
   turnNumber?: number
   children?: LogEntry[]
+  thinking?: string
 }
 
 let _nextLogId = 0
@@ -31,6 +32,7 @@ export function createLogEntry(entry: {
   rawPath?: string
   turnNumber?: number
   children?: LogEntry[]
+  thinking?: string
 }): LogEntry {
   return { ...entry, id: entry.id ?? `l${_nextLogId++}` }
 }
