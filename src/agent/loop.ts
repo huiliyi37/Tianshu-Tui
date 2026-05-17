@@ -32,6 +32,7 @@ import type { ModelCapabilityCard } from '../model/capability.js'
 import type { ImportGraph } from './import-graph.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
+import { ctclSanitizerPass } from './ctcl-sanitizer.js'
 import { RepairHintTracker } from './repair-hint.js'
 import type { PermissionConfig } from './permissions.js'
 import { type ApprovalResult } from './approval-edit.js'
@@ -137,7 +138,7 @@ export class AgentLoop {
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
   private decisions: string[] = []
   private trajectory = new TrajectoryRecorder()
-  private repairPipeline = new RepairPipeline([fourHorsemenPass, semanticRepairPass])
+  private repairPipeline = new RepairPipeline([ctclSanitizerPass, fourHorsemenPass, semanticRepairPass])
   private repairHintTracker = new RepairHintTracker()
   private traceStore: TraceStore
   private harness: TurnHarness
