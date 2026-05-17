@@ -42,6 +42,13 @@ import { processTurnEnd } from './turn-end.js'
 import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, resetAccumulator, adjustReasoningEffort } from './prediction-error.js'
 import type { PredictionAccumulator } from './prediction-error.js'
 import { stripIntraTurnRepetition } from './dedup.js'
+import { computeSensorium, computeStrategy } from './sensorium.js'
+import type { Sensorium, SensoriumInput } from './sensorium.js'
+import type { StrategyProfile } from './sensorium.js'
+import { mapSensoriumToPhase, createStarEvent, createThetaState, tickTheta, completeTheta, advanceThetaCounter } from './star-event.js'
+import type { StarEvent, ThetaState } from './star-event.js'
+import { shouldKick, buildKickActions, shouldEscalateFromKick } from './dissipative-kick.js'
+import { PressureMonitor } from '../context/pressure-monitor.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -122,6 +129,10 @@ export class AgentLoop {
   private predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   private outputTokenEscalationCount = 0
   private static readonly MAX_OUTPUT_ESCALATION = 3
+  private pressureMonitor: PressureMonitor
+  private sensorium: Sensorium | null = null
+  private strategy: StrategyProfile | null = null
+  private thetaState: ThetaState = createThetaState(7)
 
   constructor(
     private config: AgentConfig,
@@ -135,6 +146,7 @@ export class AgentLoop {
       { maxRetries: 2, retryableClasses: ['timeout', 'flaky'] },
       this.trajectory,
     )
+    this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
   }
 
   private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
@@ -398,6 +410,9 @@ export class AgentLoop {
     this.repairHintTracker = new RepairHintTracker()
     this.userAnchors = []
     this.outputTokenEscalationCount = 0
+    this.sensorium = null
+    this.strategy = null
+    this.thetaState = createThetaState(7)
     this.recordUserInputClaims(userInput)
     this.session.addUserMessage(userInput)
 
@@ -448,6 +463,56 @@ export class AgentLoop {
         this.streamedText = ''
         this.lastPrewarmAt = 0
         await this.prewarmRecentReads()
+
+        // ── StarFlow v2: Sensorium computation ──
+        const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
+        const evidenceState = this.evidence.getState()
+        const sensoriumInput: SensoriumInput = {
+          predictionAcc: this.predictionAccumulator,
+          pressureResult,
+          evidenceState: {
+            filesModified: evidenceState.filesModified.size,
+            verifiedCount: evidenceState.verifications.filter(v => v.status === 'passed').length,
+          },
+          toolCallHistory: this.recentToolHistory.map(h => h.tool),
+          pheromones: [],
+          doomLevel: getDoomLoopLevel(this.traceStore.toolFingerprints),
+        }
+        this.sensorium = computeSensorium(sensoriumInput)
+        this.strategy = computeStrategy(this.sensorium)
+
+        // Update theta interval from strategy
+        this.thetaState = { ...this.thetaState, interval: this.strategy.thetaCycleInterval }
+
+        // Emit StarEvent via existing onPhaseChange callback
+        const starCtx = {
+          turn: this.session.getTurnCount(),
+          isWriting: false,
+          isRunningTests: false,
+          isFinalTurn: false,
+          shouldEscalate: this.strategy.shouldEscalate,
+        }
+        const event = createStarEvent(this.sensorium, starCtx)
+        if (callbacks.onPhaseChange) {
+          callbacks.onPhaseChange(event.phase, {
+            tool: event.glyph,
+            suggestion: event.label,
+          })
+        }
+
+        // Dissipative kick — stagnation breakthrough
+        if (shouldKick(this.sensorium)) {
+          const kickActions = buildKickActions(this.sensorium, this.cwd)
+          if (kickActions.injectedMessage) {
+            this.session.addUserMessage(kickActions.injectedMessage)
+          }
+          if (shouldEscalateFromKick(this.sensorium) && callbacks.onPhaseChange) {
+            callbacks.onPhaseChange('tianshu-encore', {
+              reason: 'Dissipative kick: stagnation detected',
+              suggestion: 'Escalate to stronger model or reframe the problem',
+            })
+          }
+        }
 
         // Pass 5: adaptive repair hint injection
         const repairHint = this.repairHintTracker.getHint()
