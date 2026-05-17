@@ -237,7 +237,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     return tokenHistoryRef.current
   }, [])
 
-  const promptQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const promptQueueRef = useRef({ running: false })
 
   const flushThink = useCallback(() => {
     thinkTimer.current = null
@@ -673,6 +673,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setStreamingText('')
         thinkBuf.current = ''
         setStreamingThinking('')
+        // Clear tool state from failed run
+        toolAccum.current.clear()
+        toolNames.current.clear()
+        dirtyTools.current.clear()
+        toolTargetMap.current.clear()
+        toolCallTracker.current.clear()
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: `Error: ${error.message}`, isError: true }))
@@ -691,6 +697,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setStreamingText('')
         thinkBuf.current = ''
         setStreamingThinking('')
+        // Clear tool state from aborted run
+        toolAccum.current.clear()
+        toolNames.current.clear()
+        dirtyTools.current.clear()
+        toolTargetMap.current.clear()
+        toolCallTracker.current.clear()
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
@@ -706,12 +718,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     })
     } // end run
 
-    promptQueueRef.current = promptQueueRef.current
-      .then(run)
-      .catch((err: Error) => {
-        pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
-        setIsStreaming(false)
-      })
+    // Serialize via flag — if a run is already in progress, guard against double-submit
+    if (promptQueueRef.current.running) {
+      return
+    }
+    promptQueueRef.current.running = true
+    run().catch((err: Error) => {
+      pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
+      setIsStreaming(false)
+    }).finally(() => {
+      promptQueueRef.current.running = false
+    })
   }, [agent, session, pushStatic, pushStaticBatch, migrateToFrozen, flushThink, flushTools, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   const currentTokens = session.getEstimatedTokens()
