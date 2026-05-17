@@ -2,6 +2,8 @@ import type { StreamClient } from './stream-client.js'
 import type { MessageRequest, ToolDefinition } from './types.js'
 import type { StreamCallbacks } from './client.js'
 import { stableStringify } from './stable-json.js'
+import { canonicalizeRequest } from './request-freezer.js'
+import type { ProviderProfile } from './provider-profile.js'
 
 export interface OpenAIClientConfig {
   baseUrl: string
@@ -13,6 +15,10 @@ export interface OpenAIClientConfig {
   auth?: import('../auth/types.js').AuthProvider
   /** Stable session identifier for cache routing affinity */
   sessionId?: string
+  /** Provider params to strip at all levels (preserves canonical prefix) */
+  unsupported?: string[]
+  /** Provider profile for cache strategy application */
+  providerProfile?: ProviderProfile
 }
 
 interface OpenAIToolCall {
@@ -69,7 +75,12 @@ export class OpenAIClient implements StreamClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
-    const body = this.buildRequestBody(request)
+    // Canonicalize request for cache stability before building body
+    const canonicalReq = (this.config.unsupported && this.config.providerProfile)
+      ? canonicalizeRequest(request, this.config.providerProfile, this.config.unsupported)
+      : request
+
+    const body = this.buildRequestBody(canonicalReq)
 
     // Reset instance state to prevent stale data from previous calls/retries
     this.toolCallBuffer.clear()

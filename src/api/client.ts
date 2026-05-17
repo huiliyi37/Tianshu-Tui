@@ -3,6 +3,8 @@ import type { StreamClient } from './stream-client.js'
 import { SSEParser } from './sse.js'
 import { withStructuredRetry } from './retry-engine.js'
 import { stableStringify } from './stable-json.js'
+import { canonicalizeRequest } from './request-freezer.js'
+import type { ProviderProfile } from './provider-profile.js'
 
 class ApiError extends Error {
   constructor(
@@ -28,6 +30,8 @@ export interface ClientConfig {
   hasToolJsonInContentBug: boolean
   /** Optional function to normalize usage fields from provider-specific format to standard Usage */
   mapUsage?: (raw: Record<string, unknown>) => Partial<Usage>
+  /** Provider profile for cache strategy application */
+  providerProfile?: ProviderProfile
 }
 
 export interface StreamCallbacks {
@@ -168,7 +172,20 @@ export class ApiClient implements StreamClient {
       }
     }
 
-    const finalRequest = this.stripUnsupported({ ...request, stream: true })
+    // Canonicalize request: deep strip + cache strategy for prefix stability
+    const canonicalReq = this.config.providerProfile
+      ? canonicalizeRequest({ ...request, stream: true }, this.config.providerProfile, this.config.unsupported)
+      : this.stripUnsupported({ ...request, stream: true })
+
+    // Apply thinking/reasoning (provider-specific, not part of canonical prefix)
+    const finalRequest = canonicalReq
+    if (this.config.thinking === 'enabled') {
+      const fr = finalRequest as unknown as Record<string, unknown>
+      fr['thinking'] = { type: 'enabled', budget_tokens: this.config.thinkingBudget ?? 16000 }
+      if (this.config.reasoningEffort) {
+        fr['reasoning_effort'] = this.config.reasoningEffort
+      }
+    }
 
     const response = await withStructuredRetry(
       () => fetch(`${this.config.baseUrl}/messages`, {
