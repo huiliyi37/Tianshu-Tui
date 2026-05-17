@@ -44,7 +44,7 @@ describe('Config schema integration', () => {
     assert.equal(config.workers.profiles.capable.provider, 'codex')
     assert.equal(config.workers.profiles.capable.model, 'gpt-5.5')
     assert.equal(config.workers.routing.code_edit, 'capable')
-    assert.equal(config.workers.routing.compaction, 'cheap')
+    assert.equal(config.workers.routing.compaction, undefined) // compaction is main agent's own concern
   })
 
   it('resolveApiKey works for minimax with apiKeyEnv', () => {

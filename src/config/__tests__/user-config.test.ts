@@ -39,7 +39,7 @@ describe('User config validation', () => {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'))
     assert.equal(config.workers.routing.code_edit, 'capable')
     assert.equal(config.workers.routing.repo_summarization, 'cheap')
-    assert.equal(config.workers.routing.compaction, 'cheap')
+    assert.equal(config.workers.routing.compaction, undefined) // compaction is main agent's own concern
     assert.equal(config.workers.profiles.capable.provider, 'codex')
     assert.equal(config.workers.profiles.cheap.provider, 'minimax')
   })
