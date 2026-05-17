@@ -219,6 +219,36 @@ export class CodexClient implements StreamClient {
     // Track function calls by index
     const functionCalls = new Map<number, { id: string; name: string; arguments: string }>()
 
+    // Reasoning-before-text ordering buffer.
+    // DeepSeek Codex API may emit output_item.done (message) before
+    // output_item.done (reasoning). Without buffering, the TUI shows
+    // text first, then reasoning "flashes" in after — breaking the
+    // expected thinking→answer order. We buffer the message item
+    // until either a reasoning item arrives or the stream ends.
+    let pendingMessageItem: {
+      texts: string[]
+      blocks: ContentBlock[]
+      msgUsage?: Record<string, unknown>
+    } | null = null
+    let seenReasoningItem = false
+
+    const flushPendingMessage = () => {
+      if (!pendingMessageItem) return
+      for (const t of pendingMessageItem.texts) {
+        callbacks.onTextDelta(t)
+      }
+      for (const b of pendingMessageItem.blocks) {
+        callbacks.onContentBlock(b)
+      }
+      if (pendingMessageItem.msgUsage) {
+        usage = {
+          input_tokens: pendingMessageItem.msgUsage.input_tokens as number,
+          output_tokens: pendingMessageItem.msgUsage.output_tokens as number,
+        }
+      }
+      pendingMessageItem = null
+    }
+
     // SSE idle timeout — same pattern as ApiClient and OpenAIClient
     const READ_TIMEOUT_MS = 180_000
     let streamTimedOut = false
@@ -273,6 +303,7 @@ export class CodexClient implements StreamClient {
 
             case 'response.reasoning_text.delta':
             case 'response.reasoning_summary_text.delta': {
+              seenReasoningItem = true
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
                 : (parsed.delta as Record<string, unknown>)?.text as string | undefined
@@ -292,7 +323,9 @@ export class CodexClient implements StreamClient {
                   callbacks.onContentBlock({ type: 'tool_use', id: callId, name, input })
                 } catch {}
               } else if (item?.type === 'reasoning') {
-                // Reasoning item — emit BEFORE text so TUI captures thinking first
+                // Reasoning item — emit BEFORE text so TUI captures thinking first.
+                // The summary array contains sanitized reasoning content.
+                seenReasoningItem = true
                 const summary = item.summary as Array<Record<string, unknown>> | undefined
                 if (summary) {
                   for (const s of summary) {
@@ -301,23 +334,42 @@ export class CodexClient implements StreamClient {
                     }
                   }
                 }
+                // Flush any buffered message that arrived before reasoning
+                flushPendingMessage()
               } else if (item?.type === 'message') {
-                // Text message — extract content
+                // Text message — buffer if reasoning hasn't arrived yet,
+                // otherwise emit immediately.
                 const content = item.content as Array<Record<string, unknown>> | undefined
-                if (content) {
-                  for (const part of content) {
-                    if (part.type === 'output_text' && typeof part.text === 'string') {
-                      callbacks.onTextDelta(part.text)
-                      callbacks.onContentBlock({ type: 'text', text: part.text })
+                const msgUsage = item.usage as Record<string, unknown> | undefined
+
+                if (!seenReasoningItem) {
+                  // Buffer: reasoning hasn't arrived, hold this message
+                  const texts: string[] = []
+                  const blocks: ContentBlock[] = []
+                  if (content) {
+                    for (const part of content) {
+                      if (part.type === 'output_text' && typeof part.text === 'string') {
+                        texts.push(part.text)
+                        blocks.push({ type: 'text', text: part.text })
+                      }
                     }
                   }
-                }
-                // Usage
-                const msgUsage = item.usage as Record<string, unknown> | undefined
-                if (msgUsage) {
-                  usage = {
-                    input_tokens: msgUsage.input_tokens as number,
-                    output_tokens: msgUsage.output_tokens as number,
+                  pendingMessageItem = { texts, blocks, msgUsage }
+                } else {
+                  // Emit immediately: reasoning already seen
+                  if (content) {
+                    for (const part of content) {
+                      if (part.type === 'output_text' && typeof part.text === 'string') {
+                        callbacks.onTextDelta(part.text)
+                        callbacks.onContentBlock({ type: 'text', text: part.text })
+                      }
+                    }
+                  }
+                  if (msgUsage) {
+                    usage = {
+                      input_tokens: msgUsage.input_tokens as number,
+                      output_tokens: msgUsage.output_tokens as number,
+                    }
                   }
                 }
               }
@@ -355,6 +407,9 @@ export class CodexClient implements StreamClient {
       if (idleTimer) clearTimeout(idleTimer)
       reader.releaseLock()
     }
+
+    // Flush any buffered message that arrived before reasoning (e.g. no-reasoning responses)
+    flushPendingMessage()
 
     callbacks.onStopReason(stopReason ?? 'stop', {
       input_tokens: usage?.input_tokens ?? 0,
