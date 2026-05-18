@@ -96,9 +96,10 @@ export class SessionPersist {
     }
   }
 
-  /** Compact the session file with the given messages */
+  /** Compact the session file with the given messages (with checksums) */
   compact(messages: Message[]): void {
-    writeFileAtomicSync(this.filePath, messages.map(m => JSON.stringify(m)).join('\n') + '\n')
+    const content = messages.map(m => appendChecksum(JSON.stringify(m))).join('\n') + '\n'
+    writeFileAtomicSync(this.filePath, content)
   }
 
   /** Delete the session file */
