@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
+    "types": ["node"],
     "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
