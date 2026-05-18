@@ -36,7 +36,7 @@ Rivet 在长会话中存在两类系统性故障：
 用户发起复杂任务
   → 模型执行 20+ 轮 tool calls
     → volatile context × 20 = 20K token 纯重复
-    → thinking blocks × 20 = 200K-400K token 不可压缩
+    → thinking blocks × 20 = 200K-400K token 不可压缩  ← ✅ 已修复 (5ed2c9d): 截断到 500 chars/条
     → tool results 累积 = 200K+ token
       → 到达 800K 触发 smart compact
         → compact 模型收到 24K chars 摘要输入（含 thinking 噪声）
@@ -73,14 +73,15 @@ Rivet 在长会话中存在两类系统性故障：
 
 **位置**: `src/compact/micro.ts`
 
-**策略**: micro-compact 时截断历史 turns 中的 thinking blocks。
+**状态**: ✅ 已实现 — commit `5ed2c9d` on `feat/tui-2.4-structural-maturity`
 
-- 当前 turn（最后一条 assistant message）的 thinking 保持完整
-- 历史 turns 的 thinking blocks：
-  - Tier 1 (60%): 截断到 500 chars（保留开头结论）
-  - Tier 2 (78%): 截断到 200 chars
-  - Tier 3 (88%): 完全移除
-- Smart compact 的 summary prompt 构建时，先 strip 所有 thinking blocks 再采样
+**已实现方案**: 在 `microCompact()` Tier 1 中增加 `compactThinkingBlock()`：
+- 历史（非近期、非 anchor）assistant 消息中的 thinking blocks 截断到 500 chars
+- 近期消息（最后 KEEP_RECENT_MESSAGES=4）保持完整
+- 短 thinking（≤500 chars）不处理
+- 不需要新的 LLM 调用，不影响 prefix cache
+
+**效果**: 20 轮会话中 thinking blocks 从 ~360K tokens 降至 ~9K tokens。
 
 ### 模块 3：Compaction 阈值前移
 

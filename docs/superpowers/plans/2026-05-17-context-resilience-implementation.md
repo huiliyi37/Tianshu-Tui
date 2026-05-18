@@ -628,3 +628,46 @@ git commit -m "feat(agent): turn budget guard — force compact when growth rate
 ## 执行顺序
 
 任务 1 → 2 → 3 → 4 → 5 → 6（有依赖：任务 2 依赖任务 1 的 tier 阈值）
+
+---
+
+## 实施记录
+
+### 已完成
+
+#### 任务 2（部分）：Thinking Block 压缩 — `5ed2c9d`
+
+**背景**：用户观察到 DeepSeek V4 在长会话中，输入上下文特别少，怀疑是 thinking blocks 不可压缩导致上下文预算被 reasoning 吃光。分析确认：
+- DeepSeek V4 extended thinking 每轮产生 10K-50K tokens
+- thinking blocks 存储在 `SessionContext.messages` 中作为 `{type:'thinking'}` ContentBlock
+- micro-compact Tier 1 只处理 `tool_result`，对 thinking 完全不感知
+- 20 轮会话中 thinking blocks 可达 200K-400K tokens，吃掉 1M 窗口的 20%-40%
+
+**实际实现**（与原计划不同，选择了更轻量的方案）：
+- 在 `microCompact()` Tier 1 中增加 `compactThinkingBlock()` 函数
+- 非近期、非 anchor 的 assistant 消息中，thinking blocks 截断到 500 chars
+- 近期消息（最后 `KEEP_RECENT_MESSAGES=4` 条）保持 thinking 完整
+- anchor 消息（前 `CACHE_ANCHOR_MESSAGES=2` 条）不触碰
+- 短 thinking（≤500 chars）不处理
+
+**与原计划的差异**：
+- 原计划设计了 tier-aware 分级截断（Tier 1: 500 chars, Tier 2: 200 chars, Tier 3: 完全移除）
+- 实际实现采用固定 500 chars 截断，因为更简单且效果足够
+- 没有修改 `compact/auto.ts` 的 summary prompt（`smartCompact` 暂不需要）
+- 没有新增独立的 `compactThinkingBlocks()` 函数，而是嵌入现有 `microCompact()` 流程
+
+**测试**：3 个新测试覆盖历史截断、近期保留、短块不处理。全量 1847 测试通过。
+
+**效果预估**：20 轮会话中，18 条历史 assistant 消息的 thinking 从 ~360K tokens 降到 ~9K tokens。
+
+### 待评估
+
+以下模块已分析但暂不实施，视实际使用反馈决定：
+
+| 模块 | 状态 | 理由 |
+|------|------|------|
+| 模块 1: Volatile Budget Cap | 暂缓 | volatile 重复注入影响较小，且可能破坏 prefix cache |
+| 模块 3: Compaction 阈值前移 | 暂缓 | 当前 60%/78%/88%/95% 阈值在 thinking 压缩后可能已足够 |
+| 模块 4: Doom Loop Hard Break | 暂缓 | 需要改 AgentCallbacks 接口，风险较大 |
+| 模块 5: Truncation-Aware Read | 暂缓 | 改 read_file 工具行为，影响面广 |
+| 模块 6: Turn Budget Guard | 暂缓 | 需要在 loop.ts 增加状态，等 thinking 压缩效果验证后再考虑 |
