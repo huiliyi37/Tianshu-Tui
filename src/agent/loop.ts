@@ -1,4 +1,3 @@
-import type { StreamCallbacks } from '../api/client.js'
 import type { StreamClient } from '../api/stream-client.js'
 import type { ContentBlock, Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
@@ -33,7 +32,6 @@ import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import { processTurnEnd } from './turn-end.js'
 import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, resetAccumulator, adjustReasoningEffort } from './prediction-error.js'
 import type { PredictionAccumulator } from './prediction-error.js'
-import { stripIntraTurnRepetition } from './dedup.js'
 import type { Sensorium } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
 import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
@@ -46,6 +44,7 @@ import { TurnPerceptionController } from './turn-perception.js'
 import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
+import { TurnStreamController } from './turn-stream.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
@@ -120,15 +119,6 @@ export interface AgentCallbacks {
   onSteerDrain?: () => string | null
 }
 
-function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id: string; name: string } {
-  return b.type === 'tool_use'
-}
-
-
-function displayTextFingerprint(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
-}
-
 export class AgentLoop {
   private abortController: AbortController | null = null
   private cwd: string
@@ -164,6 +154,7 @@ export class AgentLoop {
   private intent: TurnIntentController
   private contextInjection: ContextInjectionController
   private compaction: CompactionController
+  private turnStream: TurnStreamController | null = null
   private thetaCheckInFlight = false
   private thetaTelemetry: { lastReason: string | null; lastDurationMs: number | null; lastErrorCount: number; lastTimedOut: boolean; requestedCount: number } = {
     lastReason: null,
@@ -257,6 +248,21 @@ export class AgentLoop {
       getTrajectoryEntries: () => this.trajectory.getEntries(),
       getStreamedText: () => this.streamedText,
       refreshLedger: () => { this.contextInjection.refreshLedger() },
+    })
+    this.turnStream = this.createTurnStreamController()
+  }
+
+  private createTurnStreamController(): TurnStreamController {
+    return new TurnStreamController({
+      client: this.config.client,
+      abortSignal: this.abortController?.signal ?? new AbortController().signal,
+      getStreamedTextLength: () => this.streamedText.length,
+      appendStreamedText: text => { this.streamedText += text },
+      getLastPrewarmAt: () => this.lastPrewarmAt,
+      setLastPrewarmAt: position => { this.lastPrewarmAt = position },
+      maybePrewarm: text => { this.maybePrewarm(text) },
+      addUsage: usage => { this.session.addUsage(usage) },
+      recordTurnCache: (turn, usage) => { this.session.recordTurnCache(turn, usage) },
     })
   }
 
@@ -461,6 +467,7 @@ export class AgentLoop {
 
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
+    this.turnStream = this.createTurnStreamController()
     this.trajectory.reset()
     this.decisions = []
     this.traceStore = createTraceStore()
@@ -573,66 +580,19 @@ export class AgentLoop {
         this.compaction.enforceContextCeiling()
         this.contextInjection.refreshActiveClaims()
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
-        const collectedBlocks: ContentBlock[] = []
-        let thinkingAccum = ''
-        let toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
-        let stopReason = ''
-        let turnDisplayBuffer = ''
-        const streamCallbacks: StreamCallbacks = {
-          onTextDelta: (text) => {
-            this.streamedText += text
-            if (this.streamedText.length - this.lastPrewarmAt >= 500) {
-              this.lastPrewarmAt = this.streamedText.length
-              this.maybePrewarm(this.streamedText)
-            }
-            turnDisplayBuffer += text
+        const streamResult = await this.turnStream!.streamTurn({
+          request,
+          turn,
+          lastTurnTextFingerprint: this.lastTurnTextFingerprint,
+          callbacks: {
+            onTextDelta: callbacks.onTextDelta,
+            onThinkingDelta: callbacks.onThinkingDelta,
+            onToolUse: callbacks.onToolUse,
+            onError: callbacks.onError,
           },
-          onThinkingDelta: (thinking) => {
-            thinkingAccum += thinking
-            callbacks.onThinkingDelta(thinking)
-          },
-          onContentBlock: (block) => {
-            collectedBlocks.push(block)
-            if (isToolUse(block)) {
-              toolUses.push({ id: block.id, name: block.name, input: block.input })
-              callbacks.onToolUse(block.id, block.name, block.input)
-            }
-          },
-          onStopReason: (reason, usage) => {
-            stopReason = reason
-            this.session.addUsage(usage)
-            if (usage.cache_read_input_tokens !== undefined || usage.cache_creation_input_tokens !== undefined) {
-              this.session.recordTurnCache(turn, {
-                input_tokens: usage.input_tokens ?? 0,
-                output_tokens: usage.output_tokens ?? 0,
-                cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
-                cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
-              })
-            }
-          },
-          onError: (error) => {
-            callbacks.onError(error)
-          },
-        }
-
-        let streamError: Error | null = null
-        try {
-          await this.config.client.stream(request, streamCallbacks, this.abortController.signal)
-        } catch (err) {
-          // On stream error, estimate usage from collected content before propagating
-          const estimatedOut = this.streamedText.length + collectedBlocks.reduce((s, b) => s + (b.type === 'text' ? (b as { text: string }).text.length : 0), 0)
-          if (estimatedOut > 0) {
-            this.session.addUsage({ output_tokens: Math.ceil(estimatedOut / 4) })
-          }
-          streamError = err as Error
-        }
-
-        const dedupedBuffer = stripIntraTurnRepetition(turnDisplayBuffer)
-        const displayFingerprint = displayTextFingerprint(dedupedBuffer)
-        if (dedupedBuffer && displayFingerprint !== this.lastTurnTextFingerprint) {
-          callbacks.onTextDelta(dedupedBuffer)
-        }
-        this.lastTurnTextFingerprint = displayFingerprint
+        })
+        const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
+        this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
 
         if (this.abortController.signal.aborted) {
           // Estimate output usage from what was streamed before abort
