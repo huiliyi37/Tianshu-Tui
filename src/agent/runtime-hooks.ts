@@ -21,6 +21,12 @@ export interface RuntimeHookSnapshot {
   gitChangeRate: number
 }
 
+export interface RuntimePhaseChangeDetail {
+  tool?: string
+  reason?: string
+  suggestion?: string
+}
+
 export interface RuntimeHookEffects {
   setSensorium(sensorium: Sensorium): void
   setStrategy(strategy: StrategyProfile): void
@@ -28,6 +34,7 @@ export interface RuntimeHookEffects {
   setGitChangeRate(rate: number): void
   injectUserMessage(message: string): void
   requestThetaCheck(reason: string): void
+  emitPhaseChange(phase: string, detail?: RuntimePhaseChangeDetail): void
 }
 
 export interface RuntimeHookContext {
@@ -95,6 +102,7 @@ export function createRuntimeHookContext(
       setGitChangeRate: effects.setGitChangeRate ?? noop,
       injectUserMessage: effects.injectUserMessage ?? noop,
       requestThetaCheck: effects.requestThetaCheck ?? noop,
+      emitPhaseChange: effects.emitPhaseChange ?? noop,
     },
   }
 }

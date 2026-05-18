@@ -120,6 +120,7 @@ describe('RuntimeHookPipeline', () => {
   it('exposes typed effects for controlled hook-to-loop communication', async () => {
     const messages: string[] = []
     const thetaRequests: string[] = []
+    const phases: Array<{ phase: string; detail?: { tool?: string; reason?: string; suggestion?: string } }> = []
     const ctx = createRuntimeHookContext({
       cwd: '/tmp/project',
       turn: 1,
@@ -131,6 +132,7 @@ describe('RuntimeHookPipeline', () => {
     }, {
       injectUserMessage: message => { messages.push(message) },
       requestThetaCheck: reason => { thetaRequests.push(reason) },
+      emitPhaseChange: (phase, detail) => { phases.push({ phase, detail }) },
     })
     const hook: PreTurnRuntimeHook = {
       phase: 'preTurn',
@@ -138,6 +140,7 @@ describe('RuntimeHookPipeline', () => {
       run: async (runtime) => {
         runtime.effects.injectUserMessage('hello')
         runtime.effects.requestThetaCheck('elm')
+        runtime.effects.emitPhaseChange('tianshu-encore', { reason: 'kick' })
       },
     }
     const pipeline = new RuntimeHookPipeline([hook])
@@ -146,5 +149,6 @@ describe('RuntimeHookPipeline', () => {
 
     assert.deepEqual(messages, ['hello'])
     assert.deepEqual(thetaRequests, ['elm'])
+    assert.deepEqual(phases, [{ phase: 'tianshu-encore', detail: { reason: 'kick' } }])
   })
 })

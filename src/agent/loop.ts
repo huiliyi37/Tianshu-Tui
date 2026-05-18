@@ -49,7 +49,6 @@ import type { StrategyProfile } from './sensorium.js'
 import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
 import { mapSensoriumToPhase, createStarEvent, createThetaState } from './star-event.js'
 import type { StarEvent, ThetaState } from './star-event.js'
-import { shouldKick, buildKickActions, shouldEscalateFromKick } from './dissipative-kick.js'
 import { runThetaCheck } from './theta-check.js'
 import { RuntimeHookPipeline, createRuntimeHookContext } from './runtime-hooks.js'
 import { createVigorState, detectRigidity } from './vigor.js'
@@ -57,6 +56,7 @@ import type { VigorState } from './vigor.js'
 import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
 import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
+import { createKickRuntimeHook } from './hooks/kick-hook.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -191,6 +191,9 @@ export class AgentLoop {
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
     this.runtimeHooks = new RuntimeHookPipeline([
+      createKickRuntimeHook({
+        deposit: deposit => this.stigmergyStore.deposit(deposit),
+      }),
       createVigorAfterPerceptionHook(),
       createThetaRuntimeHook({
         getThetaState: () => this.thetaState,
@@ -609,6 +612,19 @@ export class AgentLoop {
 
         this.strategy = computeStrategy(this.sensorium)
 
+        await this.runtimeHooks.runPreTurn(createRuntimeHookContext({
+          cwd: this.cwd,
+          turn: this.session.getTurnCount(),
+          recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
+          sensorium: this.sensorium,
+          strategy: this.strategy,
+          vigor: this.vigorState,
+          gitChangeRate: this.gitChangeRate,
+        }, {
+          injectUserMessage: message => { this.session.addUserMessage(message) },
+          emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
+        }))
+
         await this.runtimeHooks.runAfterPerception(createRuntimeHookContext({
           cwd: this.cwd,
           turn: this.session.getTurnCount(),
@@ -701,31 +717,6 @@ export class AgentLoop {
             .catch(() => {})
         )
 
-        // Dissipative kick — stagnation breakthrough
-        if (shouldKick(this.sensorium)) {
-          const recentFailed = this.recentToolHistory
-            .filter(h => h.status === 'failed')
-            .map(h => h.target)
-            .filter(Boolean)
-          const kickActions = buildKickActions(this.sensorium, this.cwd, recentFailed)
-
-          for (const path of kickActions.deadEndPaths) {
-            this.stigmergyStore.deposit({ path, signal: 'dead-end', strength: 0.9 }).catch(() => {})
-          }
-
-          const fullMessage = kickActions.alternativeFrameworks.length > 0
-            ? `${kickActions.injectedMessage}\n\n**替代框架：**\n${kickActions.alternativeFrameworks.map(f => `- ${f}`).join('\n')}`
-            : kickActions.injectedMessage
-          if (fullMessage) {
-            this.session.addUserMessage(fullMessage)
-          }
-          if (shouldEscalateFromKick(this.sensorium) && callbacks.onPhaseChange) {
-            callbacks.onPhaseChange('tianshu-encore', {
-              reason: 'Dissipative kick: stagnation detected',
-              suggestion: 'Escalate to stronger model or reframe the problem',
-            })
-          }
-        }
 
         // Pass 5: adaptive repair hint injection
         const repairHint = this.repairHintTracker.getHint()
