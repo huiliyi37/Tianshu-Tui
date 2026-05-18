@@ -3,7 +3,8 @@
 **Status:** 全部完成 ✅  
 **Design:** `docs/superpowers/specs/2026-05-16-rivet-subagent-orchestration-design.md`  
 **Wiring:** `docs/superpowers/specs/2026-05-16-rivet-wave7-subagent-wiring-design.md`  
-**Commits:** `afab63b` + `17d57ce`
+**Closure:** `docs/superpowers/status/2026-05-19-wave7-closure.md`  
+**Commits:** `afab63b` + `17d57ce` + `3336297`
 
 ---
 

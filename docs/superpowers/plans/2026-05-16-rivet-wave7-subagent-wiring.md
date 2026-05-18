@@ -1,6 +1,6 @@
 # Wave 7: Sub-Agent 接线增强 实施计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [x]`）语法来跟踪进度。
 
 **目标：** 把 coordinator 从 demo 级提升到生产级——暴露全部 worker 类型、启用写入工具、claim 回流、并行 delegation、失败升级。
 
@@ -39,7 +39,11 @@
 - 修改：`src/tools/delegate-task.ts`
 - 测试：`src/__tests__/delegate-task.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
+- [x] **步骤 2：运行测试确认失败**
+- [x] **步骤 3：修改 delegate-task.ts**
+- [x] **步骤 4：运行测试确认通过**
+- [x] **步骤 5：Commit** `feat(subagent): wire delegate_task concurrency, model routing, and system prompt delegation section`
 
 ```typescript
 // src/__tests__/delegate-task.test.ts
@@ -89,12 +93,12 @@ describe('delegate_task tool', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`npm test -- src/__tests__/delegate-task.test.ts`
 预期：FAIL（kind/profile 不从 input 读取）
 
-- [ ] **步骤 3：修改 delegate-task.ts**
+- [x] **步骤 3：修改 delegate-task.ts**
 
 ```typescript
 // src/tools/delegate-task.ts — 修改 input schema 和 execute
@@ -138,12 +142,12 @@ description: 'Delegate a bounded task to a worker agent. Supports code search, r
 
 设置 `isConcurrencySafe: () => true`。
 
-- [ ] **步骤 4：运行测试确认通过**
+- [x] **步骤 4：运行测试确认通过**
 
 运行：`npm test -- src/__tests__/delegate-task.test.ts`
 预期：PASS
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/tools/delegate-task.ts src/__tests__/delegate-task.test.ts
@@ -157,7 +161,7 @@ git commit -m "feat(delegate): expose kind/profile params + enable concurrency"
 **文件：**
 - 修改：`src/agent/coordinator.ts`
 
-- [ ] **步骤 1：导入 WRITE_WORKER_TOOLS**
+- [x] **步骤 1：导入 WRITE_WORKER_TOOLS**
 
 ```typescript
 import {
@@ -169,7 +173,7 @@ import {
 } from './work-order.js'
 ```
 
-- [ ] **步骤 2：按 profile 选择工具集**
+- [x] **步骤 2：按 profile 选择工具集**
 
 在 `delegate()` 方法中，替换硬编码的 `READ_ONLY_WORKER_TOOLS`：
 
@@ -179,7 +183,7 @@ const toolSet = writeProfiles.includes(request.profile) ? WRITE_WORKER_TOOLS : R
 const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, toolSet)
 ```
 
-- [ ] **步骤 3：接线 shouldEscalate**
+- [x] **步骤 3：接线 shouldEscalate**
 
 在 `delegate()` 中，worker 完成后检查升级：
 
@@ -198,12 +202,12 @@ if (this.state.shouldEscalate()) {
 }
 ```
 
-- [ ] **步骤 4：运行测试**
+- [x] **步骤 4：运行测试**
 
 运行：`npm test`
 预期：全部通过
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/coordinator.ts
@@ -218,7 +222,7 @@ git commit -m "feat(coordinator): profile-based tool selection + failure escalat
 - 修改：`src/tools/delegate-task.ts`
 - 测试：追加到 `src/__tests__/delegate-task.test.ts`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 ```typescript
 // 追加到 src/__tests__/delegate-task.test.ts
@@ -269,12 +273,12 @@ it('extracts worker findings into claim store', async () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`npm test -- src/__tests__/delegate-task.test.ts`
 预期：FAIL（createDelegateTaskTool 签名不接受 claimStore）
 
-- [ ] **步骤 3：修改 createDelegateTaskTool 签名**
+- [x] **步骤 3：修改 createDelegateTaskTool 签名**
 
 ```typescript
 // src/tools/delegate-task.ts
@@ -320,7 +324,7 @@ export function createDelegateTaskTool(
 }
 ```
 
-- [ ] **步骤 4：更新 main.tsx 中的 createDelegateTaskTool 调用**
+- [x] **步骤 4：更新 main.tsx 中的 createDelegateTaskTool 调用**
 
 ```typescript
 // src/main.tsx — 在 toolRegistry 初始化中
@@ -358,17 +362,17 @@ export function createDelegateTaskTool(
 ): Tool
 ```
 
-- [ ] **步骤 5：运行测试确认通过**
+- [x] **步骤 5：运行测试确认通过**
 
 运行：`npm test -- src/__tests__/delegate-task.test.ts`
 预期：PASS
 
-- [ ] **步骤 6：运行全量测试**
+- [x] **步骤 6：运行全量测试**
 
 运行：`npm test`
 预期：全部通过
 
-- [ ] **步骤 7：Commit**
+- [x] **步骤 7：Commit**
 
 ```bash
 git add src/tools/delegate-task.ts src/__tests__/delegate-task.test.ts src/main.tsx
@@ -383,7 +387,7 @@ git commit -m "feat(delegate): extract worker findings into claim store"
 - 修改：`src/agent/worker-session.ts`
 - 修改：`src/main.tsx`（runtimeFactory）
 
-- [ ] **步骤 1：扩展 WorkerSessionConfig**
+- [x] **步骤 1：扩展 WorkerSessionConfig**
 
 ```typescript
 // src/agent/worker-session.ts — 在 WorkerSessionConfig 中增加
@@ -393,7 +397,7 @@ export interface WorkerSessionConfig {
 }
 ```
 
-- [ ] **步骤 2：在 runWorkerSession 中注入 claims**
+- [x] **步骤 2：在 runWorkerSession 中注入 claims**
 
 ```typescript
 // src/agent/worker-session.ts — 在 agent 创建后
@@ -402,7 +406,7 @@ if (config.activeClaims && config.activeClaims.length > 0) {
 }
 ```
 
-- [ ] **步骤 3：在 runtimeFactory 中传入 active claims**
+- [x] **步骤 3：在 runtimeFactory 中传入 active claims**
 
 ```typescript
 // src/main.tsx — runtimeFactory 修改
@@ -412,12 +416,12 @@ const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => (
 })
 ```
 
-- [ ] **步骤 4：运行测试**
+- [x] **步骤 4：运行测试**
 
 运行：`npm test`
 预期：全部通过
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/agent/worker-session.ts src/main.tsx
@@ -431,7 +435,7 @@ git commit -m "feat(worker): inherit parent active claims as read-only context"
 **文件：**
 - 修改：`src/main.tsx`（goal loop 的 createAgent）
 
-- [ ] **步骤 1：在 goal loop createAgent 中注册 delegate_task**
+- [x] **步骤 1：在 goal loop createAgent 中注册 delegate_task**
 
 ```typescript
 // src/main.tsx — goal loop 的 createAgent 内
@@ -462,17 +466,17 @@ toolRegistry.register(createDelegateTaskTool(
 ))
 ```
 
-- [ ] **步骤 2：运行 typecheck**
+- [x] **步骤 2：运行 typecheck**
 
 运行：`npx tsc --noEmit`
 预期：无新错误
 
-- [ ] **步骤 3：运行测试**
+- [x] **步骤 3：运行测试**
 
 运行：`npm test`
 预期：全部通过
 
-- [ ] **步骤 4：Commit**
+- [x] **步骤 4：Commit**
 
 ```bash
 git add src/main.tsx
@@ -488,7 +492,7 @@ git commit -m "feat(goal): inject coordinator + delegate_task into goal loop"
 - 创建：`src/__tests__/delegate-batch.test.ts`
 - 修改：`src/main.tsx`（注册）
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 ```typescript
 // src/__tests__/delegate-batch.test.ts
@@ -540,12 +544,12 @@ describe('delegate_batch tool', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`npm test -- src/__tests__/delegate-batch.test.ts`
 预期：FAIL（模块不存在）
 
-- [ ] **步骤 3：实现 delegate-batch.ts**
+- [x] **步骤 3：实现 delegate-batch.ts**
 
 ```typescript
 // src/tools/delegate-batch.ts
@@ -626,7 +630,7 @@ export function createDelegateBatchTool(coordinator: DelegateBatchCoordinator): 
 }
 ```
 
-- [ ] **步骤 4：注册到 main.tsx**
+- [x] **步骤 4：注册到 main.tsx**
 
 ```typescript
 // src/main.tsx — 在 toolRegistry 初始化中，delegate_task 注册之后
@@ -640,12 +644,12 @@ reg.register(createDelegateBatchTool({
 }))
 ```
 
-- [ ] **步骤 5：运行测试确认通过**
+- [x] **步骤 5：运行测试确认通过**
 
 运行：`npm test`
 预期：全部通过
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
 git add src/tools/delegate-batch.ts src/__tests__/delegate-batch.test.ts src/main.tsx
@@ -659,7 +663,7 @@ git commit -m "feat(delegate): delegate_batch tool for parallel worker execution
 **文件：**
 - 修改：`src/main.tsx`
 
-- [ ] **步骤 1：maxWorkers 从 2 提升到 3**
+- [x] **步骤 1：maxWorkers 从 2 提升到 3**
 
 ```typescript
 // src/main.tsx — DelegationCoordinator 配置
@@ -671,7 +675,7 @@ _coordinatorRef = new DelegationCoordinator({
 })
 ```
 
-- [ ] **步骤 2：runtimeFactory 按 profile 调整 maxTurns**
+- [x] **步骤 2：runtimeFactory 按 profile 调整 maxTurns**
 
 ```typescript
 const runtimeFactory: WorkerRuntimeFactory = (order, card, workerRegistry) => {
@@ -702,12 +706,12 @@ const runtimeFactory: WorkerRuntimeFactory = (order, card, workerRegistry) => {
 }
 ```
 
-- [ ] **步骤 3：运行 typecheck + test**
+- [x] **步骤 3：运行 typecheck + test**
 
 运行：`npx tsc --noEmit && npm test`
 预期：无错误，全部通过
 
-- [ ] **步骤 4：Commit**
+- [x] **步骤 4：Commit**
 
 ```bash
 git add src/main.tsx
