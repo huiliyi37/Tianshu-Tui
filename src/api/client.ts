@@ -176,8 +176,12 @@ export class ApiClient implements StreamClient {
     signal?: AbortSignal,
   ): Promise<void> {
     const toolSchemas = new Map<string, string[]>()
-    if (request.tools) {
-      for (const tool of request.tools) {
+    // Filter out provider-native tools (e.g. GLM web_search) — they have no
+    // valid input_schema for Anthropic/OpenAI format and cause 400 errors.
+    // Only GLM's native API understands the { type: 'web_search' } shape.
+    const filteredTools = request.tools?.filter(t => !t.providerFormat)
+    if (filteredTools) {
+      for (const tool of filteredTools) {
         toolSchemas.set(tool.name, tool.input_schema?.required ?? [])
       }
     }
