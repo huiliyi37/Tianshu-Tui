@@ -232,8 +232,10 @@ export class OpenAIClient implements StreamClient {
         if (textParts.length > 0) {
           assistant.content = textParts.join('')
         }
-        // DeepSeek requires reasoning_content to be passed back in tool-call rounds
-        if (thinkingParts.length > 0) {
+        // DeepSeek requires reasoning_content to be passed back in tool-call rounds.
+        // GLM with clear_thinking=true (default): API ignores reasoning_content in
+        // history anyway, so skip it to save context window space (200K).
+        if (thinkingParts.length > 0 && this.config.providerName !== 'glm') {
           assistant.reasoning_content = thinkingParts.join('')
         }
         if (toolCalls.length > 0) {
@@ -279,7 +281,10 @@ export class OpenAIClient implements StreamClient {
     if (this.config.thinking) {
       body.thinking = { type: this.config.thinking }
       if (this.config.providerName === 'glm') {
-        ;(body.thinking as Record<string, unknown>)['clear_thinking'] = false
+        // GLM clear_thinking=true (default): API strips reasoning_content from
+        // history automatically. This saves context window for the 200K GLM limit.
+        // Set to true since we don't pass reasoning_content back anyway.
+        ;(body.thinking as Record<string, unknown>)['clear_thinking'] = true
       }
       // Claude via proxy: budget_tokens controls thinking depth.
       // When reasoning_effort is 'max', set budget_tokens to the max output budget.
