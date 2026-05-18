@@ -144,6 +144,16 @@ export class ApiClient implements StreamClient {
 
   setReasoningEffort(effort: string): void {
     this.config.reasoningEffort = effort
+    if (this.config.thinking === 'enabled') {
+      const budgetMap: Record<string, number> = {
+        max: this.config.maxTokens,
+        high: Math.floor(this.config.maxTokens * 0.6),
+        medium: Math.floor(this.config.maxTokens * 0.3),
+        low: 8192,
+        off: 0,
+      }
+      this.config.thinkingBudget = budgetMap[effort] ?? Math.floor(this.config.maxTokens * 0.6)
+    }
   }
 
   private stripUnsupported(request: MessageRequest): MessageRequest {
