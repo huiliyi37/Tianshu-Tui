@@ -56,6 +56,7 @@ import { createVigorState, detectRigidity } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
 import { createThetaRuntimeHook } from './hooks/theta-hook.js'
+import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -194,6 +195,12 @@ export class AgentLoop {
       createThetaRuntimeHook({
         getThetaState: () => this.thetaState,
         setThetaState: state => { this.thetaState = state },
+      }),
+      createStigmergyRuntimeHook({
+        deposit: deposit => this.stigmergyStore.deposit(deposit),
+        query: () => this.stigmergyStore.query(),
+        getEvidenceState: () => this.evidence.getState(),
+        setLoadedPheromones: pheromones => { this.loadedPheromones = mapQueriedPheromones(pheromones) },
       }),
       createVigorPostToolHook({
         getPredictionAccumulator: () => this.predictionAccumulator,
@@ -907,46 +914,6 @@ export class AgentLoop {
             })
           }
 
-          // Auto-deposit pheromones from tool execution patterns
-          const evidenceState = this.evidence.getState()
-          for (const tu of toolUses) {
-            if (tu.name === 'read_file') {
-              const path = typeof tu.input?.file_path === 'string' ? tu.input.file_path : ''
-              if (!path) continue
-              const readCount = this.recentToolHistory.filter(
-                h => h.tool === 'read_file' && h.target === path
-              ).length
-              if (readCount >= 3 && !this.recentToolHistory.some(
-                h => (h.tool === 'write_file' || h.tool === 'edit_file') && h.target === path
-              )) {
-                this.stigmergyStore.deposit({ path, signal: 'entry-point', strength: 0.4 }).catch(() => {})
-              }
-            }
-            if (tu.name === 'write_file' || tu.name === 'edit_file') {
-              const path = typeof tu.input?.file_path === 'string' ? tu.input.file_path : ''
-              if (!path) continue
-              const hasPassed = evidenceState.verifications.some(v => v.status === 'passed')
-              const hasFailed = evidenceState.verifications.some(v => v.status === 'failed')
-              if (hasPassed) {
-                this.stigmergyStore.deposit({ path, signal: 'well-tested', strength: 0.6 }).catch(() => {})
-              }
-              if (hasFailed) {
-                this.stigmergyStore.deposit({ path, signal: 'fragile', strength: 0.8 }).catch(() => {})
-              }
-            }
-            if (tu.name === 'bash') {
-              const bashErrors = this.recentToolHistory.filter(
-                h => h.tool === 'bash' && h.status === 'failed'
-              ).length
-              if (bashErrors >= 2) {
-                const deadPath = typeof tu.input?.command === 'string'
-                  ? tu.input.command.slice(0, 50) : 'bash-command'
-                this.stigmergyStore.deposit({ path: deadPath, signal: 'dead-end', strength: 0.9 }).catch(() => {})
-              }
-            }
-          }
-          // Refresh loaded pheromones after deposition, preserving decay semantics.
-          this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
           if (shouldTippingPointReset(this.predictionAccumulator)) {
             this.predictionAccumulator = resetAccumulator(this.predictionAccumulator)
             this.config.promptEngine.setCerebellarHint(null)
