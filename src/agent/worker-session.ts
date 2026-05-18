@@ -12,6 +12,7 @@ import {
   type WorkerResult,
 } from './work-order.js'
 import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
+import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
 
 export interface WorkerSessionConfig {
   order: WorkOrder
@@ -85,6 +86,12 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
   if (config.activeClaims && config.activeClaims.length > 0) {
     config.promptEngine.updateActiveClaims(config.activeClaims)
   }
+  // Build knowledge block from active claims for prompt injection
+  const knowledgeBlock = config.activeClaims ? buildWorkerKnowledgeBlock(config.activeClaims) : ''
+  const prompt = knowledgeBlock
+    ? `${knowledgeBlock}\n\n${buildWorkerPrompt(config.order)}`
+    : buildWorkerPrompt(config.order)
+
   const session = new SessionContext()
   const agent = new AgentLoop({
     client: config.client,
@@ -100,7 +107,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
 
   try {
     const transcript = emptyTranscript()
-    let latestText = await runOnce(agent, buildWorkerPrompt(config.order), transcript)
+    let latestText = await runOnce(agent, prompt, transcript)
 
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
       try {

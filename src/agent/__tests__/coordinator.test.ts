@@ -29,7 +29,7 @@ function fakeTool(name: string): Tool {
 function makeRegistry() {
   const registry = new ToolRegistry()
   for (const name of READ_ONLY_WORKER_TOOLS) registry.register(fakeTool(name))
-  registry.register(fakeTool('write_file'))
+  for (const name of ['edit_file', 'write_file', 'bash', 'run_tests']) registry.register(fakeTool(name))
   return registry
 }
 
@@ -79,6 +79,65 @@ describe('DelegationCoordinator', () => {
     assert.equal(shouldDelegateObjective('tiny', {}), false)
     assert.equal(shouldDelegateObjective('compare routing seams across worker session and coordinator modules', {}), true)
     assert.equal(shouldDelegateObjective('inspect files', { files: ['a.ts', 'b.ts'] }), true)
+  })
+
+  it('routes patcher profile through injected hands runner seam', async () => {
+    let handsCalled = false
+    let workerCalled = false
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as ApiClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => {
+        workerCalled = true
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+      runHands: async config => {
+        handsCalled = true
+        return {
+          result: {
+            workOrderId: config.order.id,
+            status: 'passed',
+            summary: 'hands completed in isolated worktree',
+            findings: [],
+            artifacts: [{ kind: 'diff', title: 'Patch: src/a.ts', content: 'diff --git a/src/a.ts b/src/a.ts' }],
+            changedFiles: ['src/a.ts'],
+            risks: [],
+            nextActions: [],
+            evidenceStatus: 'unverified',
+          },
+          usage: {},
+        }
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_hands_1',
+      objective: 'Patch multiple files safely inside an isolated worker worktree',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      scope: { files: ['src/a.ts', 'src/b.ts'] },
+    })
+
+    assert.equal(handsCalled, true)
+    assert.equal(workerCalled, false)
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results[0]?.artifacts[0]?.kind, 'diff')
   })
 
   it('selects a model through recommendModelForTask and uses a read-only registry', async () => {

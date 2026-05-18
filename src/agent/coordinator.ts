@@ -18,6 +18,10 @@ import {
 } from './work-order.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
 import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
+import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
+import { WorktreeCoordinator } from './worktree-coordinator.js'
+import { classifyProfile } from './coordination-policy.js'
+import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
 import { aggregateResults } from './aggregation.js'
 import { CoordinatorState } from './coordinator-state.js'
 import { WorkOrderQueue } from './work-queue.js'
@@ -58,6 +62,9 @@ export interface DelegationCoordinatorConfig {
   runtimeFactory: WorkerRuntimeFactory
   routing?: WorkerRouteConfig
   runWorker?: (config: WorkerSessionConfig) => Promise<WorkerSessionRun>
+  runHands?: (config: HandsSessionConfig) => Promise<HandsSessionRun>
+  cwd?: string
+  activeClaims?: () => import('../context/claims.js').ContextClaim[]
   /** Optional provider health tracker for Physarum-style routing.
    *  When set, cold-tier providers are excluded from model selection. */
   providerHealth?: ProviderHealthTracker
@@ -85,10 +92,12 @@ function workerFailureResult(order: WorkOrder, error: unknown): WorkerResult {
 
 export class DelegationCoordinator {
   private runWorker: (config: WorkerSessionConfig) => Promise<WorkerSessionRun>
+  private runHands: (config: HandsSessionConfig) => Promise<HandsSessionRun>
   private state: CoordinatorState
 
   constructor(private config: DelegationCoordinatorConfig) {
     this.runWorker = config.runWorker ?? runWorkerSession
+    this.runHands = config.runHands ?? runHandsSession
     this.state = new CoordinatorState(config.maxWorkers)
   }
 
@@ -150,6 +159,7 @@ export class DelegationCoordinator {
   }
 
   private async delegateOrder(order: WorkOrder): Promise<CoordinatorRun> {
+    const role = classifyProfile(order.profile)
     const isWrite = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
     this.state.recordEvent({ type: 'queued', workOrderId: order.id, timestamp: Date.now() })
 
@@ -160,7 +170,37 @@ export class DelegationCoordinator {
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
-    const run = await this.runWorker(workerConfig)
+
+    let run: { result: WorkerResult }
+    if (role === 'hands') {
+      const activeClaims = this.config.activeClaims?.() ?? workerConfig.activeClaims ?? []
+      const knowledgeBlock = buildWorkerKnowledgeBlock(activeClaims)
+      const cwd = this.config.cwd ?? workerConfig.cwd
+      const handsRun = await this.runHands({
+        order,
+        wtCoordinator: new WorktreeCoordinator(cwd),
+        cwd,
+        maxTurns: workerConfig.maxTurns,
+        contextWindow: workerConfig.contextWindow,
+        compact: workerConfig.compact,
+        activeClaims,
+        runAgent: async (prompt, callbacks) => {
+          const fullPrompt = knowledgeBlock ? `${knowledgeBlock}\n\n${prompt}` : prompt
+          const sessionRun = await this.runWorker({
+            ...workerConfig,
+            order: { ...order, objective: fullPrompt },
+            cwd,
+            activeClaims,
+          })
+          callbacks.onTurnComplete(sessionRun.usage, 1, true)
+          return JSON.stringify(sessionRun.result)
+        },
+      })
+      run = { result: handsRun.result }
+    } else {
+      run = await this.runWorker(workerConfig)
+    }
+
     this.state.recordEvent({ type: run.result.status === 'passed' ? 'passed' : run.result.status === 'blocked' ? 'blocked' : 'failed', workOrderId: order.id, timestamp: Date.now() })
 
     if (this.state.shouldEscalate()) {
