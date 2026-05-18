@@ -173,6 +173,7 @@ export class AgentLoop {
   private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
   private sensoriumSnapshots: SensoriumEntry[] = []
+  private persist: SessionPersist | null = null
 
   constructor(
     private config: AgentConfig,
@@ -262,6 +263,11 @@ export class AgentLoop {
     this.turnStream = this.createTurnStreamController()
     this.turnCompletion = this.createTurnCompletionController()
     this.toolExecution = this.createToolExecutionController()
+    
+    // 初始化 SessionPersist 用于 fuzzy checkpoint
+    if (this.config.sessionId) {
+      this.persist = new SessionPersist(this.config.sessionId)
+    }
   }
 
   private createTurnStreamController(): TurnStreamController {
@@ -549,11 +555,22 @@ export class AgentLoop {
         }
 
         const estTokens = this.session.getEstimatedTokens()
+        
+        // Fuzzy checkpoint: 记录 compact 开始
+        if (this.persist) {
+          this.persist.appendCompactStart(turn, this.session.getMessages().length)
+        }
+        
         const compactResult = await this.compaction.maybeCompact({
           loopTurn: turn,
           failures: this.compactFailures,
         })
         this.compactFailures = compactResult.failures
+        
+        // Fuzzy checkpoint: 记录 compact 结束
+        if (this.persist) {
+          this.persist.appendCompactEnd(turn, this.session.getMessages().length)
+        }
 
         this.streamedText = ''
         this.lastPrewarmAt = 0
