@@ -1112,6 +1112,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           apiSafe={(session.getContextLedger()?.apiInvariantStatus.brokenRounds ?? 0) === 0}
           interview={interviewState}
           clarityHistory={clarityHistory}
+          reasoningEffort={reasoningEffort}
         />
         {isStreaming && !cockpitPanel && <SummaryBar state={summaryState} />}
         {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}

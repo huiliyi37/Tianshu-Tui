@@ -43,9 +43,10 @@ interface StatusBarProps {
   apiSafe?: boolean
   interview?: InterviewState | null
   clarityHistory?: number[]
+  reasoningEffort?: string
 }
 
-export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheStatus = 'healthy', totalCost, currentTokens, maxTokens, contextHealth = 'healthy', apiSafe = true, interview, clarityHistory }: StatusBarProps) {
+export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheStatus = 'healthy', totalCost, currentTokens, maxTokens, contextHealth = 'healthy', apiSafe = true, interview, clarityHistory, reasoningEffort }: StatusBarProps) {
   const theme = getTheme()
   const { stdout } = useStdout()
   const cols = stdout?.columns ?? 80
@@ -96,6 +97,11 @@ export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheSta
     <Box flexDirection="row" justifyContent="space-between" paddingX={1} borderStyle="round" borderColor={theme.dim}>
       <Box gap={1}>
         <Text bold color={theme.primary}>{shortModel}</Text>
+        {reasoningEffort && reasoningEffort !== 'off' && (
+          <Text color={reasoningEffort === 'max' ? theme.error : reasoningEffort === 'high' ? theme.warning : theme.dim}>
+            {reasoningEffort}
+          </Text>
+        )}
         <Text color={statusColor}>
           cache:{statusIcon}{hitPct}%
         </Text>

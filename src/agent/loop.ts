@@ -15,13 +15,9 @@ import { smartCompact } from '../compact/index.js'
 import { microCompact, estimateTokens } from '../compact/micro.js'
 import { CACHE_ANCHOR_MESSAGES, type CompactionConfig } from '../compact/constants.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
-import { createContextLedger } from '../context/ledger.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
-import { AnchorRegistry } from '../context/anchor-registry.js'
-import { claimProposalFromAnchor } from '../context/claims.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import { EvidenceTracker } from './evidence.js'
-import { selectEvictionCandidates } from '../context/claim-budget.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
@@ -53,6 +49,7 @@ import { RuntimeHookPipeline, createRuntimeHookContext, type RuntimeHookSnapshot
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { TurnPerceptionController } from './turn-perception.js'
 import { TurnIntentController } from './turn-intent.js'
+import { ContextInjectionController } from './context-injection.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
@@ -63,7 +60,6 @@ import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
-import { extractKeywords } from './playbook.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput, SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
@@ -158,8 +154,6 @@ export class AgentLoop {
   private harness: TurnHarness
   private routingMetrics = new RoutingMetricsCollector()
   private importGraph: ImportGraph | null = null
-  private userAnchors: ContextAnchor[] = []
-  private anchorRegistry = new AnchorRegistry(2_000)
   private lastConflictCheckCount = 0
   private predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   private outputTokenEscalationCount = 0
@@ -171,6 +165,7 @@ export class AgentLoop {
   private runtimeHooks: RuntimeHookPipeline
   private perception: TurnPerceptionController
   private intent: TurnIntentController
+  private contextInjection: ContextInjectionController
   private thetaCheckInFlight = false
   private thetaTelemetry: { lastReason: string | null; lastDurationMs: number | null; lastErrorCount: number; lastTimedOut: boolean; requestedCount: number } = {
     lastReason: null,
@@ -241,6 +236,19 @@ export class AgentLoop {
       depositDeadEnd: deposit => this.stigmergyStore.deposit(deposit),
       addUserMessage: message => { this.session.addUserMessage(message) },
     })
+    this.contextInjection = new ContextInjectionController({
+      session: this.session,
+      promptEngine: this.config.promptEngine,
+      contextWindow: this.config.contextWindow,
+      getSessionId: () => this.config.sessionId,
+      getTranscriptPath: () => this.config.transcriptPath,
+      getSessionMemoryState: () => this.config.getSessionMemoryState?.(),
+      getMessages: () => this.session.getMessages(),
+      getRecentToolHistory: () => this.recentToolHistory,
+      getRepairHintTracker: () => this.repairHintTracker,
+      getContextClaimStore: () => this.config.contextClaimStore,
+      getPlaybookStore: () => this.config.playbookStore,
+    })
   }
 
   private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
@@ -278,13 +286,6 @@ export class AgentLoop {
         strength: p.strength,
       })),
     }
-  }
-
-  private refreshPlaybookLessons(userInput: string): void {
-    if (!this.config.playbookStore) return
-    const keywords = extractKeywords(`${userInput} ${this.recentToolHistory.map(h => `${h.tool} ${h.target}`).join(' ')}`, 12)
-    const lessons = this.config.playbookStore.query(keywords, 3)
-    this.config.promptEngine.updatePlaybookLessons(lessons)
   }
 
   private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
@@ -335,6 +336,10 @@ export class AgentLoop {
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort): void {
     this.config.reasoningEffort = effort
     this.config.client.setReasoningEffort?.(effort)
+  }
+
+  getReasoningEffort(): import('./auto-reasoning.js').ReasoningEffort | undefined {
+    return this.config.reasoningEffort
   }
 
   updateSessionMemory(block: string): void {
@@ -417,8 +422,7 @@ export class AgentLoop {
   getLedger() { return this.session.getContextLedger() }
 
   addAnchor(kind: ContextAnchor['kind'], text: string): void {
-    this.userAnchors.push({ kind, text, sourceRoundIndex: -1, salience: 1.0 })
-    this.refreshLedger()
+    this.contextInjection.addAnchor(kind, text)
   }
 
   getFileHistory() { return this.config.fileHistory }
@@ -453,67 +457,6 @@ export class AgentLoop {
     }
     return microCompact(messages, this.config.contextWindow, tokenCount)
   }
-
-  private refreshLedger(): void {
-    const ledger = createContextLedger(
-      this.config.sessionId ?? 'session',
-      this.config.transcriptPath ?? '',
-      this.session.getMessages(),
-      this.config.contextWindow,
-      this.config.getSessionMemoryState?.(),
-      this.userAnchors,
-    )
-    this.session.setContextLedger(ledger)
-  }
-
-  private recordUserInputClaims(userInput: string): void {
-    if (!this.config.contextClaimStore || !this.config.sessionId) return
-
-    const before = this.anchorRegistry.getAnchors().length
-    const turn = this.session.getTurnCount()
-    this.anchorRegistry.processUserMessage(userInput, turn)
-    const anchors = this.anchorRegistry.getAnchors().slice(before)
-    const createdAt = Date.now()
-
-    for (const anchor of anchors) {
-      const proposal = claimProposalFromAnchor(anchor, {
-        actor: 'user',
-        sessionId: this.config.sessionId,
-        turn,
-        eventId: `turn-${turn}:user-input`,
-        createdAt,
-      })
-      this.config.contextClaimStore.propose(proposal)
-    }
-  }
-
-  private refreshActiveClaims(): void {
-    if (!this.config.contextClaimStore) {
-      this.config.promptEngine.updateActiveClaims([])
-      return
-    }
-
-    this.config.contextClaimStore.promoteEligibleClaims()
-    const activeClaims = this.config.contextClaimStore.listActiveClaims()
-    const usedAt = Date.now()
-    const consumerId = `turn-${this.session.getTurnCount()}:prompt`
-    for (const claim of activeClaims) {
-      this.config.contextClaimStore.recordClaimUsed(claim.id, {
-        consumerId,
-        consumerKind: 'prompt',
-        usedAt,
-      })
-    }
-
-    // Budget eviction: mark excess low-value claims as stale
-    const toEvict = selectEvictionCandidates(this.config.contextClaimStore.listActiveClaims())
-    for (const c of toEvict) {
-      this.config.contextClaimStore.updateClaimStatus(c.id, 'stale', 'budget eviction')
-    }
-
-    this.config.promptEngine.updateActiveClaims(this.config.contextClaimStore.listActiveClaims())
-  }
-
 
   private enforceContextCeiling(): void {
     const ceiling = this.config.contextWindow * 0.95
@@ -550,7 +493,7 @@ export class AgentLoop {
       afterTokens: this.session.getEstimatedTokens(),
       createdAt: Date.now(),
     })
-    this.refreshLedger()
+    this.contextInjection.refreshLedger()
   }
 
   private recordTurnSnapshot(): void {
@@ -582,7 +525,7 @@ export class AgentLoop {
     this.lastTurnTextFingerprint = ''
     this.evidence.reset()
     this.repairHintTracker = new RepairHintTracker()
-    this.userAnchors = []
+    this.contextInjection.reset()
     this.outputTokenEscalationCount = 0
     this.sensorium = null
     this.strategy = null
@@ -598,8 +541,8 @@ export class AgentLoop {
     // Use query() so Sensorium sees decayed currentStrength, and prune stale entries opportunistically.
     this.stigmergyStore.prune().catch(() => {})
     this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
-    this.recordUserInputClaims(userInput)
-    this.refreshPlaybookLessons(userInput)
+    this.contextInjection.recordUserInputClaims(userInput)
+    this.contextInjection.refreshPlaybookLessons(userInput)
     this.session.addUserMessage(userInput)
 
     if (this.config.autoReasoning) {
@@ -649,7 +592,7 @@ export class AgentLoop {
               }
             }
 
-            this.refreshLedger()
+            this.contextInjection.refreshLedger()
           } catch (err) {
             this.compactFailures = recordCompactFailure(this.compactFailures, this.session.getTurnCount())
             throw err
@@ -712,11 +655,10 @@ export class AgentLoop {
         }
 
         // Pass 5: adaptive repair hint injection
-        const repairHint = this.repairHintTracker.getHint()
-        this.config.promptEngine.setRepairHint(repairHint)
+        this.contextInjection.refreshRepairHint()
 
         this.enforceContextCeiling()
-        this.refreshActiveClaims()
+        this.contextInjection.refreshActiveClaims()
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const collectedBlocks: ContentBlock[] = []
         let thinkingAccum = ''
@@ -865,11 +807,7 @@ export class AgentLoop {
 
           // Cerebellar Loop: check intervention level and adjust reasoning
           const level = getInterventionLevel(this.predictionAccumulator)
-          if (level !== 'none') {
-            this.config.promptEngine.setCerebellarHint(`Prediction error rate elevated (${level}). Mental model may be stale — verify assumptions before proceeding.`)
-          } else {
-            this.config.promptEngine.setCerebellarHint(null)
-          }
+          this.contextInjection.setCerebellarHint(level)
 
           for (const tu of toolUses) {
             const result = toolResults.find(r => r.type === 'tool_result' && r.tool_use_id === tu.id)
@@ -893,7 +831,7 @@ export class AgentLoop {
 
           if (shouldTippingPointReset(this.predictionAccumulator)) {
             this.predictionAccumulator = resetAccumulator(this.predictionAccumulator)
-            this.config.promptEngine.setCerebellarHint(null)
+            this.contextInjection.clearCerebellarHint()
           }
           if (this.config.autoReasoning && this.config.reasoningEffort) {
             this.config.reasoningEffort = adjustReasoningEffort(this.config.reasoningEffort, level)
@@ -909,7 +847,7 @@ export class AgentLoop {
             evidence: this.evidence,
           })
           this.decisions = turnEndResult.decisions
-          this.refreshLedger()
+          this.contextInjection.refreshLedger()
           this.refreshCacheDiagnostic(turn)
           this.recordTurnSnapshot()
           await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
@@ -955,7 +893,7 @@ export class AgentLoop {
         })
         this.decisions = finalResult.decisions
         if (finalResult.badge) callbacks.onTextDelta('\n' + finalResult.badge)
-        this.refreshLedger()
+        this.contextInjection.refreshLedger()
         this.refreshCacheDiagnostic(turn)
         this.recordTurnSnapshot()
         await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
