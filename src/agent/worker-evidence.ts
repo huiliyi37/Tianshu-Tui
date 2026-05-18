@@ -15,16 +15,16 @@ const READ_ONLY_PROFILES = ['code_scout', 'doc_scout', 'planner', 'reviewer']
  * When a `profile` is provided and it's a read-only profile, the gate is skipped
  * entirely if `changedFiles` is empty — read-only workers don't need verification metadata.
  *
+ * This distinction is critical for read-only workers (code_scout, reviewer, etc.)
+ * that examine files without modifying them — they should use `examinedFiles` and
+ * leave `changedFiles` empty to pass through without verification metadata.
+ *
  * @param result - The worker result to verify
  * @param profile - Optional worker profile for profile-aware verification
  */
 export function verifyWorkerEvidence(result: WorkerResult, profile?: string): WorkerResult {
-  // Read-only profiles skip the verification gate when no files were changed
-  if (profile && READ_ONLY_PROFILES.includes(profile) && result.changedFiles.length === 0) {
-    return result
-  }
-
-  // Only gate on changedFiles (mutations). examinedFiles are informational.
+  // Read-only profiles skip the verification gate when no files were changed.
+  // Without a profile, the same mutation-based rule still applies: examinedFiles are informational only.
   if (result.changedFiles.length === 0) return result
 
   const unverifiedRisk = `unverified: ${result.changedFiles.length} file(s) changed without verified evidence`

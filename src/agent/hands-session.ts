@@ -24,7 +24,7 @@ export interface HandsSessionConfig {
    * Receives the worker prompt and AgentCallbacks; returns the full text output
    * which must contain a schema-valid WorkerResult JSON.
    */
-  runAgent: (prompt: string, callbacks: AgentCallbacks) => Promise<string>
+  runAgent: (prompt: string, callbacks: AgentCallbacks, workerCwd: string) => Promise<string>
 }
 
 export interface HandsSessionRun {
@@ -58,7 +58,7 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
       onError: (err) => { apiError = err.message },
       onAbort: () => { apiError = 'aborted' },
       onApprovalRequired: async () => false,
-    })
+    }, wt.path)
 
     if (apiError) {
       return {
@@ -67,8 +67,7 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
       }
     }
 
-    const mainBranch = 'main'
-    const diff = collectDiff(config.cwd, wt.path, mainBranch)
+    const diff = collectDiff(config.cwd, wt.path, 'main')
 
     let result: WorkerResult
     try {

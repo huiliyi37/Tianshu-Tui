@@ -574,12 +574,13 @@ async function main() {
   if (args.includes('--worktree')) {
     const { createWorktree, removeWorktree } = await import('./agent/worktree.js')
     const sessionId = crypto.randomUUID()
-    const wtPath = createWorktree(process.cwd(), sessionId)
-    process.chdir(wtPath)
-    process.on('exit', () => removeWorktree(process.cwd(), wtPath))
-    process.on('SIGINT', () => { removeWorktree(process.cwd(), wtPath); process.exit(0) })
-    process.on('SIGTERM', () => { removeWorktree(process.cwd(), wtPath); process.exit(0) })
-    console.log(`Worktree created at: ${wtPath}`)
+    const wt = createWorktree(process.cwd(), sessionId)
+    const baseCwd = process.cwd()
+    process.chdir(wt.path)
+    process.on('exit', () => removeWorktree(baseCwd, wt.path, wt.branch))
+    process.on('SIGINT', () => { removeWorktree(baseCwd, wt.path, wt.branch); process.exit(0) })
+    process.on('SIGTERM', () => { removeWorktree(baseCwd, wt.path, wt.branch); process.exit(0) })
+    console.log(`Worktree created at: ${wt.path}`)
   }
 
   if (args[0] === 'config') {

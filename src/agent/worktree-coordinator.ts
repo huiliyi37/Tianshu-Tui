@@ -25,9 +25,9 @@ export class WorktreeCoordinator {
     // Cleanup any stale worktree for this worker id
     this.remove(workerId)
 
-    const path = createWorktree(this.baseCwd, workerId)
     const branch = `rivet-hands-${workerId.slice(0, 8)}`
-    const handle: WorktreeHandle = { path, branch }
+    const wt = createWorktree(this.baseCwd, workerId, branch)
+    const handle: WorktreeHandle = { path: wt.path, branch: wt.branch }
     this.active.set(workerId, handle)
     return handle
   }
@@ -36,7 +36,7 @@ export class WorktreeCoordinator {
   remove(workerId: string): void {
     const handle = this.active.get(workerId)
     if (handle) {
-      removeWorktree(this.baseCwd, handle.path)
+      removeWorktree(this.baseCwd, handle.path, handle.branch)
       this.active.delete(workerId)
     }
   }

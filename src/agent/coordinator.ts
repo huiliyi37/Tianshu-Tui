@@ -21,7 +21,6 @@ import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } fro
 import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
 import { WorktreeCoordinator } from './worktree-coordinator.js'
 import { classifyProfile } from './coordination-policy.js'
-import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
 import { aggregateResults } from './aggregation.js'
 import { CoordinatorState } from './coordinator-state.js'
 import { WorkOrderQueue } from './work-queue.js'
@@ -174,7 +173,6 @@ export class DelegationCoordinator {
     let run: { result: WorkerResult }
     if (role === 'hands') {
       const activeClaims = this.config.activeClaims?.() ?? workerConfig.activeClaims ?? []
-      const knowledgeBlock = buildWorkerKnowledgeBlock(activeClaims)
       const cwd = this.config.cwd ?? workerConfig.cwd
       const handsRun = await this.runHands({
         order,
@@ -184,12 +182,11 @@ export class DelegationCoordinator {
         contextWindow: workerConfig.contextWindow,
         compact: workerConfig.compact,
         activeClaims,
-        runAgent: async (prompt, callbacks) => {
-          const fullPrompt = knowledgeBlock ? `${knowledgeBlock}\n\n${prompt}` : prompt
+        runAgent: async (prompt, callbacks, workerCwd) => {
           const sessionRun = await this.runWorker({
             ...workerConfig,
-            order: { ...order, objective: fullPrompt },
-            cwd,
+            order,
+            cwd: workerCwd,
             activeClaims,
           })
           callbacks.onTurnComplete(sessionRun.usage, 1, true)

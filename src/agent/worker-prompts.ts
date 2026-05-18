@@ -12,7 +12,7 @@ function buildReadOnlyResultShape(): string {
     { "kind": "note | patch | test_command | risk | question", "title": "short title", "content": "artifact content" }
   ],
   "changedFiles": [],
-  "examinedFiles": ["REQUIRED: list all files you read/inspected"],
+  "examinedFiles": ["REQUIRED: list all files you read/inspected but did NOT modify"],
   "risks": [],
   "nextActions": [],
   "evidenceStatus": "verified | failed | blocked | unverified"

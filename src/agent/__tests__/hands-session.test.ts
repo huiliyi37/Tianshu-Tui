@@ -52,13 +52,13 @@ describe('runHandsSession', () => {
       maxTurns: 2,
       contextWindow: 128_000,
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
-      runAgent: async (_prompt, _callbacks) => {
-        // Simulate worker writing a file in the worktree
-        const wtPath = wtCoordinator.getWorktree(order.id)!.path
-        mkdirSync(join(wtPath, 'src'), { recursive: true })
-        writeFileSync(join(wtPath, 'src', 'output.ts'), 'export const hello = 1\n')
+      runAgent: async (_prompt, _callbacks, workerCwd) => {
+        // Simulate worker writing a file in the worktree it was asked to use
+        assert.notEqual(workerCwd, baseDir)
+        mkdirSync(join(workerCwd, 'src'), { recursive: true })
+        writeFileSync(join(workerCwd, 'src', 'output.ts'), 'export const hello = 1\n')
         execSync('git add -A && git commit -m "worker output"', {
-          cwd: wtPath, stdio: 'pipe',
+          cwd: workerCwd, stdio: 'pipe',
         })
         return JSON.stringify({
           workOrderId: order.id,

@@ -79,6 +79,7 @@ test('read-only profile skips verification gate when changedFiles is empty', () 
 
   assert.equal(checked.status, 'passed')
   assert.equal(checked.evidenceStatus, 'unverified')
+  assert.deepEqual(checked.examinedFiles, ['src/auth.ts'])
 })
 
 test('read-only profile skips verification gate for reviewer', () => {
@@ -90,6 +91,29 @@ test('read-only profile skips verification gate for reviewer', () => {
 
   assert.equal(checked.status, 'passed')
   assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('passes through read-only worker with examinedFiles and empty changedFiles', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    examinedFiles: ['src/auth.ts', 'src/login.ts'],
+    evidenceStatus: 'unverified',
+  }))
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.deepEqual(checked.examinedFiles, ['src/auth.ts', 'src/login.ts'])
+})
+
+test('passes through read-only worker with examinedFiles even when evidenceStatus is verified', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    examinedFiles: ['src/config.ts'],
+    evidenceStatus: 'verified',
+  }))
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'verified')
 })
 
 test('write profile does not skip verification gate', () => {
@@ -108,4 +132,15 @@ test('verifier profile does not skip verification gate', () => {
   }), 'verifier')
 
   assert.equal(checked.status, 'blocked')
+})
+
+test('blocks write worker with changedFiles and examinedFiles but no verification', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    examinedFiles: ['src/b.ts'],
+    evidenceStatus: 'verified',
+  }))
+
+  assert.equal(checked.status, 'blocked')
+  assert.ok(checked.risks.some(r => r.includes('missing verification metadata')))
 })

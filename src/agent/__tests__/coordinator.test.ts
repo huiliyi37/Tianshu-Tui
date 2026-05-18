@@ -100,6 +100,9 @@ describe('DelegationCoordinator', () => {
       }),
       runWorker: async config => {
         workerCalled = true
+        assert.notEqual(config.cwd, '/repo')
+        assert.ok(config.cwd.includes('rivet-wt-'), `hands worker cwd should be isolated worktree: ${config.cwd}`)
+        assert.equal(config.order.objective, 'Patch multiple files safely inside an isolated worker worktree')
         return {
           result: resultFor(config.order.id),
           transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
@@ -109,6 +112,8 @@ describe('DelegationCoordinator', () => {
       },
       runHands: async config => {
         handsCalled = true
+        const callbacks = { onTextDelta: () => {}, onThinkingDelta: () => {}, onToolUse: () => {}, onToolResult: () => {}, onTurnComplete: () => {}, onError: () => {}, onAbort: () => {}, onApprovalRequired: async () => false }
+        await config.runAgent('worker prompt', callbacks, '/tmp/rivet-wt-test')
         return {
           result: {
             workOrderId: config.order.id,
@@ -135,7 +140,7 @@ describe('DelegationCoordinator', () => {
     })
 
     assert.equal(handsCalled, true)
-    assert.equal(workerCalled, false)
+    assert.equal(workerCalled, true)
     assert.equal(run.status, 'completed')
     assert.equal(run.results[0]?.artifacts[0]?.kind, 'diff')
   })
