@@ -92,10 +92,12 @@ const workerFindingSchema = z.object({
 })
 
 const workerArtifactSchema = z.object({
-  kind: z.enum(['note', 'patch', 'test_command', 'risk', 'question']),
+  kind: z.enum(['note', 'patch', 'test_command', 'risk', 'question', 'diff']),
   title: z.string().min(1),
   content: z.string().min(1),
 })
+
+export type WorkerArtifact = z.infer<typeof workerArtifactSchema>
 
 export const workerResultSchema = z.object({
   workOrderId: z.string().min(1),

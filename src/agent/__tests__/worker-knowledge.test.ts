@@ -8,6 +8,7 @@ function claim(overrides: Partial<ContextClaim> = {}): ContextClaim {
     id: 'c1',
     kind: 'user_constraint',
     scope: 'session',
+    status: 'active',
     text: 'Use TypeScript strict mode',
     confidence: 0.9,
     fitness: 5,

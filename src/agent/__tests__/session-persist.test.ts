@@ -228,7 +228,7 @@ describe('checksum integration', () => {
     
     // 手动写入旧格式
     const { appendFileSync } = await import('node:fs')
-    appendFileSync(persist.filePath, JSON.stringify(message) + '\n')
+    appendFileSync(persist.getFilePath(), JSON.stringify(message) + '\n')
     
     const loaded = persist.loadWithChecksum()
     
@@ -248,7 +248,7 @@ describe('checksum integration', () => {
     
     // 写入无效校验和
     const { appendFileSync } = await import('node:fs')
-    appendFileSync(persist.filePath, '{"invalid": true}|0000000000000000\n')
+    appendFileSync(persist.getFilePath(), '{"invalid": true}|0000000000000000\n')
     
     const loaded = persist.loadWithChecksum()
     

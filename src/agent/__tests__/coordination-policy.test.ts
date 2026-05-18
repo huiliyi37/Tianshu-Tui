@@ -14,23 +14,23 @@ import {
 describe('coordination policy', () => {
   it('Brain tools include delegate_task, delegate_batch, and exclude all concrete tools', () => {
     for (const t of ['delegate_task', 'delegate_batch']) {
-      assert.ok(BRAIN_TOOLS.includes(t), `Brain must include ${t}`)
+      assert.ok((BRAIN_TOOLS as readonly string[]).includes(t), `Brain must include ${t}`)
     }
     for (const t of ['bash', 'edit_file', 'write_file', 'run_tests', 'read_file', 'grep', 'glob']) {
-      assert.ok(!BRAIN_TOOLS.includes(t), `Brain must NOT include ${t}`)
+      assert.ok(!(BRAIN_TOOLS as readonly string[]).includes(t), `Brain must NOT include ${t}`)
     }
   })
 
   it('Hands read tools include all read-only primitives', () => {
     for (const t of ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests']) {
-      assert.ok(HANDS_READ_TOOLS.includes(t), `Hands read must include ${t}`)
+      assert.ok((HANDS_READ_TOOLS as readonly string[]).includes(t), `Hands read must include ${t}`)
     }
-    assert.ok(!HANDS_READ_TOOLS.includes('delegate_task'), 'Hands must NOT include delegate_task')
+    assert.ok(!(HANDS_READ_TOOLS as readonly string[]).includes('delegate_task'), 'Hands must NOT include delegate_task')
   })
 
   it('Hands write tools include edit/write/bash/run_tests', () => {
     for (const t of ['edit_file', 'write_file', 'bash', 'run_tests']) {
-      assert.ok(HANDS_WRITE_TOOLS.includes(t), `Hands write must include ${t}`)
+      assert.ok((HANDS_WRITE_TOOLS as readonly string[]).includes(t), `Hands write must include ${t}`)
     }
   })
 

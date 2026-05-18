@@ -29,6 +29,11 @@ export class SessionPersist {
   private snapshotPath: string
   private sessionId: string
 
+  /** Public getter for testing file-path-dependent integrations. */
+  getFilePath(): string {
+    return this.filePath
+  }
+
   constructor(sessionId: string) {
     assertValidSessionId(sessionId)
     ensureDir(getSessionDir())

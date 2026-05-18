@@ -32,9 +32,9 @@ export function classifyProfile(profile: WorkerProfile): AgentRole {
 }
 
 export function isBrainTool(name: string): boolean {
-  return (BRAIN_TOOLS as readonly string[]).includes(name)
+  return (BRAIN_TOOLS as unknown as readonly string[]).includes(name)
 }
 
 export function isHandsTool(name: string): boolean {
-  return (HANDS_ALL_TOOLS as readonly string[]).includes(name)
+  return (HANDS_ALL_TOOLS as unknown as readonly string[]).includes(name)
 }
