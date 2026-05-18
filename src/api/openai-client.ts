@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs'
 import type { StreamClient } from './stream-client.js'
 import type { MessageRequest, ToolDefinition } from './types.js'
 import type { StreamCallbacks } from './client.js'
@@ -166,6 +167,11 @@ export class OpenAIClient implements StreamClient {
 
           // Don't retry on 4xx (except 429)
           if (status >= 400 && status < 500 && status !== 429) {
+            try { writeFileSync('.rivet/debug-400.json', JSON.stringify({
+              status, bodyKeys: Object.keys(body).sort(),
+              body: stableStringify(body).slice(0, 5000),
+              errorBody: errorBody.slice(0, 1000),
+            }, null, 2)) } catch {}
             throw new Error(parseOpenAIError(status, errorBody))
           }
 
@@ -437,6 +443,13 @@ export class OpenAIClient implements StreamClient {
       }
 
       this.flushToolCalls(callbacks)
+
+      // Emit thinking content block so reasoning_content can be passed back
+      // in subsequent requests. Mimo, MiniMax, and other OpenAI-compatible
+      // providers that return reasoning_content require it to be echoed.
+      if (reasoningAccum) {
+        callbacks.onContentBlock?.({ type: 'thinking', thinking: reasoningAccum })
+      }
 
       // GLM-5.1 mandatory thinking: if only reasoning_content arrived (no content),
       // promote reasoning to visible text so the TUI shows a reply.

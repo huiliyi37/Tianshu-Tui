@@ -103,7 +103,7 @@ describe('createSignalConsumerRuntimeHook', () => {
     assert.match(messages[0]!, /任务过大/)
   })
 
-  it('injects file warnings for dead-end pheromones', async () => {
+  it('injects compressed file warnings for dead-end pheromones', async () => {
     const { hook, ctx, messages } = runHook({
       sensoriumInput: makeInput({
         pheromones: [makeDeadEnd('src/a.ts'), makeDeadEnd('src/a.ts'), makeDeadEnd('src/b.ts')],
@@ -113,9 +113,27 @@ describe('createSignalConsumerRuntimeHook', () => {
     await hook.run(ctx)
 
     assert.equal(messages.length, 1)
-    assert.match(messages[0]!, /<file-warnings kind="dead-end">/)
-    assert.match(messages[0]!, /src\/a\.ts/)
-    assert.match(messages[0]!, /src\/b\.ts/)
+    assert.match(messages[0]!, /<file-warnings kind="dead-end" compressed="true">/)
+    // Generic rule since these paths don't match specific patterns
+    assert.match(messages[0]!, /\[generic\]/)
+  })
+
+  it('injects rule-based warnings for known dead-end patterns', async () => {
+    const { hook, ctx, messages } = runHook({
+      sensoriumInput: makeInput({
+        pheromones: [
+          makeDeadEnd('printenv API_KEY'),
+          makeDeadEnd('npx tsx --test src/foo.test.ts'),
+        ],
+      }),
+    })
+
+    await hook.run(ctx)
+
+    assert.equal(messages.length, 1)
+    assert.match(messages[0]!, /<file-warnings kind="dead-end" compressed="true">/)
+    assert.match(messages[0]!, /\[security\]/)
+    assert.match(messages[0]!, /\[test-runner\]/)
   })
 
   it('deduplicates repeated signal emissions by default', async () => {

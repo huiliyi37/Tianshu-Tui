@@ -16,6 +16,8 @@ import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimStatus } from '../context/claims.js'
 import { loadProjectRules } from '../context/rules-loader.js'
 import { exportDurableClaims, importClaims } from '../context/claim-export.js'
+import { resolveEcosystemWorkflowInput } from '../workflows/ecosystem-workflows.js'
+import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
@@ -65,6 +67,8 @@ export function formatContextClaimsCommand(store: ContextClaimStore, status?: Co
 
 export function resolveAppPromptInput(input: string, cwd: string): string {
   if (!input.startsWith('/')) return input
+  const workflow = resolveEcosystemWorkflowInput(input)
+  if (workflow) return workflow.prompt
   return resolveCustomCommand(cwd, input) ?? input
 }
 
@@ -82,7 +86,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /model [name|list] — Show or switch model
 /verbose — Toggle verbose tool output
 /effort [off|low|medium|high|max] — Set reasoning effort (max = always full reasoning)
-/debug [prompt|fingerprint|cache|mcp] — Debug prefix cache, prompt, and MCP connections
+/debug [prompt|fingerprint|cache|context-payload|mcp] — Debug prefix cache, prompt, context payload, and MCP connections
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
@@ -96,6 +100,8 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle or switch cockpit panel
 /skill [list|<name>] — List or load Claude skills
 /interview <topic> — Start deep interview to clarify requirements before coding
+/plan <feature> — Create a superpowers-style implementation plan before coding
+/write-plan <feature> — Alias of /plan
 Ctrl+C — Interrupt current turn (press twice to exit)` }))
       setIsStreaming(false)
       return true
@@ -200,6 +206,8 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         const hitRate = ctx.cacheHitRate
         const totalCached = usage.cache_read_input_tokens + usage.cache_creation_input_tokens
         pushStatic(createLogEntry({ type: 'system', content: `Cache:\n  hit rate: ${(hitRate * 100).toFixed(1)}%\n  read tokens: ${usage.cache_read_input_tokens.toLocaleString()}\n  write tokens: ${usage.cache_creation_input_tokens.toLocaleString()}\n  total cached: ${totalCached.toLocaleString()}\n  input tokens: ${usage.input_tokens.toLocaleString()}\n  output tokens: ${usage.output_tokens.toLocaleString()}\n  estimated: ${ctx.session.getEstimatedTokens().toLocaleString()}\n  cost: ¥${ctx.cost.toFixed(4)}\n  saved: ¥${((usage.cache_read_input_tokens * 0.9) / 1_000_000).toFixed(4)} (cache discount)` }))
+      } else if (subcmd === 'context-payload') {
+        pushStatic(createLogEntry({ type: 'system', content: formatVolatilePayloadReport(info.volatilePayloadReport) }))
       } else if (subcmd === 'mcp') {
         const mgr = ctx.mcpManagerRef.current
         if (!mgr) {
@@ -222,7 +230,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
         }
       } else {
-        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /debug [prompt|fingerprint|cache|mcp]' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /debug [prompt|fingerprint|cache|context-payload|mcp]' }))
       }
       setIsStreaming(false)
       return true
@@ -532,6 +540,17 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       const topic = parts.slice(1).join(' ').trim()
       if (!topic) {
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /interview <topic>\nExample: /interview add a notification system' }))
+        setIsStreaming(false)
+        return true
+      }
+      return false
+    }
+
+    case '/plan':
+    case '/write-plan': {
+      const feature = parts.slice(1).join(' ').trim()
+      if (!feature) {
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\nExample: ${cmd} add Context7 MCP preset` }))
         setIsStreaming(false)
         return true
       }

@@ -5,6 +5,7 @@ import { gitStatusCache } from './volatile-git.js'
 import type { ContextLedger } from '../context/types.js'
 import type { TaskState } from '../agent/task-state.js'
 import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
+import { selectRelevantClaims, type ClaimRelevanceInput } from '../context/claim-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 
 export interface ToolHistoryEntry {
@@ -210,7 +211,19 @@ ${escapeXml(ctx.cerebellarHint)}
   }
 
   if (ctx.activeClaims && ctx.activeClaims.length > 0) {
-    parts.push(renderActiveClaimsBlock(ctx.activeClaims))
+    const relevanceInput: ClaimRelevanceInput = {
+      workingSet: ctx.workingSet,
+      recentTools: ctx.toolHistory?.map(t => ({ tool: t.tool, target: t.target, status: t.status })),
+    }
+    const { selected, omitted } = selectRelevantClaims(ctx.activeClaims, relevanceInput)
+    if (selected.length > 0) {
+      const block = renderActiveClaimsBlock(selected)
+      if (block && omitted.length > 0) {
+        parts.push(block.replace('<active-claims', `<active-claims omitted="${omitted.length}"`))
+      } else if (block) {
+        parts.push(block)
+      }
+    }
   }
 
   if (ctx.sessionMemoryBlock) {

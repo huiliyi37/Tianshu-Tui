@@ -1,6 +1,7 @@
 import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+import { analyzeVolatilePayload, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
@@ -219,6 +220,22 @@ export class PromptEngine {
 
   setDecisions(decisions: string[]): void {
     this.decisions = decisions
+  }
+
+  getVolatilePayloadReport(toolHistory?: ToolHistoryEntry[]): VolatilePayloadReport {
+    const latest = buildLatestTurnVolatileBlock({
+      ...this.config.volatileCtx,
+      toolHistory,
+      taskProgress: this.taskProgress,
+      behaviorMirror: this.behaviorMirror,
+      strategyShift: this.strategyShift,
+      repairHint: this.repairHint,
+      impactHint: this.impactHint,
+      routingReason: this.routingReason,
+      cerebellarHint: this.cerebellarHint,
+      decisions: this.decisions,
+    })
+    return analyzeVolatilePayload(latest)
   }
 
   getContextLayerReport(): ContextLayerReport {

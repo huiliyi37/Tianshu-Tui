@@ -173,7 +173,15 @@ export function isPromptEligibleClaim(claim: ContextClaim, now = Date.now()): bo
 
 export const MAX_PROMPT_CLAIMS = 20
 
-export function renderActiveClaimsBlock(claims: ContextClaim[]): string {
+export interface ActiveClaimsRenderOptions {
+  query?: string
+  workingSet?: string[]
+  recentTools?: Array<{ tool: string; target: string; status: string }>
+  now?: number
+  maxClaims?: number
+}
+
+export function renderActiveClaimsBlock(claims: ContextClaim[], options?: ActiveClaimsRenderOptions): string {
   const active = claims
     .filter(isPromptEligibleClaim)
     .sort((a, b) => b.fitness - a.fitness || b.confidence - a.confidence || a.createdAt - b.createdAt)

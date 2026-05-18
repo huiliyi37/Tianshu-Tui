@@ -6,7 +6,24 @@ import type { LogEntry } from '../log-state.js'
 function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext {
   return {
     parts: ['/help'],
-    agent: null as any,
+    agent: {
+      getDebugInfo: () => ({
+        fingerprint: { systemSha256: 'a'.repeat(64), toolsSha256: 'b'.repeat(64), combinedSha256: 'c'.repeat(64) },
+        drift: null,
+        systemPromptLength: 10,
+        systemPromptPreview: 'system',
+        toolCount: 0,
+        toolNames: [],
+        volatilePayloadReport: {
+          totalChars: 50,
+          estimatedTokens: 13,
+          sections: [{ id: 'environment', chars: 40, estimatedTokens: 10, lines: 1, present: true }],
+          wasteCandidates: [],
+        },
+      }),
+      setApprovalMode: () => {},
+      addAnchor: () => {},
+    } as any,
     session: null as any,
     persist: null as any,
     model: 'test-model',
@@ -43,6 +60,28 @@ describe('resolveAppPromptInput', () => {
   it('passes unknown slash commands through', () => {
     assert.equal(resolveAppPromptInput('/unknown-cmd', '/cwd'), '/unknown-cmd')
   })
+
+  it('resolves /plan into a writing-plans workflow prompt', () => {
+    const resolved = resolveAppPromptInput('/plan add workflow aliases', '/cwd')
+
+    assert.ok(resolved.includes('我正在使用 writing-plans 技能创建实现计划。'))
+    assert.ok(resolved.includes('Create a comprehensive implementation plan for: add workflow aliases'))
+    assert.ok(resolved.includes('Do not write implementation code yet.'))
+    assert.ok(resolved.includes('docs/superpowers/plans/'))
+    assert.ok(resolved.includes('Forbidden placeholders'))
+  })
+
+  it('resolves /write-plan into a writing-plans workflow prompt', () => {
+    const resolved = resolveAppPromptInput('/write-plan add Context7 MCP preset', '/cwd')
+
+    assert.ok(resolved.includes('writing-plans'))
+    assert.ok(resolved.includes('add Context7 MCP preset'))
+    assert.ok(resolved.includes('Execution handoff'))
+  })
+
+  it('does not resolve empty /plan before slash handler can show usage', () => {
+    assert.equal(resolveAppPromptInput('/plan', '/cwd'), '/plan')
+  })
 })
 
 describe('handleSlashCommand', () => {
@@ -63,9 +102,45 @@ describe('handleSlashCommand', () => {
     assert.equal(handleSlashCommand(ctx), true)
   })
 
+  it('/plan without feature shows usage and returns true', () => {
+    const entries: string[] = []
+    const streaming: boolean[] = []
+    const ctx = makeCtx({
+      parts: ['/plan'],
+      pushStatic: (entry) => entries.push(entry.content),
+      setIsStreaming: (v) => streaming.push(v),
+    })
+
+    assert.equal(handleSlashCommand(ctx), true)
+    assert.ok(entries[0]!.includes('Usage: /plan <feature>'))
+    assert.deepEqual(streaming, [false])
+  })
+
+  it('/plan with feature falls through to agent prompt resolution', () => {
+    const ctx = makeCtx({ parts: ['/plan', 'add', 'workflow', 'aliases'] })
+    assert.equal(handleSlashCommand(ctx), false)
+  })
+
+  it('/write-plan with feature falls through to agent prompt resolution', () => {
+    const ctx = makeCtx({ parts: ['/write-plan', 'add', 'workflow', 'aliases'] })
+    assert.equal(handleSlashCommand(ctx), false)
+  })
+
   it('unknown command returns false', () => {
     const ctx = makeCtx({ parts: ['/unknown-cmd'] })
     assert.equal(handleSlashCommand(ctx), false)
+  })
+
+  it('/debug context-payload renders volatile payload report', () => {
+    const entries: string[] = []
+    const ctx = makeCtx({
+      parts: ['/debug', 'context-payload'],
+      pushStatic: (entry) => entries.push(entry.content),
+    })
+
+    assert.equal(handleSlashCommand(ctx), true)
+    assert.ok(entries[0]!.includes('Context Payload'))
+    assert.ok(entries[0]!.includes('environment'))
   })
 
   it('/verbose toggles and returns true', () => {

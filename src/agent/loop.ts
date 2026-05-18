@@ -483,7 +483,8 @@ export class AgentLoop {
       systemPromptLength: sysPrompt.length,
       systemPromptPreview: sysPrompt.slice(0, 200) + (sysPrompt.length > 200 ? '...' : ''),
       toolCount: this.config.toolRegistry.getDefinitions().length,
-      toolNames: this.config.toolRegistry.getDefinitions().map(t => t.name) }
+      toolNames: this.config.toolRegistry.getDefinitions().map(t => t.name),
+      volatilePayloadReport: this.config.promptEngine.getVolatilePayloadReport(this.recentToolHistory) }
   }
 
   private recordTurnSnapshot(): void {
