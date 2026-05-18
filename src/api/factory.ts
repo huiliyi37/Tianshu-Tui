@@ -63,6 +63,7 @@ export function createProviderClient(
       auth: params.auth,
       thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
       thinkingFormat: capabilities.thinkingFormat,
+      effortFormat: capabilities.effortFormat,
       reasoningEffort: params.reasoningEffort,
       sessionId: params.sessionId,
     })
