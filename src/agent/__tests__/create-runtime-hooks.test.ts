@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createDefaultRuntimeHooks } from '../create-runtime-hooks.js'
 
 describe('createDefaultRuntimeHooks', () => {
-  it('returns 6 hooks in the correct phase order', () => {
+  it('returns 7 hooks in the correct phase order', () => {
     const hooks = createDefaultRuntimeHooks({
       stigmergyDeposit: async () => {},
       stigmergyQuery: async () => [],
@@ -14,14 +14,15 @@ describe('createDefaultRuntimeHooks', () => {
       getPredictionAccumulator: () => ({ history: [] }),
     })
 
-    assert.equal(hooks.length, 6)
+    assert.equal(hooks.length, 7)
 
     const phases = hooks.map(h => h.phase)
-    assert.deepEqual(phases, ['preTurn', 'preTurn', 'afterPerception', 'postTool', 'postTool', 'postTool'])
+    assert.deepEqual(phases, ['preTurn', 'preTurn', 'preTurn', 'afterPerception', 'postTool', 'postTool', 'postTool'])
 
     const names = hooks.map(h => h.name)
     assert.deepEqual(names, [
       'perception-runtime',
+      'signal-consumer',
       'dissipative-kick',
       'vigor-after-perception',
       'theta-runtime',

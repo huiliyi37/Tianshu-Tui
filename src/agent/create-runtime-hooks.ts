@@ -4,6 +4,7 @@ import { createKickRuntimeHook } from './hooks/kick-hook.js'
 import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
 import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
+import { createSignalConsumerRuntimeHook } from './hooks/signal-consumer-hook.js'
 
 export interface RuntimeHookDeps {
   stigmergyDeposit: (deposit: any) => Promise<void>
@@ -18,6 +19,7 @@ export interface RuntimeHookDeps {
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
   return [
     createPerceptionRuntimeHook(),
+    createSignalConsumerRuntimeHook(),
     createKickRuntimeHook({ deposit: deps.stigmergyDeposit }),
     createVigorAfterPerceptionHook(),
     createThetaRuntimeHook({
