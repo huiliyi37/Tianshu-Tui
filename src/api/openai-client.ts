@@ -23,6 +23,8 @@ export interface OpenAIClientConfig {
   unsupported?: string[]
   /** Provider profile for cache strategy application */
   providerProfile?: ProviderProfile
+  /** Provider name for feature gating (e.g. 'glm' for web_search) */
+  providerName?: string
 }
 
 interface OpenAIToolCall {
@@ -43,6 +45,9 @@ const BASE_DELAY_MS = 1000
 const READ_TIMEOUT_MS = 120_000
 
 function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
+  // Provider-native tool format (e.g. GLM web_search) — pass through as-is
+  if (tool.providerFormat) return tool.providerFormat
+
   return {
     type: 'function',
     function: { name: tool.name, description: tool.description, parameters: tool.input_schema },
@@ -253,17 +258,28 @@ export class OpenAIClient implements StreamClient {
     }
 
     if (request.tools && request.tools.length > 0) {
-      body.tools = [...request.tools]
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map(toOpenAITool)
-      body.tool_choice = 'auto'
+      // Filter: only include provider-native tools (web_search) for GLM.
+      // Non-GLM providers ignore unknown tool types or may error.
+      const applicableTools = this.config.providerName === 'glm'
+        ? request.tools
+        : request.tools.filter(t => !t.providerFormat)
+      if (applicableTools.length > 0) {
+        body.tools = [...applicableTools]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(toOpenAITool)
+        body.tool_choice = 'auto'
+      }
     }
 
     // Thinking mode: GLM and DeepSeek both use {thinking: {type: 'enabled'}}.
     // Providers with thinking: 'enabled' should receive the thinking param.
     // The thinkingFormat field controls RESPONSE parsing, not request format.
+    // GLM Coding Plan: clear_thinking=false enables Preserved Thinking.
     if (this.config.thinking) {
       body.thinking = { type: this.config.thinking }
+      if (this.config.providerName === 'glm') {
+        ;(body.thinking as Record<string, unknown>)['clear_thinking'] = false
+      }
     }
     // reasoning_effort is an OpenAI-specific field. Only send if the provider
     // explicitly supports it via effortFormat.

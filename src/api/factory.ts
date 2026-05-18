@@ -66,6 +66,7 @@ export function createProviderClient(
       effortFormat: capabilities.effortFormat,
       reasoningEffort: params.reasoningEffort,
       sessionId: params.sessionId,
+      providerName: provider.name,
     })
   }
 

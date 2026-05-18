@@ -43,11 +43,13 @@ export interface SystemBlock {
 export interface ToolDefinition {
   name: string
   description: string
-  input_schema: {
+  input_schema?: {
     type: 'object'
     properties: Record<string, unknown>
     required?: string[]
   }
+  /** Provider-native tool shape (e.g. GLM web_search). If set, bypasses standard function tool format. */
+  providerFormat?: Record<string, unknown>
 }
 
 export interface MessageRequest {

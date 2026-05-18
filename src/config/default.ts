@@ -65,7 +65,7 @@ export const DEFAULT_CONFIG: Config = {
       glm: {
         name: 'glm',
         apiKeyEnv: 'ZHIPU_API_KEY',
-        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
         protocol: 'openai' as const,
         capabilities: {
           cacheControl: false,
@@ -74,13 +74,13 @@ export const DEFAULT_CONFIG: Config = {
           prefixCache: 'none' as const,
         },
         thinking: 'enabled',
-        maxTokens: 64000,
+        maxTokens: 128000,
         models: [
           {
             id: 'glm-5.1',
             alias: 'glm',
             contextWindow: 200_000,
-            maxTokens: 64000,
+            maxTokens: 128000,
             reasoningEffort: 'high',
           },
         ],

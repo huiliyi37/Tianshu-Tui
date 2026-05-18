@@ -13,6 +13,7 @@ import { TODO_TOOL } from './todo.js'
 import { ToolRegistry } from './registry.js'
 import type { Tool } from './types.js'
 import { WEB_FETCH_TOOL } from './web-fetch.js'
+import { WEB_SEARCH_TOOL } from './web-search.js'
 import { WRITE_FILE_TOOL } from './write-file.js'
 
 export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry {
@@ -31,6 +32,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(INSPECT_PROJECT_TOOL)
   registry.register(REPO_MAP_TOOL)
   registry.register(RELATED_TESTS_TOOL)
+  registry.register(WEB_SEARCH_TOOL)
   for (const tool of extraTools) registry.register(tool)
   return registry
 }
