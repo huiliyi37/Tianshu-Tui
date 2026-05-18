@@ -311,9 +311,9 @@ export class OpenAIClient implements StreamClient {
 
         for (const line of lines) {
           const trimmed = line.trim()
-          if (!trimmed || !trimmed.startsWith('data: ')) continue
+          if (!trimmed || !trimmed.startsWith('data:')) continue
 
-          const payload = trimmed.slice(6)
+          const payload = trimmed.slice(5).trimStart()
           if (payload === '[DONE]') { streamDone = true; break }
 
           try {
@@ -328,8 +328,8 @@ export class OpenAIClient implements StreamClient {
       // Process any residual data in the SSE buffer (final chunk without trailing newline)
       if (buffer.trim()) {
         const trimmed = buffer.trim()
-        if (trimmed.startsWith('data: ')) {
-          const payload = trimmed.slice(6)
+        if (trimmed.startsWith('data:')) {
+          const payload = trimmed.slice(5).trimStart()
           if (payload !== '[DONE]') {
             try {
               const parsed = JSON.parse(payload)
