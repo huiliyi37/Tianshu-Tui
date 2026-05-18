@@ -22,6 +22,7 @@ function makeSession(overrides: Partial<SessionContext> = {}): SessionContext {
     getTotalUsage: () => ({ input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 80, cache_creation_input_tokens: 20 }),
     getCacheHitRate: () => 0.8,
     getLatestTurnHitRate: () => null,
+    getRecentTurnHitRate: () => null,
     getContextLedger: () => null,
     getCompactEvents: () => [],
     ...overrides,

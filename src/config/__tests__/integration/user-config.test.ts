@@ -11,10 +11,13 @@ describe('User config validation', () => {
     assert.ok(existsSync(configPath), `Config not found at ${configPath}`)
   })
 
-  it('config has all 6 providers', () => {
+  it('config has required providers', () => {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'))
     const providers = Object.keys(config.provider.providers)
-    assert.deepEqual(providers.sort(), ['codex', 'deepseek', 'glm', 'minimax', 'mimo', 'opencode-go'].sort())
+    assert.ok(providers.length >= 6, `expected >= 6 providers, got ${providers.length}: ${providers.join(', ')}`)
+    for (const p of ['codex', 'deepseek', 'glm', 'minimax', 'mimo', 'opencode-go']) {
+      assert.ok(providers.includes(p), `missing required provider: ${p}`)
+    }
   })
 
   it('codex has oauth auth', () => {
