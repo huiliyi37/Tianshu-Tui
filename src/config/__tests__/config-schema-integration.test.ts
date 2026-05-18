@@ -38,8 +38,8 @@ describe('Config schema integration', () => {
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
     const config = configSchema.parse(raw)
     assert.ok(config.workers.profiles.capable)
-    assert.equal(config.workers.profiles.capable.provider, 'codex')
-    assert.equal(config.workers.profiles.capable.model, 'gpt-5.5')
+    assert.equal(config.workers.profiles.capable.provider, 'cliproxy')
+    assert.equal(config.workers.profiles.capable.model, 'claude-opus-4-5')
     assert.equal(config.workers.routing.code_edit, 'capable')
     assert.equal(config.workers.routing.compaction, undefined) // compaction is main agent's own concern
   })

@@ -6,6 +6,7 @@ import type { ContextLedger } from '../context/types.js'
 import type { TaskState } from '../agent/task-state.js'
 import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
 import { selectRelevantClaims, type ClaimRelevanceInput } from '../context/claim-relevance.js'
+import { scoreLessons } from '../context/lesson-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 
 export interface ToolHistoryEntry {
@@ -231,8 +232,11 @@ ${escapeXml(ctx.cerebellarHint)}
   }
 
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
-    const lessons = ctx.playbookLessons
-      .slice(0, 3)
+    const { selected } = scoreLessons(ctx.playbookLessons, {
+      recentToolTargets: ctx.toolHistory?.map(t => t.target),
+    })
+    const toRender = selected.length > 0 ? selected : ctx.playbookLessons.slice(0, 2)
+    const lessons = toRender
       .map(b => `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`)
       .join('\n')
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)

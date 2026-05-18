@@ -192,7 +192,7 @@ Good: inspect_project() — get project overview`,
     input_schema: {
       type: 'object',
       properties: {},
-      required: [],
+      additionalProperties: true,
     },
   },
 

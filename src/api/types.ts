@@ -47,6 +47,7 @@ export interface ToolDefinition {
     type: 'object'
     properties: Record<string, unknown>
     required?: string[]
+    additionalProperties?: boolean
   }
   /** Provider-native tool shape (e.g. GLM web_search). If set, bypasses standard function tool format. */
   providerFormat?: Record<string, unknown>
