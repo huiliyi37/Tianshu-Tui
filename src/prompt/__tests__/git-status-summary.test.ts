@@ -1,0 +1,93 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { summarizeGitStatus, parseGitStatus } from '../git-status-summary.js'
+
+/** Build a git status string that exceeds the 1200-char threshold. */
+function makeLongStatus(files: { modified?: number; untracked?: number; staged?: number; branch?: string }): string {
+  const branch = files.branch ?? 'main'
+  const lines: string[] = [`On branch ${branch}`]
+  if ((files.staged ?? 0) > 0) {
+    lines.push('Changes to be committed:')
+    for (let i = 0; i < (files.staged ?? 0); i++) {
+      lines.push(`  new file:   src/staged/file-with-long-name-${i}.ts`)
+    }
+  }
+  if ((files.modified ?? 0) > 0) {
+    lines.push('Changes not staged for commit:')
+    for (let i = 0; i < (files.modified ?? 0); i++) {
+      lines.push(`  modified:   src/api/client-with-long-path-${i}.ts`)
+    }
+  }
+  if ((files.untracked ?? 0) > 0) {
+    lines.push('Untracked files:')
+    for (let i = 0; i < (files.untracked ?? 0); i++) {
+      lines.push(`  src/context/new-module-with-long-name-${i}.ts`)
+    }
+  }
+  return lines.join('\n')
+}
+
+describe('summarizeGitStatus', () => {
+  it('returns original status when under threshold', () => {
+    const short = 'On branch main\nChanges: 1 file'
+    assert.equal(summarizeGitStatus(short), short)
+  })
+
+  it('returns empty string for empty input', () => {
+    assert.equal(summarizeGitStatus(''), '')
+  })
+
+  it('summarizes when over threshold with modified/untracked files', () => {
+    const long = makeLongStatus({ modified: 15, untracked: 10, branch: 'feat/tianshu-test' })
+    assert.ok(long.length > 1200, `fixture should exceed threshold, got ${long.length}`)
+    const result = summarizeGitStatus(long)
+    assert.match(result, /\[feat\/tianshu-test\]/)
+    assert.match(result, /15 modified/)
+    assert.match(result, /10 untracked/)
+    // File paths preserved
+    assert.match(result, /src\/api\/client-with-long-path-0\.ts/)
+    assert.match(result, /src\/context\/new-module-with-long-name-0\.ts/)
+  })
+
+  it('summarizes many modified files', () => {
+    const long = makeLongStatus({ modified: 30 })
+    assert.ok(long.length > 1200, `fixture should exceed threshold, got ${long.length}`)
+    const result = summarizeGitStatus(long)
+    assert.match(result, /30 modified/)
+    assert.match(result, /src\/api\/client-with-long-path-0\.ts/)
+    assert.match(result, /src\/api\/client-with-long-path-29\.ts/)
+  })
+
+  it('includes staged files in summary', () => {
+    const long = makeLongStatus({ staged: 20, modified: 15 })
+    assert.ok(long.length > 1200, `fixture should exceed threshold, got ${long.length}`)
+    const result = summarizeGitStatus(long)
+    assert.match(result, /20 staged/)
+    assert.match(result, /15 modified/)
+  })
+})
+
+describe('parseGitStatus', () => {
+  it('extracts branch name', () => {
+    const result = parseGitStatus('On branch feat/my-feature\n')
+    assert.equal(result.branch, 'feat/my-feature')
+  })
+
+  it('defaults to unknown when no branch line', () => {
+    const result = parseGitStatus('some random text')
+    assert.equal(result.branch, 'unknown')
+  })
+
+  it('parses staged and modified sections', () => {
+    const status = [
+      'On branch main',
+      'Changes to be committed:',
+      '  new file:   src/new.ts',
+      'Changes not staged for commit:',
+      '  modified:   src/old.ts',
+    ].join('\n')
+    const result = parseGitStatus(status)
+    assert.deepEqual(result.staged, ['src/new.ts'])
+    assert.deepEqual(result.modified, ['src/old.ts'])
+  })
+})

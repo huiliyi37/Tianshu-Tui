@@ -6,6 +6,7 @@ import type { ContextLedger } from '../context/types.js'
 import type { TaskState } from '../agent/task-state.js'
 import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
 import { selectRelevantClaims, type ClaimRelevanceInput } from '../context/claim-relevance.js'
+import { summarizeGitStatus } from './git-status-summary.js'
 import { scoreLessons } from '../context/lesson-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 
@@ -141,7 +142,8 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<project-memory>\n${escapeXml(knowledge)}\n</project-memory>`)
   }
 
-  const git = ctx.gitStatus ?? gitStatusCache.get(ctx.cwd)
+  const rawGit = ctx.gitStatus ?? gitStatusCache.get(ctx.cwd)
+  const git = rawGit ? summarizeGitStatus(rawGit) : undefined
   if (git) {
     const lines = git.split('\n')
     const commitIdx = lines.findIndex(l => l.startsWith('Recent commits:'))
