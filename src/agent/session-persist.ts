@@ -55,13 +55,9 @@ export class SessionPersist {
     await appendFile(this.filePath, line)
   }
 
-  /** Load all messages from the session file */
+  /** Load all messages from the session file (with checksum validation) */
   load(): Message[] {
-    if (!existsSync(this.filePath)) return []
-    const content = readFileSync(this.filePath, 'utf-8')
-    return content.trim().split('\n').filter(Boolean).map(line => {
-      try { return JSON.parse(line) as Message } catch { return null }
-    }).filter(Boolean) as Message[]
+    return this.loadWithChecksum()
   }
 
   /** Load messages repaired for resume, rolling back to the last safe snapshot when needed. */
