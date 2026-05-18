@@ -56,7 +56,7 @@ const VALID_SCHEMA_TYPES = new Set([
  * that cause 400 errors from strict OpenAI-compatible providers like Mimo.
  */
 function sanitizeSchemaProperties(properties: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  if (!properties) return properties
+  if (!properties) return undefined
   const cleaned: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(properties)) {
     if (value === null || value === undefined || typeof value !== 'object') continue
@@ -82,13 +82,22 @@ function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
   // Provider-native tool format (e.g. GLM web_search) — pass through as-is
   if (tool.providerFormat) return tool.providerFormat
 
-  const params = tool.input_schema
-    ? {
-        type: tool.input_schema.type,
-        properties: sanitizeSchemaProperties(tool.input_schema.properties),
-        ...(tool.input_schema.required?.length ? { required: tool.input_schema.required } : {}),
-      }
-    : { type: 'object', properties: {} }
+  const inputSchema = tool.input_schema
+  const params: Record<string, unknown> = {
+    type: 'object',
+    properties: inputSchema ? sanitizeSchemaProperties(inputSchema.properties) : undefined,
+  }
+  if (inputSchema?.required?.length) {
+    params.required = inputSchema.required
+  }
+  // Preserve additionalProperties for empty-object schemas (allows any params)
+  if (inputSchema?.additionalProperties !== undefined) {
+    params.additionalProperties = inputSchema.additionalProperties
+  }
+  // Ensure properties is never undefined — empty object is valid
+  if (params.properties === undefined) {
+    params.properties = {}
+  }
 
   return {
     type: 'function',
@@ -282,6 +291,12 @@ export class OpenAIClient implements StreamClient {
         }
         if (toolCalls.length > 0) {
           assistant.tool_calls = toolCalls
+        }
+        // OpenAI API requires content or tool_calls on every assistant message.
+        // If only thinking arrived (no text, no tool calls), set content to a
+        // placeholder so the API doesn't reject the request with 400.
+        if (!assistant.content && !assistant.tool_calls) {
+          assistant.content = ''
         }
         messages.push(assistant)
       }
