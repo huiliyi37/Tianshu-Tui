@@ -1,4 +1,4 @@
-import type { PostTurnRuntimeHook } from '../runtime-hooks.js'
+import type { PostSessionRuntimeHook } from '../runtime-hooks.js'
 import { extractBullets, shouldReflect } from '../playbook.js'
 import type { RetrospectInput } from '../retrospect.js'
 import { generateRetrospect } from '../retrospect.js'
@@ -11,9 +11,9 @@ export interface PlaybookReflectHookDeps {
   getDoomLoopLevel: () => DoomLoopLevel
 }
 
-export function createPlaybookReflectHook(deps: PlaybookReflectHookDeps): PostTurnRuntimeHook {
+export function createPlaybookReflectHook(deps: PlaybookReflectHookDeps): PostSessionRuntimeHook {
   return {
-    phase: 'postTurn',
+    phase: 'postSession',
     name: 'playbook-reflect',
     run(ctx) {
       const { vigor, sensorium } = ctx.snapshot

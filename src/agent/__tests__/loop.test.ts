@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentLoop } from '../loop.js'
 import { SessionContext } from '../context.js'
+import { RuntimeHookPipeline } from '../runtime-hooks.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
 import { READ_FILE_TOOL } from '../../tools/read-file.js'
@@ -452,6 +453,86 @@ describe('AgentLoop — multi-turn tool_use', () => {
     const allText = texts.join('')
     assert.equal(allText.match(/审查发现了 4 个中风险问题/g)?.length, 1)
     assert.ok(allText.includes('完成。'))
+  })
+})
+
+describe('AgentLoop — session lifecycle', () => {
+  it('runs postSession before final turn completion', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const events: string[] = []
+    const runtimeHooks = new RuntimeHookPipeline([{
+      phase: 'preTurn',
+      name: 'test-perception',
+      run: ctx => {
+        ctx.effects.setSensorium({ momentum: 0.5, pressure: 0.1, confidence: 0.8, complexity: 0.2, freshness: 0.7, stability: 0.9 })
+        ctx.effects.setStrategy({ reasoningEffort: 'medium', explorationBreadth: 0.3, commitThreshold: 0.6, shouldEscalate: false, thetaCycleInterval: 7 })
+      },
+    }, {
+      phase: 'postSession',
+      name: 'test-post-session',
+      run: () => { events.push('postSession') },
+    }])
+    const client = mockClient([makeTextBlock('done')], 'end_turn')
+    const agent = new AgentLoop({
+      client,
+      promptEngine: makeEngine(),
+      toolRegistry: registry,
+      maxTurns: 2,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      runtimeHooks,
+    }, session, '/test')
+
+    await agent.run('test prompt', {
+      ...makeCallbacks(),
+      onTurnComplete: (_usage, _turn, isFinal) => {
+        if (isFinal) events.push('final')
+      },
+    })
+
+    assert.deepEqual(events, ['postSession', 'final'])
+  })
+
+  it('runs postSession on AbortError before abort callback', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const events: string[] = []
+    const runtimeHooks = new RuntimeHookPipeline([{
+      phase: 'preTurn',
+      name: 'test-perception',
+      run: ctx => {
+        ctx.effects.setSensorium({ momentum: 0.5, pressure: 0.1, confidence: 0.8, complexity: 0.2, freshness: 0.7, stability: 0.9 })
+        ctx.effects.setStrategy({ reasoningEffort: 'medium', explorationBreadth: 0.3, commitThreshold: 0.6, shouldEscalate: false, thetaCycleInterval: 7 })
+      },
+    }, {
+      phase: 'postSession',
+      name: 'test-post-session',
+      run: () => { events.push('postSession') },
+    }])
+    const client: ApiClient = {
+      stream: mock.fn(async () => {
+        throw new DOMException('Aborted', 'AbortError')
+      }),
+    } as unknown as ApiClient
+    const agent = new AgentLoop({
+      client,
+      promptEngine: makeEngine(),
+      toolRegistry: registry,
+      maxTurns: 2,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      runtimeHooks,
+    }, session, '/test')
+
+    await agent.run('test prompt', {
+      ...makeCallbacks(),
+      onAbort: () => { events.push('abort') },
+    })
+
+    assert.deepEqual(events, ['postSession', 'abort'])
   })
 })
 

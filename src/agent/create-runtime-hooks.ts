@@ -6,18 +6,30 @@ import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
 import { createSignalConsumerRuntimeHook } from './hooks/signal-consumer-hook.js'
 import { createPlaybookReflectHook } from './hooks/playbook-reflect-hook.js'
+import { createTelemetryFlushHook } from './hooks/telemetry-flush-hook.js'
+import { createDreamHook } from './hooks/dream-hook.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput } from './retrospect.js'
 import type { DoomLoopLevel } from './trace-store.js'
+import type { TelemetryWriter } from './telemetry-writer.js'
+import type { EvidenceState } from './evidence.js'
+import type { TrajectoryEntry } from './trajectory.js'
 
 export interface RuntimeHookDeps {
   stigmergyDeposit: (deposit: any) => Promise<void>
   stigmergyQuery: () => Promise<any>
-  getEvidenceState: () => any
+  getEvidenceState: () => EvidenceState
   setLoadedPheromones: (pheromones: any) => void
   getThetaState: () => any
   setThetaState: (state: any) => void
   getPredictionAccumulator: () => any
+  telemetryWriter?: TelemetryWriter
+  dream?: {
+    cwd: string
+    sessionId: string
+    getDecisions: () => string[]
+    getTrajectory: () => TrajectoryEntry[]
+  }
   playbookStore?: PlaybookStore
   buildRetrospectInput?: () => RetrospectInput
   getDoomLoopLevel?: () => DoomLoopLevel
@@ -50,6 +62,20 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       buildRetrospectInput: deps.buildRetrospectInput,
       getDoomLoopLevel: deps.getDoomLoopLevel,
     }))
+  }
+
+  if (deps.dream) {
+    hooks.push(createDreamHook({
+      cwd: deps.dream.cwd,
+      sessionId: deps.dream.sessionId,
+      getEvidenceState: deps.getEvidenceState,
+      getDecisions: deps.dream.getDecisions,
+      getTrajectory: deps.dream.getTrajectory,
+    }))
+  }
+
+  if (deps.telemetryWriter) {
+    hooks.push(createTelemetryFlushHook(deps.telemetryWriter))
   }
 
   return hooks

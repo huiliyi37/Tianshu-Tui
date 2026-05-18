@@ -6,6 +6,7 @@ import {
 } from '../runtime-hooks.js'
 import type {
   AfterPerceptionRuntimeHook,
+  PostSessionRuntimeHook,
   PostToolRuntimeHook,
   PostTurnRuntimeHook,
   PreTurnRuntimeHook,
@@ -86,6 +87,17 @@ describe('RuntimeHookPipeline', () => {
     const pipeline = new RuntimeHookPipeline([hookA, hookB])
 
     await pipeline.runPostTurn(makeContext())
+
+    assert.deepEqual(order, ['a', 'b'])
+  })
+
+  it('runs postSession hooks in registration order', async () => {
+    const order: string[] = []
+    const hookA: PostSessionRuntimeHook = { phase: 'postSession', name: 'a', run: async () => { order.push('a') } }
+    const hookB: PostSessionRuntimeHook = { phase: 'postSession', name: 'b', run: async () => { order.push('b') } }
+    const pipeline = new RuntimeHookPipeline([hookA, hookB])
+
+    await pipeline.runPostSession(makeContext())
 
     assert.deepEqual(order, ['a', 'b'])
   })

@@ -2,7 +2,7 @@ import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import type { Sensorium, SensoriumInput, StrategyProfile } from './sensorium.js'
 import type { VigorState } from './vigor.js'
 
-export type RuntimeHookPhase = 'preTurn' | 'afterPerception' | 'postTool' | 'postTurn'
+export type RuntimeHookPhase = 'preTurn' | 'afterPerception' | 'postTool' | 'postTurn' | 'postSession'
 
 export interface RuntimeToolEvent {
   name: string
@@ -68,11 +68,18 @@ export interface PostTurnRuntimeHook {
   run(ctx: RuntimeHookContext): Promise<void> | void
 }
 
+export interface PostSessionRuntimeHook {
+  phase: 'postSession'
+  name: string
+  run(ctx: RuntimeHookContext): Promise<void> | void
+}
+
 export type RuntimeHook =
   | PreTurnRuntimeHook
   | AfterPerceptionRuntimeHook
   | PostToolRuntimeHook
   | PostTurnRuntimeHook
+  | PostSessionRuntimeHook
 
 export interface RuntimeHookError {
   phase: RuntimeHookPhase
@@ -126,6 +133,7 @@ export class RuntimeHookPipeline {
   private afterPerceptionHooks: AfterPerceptionRuntimeHook[] = []
   private postToolHooks: PostToolRuntimeHook[] = []
   private postTurnHooks: PostTurnRuntimeHook[] = []
+  private postSessionHooks: PostSessionRuntimeHook[] = []
 
   constructor(
     hooks: RuntimeHook[] = [],
@@ -148,6 +156,9 @@ export class RuntimeHookPipeline {
       case 'postTurn':
         this.postTurnHooks.push(hook)
         break
+      case 'postSession':
+        this.postSessionHooks.push(hook)
+        break
     }
   }
 
@@ -165,6 +176,10 @@ export class RuntimeHookPipeline {
 
   async runPostTurn(ctx: RuntimeHookContext): Promise<void> {
     await this.runPhase('postTurn', this.postTurnHooks, hook => hook.run(ctx))
+  }
+
+  async runPostSession(ctx: RuntimeHookContext): Promise<void> {
+    await this.runPhase('postSession', this.postSessionHooks, hook => hook.run(ctx))
   }
 
   private async runPhase<T extends RuntimeHook>(

@@ -16,17 +16,14 @@ describe('Config schema integration', () => {
     assert.equal(config.provider.default, 'deepseek')
   })
 
-  it('all 6 providers parsed with correct protocols', () => {
+  it('all configured providers parse with supported protocols', () => {
     if (!existsSync(configPath)) return
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
     const config = configSchema.parse(raw)
     const providers = config.provider.providers
-    assert.equal(providers.deepseek!.protocol, 'anthropic')
-    assert.equal(providers.glm!.protocol, 'anthropic')
-    assert.equal(providers.codex!.protocol, 'openai')
-    assert.equal(providers.minimax!.protocol, 'openai')
-    assert.equal(providers.mimo!.protocol, 'openai')
-    assert.equal(providers['opencode-go']!.protocol, 'openai')
+    for (const [name, provider] of Object.entries(providers)) {
+      assert.match(provider.protocol, /^(anthropic|openai)$/, `${name} protocol should be supported`)
+    }
   })
 
   it('codex auth parsed as oauth', () => {

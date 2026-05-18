@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 import { createDefaultRuntimeHooks } from '../create-runtime-hooks.js'
 
 describe('createDefaultRuntimeHooks', () => {
-  it('returns 7 hooks in the correct phase order without playbook deps', () => {
+  it('returns 7 hooks in the correct phase order without optional session-end deps', () => {
     const hooks = createDefaultRuntimeHooks({
       stigmergyDeposit: async () => {},
       stigmergyQuery: async () => [],
-      getEvidenceState: () => ({ filesModified: 0, verifiedCount: 0 }),
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
       setLoadedPheromones: () => {},
       getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
       setThetaState: () => {},
@@ -35,7 +35,7 @@ describe('createDefaultRuntimeHooks', () => {
     const hooks = createDefaultRuntimeHooks({
       stigmergyDeposit: async () => {},
       stigmergyQuery: async () => [],
-      getEvidenceState: () => ({ filesModified: 0, verifiedCount: 0 }),
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
       setLoadedPheromones: () => {},
       getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
       setThetaState: () => {},
@@ -46,6 +46,41 @@ describe('createDefaultRuntimeHooks', () => {
     })
 
     assert.equal(hooks.at(-1)?.name, 'playbook-reflect')
-    assert.equal(hooks.at(-1)?.phase, 'postTurn')
+    assert.equal(hooks.at(-1)?.phase, 'postSession')
+  })
+
+  it('appends telemetry flush hook when telemetry writer is provided', () => {
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      telemetryWriter: { write: () => {}, flush: async () => {} },
+    })
+
+    assert.equal(hooks.at(-1)?.name, 'telemetry-flush')
+    assert.equal(hooks.at(-1)?.phase, 'postSession')
+  })
+
+  it('appends dream hook before telemetry flush when dream deps are provided', () => {
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      telemetryWriter: { write: () => {}, flush: async () => {} },
+      dream: { cwd: '/tmp/project', sessionId: 'session-1', getDecisions: () => [], getTrajectory: () => [] },
+    })
+
+    assert.deepEqual(hooks.slice(-2).map(h => [h.name, h.phase]), [
+      ['dream-distill', 'postSession'],
+      ['telemetry-flush', 'postSession'],
+    ])
   })
 })

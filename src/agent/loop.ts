@@ -96,6 +96,7 @@ export interface AgentConfig {
   transcriptPath?: string
   getSessionMemoryState?: () => import('../context/types.js').LedgerSessionMemoryState | undefined
   hooks?: HookRegistry
+  runtimeHooks?: RuntimeHookPipeline
   fileHistory?: import('./file-history.js').FileHistory
   modelCards?: ModelCapabilityCard[]
   onModelSwitch?: (newModel: string) => void
@@ -202,7 +203,9 @@ export class AgentLoop {
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
     this.telemetryWriter = createTelemetryWriter(this.cwd)
-    this.runtimeHooks = new RuntimeHookPipeline(createDefaultRuntimeHooks({
+    const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
+    this.stigmergyStore = new StigmergyStore(pheromonesPath)
+    this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
       stigmergyQuery: () => this.stigmergyStore.query(),
       getEvidenceState: () => this.evidence.getState(),
@@ -213,9 +216,16 @@ export class AgentLoop {
       playbookStore: this.config.playbookStore,
       buildRetrospectInput: () => this.buildRetrospectInput(),
       getDoomLoopLevel: () => this.getDoomLoopLevel(),
+      telemetryWriter: this.telemetryWriter,
+      ...(this.config.sessionId ? {
+        dream: {
+          cwd: this.cwd,
+          sessionId: this.config.sessionId,
+          getDecisions: () => this.decisions,
+          getTrajectory: () => this.trajectory.getEntries(),
+        },
+      } : {}),
     }))
-    const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
-    this.stigmergyStore = new StigmergyStore(pheromonesPath)
   }
 
   private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
@@ -539,6 +549,12 @@ export class AgentLoop {
     })
   }
 
+  private async runPostSession(callbacks: AgentCallbacks): Promise<void> {
+    await this.runtimeHooks.runPostSession(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
+      emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
+    }))
+  }
+
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     this.trajectory.reset()
@@ -840,6 +856,7 @@ export class AgentLoop {
           if (estimatedOut > 0) {
             this.session.addUsage({ output_tokens: Math.ceil(estimatedOut / 4) })
           }
+          await this.runPostSession(callbacks)
           callbacks.onAbort()
           return
         }
@@ -1015,6 +1032,7 @@ export class AgentLoop {
         await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
           emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
         }))
+        await this.runPostSession(callbacks)
         callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), true)
         this.evidence.reset()
         break
@@ -1022,6 +1040,7 @@ export class AgentLoop {
     } catch (err) {
       this.evidence.reset()
       if ((err as Error).name === 'AbortError') {
+        await this.runPostSession(callbacks)
         callbacks.onAbort()
       } else {
         callbacks.onError(err as Error)

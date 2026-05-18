@@ -63,9 +63,8 @@ describe('createTelemetryWriter', () => {
     const writer = createTelemetryWriter(cwd)
     const snapshot = makeSnapshot()
 
-    // write() is fire-and-forget — wait a tick for the async append to complete
     writer.write(snapshot)
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await writer.flush()
 
     const raw = readFileSync(join(cwd, '.rivet', 'sensorium.jsonl'), 'utf-8')
     const lines = raw.trim().split('\n')
@@ -79,7 +78,7 @@ describe('createTelemetryWriter', () => {
     const writer = createTelemetryWriter(cwd)
     writer.write(makeSnapshot(1))
     writer.write(makeSnapshot(2))
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await writer.flush()
 
     const raw = readFileSync(join(cwd, '.rivet', 'sensorium.jsonl'), 'utf-8')
     const lines = raw.trim().split('\n')

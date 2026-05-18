@@ -160,8 +160,6 @@ export function activityPhaseLabel(phase: ActivityPhase): string {
 }
 
 const STALE_THRESHOLD_MS = 10_000
-/** After this many ms in 'completed' state, auto-transition display to 'waiting' */
-const COMPLETED_WAIT_TRANSITION_MS = 5_000
 
 export function formatActivitySummary(
   activity: ActivityState,
@@ -173,12 +171,6 @@ export function formatActivitySummary(
 
   if (activity.status === 'completed') {
     const elapsed = (activity.completedAt ?? now) - activity.startedAt
-    const sinceCompletion = now - (activity.completedAt ?? now)
-    // After threshold, show a live "Waiting…" instead of static "completed"
-    if (sinceCompletion >= COMPLETED_WAIT_TRANSITION_MS) {
-      const waitLabel = activityPhaseLabel('waiting')
-      return `${waitLabel}… ${formatActivityDuration(sinceCompletion)}`
-    }
     const sizePart = activity.sizeHint ? ` (${activity.sizeHint})` : ''
     return `${label} completed in ${formatActivityDuration(elapsed)}${sizePart}`
   }

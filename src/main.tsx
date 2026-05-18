@@ -13,7 +13,6 @@ import { SessionPersist } from './agent/session-persist.js'
 import { evictOldSessions } from './agent/session-persist.js'
 import { FileHistory } from './agent/file-history.js'
 import { persistFileHistory } from './agent/file-history-persist.js'
-import { persistDream } from './agent/dream.js'
 import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
@@ -454,28 +453,6 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       killAll()
       _mcpManager?.shutdown().catch(() => {})
       persist.compact(session.getMessages())
-      try {
-        const evidenceState = agent.getEvidenceState()
-        const rawTrajectory = agent.getTrajectoryEntries()
-        const decisions = agent.getDecisions()
-        // Gate: only persist if tests passed OR 3+ files modified
-        const hasPassedTests = evidenceState.verifications.some(v => v.status === 'passed')
-        const hasEnoughFiles = evidenceState.filesModified.size >= 3
-        if (!hasPassedTests && !hasEnoughFiles) throw new Error('gate')
-        persistDream(process.cwd(), {
-          filesModified: [...evidenceState.filesModified],
-          filesRead: [...evidenceState.filesRead],
-          verifications: evidenceState.verifications,
-          decisions,
-          trajectoryEntries: rawTrajectory.map(e => ({
-            tool: e.tool,
-            target: e.target,
-            status: e.status.startsWith('retried') || e.status === 'success' ? 'success' as const : 'failed' as const,
-            error: e.errorClass,
-          })),
-          sessionId,
-        })
-      } catch { /* dream distillation is best-effort */ }
       if (_fileHistoryRef) {
         persistFileHistory(
           join(homedir(), '.rivet', 'sessions', sessionId, 'file-history.json'),
