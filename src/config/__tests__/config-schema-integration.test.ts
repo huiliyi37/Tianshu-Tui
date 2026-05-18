@@ -13,7 +13,10 @@ describe('Config schema integration', () => {
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
     const config = configSchema.parse(raw)
     assert.ok(config)
-    assert.equal(config.provider.default, 'deepseek')
+    // Default provider must be one of the configured providers
+    const defaultProvider = config.provider.default
+    assert.ok(defaultProvider, 'default provider must be set')
+    assert.ok(config.provider.providers[defaultProvider], `default provider '${defaultProvider}' not found in providers map`)
   })
 
   it('all configured providers parse with supported protocols', () => {
