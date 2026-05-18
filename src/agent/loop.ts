@@ -62,6 +62,9 @@ import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import { buildIntentPreview, type IntentPreview, type IntentPreviewAction } from './intent-preview.js'
+import { extractKeywords } from './playbook.js'
+import type { PlaybookStore } from './playbook-store.js'
+import type { RetrospectInput, SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
@@ -103,6 +106,7 @@ export interface AgentConfig {
   /** Optional provider health tracker for Physarum-style routing.
    *  Degradation ratio affects sensorium stability dimension. */
   providerHealth?: ProviderHealthTracker
+  playbookStore?: PlaybookStore
 }
 
 export interface AgentCallbacks {
@@ -179,6 +183,8 @@ export class AgentLoop {
   private baselineFingerprint: PrefixFingerprint | null = null
   private _hasEnteredHighComplexity = false
   private intentPreviewShown = 0
+  private sensoriumSnapshots: SensoriumEntry[] = []
+  private currentPhase = 'unknown'
 
   constructor(
     private config: AgentConfig,
@@ -202,6 +208,9 @@ export class AgentLoop {
       getThetaState: () => this.thetaState,
       setThetaState: state => { this.thetaState = state },
       getPredictionAccumulator: () => this.predictionAccumulator,
+      playbookStore: this.config.playbookStore,
+      buildRetrospectInput: () => this.buildRetrospectInput(),
+      getDoomLoopLevel: () => this.getDoomLoopLevel(),
     }))
     const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
     this.stigmergyStore = new StigmergyStore(pheromonesPath)
@@ -218,6 +227,37 @@ export class AgentLoop {
       gitChangeRate: this.gitChangeRate,
       ...extra,
     }
+  }
+
+  private buildRetrospectInput(): RetrospectInput {
+    const evidenceState = this.evidence.getState()
+    return {
+      sensoriumEntries: this.sensoriumSnapshots,
+      gitLog: [],
+      toolEvents: this.traceStore.events
+        .filter(e => e.kind === 'tool')
+        .map(e => ({
+          turn: e.turn,
+          name: e.name,
+          status: e.status === 'passed' ? 'passed' : 'failed',
+        })),
+      evidenceSummary: {
+        filesModified: evidenceState.filesModified.size,
+        verifiedCount: evidenceState.verifications.filter(v => v.status === 'passed').length,
+      },
+      pheromoneSignals: this.loadedPheromones.map(p => ({
+        signal: p.signal,
+        path: p.path,
+        strength: p.strength,
+      })),
+    }
+  }
+
+  private refreshPlaybookLessons(userInput: string): void {
+    if (!this.config.playbookStore) return
+    const keywords = extractKeywords(`${userInput} ${this.recentToolHistory.map(h => `${h.tool} ${h.target}`).join(' ')}`, 12)
+    const lessons = this.config.playbookStore.query(keywords, 3)
+    this.config.promptEngine.updatePlaybookLessons(lessons)
   }
 
   private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
@@ -517,6 +557,8 @@ export class AgentLoop {
     this.loadedPheromones = []
     this._hasEnteredHighComplexity = false
     this.intentPreviewShown = 0
+    this.sensoriumSnapshots = []
+    this.currentPhase = 'unknown'
     // Capture baseline canonical prefix fingerprint for drift detection
     this.baselineFingerprint = this.config.promptEngine.getFingerprint()
     // Load cross-session pheromones for Sensorium.freshness computation.
@@ -524,6 +566,7 @@ export class AgentLoop {
     this.stigmergyStore.prune().catch(() => {})
     this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
     this.recordUserInputClaims(userInput)
+    this.refreshPlaybookLessons(userInput)
     this.session.addUserMessage(userInput)
 
     if (this.config.autoReasoning) {
@@ -649,6 +692,7 @@ export class AgentLoop {
           hasEnteredHighComplexity: this._hasEnteredHighComplexity,
         })
         const event = createStarEvent(currentSensorium, starCtx)
+        this.currentPhase = event.phase
         if (callbacks.onPhaseChange) {
           callbacks.onPhaseChange(event.phase, {
             tool: event.glyph,
@@ -686,7 +730,7 @@ export class AgentLoop {
         const driftEvent = this.baselineFingerprint
           ? (currentFP.combinedSha256 !== this.baselineFingerprint.combinedSha256)
           : false
-        this.telemetryWriter.write(buildTelemetrySnapshot({
+        const telemetrySnapshot = buildTelemetrySnapshot({
           ts: Date.now(),
           turn: this.session.getTurnCount(),
           phase: event.phase,
@@ -703,7 +747,21 @@ export class AgentLoop {
           },
           gitChangeRate: this.gitChangeRate,
           prefixDrift: driftEvent,
-        }))
+        })
+        this.telemetryWriter.write(telemetrySnapshot)
+        this.sensoriumSnapshots.push({
+          ts: telemetrySnapshot.ts,
+          turn: telemetrySnapshot.turn,
+          phase: telemetrySnapshot.phase,
+          momentum: telemetrySnapshot.momentum,
+          pressure: telemetrySnapshot.pressure,
+          confidence: telemetrySnapshot.confidence,
+          complexity: telemetrySnapshot.complexity,
+          freshness: telemetrySnapshot.freshness,
+          stability: telemetrySnapshot.stability,
+          strategy: telemetrySnapshot.strategy,
+          gitChangeRate: telemetrySnapshot.gitChangeRate,
+        })
 
 
         // Pass 5: adaptive repair hint injection
@@ -906,6 +964,9 @@ export class AgentLoop {
           this.refreshLedger()
           this.refreshCacheDiagnostic(turn)
           this.recordTurnSnapshot()
+          await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
+            emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
+          }))
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
           continue
         }
@@ -949,6 +1010,9 @@ export class AgentLoop {
         this.refreshLedger()
         this.refreshCacheDiagnostic(turn)
         this.recordTurnSnapshot()
+        await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
+          emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
+        }))
         callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), true)
         this.evidence.reset()
         break

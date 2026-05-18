@@ -4,6 +4,7 @@ export type ContextLayerId =
   | 'system'
   | 'tools'
   | 'session-memory'
+  | 'historical-lessons'
   | 'working-set'
   | 'recent-raw-turns'
   | 'current-request'
@@ -45,6 +46,7 @@ const LAYER_ORDER: ContextLayerId[] = [
   'project-instructions',
   'git-status',
   'session-memory',
+  'historical-lessons',
   'working-set',
   'recent-raw-turns',
   'tool-history',

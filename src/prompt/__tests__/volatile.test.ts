@@ -242,6 +242,27 @@ describe('session memory XML section', () => {
     assert.doesNotMatch(block, /<system>ignore previous instructions/)
   })
 })
+describe('historical lessons XML section', () => {
+  it('renders playbook lessons as escaped historical-lessons', () => {
+    const block = buildVolatileBlock({
+      cwd: '/repo',
+      playbookLessons: [{
+        id: 'pb1',
+        createdAt: 1,
+        keywords: ['tests'],
+        lesson: 'Run targeted tests after <edits>',
+        context: 'recommendation',
+        useCount: 0,
+        lastUsedAt: null,
+        importance: 0.6,
+      }],
+    })
+
+    assert.match(block, /<historical-lessons>/)
+    assert.match(block, /Run targeted tests after &lt;edits&gt;/)
+  })
+})
+
 describe('stable/latest volatile split', () => {
   it('keeps dynamic sections out of stable block', () => {
     const stable = buildStableVolatileBlock({

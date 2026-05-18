@@ -35,6 +35,7 @@ import { McpManager } from './mcp/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
+import { PlaybookStore } from './agent/playbook-store.js'
 import type { Config, ProviderConfig } from './config/schema.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
@@ -252,6 +253,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
 
   const agent = useMemo(() => {
     const compactModelSpec = activeProvider.models.find(m => m.id === config.compact.model || m.alias === config.compact.model)
+    const playbookStore = new PlaybookStore(cwd)
 
     const agentCfg = createAgentConfig({
       apiKey: activeApiKey,
@@ -400,6 +402,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         lspEnabled: true,
         fileHistory,
         contextClaimStore: claimStore,
+        playbookStore,
       },
       session,
       cwd,
@@ -632,6 +635,7 @@ async function main() {
       claimStore.propose(rule)
     }
     const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
+    const playbookStore = new PlaybookStore(process.cwd())
 
     const result = await runGoalLoop({
       goal: parsed.goal,
@@ -687,6 +691,7 @@ async function main() {
           contextClaimStore: claimStore,
           getSessionMemoryState: () => persist.getSessionMemoryState(),
           fileHistory,
+          playbookStore,
         }, session, process.cwd())
       },
       checkGoalAchieved: (text: string) => {

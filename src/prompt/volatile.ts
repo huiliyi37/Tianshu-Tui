@@ -5,6 +5,7 @@ import { gitStatusCache } from './volatile-git.js'
 import type { ContextLedger } from '../context/types.js'
 import type { TaskState } from '../agent/task-state.js'
 import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
+import type { PlaybookBullet } from '../agent/playbook.js'
 
 export interface ToolHistoryEntry {
   tool: string
@@ -20,6 +21,7 @@ export interface VolatileContext {
   workingSet?: string[]
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
+  playbookLessons?: PlaybookBullet[]
   activeClaims?: ContextClaim[]
   toolHistory?: ToolHistoryEntry[]
   taskProgress?: TaskState
@@ -103,6 +105,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     ...ctx,
     gitStatus: undefined,
     activeClaims: undefined,
+    playbookLessons: undefined,
     toolHistory: undefined,
     taskProgress: undefined,
     behaviorMirror: undefined,
@@ -212,6 +215,14 @@ ${escapeXml(ctx.cerebellarHint)}
 
   if (ctx.sessionMemoryBlock) {
     parts.push(`<session-memory>\n${escapeXml(ctx.sessionMemoryBlock)}\n</session-memory>`)
+  }
+
+  if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
+    const lessons = ctx.playbookLessons
+      .slice(0, 3)
+      .map(b => `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`)
+      .join('\n')
+    parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
   }
 
   return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''

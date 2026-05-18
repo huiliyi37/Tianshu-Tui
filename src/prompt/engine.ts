@@ -3,6 +3,7 @@ import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
+import type { PlaybookBullet } from '../agent/playbook.js'
 import {
   computeFingerprint,
   detectDrift,
@@ -99,6 +100,7 @@ export class PromptEngine {
       ...(config.volatileCtx.rivetMd ? [createContextLayer({ id: 'project-instructions', label: 'Project Instructions', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'included', content: config.volatileCtx.rivetMd })] : []),
       ...(config.volatileCtx.gitStatus ? [createContextLayer({ id: 'git-status', label: 'Git Status', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'included', content: config.volatileCtx.gitStatus })] : []),
       ...(config.volatileCtx.sessionMemoryBlock ? [createContextLayer({ id: 'session-memory', label: 'Session Memory', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'included', content: config.volatileCtx.sessionMemoryBlock })] : []),
+      ...(config.volatileCtx.playbookLessons && config.volatileCtx.playbookLessons.length > 0 ? [createContextLayer({ id: 'historical-lessons', label: 'Historical Lessons', stability: 'dynamic', channel: 'volatile-user-message', fingerprint: 'excluded', content: config.volatileCtx.playbookLessons.map(b => b.lesson).join('\n') })] : []),
       ...(config.volatileCtx.workingSet && config.volatileCtx.workingSet.length > 0 ? [createContextLayer({ id: 'working-set', label: 'Working Set', stability: 'stable-volatile', channel: 'volatile-user-message', fingerprint: 'partial', content: config.volatileCtx.workingSet.join('\n') })] : []),
     ])
   }
@@ -181,6 +183,10 @@ export class PromptEngine {
 
   updateActiveClaims(claims: ContextClaim[]): void {
     this.config.volatileCtx.activeClaims = claims
+  }
+
+  updatePlaybookLessons(lessons: PlaybookBullet[]): void {
+    this.config.volatileCtx.playbookLessons = lessons
   }
 
   setTaskProgress(state: TaskState): void {
