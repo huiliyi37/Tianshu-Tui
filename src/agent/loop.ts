@@ -69,6 +69,8 @@ import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
+const MAX_SENSORIUM_SNAPSHOTS = 50
+
 function mapQueriedPheromones(results: PheromoneQueryResult[]): Pheromone[] {
   return results.map(r => ({
     path: r.path,
@@ -749,7 +751,7 @@ export class AgentLoop {
           prefixDrift: driftEvent,
         })
         this.telemetryWriter.write(telemetrySnapshot)
-        this.sensoriumSnapshots.push({
+        this.sensoriumSnapshots = [...this.sensoriumSnapshots, {
           ts: telemetrySnapshot.ts,
           turn: telemetrySnapshot.turn,
           phase: telemetrySnapshot.phase,
@@ -761,7 +763,7 @@ export class AgentLoop {
           stability: telemetrySnapshot.stability,
           strategy: telemetrySnapshot.strategy,
           gitChangeRate: telemetrySnapshot.gitChangeRate,
-        })
+        }].slice(-MAX_SENSORIUM_SNAPSHOTS)
 
 
         // Pass 5: adaptive repair hint injection

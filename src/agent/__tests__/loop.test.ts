@@ -9,6 +9,7 @@ import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
 import { READ_FILE_TOOL } from '../../tools/read-file.js'
 import { ContextClaimStore } from '../../context/claim-store.js'
+import { PlaybookStore } from '../playbook-store.js'
 import type { ApiClient, StreamCallbacks } from '../../api/client.js'
 import type { ContentBlock } from '../../api/types.js'
 
@@ -825,6 +826,51 @@ describe('AgentLoop — antibody generation', () => {
 
     assert.equal(texts1.join(''), 'Hello! How can I help?')
     assert.equal(texts2.join(''), 'Hello! How can I help?', 'second run text should not be suppressed by dedup')
+  })
+})
+
+describe('AgentLoop — playbook telemetry bounds', () => {
+  it('caps sensorium snapshots retained for playbook reflection', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register({
+      definition: { name: 'noop', description: 'noop', input_schema: { type: 'object', properties: {} } },
+      execute: async () => ({ content: 'ok' }),
+      isConcurrencySafe: () => true,
+      isEnabled: () => true,
+      requiresApproval: () => false,
+    })
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-loop-playbook-'))
+    const client: ApiClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks) => {
+        cb.onContentBlock(makeToolUseBlock(`tu_${session.getTurnCount()}`, 'noop', {}))
+        cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 10 })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop(
+      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 60, contextWindow: 1_000_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' }, playbookStore: new PlaybookStore(dir) },
+      session, '/test',
+    )
+
+    try {
+      await agent.run('test prompt', {
+        onTextDelta: () => {},
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onToolResult: () => {},
+        onTurnComplete: () => {},
+        onError: (e) => { throw e },
+        onAbort: () => {},
+        onApprovalRequired: async () => false,
+      })
+
+      assert.equal(agent['sensoriumSnapshots'].length, 50)
+      assert.ok(agent['sensoriumSnapshots'][0]!.turn > 1)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
