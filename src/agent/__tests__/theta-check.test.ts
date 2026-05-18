@@ -33,6 +33,7 @@ describe('runThetaCheck', () => {
 
     assert.deepEqual(result.errors, [])
     assert.ok(result.durationMs >= 0)
+    assert.equal(result.timedOut, false)
   })
 
   it('returns error file paths for invalid TypeScript', async () => {
@@ -43,6 +44,7 @@ describe('runThetaCheck', () => {
 
     assert.ok(result.errors.length > 0)
     assert.ok(result.errors.some(e => e.endsWith('broken.ts')), `expected broken.ts in ${result.errors.join(', ')}`)
+    assert.equal(result.timedOut, false)
   })
 
   it('returns empty errors when no parseable file errors are emitted', async () => {
@@ -53,5 +55,16 @@ describe('runThetaCheck', () => {
 
     assert.deepEqual(result.errors, [])
     assert.ok(result.durationMs >= 0)
+    assert.equal(result.timedOut, false)
+  })
+
+  it('reports timeout metadata for very short timeouts', async () => {
+    const dir = makeProject()
+    writeFileSync(join(dir, 'valid.ts'), 'export const x: number = 42\n')
+
+    const result = await runThetaCheck(dir, 1)
+
+    assert.deepEqual(result.errors, [])
+    assert.equal(result.timedOut, true)
   })
 })

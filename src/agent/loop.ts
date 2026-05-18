@@ -161,6 +161,13 @@ export class AgentLoop {
   private vigorState: VigorState = createVigorState()
   private runtimeHooks: RuntimeHookPipeline
   private thetaCheckInFlight = false
+  private thetaTelemetry: { lastReason: string | null; lastDurationMs: number | null; lastErrorCount: number; lastTimedOut: boolean; requestedCount: number } = {
+    lastReason: null,
+    lastDurationMs: null,
+    lastErrorCount: 0,
+    lastTimedOut: false,
+    requestedCount: 0,
+  }
   private thetaState: ThetaState = createThetaState(7)
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
@@ -267,14 +274,32 @@ export class AgentLoop {
 
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
 
-  private requestThetaCheck(_reason: string): void {
+  private requestThetaCheck(reason: string): void {
     if (this.thetaCheckInFlight) return
     this.thetaCheckInFlight = true
+    this.thetaTelemetry = {
+      ...this.thetaTelemetry,
+      lastReason: reason,
+      requestedCount: this.thetaTelemetry.requestedCount + 1,
+    }
     runThetaCheck(this.cwd).then(result => {
       for (const errFile of result.errors) {
         this.repairHintTracker.recordFailure(errFile, 'type_error')
       }
-    }).catch(() => {}).finally(() => {
+      this.thetaTelemetry = {
+        ...this.thetaTelemetry,
+        lastDurationMs: result.durationMs,
+        lastErrorCount: result.errors.length,
+        lastTimedOut: result.timedOut,
+      }
+    }).catch(() => {
+      this.thetaTelemetry = {
+        ...this.thetaTelemetry,
+        lastDurationMs: null,
+        lastErrorCount: 0,
+        lastTimedOut: false,
+      }
+    }).finally(() => {
       this.thetaCheckInFlight = false
     })
   }
@@ -646,6 +671,15 @@ export class AgentLoop {
           },
           health: {
             rigidity: detectRigidity(this.vigorState.history),
+            elmDue: this.vigorState.vigor > 0.8 && this.vigorState.history.slice(-5).length === 5 && this.vigorState.history.slice(-5).every(v => v > 0.8),
+          },
+          theta: {
+            inFlight: this.thetaCheckInFlight,
+            lastReason: this.thetaTelemetry.lastReason,
+            lastDurationMs: this.thetaTelemetry.lastDurationMs,
+            lastErrorCount: this.thetaTelemetry.lastErrorCount,
+            lastTimedOut: this.thetaTelemetry.lastTimedOut,
+            requestedCount: this.thetaTelemetry.requestedCount,
           },
           gitChangeRate: this.gitChangeRate,
           prefixDrift: driftEvent,

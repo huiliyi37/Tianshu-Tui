@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 export interface ThetaCheckResult {
   errors: string[]
   durationMs: number
+  timedOut: boolean
 }
 
 function parseTypeScriptErrorFiles(output: string): string[] {
@@ -36,11 +37,11 @@ export function runThetaCheck(cwd: string, timeoutMs = 3000): Promise<ThetaCheck
     let settled = false
     let timedOut = false
 
-    const finish = (errors: string[]): void => {
+    const finish = (errors: string[], didTimeOut = timedOut): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      resolve({ errors, durationMs: Date.now() - start })
+      resolve({ errors, durationMs: Date.now() - start, timedOut: didTimeOut })
     }
 
     const timer = setTimeout(() => {
