@@ -203,7 +203,7 @@ export class ApiClient implements StreamClient {
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': this.config.apiKey,
-          'anthropic-version': '2023-06-01',
+          'anthropic-version': '2025-04-14',
         },
         body: stableStringify(finalRequest),
         signal,
