@@ -1,3 +1,24 @@
+### 2026-05-18 — session 0bba0331
+
+**Modified** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/payload-diagnostic.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/payload-diagnostic.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/slash-commands.test.ts
+**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/slash-commands.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/__tests__/volatile.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×11, read_file×6, diff×6, todo×5, bash×4, git×2, write_file×2, grep×1
+
+### 2026-05-18 — session 0bba0331
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/workflows/ecosystem-workflows.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/workflows/__tests__/ecosystem-workflows.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/slash-commands.test.ts
+**Read** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/slash-commands.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/__tests__/commands-loader.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx
+**Tests**: ⚠️ unverified
+**Tools used**: read_file×6, edit_file×6, todo×5, git×4, bash×4, diff×4, write_file×2, glob×1, grep×1
+
+### 2026-05-18 — session 27a06f5b
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-17-context-resilience-implementation.md, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-17-context-resilience-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/status/2026-05-18-tui-2.3-conscious-agent-followups.md
+**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/status/2026-05-18-tui-2.3-conscious-agent-followups.md, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-17-context-resilience-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-17-context-resilience-implementation.md
+**Tests**: ⚠️ unverified
+**Tools used**: read_file×5, edit_file×4, git×2, diff×1, bash×1
+
 ### 2026-05-18 — session 27a06f5b
 
 **Modified** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/micro.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/micro.ts
@@ -65,24 +86,3 @@
 - **Branch**: main
 - **Tests**: codex-client 3/3 pass, work-order 10/10 pass, coordinator 8/8 pass
 - **未跟踪文件**: `docs/superpowers/plans/2026-05-17-rivet-agent-parity-roadmap.md`（R1-R4 计划，见下方）
-
-### 待开始工作
-
-**Rivet Agent Parity Roadmap**（`docs/superpowers/plans/2026-05-17-rivet-agent-parity-roadmap.md`）：
-- R1 Capability Baseline：benchmark task schema, JSONL store, matrix report, dry-run runner
-- R2 Execution Closure：trace/evidence 可序列化报告, LSP diagnostics, completion guard, provider registry
-- R3 / R4 不在本计划内，需单独子计划
-
-### 不需要重复做的工作
-
-以下测试已验证通过，下一个会话无需重跑：
-- `src/agent/__tests__/work-order.test.ts` — 10/10 pass
-- `src/agent/__tests__/coordinator.test.ts` — 8/8 pass
-- `src/api/__tests__/codex-client.test.ts` — 3/3 pass
-
-三个清理提交均已在仓库中，无需再处理。
-
-### 关键决策
-
-- codex 缓冲只针对 `output_item.done` 事件，不缓冲流式 delta（保持实时体验）
-- DeepSeek 服务端保证 reasoning delta 在 text delta 之前，只在 done 事件层面需要排序修复
