@@ -195,6 +195,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
   const [showPalette, setShowPalette] = useState(false)
   const [reasoningEffort, setReasoningEffortState] = useState<string>('')
+  const reasoningSyncedRef = useRef(false)
+
+  // Sync initial reasoning effort from agent config
+  if (!reasoningSyncedRef.current) {
+    reasoningSyncedRef.current = true
+    const initial = agent.getReasoningEffort()
+    if (initial) setReasoningEffortState(initial)
+  }
 
   const [verbose, _setVerbose] = useState(false)
   const [, _setAutoSafe] = useState(true)
@@ -837,6 +845,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         pushStatic(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
       },
       onTurnComplete: (_usage, turnNumber, isFinal) => {
+        // Sync reasoning effort from agent (auto-reasoning may have changed it)
+        const currentEffort = agent.getReasoningEffort()
+        if (currentEffort && currentEffort !== reasoningEffort) {
+          setReasoningEffortState(currentEffort)
+        }
+
         if (dirtyTools.current.size > 0) {
           flushTools()
         }
