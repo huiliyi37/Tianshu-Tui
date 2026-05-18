@@ -14,7 +14,10 @@ function claim(overrides: Partial<ContextClaim> = {}): ContextClaim {
     fitness: 5,
     source: { actor: 'user', sessionId: 's1', turn: 0, eventId: 'e1' },
     evidence: [],
+    consumers: [],
+    counterevidence: [],
     createdAt: 1000,
+    lastUsedAt: 1000,
     tags: [],
     ...overrides,
   }
