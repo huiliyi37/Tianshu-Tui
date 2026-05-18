@@ -120,13 +120,26 @@ export class CodexClient implements StreamClient {
     }
 
     // Tools
-    const tools = request.tools?.map(t => ({
-      type: 'function',
-      name: t.name,
-      description: t.description,
-      parameters: t.input_schema,
-      strict: false,
-    })) ?? []
+    const tools = request.tools?.map(t => {
+      const inputSchema = t.input_schema
+      const params: Record<string, unknown> = {
+        type: 'object',
+        properties: inputSchema?.properties ?? {},
+      }
+      if (inputSchema?.required?.length) {
+        params.required = inputSchema.required
+      }
+      if (inputSchema?.additionalProperties !== undefined) {
+        params.additionalProperties = inputSchema.additionalProperties
+      }
+      return {
+        type: 'function',
+        name: t.name,
+        description: t.description,
+        parameters: params,
+        strict: false,
+      }
+    }) ?? []
 
     const body: Record<string, unknown> = {
       model: this.config.model,
