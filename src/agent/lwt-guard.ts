@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, mkdirSync, writeFileSync, openSync, closeSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 
@@ -52,12 +52,12 @@ export class LWTGuard {
 
   /**
    * 获取文件锁（防止多实例竞争）
+   * 使用原子操作 O_CREAT|O_EXCL 避免 TOCTOU 竞态条件
    * @returns 是否成功获取锁
    */
   acquireLock(): boolean {
-    // 检查锁文件是否已存在
+    // 检查锁文件是否已存在（可能是死锁）
     if (existsSync(this.lockPath)) {
-      // 锁文件存在，检查是否是死锁
       try {
         const data = readFileSync(this.lockPath, 'utf-8')
         const pid = parseInt(data, 10)
@@ -69,13 +69,15 @@ export class LWTGuard {
           return false
         }
       } catch {
-        // 无法读取锁文件，尝试删除
         try { unlinkSync(this.lockPath) } catch { /* ignore */ }
       }
     }
 
-    // 创建锁文件并写入 PID
+    // 原子创建：O_CREAT|O_EXCL 在文件已存在时会失败
     try {
+      const fd = openSync(this.lockPath, 'wx') // wx = O_CREAT|O_EXCL
+      closeSync(fd)
+      // 写入 PID
       writeFileSync(this.lockPath, String(process.pid))
       return true
     } catch {
