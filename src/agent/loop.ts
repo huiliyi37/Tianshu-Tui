@@ -54,6 +54,8 @@ import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { adaptThetaInterval, buildStarPhaseContext, buildTelemetrySnapshot } from './perception.js'
+import { createTelemetryWriter } from './telemetry-writer.js'
+import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -171,6 +173,7 @@ export class AgentLoop {
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
   private gitChangeRate = 0
+  private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
   private _hasEnteredHighComplexity = false
 
@@ -187,6 +190,7 @@ export class AgentLoop {
       this.trajectory,
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
+    this.telemetryWriter = createTelemetryWriter(this.cwd)
     this.runtimeHooks = new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
       stigmergyQuery: () => this.stigmergyStore.query(),
@@ -653,7 +657,7 @@ export class AgentLoop {
         const driftEvent = this.baselineFingerprint
           ? (currentFP.combinedSha256 !== this.baselineFingerprint.combinedSha256)
           : false
-        const telemetryLine = JSON.stringify(buildTelemetrySnapshot({
+        this.telemetryWriter.write(buildTelemetrySnapshot({
           ts: Date.now(),
           turn: this.session.getTurnCount(),
           phase: event.phase,
@@ -671,10 +675,6 @@ export class AgentLoop {
           gitChangeRate: this.gitChangeRate,
           prefixDrift: driftEvent,
         }))
-        import('node:fs/promises').then(fs =>
-          fs.appendFile(join(this.cwd, '.rivet', 'sensorium.jsonl'), telemetryLine + '\n', 'utf-8')
-            .catch(() => {})
-        )
 
 
         // Pass 5: adaptive repair hint injection
