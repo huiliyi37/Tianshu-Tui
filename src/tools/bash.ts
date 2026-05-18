@@ -1,8 +1,16 @@
-import { spawn } from 'child_process'
+import { spawn, execFileSync } from 'child_process'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
+
+function rtkRewrite(command: string): string {
+  try {
+    return execFileSync('rtk', ['rewrite', command], { timeout: 500, encoding: 'utf-8' }).trim()
+  } catch {
+    return command
+  }
+}
 
 const DANGEROUS_PATTERNS: RegExp[] = [
   /\brm\s+-/,                                    // rm -rf, rm -r, etc.
@@ -60,7 +68,8 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
   },
 
   async execute(params: ToolCallParams) {
-    const command = params.input.command as string
+    const rawCommand = params.input.command as string
+    const command = rtkRewrite(rawCommand)
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
 
@@ -98,7 +107,7 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         const raw = stdout + (stderr ? '\n' + stderr : '')
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
-        const meta = { command, exitCode, durationMs }
+        const meta = { command: rawCommand, exitCode, durationMs }
         const rawPath = await persistRawOutput(params.toolUseId, raw)
 
         return {
