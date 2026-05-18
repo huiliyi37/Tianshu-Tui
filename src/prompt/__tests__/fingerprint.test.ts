@@ -95,7 +95,8 @@ describe('computeFingerprint', () => {
       ? {
           ...tool,
           input_schema: {
-            ...tool.input_schema,
+            ...tool.input_schema!,
+            type: 'object' as const,
             required: ['file_path'],
           },
         }

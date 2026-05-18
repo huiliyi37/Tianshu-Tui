@@ -108,8 +108,8 @@ describe('createMcpToolWrapper', () => {
     const callTool = async () => ({ content: [{ type: 'text' as const, text: 'ok' }], isError: false })
     const tool = createMcpToolWrapper('fs', mcpDef, callTool)
 
-    assert.deepEqual(tool.definition.input_schema.required, ['path', 'content'])
-    assert.equal((tool.definition.input_schema.properties as any).path.description, 'File path')
+    assert.deepEqual(tool.definition.input_schema?.required, ['path', 'content'])
+    assert.equal((tool.definition.input_schema?.properties as any).path.description, 'File path')
   })
 
   it('requires approval for write-like MCP tools', () => {

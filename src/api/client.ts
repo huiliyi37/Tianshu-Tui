@@ -168,7 +168,7 @@ export class ApiClient implements StreamClient {
     const toolSchemas = new Map<string, string[]>()
     if (request.tools) {
       for (const tool of request.tools) {
-        toolSchemas.set(tool.name, tool.input_schema.required ?? [])
+        toolSchemas.set(tool.name, tool.input_schema?.required ?? [])
       }
     }
 

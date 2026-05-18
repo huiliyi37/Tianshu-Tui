@@ -4,8 +4,8 @@ export const fourHorsemenPass: RepairPass = {
   name: 'four-horsemen',
   run(input: Record<string, unknown>, ctx: RepairContext): RepairResult {
     let applied = false
-    const required = new Set(ctx.schema.required ?? [])
-    const props = ctx.schema.properties ?? {}
+    const required = new Set(ctx.schema?.required ?? [])
+    const props = ctx.schema?.properties ?? {}
 
     // Fix 1: null → omit for optional fields
     const step1: Record<string, unknown> = {}

@@ -86,6 +86,35 @@ export const DEFAULT_CONFIG: Config = {
         ],
         unsupported: ['stream_options'],
       },
+      mimo: {
+        name: 'mimo',
+        apiKeyEnv: 'MIMO_API_KEY',
+        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1',
+        protocol: 'openai' as const,
+        capabilities: {
+          cacheControl: false,
+          stripParams: [],
+          toolJsonBug: false,
+          prefixCache: 'none' as const,
+        },
+        thinking: 'enabled',
+        maxTokens: 64000,
+        models: [
+          {
+            id: 'MiMo-V2.5-Pro',
+            alias: 'mimo-pro',
+            contextWindow: 1_000_000,
+            maxTokens: 64000,
+          },
+          {
+            id: 'MiMo-V2.5',
+            alias: 'mimo',
+            contextWindow: 262_000,
+            maxTokens: 64000,
+          },
+        ],
+        unsupported: ['stream_options'],
+      },
     },
   },
   agent: {
@@ -116,6 +145,8 @@ export const DEFAULT_CONFIG: Config = {
     profiles: {
       cheap: { provider: 'deepseek', model: 'deepseek-v4-flash' },
       capable: { provider: 'deepseek', model: 'deepseek-v4-pro' },
+      mimo: { provider: 'mimo', model: 'MiMo-V2.5' },
+      'mimo-pro': { provider: 'mimo', model: 'MiMo-V2.5-Pro' },
     },
     routing: {
       repo_summarization: 'cheap',
