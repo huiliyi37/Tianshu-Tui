@@ -16,7 +16,8 @@ import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimStatus } from '../context/claims.js'
 import { loadProjectRules } from '../context/rules-loader.js'
 import { exportDurableClaims, importClaims } from '../context/claim-export.js'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 
 export interface SlashHandlerContext {
@@ -93,6 +94,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /auto — Toggle auto-approve (current: ${ctx.autoSafeRef.current ? 'auto-safe' : 'manual'})
 /theme [pastel|cyberpunk|list] — Switch color theme
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle or switch cockpit panel
+/skill [list|<name>] — List or load Claude skills
 /interview <topic> — Start deep interview to clarify requirements before coding
 Ctrl+C — Interrupt current turn (press twice to exit)` }))
       setIsStreaming(false)
@@ -534,6 +536,76 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         return true
       }
       return false
+    }
+
+    case '/skill': {
+      const sub = parts[1]?.toLowerCase()
+      const cwd = process.cwd()
+
+      // Scan .claude/skills/*/SKILL.md in project + home
+      const skillDirs = [
+        { label: 'project', path: join(cwd, '.claude', 'skills') },
+        { label: 'global', path: join(homedir(), '.claude', 'skills') },
+      ]
+
+      const skills: Array<{ name: string; path: string; source: string; desc: string; size: number }> = []
+      for (const dir of skillDirs) {
+        if (!existsSync(dir.path)) continue
+        for (const entry of readdirSync(dir.path, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue
+          const skillFile = join(dir.path, entry.name, 'SKILL.md')
+          if (!existsSync(skillFile)) continue
+          const content = readFileSync(skillFile, 'utf8')
+          // Extract YAML front-matter description
+          const descMatch = content.match(/^---\n([\s\S]*?\n)---/)?.[1] ?? ''
+          const descLine = descMatch.split('\n').find(l => l.startsWith('description:') || l.startsWith('description:'))
+          const desc = descLine
+            ? descLine.replace(/^description:\s*(?:\|\s*)?/, '').replace(/^\s+/, '').slice(0, 120)
+            : ''
+          skills.push({
+            name: entry.name,
+            path: skillFile,
+            source: dir.label,
+            desc: desc || '(no description)',
+            size: content.length,
+          })
+        }
+      }
+
+      if (!sub || sub === 'list' || sub === 'ls') {
+        if (skills.length === 0) {
+          pushStatic(createLogEntry({ type: 'system', content: 'No skills found.\nScanned:\n  .claude/skills/ (project)\n  ~/.claude/skills/ (global)' }))
+        } else {
+          const lines = skills.map(s => {
+            const tag = s.source === 'global' ? '🌐' : '📁'
+            const size = s.size > 1024 ? `${(s.size / 1024).toFixed(1)}KB` : `${s.size}B`
+            return `  ${tag} ${s.name} (${size}) — ${s.desc}`
+          })
+          pushStatic(createLogEntry({ type: 'system', content: `Skills (${skills.length}):\n${lines.join('\n')}\n\nUse /skill <name> to load a skill into the conversation.` }))
+        }
+        setIsStreaming(false)
+        return true
+      }
+
+      // /skill <name> — inject skill into conversation
+      const skill = skills.find(s => s.name === sub || s.name === parts[1])
+      if (!skill) {
+        pushStatic(createLogEntry({ type: 'system', content: `Skill "${parts[1]}" not found.\nUse /skill list to see available skills.` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      const skillContent = readFileSync(skill.path, 'utf8')
+      // Inject as a user message with skill preamble — the agent will treat it as context
+      pushStatic(createLogEntry({ type: 'system', content: `✅ Loaded skill: ${skill.name} (${(skill.size / 1024).toFixed(1)}KB from ${skill.source})\nThe skill prompt is now active for this conversation.` }))
+
+      // Store the skill content so the next user message can reference it
+      // We inject it as a slash command resolution that returns the skill body
+      setIsStreaming(false)
+      // Push the skill as the next prompt input by returning false with the skill content
+      // Instead, add it to session as a system-pinned context via anchor
+      ctx.agent.addAnchor('user_preference', `[Active Skill: ${skill.name}]\n${skillContent.slice(0, 8000)}`)
+      return true
     }
   }
 
