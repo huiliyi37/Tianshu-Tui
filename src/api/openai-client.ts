@@ -241,7 +241,13 @@ export class OpenAIClient implements StreamClient {
       messages,
       max_tokens: this.config.maxTokens,
       stream: true,
-      stream_options: { include_usage: true },
+    }
+
+    // stream_options: { include_usage: true } is an OpenAI-specific extension.
+    // Most OpenAI-compatible providers (GLM, MiniMax, Mimo) don't support it
+    // and will return 400. Only include when the provider hasn't marked it as unsupported.
+    if (!this.config.unsupported?.includes('stream_options')) {
+      body.stream_options = { include_usage: true }
     }
 
     if (request.tools && request.tools.length > 0) {

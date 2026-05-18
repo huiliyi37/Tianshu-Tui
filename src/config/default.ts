@@ -84,7 +84,7 @@ export const DEFAULT_CONFIG: Config = {
             reasoningEffort: 'high',
           },
         ],
-        unsupported: [],
+        unsupported: ['stream_options'],
       },
     },
   },
