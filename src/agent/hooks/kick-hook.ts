@@ -4,15 +4,26 @@ import type { PheromoneDeposit } from '../../context/stigmergy.js'
 
 export interface KickRuntimeHookDeps {
   deposit: (deposit: PheromoneDeposit) => Promise<void>
+  /** Number of turns to wait before allowing another kick. Default 3. */
+  cooldownTurns?: number
 }
 
 export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntimeHook {
+  const cooldown = deps.cooldownTurns ?? 3
+  let lastKickTurn = -Infinity
+
   return {
     phase: 'preTurn',
     name: 'dissipative-kick',
     async run(ctx) {
       const sensorium = ctx.snapshot.sensorium
       if (!sensorium || !shouldKick(sensorium)) return
+
+      // Cooldown: skip if we kicked within the last N turns
+      const currentTurn = ctx.snapshot.turn
+      if (currentTurn - lastKickTurn < cooldown) return
+
+      lastKickTurn = currentTurn
 
       const recentFailed = ctx.snapshot.recentToolHistory
         .filter(h => h.status === 'failed')

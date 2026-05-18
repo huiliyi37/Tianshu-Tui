@@ -22,10 +22,11 @@ function makeContext(options: {
   history?: Array<{ tool: string; status: 'success' | 'failed' | 'running'; target: string }>
   messages?: string[]
   phases?: Array<{ phase: string; detail?: { reason?: string; suggestion?: string } }>
+  turn?: number
 } = {}) {
   return createRuntimeHookContext({
     cwd: '/tmp/project',
-    turn: 5,
+    turn: options.turn ?? 5,
     recentToolHistory: options.history ?? [],
     sensorium: options.sensorium === undefined ? makeSensorium() : options.sensorium,
     strategy: null,
@@ -103,5 +104,36 @@ describe('createKickRuntimeHook', () => {
     assert.equal(phases.length, 1)
     assert.equal(phases[0]!.phase, 'tianshu-encore')
     assert.match(phases[0]!.detail?.reason ?? '', /Dissipative kick/)
+  })
+
+  it('enforces cooldown: skips kick within cooldown window, resumes after', async () => {
+    const deposits: PheromoneDeposit[] = []
+    const messages: string[] = []
+    const cooldown = 3
+    const hook = createKickRuntimeHook({ deposit: async d => { deposits.push(d) }, cooldownTurns: cooldown })
+
+    // Turn 1: should fire (first kick)
+    await hook.run(makeContext({ messages, turn: 1 }))
+    assert.equal(messages.length, 1, 'turn 1: first kick should fire')
+
+    // Turn 2: within cooldown, should NOT fire
+    await hook.run(makeContext({ messages, turn: 2 }))
+    assert.equal(messages.length, 1, 'turn 2: should be blocked by cooldown')
+
+    // Turn 3: within cooldown, should NOT fire
+    await hook.run(makeContext({ messages, turn: 3 }))
+    assert.equal(messages.length, 1, 'turn 3: should be blocked by cooldown')
+
+    // Turn 4: cooldown expired, should fire again
+    await hook.run(makeContext({ messages, turn: 4 }))
+    assert.equal(messages.length, 2, 'turn 4: kick should fire after cooldown expires')
+
+    // Turn 5: within cooldown again
+    await hook.run(makeContext({ messages, turn: 5 }))
+    assert.equal(messages.length, 2, 'turn 5: should be blocked again')
+
+    // Turn 7: cooldown expired again
+    await hook.run(makeContext({ messages, turn: 7 }))
+    assert.equal(messages.length, 3, 'turn 7: third kick should fire')
   })
 })
