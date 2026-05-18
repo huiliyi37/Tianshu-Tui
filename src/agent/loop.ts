@@ -51,12 +51,13 @@ import { mapSensoriumToPhase, createStarEvent, createThetaState } from './star-e
 import type { StarEvent, ThetaState } from './star-event.js'
 import { runThetaCheck } from './theta-check.js'
 import { RuntimeHookPipeline, createRuntimeHookContext } from './runtime-hooks.js'
-import { createVigorState, detectRigidity } from './vigor.js'
+import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
 import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
 import { createKickRuntimeHook } from './hooks/kick-hook.js'
+import { adaptThetaInterval, applyProviderHealth, buildStarPhaseContext, buildTelemetrySnapshot } from './perception.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -601,13 +602,7 @@ export class AgentLoop {
         // Provider health degradation → reduces stability
         // When providers fail, agent operational stability is genuinely reduced
         if (this.config.providerHealth) {
-          const degRatio = this.config.providerHealth.getDegradationRatio()
-          if (degRatio > 0) {
-            this.sensorium = {
-              ...this.sensorium,
-              stability: this.sensorium.stability * (1 - 0.3 * degRatio),
-            }
-          }
+          this.sensorium = applyProviderHealth(this.sensorium, this.config.providerHealth.getDegradationRatio())
         }
 
         this.strategy = computeStrategy(this.sensorium)
@@ -649,24 +644,18 @@ export class AgentLoop {
         // Theta interval is base (from strategy) modulated by git change rate.
         // Higher code volatility → more frequent cross-file consistency checks.
         // floor = 2 prevents over-sampling; ceiling = baseInterval.
-        const baseInterval = this.strategy.thetaCycleInterval
-        const gitMod = 1 - this.gitChangeRate * 0.5
-        const adaptiveInterval = Math.max(2, Math.round(baseInterval * gitMod))
+        const adaptiveInterval = adaptThetaInterval(this.strategy.thetaCycleInterval, this.gitChangeRate)
         this.thetaState = { ...this.thetaState, interval: adaptiveInterval }
 
         // Emit StarEvent via existing onPhaseChange callback
         const recentTools = this.recentToolHistory.map(h => h.tool)
-        const isWriting = recentTools.some(t => t === 'write_file' || t === 'edit_file')
-        const isRunningTests = recentTools.some(t => t === 'run_tests')
-        const isFinalTurn = turn >= this.config.maxTurns - 1
-        const starCtx = {
+        const starCtx = buildStarPhaseContext({
           turn: this.session.getTurnCount(),
-          isWriting,
-          isRunningTests,
-          isFinalTurn,
+          maxTurns: this.config.maxTurns,
+          recentTools,
           shouldEscalate: this.strategy.shouldEscalate,
           hasEnteredHighComplexity: this._hasEnteredHighComplexity,
-        }
+        })
         const event = createStarEvent(this.sensorium, starCtx)
         if (callbacks.onPhaseChange) {
           callbacks.onPhaseChange(event.phase, {
@@ -680,27 +669,13 @@ export class AgentLoop {
         const driftEvent = this.baselineFingerprint
           ? (currentFP.combinedSha256 !== this.baselineFingerprint.combinedSha256)
           : false
-        const telemetryLine = JSON.stringify({
+        const telemetryLine = JSON.stringify(buildTelemetrySnapshot({
           ts: Date.now(),
           turn: this.session.getTurnCount(),
           phase: event.phase,
-          ...this.sensorium,
-          strategy: {
-            reasoningEffort: this.strategy.reasoningEffort,
-            shouldEscalate: this.strategy.shouldEscalate,
-            thetaInterval: this.strategy.thetaCycleInterval,
-          },
-          vigor: {
-            tonic: this.vigorState.tonic,
-            phasic: this.vigorState.phasic,
-            curiosity: this.vigorState.curiosity,
-            vigor: this.vigorState.vigor,
-            variability: this.vigorState.variability,
-          },
-          health: {
-            rigidity: detectRigidity(this.vigorState.history),
-            elmDue: this.vigorState.vigor > 0.8 && this.vigorState.history.slice(-5).length === 5 && this.vigorState.history.slice(-5).every(v => v > 0.8),
-          },
+          sensorium: this.sensorium,
+          strategy: this.strategy,
+          vigor: this.vigorState,
           theta: {
             inFlight: this.thetaCheckInFlight,
             lastReason: this.thetaTelemetry.lastReason,
@@ -711,7 +686,7 @@ export class AgentLoop {
           },
           gitChangeRate: this.gitChangeRate,
           prefixDrift: driftEvent,
-        })
+        }))
         import('node:fs/promises').then(fs =>
           fs.appendFile(join(this.cwd, '.rivet', 'sensorium.jsonl'), telemetryLine + '\n', 'utf-8')
             .catch(() => {})
