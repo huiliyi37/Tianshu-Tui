@@ -67,6 +67,9 @@ export function createProviderClient(
       reasoningEffort: params.reasoningEffort,
       sessionId: params.sessionId,
       providerName: provider.name,
+      unsupported: provider.unsupported.length > 0
+        ? provider.unsupported
+        : capabilities.stripParams,
     })
   }
 
