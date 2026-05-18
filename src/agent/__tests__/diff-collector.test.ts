@@ -1,17 +1,30 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { collectDiff, formatDiffArtifact } from '../diff-collector.js'
 
+function git(cwd: string, args: string[]): string {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
+  }
+  return result.stdout
+}
+
 function initGitRepo(dir: string): void {
-  execSync('git init -b main', { cwd: dir, stdio: 'pipe' })
-  execSync('git config user.email "test@test"', { cwd: dir, stdio: 'pipe' })
-  execSync('git config user.name "Test"', { cwd: dir, stdio: 'pipe' })
+  git(dir, ['init', '-b', 'main'])
+  git(dir, ['config', 'user.email', 'test@test'])
+  git(dir, ['config', 'user.name', 'Test'])
   writeFileSync(join(dir, 'README.md'), '# test\n')
-  execSync('git add -A && git commit -m "init"', { cwd: dir, stdio: 'pipe' })
+  git(dir, ['add', '-A'])
+  git(dir, ['commit', '-m', 'init'])
 }
 
 describe('diff-collector', () => {
@@ -23,12 +36,12 @@ describe('diff-collector', () => {
     initGitRepo(baseDir)
     // Create a worktree for the "worker" to write into
     wtDir = mkdtempSync(join(tmpdir(), 'rivet-diff-wt-'))
-    execSync(`git worktree add -b rivet-hands-test "${wtDir}"`, { cwd: baseDir, stdio: 'pipe' })
+    git(baseDir, ['worktree', 'add', '-b', 'rivet-hands-test', wtDir])
   })
 
   after(() => {
-    execSync(`git worktree remove --force "${wtDir}"`, { cwd: baseDir, stdio: 'pipe' })
-    try { execSync('git branch -D rivet-hands-test', { cwd: baseDir, stdio: 'pipe' }) } catch {}
+    try { git(baseDir, ['worktree', 'remove', '--force', wtDir]) } catch {}
+    try { git(baseDir, ['branch', '-D', 'rivet-hands-test']) } catch {}
     rmSync(baseDir, { recursive: true, force: true })
     rmSync(wtDir, { recursive: true, force: true })
   })
@@ -38,7 +51,8 @@ describe('diff-collector', () => {
     mkdirSync(join(wtDir, 'src'), { recursive: true })
     writeFileSync(join(wtDir, 'src', 'new-file.ts'), 'export const x = 1\n')
 
-    execSync('git add -A && git commit -m "worker change"', { cwd: wtDir, stdio: 'pipe' })
+    git(wtDir, ['add', '-A'])
+    git(wtDir, ['commit', '-m', 'worker change'])
 
     const diff = collectDiff(baseDir, wtDir, 'main')
     assert.ok(diff.length > 0, 'diff should be non-empty')
@@ -56,9 +70,16 @@ describe('diff-collector', () => {
     assert.equal(diff, '')
   })
 
+  it('formats empty diffs as schema-valid artifacts', () => {
+    const artifact = formatDiffArtifact('', 'patcher')
+    assert.equal(artifact.kind, 'diff')
+    assert.equal(artifact.title, 'Patch (empty)')
+    assert.equal(artifact.content, '(empty diff)')
+  })
+
   it('handles nonexistent branches gracefully', () => {
     const diff = collectDiff(baseDir, wtDir, 'nonexistent-branch')
     // Should not throw, returns empty string on error
-    assert.equal(typeof diff, 'string')
+    assert.equal(diff, '')
   })
 })

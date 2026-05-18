@@ -1,5 +1,22 @@
-import { execSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import type { WorkerArtifact } from './work-order.js'
+
+interface GitResult {
+  ok: boolean
+  stdout: string
+}
+
+function git(cwd: string, args: string[]): GitResult {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  return {
+    ok: result.status === 0,
+    stdout: typeof result.stdout === 'string' ? result.stdout : '',
+  }
+}
 
 /**
  * Collect a git diff between a base branch and the HEAD of a worker worktree.
@@ -11,21 +28,12 @@ import type { WorkerArtifact } from './work-order.js'
  * @returns Unified diff string, or empty string on any error
  */
 export function collectDiff(baseCwd: string, workerCwd: string, baseBranch: string): string {
-  try {
-    // Get the worker's current branch from the worktree
-    const workerBranch = execSync('git rev-parse --abbrev-ref HEAD', {
-      cwd: workerCwd, encoding: 'utf-8', stdio: 'pipe',
-    }).trim()
+  const branch = git(workerCwd, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const workerBranch = branch.stdout.trim()
+  if (!branch.ok || !workerBranch || workerBranch === 'HEAD') return ''
 
-    if (!workerBranch || workerBranch === 'HEAD') return ''
-
-    // Diff between base and worker branch (triple-dot = changes on worker since fork)
-    return execSync(`git diff ${baseBranch}...${workerBranch}`, {
-      cwd: baseCwd, encoding: 'utf-8', stdio: 'pipe',
-    })
-  } catch {
-    return ''
-  }
+  const diff = git(baseCwd, ['diff', `${baseBranch}...${workerBranch}`])
+  return diff.ok ? diff.stdout : ''
 }
 
 /**
@@ -36,7 +44,7 @@ export function formatDiffArtifact(diff: string, _profile: string): WorkerArtifa
   return {
     kind: 'diff',
     title: files.length > 0 ? `Patch: ${files.join(', ')}` : 'Patch (empty)',
-    content: diff,
+    content: diff.length > 0 ? diff : '(empty diff)',
   }
 }
 
