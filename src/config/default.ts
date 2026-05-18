@@ -88,9 +88,9 @@ export const DEFAULT_CONFIG: Config = {
       },
       claude: {
         name: 'claude',
-        apiKeyEnv: 'CC_SWITCH_PROXY_API_KEY',
-        baseUrl: 'http://127.0.0.1:8891/v1',
-        protocol: 'openai' as const,
+        apiKeyEnv: 'CLAUDE_API_KEY',
+        baseUrl: 'http://85.137.242.133:8080/v1',
+        protocol: 'anthropic' as const,
         capabilities: {
           cacheControl: false,
           stripParams: [],

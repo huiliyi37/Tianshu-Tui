@@ -128,9 +128,9 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   claude: {
     supportsThinking: true,
-    thinkingFormat: 'openai',
+    thinkingFormat: 'anthropic',
     supportsCacheControl: false,
-    stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+    stripParams: ['top_k', 'metadata', 'service_tier'],
     hasToolJsonInContentBug: false,
     effortFormat: 'reasoning_effort',
     prefixCacheStrategy: 'none',
