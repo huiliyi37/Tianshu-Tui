@@ -62,6 +62,7 @@ export function createProviderClient(
       maxTokens: params.maxTokens,
       auth: params.auth,
       thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
+      thinkingFormat: capabilities.thinkingFormat,
       reasoningEffort: params.reasoningEffort,
       sessionId: params.sessionId,
     })

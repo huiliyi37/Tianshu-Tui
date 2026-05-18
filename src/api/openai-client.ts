@@ -12,6 +12,8 @@ export interface OpenAIClientConfig {
   maxTokens: number
   reasoningEffort?: string
   thinking?: 'enabled' | 'disabled'
+  /** How to format thinking in the request body. 'openai' = use reasoning_effort only, others = use thinking block */
+  thinkingFormat?: 'anthropic' | 'openai' | 'none'
   auth?: import('../auth/types.js').AuthProvider
   /** Stable session identifier for cache routing affinity */
   sessionId?: string
@@ -249,8 +251,12 @@ export class OpenAIClient implements StreamClient {
       body.tool_choice = 'auto'
     }
 
-    // DeepSeek thinking mode
-    if (this.config.thinking) {
+    // DeepSeek thinking mode: only send thinking body param for providers
+    // that use DeepSeek-native format (anthropic thinkingFormat).
+    // Providers with 'openai' thinkingFormat (GLM, MiniMax, Mimo) use
+    // reasoning_effort only — sending {thinking: {type: 'enabled'}} causes
+    // API errors or silent ingestion failures.
+    if (this.config.thinking && this.config.thinkingFormat !== 'openai') {
       body.thinking = { type: this.config.thinking }
     }
     if (this.config.reasoningEffort) {
