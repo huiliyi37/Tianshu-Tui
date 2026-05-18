@@ -930,7 +930,7 @@ describe('AgentLoop — playbook telemetry bounds', () => {
     } as unknown as ApiClient
 
     const agent = new AgentLoop(
-      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 60, contextWindow: 1_000_000,
+      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 120, contextWindow: 1_000_000,
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' }, playbookStore: new PlaybookStore(dir) },
       session, '/test',
     )
@@ -947,7 +947,7 @@ describe('AgentLoop — playbook telemetry bounds', () => {
         onApprovalRequired: async () => false,
       })
 
-      assert.equal(agent['sensoriumSnapshots'].length, 50)
+      assert.equal(agent['sensoriumSnapshots'].length, 100)
       assert.ok(agent['sensoriumSnapshots'][0]!.turn > 1)
     } finally {
       rmSync(dir, { recursive: true, force: true })

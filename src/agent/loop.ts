@@ -43,17 +43,17 @@ import { processTurnEnd } from './turn-end.js'
 import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, resetAccumulator, adjustReasoningEffort } from './prediction-error.js'
 import type { PredictionAccumulator } from './prediction-error.js'
 import { stripIntraTurnRepetition } from './dedup.js'
-import type { Sensorium, SensoriumInput } from './sensorium.js'
+import type { Sensorium } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
 import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
-import { mapSensoriumToPhase, createStarEvent, createThetaState } from './star-event.js'
-import type { StarEvent, ThetaState } from './star-event.js'
+import { createThetaState } from './star-event.js'
+import type { ThetaState } from './star-event.js'
 import { runThetaCheck } from './theta-check.js'
 import { RuntimeHookPipeline, createRuntimeHookContext, type RuntimeHookSnapshot } from './runtime-hooks.js'
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
+import { TurnPerceptionController } from './turn-perception.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
-import { adaptThetaInterval, buildStarPhaseContext, buildTelemetrySnapshot } from './perception.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
@@ -68,8 +68,6 @@ import type { RetrospectInput, SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
-
-const MAX_SENSORIUM_SNAPSHOTS = 50
 
 function mapQueriedPheromones(results: PheromoneQueryResult[]): Pheromone[] {
   return results.map(r => ({
@@ -170,6 +168,7 @@ export class AgentLoop {
   private strategy: StrategyProfile | null = null
   private vigorState: VigorState = createVigorState()
   private runtimeHooks: RuntimeHookPipeline
+  private perception: TurnPerceptionController
   private thetaCheckInFlight = false
   private thetaTelemetry: { lastReason: string | null; lastDurationMs: number | null; lastErrorCount: number; lastTimedOut: boolean; requestedCount: number } = {
     lastReason: null,
@@ -184,7 +183,6 @@ export class AgentLoop {
   private gitChangeRate = 0
   private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
-  private _hasEnteredHighComplexity = false
   private intentPreviewShown = 0
   private sensoriumSnapshots: SensoriumEntry[] = []
   private currentPhase = 'unknown'
@@ -226,6 +224,18 @@ export class AgentLoop {
         },
       } : {}),
     }))
+    this.perception = new TurnPerceptionController({
+      cwd: this.cwd,
+      maxTurns: this.config.maxTurns,
+      runtimeHooks: this.runtimeHooks,
+      telemetryWriter: this.telemetryWriter,
+      getRuntimeSnapshot: extra => this.buildRuntimeSnapshot(extra),
+      getProviderDegradationRatio: () => this.config.providerHealth?.getDegradationRatio() ?? 0,
+      addUserMessage: message => { this.session.addUserMessage(message) },
+      requestThetaCheck: reason => { this.requestThetaCheck(reason) },
+      setReasoningEffort: effort => { this.setReasoningEffort(effort) },
+      getFingerprint: () => this.config.promptEngine.getFingerprint(),
+    })
   }
 
   private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
@@ -573,10 +583,10 @@ export class AgentLoop {
     this.strategy = null
     this.thetaState = createThetaState(7)
     this.loadedPheromones = []
-    this._hasEnteredHighComplexity = false
     this.intentPreviewShown = 0
-    this.sensoriumSnapshots = []
-    this.currentPhase = 'unknown'
+    this.perception.reset()
+    this.sensoriumSnapshots = this.perception.getSnapshots()
+    this.currentPhase = this.perception.getCurrentPhase()
     // Capture baseline canonical prefix fingerprint for drift detection
     this.baselineFingerprint = this.config.promptEngine.getFingerprint()
     // Load cross-session pheromones for Sensorium.freshness computation.
@@ -652,71 +662,34 @@ export class AgentLoop {
 
         // ── StarFlow v2: Sensorium computation ──
         const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
-        const evidenceState = this.evidence.getState()
-        const sensoriumInput: SensoriumInput = {
-          predictionAcc: this.predictionAccumulator,
-          pressureResult,
-          evidenceState: {
-            filesModified: evidenceState.filesModified.size,
-            verifiedCount: evidenceState.verifications.filter(v => v.status === 'passed').length,
-          },
-          toolCallHistory: this.recentToolHistory.map(h => h.tool),
-          pheromones: this.loadedPheromones,
-          doomLevel: getDoomLoopLevel(this.traceStore.toolFingerprints),
-          gitChangeRate: this.gitChangeRate,
-        }
-        await this.runtimeHooks.runPreTurn(createRuntimeHookContext(this.buildRuntimeSnapshot({
-          sensoriumInput,
-          providerDegradationRatio: this.config.providerHealth?.getDegradationRatio() ?? 0,
-        }), {
-          setSensorium: sensorium => { this.sensorium = sensorium },
-          setStrategy: strategy => { this.strategy = strategy },
-          injectUserMessage: message => { this.session.addUserMessage(message) },
-          emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
-        }))
-
-        if (!this.sensorium || !this.strategy) {
-          throw new Error('Perception runtime hook did not produce sensorium and strategy')
-        }
-        const currentSensorium: Sensorium = this.sensorium
-        let currentStrategy: StrategyProfile = this.strategy
-
-        await this.runtimeHooks.runAfterPerception(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
-          setStrategy: strategy => { this.strategy = strategy; currentStrategy = strategy },
-          setVigor: vigor => { this.vigorState = vigor },
-          requestThetaCheck: reason => { this.requestThetaCheck(reason) },
-        }))
-
-        // Track whether complexity ever reached high → enables contracting phase
-        if (currentSensorium.complexity > 0.5) {
-          this._hasEnteredHighComplexity = true
-        }
-
-        // Wire strategy → harness: reasoning effort, theta interval
-        this.setReasoningEffort(currentStrategy.reasoningEffort)
-        // Theta interval is base (from strategy) modulated by git change rate.
-        // Higher code volatility → more frequent cross-file consistency checks.
-        // floor = 2 prevents over-sampling; ceiling = baseInterval.
-        const adaptiveInterval = adaptThetaInterval(currentStrategy.thetaCycleInterval, this.gitChangeRate)
-        this.thetaState = { ...this.thetaState, interval: adaptiveInterval }
-
-        // Emit StarEvent via existing onPhaseChange callback
-        const recentTools = this.recentToolHistory.map(h => h.tool)
-        const starCtx = buildStarPhaseContext({
+        const perceptionResult = await this.perception.perceive({
           turn: this.session.getTurnCount(),
-          maxTurns: this.config.maxTurns,
-          recentTools,
-          shouldEscalate: currentStrategy.shouldEscalate,
-          hasEnteredHighComplexity: this._hasEnteredHighComplexity,
+          estimatedTokens: estTokens,
+          pressureResult,
+          evidenceState: this.evidence.getState(),
+          predictionAccumulator: this.predictionAccumulator,
+          recentToolHistory: this.recentToolHistory,
+          loadedPheromones: this.loadedPheromones,
+          traceStore: this.traceStore,
+          gitChangeRate: this.gitChangeRate,
+          sensorium: this.sensorium,
+          strategy: this.strategy,
+          vigor: this.vigorState,
+          thetaState: this.thetaState,
+          thetaTelemetry: this.thetaTelemetry,
+          thetaCheckInFlight: this.thetaCheckInFlight,
+          baselineFingerprint: this.baselineFingerprint,
+        }, {
+          emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
         })
-        const event = createStarEvent(currentSensorium, starCtx)
-        this.currentPhase = event.phase
-        if (callbacks.onPhaseChange) {
-          callbacks.onPhaseChange(event.phase, {
-            tool: event.glyph,
-            suggestion: event.label,
-          })
-        }
+        this.sensorium = perceptionResult.sensorium
+        this.strategy = perceptionResult.strategy
+        this.vigorState = perceptionResult.vigor
+        this.thetaState = perceptionResult.thetaState
+        this.currentPhase = perceptionResult.event.phase
+        this.sensoriumSnapshots = this.perception.getSnapshots()
+        const currentSensorium: Sensorium = perceptionResult.sensorium
+        const currentStrategy: StrategyProfile = perceptionResult.strategy
 
         if (callbacks.onIntentPreview && this.intentPreviewShown < 3) {
           const preview = buildIntentPreview({
@@ -742,45 +715,6 @@ export class AgentLoop {
             }
           }
         }
-
-        // Sensorium telemetry: append snapshot to debug JSONL (~/.rivet/sensorium.jsonl)
-        const currentFP = this.config.promptEngine.getFingerprint()
-        const driftEvent = this.baselineFingerprint
-          ? (currentFP.combinedSha256 !== this.baselineFingerprint.combinedSha256)
-          : false
-        const telemetrySnapshot = buildTelemetrySnapshot({
-          ts: Date.now(),
-          turn: this.session.getTurnCount(),
-          phase: event.phase,
-          sensorium: currentSensorium,
-          strategy: currentStrategy,
-          vigor: this.vigorState,
-          theta: {
-            inFlight: this.thetaCheckInFlight,
-            lastReason: this.thetaTelemetry.lastReason,
-            lastDurationMs: this.thetaTelemetry.lastDurationMs,
-            lastErrorCount: this.thetaTelemetry.lastErrorCount,
-            lastTimedOut: this.thetaTelemetry.lastTimedOut,
-            requestedCount: this.thetaTelemetry.requestedCount,
-          },
-          gitChangeRate: this.gitChangeRate,
-          prefixDrift: driftEvent,
-        })
-        this.telemetryWriter.write(telemetrySnapshot)
-        this.sensoriumSnapshots = [...this.sensoriumSnapshots, {
-          ts: telemetrySnapshot.ts,
-          turn: telemetrySnapshot.turn,
-          phase: telemetrySnapshot.phase,
-          momentum: telemetrySnapshot.momentum,
-          pressure: telemetrySnapshot.pressure,
-          confidence: telemetrySnapshot.confidence,
-          complexity: telemetrySnapshot.complexity,
-          freshness: telemetrySnapshot.freshness,
-          stability: telemetrySnapshot.stability,
-          strategy: telemetrySnapshot.strategy,
-          gitChangeRate: telemetrySnapshot.gitChangeRate,
-        }].slice(-MAX_SENSORIUM_SNAPSHOTS)
-
 
         // Pass 5: adaptive repair hint injection
         const repairHint = this.repairHintTracker.getHint()
