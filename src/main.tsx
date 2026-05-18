@@ -712,14 +712,14 @@ async function main() {
     
     // 自动恢复会话
     const persist = new SessionPersist(crashedSessionId)
-    const { messages, preflight, usedSnapshot, hadIncompleteCompact } = persist.loadRecoverableMessages()
+    const { messages, preflight, usedSnapshot, snapshotTurn, hadIncompleteCompact } = persist.loadRecoverableMessages()
     
     if (hadIncompleteCompact) {
       console.log('⚠️ 检测到 incomplete compact，已从快照恢复')
     }
     
-    if (usedSnapshot) {
-      console.log(`📸 使用快照恢复到 turn ${preflight.lastSafeTurn}`)
+    if (usedSnapshot && snapshotTurn !== undefined) {
+      console.log(`📸 使用快照恢复到 turn ${snapshotTurn}`)
     }
     
     console.log(`✅ 恢复完成：${messages.length} 条消息`)
