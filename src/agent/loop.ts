@@ -50,13 +50,9 @@ import { mapSensoriumToPhase, createStarEvent, createThetaState } from './star-e
 import type { StarEvent, ThetaState } from './star-event.js'
 import { runThetaCheck } from './theta-check.js'
 import { RuntimeHookPipeline, createRuntimeHookContext } from './runtime-hooks.js'
+import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
-import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
-import { createThetaRuntimeHook } from './hooks/theta-hook.js'
-import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
-import { createKickRuntimeHook } from './hooks/kick-hook.js'
-import { createPerceptionRuntimeHook } from './hooks/perception-hook.js'
 import { adaptThetaInterval, buildStarPhaseContext, buildTelemetrySnapshot } from './perception.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
@@ -191,26 +187,15 @@ export class AgentLoop {
       this.trajectory,
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
-    this.runtimeHooks = new RuntimeHookPipeline([
-      createPerceptionRuntimeHook(),
-      createKickRuntimeHook({
-        deposit: deposit => this.stigmergyStore.deposit(deposit),
-      }),
-      createVigorAfterPerceptionHook(),
-      createThetaRuntimeHook({
-        getThetaState: () => this.thetaState,
-        setThetaState: state => { this.thetaState = state },
-      }),
-      createStigmergyRuntimeHook({
-        deposit: deposit => this.stigmergyStore.deposit(deposit),
-        query: () => this.stigmergyStore.query(),
-        getEvidenceState: () => this.evidence.getState(),
-        setLoadedPheromones: pheromones => { this.loadedPheromones = mapQueriedPheromones(pheromones) },
-      }),
-      createVigorPostToolHook({
-        getPredictionAccumulator: () => this.predictionAccumulator,
-      }),
-    ])
+    this.runtimeHooks = new RuntimeHookPipeline(createDefaultRuntimeHooks({
+      stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
+      stigmergyQuery: () => this.stigmergyStore.query(),
+      getEvidenceState: () => this.evidence.getState(),
+      setLoadedPheromones: pheromones => { this.loadedPheromones = mapQueriedPheromones(pheromones) },
+      getThetaState: () => this.thetaState,
+      setThetaState: state => { this.thetaState = state },
+      getPredictionAccumulator: () => this.predictionAccumulator,
+    }))
     const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
     this.stigmergyStore = new StigmergyStore(pheromonesPath)
   }
