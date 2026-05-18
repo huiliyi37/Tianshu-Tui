@@ -65,7 +65,7 @@
 | `src/agent/worker-session.ts` | 对 readonly worker 注入 `buildWorkerKnowledgeBlock()`，保持 read-only 不变。 | `src/agent/worker-session.ts:1-130` |
 | `src/agent/__tests__/worker-session.test.ts` | 验证 activeClaims 被投影为 worker knowledge 或 active claims，不污染 primary session。 | `src/agent/__tests__/worker-session.test.ts` |
 | `src/agent/work-order.ts` | 如测试发现缺口，只做 schema 最小补齐；当前预计无需改。 | `src/agent/work-order.ts:80-130` |
-| `docs/superpowers/plans/2026-05-19-可以-继续.md` | 本实施计划。 | 全文件 |
+| `docs/superpowers/plans/2026-05-19-wave8-hands-routing-knowledge-projection-closure.md` | 本实施计划。 | 全文件 |
 
 ---
 
@@ -649,7 +649,7 @@ npx tsx --test src/**/__tests__/*.test.ts
 |---|---|
 | Do not write implementation code yet | 本文件只保存计划；代码改动留给执行阶段。 |
 | Read relevant docs/specs/code first | Scope check 1.1 已列出已读 Wave8 plan、HandsSession、Coordinator、WorkerSession、WorkOrder。 |
-| Save plan to specified path | 本文件保存为 `docs/superpowers/plans/2026-05-19-可以-继续.md`。 |
+| Save plan to specified path | 本文件保存为 `docs/superpowers/plans/2026-05-19-wave8-hands-routing-knowledge-projection-closure.md`。 |
 | Near-zero context engineer | Scope、File structure、Tasks 均列路径、目标、命令和预期。 |
 | Engineer may not design tests well | 每个 code task 都给出具体 test snippets 或断言方向。 |
 | DRY/YAGNI/TDD/small commits | 使用现有 module seam；每个任务一组 focused files；每个任务有 commit。 |
@@ -664,7 +664,7 @@ npx tsx --test src/**/__tests__/*.test.ts
 本计划未使用 forbidden placeholder patterns 作为未完成步骤。执行阶段可运行：
 
 ```bash
-node -e "const fs=require('fs'); const p='docs/superpowers/plans/2026-05-19-可以-继续.md'; const banned=['TO'+'DO','TB'+'D','待'+'定','后续'+'实现','补充'+'细节','类似任务 '+'N','添加适当的错误'+'处理','为上述代码编写'+'测试']; const text=fs.readFileSync(p,'utf8'); const hits=banned.filter(s=>text.includes(s)); if(hits.length){ console.error(hits.join('\n')); process.exit(1); }"
+node -e "const fs=require('fs'); const p='docs/superpowers/plans/2026-05-19-wave8-hands-routing-knowledge-projection-closure.md'; const banned=['TO'+'DO','TB'+'D','待'+'定','后续'+'实现','补充'+'细节','类似任务 '+'N','添加适当的错误'+'处理','为上述代码编写'+'测试']; const text=fs.readFileSync(p,'utf8'); const hits=banned.filter(s=>text.includes(s)); if(hits.length){ console.error(hits.join('\n')); process.exit(1); }"
 ```
 
 预期：无输出，退出码 0。
@@ -686,7 +686,7 @@ node -e "const fs=require('fs'); const p='docs/superpowers/plans/2026-05-19-可�
 
 ## 6. Execution handoff
 
-计划已完成并保存到 `docs/superpowers/plans/2026-05-19-可以-继续.md`。两种执行方式：
+计划已完成并保存到 `docs/superpowers/plans/2026-05-19-wave8-hands-routing-knowledge-projection-closure.md`。两种执行方式：
 1. 子代理驱动（推荐）— 每个任务调度一个新的子代理，任务间进行审查，快速迭代。
 2. 内联执行 — 在当前会话中使用 executing-plans 执行任务，批量执行并设有检查点。
 选哪种方式？
