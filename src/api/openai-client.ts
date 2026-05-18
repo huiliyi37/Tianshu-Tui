@@ -44,13 +44,55 @@ const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
 const READ_TIMEOUT_MS = 120_000
 
+/** JSON Schema types accepted by OpenAI function-calling APIs */
+const VALID_SCHEMA_TYPES = new Set([
+  'string', 'number', 'integer', 'boolean', 'object', 'array', 'null',
+])
+
+/**
+ * Sanitize a JSON Schema object for OpenAI-compatible APIs.
+ * Strips properties with null/undefined/invalid type values and
+ * removes unsupported JSON Schema keywords (anyOf, oneOf, allOf, $ref, etc.)
+ * that cause 400 errors from strict OpenAI-compatible providers like Mimo.
+ */
+function sanitizeSchemaProperties(properties: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!properties) return properties
+  const cleaned: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(properties)) {
+    if (value === null || value === undefined || typeof value !== 'object') continue
+    const prop = value as Record<string, unknown>
+    // Drop properties with null/undefined type (invalid for OpenAI function calling)
+    if (prop.type === null || prop.type === undefined) {
+      // If the property has an enum, it's still usable without an explicit type
+      if (!prop.enum && !prop.const) continue
+    }
+    if (typeof prop.type === 'string' && !VALID_SCHEMA_TYPES.has(prop.type)) continue
+    // Strip unsupported JSON Schema combinators
+    const sanitized: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(prop)) {
+      if (k === 'anyOf' || k === 'oneOf' || k === 'allOf' || k === '$ref' || k === 'not' || k === 'if' || k === 'then' || k === 'else') continue
+      sanitized[k] = v
+    }
+    cleaned[key] = sanitized
+  }
+  return Object.keys(cleaned).length > 0 ? cleaned : undefined
+}
+
 function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
   // Provider-native tool format (e.g. GLM web_search) — pass through as-is
   if (tool.providerFormat) return tool.providerFormat
 
+  const params = tool.input_schema
+    ? {
+        type: tool.input_schema.type,
+        properties: sanitizeSchemaProperties(tool.input_schema.properties),
+        ...(tool.input_schema.required?.length ? { required: tool.input_schema.required } : {}),
+      }
+    : { type: 'object', properties: {} }
+
   return {
     type: 'function',
-    function: { name: tool.name, description: tool.description, parameters: tool.input_schema },
+    function: { name: tool.name, description: tool.description, parameters: params },
   }
 }
 
@@ -274,11 +316,13 @@ export class OpenAIClient implements StreamClient {
     }
 
     // Thinking mode: GLM and DeepSeek both use {thinking: {type: 'enabled'}}.
-    // Providers with thinking: 'enabled' should receive the thinking param.
+    // Only send thinking when explicitly enabled. 'disabled' is truthy in JS
+    // but sending {type: 'disabled'} causes "Param Incorrect" on providers
+    // that don't recognize the thinking parameter (e.g. Mimo).
     // The thinkingFormat field controls RESPONSE parsing, not request format.
     // GLM Coding Plan: clear_thinking=false enables Preserved Thinking.
     // Claude proxy (cc-switch) passes thinking through to Anthropic Messages API.
-    if (this.config.thinking) {
+    if (this.config.thinking === 'enabled') {
       body.thinking = { type: this.config.thinking }
       if (this.config.providerName === 'glm') {
         // GLM clear_thinking=true (default): API strips reasoning_content from
