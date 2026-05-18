@@ -380,7 +380,20 @@ export class CodexClient implements StreamClient {
             }
 
             case 'error': {
-              const msg = (parsed.message as string) ?? (parsed.error as string) ?? 'Unknown Codex error'
+              const rawMsg = (parsed.message as string | Record<string, unknown> | undefined)
+                ?? (parsed.error as string | Record<string, unknown> | undefined)
+              let msg: string
+              if (typeof rawMsg === 'string') {
+                msg = rawMsg
+              } else if (typeof rawMsg === 'object' && rawMsg !== null) {
+                // Error object may contain nested message/error fields
+                const errObj = rawMsg as Record<string, unknown>
+                msg = (errObj.message as string)
+                  ?? (errObj.error as string)
+                  ?? JSON.stringify(errObj)
+              } else {
+                msg = 'Unknown Codex error'
+              }
               throw new Error(`Codex stream error: ${msg}`)
             }
           }
