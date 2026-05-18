@@ -98,6 +98,22 @@ risky_refactor         → capable (pro)
 
 ---
 
+## 相关工作流闭环
+
+| 工作流 | 状态 | 证据 |
+|---|---|---|
+| `/plan <feature>` | ✅ 已集成 | `src/workflows/ecosystem-workflows.ts` 生成 writing-plans prompt；`src/tui/slash-commands.ts` 负责 slash alias 接线 |
+| `/write-plan <feature>` | ✅ 已集成 | 与 `/plan` 共享 `resolveEcosystemWorkflowInput()` |
+
+验证命令：
+
+```bash
+./node_modules/.bin/tsx --test src/workflows/__tests__/ecosystem-workflows.test.ts
+./node_modules/.bin/tsx --test src/tui/__tests__/slash-commands.test.ts
+```
+
+---
+
 ## 文档索引
 
 | 文档 | 路径 |
