@@ -1,5 +1,5 @@
 import type { StreamClient } from '../api/stream-client.js'
-import type { ContentBlock, Usage } from '../api/types.js'
+import type { Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { ToolRegistry } from '../tools/registry.js'
@@ -28,9 +28,10 @@ import { RepairHintTracker } from './repair-hint.js'
 import type { PermissionConfig } from './permissions.js'
 import { type ApprovalResult } from './approval-edit.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
-import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
-import { processTurnEnd } from './turn-end.js'
-import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, resetAccumulator, adjustReasoningEffort } from './prediction-error.js'
+import { TurnCompletionController } from './turn-completion.js'
+import { ToolExecutionController } from './tool-execution.js'
+import { evaluateThinkingRetry } from './thinking-retry.js'
+import { createPredictionAccumulator } from './prediction-error.js'
 import type { PredictionAccumulator } from './prediction-error.js'
 import type { Sensorium } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
@@ -56,7 +57,7 @@ import { ProviderHealthTracker } from './provider-health.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { PlaybookStore } from './playbook-store.js'
-import type { RetrospectInput, SensoriumEntry } from './retrospect.js'
+import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
@@ -155,6 +156,8 @@ export class AgentLoop {
   private contextInjection: ContextInjectionController
   private compaction: CompactionController
   private turnStream: TurnStreamController | null = null
+  private turnCompletion: TurnCompletionController
+  private toolExecution: ToolExecutionController
   private thetaCheckInFlight = false
   private thetaTelemetry: { lastReason: string | null; lastDurationMs: number | null; lastErrorCount: number; lastTimedOut: boolean; requestedCount: number } = {
     lastReason: null,
@@ -170,7 +173,6 @@ export class AgentLoop {
   private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
   private sensoriumSnapshots: SensoriumEntry[] = []
-  private currentPhase = 'unknown'
 
   constructor(
     private config: AgentConfig,
@@ -197,7 +199,15 @@ export class AgentLoop {
       setThetaState: state => { this.thetaState = state },
       getPredictionAccumulator: () => this.predictionAccumulator,
       playbookStore: this.config.playbookStore,
-      buildRetrospectInput: () => this.buildRetrospectInput(),
+      buildRetrospectInput: () => {
+        const es = this.evidence.getState()
+        return {
+          sensoriumEntries: this.sensoriumSnapshots, gitLog: [],
+          toolEvents: this.traceStore.events.filter(e => e.kind === 'tool').map(e => ({ turn: e.turn, name: e.name, status: e.status === 'passed' ? 'passed' : 'failed' })),
+          evidenceSummary: { filesModified: es.filesModified.size, verifiedCount: es.verifications.filter(v => v.status === 'passed').length },
+          pheromoneSignals: this.loadedPheromones.map(p => ({ signal: p.signal, path: p.path, strength: p.strength })),
+        }
+      },
       getDoomLoopLevel: () => this.getDoomLoopLevel(),
       telemetryWriter: this.telemetryWriter,
       ...(this.config.sessionId ? {
@@ -250,6 +260,8 @@ export class AgentLoop {
       refreshLedger: () => { this.contextInjection.refreshLedger() },
     })
     this.turnStream = this.createTurnStreamController()
+    this.turnCompletion = this.createTurnCompletionController()
+    this.toolExecution = this.createToolExecutionController()
   }
 
   private createTurnStreamController(): TurnStreamController {
@@ -266,6 +278,59 @@ export class AgentLoop {
     })
   }
 
+  private createTurnCompletionController(callbacks?: AgentCallbacks): TurnCompletionController {
+    return new TurnCompletionController({
+      config: this.config,
+      session: this.session,
+      trajectory: this.trajectory,
+      routingMetrics: this.routingMetrics,
+      evidence: this.evidence,
+      getStreamedText: () => this.streamedText,
+      getDecisions: () => this.decisions,
+      setDecisions: decisions => { this.decisions = decisions },
+      refreshLedger: () => { this.contextInjection.refreshLedger() },
+      refreshCacheDiagnostic: turn => { this.refreshCacheDiagnostic(turn) },
+      recordTurnSnapshot: () => { this.recordTurnSnapshot() },
+      runPostTurn: async () => {
+        await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
+          emitPhaseChange: (phase, detail) => { callbacks?.onPhaseChange?.(phase, detail) },
+        }))
+      },
+      runBeforeComplete: async () => {
+        if (callbacks) await this.runPostSession(callbacks)
+      },
+    })
+  }
+
+  private createToolExecutionController(): ToolExecutionController {
+    return new ToolExecutionController({
+      config: this.config,
+      cwd: this.cwd,
+      harness: this.harness,
+      prewarm: this.prewarm,
+      evidence: this.evidence,
+      repairHintTracker: this.repairHintTracker,
+      repairPipeline: this.repairPipeline,
+      runtimeHooks: this.runtimeHooks,
+      contextInjection: this.contextInjection,
+      trajectory: this.trajectory,
+      getPredictionAccumulator: () => this.predictionAccumulator,
+      setPredictionAccumulator: a => { this.predictionAccumulator = a },
+      getVigorState: () => this.vigorState,
+      setVigorState: v => { this.vigorState = v },
+      getDoomLoopLevel: () => this.getDoomLoopLevel(),
+      getSessionTurnCount: () => this.session.getTurnCount(),
+      getSessionId: () => this.config.sessionId,
+      addToolResults: results => { this.session.addToolResults(results) },
+      recordToolHistory: (name, input, isError, content) => this.recordToolHistory(name, input, isError, content),
+      buildRuntimeSnapshot: extra => this.buildRuntimeSnapshot(extra),
+      requestThetaCheck: reason => { this.requestThetaCheck(reason) },
+      getAutoReasoning: () => this.config.autoReasoning ?? false,
+      getReasoningEffort: () => this.config.reasoningEffort,
+      setClientReasoningEffort: effort => { this.config.reasoningEffort = effort; this.config.client.setReasoningEffort?.(effort) },
+    })
+  }
+
   private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
     return {
       cwd: this.cwd,
@@ -279,29 +344,6 @@ export class AgentLoop {
     }
   }
 
-  private buildRetrospectInput(): RetrospectInput {
-    const evidenceState = this.evidence.getState()
-    return {
-      sensoriumEntries: this.sensoriumSnapshots,
-      gitLog: [],
-      toolEvents: this.traceStore.events
-        .filter(e => e.kind === 'tool')
-        .map(e => ({
-          turn: e.turn,
-          name: e.name,
-          status: e.status === 'passed' ? 'passed' : 'failed',
-        })),
-      evidenceSummary: {
-        filesModified: evidenceState.filesModified.size,
-        verifiedCount: evidenceState.verifications.filter(v => v.status === 'passed').length,
-      },
-      pheromoneSignals: this.loadedPheromones.map(p => ({
-        signal: p.signal,
-        path: p.path,
-        strength: p.strength,
-      })),
-    }
-  }
 
   private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
     const target = typeof input?.path === 'string'
@@ -436,38 +478,32 @@ export class AgentLoop {
 
   getDebugInfo() {
     const fp = this.config.promptEngine.getFingerprint()
-    const drift = this.config.promptEngine.checkDrift()
     const sysPrompt = this.config.promptEngine.getSystemPrompt()
-    return {
-      fingerprint: fp,
-      drift,
+    return { fingerprint: fp, drift: this.config.promptEngine.checkDrift(),
       systemPromptLength: sysPrompt.length,
       systemPromptPreview: sysPrompt.slice(0, 200) + (sysPrompt.length > 200 ? '...' : ''),
       toolCount: this.config.toolRegistry.getDefinitions().length,
-      toolNames: this.config.toolRegistry.getDefinitions().map(t => t.name),
-    }
+      toolNames: this.config.toolRegistry.getDefinitions().map(t => t.name) }
   }
 
   private recordTurnSnapshot(): void {
     if (!this.config.sessionId) return
-    const persist = new SessionPersist(this.config.sessionId)
-    persist.appendTurnSnapshot({
-      turn: this.session.getTurnCount(),
-      timestamp: Date.now(),
+    new SessionPersist(this.config.sessionId).appendTurnSnapshot({
+      turn: this.session.getTurnCount(), timestamp: Date.now(),
       messageCount: this.session.getMessages().length,
       estimatedTokens: this.session.getEstimatedTokens(),
     })
   }
 
   private async runPostSession(callbacks: AgentCallbacks): Promise<void> {
-    await this.runtimeHooks.runPostSession(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
-      emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
-    }))
+    await this.runtimeHooks.runPostSession(createRuntimeHookContext(this.buildRuntimeSnapshot(),
+      { emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) } }))
   }
 
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     this.turnStream = this.createTurnStreamController()
+    this.turnCompletion = this.createTurnCompletionController(callbacks)
     this.trajectory.reset()
     this.decisions = []
     this.traceStore = createTraceStore()
@@ -487,7 +523,6 @@ export class AgentLoop {
     this.intent.reset()
     this.perception.reset()
     this.sensoriumSnapshots = this.perception.getSnapshots()
-    this.currentPhase = this.perception.getCurrentPhase()
     // Capture baseline canonical prefix fingerprint for drift detection
     this.baselineFingerprint = this.config.promptEngine.getFingerprint()
     // Load cross-session pheromones for Sensorium.freshness computation.
@@ -554,7 +589,6 @@ export class AgentLoop {
         this.strategy = perceptionResult.strategy
         this.vigorState = perceptionResult.vigor
         this.thetaState = perceptionResult.thetaState
-        this.currentPhase = perceptionResult.event.phase
         this.sensoriumSnapshots = this.perception.getSnapshots()
         const currentSensorium: Sensorium = perceptionResult.sensorium
         const currentStrategy: StrategyProfile = perceptionResult.strategy
@@ -595,30 +629,20 @@ export class AgentLoop {
         this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
 
         if (this.abortController.signal.aborted) {
-          // Estimate output usage from what was streamed before abort
-          const estimatedOut = this.streamedText.length
-          if (estimatedOut > 0) {
-            this.session.addUsage({ output_tokens: Math.ceil(estimatedOut / 4) })
-          }
+          if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
           await this.runPostSession(callbacks)
           callbacks.onAbort()
           return
         }
 
         if (streamError) {
-          if (collectedBlocks.length > 0) {
-            this.session.addAssistantBlocks(collectedBlocks)
-            this.recordTurnSnapshot()
-          }
+          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); this.recordTurnSnapshot() }
           callbacks.onError(streamError)
           return
         }
 
-        if (collectedBlocks.length > 0) {
-          this.session.addAssistantBlocks(collectedBlocks)
-        }
+        if (collectedBlocks.length > 0) this.session.addAssistantBlocks(collectedBlocks)
 
-        // Output token escalation: silently continue when model hits token limit
         if (stopReason === 'max_output_tokens' && toolUses.length === 0 && this.outputTokenEscalationCount < AgentLoop.MAX_OUTPUT_ESCALATION) {
           this.outputTokenEscalationCount++
           this.session.addUserMessage('Continue your response from where you left off.')
@@ -626,155 +650,38 @@ export class AgentLoop {
         }
 
         if (toolUses.length > 0) {
-          const toolResults: ContentBlock[] = []
-
-          for (const tu of toolUses) {
-            if (this.abortController.signal.aborted) break
-
-            const pipelineDeps: ToolPipelineDeps = {
-              config: this.config,
-              cwd: this.cwd,
-              harness: this.harness,
-              prewarm: this.prewarm,
-              evidence: this.evidence,
-              traceStore: this.traceStore,
-              repairHintTracker: this.repairHintTracker,
-              repairPipeline: this.repairPipeline,
-              abortSignal: this.abortController.signal,
-              importGraph: this.importGraph,
-              lastConflictCheckCount: this.lastConflictCheckCount,
-              trajectory: this.trajectory,
-              getDoomLoopLevel: () => this.getDoomLoopLevel(),
-              latestRisk: this.latestRisk,
-              sessionTurnCount: this.session.getTurnCount(),
-              sessionId: this.config.sessionId,
-              recordToolHistory: (name, input, isError, content) => this.recordToolHistory(name, input, isError, content),
-              getInterventionLevel: () => getInterventionLevel(this.predictionAccumulator),
-              recordPrediction: (correct) => {
-                this.predictionAccumulator = recordPrediction(this.predictionAccumulator, correct)
-              },
-            }
-
-            const result = await executeToolUse(tu, pipelineDeps, callbacks, turn, checkpointCreatedThisTurn)
-
-            this.traceStore = result.traceStore
-            this.importGraph = result.importGraph
-            this.lastConflictCheckCount = result.lastConflictCheckCount
-            this.latestRisk = result.latestRisk
-            if (result.checkpointCreated) checkpointCreatedThisTurn = true
-
-            toolResults.push(result.toolResult)
-          }
-
-          // Inject steer guidance into last tool result if available
-          const steerText = callbacks.onSteerDrain?.()
-          if (steerText && toolResults.length > 0) {
-            const lastResult = toolResults[toolResults.length - 1]!
-            if (lastResult.type === 'tool_result') {
-              const existing = typeof lastResult.content === 'string' ? lastResult.content : ''
-              toolResults[toolResults.length - 1] = { ...lastResult, content: existing + '\n\n' + steerText }
-            }
-          }
-
-          this.session.addToolResults(toolResults)
-
-          // Cerebellar Loop: check intervention level and adjust reasoning
-          const level = getInterventionLevel(this.predictionAccumulator)
-          this.contextInjection.setCerebellarHint(level)
-
-          for (const tu of toolUses) {
-            const result = toolResults.find(r => r.type === 'tool_result' && r.tool_use_id === tu.id)
-            const target = typeof tu.input?.file_path === 'string'
-              ? tu.input.file_path
-              : typeof tu.input?.path === 'string'
-                ? tu.input.path
-                : typeof tu.input?.command === 'string'
-                  ? tu.input.command.slice(0, 50)
-                  : undefined
-            await this.runtimeHooks.runPostTool(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
-              setVigor: vigor => { this.vigorState = vigor },
-              requestThetaCheck: reason => { this.requestThetaCheck(reason) },
-            }), {
-              name: tu.name,
-              success: !(result && 'is_error' in result && result.is_error === true),
-              isError: result && 'is_error' in result ? result.is_error === true : false,
-              target,
-            })
-          }
-
-          if (shouldTippingPointReset(this.predictionAccumulator)) {
-            this.predictionAccumulator = resetAccumulator(this.predictionAccumulator)
-            this.contextInjection.clearCerebellarHint()
-          }
-          if (this.config.autoReasoning && this.config.reasoningEffort) {
-            this.config.reasoningEffort = adjustReasoningEffort(this.config.reasoningEffort, level)
-            this.config.client.setReasoningEffort?.(this.config.reasoningEffort)
-          }
-
-          const turnEndResult = processTurnEnd({
-            config: this.config,
-            session: this.session,
-            trajectory: this.trajectory,
-            streamedText: this.streamedText,
-            routingMetrics: this.routingMetrics,
-            decisions: this.decisions,
-            evidence: this.evidence,
+          const r = await this.toolExecution.executeBatch({
+            toolUses, callbacks, turn, checkpointCreatedThisTurn,
+            abortSignal: this.abortController.signal,
+            traceStore: this.traceStore, importGraph: this.importGraph,
+            lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk,
           })
-          this.decisions = turnEndResult.decisions
-          this.contextInjection.refreshLedger()
-          this.refreshCacheDiagnostic(turn)
-          this.recordTurnSnapshot()
-          await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
-            emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
-          }))
-          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
+          ;({ traceStore: this.traceStore, importGraph: this.importGraph,
+             lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk } = r)
+          if (r.checkpointCreated) checkpointCreatedThisTurn = true
+          await this.turnCompletion.complete({ turn, isFinal: false, callbacks })
           continue
         }
 
-        // Thinking-only turn detection: model produced reasoning but no text or tool calls.
-        // Auto-retry with "continue" prompt, but stop if thinking is looping (similar content).
-        if (this.streamedText.length === 0 && collectedBlocks.length === 0 && this.thinkingOnlyRetries < 1) {
-          // Detect repetition within this thinking block (e.g. same 100-char chunk repeats 3+ times)
-          const midChunk = thinkingAccum.length > 400 ? thinkingAccum.slice(150, 250) : ''
-          const repeatsInBlock = midChunk.length > 0 &&
-            (thinkingAccum.split(midChunk).length - 1) >= 3
-
-          const isLooping = (this.lastThinkingContent.length > 0 &&
-            thinkingAccum.slice(0, 600) === this.lastThinkingContent.slice(0, 600)) ||
-            repeatsInBlock
-
-          if (isLooping) {
-            // Thinking loop detected — don't retry, fall through to turn-end
-          } else {
-            this.lastThinkingContent = thinkingAccum
-            this.thinkingOnlyRetries++
-            // Specific prompt to break the thinking pattern and force direct output
-            this.session.addUserMessage('Please respond directly without additional thinking. Just output your answer.')
-            continue
-          }
-        }
-        this.thinkingOnlyRetries = 0
-        this.lastThinkingContent = ''
-
-        const finalResult = processTurnEnd({
-          config: this.config,
-          session: this.session,
-          trajectory: this.trajectory,
-          streamedText: this.streamedText,
-          routingMetrics: this.routingMetrics,
-          decisions: this.decisions,
-          evidence: this.evidence,
+        // Thinking-only turn detection: retry if model produced reasoning but no text/tools
+        const thinkingResult = evaluateThinkingRetry({
+          streamedText: this.streamedText, collectedBlockCount: collectedBlocks.length,
+          thinkingAccum, thinkingOnlyRetries: this.thinkingOnlyRetries,
+          lastThinkingContent: this.lastThinkingContent,
         })
-        this.decisions = finalResult.decisions
-        if (finalResult.badge) callbacks.onTextDelta('\n' + finalResult.badge)
-        this.contextInjection.refreshLedger()
-        this.refreshCacheDiagnostic(turn)
-        this.recordTurnSnapshot()
-        await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
-          emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
-        }))
-        await this.runPostSession(callbacks)
-        callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), true)
+        this.lastThinkingContent = thinkingResult.nextState.lastThinkingContent
+        this.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
+        if (thinkingResult.shouldRetry) {
+          this.session.addUserMessage(thinkingResult.retryMessage)
+          continue
+        }
+
+        await this.turnCompletion.complete({
+          turn,
+          isFinal: true,
+          emitBadge: true,
+          callbacks,
+        })
         this.evidence.reset()
         break
       }
