@@ -52,6 +52,7 @@ import { runThetaCheck } from './theta-check.js'
 import { RuntimeHookPipeline, createRuntimeHookContext, type RuntimeHookSnapshot } from './runtime-hooks.js'
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { TurnPerceptionController } from './turn-perception.js'
+import { TurnIntentController } from './turn-intent.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
@@ -61,7 +62,7 @@ import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
-import { buildIntentPreview, type IntentPreview, type IntentPreviewAction } from './intent-preview.js'
+import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import { extractKeywords } from './playbook.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput, SensoriumEntry } from './retrospect.js'
@@ -169,6 +170,7 @@ export class AgentLoop {
   private vigorState: VigorState = createVigorState()
   private runtimeHooks: RuntimeHookPipeline
   private perception: TurnPerceptionController
+  private intent: TurnIntentController
   private thetaCheckInFlight = false
   private thetaTelemetry: { lastReason: string | null; lastDurationMs: number | null; lastErrorCount: number; lastTimedOut: boolean; requestedCount: number } = {
     lastReason: null,
@@ -183,7 +185,6 @@ export class AgentLoop {
   private gitChangeRate = 0
   private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
-  private intentPreviewShown = 0
   private sensoriumSnapshots: SensoriumEntry[] = []
   private currentPhase = 'unknown'
 
@@ -235,6 +236,10 @@ export class AgentLoop {
       requestThetaCheck: reason => { this.requestThetaCheck(reason) },
       setReasoningEffort: effort => { this.setReasoningEffort(effort) },
       getFingerprint: () => this.config.promptEngine.getFingerprint(),
+    })
+    this.intent = new TurnIntentController({
+      depositDeadEnd: deposit => this.stigmergyStore.deposit(deposit),
+      addUserMessage: message => { this.session.addUserMessage(message) },
     })
   }
 
@@ -583,7 +588,7 @@ export class AgentLoop {
     this.strategy = null
     this.thetaState = createThetaState(7)
     this.loadedPheromones = []
-    this.intentPreviewShown = 0
+    this.intent.reset()
     this.perception.reset()
     this.sensoriumSnapshots = this.perception.getSnapshots()
     this.currentPhase = this.perception.getCurrentPhase()
@@ -691,29 +696,19 @@ export class AgentLoop {
         const currentSensorium: Sensorium = perceptionResult.sensorium
         const currentStrategy: StrategyProfile = perceptionResult.strategy
 
-        if (callbacks.onIntentPreview && this.intentPreviewShown < 3) {
-          const preview = buildIntentPreview({
-            strategy: currentStrategy,
-            vigor: this.vigorState,
-            sensorium: currentSensorium,
-            pheromones: this.loadedPheromones,
-            thrashingSuggestion: pressureResult.suggestion ?? null,
-            recentTargets: this.recentToolHistory.map(h => h.target).filter((target): target is string => Boolean(target)),
-          })
-          if (preview) {
-            this.intentPreviewShown++
-            const action = await callbacks.onIntentPreview(preview)
-            if (action === 'veto') {
-              await this.stigmergyStore.deposit({ path: preview.summary, signal: 'dead-end', strength: 0.9, context: 'intent veto' })
-              this.session.addUserMessage('<intent-veto>User vetoed the previous plan. Re-plan from the nearest safe branch point before using tools.</intent-veto>')
-              callbacks.onPhaseChange?.('intent-veto', { reason: 'user vetoed intent', suggestion: 're-plan before tool use' })
-              callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
-              continue
-            }
-            if (action === 'alternative') {
-              this.session.addUserMessage('<intent-alternative>User requested an alternative path. Prefer a lower-risk option and explain the tradeoff before using tools.</intent-alternative>')
-            }
-          }
+        const intentResult = await this.intent.evaluate({
+          strategy: currentStrategy,
+          vigor: this.vigorState,
+          sensorium: currentSensorium,
+          pheromones: this.loadedPheromones,
+          pressureResult,
+          recentToolHistory: this.recentToolHistory,
+          onIntentPreview: callbacks.onIntentPreview,
+        })
+        if (intentResult === 'veto') {
+          callbacks.onPhaseChange?.('intent-veto', { reason: 'user vetoed intent', suggestion: 're-plan before tool use' })
+          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
+          continue
         }
 
         // Pass 5: adaptive repair hint injection
