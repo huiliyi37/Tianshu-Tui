@@ -284,6 +284,10 @@ export class OpenAIClient implements StreamClient {
     let buffer = ''
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
+    // GLM-5.1 mandatory thinking mode outputs everything as reasoning_content
+    // with no content field. Accumulate reasoning to promote if no content arrives.
+    let reasoningAccum = ''
+    let textReceived = false
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
@@ -319,6 +323,11 @@ export class OpenAIClient implements StreamClient {
           try {
             const parsed = JSON.parse(payload)
             this.processDelta(parsed, callbacks)
+            // Track whether text/content was received (for reasoning promotion fallback)
+            if (parsed.choices?.[0]?.delta?.content) textReceived = true
+            if (parsed.choices?.[0]?.delta?.reasoning_content) {
+              reasoningAccum += parsed.choices[0].delta.reasoning_content
+            }
           } catch {
             // Skip malformed SSE lines
           }
@@ -334,12 +343,22 @@ export class OpenAIClient implements StreamClient {
             try {
               const parsed = JSON.parse(payload)
               this.processDelta(parsed, callbacks)
+              if (parsed.choices?.[0]?.delta?.content) textReceived = true
+              if (parsed.choices?.[0]?.delta?.reasoning_content) {
+                reasoningAccum += parsed.choices[0].delta.reasoning_content
+              }
             } catch { /* skip malformed */ }
           }
         }
       }
 
       this.flushToolCalls(callbacks)
+
+      // GLM-5.1 mandatory thinking: if only reasoning_content arrived (no content),
+      // promote reasoning to visible text so the TUI shows a reply.
+      if (!textReceived && reasoningAccum) {
+        callbacks.onTextDelta?.(reasoningAccum)
+      }
 
       // If no usage chunk arrived, emit stop reason now
       if (this.pendingStopReason) {
