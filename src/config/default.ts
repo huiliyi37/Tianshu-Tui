@@ -65,8 +65,8 @@ export const DEFAULT_CONFIG: Config = {
       glm: {
         name: 'glm',
         apiKeyEnv: 'ZHIPU_API_KEY',
-        baseUrl: 'https://open.bigmodel.cn/api/anthropic',
-        protocol: 'anthropic' as const,
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        protocol: 'openai' as const,
         capabilities: {
           cacheControl: false,
           stripParams: [],

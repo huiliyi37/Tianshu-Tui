@@ -89,7 +89,8 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
     'No prefix cache support',
   ]),
   glm: buildEntry('glm', 'GLM (Zhipu)', WELL_KNOWN_DEFAULTS['glm']!, [
-    'Anthropic-compatible thinking format',
+    'OpenAI-compatible protocol via /api/paas/v4',
+    'OpenAI-compatible thinking format',
   ]),
   minimax: buildEntry('minimax', 'MiniMax', WELL_KNOWN_DEFAULTS['minimax']!, [
     'OpenAI-compatible thinking format',

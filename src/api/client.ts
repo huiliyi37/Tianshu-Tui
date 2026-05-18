@@ -373,12 +373,82 @@ export class ApiClient implements StreamClient {
                 reader.cancel().catch(() => {})
                 break
               }
+
+              default: {
+                // Fallback for providers that omit event: headers (parsed as 'message')
+                // or use non-standard event names.  Try to extract content from the
+                // data shape regardless of the event label.
+                const d = data.delta
+                const cb = data.content_block
+
+                // Content block start detection
+                if (cb) {
+                  flushTextBlock()
+                  flushThinkingBlock()
+                  if (cb.type === 'text') {
+                    textBlockOpen = true
+                    textContent = ''
+                  } else if (cb.type === 'thinking') {
+                    thinkingBlockOpen = true
+                    thinkingContent = ''
+                  } else if (cb.type === 'tool_use' && cb.id && cb.name) {
+                    toolUseBuffer = { id: cb.id, name: cb.name, partialJson: '' }
+                  }
+                }
+
+                // Delta detection — allow text/thinking deltas to auto-open
+                // their block even without a prior content_block_start event
+                if (d) {
+                  if (d.type === 'text_delta' && d.text) {
+                    if (!textBlockOpen) textBlockOpen = true
+                    textContent += d.text
+                    callbacks.onTextDelta(d.text)
+                  } else if (d.type === 'thinking_delta' && d.thinking) {
+                    if (!thinkingBlockOpen) thinkingBlockOpen = true
+                    thinkingContent += d.thinking
+                    callbacks.onThinkingDelta(d.thinking)
+                  } else if (d.type === 'input_json_delta' && d.partial_json !== undefined) {
+                    if (toolUseBuffer) {
+                      toolUseBuffer.partialJson += d.partial_json
+                    }
+                  }
+                }
+
+                // Stop reason / usage may arrive in any event shape
+                const stopReason = data.delta_stop_reason ?? ''
+                const rawUsage = data.usage ?? {}
+                if (stopReason) {
+                  const usage = this.config.mapUsage ? this.config.mapUsage(rawUsage) : rawUsage
+                  callbacks.onStopReason(stopReason, usage)
+                }
+                break
+              }
             }
           } catch {
             // skip non-JSON events
           }
         }
       }
+    // Flush any blocks still open at stream end (defensive: some providers
+    // may omit content_block_stop events or send them under non-standard labels)
+    flushTextBlock()
+    flushThinkingBlock()
+    // Flush any pending tool_use buffer
+    if (toolUseBuffer && toolUseBuffer.id && toolUseBuffer.name) {
+      let input: Record<string, unknown> = {}
+      try {
+        input = JSON.parse(toolUseBuffer.partialJson) as Record<string, unknown>
+      } catch {
+        input = recoverTruncatedJSON(toolUseBuffer.partialJson)
+      }
+      callbacks.onContentBlock({
+        type: 'tool_use',
+        id: toolUseBuffer.id,
+        name: toolUseBuffer.name,
+        input,
+      })
+      toolUseBuffer = null
+    }
     if (streamIdleTimeout) clearTimeout(streamIdleTimeout)
     if (streamTimedOut) throw new Error('SSE stream idle timeout')
     } finally {

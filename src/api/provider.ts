@@ -83,7 +83,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   glm: {
     supportsThinking: true,
-    thinkingFormat: 'anthropic',
+    thinkingFormat: 'openai',
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier'],
     hasToolJsonInContentBug: false,

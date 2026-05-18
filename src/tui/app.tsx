@@ -22,6 +22,9 @@ import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
+import { parseSensoriumLog, generateRetrospect } from '../agent/retrospect.js'
+import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.js'
 import type { McpManager } from '../mcp/manager.js'
 import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, McpPanel } from './cockpit/index.js'
@@ -563,6 +566,48 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           } else {
             pushStatic(createLogEntry({ type: 'system', content: 'No agent-owned changes to rollback.' }))
           }
+        }
+        setIsStreaming(false)
+        return
+      }
+
+      if (cmd === '/retrospect') {
+        const cwd = process.cwd()
+        const sensoriumPath = join(cwd, '.rivet', 'sensorium.jsonl')
+        if (!existsSync(sensoriumPath)) {
+          pushStatic(createLogEntry({ type: 'system', content: '无 sensorium 数据。请先运行一个 session。' }))
+          setIsStreaming(false)
+          return
+        }
+        try {
+          const raw = readFileSync(sensoriumPath, 'utf-8')
+          if (!raw.trim()) {
+            pushStatic(createLogEntry({ type: 'system', content: 'Sensorium 日志为空。请先运行一个 session。' }))
+            setIsStreaming(false)
+            return
+          }
+          const entries = parseSensoriumLog(raw)
+          const traceStore = agent.getTraceStore()
+          const evidenceState = agent.getEvidenceState()
+          const toolEvents = traceStore.events
+            .filter(e => e.kind === 'tool')
+            .map(e => ({
+              turn: e.turn,
+              name: e.name,
+              status: e.status === 'passed' ? 'passed' as const : 'failed' as const,
+            }))
+          const report = generateRetrospect({
+            sensoriumEntries: entries,
+            gitLog: [], // git log can be added later via child_process
+            toolEvents,
+            evidenceSummary: {
+              filesModified: evidenceState.filesModified.size,
+              verifiedCount: evidenceState.verifications.filter(v => v.status === 'passed').length,
+            },
+          })
+          pushStatic(createLogEntry({ type: 'system', content: report }))
+        } catch (err) {
+          pushStatic(createLogEntry({ type: 'system', content: `Retrospect 生成失败: ${err instanceof Error ? err.message : String(err)}` }))
         }
         setIsStreaming(false)
         return
