@@ -1,6 +1,6 @@
 import type { StreamCallbacks } from '../api/client.js'
 import type { StreamClient } from '../api/stream-client.js'
-import type { ContentBlock, Message, Usage } from '../api/types.js'
+import type { ContentBlock, Usage } from '../api/types.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { ToolRegistry } from '../tools/registry.js'
@@ -9,12 +9,8 @@ import { SessionContext } from './context.js'
 import { SessionPersist } from './session-persist.js'
 import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
-import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { batchPrewarm, buildPrewarmValue } from './prewarm-file.js'
-import { smartCompact } from '../compact/index.js'
-import { microCompact, estimateTokens } from '../compact/micro.js'
-import { CACHE_ANCHOR_MESSAGES, type CompactionConfig } from '../compact/constants.js'
-import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
+import { type CompactionConfig } from '../compact/constants.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import { EvidenceTracker } from './evidence.js'
@@ -33,7 +29,6 @@ import { RepairHintTracker } from './repair-hint.js'
 import type { PermissionConfig } from './permissions.js'
 import { type ApprovalResult } from './approval-edit.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
-import { extractTaskState } from './task-state.js'
 import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import { processTurnEnd } from './turn-end.js'
 import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, resetAccumulator, adjustReasoningEffort } from './prediction-error.js'
@@ -50,6 +45,7 @@ import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { TurnPerceptionController } from './turn-perception.js'
 import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
+import { CompactionController } from './compaction-controller.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
@@ -167,6 +163,7 @@ export class AgentLoop {
   private perception: TurnPerceptionController
   private intent: TurnIntentController
   private contextInjection: ContextInjectionController
+  private compaction: CompactionController
   private thetaCheckInFlight = false
   private thetaTelemetry: { lastReason: string | null; lastDurationMs: number | null; lastErrorCount: number; lastTimedOut: boolean; requestedCount: number } = {
     lastReason: null,
@@ -249,6 +246,17 @@ export class AgentLoop {
       getRepairHintTracker: () => this.repairHintTracker,
       getContextClaimStore: () => this.config.contextClaimStore,
       getPlaybookStore: () => this.config.playbookStore,
+    })
+    this.compaction = new CompactionController({
+      session: this.session,
+      promptEngine: this.config.promptEngine,
+      contextWindow: this.config.contextWindow,
+      compactClient: this.config.compactClient,
+      compactModel: this.config.compactModel,
+      pressureMonitor: this.pressureMonitor,
+      getTrajectoryEntries: () => this.trajectory.getEntries(),
+      getStreamedText: () => this.streamedText,
+      refreshLedger: () => { this.contextInjection.refreshLedger() },
     })
   }
 
@@ -409,18 +417,7 @@ export class AgentLoop {
   getCacheDiagnostic(): string | null { return this.lastCacheDiagnostic }
 
   private refreshCacheDiagnostic(turn: number): void {
-    const hitRate = this.session.getLatestTurnHitRate()
-    if (hitRate !== null && hitRate < 0.8) {
-      const diagnostic = diagnoseCacheMiss(
-        this.session.getCacheHistory(),
-        this.session.getTurnCount(),
-        this.config.promptEngine.checkDrift(),
-        this.session.wasCompactedAt(turn),
-      )
-      this.lastCacheDiagnostic = diagnostic?.message ?? null
-      return
-    }
-    this.lastCacheDiagnostic = null
+    this.lastCacheDiagnostic = this.compaction.refreshCacheDiagnostic(turn)
   }
 
   getLedger() { return this.session.getContextLedger() }
@@ -443,61 +440,6 @@ export class AgentLoop {
       toolCount: this.config.toolRegistry.getDefinitions().length,
       toolNames: this.config.toolRegistry.getDefinitions().map(t => t.name),
     }
-  }
-
-  private async compactMessages(
-    messages: Message[],
-    tokenCount: number,
-  ): Promise<{ messages: Message[] }> {
-    if (this.config.compactClient && this.config.compactModel) {
-      const result = await smartCompact(
-        this.config.compactClient,
-        messages,
-        tokenCount,
-        this.config.contextWindow,
-        this.config.compactModel,
-      )
-      return { messages: result.messages }
-    }
-    return microCompact(messages, this.config.contextWindow, tokenCount)
-  }
-
-  private enforceContextCeiling(): void {
-    const ceiling = this.config.contextWindow * 0.95
-    if (this.session.getEstimatedTokens() <= ceiling) return
-
-    const messages = this.session.getMessages()
-    const taskState = extractTaskState(this.trajectory.getEntries(), this.streamedText)
-    const stateLines = [
-      `Current: ${taskState.current}`,
-      ...taskState.completed.map(item => `Completed: ${item}`),
-      ...taskState.remaining.map(item => `Remaining: ${item}`),
-    ]
-    const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
-    let resumeMessage: Message = {
-      role: 'user',
-      content: `<checkpoint-resume>\n${stateLines.join('\n')}\n</checkpoint-resume>`,
-    }
-    let candidate = [...anchorMessages, resumeMessage]
-
-    if (estimateTokens(candidate) > ceiling) {
-      resumeMessage = {
-        role: 'user',
-        content: '<checkpoint-resume>Context ceiling exceeded. Continue from preserved cache anchors and ask for missing details if needed.</checkpoint-resume>',
-      }
-      candidate = [...anchorMessages, resumeMessage]
-    }
-
-    this.session.replaceMessages(candidate)
-    this.session.recordCompactEvent({
-      turn: this.session.getTurnCount(),
-      tier: 4,
-      reason: 'context ceiling exceeded; checkpoint-resume required',
-      beforeTokens: estimateTokens(messages),
-      afterTokens: this.session.getEstimatedTokens(),
-      createdAt: Date.now(),
-    })
-    this.contextInjection.refreshLedger()
   }
 
   private recordTurnSnapshot(): void {
@@ -563,46 +505,12 @@ export class AgentLoop {
           return
         }
 
-        const messages = this.session.getMessages()
         const estTokens = this.session.getEstimatedTokens()
-        const compactDecision = decideCompactTier({
-          estimatedTokens: estTokens,
-          maxTokens: this.config.contextWindow,
-          turn: this.session.getTurnCount(),
+        const compactResult = await this.compaction.maybeCompact({
+          loopTurn: turn,
           failures: this.compactFailures,
         })
-        if (compactDecision.shouldCompact) {
-          const beforeTokens = estTokens
-          try {
-            const { messages: compacted } = await this.compactMessages(messages, estTokens)
-            this.session.replaceMessages(compacted)
-            this.session.markCompacted(turn)
-            this.pressureMonitor.recordCompaction(this.session.getTurnCount())
-            const afterTokens = this.session.getEstimatedTokens()
-            this.session.recordCompactEvent({
-              turn: this.session.getTurnCount(),
-              tier: this.config.compactClient ? 2 : 1,
-              reason: `auto compact: ${compactDecision.reason}`,
-              beforeTokens,
-              afterTokens,
-              createdAt: Date.now(),
-            })
-            this.compactFailures = recordCompactSuccess(this.compactFailures)
-
-            // Cache boundary detection: did compaction touch cache-anchored messages?
-            if (messages.length >= CACHE_ANCHOR_MESSAGES && compacted.length >= CACHE_ANCHOR_MESSAGES) {
-              const anchorTouched = messages[CACHE_ANCHOR_MESSAGES - 1]!.content !== compacted[CACHE_ANCHOR_MESSAGES - 1]!.content
-              if (anchorTouched) {
-                this.pressureMonitor.recordCompaction(this.session.getTurnCount()) // extra signal
-              }
-            }
-
-            this.contextInjection.refreshLedger()
-          } catch (err) {
-            this.compactFailures = recordCompactFailure(this.compactFailures, this.session.getTurnCount())
-            throw err
-          }
-        }
+        this.compactFailures = compactResult.failures
 
         this.streamedText = ''
         this.lastPrewarmAt = 0
@@ -662,7 +570,7 @@ export class AgentLoop {
         // Pass 5: adaptive repair hint injection
         this.contextInjection.refreshRepairHint()
 
-        this.enforceContextCeiling()
+        this.compaction.enforceContextCeiling()
         this.contextInjection.refreshActiveClaims()
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const collectedBlocks: ContentBlock[] = []
