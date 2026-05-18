@@ -24,6 +24,9 @@ describe('work-order contract', () => {
     assert.equal(order.id, 'wo_1')
     assert.equal(order.kind, 'code_search')
     assert.deepEqual(order.allowedTools, READ_ONLY_WORKER_TOOLS)
+    assert.ok(order.allowedTools.includes('inspect_project'))
+    assert.ok(order.allowedTools.includes('repo_map'))
+    assert.ok(order.allowedTools.includes('related_tests'))
     assert.deepEqual(order.disallowedTools, ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'])
     assert.equal(order.budget.maxRetries, 2)
     assert.equal(order.aggregationPolicy, 'primary_decides')
@@ -58,6 +61,45 @@ describe('work-order contract', () => {
     assert.equal(result.status, 'passed')
     assert.equal(result.findings[0]!.confidence, 'high')
     assert.deepEqual(result.changedFiles, [])
+  })
+
+  it('skips non-result JSON before the WorkerResult packet', () => {
+    const result = parseWorkerResult(`I inspected this scope {"note":"not the result"} and found:\n{
+  "workOrderId": "wo_1",
+  "status": "passed",
+  "summary": "Worker result packet follows incidental JSON.",
+  "findings": [],
+  "artifacts": [],
+  "changedFiles": [],
+  "risks": [],
+  "nextActions": []
+}`, 'wo_1')
+
+    assert.equal(result.status, 'passed')
+    assert.equal(result.summary, 'Worker result packet follows incidental JSON.')
+  })
+
+  it('normalizes legacy string findings and fills optional arrays', () => {
+    const result = parseWorkerResult(JSON.stringify({
+      workOrderId: 'wo_1',
+      status: 'passed',
+      summary: 'Legacy worker packet was normalized.',
+      findings: ['Coordinator creates isolated worker sessions.'],
+      artifacts: ['Use ToolRegistry allowlist for workers.'],
+    }), 'wo_1')
+
+    assert.equal(result.findings[0]!.claim, 'Coordinator creates isolated worker sessions.')
+    assert.equal(result.findings[0]!.confidence, 'medium')
+    assert.deepEqual(result.changedFiles, [])
+    assert.equal(result.artifacts[0]!.kind, 'note')
+  })
+
+  it('reports schema errors from the WorkerResult candidate, not incidental JSON', () => {
+    assert.throws(() => parseWorkerResult(`{"note":"incidental"}\n{
+  "workOrderId": "wo_1",
+  "status": "done",
+  "summary": "Invalid result status"
+}`, 'wo_1'), /Invalid enum value/)
   })
 
   it('rejects a packet for the wrong work order', () => {

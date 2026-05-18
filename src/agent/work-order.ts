@@ -3,8 +3,8 @@ import { z } from 'zod'
 import type { CapabilityTask } from '../model/capability.js'
 import type { VerificationMetadata } from '../tools/types.js'
 
-export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff'] as const
-export const WRITE_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
+export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests'] as const
+export const WRITE_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
 export const PHASE1_DISALLOWED_WORKER_TOOLS = ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'] as const
 
 export const workOrderKindSchema = z.enum([
@@ -85,25 +85,43 @@ const verificationMetadataSchema = z.object({
   durationMs: z.number(),
 }) satisfies z.ZodType<VerificationMetadata>
 
+const workerFindingSchema = z.object({
+  claim: z.string().min(1),
+  evidence: z.string().min(1),
+  confidence: z.enum(['low', 'medium', 'high']),
+})
+
+const workerArtifactSchema = z.object({
+  kind: z.enum(['note', 'patch', 'test_command', 'risk', 'question']),
+  title: z.string().min(1),
+  content: z.string().min(1),
+})
+
 export const workerResultSchema = z.object({
   workOrderId: z.string().min(1),
   status: z.enum(['passed', 'failed', 'blocked', 'escalated']),
   summary: z.string().min(1),
-  findings: z.array(z.object({
-    claim: z.string().min(1),
-    evidence: z.string().min(1),
-    confidence: z.enum(['low', 'medium', 'high']),
-  })),
-  artifacts: z.array(z.object({
-    kind: z.enum(['note', 'patch', 'test_command', 'risk', 'question']),
-    title: z.string().min(1),
-    content: z.string().min(1),
-  })),
+  findings: z.array(workerFindingSchema),
+  artifacts: z.array(workerArtifactSchema),
   patchSummary: z.string().optional(),
   verification: verificationMetadataSchema.optional(),
   changedFiles: z.array(z.string()),
   risks: z.array(z.string()),
   nextActions: z.array(z.string()),
+  evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified']).default('unverified'),
+})
+
+const workerResultIngestSchema = z.object({
+  workOrderId: z.string().min(1),
+  status: z.enum(['passed', 'failed', 'blocked', 'escalated']),
+  summary: z.string().min(1),
+  findings: z.array(z.union([workerFindingSchema, z.string().min(1)])).default([]),
+  artifacts: z.array(z.union([workerArtifactSchema, z.string().min(1)])).default([]),
+  patchSummary: z.string().optional(),
+  verification: verificationMetadataSchema.optional(),
+  changedFiles: z.array(z.string()).default([]),
+  risks: z.array(z.string()).default([]),
+  nextActions: z.array(z.string()).default([]),
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified']).default('unverified'),
 })
 
@@ -196,57 +214,101 @@ export function mapWorkOrderKindToCapabilityTask(kind: WorkOrderKind): Capabilit
   }
 }
 
-function extractJsonObject(text: string): string {
-  // Strategy 1: Extract from fenced code block (```json ... ``` or ``` ... ```)
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (fenced?.[1]) {
-    const trimmed = fenced[1].trim()
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-      return trimmed
-    }
-  }
+function extractFencedJsonCandidates(text: string): string[] {
+  return [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)]
+    .map(match => match[1]?.trim())
+    .filter((candidate): candidate is string => Boolean(candidate?.startsWith('{') && candidate.endsWith('}')))
+}
 
-  // Strategy 2: Find balanced JSON object by scanning from first { to matching }
-  // Handles prose before/after the JSON — common when worker outputs thinking then JSON.
-  const firstBrace = text.indexOf('{')
-  if (firstBrace === -1) {
-    throw new Error('Worker result did not contain a JSON object')
-  }
-
-  let depth = 0
-  let inString = false
-  let escaped = false
-  for (let i = firstBrace; i < text.length; i++) {
-    const ch = text[i]!
-    if (escaped) { escaped = false; continue }
-    if (ch === '\\') { escaped = true; continue }
-    if (ch === '"') { inString = !inString; continue }
-    if (inString) continue
-    if (ch === '{') depth++
-    if (ch === '}') {
-      depth--
-      if (depth === 0) {
-        return text.slice(firstBrace, i + 1)
+function extractBalancedJsonCandidates(text: string): string[] {
+  const candidates: string[] = []
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i]!
+      if (escaped) { escaped = false; continue }
+      if (ch === '\\') { escaped = true; continue }
+      if (ch === '"') { inString = !inString; continue }
+      if (inString) continue
+      if (ch === '{') depth++
+      if (ch === '}') {
+        depth--
+        if (depth === 0) {
+          candidates.push(text.slice(start, i + 1))
+          break
+        }
       }
     }
   }
+  return candidates
+}
 
-  // Strategy 3: Truncated JSON — use first { to last } as fallback
+function extractJsonCandidates(text: string): string[] {
+  const candidates = [...extractFencedJsonCandidates(text), ...extractBalancedJsonCandidates(text)]
+  if (candidates.length > 0) return candidates
+
+  const firstBrace = text.indexOf('{')
   const lastBrace = text.lastIndexOf('}')
-  if (lastBrace > firstBrace) {
-    return text.slice(firstBrace, lastBrace + 1)
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    return [text.slice(firstBrace, lastBrace + 1)]
   }
 
-  throw new Error('Worker result did not contain a valid JSON object')
+  throw new Error('Worker result did not contain a JSON object')
+}
+
+function extractJsonParseError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+function parseJsonCandidate(candidate: string): unknown {
+  return JSON.parse(candidate) as unknown
+}
+
+function normalizeWorkerResult(raw: z.infer<typeof workerResultIngestSchema>): WorkerResult {
+  return workerResultSchema.parse({
+    ...raw,
+    findings: raw.findings.map((finding, index) => typeof finding === 'string'
+      ? { claim: finding, evidence: `worker finding ${index + 1}`, confidence: 'medium' as const }
+      : finding),
+    artifacts: raw.artifacts.map((artifact, index) => typeof artifact === 'string'
+      ? { kind: 'note' as const, title: `Artifact ${index + 1}`, content: artifact }
+      : artifact),
+  })
+}
+
+function parseWorkerResultObject(parsed: unknown, expectedWorkOrderId: string): WorkerResult {
+  const ingested = workerResultIngestSchema.parse(parsed)
+  if (ingested.workOrderId !== expectedWorkOrderId) {
+    throw new Error(`WorkerResult workOrderId ${ingested.workOrderId} does not match ${expectedWorkOrderId}`)
+  }
+  return normalizeWorkerResult(ingested)
 }
 
 export function parseWorkerResult(text: string, expectedWorkOrderId: string): WorkerResult {
-  const parsed = JSON.parse(extractJsonObject(text)) as unknown
-  const result = workerResultSchema.parse(parsed)
-  if (result.workOrderId !== expectedWorkOrderId) {
-    throw new Error(`WorkerResult workOrderId ${result.workOrderId} does not match ${expectedWorkOrderId}`)
+  const candidates = extractJsonCandidates(text)
+  const errors: string[] = []
+
+  for (const candidate of candidates) {
+    let parsed: unknown
+    try {
+      parsed = parseJsonCandidate(candidate)
+    } catch (error) {
+      errors.push(extractJsonParseError(error))
+      continue
+    }
+
+    try {
+      return parseWorkerResultObject(parsed, expectedWorkOrderId)
+    } catch (error) {
+      errors.push(extractJsonParseError(error))
+      continue
+    }
   }
-  return result
+
+  throw new Error(errors.at(-1) ?? 'Worker result did not contain a valid JSON object')
 }
 
 export function buildBlockedWorkerResult(order: WorkOrder, reason: string): WorkerResult {

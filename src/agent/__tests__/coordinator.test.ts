@@ -33,6 +33,10 @@ function makeRegistry() {
   return registry
 }
 
+function sortedReadOnlyToolNames(): string[] {
+  return [...READ_ONLY_WORKER_TOOLS].sort()
+}
+
 const cards: ModelCapabilityCard[] = [
   {
     model: 'fast-json',
@@ -124,7 +128,7 @@ describe('DelegationCoordinator', () => {
     assert.equal(run.status, 'completed')
     assert.equal(run.results.length, 1)
     assert.deepEqual(selectedModels, ['large-cache'])
-    assert.deepEqual(seenToolNames[0], ['diff', 'glob', 'grep', 'read_file'])
+    assert.deepEqual(seenToolNames[0], sortedReadOnlyToolNames())
   })
 
   it('returns skipped when the objective does not pass the budget gate', async () => {

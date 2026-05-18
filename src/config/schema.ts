@@ -81,9 +81,16 @@ export const workerProfileSchema = z.object({
   model: z.string(),
 })
 
+export const workerRoutingSchema = z.record(z.string(), z.string()).default({
+  repo_summarization: 'mimo',
+  code_edit: 'capable',
+  test_failure_diagnosis: 'capable',
+  risky_refactor: 'capable',
+})
+
 export const workersSchema = z.object({
   profiles: z.record(z.string(), workerProfileSchema).default({}),
-  routing: z.record(z.string(), z.string()).default({}),
+  routing: workerRoutingSchema,
 }).default({})
 
 export const configSchema = z.object({

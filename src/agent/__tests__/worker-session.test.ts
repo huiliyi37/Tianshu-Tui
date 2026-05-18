@@ -103,6 +103,33 @@ describe('runWorkerSession', () => {
     assert.ok(run.session.getMessages().length > 0)
   })
 
+  it('recovers without repair when prose contains incidental JSON before the result packet', async () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_incidental',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Find worker result parser seams across coordinator and worker session modules.',
+      scope: {},
+      budget: { maxRetries: 1 },
+    })
+
+    const text = `Observed tool input {"pattern":"WorkerResult"}. Final packet:\n${validPacket('wo_incidental')}`
+    const run = await runWorkerSession({
+      order,
+      client: clientFromTexts([text]),
+      promptEngine: makePromptEngine(),
+      toolRegistry: new ToolRegistry(),
+      cwd: '/repo',
+      maxTurns: 2,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+    })
+
+    assert.equal(run.result.status, 'passed')
+    assert.equal(run.transcript.repairAttempts, 0)
+  })
+
   it('runs one repair prompt after invalid worker JSON', async () => {
     const order = createReadOnlyWorkOrder({
       id: 'wo_3',

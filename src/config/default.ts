@@ -149,7 +149,7 @@ export const DEFAULT_CONFIG: Config = {
       'mimo-pro': { provider: 'mimo', model: 'mimo-v2.5-pro' },
     },
     routing: {
-      repo_summarization: 'cheap',
+      repo_summarization: 'mimo',
       code_edit: 'capable',
       test_failure_diagnosis: 'capable',
       risky_refactor: 'capable',
