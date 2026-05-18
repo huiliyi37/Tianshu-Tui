@@ -101,13 +101,13 @@ export const DEFAULT_CONFIG: Config = {
         maxTokens: 64000,
         models: [
           {
-            id: 'MiMo-V2.5-Pro',
+            id: 'mimo-v2.5-pro',
             alias: 'mimo-pro',
             contextWindow: 1_000_000,
             maxTokens: 64000,
           },
           {
-            id: 'MiMo-V2.5',
+            id: 'mimo-v2.5',
             alias: 'mimo',
             contextWindow: 262_000,
             maxTokens: 64000,
@@ -145,8 +145,8 @@ export const DEFAULT_CONFIG: Config = {
     profiles: {
       cheap: { provider: 'deepseek', model: 'deepseek-v4-flash' },
       capable: { provider: 'deepseek', model: 'deepseek-v4-pro' },
-      mimo: { provider: 'mimo', model: 'MiMo-V2.5' },
-      'mimo-pro': { provider: 'mimo', model: 'MiMo-V2.5-Pro' },
+      mimo: { provider: 'mimo', model: 'mimo-v2.5' },
+      'mimo-pro': { provider: 'mimo', model: 'mimo-v2.5-pro' },
     },
     routing: {
       repo_summarization: 'cheap',
