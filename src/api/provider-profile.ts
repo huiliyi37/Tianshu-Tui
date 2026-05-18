@@ -20,6 +20,7 @@ const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
   minimax: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
   mimo: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
   'opencode-go': { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
+  claude: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
 }
 
 export function getProviderProfile(provider: string, contextWindow?: number): ProviderProfile {

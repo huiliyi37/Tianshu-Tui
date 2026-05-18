@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter complete and merged to `main` — 1248 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, and cerebellar/thinking edge cases are covered by tests.
+Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter complete and merged to `main` — 1685 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, and cerebellar/thinking edge cases are covered by tests.
 
 ### Session HA Closure — completed this round
 
@@ -454,11 +454,34 @@ Rivet supports multiple model providers with different authentication methods:
 | Provider | Protocol | Auth | Models |
 |----------|----------|------|--------|
 | DeepSeek | Anthropic | API key | v4-pro, v4-flash |
+| **Claude** | **OpenAI (proxy)** | **API key (`CC_SWITCH_PROXY_API_KEY`)** | **opus-4-7, opus-4-6, sonnet-4-5** |
 | GLM | Anthropic | API key | glm-5.1, glm-4.7 |
 | Codex (GPT-5.5) | Codex Responses | OAuth PKCE | gpt-5.5 |
 | MiniMax | OpenAI | API key | M2.7, M2.5 |
 | MiMo | OpenAI | API key | V2.5-Pro, V2.5 |
 | OpenCode Go | OpenAI | API key | aggregated models |
+
+#### Claude via CLI Proxy
+
+Claude models are accessed through a local CLI proxy (`cc-switch`) that translates OpenAI-compatible requests to Anthropic Messages API. All three models support 1M context window, 128K max output, and extended thinking with `reasoning_effort: max`.
+
+```bash
+# Prerequisites: cc-switch proxy running at http://127.0.0.1:8891
+# API key from CC_SWITCH_PROXY_API_KEY environment variable
+
+# Start with Claude Opus 4-7 (strongest reasoning)
+node dist/main.js --provider claude --model claude-opus-4-7
+
+# Use alias shorthand
+node dist/main.js --provider claude --model opus-4-7
+
+# Switch inside a running session
+/model claude/claude-opus-4-7
+/model claude/opus-4-6
+/model claude/sonnet-4-5
+```
+
+Extended thinking is enabled by default with `budget_tokens` scaled to the full 128K output budget at `max` reasoning effort. The proxy handles Anthropic-native thinking format translation.
 
 #### Codex OAuth Login
 

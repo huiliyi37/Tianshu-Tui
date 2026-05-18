@@ -1,6 +1,36 @@
 # Changelog
 
-<<<<<<< Updated upstream
+## 2026-05-19 — Claude Provider (CLI Proxy)
+
+### Added
+- **Claude provider** via local CLI proxy (`cc-switch` at `http://127.0.0.1:8891`): routes requests to Anthropic Claude models through an OpenAI-compatible proxy with `CC_SWITCH_PROXY_API_KEY` authentication.
+- **Three Claude models**: `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-5` — all with 1M context window, 128K max output tokens, `reasoning_effort: max`.
+- **Extended thinking with budget_tokens**: Claude proxy passes `thinking: { type: 'enabled', budget_tokens }` to Anthropic Messages API. Budget scales with `reasoning_effort` level: `max` = full output budget, `high` = 60%, `medium` = 30%, `low` = 8K.
+- **Provider capabilities**: `claude` entry in `WELL_KNOWN_DEFAULTS` (OpenAI thinking format, reasoning_effort effort format, no prefix cache).
+- **Cache profile**: `claude` entry with `cacheType: 'none'` (proxy handles caching internally).
+
+### Usage
+```bash
+# Start with Claude Opus 4-7 (strongest reasoning)
+node dist/main.js --provider claude --model claude-opus-4-7
+
+# Switch inside TUI
+/model claude/claude-opus-4-7
+/model claude/claude-opus-4-6
+/model claude/claude-sonnet-4-5
+
+# Use alias
+/model claude/opus-4-7
+```
+
+### Files Changed
+- `src/config/default.ts` — claude provider definition with 3 models
+- `src/api/provider.ts` — WELL_KNOWN_DEFAULTS.claude
+- `src/api/provider-profile.ts` — claude cache profile
+- `src/api/openai-client.ts` — budget_tokens injection for claude providerName
+
+---
+
 ## 2026-05-17 — Multi-Provider Adapter (Codex OAuth + MiniMax + MiMo)
 
 ### Added
@@ -278,7 +308,9 @@
 - 736/736 tests passing, typecheck clean, build succeeds
 - DeepSeek prefix cache preserved: first 2 messages (CACHE_ANCHOR_MESSAGES=2) never modified
 - 128K window test: 320K token fixture compacts to below 95% ceiling with anchors + resume state
-=======
+
+---
+
 ## 2026-05-16 — Wave 3 UX Polish + Wave 4 Ecosystem Extension
 
 ### Added — Wave 3 UX Polish
@@ -311,7 +343,6 @@
 - 855 tests pass (was 859)
 - npm run typecheck clean
 - 5 new test files: vim-mode, file-completer, command-palette, external-editor, worktree
->>>>>>> Stashed changes
 
 ## 2026-05-16 — Wave 1 Core Gaps Closed
 

@@ -275,10 +275,24 @@ export class OpenAIClient implements StreamClient {
     // Providers with thinking: 'enabled' should receive the thinking param.
     // The thinkingFormat field controls RESPONSE parsing, not request format.
     // GLM Coding Plan: clear_thinking=false enables Preserved Thinking.
+    // Claude proxy (cc-switch) passes thinking through to Anthropic Messages API.
     if (this.config.thinking) {
       body.thinking = { type: this.config.thinking }
       if (this.config.providerName === 'glm') {
         ;(body.thinking as Record<string, unknown>)['clear_thinking'] = false
+      }
+      // Claude via proxy: budget_tokens controls thinking depth.
+      // When reasoning_effort is 'max', set budget_tokens to the max output budget.
+      if (this.config.providerName === 'claude') {
+        const budgetMap: Record<string, number> = {
+          max: this.config.maxTokens,
+          high: Math.floor(this.config.maxTokens * 0.6),
+          medium: Math.floor(this.config.maxTokens * 0.3),
+          low: 8192,
+          off: 0,
+        }
+        const budget = budgetMap[this.config.reasoningEffort ?? 'high'] ?? Math.floor(this.config.maxTokens * 0.6)
+        ;(body.thinking as Record<string, unknown>)['budget_tokens'] = budget
       }
     }
     // reasoning_effort is an OpenAI-specific field. Only send if the provider
