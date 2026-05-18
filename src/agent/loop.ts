@@ -47,7 +47,7 @@ import { computeSensorium, computeStrategy } from './sensorium.js'
 import type { Sensorium, SensoriumInput } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
 import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
-import { mapSensoriumToPhase, createStarEvent, createThetaState, tickTheta, completeTheta, advanceThetaCounter } from './star-event.js'
+import { mapSensoriumToPhase, createStarEvent, createThetaState } from './star-event.js'
 import type { StarEvent, ThetaState } from './star-event.js'
 import { shouldKick, buildKickActions, shouldEscalateFromKick } from './dissipative-kick.js'
 import { runThetaCheck } from './theta-check.js'
@@ -55,6 +55,7 @@ import { RuntimeHookPipeline, createRuntimeHookContext } from './runtime-hooks.j
 import { createVigorState, detectRigidity } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
+import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -190,6 +191,10 @@ export class AgentLoop {
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
     this.runtimeHooks = new RuntimeHookPipeline([
       createVigorAfterPerceptionHook(),
+      createThetaRuntimeHook({
+        getThetaState: () => this.thetaState,
+        setThetaState: state => { this.thetaState = state },
+      }),
       createVigorPostToolHook({
         getPredictionAccumulator: () => this.predictionAccumulator,
       }),
@@ -872,13 +877,6 @@ export class AgentLoop {
             this.config.promptEngine.setCerebellarHint(`Prediction error rate elevated (${level}). Mental model may be stale — verify assumptions before proceeding.`)
           } else {
             this.config.promptEngine.setCerebellarHint(null)
-          }
-
-          // Theta-Gamma: advance counter, check if cross-file consistency check is due
-          this.thetaState = advanceThetaCounter(this.thetaState)
-          if (this.sensorium && this.sensorium.complexity > 0.5 && tickTheta(this.thetaState, turn)) {
-            this.requestThetaCheck('theta-cycle')
-            this.thetaState = completeTheta(this.thetaState)
           }
 
           for (const tu of toolUses) {
