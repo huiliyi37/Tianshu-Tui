@@ -701,33 +701,38 @@ async function main() {
   
   // 尝试获取文件锁
   if (!lwtGuard.acquireLock()) {
-    console.error('另一个 Rivet 实例正在运行')
+    console.error('⚠️  另一个 Rivet 实例正在运行')
+    console.error('   如果确定没有其他实例，请删除 ~/.rivet/state/agent.lock')
     process.exit(1)
   }
   
   // 检查上次是否异常退出
   const crashedSessionId = lwtGuard.checkPreviousCrash()
   if (crashedSessionId) {
-    console.log(`🔄 检测到上次异常退出，正在恢复会话 ${crashedSessionId}...`)
+    console.log(`\n🔄 检测到上次异常退出`)
+    console.log(`   会话 ID: ${crashedSessionId}`)
     
-    // 自动恢复会话
-    const persist = new SessionPersist(crashedSessionId)
-    const { messages, preflight, usedSnapshot, snapshotTurn, hadIncompleteCompact } = persist.loadRecoverableMessages()
-    
-    if (hadIncompleteCompact) {
-      console.log('⚠️ 检测到 incomplete compact，已从快照恢复')
+    try {
+      const persist = new SessionPersist(crashedSessionId)
+      const { messages, usedSnapshot, snapshotTurn, hadIncompleteCompact } = persist.loadRecoverableMessages()
+      
+      if (hadIncompleteCompact) {
+        console.log('   ⚠️  检测到 incomplete compact，已从快照恢复')
+      }
+      
+      if (usedSnapshot && snapshotTurn !== undefined) {
+        console.log(`   📸 使用快照恢复到 turn ${snapshotTurn}`)
+      }
+      
+      console.log(`   ✅ 恢复完成：${messages.length} 条消息\n`)
+      lwtGuard.register(crashedSessionId)
+    } catch (err) {
+      console.error(`   ❌ 恢复失败: ${(err as Error).message}`)
+      console.log('   启动新会话...')
+      const sessionId = getOrCreateSessionId()
+      lwtGuard.register(sessionId)
     }
-    
-    if (usedSnapshot && snapshotTurn !== undefined) {
-      console.log(`📸 使用快照恢复到 turn ${snapshotTurn}`)
-    }
-    
-    console.log(`✅ 恢复完成：${messages.length} 条消息`)
-    
-    // 注册当前会话
-    lwtGuard.register(crashedSessionId)
   } else {
-    // 正常启动，注册新会话
     const sessionId = getOrCreateSessionId()
     lwtGuard.register(sessionId)
   }
