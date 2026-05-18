@@ -16,7 +16,7 @@ describe('SummaryBar formatting', () => {
   }
 
   it('formats line 1 with task, phase, context, elapsed', () => {
-    const line = formatSummaryLine1(state)
+    const line = formatSummaryLine1(state, 0)
     assert.ok(line.includes('refactor auth middleware'))
     assert.ok(line.includes('testing'))
     assert.ok(line.includes('3/5'))
@@ -71,7 +71,7 @@ describe('SummaryBar formatting', () => {
 
   it('truncates long task names', () => {
     const longTask = { ...state, task: 'a very long task description that exceeds thirty characters limit' }
-    const line = formatSummaryLine1(longTask)
+    const line = formatSummaryLine1(longTask, 0)
     assert.ok(line.includes('…'))
   })
 

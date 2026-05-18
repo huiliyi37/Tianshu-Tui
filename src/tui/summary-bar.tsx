@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink'
-import { memo } from 'react'
+import { memo, useState, useEffect } from 'react'
 import type { Phase, LastAction } from './phase-tracker.js'
 import { getTheme } from './theme.js'
 
@@ -15,6 +15,11 @@ export interface SummaryState {
   compactEvent?: { beforeTokens: number; afterTokens: number } | null
   approvalNeeded?: { tool: string; target: string } | null
   tokenHistory?: number[]  // last N context percentages (0-1)
+  /** How long the current phase has been running (ms) */
+  phaseDurationMs?: number
+  /** Current turn / max turns */
+  turnCount?: number
+  maxTurns?: number
 }
 
 function truncate(s: string, max: number): string {
@@ -62,16 +67,23 @@ export function contextBar(pct: number, width = 5): string {
   return '▓'.repeat(filled) + '░'.repeat(width - filled)
 }
 
-export function formatSummaryLine1(state: SummaryState): string {
+const HEARTBEAT_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+export function formatSummaryLine1(state: SummaryState, heartbeatFrame: number): string {
   const task = truncate(state.task || 'working', 30)
   const phase = state.phase
   const steps = state.totalSteps > 0 ? ` (${state.stepCount}/${state.totalSteps})` : ''
   const pct = Math.round(state.contextPct * 100)
   const elapsed = formatElapsed(state.elapsedMs)
-  return `◆ ${task} → ${phase}${steps} │ ${contextBar(state.contextPct)} ${pct}% │ ${elapsed}`
+  const spinner = HEARTBEAT_FRAMES[heartbeatFrame % HEARTBEAT_FRAMES.length]!
+  const turn = state.turnCount && state.maxTurns ? ` T${state.turnCount}/${state.maxTurns}` : ''
+  return `${spinner} ${task} → ${phase}${steps}${turn} │ ${contextBar(state.contextPct)} ${pct}% │ ${elapsed}`
 }
 
 export function formatSummaryLine2(state: SummaryState): string {
+  if (state.phaseDurationMs !== undefined && state.phaseDurationMs > 0) {
+    return `├ ${state.phase}… ${formatElapsed(state.phaseDurationMs)}`
+  }
   if (!state.lastAction) return '├ waiting for first action...'
   const icon = state.lastAction.success ? '✓' : '✗'
   const target = truncate(state.lastAction.target.split('/').pop() ?? state.lastAction.target, 30)
@@ -92,15 +104,28 @@ export const SummaryBar = memo(function SummaryBar({ state }: { state: SummarySt
   const theme = getTheme()
   const ctxColor = theme.contextColor(state.contextPct)
   const riskColor = state.risk === 'high' ? theme.error : state.risk === 'medium' ? theme.warning : theme.dim
+  const [heartbeat, setHeartbeat] = useState(0)
+
+  // Heartbeat: cycle spinner frame every 200ms while this component mounts
+  useEffect(() => {
+    const id = setInterval(() => setHeartbeat(h => h + 1), 200)
+    return () => clearInterval(id)
+  }, [])
+
+  const line1 = formatSummaryLine1(state, heartbeat)
+  const line2 = formatSummaryLine2(state)
 
   return (
     <Box flexDirection="column" paddingX={1}>
       <Text>
-        <Text color={theme.primary}>◆ </Text>
-        <Text bold>{truncate(state.task || 'working', 30)}</Text>
+        <Text color={theme.primary}>{line1.slice(0, line1.indexOf(' '))}</Text>
+        <Text bold>{line1.slice(line1.indexOf(' ') + 1, line1.indexOf(' →'))}</Text>
         <Text color={theme.dim}> → </Text>
         <Text color={theme.primary}>{state.phase}</Text>
         {state.totalSteps > 0 && <Text dimColor> ({state.stepCount}/{state.totalSteps})</Text>}
+        {state.turnCount && state.maxTurns && (
+          <Text dimColor> T{state.turnCount}/{state.maxTurns}</Text>
+        )}
         <Text color={theme.dim}> │ </Text>
         <Text color={ctxColor} bold={state.contextPct >= 0.95}>{contextBar(state.contextPct)} {Math.round(state.contextPct * 100)}%</Text>
         {state.tokenHistory && state.tokenHistory.length > 1 && (
@@ -111,7 +136,12 @@ export const SummaryBar = memo(function SummaryBar({ state }: { state: SummarySt
       </Text>
       <Text>
         <Text color={theme.dim}>├ </Text>
-        {state.lastAction ? (
+        {state.phaseDurationMs !== undefined && state.phaseDurationMs > 0 ? (
+          <>
+            <Text dimColor>{state.phase}… </Text>
+            <Text color={state.phase === 'idle' ? theme.dim : theme.primary}>{formatElapsed(state.phaseDurationMs)}</Text>
+          </>
+        ) : state.lastAction ? (
           <>
             <Text dimColor>last: </Text>
             <Text>{state.lastAction.tool} {truncate(state.lastAction.target.split('/').pop() ?? '', 30)}</Text>

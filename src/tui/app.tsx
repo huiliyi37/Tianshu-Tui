@@ -199,9 +199,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const phaseTracker = useRef(new PhaseTracker())
   const fluencyRef = useRef(new FluencyTracker())
   const foldedCountRef = useRef(0)
+  const turnCountRef = useRef(0)
+  const maxTurnsRef = useRef(50)
   const [summaryState, setSummaryState] = useState<SummaryState>({
     task: '', phase: 'idle', stepCount: 0, totalSteps: 0,
     contextPct: 0, elapsedMs: 0, lastAction: null, risk: 'none',
+    phaseDurationMs: 0, turnCount: 0, maxTurns: 50,
   })
   const [cockpitPanel, setCockpitPanel] = useState<Panel | null>(null)
   const cockpitPanelRef = useRef<Panel | null>(null)
@@ -360,7 +363,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       return
     }
     activityIntervalRef.current = setInterval(() => {
-      projectActivity(Date.now())
+      const now = Date.now()
+      projectActivity(now)
+      // Also feed phase duration + turn count into SummaryBar for live heartbeat
+      const phaseMs = now - activityRef.current.startedAt
+      setSummaryState(prev => {
+        if (prev.phaseDurationMs === phaseMs && prev.turnCount === turnCountRef.current) return prev
+        return { ...prev, phaseDurationMs: phaseMs, turnCount: turnCountRef.current, maxTurns: maxTurnsRef.current }
+      })
     }, 1000)
     return () => {
       if (activityIntervalRef.current) {
@@ -522,7 +532,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
 
     phaseTracker.current = new PhaseTracker()
-    setSummaryState({ task: taskDesc, phase: 'idle', stepCount: 0, totalSteps: 0, contextPct: initPct, elapsedMs: 0, lastAction: null, risk: 'none', tokenHistory: pushTokenHistory(initPct) })
+    setSummaryState({ task: taskDesc, phase: 'idle', stepCount: 0, totalSteps: 0, contextPct: initPct, elapsedMs: 0, lastAction: null, risk: 'none', tokenHistory: pushTokenHistory(initPct), phaseDurationMs: 0, turnCount: 0, maxTurns: maxTurnsRef.current })
 
     for (const ref of [thinkTimer, toolTimer]) {
       if (ref.current) {
@@ -805,6 +815,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (dirtyTools.current.size > 0) {
           flushTools()
         }
+
+        turnCountRef.current = turnNumber
 
         // Intermediate turn: update activity, freeze tools, reset thinking — but keep writer alive
         if (isFinal === false) {

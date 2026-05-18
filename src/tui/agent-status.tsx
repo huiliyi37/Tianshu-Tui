@@ -110,7 +110,7 @@ export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tok
 
   useEffect(() => {
     if (!isStreaming) return
-    const id = setInterval(() => setTick(t => t + 1), 120)
+    const id = setInterval(() => setTick(t => t + 1), 200)
     return () => clearInterval(id)
   }, [isStreaming])
 
@@ -122,6 +122,10 @@ export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tok
   const spinner = SPINNER_FRAMES[tick % SPINNER_FRAMES.length]!
   const isThinking = (thinkingTime > 0 || hasActiveThinking) && tools.length === 0
   const phase = statusPhaseText(activitySummary, tools, isThinking)
+
+  // Detect stale / no-update condition from activity summary
+  const hasNoUpdate = activitySummary?.includes('no update') ?? false
+  const phaseColor = hasNoUpdate ? theme.warning : theme.primary
 
   const parts: string[] = [formatDuration(elapsed)]
   if (tokenEstimate > 0) parts.push(`↓ ${formatTokenCount(tokenEstimate)} tokens`)
@@ -136,7 +140,7 @@ export const AgentStatus = memo(function AgentStatus({ isStreaming, startMs, tok
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
-        <Text bold color={theme.primary}>{spinner} {phase}</Text>
+        <Text bold color={phaseColor}>{spinner} {phase}</Text>
         <Text dimColor> ({parts.join(' · ')})</Text>
       </Box>
       {visible.length > 0 && (

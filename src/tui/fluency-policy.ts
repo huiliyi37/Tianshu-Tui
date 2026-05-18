@@ -33,6 +33,7 @@ const PHASE_STALE_TIERS: Record<ActivityPhase, [number, number, number]> = {
   mcp:        [15_000,  30_000,  60_000],
   compacting: [30_000, 120_000, 240_000],
   analyzing:  [15_000,  60_000, 120_000],
+  waiting:    [15_000,  60_000, 120_000],
   idle:       [15_000,  60_000, 120_000],
   preflight:  [15_000,  60_000, 120_000],
 }
