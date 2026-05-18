@@ -31,4 +31,10 @@ describe('selectReasoningEffort', () => {
     assert.equal(selectReasoningEffort('/help'), 'off')
     assert.equal(selectReasoningEffort('/model list'), 'off')
   })
+
+  it('respects a configured reasoning floor', () => {
+    assert.equal(selectReasoningEffort('/help', 'medium'), 'medium')
+    assert.equal(selectReasoningEffort('What does this function do?', 'high'), 'high')
+    assert.equal(selectReasoningEffort('Design a new authentication system', 'medium'), 'max')
+  })
 })

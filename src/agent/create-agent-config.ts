@@ -30,7 +30,7 @@ export interface AgentConfigInput {
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'compactClient' | 'compactModel' | 'sessionId' | 'approvalMode' | 'autoReasoning'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'compactClient' | 'compactModel' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -78,5 +78,6 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,
     autoReasoning: true,
+    reasoningFloor: model.reasoningEffort,
   }
 }

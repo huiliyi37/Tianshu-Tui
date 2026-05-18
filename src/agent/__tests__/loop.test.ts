@@ -97,6 +97,38 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.equal(session.getMessages().length, 2) // user + assistant
   })
 
+  it('syncs auto reasoning effort to the client without going below the configured floor', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const efforts: string[] = []
+    const client: ApiClient = {
+      setReasoningEffort: mock.fn((effort: string) => { efforts.push(effort) }),
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        cb.onTextDelta('done')
+        cb.onContentBlock(makeTextBlock('done'))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({
+      client,
+      promptEngine: makeEngine(),
+      toolRegistry: registry,
+      maxTurns: 5,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      autoReasoning: true,
+      reasoningFloor: 'high',
+    }, session, '/test')
+
+    await agent.run('What does this function do?', makeCallbacks())
+
+    assert.ok(efforts.length >= 1)
+    assert.ok(efforts.every(effort => effort === 'high'))
+    assert.equal(agent.getReasoningEffort(), 'high')
+  })
+
   it('executes tool_use and continues loop', async () => {
     const session = new SessionContext()
     const registry = new ToolRegistry()

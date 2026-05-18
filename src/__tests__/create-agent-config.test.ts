@@ -74,6 +74,14 @@ describe('createAgentConfig', () => {
     assert.equal(cfg.autoReasoning, true)
   })
 
+  it('uses configured model reasoningEffort as the auto-reasoning floor', () => {
+    const cfg = createAgentConfig({
+      ...baseInput,
+      model: { ...baseInput.model, reasoningEffort: 'high' },
+    })
+    assert.equal(cfg.reasoningFloor, 'high')
+  })
+
   it('passes sessionMemoryBlock to promptEngine', () => {
     const cfg = createAgentConfig({ ...baseInput, sessionMemoryBlock: 'memory block text' })
     assert.ok(cfg.promptEngine)

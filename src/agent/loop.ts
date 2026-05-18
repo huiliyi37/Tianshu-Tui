@@ -98,6 +98,7 @@ export interface AgentConfig {
   getCurrentModel?: () => string
   autoReasoning?: boolean
   reasoningEffort?: import('./auto-reasoning.js').ReasoningEffort
+  reasoningFloor?: import('./auto-reasoning.js').ReasoningEffort
   lspEnabled?: boolean
   permissions?: PermissionConfig
   contextClaimStore?: ContextClaimStore
@@ -334,8 +335,11 @@ export class AgentLoop {
   }
 
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort): void {
-    this.config.reasoningEffort = effort
-    this.config.client.setReasoningEffort?.(effort)
+    const floor = this.config.reasoningFloor
+    const rank: Record<string, number> = { off: 0, low: 1, medium: 2, high: 3, max: 4 }
+    const effective = (floor && (rank[effort] ?? 2) < (rank[floor] ?? 0)) ? floor : effort
+    this.config.reasoningEffort = effective
+    this.config.client.setReasoningEffort?.(effective)
   }
 
   getReasoningEffort(): import('./auto-reasoning.js').ReasoningEffort | undefined {
@@ -546,7 +550,8 @@ export class AgentLoop {
     this.session.addUserMessage(userInput)
 
     if (this.config.autoReasoning) {
-      this.config.reasoningEffort = selectReasoningEffort(userInput)
+      this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
+      this.config.client.setReasoningEffort?.(this.config.reasoningEffort)
     }
 
     let checkpointCreatedThisTurn = false
@@ -835,6 +840,7 @@ export class AgentLoop {
           }
           if (this.config.autoReasoning && this.config.reasoningEffort) {
             this.config.reasoningEffort = adjustReasoningEffort(this.config.reasoningEffort, level)
+            this.config.client.setReasoningEffort?.(this.config.reasoningEffort)
           }
 
           const turnEndResult = processTurnEnd({
