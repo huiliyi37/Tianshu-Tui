@@ -315,37 +315,42 @@ export class OpenAIClient implements StreamClient {
       }
     }
 
-    // Thinking mode: GLM and DeepSeek both use {thinking: {type: 'enabled'}}.
-    // Only send thinking when explicitly enabled. 'disabled' is truthy in JS
-    // but sending {type: 'disabled'} causes "Param Incorrect" on providers
-    // that don't recognize the thinking parameter (e.g. Mimo).
-    // The thinkingFormat field controls RESPONSE parsing, not request format.
-    // GLM Coding Plan: clear_thinking=false enables Preserved Thinking.
-    // Claude proxy (cc-switch) passes thinking through to Anthropic Messages API.
+    // Thinking / reasoning dispatch.
+    // Providers that accept {thinking: {type: 'enabled'}} (DeepSeek, GLM, Claude
+    // via proxy, Kimi): send the thinking block.
+    // Pure OpenAI-compatible providers (MiMo, MiniMax, OpenCode Go): the thinking
+    // block is unrecognized and returns 400. Use reasoning_effort instead, or
+    // nothing if the provider doesn't support effort control either.
+    // GLM is a hybrid: thinkingFormat='openai' for response parsing but it
+    // accepts the thinking block for requests.
+    const usesThinkingBlock = this.config.thinkingFormat === 'anthropic'
+      || this.config.providerName === 'glm'
+      || this.config.providerName === 'claude'
+
     if (this.config.thinking === 'enabled') {
-      body.thinking = { type: this.config.thinking }
-      if (this.config.providerName === 'glm') {
-        // GLM clear_thinking=true (default): API strips reasoning_content from
-        // history automatically. This saves context window for the 200K GLM limit.
-        // Set to true since we don't pass reasoning_content back anyway.
-        ;(body.thinking as Record<string, unknown>)['clear_thinking'] = true
-      }
-      // Claude via proxy: budget_tokens controls thinking depth.
-      // When reasoning_effort is 'max', set budget_tokens to the max output budget.
-      if (this.config.providerName === 'claude') {
-        const budgetMap: Record<string, number> = {
-          max: this.config.maxTokens,
-          high: Math.floor(this.config.maxTokens * 0.6),
-          medium: Math.floor(this.config.maxTokens * 0.3),
-          low: 8192,
-          off: 0,
+      if (usesThinkingBlock) {
+        body.thinking = { type: this.config.thinking }
+        if (this.config.providerName === 'glm') {
+          ;(body.thinking as Record<string, unknown>)['clear_thinking'] = true
         }
-        const budget = budgetMap[this.config.reasoningEffort ?? 'high'] ?? Math.floor(this.config.maxTokens * 0.6)
-        ;(body.thinking as Record<string, unknown>)['budget_tokens'] = budget
+        if (this.config.providerName === 'claude') {
+          const budgetMap: Record<string, number> = {
+            max: this.config.maxTokens,
+            high: Math.floor(this.config.maxTokens * 0.6),
+            medium: Math.floor(this.config.maxTokens * 0.3),
+            low: 8192,
+            off: 0,
+          }
+          const budget = budgetMap[this.config.reasoningEffort ?? 'high'] ?? Math.floor(this.config.maxTokens * 0.6)
+          ;(body.thinking as Record<string, unknown>)['budget_tokens'] = budget
+        }
+      } else if (this.config.effortFormat !== 'none') {
+        // OpenAI-format: use reasoning_effort if the provider supports it
+        body.reasoning_effort = this.config.reasoningEffort ?? 'medium'
       }
+      // If effortFormat is 'none' and thinking block is unsupported,
+      // provider controls thinking via its own defaults — send nothing.
     }
-    // reasoning_effort is an OpenAI-specific field. Only send if the provider
-    // explicitly supports it via effortFormat.
     if (this.config.reasoningEffort && this.config.effortFormat !== 'none') {
       body.reasoning_effort = this.config.reasoningEffort
     }

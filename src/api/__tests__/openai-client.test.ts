@@ -456,7 +456,7 @@ describe('DeepSeek-specific features', () => {
   })
 
   it('2: includes thinking param in body when thinking is enabled', () => {
-    const client = new OpenAIClient({ ...TEST_CONFIG, thinking: 'enabled' })
+    const client = new OpenAIClient({ ...TEST_CONFIG, thinking: 'enabled', thinkingFormat: 'anthropic' })
     const body = (client as any).buildRequestBody(makeRequest('Hello'))
 
     assert.deepEqual(body.thinking, { type: 'enabled' })
