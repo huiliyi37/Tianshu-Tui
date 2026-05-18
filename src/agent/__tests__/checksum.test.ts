@@ -84,6 +84,24 @@ describe('verifyAndExtract', () => {
     assert.equal(result.valid, false)
     assert.equal(result.error, 'Empty line')
   })
+
+  it('treats JSON with pipe and 16-hex suffix as legacy when jsonPart is not valid JSON', () => {
+    // 这不是有效 JSON，所以应该是 legacy
+    const line = 'not-json|abcdef0123456789'
+    const result = verifyAndExtract(line)
+    assert.equal(result.valid, true)
+    assert.equal(result.isLegacy, true)
+    assert.equal(result.json, line)
+  })
+
+  it('validates new format when jsonPart is valid JSON', () => {
+    const json = '{"valid": true}'
+    const line = appendChecksum(json)
+    const result = verifyAndExtract(line)
+    assert.equal(result.valid, true)
+    assert.equal(result.isLegacy, false)
+    assert.equal(result.json, json)
+  })
 })
 
 describe('verifyLines', () => {

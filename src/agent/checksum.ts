@@ -54,7 +54,14 @@ export function verifyAndExtract(line: string): {
   // 校验和格式验证（16 字符 hex）
   if (!/^[0-9a-f]{16}$/.test(storedChecksum)) {
     // 不是有效校验和格式，可能是 JSON 中包含 | 字符
-    // 尝试作为旧格式处理
+    return { valid: true, json: trimmed, isLegacy: true }
+  }
+
+  // 额外验证：检查 jsonPart 是否是有效 JSON
+  // 如果不是有效 JSON，说明是旧格式中包含 | 字符
+  try {
+    JSON.parse(jsonPart)
+  } catch {
     return { valid: true, json: trimmed, isLegacy: true }
   }
 
