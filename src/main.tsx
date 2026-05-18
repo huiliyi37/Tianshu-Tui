@@ -36,6 +36,7 @@ import { createRecallTool } from './tools/recall.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { PlaybookStore } from './agent/playbook-store.js'
 import type { Config, ProviderConfig } from './config/schema.js'
+import { LWTGuard } from './agent/lwt-guard.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target }
@@ -693,6 +694,48 @@ async function main() {
   }
 
   const config = loadConfig()
+
+  // LWT Guard: 检查上次是否异常退出
+  const stateDir = join(homedir(), '.rivet', 'state')
+  const lwtGuard = new LWTGuard({ stateDir })
+  
+  // 尝试获取文件锁
+  if (!lwtGuard.acquireLock()) {
+    console.error('另一个 Rivet 实例正在运行')
+    process.exit(1)
+  }
+  
+  // 检查上次是否异常退出
+  const crashedSessionId = lwtGuard.checkPreviousCrash()
+  if (crashedSessionId) {
+    console.log(`🔄 检测到上次异常退出，正在恢复会话 ${crashedSessionId}...`)
+    
+    // 自动恢复会话
+    const persist = new SessionPersist(crashedSessionId)
+    const { messages, preflight, usedSnapshot, hadIncompleteCompact } = persist.loadRecoverableMessages()
+    
+    if (hadIncompleteCompact) {
+      console.log('⚠️ 检测到 incomplete compact，已从快照恢复')
+    }
+    
+    if (usedSnapshot) {
+      console.log(`📸 使用快照恢复到 turn ${preflight.lastSafeTurn}`)
+    }
+    
+    console.log(`✅ 恢复完成：${messages.length} 条消息`)
+    
+    // 注册当前会话
+    lwtGuard.register(crashedSessionId)
+  } else {
+    // 正常启动，注册新会话
+    const sessionId = getOrCreateSessionId()
+    lwtGuard.register(sessionId)
+  }
+  
+  // 应用退出时释放锁
+  process.on('exit', () => {
+    lwtGuard.releaseLock()
+  })
 
   // CLI: --provider <name> --model <id>
   const providerArg = args.indexOf('--provider')
