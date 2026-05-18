@@ -14,13 +14,13 @@ async function test(body: Record<string,unknown>, name: string) {
 
 async function main() {
   // Test 1: minimal
-  await test({ model: 'MiMo-V2.5', messages: [{ role: 'user', content: 'hi' }], stream: false, max_tokens: 10 }, 'minimal')
+  await test({ model: 'mimo-v2.5', messages: [{ role: 'user', content: 'hi' }], stream: false, max_tokens: 10 }, 'minimal')
   // Test 2: with thinking
-  await test({ model: 'MiMo-V2.5', messages: [{ role: 'user', content: 'hi' }], stream: false, max_tokens: 10, thinking: { type: 'enabled' } }, 'thinking')
+  await test({ model: 'mimo-v2.5', messages: [{ role: 'user', content: 'hi' }], stream: false, max_tokens: 10, thinking: { type: 'enabled' } }, 'thinking')
   // Test 3: with stream_options
-  await test({ model: 'MiMo-V2.5', messages: [{ role: 'user', content: 'hi' }], stream: false, max_tokens: 10, stream_options: { include_usage: true } }, 'stream_opts')
+  await test({ model: 'mimo-v2.5', messages: [{ role: 'user', content: 'hi' }], stream: false, max_tokens: 10, stream_options: { include_usage: true } }, 'stream_opts')
   // Test 4: streaming minimal
-  await test({ model: 'MiMo-V2.5', messages: [{ role: 'user', content: 'hi' }], stream: true, max_tokens: 10 }, 'stream_minimal')
+  await test({ model: 'mimo-v2.5', messages: [{ role: 'user', content: 'hi' }], stream: true, max_tokens: 10 }, 'stream_minimal')
 }
 
 main()
