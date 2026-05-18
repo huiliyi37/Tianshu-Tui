@@ -11,9 +11,20 @@ if (!apiKey) {
 const body = {
   model: 'glm-5.1',
   messages: [
-    { role: 'user', content: '你好' },
+    { role: 'user', content: '搜索今天的重大科技新闻' },
   ],
   stream: true,
+  thinking: { type: 'enabled', clear_thinking: false },
+  tools: [{
+    type: 'web_search',
+    web_search: {
+      enable: true,
+      search_engine: 'search_pro_quark',
+      search_result: true,
+      count: 10,
+      content_size: 'high',
+    },
+  }],
 }
 
 // GLM Coding Plan uses the dedicated coding endpoint, not the general API
