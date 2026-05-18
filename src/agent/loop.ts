@@ -49,7 +49,7 @@ import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
 import { mapSensoriumToPhase, createStarEvent, createThetaState } from './star-event.js'
 import type { StarEvent, ThetaState } from './star-event.js'
 import { runThetaCheck } from './theta-check.js'
-import { RuntimeHookPipeline, createRuntimeHookContext } from './runtime-hooks.js'
+import { RuntimeHookPipeline, createRuntimeHookContext, type RuntimeHookSnapshot } from './runtime-hooks.js'
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
@@ -198,6 +198,19 @@ export class AgentLoop {
     }))
     const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
     this.stigmergyStore = new StigmergyStore(pheromonesPath)
+  }
+
+  private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
+    return {
+      cwd: this.cwd,
+      turn: this.session.getTurnCount(),
+      recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
+      sensorium: this.sensorium,
+      strategy: this.strategy,
+      vigor: this.vigorState,
+      gitChangeRate: this.gitChangeRate,
+      ...extra,
+    }
   }
 
   private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
@@ -583,17 +596,10 @@ export class AgentLoop {
           doomLevel: getDoomLoopLevel(this.traceStore.toolFingerprints),
           gitChangeRate: this.gitChangeRate,
         }
-        await this.runtimeHooks.runPreTurn(createRuntimeHookContext({
-          cwd: this.cwd,
-          turn: this.session.getTurnCount(),
-          recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
-          sensorium: this.sensorium,
+        await this.runtimeHooks.runPreTurn(createRuntimeHookContext(this.buildRuntimeSnapshot({
           sensoriumInput,
           providerDegradationRatio: this.config.providerHealth?.getDegradationRatio() ?? 0,
-          strategy: this.strategy,
-          vigor: this.vigorState,
-          gitChangeRate: this.gitChangeRate,
-        }, {
+        }), {
           setSensorium: sensorium => { this.sensorium = sensorium },
           setStrategy: strategy => { this.strategy = strategy },
           injectUserMessage: message => { this.session.addUserMessage(message) },
@@ -606,15 +612,7 @@ export class AgentLoop {
         const currentSensorium: Sensorium = this.sensorium
         let currentStrategy: StrategyProfile = this.strategy
 
-        await this.runtimeHooks.runAfterPerception(createRuntimeHookContext({
-          cwd: this.cwd,
-          turn: this.session.getTurnCount(),
-          recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
-          sensorium: currentSensorium,
-          strategy: currentStrategy,
-          vigor: this.vigorState,
-          gitChangeRate: this.gitChangeRate,
-        }, {
+        await this.runtimeHooks.runAfterPerception(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
           setStrategy: strategy => { this.strategy = strategy; currentStrategy = strategy },
           setVigor: vigor => { this.vigorState = vigor },
           requestThetaCheck: reason => { this.requestThetaCheck(reason) },
@@ -847,15 +845,7 @@ export class AgentLoop {
                 : typeof tu.input?.command === 'string'
                   ? tu.input.command.slice(0, 50)
                   : undefined
-            await this.runtimeHooks.runPostTool(createRuntimeHookContext({
-              cwd: this.cwd,
-              turn: this.session.getTurnCount(),
-              recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
-              sensorium: this.sensorium,
-              strategy: this.strategy,
-              vigor: this.vigorState,
-              gitChangeRate: this.gitChangeRate,
-            }, {
+            await this.runtimeHooks.runPostTool(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
               setVigor: vigor => { this.vigorState = vigor },
               requestThetaCheck: reason => { this.requestThetaCheck(reason) },
             }), {
