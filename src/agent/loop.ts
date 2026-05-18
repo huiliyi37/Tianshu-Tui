@@ -51,6 +51,10 @@ import { mapSensoriumToPhase, createStarEvent, createThetaState, tickTheta, comp
 import type { StarEvent, ThetaState } from './star-event.js'
 import { shouldKick, buildKickActions, shouldEscalateFromKick } from './dissipative-kick.js'
 import { runThetaCheck } from './theta-check.js'
+import { RuntimeHookPipeline, createRuntimeHookContext } from './runtime-hooks.js'
+import { createVigorState, detectRigidity } from './vigor.js'
+import type { VigorState } from './vigor.js'
+import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -154,6 +158,9 @@ export class AgentLoop {
   private pressureMonitor: PressureMonitor
   private sensorium: Sensorium | null = null
   private strategy: StrategyProfile | null = null
+  private vigorState: VigorState = createVigorState()
+  private runtimeHooks: RuntimeHookPipeline
+  private thetaCheckInFlight = false
   private thetaState: ThetaState = createThetaState(7)
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
@@ -174,6 +181,12 @@ export class AgentLoop {
       this.trajectory,
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
+    this.runtimeHooks = new RuntimeHookPipeline([
+      createVigorAfterPerceptionHook(),
+      createVigorPostToolHook({
+        getPredictionAccumulator: () => this.predictionAccumulator,
+      }),
+    ])
     const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
     this.stigmergyStore = new StigmergyStore(pheromonesPath)
   }
@@ -253,6 +266,18 @@ export class AgentLoop {
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }
 
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
+
+  private requestThetaCheck(_reason: string): void {
+    if (this.thetaCheckInFlight) return
+    this.thetaCheckInFlight = true
+    runThetaCheck(this.cwd).then(result => {
+      for (const errFile of result.errors) {
+        this.repairHintTracker.recordFailure(errFile, 'type_error')
+      }
+    }).catch(() => {}).finally(() => {
+      this.thetaCheckInFlight = false
+    })
+  }
 
   getLatestRisk(): import('./approval-risk.js').RiskAssessment { return this.latestRisk }
 
@@ -547,6 +572,20 @@ export class AgentLoop {
 
         this.strategy = computeStrategy(this.sensorium)
 
+        await this.runtimeHooks.runAfterPerception(createRuntimeHookContext({
+          cwd: this.cwd,
+          turn: this.session.getTurnCount(),
+          recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
+          sensorium: this.sensorium,
+          strategy: this.strategy,
+          vigor: this.vigorState,
+          gitChangeRate: this.gitChangeRate,
+        }, {
+          setStrategy: strategy => { this.strategy = strategy },
+          setVigor: vigor => { this.vigorState = vigor },
+          requestThetaCheck: reason => { this.requestThetaCheck(reason) },
+        }))
+
         // Track whether complexity ever reached high → enables contracting phase
         if (this.sensorium.complexity > 0.5) {
           this._hasEnteredHighComplexity = true
@@ -597,6 +636,16 @@ export class AgentLoop {
             reasoningEffort: this.strategy.reasoningEffort,
             shouldEscalate: this.strategy.shouldEscalate,
             thetaInterval: this.strategy.thetaCycleInterval,
+          },
+          vigor: {
+            tonic: this.vigorState.tonic,
+            phasic: this.vigorState.phasic,
+            curiosity: this.vigorState.curiosity,
+            vigor: this.vigorState.vigor,
+            variability: this.vigorState.variability,
+          },
+          health: {
+            rigidity: detectRigidity(this.vigorState.history),
           },
           gitChangeRate: this.gitChangeRate,
           prefixDrift: driftEvent,
@@ -794,12 +843,36 @@ export class AgentLoop {
           // Theta-Gamma: advance counter, check if cross-file consistency check is due
           this.thetaState = advanceThetaCounter(this.thetaState)
           if (this.sensorium && this.sensorium.complexity > 0.5 && tickTheta(this.thetaState, turn)) {
-            runThetaCheck(this.cwd).then(result => {
-              for (const errFile of result.errors) {
-                this.repairHintTracker.recordFailure(errFile, 'type_error')
-              }
-            }).catch(() => {})
+            this.requestThetaCheck('theta-cycle')
             this.thetaState = completeTheta(this.thetaState)
+          }
+
+          for (const tu of toolUses) {
+            const result = toolResults.find(r => r.type === 'tool_result' && r.tool_use_id === tu.id)
+            const target = typeof tu.input?.file_path === 'string'
+              ? tu.input.file_path
+              : typeof tu.input?.path === 'string'
+                ? tu.input.path
+                : typeof tu.input?.command === 'string'
+                  ? tu.input.command.slice(0, 50)
+                  : undefined
+            await this.runtimeHooks.runPostTool(createRuntimeHookContext({
+              cwd: this.cwd,
+              turn: this.session.getTurnCount(),
+              recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
+              sensorium: this.sensorium,
+              strategy: this.strategy,
+              vigor: this.vigorState,
+              gitChangeRate: this.gitChangeRate,
+            }, {
+              setVigor: vigor => { this.vigorState = vigor },
+              requestThetaCheck: reason => { this.requestThetaCheck(reason) },
+            }), {
+              name: tu.name,
+              success: !(result && 'is_error' in result && result.is_error === true),
+              isError: result && 'is_error' in result ? result.is_error === true : false,
+              target,
+            })
           }
 
           // Auto-deposit pheromones from tool execution patterns
