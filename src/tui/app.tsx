@@ -19,6 +19,7 @@ import { FluencyTracker } from './fluency-hook.js'
 import { createRingBuffer } from './ring-buffer.js'
 import { getTheme } from './theme.js'
 import { AgentLoop } from '../agent/loop.js'
+import { formatIntentPreview, type IntentPreview, type IntentPreviewAction } from '../agent/intent-preview.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
@@ -60,6 +61,11 @@ interface PendingApproval {
   name: string
   input: Record<string, unknown>
   resolve: (approved: boolean) => void
+}
+
+interface PendingIntentPreview {
+  intent: IntentPreview
+  resolve: (action: IntentPreviewAction) => void
 }
 
 interface AppProps {
@@ -185,6 +191,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [cacheHitRate, setCacheHitRate] = useState(0)
   const [cacheStatus, setCacheStatus] = useState<import('./status-bar.js').CacheStatus>('healthy')
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
+  const [pendingIntent, setPendingIntent] = useState<PendingIntentPreview | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
   const [showPalette, setShowPalette] = useState(false)
   const [reasoningEffort, setReasoningEffortState] = useState<string>('')
@@ -397,6 +404,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         pendingApproval.resolve(false)
         setPendingApproval(null)
       }
+      if (pendingIntent) {
+        pendingIntent.resolve('veto')
+        setPendingIntent(null)
+      }
       if (isStreaming) {
         agent.abort()
         setIsStreaming(false)
@@ -469,6 +480,20 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       const edited = openInEditor('')
       if (edited) {
         handleSubmit(edited.trim())
+      }
+      return
+    }
+
+    if (pendingIntent) {
+      if (_key.return || _input.toLowerCase() === 'y') {
+        pendingIntent.resolve('continue')
+        setPendingIntent(null)
+      } else if (_input.toLowerCase() === 'n') {
+        pendingIntent.resolve('veto')
+        setPendingIntent(null)
+      } else if (_input.toLowerCase() === 'a') {
+        pendingIntent.resolve('alternative')
+        setPendingIntent(null)
       }
       return
     }
@@ -1034,6 +1059,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           setPendingApproval({ id, name, input, resolve })
         })
       },
+      onIntentPreview: async (intent) => {
+        pushStatic(createLogEntry({ type: 'system', content: formatIntentPreview(intent) }))
+        return new Promise<IntentPreviewAction>((resolve) => {
+          setPendingIntent({ intent, resolve })
+        })
+      },
       onSteerDrain: () => {
         const steerText = steerBuffer.current.drain()
         if (steerText) {
@@ -1111,6 +1142,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           tools={toolCallsDisplay}
           activitySummary={activitySummary}
         />
+        {pendingIntent && (
+          <Box paddingX={2} borderStyle="single" borderColor="cyan">
+            <Text bold color="cyan">{formatIntentPreview(pendingIntent.intent)}</Text>
+          </Box>
+        )}
         {pendingApproval && (
           <Box paddingX={2} borderStyle="single" borderColor="yellow">
             <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
@@ -1130,7 +1166,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         <InputBar onSubmit={isStreaming ? (text: string) => {
           steerBuffer.current.push(text)
           pushStatic(createLogEntry({ type: 'system', content: `Guidance queued: "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}" — will be injected at next opportunity` }))
-        } : handleSubmit} disabled={!!pendingApproval} vimEnabled={false} />
+        } : handleSubmit} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} />
         {steerPending && isStreaming && (
           <Box paddingX={2}>
             <Text dimColor color="cyan">Pending guidance queued for injection</Text>

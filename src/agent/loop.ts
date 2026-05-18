@@ -61,6 +61,7 @@ import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
+import { buildIntentPreview, type IntentPreview, type IntentPreviewAction } from './intent-preview.js'
 import { join } from 'node:path'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
@@ -115,6 +116,7 @@ export interface AgentCallbacks {
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }) => void
+  onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
   /** Called to drain any pending steer guidance for injection into tool results */
   onSteerDrain?: () => string | null
 }
@@ -176,6 +178,7 @@ export class AgentLoop {
   private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
   private _hasEnteredHighComplexity = false
+  private intentPreviewShown = 0
 
   constructor(
     private config: AgentConfig,
@@ -513,6 +516,7 @@ export class AgentLoop {
     this.thetaState = createThetaState(7)
     this.loadedPheromones = []
     this._hasEnteredHighComplexity = false
+    this.intentPreviewShown = 0
     // Capture baseline canonical prefix fingerprint for drift detection
     this.baselineFingerprint = this.config.promptEngine.getFingerprint()
     // Load cross-session pheromones for Sensorium.freshness computation.
@@ -650,6 +654,31 @@ export class AgentLoop {
             tool: event.glyph,
             suggestion: event.label,
           })
+        }
+
+        if (callbacks.onIntentPreview && this.intentPreviewShown < 3) {
+          const preview = buildIntentPreview({
+            strategy: currentStrategy,
+            vigor: this.vigorState,
+            sensorium: currentSensorium,
+            pheromones: this.loadedPheromones,
+            thrashingSuggestion: pressureResult.suggestion ?? null,
+            recentTargets: this.recentToolHistory.map(h => h.target).filter((target): target is string => Boolean(target)),
+          })
+          if (preview) {
+            this.intentPreviewShown++
+            const action = await callbacks.onIntentPreview(preview)
+            if (action === 'veto') {
+              await this.stigmergyStore.deposit({ path: preview.summary, signal: 'dead-end', strength: 0.9, context: 'intent veto' })
+              this.session.addUserMessage('<intent-veto>User vetoed the previous plan. Re-plan from the nearest safe branch point before using tools.</intent-veto>')
+              callbacks.onPhaseChange?.('intent-veto', { reason: 'user vetoed intent', suggestion: 're-plan before tool use' })
+              callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
+              continue
+            }
+            if (action === 'alternative') {
+              this.session.addUserMessage('<intent-alternative>User requested an alternative path. Prefer a lower-risk option and explain the tradeoff before using tools.</intent-alternative>')
+            }
+          }
         }
 
         // Sensorium telemetry: append snapshot to debug JSONL (~/.rivet/sensorium.jsonl)
