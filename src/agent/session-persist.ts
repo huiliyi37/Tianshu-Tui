@@ -11,6 +11,7 @@ import { appendSessionMemory, buildSessionMemoryBlock, loadSessionMemory } from 
 import { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaim } from '../context/claims.js'
 import { assertValidSessionId } from '../validation.js'
+import { appendChecksum, verifyAndExtract, verifyLines } from './checksum.js'
 
 function getSessionDir(): string {
   return process.env.RIVET_SESSION_DIR ?? join(homedir(), '.rivet', 'sessions')
@@ -64,17 +65,22 @@ export class SessionPersist {
     preflight: ResumePreflightReport
     usedSnapshot: boolean
     snapshotTurn?: number
+    hadIncompleteCompact: boolean
   } {
-    const loaded = this.load()
+    // 检测 incomplete compact
+    const hadIncompleteCompact = this.detectIncompleteCompact()
+    
+    // 使用带校验和的 load
+    const loaded = this.loadWithChecksum()
     const preflight = runResumePreflight(loaded)
 
-    if (preflight.safe) {
-      return { messages: preflight.messages, preflight, usedSnapshot: false }
+    if (preflight.safe && !hadIncompleteCompact) {
+      return { messages: preflight.messages, preflight, usedSnapshot: false, hadIncompleteCompact: false }
     }
 
     const snapshot = this.loadLastSnapshot()
     if (!snapshot) {
-      return { messages: preflight.messages, preflight, usedSnapshot: false }
+      return { messages: preflight.messages, preflight, usedSnapshot: false, hadIncompleteCompact }
     }
 
     const snapshotMessages = this.loadUpToTurn(snapshot.turn)
@@ -85,6 +91,7 @@ export class SessionPersist {
       preflight: snapshotPreflight,
       usedSnapshot: true,
       snapshotTurn: snapshot.turn,
+      hadIncompleteCompact,
     }
   }
 
@@ -96,6 +103,105 @@ export class SessionPersist {
   /** Delete the session file */
   delete(): void {
     try { unlinkSync(this.filePath) } catch { /* ignore */ }
+  }
+
+  /**
+   * 带校验和的 append
+   */
+  async appendWithChecksum(message: Message): Promise<void> {
+    const json = JSON.stringify(message)
+    const line = appendChecksum(json) + '\n'
+    await appendFile(this.filePath, line)
+  }
+
+  /**
+   * 带校验和的 load（向后兼容）
+   */
+  loadWithChecksum(): Message[] {
+    if (!existsSync(this.filePath)) return []
+    const content = readFileSync(this.filePath, 'utf-8')
+    const lines = content.trim().split('\n').filter(Boolean)
+    
+    const { validLines, invalidCount, legacyCount } = verifyLines(lines)
+    
+    // 记录校验失败（可选：写入日志或返回统计）
+    if (invalidCount > 0) {
+      // 可以在这里添加日志记录
+    }
+
+    return validLines.map(line => {
+      try {
+        const parsed = JSON.parse(line) as Message & { type?: string }
+        // 过滤掉 compact_start 和 compact_end 标记
+        if (parsed.type === 'compact_start' || parsed.type === 'compact_end') {
+          return null
+        }
+        return parsed as Message
+      } catch { return null }
+    }).filter(Boolean) as Message[]
+  }
+
+  /**
+   * 写入 compact 开始标记
+   */
+  appendCompactStart(turn: number, messageCount: number): void {
+    const marker = {
+      type: 'compact_start',
+      turn,
+      messageCount,
+      timestamp: Date.now(),
+    }
+    appendFileSync(this.filePath, appendChecksum(JSON.stringify(marker)) + '\n')
+  }
+
+  /**
+   * 写入 compact 结束标记
+   */
+  appendCompactEnd(turn: number, messageCount: number): void {
+    const marker = {
+      type: 'compact_end',
+      turn,
+      messageCount,
+      timestamp: Date.now(),
+    }
+    appendFileSync(this.filePath, appendChecksum(JSON.stringify(marker)) + '\n')
+  }
+
+  /**
+   * 检测 incomplete compact
+   * @returns 是否检测到 incomplete compact
+   */
+  detectIncompleteCompact(): boolean {
+    if (!existsSync(this.filePath)) return false
+    
+    const content = readFileSync(this.filePath, 'utf-8')
+    const lines = content.trim().split('\n').filter(Boolean)
+    
+    let hasCompactStart = false
+    let hasCompactEnd = false
+    
+    // 从后向前扫描，找到最近的 compact 标记
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const result = verifyAndExtract(lines[i] ?? '')
+      if (!result.valid) continue
+      
+      try {
+        const data = JSON.parse(result.json)
+        if (data.type === 'compact_end') {
+          hasCompactEnd = true
+          break
+        }
+        if (data.type === 'compact_start') {
+          hasCompactStart = true
+          break
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+    
+    // 有 start 但没有 end = incomplete compact
+    return hasCompactStart && !hasCompactEnd
   }
 
   appendTurnSnapshot(snapshot: { turn: number; timestamp: number; messageCount: number; estimatedTokens: number }): void {

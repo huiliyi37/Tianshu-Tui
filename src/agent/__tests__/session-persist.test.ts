@@ -191,3 +191,127 @@ describe('SessionEviction', () => {
     assert.equal(evicted.length, 0)
   })
 })
+
+describe('checksum integration', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'rivet-checksum-test-'))
+    process.env.RIVET_SESSION_DIR = tempDir
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+    delete process.env.RIVET_SESSION_DIR
+  })
+
+  it('appends and loads messages with checksum', async () => {
+    const persist = new SessionPersist('test-checksum')
+    const message = {
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'hello' }],
+    }
+    
+    await persist.appendWithChecksum(message)
+    const loaded = persist.loadWithChecksum()
+    
+    assert.equal(loaded.length, 1)
+    assert.deepEqual(loaded[0], message)
+  })
+
+  it('loads legacy format without checksum', async () => {
+    const persist = new SessionPersist('test-legacy')
+    const message = {
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'hello' }],
+    }
+    
+    // 手动写入旧格式
+    const { appendFileSync } = await import('node:fs')
+    appendFileSync(persist.filePath, JSON.stringify(message) + '\n')
+    
+    const loaded = persist.loadWithChecksum()
+    
+    assert.equal(loaded.length, 1)
+    assert.deepEqual(loaded[0], message)
+  })
+
+  it('skips invalid checksum lines', async () => {
+    const persist = new SessionPersist('test-invalid-checksum')
+    const message = {
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'hello' }],
+    }
+    
+    // 写入有效消息
+    await persist.appendWithChecksum(message)
+    
+    // 写入无效校验和
+    const { appendFileSync } = await import('node:fs')
+    appendFileSync(persist.filePath, '{"invalid": true}|0000000000000000\n')
+    
+    const loaded = persist.loadWithChecksum()
+    
+    assert.equal(loaded.length, 1)
+    assert.deepEqual(loaded[0], message)
+  })
+})
+
+describe('fuzzy checkpoint', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'rivet-checkpoint-test-'))
+    process.env.RIVET_SESSION_DIR = tempDir
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+    delete process.env.RIVET_SESSION_DIR
+  })
+
+  it('detects incomplete compact', async () => {
+    const persist = new SessionPersist('test-checkpoint')
+    const message = {
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'hello' }],
+    }
+    
+    // 写入消息和 compact_start
+    await persist.append(message)
+    persist.appendCompactStart(1, 1)
+    
+    assert.equal(persist.detectIncompleteCompact(), true)
+  })
+
+  it('detects complete compact', async () => {
+    const persist = new SessionPersist('test-checkpoint-complete')
+    const message = {
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'hello' }],
+    }
+    
+    // 写入消息、compact_start 和 compact_end
+    await persist.append(message)
+    persist.appendCompactStart(1, 1)
+    persist.appendCompactEnd(1, 0)
+    
+    assert.equal(persist.detectIncompleteCompact(), false)
+  })
+
+  it('loadRecoverableMessages detects incomplete compact', async () => {
+    const persist = new SessionPersist('test-recoverable-checkpoint')
+    const message = {
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'hello' }],
+    }
+    
+    // 写入消息和 compact_start
+    await persist.append(message)
+    persist.appendCompactStart(1, 1)
+    
+    const result = persist.loadRecoverableMessages()
+    
+    assert.equal(result.hadIncompleteCompact, true)
+  })
+})
