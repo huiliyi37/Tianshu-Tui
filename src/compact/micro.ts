@@ -4,6 +4,25 @@ import { groupIntoRounds } from '../context/rounds.js'
 
 const CHARS_PER_TOKEN = 4
 
+/** Max chars to keep when truncating thinking blocks in historical (non-recent) messages */
+const THINKING_TRUNCATE_CHARS = 500
+
+/**
+ * Truncate a thinking block if it exceeds THINKING_TRUNCATE_CHARS.
+ * Keeps the beginning (which contains the model's conclusion/plan) and
+ * a marker showing how much was removed. Only applied to non-recent messages.
+ */
+function compactThinkingBlock(block: any): { block: any; changed: boolean } {
+  if (block.type !== 'thinking') return { block, changed: false }
+  if (typeof block.thinking !== 'string') return { block, changed: false }
+  if (block.thinking.length <= THINKING_TRUNCATE_CHARS) return { block, changed: false }
+  const truncated = block.thinking.slice(0, THINKING_TRUNCATE_CHARS)
+  const stub = `${truncated}\n<thinking-compacted removed_chars="${block.thinking.length - THINKING_TRUNCATE_CHARS}" />`
+  // Safety: don't replace if stub is somehow longer
+  if (stub.length >= block.thinking.length) return { block, changed: false }
+  return { block: { ...block, thinking: stub }, changed: true }
+}
+
 function compactToolResultBlock(block: any, contextWindow: number): { block: any; changed: boolean } {
   if (block.type !== 'tool_result') return { block, changed: false }
   if (typeof block.content !== 'string') return { block, changed: false }
@@ -18,12 +37,12 @@ function compactToolResultBlock(block: any, contextWindow: number): { block: any
  * MicroCompact: lightweight round-safe truncation without API calls.
  *
  * Two-tier strategy:
- *   Tier 1: shorten large tool_result content blocks (zero API cost)
+ *   Tier 1: shorten large tool_result + thinking blocks (zero API cost)
  *   Tier 2: remove complete safe rounds from the middle
  *
  * Always preserves:
  *   - First CACHE_ANCHOR_MESSAGES (cache anchor — preserves prefix structure)
- *   - Last KEEP_RECENT_MESSAGES (recent context)
+ *   - Last KEEP_RECENT_MESSAGES (recent context — thinking blocks kept intact)
  *
  * Returns a new messages array (immutable) and the number of truncated messages.
  */
@@ -32,15 +51,25 @@ export function microCompact(
   contextWindow: number,
   estimatedTokens: number,
 ): { messages: Message[]; truncated: number } {
-  // Tier 1: shorten large tool_result content (zero API cost)
+  const recentStart = Math.max(0, messages.length - KEEP_RECENT_MESSAGES)
+
+  // Tier 1: shorten large tool_result content + truncate thinking in history
   let compactedCount = 0
-  const shortened = messages.map(msg => {
+  const shortened = messages.map((msg, msgIdx) => {
     if (!Array.isArray(msg.content)) return msg
+    // Skip thinking truncation for recent messages
+    const isRecent = msgIdx >= recentStart
     let modified = false
     const blocks = msg.content.map((block: any) => {
-      const result = compactToolResultBlock(block, contextWindow)
-      if (result.changed) { compactedCount++; modified = true }
-      return result.block
+      // Tool result compaction applies to all messages
+      const toolResult = compactToolResultBlock(block, contextWindow)
+      if (toolResult.changed) { compactedCount++; modified = true; return toolResult.block }
+      // Thinking compaction only for non-recent, non-anchor messages
+      if (!isRecent && msgIdx >= CACHE_ANCHOR_MESSAGES) {
+        const thinkResult = compactThinkingBlock(block)
+        if (thinkResult.changed) { compactedCount++; modified = true; return thinkResult.block }
+      }
+      return block
     })
     return modified ? { ...msg, content: blocks } : msg
   })
@@ -53,13 +82,13 @@ export function microCompact(
 
   // Tier 2: remove complete safe rounds from the middle
   const anchorEnd = CACHE_ANCHOR_MESSAGES
-  const recentStart = Math.max(0, shortened.length - KEEP_RECENT_MESSAGES)
+  const tier2RecentStart = Math.max(0, shortened.length - KEEP_RECENT_MESSAGES)
   const rounds = groupIntoRounds(shortened)
   const removeIndexes = new Set<number>()
 
   for (const round of rounds) {
     // Only remove rounds that are fully in the removable middle zone
-    if (round.startMessageIndex >= anchorEnd && round.endMessageIndex <= recentStart && round.apiInvariant === 'ok') {
+    if (round.startMessageIndex >= anchorEnd && round.endMessageIndex <= tier2RecentStart && round.apiInvariant === 'ok') {
       const roundTokens = round.tokenEstimate
       if (currentTokens - roundTokens <= contextWindow * 0.7) continue // keep some headroom
       for (let idx = round.startMessageIndex; idx < round.endMessageIndex; idx++) {
