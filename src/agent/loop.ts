@@ -43,7 +43,6 @@ import { processTurnEnd } from './turn-end.js'
 import { createPredictionAccumulator, recordPrediction, getInterventionLevel, shouldTippingPointReset, resetAccumulator, adjustReasoningEffort } from './prediction-error.js'
 import type { PredictionAccumulator } from './prediction-error.js'
 import { stripIntraTurnRepetition } from './dedup.js'
-import { computeSensorium, computeStrategy } from './sensorium.js'
 import type { Sensorium, SensoriumInput } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
 import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
@@ -57,7 +56,8 @@ import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks
 import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
 import { createKickRuntimeHook } from './hooks/kick-hook.js'
-import { adaptThetaInterval, applyProviderHealth, buildStarPhaseContext, buildTelemetrySnapshot } from './perception.js'
+import { createPerceptionRuntimeHook } from './hooks/perception-hook.js'
+import { adaptThetaInterval, buildStarPhaseContext, buildTelemetrySnapshot } from './perception.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -192,6 +192,7 @@ export class AgentLoop {
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
     this.runtimeHooks = new RuntimeHookPipeline([
+      createPerceptionRuntimeHook(),
       createKickRuntimeHook({
         deposit: deposit => this.stigmergyStore.deposit(deposit),
       }),
@@ -597,54 +598,54 @@ export class AgentLoop {
           doomLevel: getDoomLoopLevel(this.traceStore.toolFingerprints),
           gitChangeRate: this.gitChangeRate,
         }
-        this.sensorium = computeSensorium(sensoriumInput)
-
-        // Provider health degradation → reduces stability
-        // When providers fail, agent operational stability is genuinely reduced
-        if (this.config.providerHealth) {
-          this.sensorium = applyProviderHealth(this.sensorium, this.config.providerHealth.getDegradationRatio())
-        }
-
-        this.strategy = computeStrategy(this.sensorium)
-
         await this.runtimeHooks.runPreTurn(createRuntimeHookContext({
           cwd: this.cwd,
           turn: this.session.getTurnCount(),
           recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
           sensorium: this.sensorium,
+          sensoriumInput,
+          providerDegradationRatio: this.config.providerHealth?.getDegradationRatio() ?? 0,
           strategy: this.strategy,
           vigor: this.vigorState,
           gitChangeRate: this.gitChangeRate,
         }, {
+          setSensorium: sensorium => { this.sensorium = sensorium },
+          setStrategy: strategy => { this.strategy = strategy },
           injectUserMessage: message => { this.session.addUserMessage(message) },
           emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
         }))
+
+        if (!this.sensorium || !this.strategy) {
+          throw new Error('Perception runtime hook did not produce sensorium and strategy')
+        }
+        const currentSensorium: Sensorium = this.sensorium
+        let currentStrategy: StrategyProfile = this.strategy
 
         await this.runtimeHooks.runAfterPerception(createRuntimeHookContext({
           cwd: this.cwd,
           turn: this.session.getTurnCount(),
           recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
-          sensorium: this.sensorium,
-          strategy: this.strategy,
+          sensorium: currentSensorium,
+          strategy: currentStrategy,
           vigor: this.vigorState,
           gitChangeRate: this.gitChangeRate,
         }, {
-          setStrategy: strategy => { this.strategy = strategy },
+          setStrategy: strategy => { this.strategy = strategy; currentStrategy = strategy },
           setVigor: vigor => { this.vigorState = vigor },
           requestThetaCheck: reason => { this.requestThetaCheck(reason) },
         }))
 
         // Track whether complexity ever reached high → enables contracting phase
-        if (this.sensorium.complexity > 0.5) {
+        if (currentSensorium.complexity > 0.5) {
           this._hasEnteredHighComplexity = true
         }
 
         // Wire strategy → harness: reasoning effort, theta interval
-        this.setReasoningEffort(this.strategy.reasoningEffort)
+        this.setReasoningEffort(currentStrategy.reasoningEffort)
         // Theta interval is base (from strategy) modulated by git change rate.
         // Higher code volatility → more frequent cross-file consistency checks.
         // floor = 2 prevents over-sampling; ceiling = baseInterval.
-        const adaptiveInterval = adaptThetaInterval(this.strategy.thetaCycleInterval, this.gitChangeRate)
+        const adaptiveInterval = adaptThetaInterval(currentStrategy.thetaCycleInterval, this.gitChangeRate)
         this.thetaState = { ...this.thetaState, interval: adaptiveInterval }
 
         // Emit StarEvent via existing onPhaseChange callback
@@ -653,10 +654,10 @@ export class AgentLoop {
           turn: this.session.getTurnCount(),
           maxTurns: this.config.maxTurns,
           recentTools,
-          shouldEscalate: this.strategy.shouldEscalate,
+          shouldEscalate: currentStrategy.shouldEscalate,
           hasEnteredHighComplexity: this._hasEnteredHighComplexity,
         })
-        const event = createStarEvent(this.sensorium, starCtx)
+        const event = createStarEvent(currentSensorium, starCtx)
         if (callbacks.onPhaseChange) {
           callbacks.onPhaseChange(event.phase, {
             tool: event.glyph,
@@ -673,8 +674,8 @@ export class AgentLoop {
           ts: Date.now(),
           turn: this.session.getTurnCount(),
           phase: event.phase,
-          sensorium: this.sensorium,
-          strategy: this.strategy,
+          sensorium: currentSensorium,
+          strategy: currentStrategy,
           vigor: this.vigorState,
           theta: {
             inFlight: this.thetaCheckInFlight,

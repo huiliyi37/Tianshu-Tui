@@ -117,6 +117,30 @@ describe('RuntimeHookPipeline', () => {
     assert.deepEqual(order, ['pre'])
   })
 
+  it('updates snapshot when state-setting effects are used', async () => {
+    const ctx = makeContext()
+    const errors: RuntimeHookError[] = []
+    const pipeline = new RuntimeHookPipeline([{
+      phase: 'preTurn',
+      name: 'sensorium-setter',
+      run: runtime => {
+        runtime.effects.setSensorium({ momentum: 0.1, pressure: 0.2, confidence: 0.3, complexity: 0.4, freshness: 0.5, stability: 0.6 })
+        runtime.effects.setStrategy({ reasoningEffort: 'high', explorationBreadth: 0.9, commitThreshold: 0.8, shouldEscalate: true, thetaCycleInterval: 3 })
+      },
+    }, {
+      phase: 'preTurn',
+      name: 'reader',
+      run: runtime => {
+        assert.equal(runtime.snapshot.sensorium?.momentum, 0.1)
+        assert.equal(runtime.snapshot.strategy?.reasoningEffort, 'high')
+      },
+    }], { onError: error => errors.push(error) })
+
+    await pipeline.runPreTurn(ctx)
+
+    assert.deepEqual(errors, [])
+  })
+
   it('exposes typed effects for controlled hook-to-loop communication', async () => {
     const messages: string[] = []
     const thetaRequests: string[] = []

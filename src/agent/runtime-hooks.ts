@@ -1,5 +1,5 @@
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
-import type { Sensorium, StrategyProfile } from './sensorium.js'
+import type { Sensorium, SensoriumInput, StrategyProfile } from './sensorium.js'
 import type { VigorState } from './vigor.js'
 
 export type RuntimeHookPhase = 'preTurn' | 'afterPerception' | 'postTool' | 'postTurn'
@@ -16,6 +16,8 @@ export interface RuntimeHookSnapshot {
   turn: number
   recentToolHistory: Array<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target'>>
   sensorium: Sensorium | null
+  sensoriumInput?: SensoriumInput
+  providerDegradationRatio?: number
   strategy: StrategyProfile | null
   vigor: VigorState | null
   gitChangeRate: number
@@ -96,10 +98,22 @@ export function createRuntimeHookContext(
   return {
     snapshot,
     effects: {
-      setSensorium: effects.setSensorium ?? noop,
-      setStrategy: effects.setStrategy ?? noop,
-      setVigor: effects.setVigor ?? noop,
-      setGitChangeRate: effects.setGitChangeRate ?? noop,
+      setSensorium: sensorium => {
+        snapshot.sensorium = sensorium
+        effects.setSensorium?.(sensorium)
+      },
+      setStrategy: strategy => {
+        snapshot.strategy = strategy
+        effects.setStrategy?.(strategy)
+      },
+      setVigor: vigor => {
+        snapshot.vigor = vigor
+        effects.setVigor?.(vigor)
+      },
+      setGitChangeRate: rate => {
+        snapshot.gitChangeRate = rate
+        effects.setGitChangeRate?.(rate)
+      },
       injectUserMessage: effects.injectUserMessage ?? noop,
       requestThetaCheck: effects.requestThetaCheck ?? noop,
       emitPhaseChange: effects.emitPhaseChange ?? noop,
