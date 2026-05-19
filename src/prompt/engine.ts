@@ -101,6 +101,7 @@ export class PromptEngine {
   private playbookLessons?: VolatileContext['playbookLessons']
   private sessionMemoryOverride?: string
   private contextLayerReportData: ContextLayerReport
+  private phaseHint?: string
 
   constructor(config: PromptEngineConfig) {
     this.config = config
@@ -109,7 +110,7 @@ export class PromptEngine {
     this.volatileBlock = this.frozenBase
     this.fingerprint = computeFingerprint(this.systemPrompt, config.staticCtx.tools, this.volatileBlock)
     this.tracker = (config.habituationThreshold ?? 5) > 0
-      ? new FieldHabituationTracker({ threshold: config.habituationThreshold ?? 5 })
+      ? new FieldHabituationTracker({ promotionThreshold: 0.8, decayRate: 0.3 })
       : null
     this.contextLayerReportData = createContextLayerReport([
       createContextLayer({ id: 'system', label: 'Stable System Prompt', stability: 'stable', channel: 'system', fingerprint: 'included', content: this.systemPrompt }),
@@ -168,7 +169,7 @@ export class PromptEngine {
               if (dynamicCtx.playbookLessons && dynamicCtx.playbookLessons.length > 0) {
                 fieldValues['playbookLessons'] = dynamicCtx.playbookLessons.map(b => b.lesson).join('|')
               }
-              this.tracker.recordTurn(fieldValues)
+              this.tracker.recordTurn(fieldValues, this.phaseHint)
 
               const habituatedContent = this.tracker.getHabituatedContent()
               const renderedHabituated = new Map<string, string>()
@@ -296,6 +297,10 @@ export class PromptEngine {
 
   setDecisions(decisions: string[]): void {
     this.decisions = decisions
+  }
+
+  setPhaseHint(hint: string): void {
+    this.phaseHint = hint
   }
 
   setActiveDomain(domain: VolatileContext['activeDomain']): void {
