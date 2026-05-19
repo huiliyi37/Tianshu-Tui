@@ -1,18 +1,24 @@
 /**
- * Tianshu Radio — Runtime hook for phase transition + milestone + stuck detection.
+ * Tianshu Radio — Runtime hook for phase transition + milestone + stuck detection
+ * + phase-aware heartbeat + domain voice.
  *
  * Emits Chinese radio messages via `emitPhaseChange` on:
  * - Session start (first tool call)
  * - Phase class transitions (explore/plan/execute/verify/deliver)
+ * - Heartbeat: periodic in-phase presence (every 6 turns)
  * - Test pass / test fail milestones
  * - Stuck-in-phase anomaly (8+ consecutive turns in same phase class)
+ *
+ * v2: All messages pass through applyDomainVoice for personality-aware tone.
+ *     Heartbeat messages use phase-aware templates (not bare "第N轮").
  */
 
 import type { PostToolRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
 import type { Sensorium } from '../sensorium.js'
 import type { StarPhase } from '../star-event.js'
 import { mapSensoriumToPhase, PHASE_SHORT_LABELS } from '../star-event.js'
-import { extractTemplateVars, formatRadioMessage } from '../radio-templates.js'
+import { extractTemplateVars, formatRadioMessage, formatHeartbeatMessage, type PhaseClass } from '../radio-templates.js'
+import { applyDomainVoice, type DomainVoiceId } from '../domain-voice.js'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -21,12 +27,11 @@ import { extractTemplateVars, formatRadioMessage } from '../radio-templates.js'
 const STUCK_THRESHOLD = 8
 const COOLDOWN_TURNS = 5
 const TEST_FAIL_COOLDOWN = 2
+const HEARTBEAT_INTERVAL = 6
 
 // ---------------------------------------------------------------------------
 // Phase classification
 // ---------------------------------------------------------------------------
-
-type PhaseClass = 'explore' | 'plan' | 'execute' | 'verify' | 'deliver'
 
 const PHASE_CLASS_MAP: Record<StarPhase, PhaseClass> = {
   'tianxuan-locating': 'explore',
@@ -94,14 +99,24 @@ export interface RadioHookDeps {
     addRadio: (message: string, turn: number) => void
     addPhaseTransition: (input: { fromPhase: string; toPhase: string; turn: number; summary: string }) => void
   }
+  /** Returns the current star domain id. null when no domain matched. */
+  getDomainId?: () => DomainVoiceId
 }
 
 export function createRadioHook(deps?: RadioHookDeps): PostToolRuntimeHook {
   // Internal state
   let lastPhase: PhaseClass | null = null
   let lastEmitTurn = -Infinity
+  let lastStuckEmitTurn = -Infinity
   let hasEmittedStart = false
   let hasEnteredHighComplexity = false
+  let samePhaseTurnCount = 0
+
+  /** Apply domain voice to a message. No-op when getDomainId is absent. */
+  function voice(msg: string): string {
+    const domainId = deps?.getDomainId?.() ?? null
+    return applyDomainVoice(msg, domainId)
+  }
 
   return {
     phase: 'postTool',
@@ -124,13 +139,21 @@ export function createRadioHook(deps?: RadioHookDeps): PostToolRuntimeHook {
       const currentPhase = classifyPhase(starPhase)
       const turn = snapshot.turn
 
+      // Track same-phase consecutive turns for heartbeat
+      if (currentPhase === lastPhase) {
+        samePhaseTurnCount++
+      } else {
+        samePhaseTurnCount = 1
+      }
+
       // 3. First call — emit session_start
       if (!hasEmittedStart) {
         hasEmittedStart = true
         lastPhase = currentPhase
         lastEmitTurn = turn
-        effects.emitPhaseChange('tianshu-radio', { reason: '[天枢] 收到任务，开始分析。' })
-        deps?.chronicle?.addRadio('[天枢] 收到任务，开始分析。', turn)
+        const msg = voice('[天枢] 收到任务，开始分析。')
+        effects.emitPhaseChange('tianshu-radio', { reason: msg })
+        deps?.chronicle?.addRadio(msg, turn)
         return
       }
 
@@ -145,9 +168,9 @@ export function createRadioHook(deps?: RadioHookDeps): PostToolRuntimeHook {
         const vars = extractTemplateVars(toolHistory)
         vars.phaseName = PHASE_SHORT_LABELS[starPhase]
         vars.turnCount = turn
-        const message = formatRadioMessage({ transition, vars })
+        const message = voice(formatRadioMessage({ transition, vars }))
 
-        const prevPhase = lastPhase ?? 'tianshu-planning'
+        const prevPhase = lastPhase
         lastPhase = currentPhase
         lastEmitTurn = turn
         effects.emitPhaseChange('tianshu-radio', { reason: message })
@@ -156,42 +179,10 @@ export function createRadioHook(deps?: RadioHookDeps): PostToolRuntimeHook {
         return
       }
 
-      // 5. Test fail milestone (failed bash/test tool, with cooldown)
-      if (
-        !tool.success &&
-        isTestRelatedTool(tool.name) &&
-        turn - lastEmitTurn >= TEST_FAIL_COOLDOWN
-      ) {
-        const toolHistory = snapshot.recentToolHistory.map(e => ({
-          tool: e.tool,
-          target: e.target ?? '',
-          status: e.status,
-        }))
-        const vars = extractTemplateVars(toolHistory)
-        vars.failCount = Math.max(vars.failCount, 1)
-        vars.errorBrief = vars.errorBrief || '命令执行失败'
-        const message = formatRadioMessage({ transition: 'test_fail', vars })
-
-        lastEmitTurn = turn
-        effects.emitPhaseChange('tianshu-radio', { reason: message })
-        deps?.chronicle?.addRadio(message, turn)
-        return
-      }
-
-      // 6. Test pass milestone (successful test tool in verify phase)
-      if (
-        tool.success &&
-        isTestRunnerTool(tool.name) &&
-        currentPhase === 'verify'
-      ) {
-        lastEmitTurn = turn
-        effects.emitPhaseChange('tianshu-radio', { reason: '[天枢] ✓ 测试通过。' })
-        deps?.chronicle?.addRadio('[天枢] ✓ 测试通过。', turn)
-        return
-      }
-
-      // 7. Stuck detection (same phase class for STUCK_THRESHOLD+ turns)
-      if (turn - lastEmitTurn >= COOLDOWN_TURNS) {
+      // 5. Stuck detection (same phase class for STUCK_THRESHOLD+ turns)
+      //    Uses its own lastStuckEmitTurn so heartbeat messages don't
+      //    suppress the stuck warning.
+      if (turn - lastStuckEmitTurn >= COOLDOWN_TURNS) {
         const history = snapshot.recentToolHistory
         let consecutive = 0
         for (let i = history.length - 1; i >= 0; i--) {
@@ -212,12 +203,70 @@ export function createRadioHook(deps?: RadioHookDeps): PostToolRuntimeHook {
           const vars = extractTemplateVars([])
           vars.phaseName = PHASE_SHORT_LABELS[starPhase]
           vars.turnCount = consecutive
-          const message = formatRadioMessage({ transition: 'stuck', vars })
+          const message = voice(formatRadioMessage({ transition: 'stuck', vars }))
 
-          lastEmitTurn = turn
+          lastStuckEmitTurn = turn
           effects.emitPhaseChange('tianshu-radio', { reason: message })
           deps?.chronicle?.addRadio(message, turn)
+          return
         }
+      }
+
+      // 6. Heartbeat — periodic in-phase presence signal
+      if (
+        samePhaseTurnCount >= HEARTBEAT_INTERVAL &&
+        samePhaseTurnCount % HEARTBEAT_INTERVAL === 0 &&
+        turn - lastEmitTurn >= COOLDOWN_TURNS
+      ) {
+        const toolHistory = snapshot.recentToolHistory.map(e => ({
+          tool: e.tool,
+          target: e.target ?? '',
+          status: e.status,
+        }))
+        const vars = extractTemplateVars(toolHistory)
+        vars.phaseName = PHASE_SHORT_LABELS[starPhase]
+        vars.turnCount = turn
+        const message = voice(formatHeartbeatMessage(currentPhase, vars))
+
+        lastEmitTurn = turn
+        effects.emitPhaseChange('tianshu-radio', { reason: message })
+        deps?.chronicle?.addRadio(message, turn)
+        return
+      }
+
+      // 6. Test fail milestone (failed bash/test tool, with cooldown)
+      if (
+        !tool.success &&
+        isTestRelatedTool(tool.name) &&
+        turn - lastEmitTurn >= TEST_FAIL_COOLDOWN
+      ) {
+        const toolHistory = snapshot.recentToolHistory.map(e => ({
+          tool: e.tool,
+          target: e.target ?? '',
+          status: e.status,
+        }))
+        const vars = extractTemplateVars(toolHistory)
+        vars.failCount = Math.max(vars.failCount, 1)
+        vars.errorBrief = vars.errorBrief || '命令执行失败'
+        const message = voice(formatRadioMessage({ transition: 'test_fail', vars }))
+
+        lastEmitTurn = turn
+        effects.emitPhaseChange('tianshu-radio', { reason: message })
+        deps?.chronicle?.addRadio(message, turn)
+        return
+      }
+
+      // 7. Test pass milestone (successful test tool in verify phase)
+      if (
+        tool.success &&
+        isTestRunnerTool(tool.name) &&
+        currentPhase === 'verify'
+      ) {
+        lastEmitTurn = turn
+        const msg = voice('[天枢] ✓ 测试通过。')
+        effects.emitPhaseChange('tianshu-radio', { reason: msg })
+        deps?.chronicle?.addRadio(msg, turn)
+        return
       }
     },
   }
