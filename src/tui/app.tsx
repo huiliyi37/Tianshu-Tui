@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, type RefObject } fro
 import { Box, Text, useInput, Static } from 'ink'
 import gradient from 'gradient-string'
 import { StatusBar } from './status-bar.js'
+import { PHASE_GLYPHS, PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
 import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
 import { ThinkingCollapser } from './thinking.js'
@@ -285,6 +286,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   // Tool target tracking for SummaryBar
   const toolTargetMap = useRef<Map<string, string>>(new Map())
+  const recentToolLabels = useRef<string[]>([])
 
   // Braille sparkline token history
   const tokenHistoryRef = useRef<number[]>([])
@@ -749,6 +751,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         projectActivity(now)
 
         phaseTracker.current.onToolUse(name, target)
+        const basename = (target ?? '').split('/').pop() ?? target ?? name
+        const shortLabel = `${name === 'read_file' ? 'read' : name === 'edit_file' ? 'edit' : name === 'write_file' ? 'write' : name === 'bash' ? 'run' : name} ${basename}`.slice(0, 25)
+        recentToolLabels.current = [...recentToolLabels.current.slice(-2), shortLabel]
         const tuPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setSummaryState(prev => ({
           ...prev,
@@ -757,6 +762,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           contextPct: tuPct,
           elapsedMs: Date.now() - streamStartRef.current,
           tokenHistory: pushTokenHistory(tuPct),
+          recentToolSummary: recentToolLabels.current,
         }))
       },
       onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {
@@ -994,6 +1000,24 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setCost(estimatedCost)
 
 
+      },
+      onPhaseChange: (phase, detail) => {
+        if (phase === 'tianshu-radio' && detail?.reason) {
+          pushStatic(createLogEntry({ type: 'system', content: detail.reason }))
+        }
+        const knownPhases: readonly string[] = [
+          'tianshu-planning', 'tianxuan-locating', 'tianji-decomposing',
+          'tianquan-contracting', 'yuheng-implementing', 'kaiyang-testing',
+          'yaoguang-delivering', 'tianshu-encore',
+        ]
+        if (knownPhases.includes(phase)) {
+          const starPhase = phase as StarPhase
+          setSummaryState(prev => ({
+            ...prev,
+            starPhaseGlyph: PHASE_GLYPHS[starPhase],
+            starPhaseLabel: PHASE_SHORT_LABELS[starPhase],
+          }))
+        }
       },
       onError: (error) => {
         // Mark current activity as failed and project before cleanup
