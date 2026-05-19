@@ -12,7 +12,7 @@ import { READ_FILE_TOOL } from '../../tools/read-file.js'
 import { ContextClaimStore } from '../../context/claim-store.js'
 import { PlaybookStore } from '../playbook-store.js'
 import type { ApiClient, StreamCallbacks } from '../../api/client.js'
-import type { ContentBlock } from '../../api/types.js'
+import type { ContentBlock, Message } from '../../api/types.js'
 
 function makeTextBlock(text: string): ContentBlock {
   return { type: 'text', text }
@@ -170,6 +170,35 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.deepEqual(toolResults, ['read_file'])
     assert.equal(session.getMessages().length, 5)
     assert.match(String(session.getMessages()[3]?.content ?? ''), /<metacognition>/)
+  })
+
+  it('binds a matched star domain once per session and injects it into latest volatile context', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const engine = makeEngine()
+    const seenContexts: string[] = []
+
+    const client: ApiClient = {
+      stream: mock.fn(async (req: { messages: Message[] }, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        const contexts = req.messages.filter(message => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<context>'))
+        const context = contexts.at(-1)
+        if (context && typeof context.content === 'string') seenContexts.push(context.content)
+        cb.onTextDelta('done')
+        cb.onContentBlock(makeTextBlock('done'))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+      }),
+    } as unknown as ApiClient
+
+    const agent = new AgentLoop({ client, promptEngine: engine, toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+
+    await agent.run('探索一个新的缓存方案', makeCallbacks())
+    await agent.run('修复内存泄漏', makeCallbacks())
+
+    assert.equal(seenContexts.length, 2)
+    assert.match(seenContexts[0]!, /<star-domain name="破军"/)
+    assert.match(seenContexts[1]!, /<star-domain name="破军"/)
+    assert.doesNotMatch(seenContexts[1]!, /name="天府"/)
   })
 
 

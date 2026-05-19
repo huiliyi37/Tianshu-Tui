@@ -186,4 +186,27 @@ describe('PromptEngine active claims projection', () => {
     assert.match(context, /Use JSONL first/)
     assert.doesNotMatch(context, /<session-memory session_id="s1">/)
   })
+
+  it('updated active domain appears only in latest volatile context', () => {
+    const engine = new PromptEngine({
+      model: 'deepseek-test',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+
+    engine.setActiveDomain({ name: '破军', motto: '好男儿当负三尺剑立不世之功', volatileBlock: '你当前在破军域。' })
+
+    const request = engine.buildRequest([
+      { role: 'user', content: 'first turn' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: '探索新的缓存方案' },
+    ])
+    const contextMessages = request.messages.filter(message => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<context>'))
+
+    assert.equal(contextMessages.length, 2)
+    assert.doesNotMatch(contextMessages[0]!.content as string, /star-domain/)
+    assert.match(contextMessages[1]!.content as string, /<star-domain name="破军"/)
+    assert.equal(engine.checkDrift(), null)
+  })
 })

@@ -45,6 +45,7 @@ import { TurnPerceptionController } from './turn-perception.js'
 import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
+import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
 import { TurnStreamController } from './turn-stream.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
@@ -145,6 +146,7 @@ export class AgentLoop {
   private lastConflictCheckCount = 0
   private predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   private outputTokenEscalationCount = 0
+  private sessionDomain: ActiveStarDomain | null | undefined
   private static readonly MAX_OUTPUT_ESCALATION = 3
   private pressureMonitor: PressureMonitor
   private sensorium: Sensorium | null = null
@@ -368,6 +370,12 @@ export class AgentLoop {
     if (this.recentToolHistory.length > 5) this.recentToolHistory.shift()
   }
 
+  private bindSessionDomain(taskDescription: string): void {
+    if (this.sessionDomain !== undefined) return
+    this.sessionDomain = buildActiveDomain(taskDescription)
+    this.config.promptEngine.setActiveDomain(this.sessionDomain)
+  }
+
   private maybePrewarm(text: string): void {
     const intents = extractIntents(text)
     for (const intent of intents) {
@@ -536,6 +544,7 @@ export class AgentLoop {
     // Use query() so Sensorium sees decayed currentStrength, and prune stale entries opportunistically.
     this.stigmergyStore.prune().catch(() => {})
     this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
+    this.bindSessionDomain(userInput)
     this.contextInjection.recordUserInputClaims(userInput)
     this.contextInjection.refreshPlaybookLessons(userInput)
     this.session.addUserMessage(userInput)

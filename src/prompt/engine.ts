@@ -222,6 +222,10 @@ export class PromptEngine {
     this.decisions = decisions
   }
 
+  setActiveDomain(domain: VolatileContext['activeDomain']): void {
+    this.config.volatileCtx.activeDomain = domain
+  }
+
   getVolatilePayloadReport(toolHistory?: ToolHistoryEntry[]): VolatilePayloadReport {
     const latest = buildLatestTurnVolatileBlock({
       ...this.config.volatileCtx,

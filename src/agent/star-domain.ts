@@ -63,3 +63,20 @@ export function matchDomain(taskDescription: string): StarDomainId | null {
 
   return winners[0]![0]
 }
+
+export interface ActiveStarDomain {
+  name: string
+  volatileBlock: string
+  motto: string
+}
+
+export function buildActiveDomain(taskDescription: string): ActiveStarDomain | null {
+  const id = matchDomain(taskDescription)
+  if (!id) return null
+  const domain = STAR_DOMAINS[id]
+  return {
+    name: domain.name,
+    volatileBlock: domain.volatileBlock,
+    motto: domain.motto,
+  }
+}

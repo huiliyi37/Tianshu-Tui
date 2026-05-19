@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { matchDomain, STAR_DOMAINS } from '../star-domain.js'
+import { matchDomain, STAR_DOMAINS, buildActiveDomain } from '../star-domain.js'
 
 describe('StarDomain', () => {
   it('exports three built-in domains', () => {
@@ -34,5 +34,19 @@ describe('StarDomain', () => {
   it('returns null for ambiguous tasks', () => {
     assert.equal(matchDomain('帮我看看'), null)
     assert.equal(matchDomain('探索并修复缓存问题'), null)
+  })
+})
+
+describe('buildActiveDomain', () => {
+  it('returns domain info for matched task', () => {
+    const result = buildActiveDomain('探索新的认证方案')
+    assert.ok(result)
+    assert.equal(result.name, '破军')
+    assert.ok(result.volatileBlock.includes('破军'))
+    assert.ok(result.motto)
+  })
+
+  it('returns null for ambiguous task', () => {
+    assert.equal(buildActiveDomain('帮我看看'), null)
   })
 })
