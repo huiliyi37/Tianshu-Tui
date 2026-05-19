@@ -36,7 +36,7 @@ import { createRecallTool } from './tools/recall.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { PlaybookStore } from './agent/playbook-store.js'
 import type { Config, ProviderConfig } from './config/schema.js'
-import { LWTGuard } from './agent/lwt-guard.js'
+import { SessionRegistry } from './agent/session-registry.js'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target }
@@ -697,51 +697,57 @@ async function main() {
 
   const config = loadConfig()
 
-  // LWT Guard: 检查上次是否异常退出
+  // Session Registry: 多实例共存 + 崩溃检测
   const stateDir = join(homedir(), '.rivet', 'state')
-  const lwtGuard = new LWTGuard({ stateDir })
-  
-  // 尝试获取文件锁
-  if (!lwtGuard.acquireLock()) {
-    console.error('⚠️  另一个 Rivet 实例正在运行')
-    console.error('   如果确定没有其他实例，请删除 ~/.rivet/state/agent.lock')
-    process.exit(1)
+  const registry = new SessionRegistry(stateDir)
+
+  // 清理崩溃会话 + stale claims
+  const crashedSessions = registry.detectCrashedSessions()
+  if (crashedSessions.length > 0) {
+    console.log(`\n🔄 检测到 ${crashedSessions.length} 个异常退出的会话，已清理`)
+    for (const cs of crashedSessions) {
+      console.log(`   会话 ID: ${cs.id}`)
+    }
   }
-  
-  // 检查上次是否异常退出
-  const crashedSessionId = lwtGuard.checkPreviousCrash()
-  if (crashedSessionId) {
-    console.log(`\n🔄 检测到上次异常退出`)
-    console.log(`   会话 ID: ${crashedSessionId}`)
-    
+
+  // 尝试恢复最近的崩溃会话
+  const lastCrashed = crashedSessions[0]
+  if (lastCrashed) {
     try {
-      const persist = new SessionPersist(crashedSessionId)
+      const persist = new SessionPersist(lastCrashed.id)
       const { messages, usedSnapshot, snapshotTurn, hadIncompleteCompact } = persist.loadRecoverableMessages()
-      
+
       if (hadIncompleteCompact) {
         console.log('   ⚠️  检测到 incomplete compact，已从快照恢复')
       }
-      
+
       if (usedSnapshot && snapshotTurn !== undefined) {
         console.log(`   📸 使用快照恢复到 turn ${snapshotTurn}`)
       }
-      
+
       console.log(`   ✅ 恢复完成：${messages.length} 条消息\n`)
-      lwtGuard.register(crashedSessionId)
     } catch (err) {
       console.error(`   ❌ 恢复失败: ${(err as Error).message}`)
       console.log('   启动新会话...')
-      const sessionId = getOrCreateSessionId()
-      lwtGuard.register(sessionId)
     }
-  } else {
-    const sessionId = getOrCreateSessionId()
-    lwtGuard.register(sessionId)
   }
-  
-  // 应用退出时释放锁
+
+  // 注册当前会话
+  const sessionId = getOrCreateSessionId()
+  registry.register(sessionId, process.cwd())
+
+  // 心跳定时器
+  const heartbeatInterval = setInterval(() => {
+    try { registry.heartbeat(sessionId) } catch { /* ignore */ }
+  }, 10_000)
+
+  // 退出时清理
   process.on('exit', () => {
-    lwtGuard.releaseLock()
+    clearInterval(heartbeatInterval)
+    try {
+      registry.unregister(sessionId)
+      registry.close()
+    } catch { /* ignore during exit */ }
   })
 
   // CLI: --provider <name> --model <id>

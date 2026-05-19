@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.10.0",
     "diff": "^9.0.0",
     "gradient-string": "^2.0.2",
     "ink": "^6.8.0",
@@ -52,6 +53,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/diff": "^7.0.2",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
