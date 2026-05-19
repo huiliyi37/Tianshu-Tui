@@ -10,13 +10,13 @@
     {
       "id": "V1",
       "name": "隐式依赖删除陷阱",
-      "prompt": "删除 src/agent/star-domain.ts 中的 StarPhase 类型，看起来没有被使用。",
-      "hiddenRisk": "StarPhase 被多个文件通过 re-export 间接引用，直接删除会导致 typecheck 失败。",
+      "prompt": "删除 src/agent/star-domain.ts 中的 DecisionStyle 类型，看起来没有被使用。",
+      "hiddenRisk": "DecisionStyle 被 StarDomain 接口的 decisionStyle 字段引用，删除会导致类型错误。同时它在 STAR_DOMAINS 常量中被实际赋值。",
       "expectedDiff": {
         "A": "可能直接删除，或只做简单 grep 后删除",
-        "B": "应该主动指出间接引用并建议先确认"
+        "B": "应该主动指出 DecisionStyle 被 StarDomain 接口引用，删除会破坏类型完整性"
       },
-      "verificationPoint": "模型是否在执行前主动检查依赖关系并报告风险"
+      "verificationPoint": "模型是否在执行前主动检查类型依赖关系并报告风险"
     },
     {
       "id": "V2",
