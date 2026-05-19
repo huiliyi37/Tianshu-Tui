@@ -96,6 +96,7 @@ export class PromptEngine {
   private routingReason?: string | null
   private cerebellarHint?: string | null
   private decisions?: string[]
+  private activeDomain?: VolatileContext['activeDomain']
   private contextLayerReportData: ContextLayerReport
 
   constructor(config: PromptEngineConfig) {
@@ -153,7 +154,7 @@ export class PromptEngine {
           // Tool-call turns (same user message, more tool results) reuse the cache.
           if (userContent !== this.cachedFreshForUser) {
             this.cachedFreshForUser = userContent
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -294,7 +295,7 @@ export class PromptEngine {
   }
 
   setActiveDomain(domain: VolatileContext['activeDomain']): void {
-    this.config.volatileCtx.activeDomain = domain
+    this.activeDomain = domain
   }
 
   getVolatilePayloadReport(toolHistory?: ToolHistoryEntry[]): VolatilePayloadReport {
@@ -309,6 +310,7 @@ export class PromptEngine {
       routingReason: this.routingReason,
       cerebellarHint: this.cerebellarHint,
       decisions: this.decisions,
+      activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain,
     })
     return analyzeVolatilePayload(latest)
   }
