@@ -128,6 +128,18 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
 }
 
 /**
+ * Render habituated fields into a <consolidated> block.
+ * Fields are sorted by key for deterministic byte ordering.
+ * Returns empty string if no habituated fields.
+ */
+export function buildConsolidatedBlock(habituatedContent: Map<string, string>): string {
+  if (habituatedContent.size === 0) return ''
+  const sorted = [...habituatedContent.entries()].sort(([a], [b]) => a.localeCompare(b))
+  const parts = sorted.map(([, content]) => content)
+  return `<consolidated>\n${parts.join('\n\n')}\n</consolidated>`
+}
+
+/**
  * Render ONLY the per-turn dynamic fields into a separate `<context-update>` XML block.
  * Returns empty string if no dynamic fields are present.
  */
