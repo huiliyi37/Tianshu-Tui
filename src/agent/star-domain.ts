@@ -65,6 +65,7 @@ export function matchDomain(taskDescription: string): StarDomainId | null {
 }
 
 export interface ActiveStarDomain {
+  id: StarDomainId
   name: string
   volatileBlock: string
   motto: string
@@ -75,6 +76,7 @@ export function buildActiveDomain(taskDescription: string): ActiveStarDomain | n
   if (!id) return null
   const domain = STAR_DOMAINS[id]
   return {
+    id,
     name: domain.name,
     volatileBlock: domain.volatileBlock,
     motto: domain.motto,

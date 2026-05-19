@@ -229,6 +229,7 @@ export class AgentLoop {
       },
       getDoomLoopLevel: () => this.getDoomLoopLevel(),
       telemetryWriter: this.telemetryWriter,
+      getDomainId: () => this.sessionDomain?.id ?? null,
       ...(this.config.sessionId ? {
         dream: {
           cwd: this.cwd,
