@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, delimiter } from 'node:path'
 import type { Tool, ToolCallParams, VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
@@ -176,6 +176,16 @@ function truncateOutput(output: string): string {
   return `${head}\n... (${omitted} chars omitted) ...\n${tail}`
 }
 
+function buildExecutionEnv(cwd: string): NodeJS.ProcessEnv {
+  const localBin = join(cwd, 'node_modules', '.bin')
+  const repoBin = join(process.cwd(), 'node_modules', '.bin')
+  const currentPath = process.env.PATH ?? ''
+  return {
+    ...process.env,
+    PATH: [localBin, repoBin, currentPath].filter(Boolean).join(delimiter),
+  }
+}
+
 export const RUN_TESTS_TOOL: Tool = {
   definition: {
     name: 'run_tests',
@@ -209,7 +219,7 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
     return new Promise((resolve) => {
       const child = track(spawn(testCommand.command, testCommand.args, {
         cwd: params.cwd,
-        env: { ...process.env },
+        env: buildExecutionEnv(params.cwd),
         stdio: ['ignore', 'pipe', 'pipe'],
       }))
 

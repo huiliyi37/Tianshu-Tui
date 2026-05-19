@@ -73,6 +73,25 @@ describe('tool-history XML section', () => {
     assert.ok(!buildVolatileBlock(base).includes('<tool-history'))
   })
 
+  it('renders active star domain in latest context and excludes it from stable context', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      activeDomain: {
+        name: '破军<域>',
+        motto: '好男儿当负三尺剑立不世之功',
+        volatileBlock: '你当前在破军域。突破 <边界> & 记录失败。',
+      },
+    }
+
+    const latest = buildLatestTurnVolatileBlock(ctx)
+    const stable = buildStableVolatileBlock(ctx)
+
+    assert.ok(latest.includes('<star-domain'))
+    assert.ok(latest.includes('name="破军&lt;域&gt;"'))
+    assert.ok(latest.includes('突破 &lt;边界&gt; &amp; 记录失败'))
+    assert.ok(!stable.includes('<star-domain'))
+  })
+
   it('escapes XML special chars in targets', () => {
     const ctx: VolatileContext = {
       ...base,

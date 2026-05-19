@@ -8,6 +8,7 @@ import { createSignalConsumerRuntimeHook } from './hooks/signal-consumer-hook.js
 import { createPlaybookReflectHook } from './hooks/playbook-reflect-hook.js'
 import { createTelemetryFlushHook } from './hooks/telemetry-flush-hook.js'
 import { createDreamHook } from './hooks/dream-hook.js'
+import { createCourageHook } from './hooks/courage-hook.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput } from './retrospect.js'
 import type { DoomLoopLevel } from './trace-store.js'
@@ -39,6 +40,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   const hooks: RuntimeHook[] = [
     createPerceptionRuntimeHook(),
     createSignalConsumerRuntimeHook(),
+    createCourageHook({ cooldownTurns: 5, courageThreshold: 0.5 }),
     createKickRuntimeHook({ deposit: deps.stigmergyDeposit }),
     createVigorAfterPerceptionHook(),
     createThetaRuntimeHook({

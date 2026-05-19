@@ -22,6 +22,7 @@ export interface VolatileContext {
   rivetMd?: string
   gitStatus?: string
   workingSet?: string[]
+  activeDomain?: { name: string; volatileBlock: string; motto: string } | null
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
   playbookLessons?: PlaybookBullet[]
@@ -107,6 +108,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
   return buildVolatileBlockInternal({
     ...ctx,
     gitStatus: undefined,
+    activeDomain: undefined,
     activeClaims: undefined,
     playbookLessons: undefined,
     toolHistory: undefined,
@@ -130,6 +132,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   const parts: string[] = []
 
   parts.push(`<environment platform="${process.platform}" cwd="${escapeXml(ctx.cwd)}" os="${escapeXml(`${os.type()} ${os.release()}`)}" />`)
+
+  if (ctx.activeDomain) {
+    parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
+  }
 
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)
   if (md) {
