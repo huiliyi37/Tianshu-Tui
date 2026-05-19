@@ -1,0 +1,131 @@
+{
+  "session": "2026-05-20-habituation-v3",
+  "topic": "sensorium-driven habituation engine",
+  "phases": ["diverge", "select", "adapt"],
+  "fragments": [
+    {
+      "text": "Cao-Rhinehart R-statistic: R = V_filtered / V_unfiltered. At steady state R→1.0. Pure state-based, zero time dependence. Lambda=0.05-0.2, R_critical=0.5-0.8.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["process-control", "steady-state-detection", "variance-ratio"],
+      "applicability": "low — degenerates on binary hash data"
+    },
+    {
+      "text": "Tag-Trigger-Consolidation (TagTriC): individual tag threshold + population trigger threshold. Neuromodulatory state (dopamine) lowers trigger threshold for behaviorally significant events.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["neuroscience", "memory-consolidation", "dual-gate"],
+      "applicability": "medium — two-gate concept adopted conceptually"
+    },
+    {
+      "text": "B-cell IRF4 graded accumulator: signal quality integral, not repetition count. Positive autoregulation accelerates stability. Bistable switch with hysteresis — once flipped, irreversible.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["immunology", "affinity-maturation", "positive-feedback"],
+      "applicability": "high — CORE ADOPTION: confidence += (1-confidence)*alpha"
+    },
+    {
+      "text": "Physarum dD/dt = f(|Q|) - D: current flow magnitude drives reinforcement, decay term continuously challenges. Threshold sensing yields optimal paths. Zero historical dependence.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["slime-mold", "network-optimization", "utility-driven"],
+      "applicability": "high — ADOPTED: absent field decay (confidence *= 0.7)"
+    },
+    {
+      "text": "Classical Nucleation Theory: clusters below critical radius dissolve naturally. Only super-critical clusters grow irreversibly. Sub-critical = safe fluctuation, not premature commitment.",
+      "fragmentType": "analogy",
+      "source": "external",
+      "tags": ["thermodynamics", "nucleation", "critical-size"],
+      "applicability": "conceptual — confidence < 0.8 = sub-critical, dissolves on any change"
+    },
+    {
+      "text": "Omori aftershock decay n(t) = K/(c+t)^p: quiet-after-change has different meaning depending on elapsed time. Z-value > 2.0 distinguishes genuine quiescence from normal decay.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["seismology", "power-law-decay", "quiescence-detection"],
+      "applicability": "low — requires continuous time series, not applicable to discrete turns"
+    },
+    {
+      "text": "Jazz critical slowing down: rising lag-1 autocorrelation + rising variance = approaching critical transition. Same early warning signals as ecosystem tipping points (Scheffer 2009).",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["jazz", "critical-transition", "early-warning"],
+      "applicability": "low — signal processing overhead, insufficient data points per session"
+    },
+    {
+      "text": "NashConv: deviation incentive per actor → 0 = equilibrium. Asks 'would anyone benefit from changing?' not 'has it been unchanged for N turns?'",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["game-theory", "equilibrium-detection"],
+      "applicability": "conceptual — framing for why counter-based is wrong"
+    },
+    {
+      "text": "Raft leader stability: term + heartbeat + quorum. Three interlocking signals, any one failing triggers step-down. Quorum intersection prevents false positive in partitioned networks.",
+      "fragmentType": "mechanism",
+      "source": "external",
+      "tags": ["distributed-systems", "consensus", "multi-signal"],
+      "applicability": "low — over-engineered for single-process habituation"
+    },
+    {
+      "text": "Combat sports pattern detection: stability = collapse of degrees of freedom. Weight transfer = committed, posture optionality = still probing. Binary detection, not accumulated count.",
+      "fragmentType": "analogy",
+      "source": "external",
+      "tags": ["martial-arts", "kinematic-constraint", "degrees-of-freedom"],
+      "applicability": "conceptual — agent in execute phase = 'committed posture'"
+    },
+    {
+      "text": "sensorium.stability measures doom-loop severity (none=1.0, warn=0.6, blocked=0.2), NOT field stability. Using it to modulate promotion would INVERT behavior during doom loops.",
+      "fragmentType": "contradiction",
+      "source": "agent",
+      "tags": ["falsification", "semantic-mismatch", "critical"]
+    },
+    {
+      "text": "Sensorium simplified from 6D to 3D (momentum, pressure, confidence) in commit f191be1. stability, complexity, freshness dimensions deleted.",
+      "fragmentType": "observation",
+      "source": "agent",
+      "tags": ["codebase-state", "breaking-change"]
+    },
+    {
+      "text": "PromptEngine has zero references to sensorium. Architectural boundary: src/prompt/ has zero imports from src/agent/. But setBehaviorMirror/setStrategyShift setter pattern already exists.",
+      "fragmentType": "observation",
+      "source": "agent",
+      "tags": ["architecture", "data-flow", "setter-pattern"]
+    },
+    {
+      "text": "R-statistic on binary data (hash match/no-match) degenerates to match_count/window_size — essentially what the fixed counter already does.",
+      "fragmentType": "contradiction",
+      "source": "agent",
+      "tags": ["falsification", "binary-data", "degenerate-case"]
+    }
+  ],
+  "candidates": [
+    {
+      "id": "V1",
+      "niche": "mainstream — external signal injection",
+      "oneLiner": "PromptEngine.setPhaseHint() + threshold lookup table per phase",
+      "status": "survived → merged into V3"
+    },
+    {
+      "id": "V2",
+      "niche": "adjacent — Omori internal self-adaptation",
+      "oneLiner": "lastChangeTurn-based adaptive threshold, no external signal",
+      "status": "extinct — doesn't sense agent behavioral phase",
+      "discardedTraits": ["lastChangeTurn for cooldown reference"]
+    },
+    {
+      "id": "V3",
+      "niche": "empty niche — IRF4 confidence accumulator",
+      "oneLiner": "continuous confidence score with positive feedback + phaseHint alpha modulation",
+      "status": "WINNER — adopted as final design"
+    },
+    {
+      "id": "V4",
+      "niche": "mutation — Physarum flow + decay",
+      "oneLiner": "continuous flow score with constant reinforcement + decay",
+      "status": "extinct — doesn't sense agent phase",
+      "discardedTraits": ["decay term for absent fields — ADOPTED into V3"]
+    }
+  ],
+  "convergenceInsight": "Agent behavioral phase is the external gate; field stability is the internal accumulator. Two layers, both required.",
+  "finalDesign": "confidence accumulator (IRF4) + phaseHint alpha modulation (V1 setter) + absent decay (V4 Physarum)"
+}
