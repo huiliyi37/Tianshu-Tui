@@ -177,3 +177,148 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
     assert.equal(req1.system, req2.system, 'System prompt must be identical across turns')
   })
 })
+
+describe('habituation: three-zone consolidation', () => {
+  function createEngineH(threshold = 5) {
+    return new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: {
+        cwd: '/test/project',
+        gitStatus: 'Current branch: main',
+        rivetMd: '# Test',
+      },
+      habituationThreshold: threshold,
+    })
+  }
+
+  it('no consolidated block before reaching threshold', () => {
+    const engine = createEngineH(5)
+
+    // 3 turns + 1 check = 4 recordTurn calls, below threshold of 5
+    for (let t = 0; t < 3; t++) {
+      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+    }
+
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req = engine.buildRequest([{ role: 'user', content: 'check' }])
+    const vol = (req.messages[0] as { content: string }).content
+    assert.ok(!vol.includes('<consolidated>'), 'No consolidated block before threshold')
+  })
+
+  it('consolidated block appears after threshold turns with stable domain', () => {
+    const engine = createEngineH(3) // lower threshold for test speed
+
+    for (let t = 0; t < 3; t++) {
+      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      const messages: Message[] = []
+      for (let m = 0; m <= t; m++) {
+        messages.push({ role: 'user', content: `msg ${m}` })
+        if (m < t) messages.push({ role: 'assistant', content: `resp ${m}` })
+      }
+      engine.buildRequest(messages)
+    }
+
+    const messages: Message[] = [{ role: 'user', content: 'final' }]
+    const req = engine.buildRequest(messages)
+    const vol = (req.messages[0] as { content: string }).content
+    assert.ok(vol.includes('<consolidated>'), 'Consolidated block should appear after threshold')
+    assert.ok(vol.includes('tianshu'), 'Consolidated should contain domain name')
+  })
+
+  it('historical volatile includes consolidated block after promotion', () => {
+    const engine = createEngineH(3)
+
+    // Promote domain over 3 turns
+    for (let t = 0; t < 3; t++) {
+      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+    }
+
+    // Now build a multi-turn request — historical volatile should include consolidated
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req = engine.buildRequest([
+      { role: 'user', content: 'msg 0' },
+      { role: 'assistant', content: 'resp 0' },
+      { role: 'user', content: 'msg 1' },
+    ])
+
+    const histVol = (req.messages[0] as { content: string }).content
+    assert.ok(histVol.includes('<consolidated>'), 'Historical volatile must include consolidated')
+  })
+
+  it('dehabituation removes field from consolidated block', () => {
+    const engine = createEngineH(3)
+
+    // Promote
+    for (let t = 0; t < 3; t++) {
+      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+    }
+
+    // Verify promoted
+    let req = engine.buildRequest([{ role: 'user', content: 'check' }])
+    let vol = (req.messages[0] as { content: string }).content
+    assert.ok(vol.includes('<consolidated>'))
+
+    // Change domain → dehabituation
+    engine.setActiveDomain({ name: 'tianji', volatileBlock: 'other', motto: 'other-motto' })
+    req = engine.buildRequest([{ role: 'user', content: 'after change' }])
+    vol = (req.messages[0] as { content: string }).content
+    assert.ok(!vol.includes('<consolidated>'), 'Consolidated should disappear after dehabituation')
+  })
+
+  it('FROZEN+CONSOLIDATED is byte prefix of FRESH with active appendix', () => {
+    const engine = createEngineH(3)
+
+    // Promote domain
+    for (let t = 0; t < 3; t++) {
+      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+    }
+
+    // Build with active dynamic fields
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req = engine.buildRequest([
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' },
+      { role: 'user', content: 'read' },
+    ], [{ tool: 'read_file', target: 'x', status: 'success' }])
+
+    const histVol = (req.messages[0] as { content: string }).content  // FROZEN+CONSOLIDATED
+
+    // Find FRESH volatile (before last user text "read")
+    let freshVol = ''
+    for (let i = req.messages.length - 1; i >= 0; i--) {
+      const m = req.messages[i] as { role: string; content: string }
+      if (m.role === 'user' && m.content === 'read') {
+        freshVol = (req.messages[i - 1] as { content: string }).content
+        break
+      }
+    }
+
+    assert.ok(freshVol.startsWith(histVol),
+      'FRESH must start with FROZEN+CONSOLIDATED bytes')
+  })
+
+  it('disabling habituation (threshold=0) falls back to v1 behavior', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test', gitStatus: 'clean' },
+      habituationThreshold: 0,
+    })
+
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    for (let t = 0; t < 10; t++) {
+      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+    }
+
+    const req = engine.buildRequest([{ role: 'user', content: 'test' }])
+    const vol = (req.messages[0] as { content: string }).content
+    assert.ok(!vol.includes('<consolidated>'), 'No consolidated when habituation disabled')
+  })
+})

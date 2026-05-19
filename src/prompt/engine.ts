@@ -1,6 +1,6 @@
 import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
-import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import { analyzeVolatilePayload, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
@@ -11,6 +11,7 @@ import {
   type PrefixFingerprint,
   type DriftEvent,
 } from './fingerprint.js'
+import { FieldHabituationTracker } from './field-habituation.js'
 import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
 
 export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
@@ -20,6 +21,7 @@ export interface PromptEngineConfig {
   maxTokens: number
   staticCtx: StaticPromptContext
   volatileCtx: VolatileContext
+  habituationThreshold?: number
 }
 
 function isToolUseBlock(block: ContentBlock): block is ContentBlock & { type: 'tool_use'; id: string } {
@@ -78,8 +80,11 @@ function normalizeToolResultPairs(messages: Message[]): Message[] {
 export class PromptEngine {
   private systemPrompt: string
   private volatileBlock: string
+  private frozenBase: string
   private fingerprint: PrefixFingerprint
   private config: PromptEngineConfig
+  private tracker: FieldHabituationTracker | null
+  private consolidatedBlock: string = ''
   private taskProgress?: TaskState
   private behaviorMirror?: string | null
   private strategyShift?: string | null
@@ -93,8 +98,12 @@ export class PromptEngine {
   constructor(config: PromptEngineConfig) {
     this.config = config
     this.systemPrompt = buildSystemPrompt(config.staticCtx)
-    this.volatileBlock = buildStableVolatileBlock(config.volatileCtx)
+    this.frozenBase = buildStableVolatileBlock(config.volatileCtx)
+    this.volatileBlock = this.frozenBase
     this.fingerprint = computeFingerprint(this.systemPrompt, config.staticCtx.tools, this.volatileBlock)
+    this.tracker = (config.habituationThreshold ?? 5) > 0
+      ? new FieldHabituationTracker({ threshold: config.habituationThreshold ?? 5 })
+      : null
     this.contextLayerReportData = createContextLayerReport([
       createContextLayer({ id: 'system', label: 'Stable System Prompt', stability: 'stable', channel: 'system', fingerprint: 'included', content: this.systemPrompt }),
       createContextLayer({ id: 'tools', label: 'Tool Definitions', stability: 'stable', channel: 'tools', fingerprint: 'included', content: JSON.stringify(config.staticCtx.tools) }),
@@ -141,11 +150,62 @@ export class PromptEngine {
       const msg = normalized[i]!
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         if (i === lastUserTextIdx) {
-          // Always refresh the latest turn so active claims and session memory updates project even when no tools ran.
-          const freshBlock = buildLatestTurnVolatileBlock({ ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions })
-          result.push({ role: 'user', content: freshBlock })
+          const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions }
+
+          if (this.tracker) {
+            const fieldValues: Record<string, string> = {}
+            if (dynamicCtx.activeDomain) fieldValues['activeDomain'] = JSON.stringify(dynamicCtx.activeDomain)
+            if (dynamicCtx.behaviorMirror) fieldValues['behaviorMirror'] = dynamicCtx.behaviorMirror
+            if (dynamicCtx.strategyShift) fieldValues['strategyShift'] = dynamicCtx.strategyShift
+            if (dynamicCtx.routingReason) fieldValues['routingReason'] = dynamicCtx.routingReason
+            if (dynamicCtx.playbookLessons && dynamicCtx.playbookLessons.length > 0) {
+              fieldValues['playbookLessons'] = dynamicCtx.playbookLessons.map(b => b.lesson).join('|')
+            }
+            this.tracker.recordTurn(fieldValues)
+
+            const habituatedContent = this.tracker.getHabituatedContent()
+            const renderedHabituated = new Map<string, string>()
+            for (const [name, content] of habituatedContent) {
+              if (name === 'activeDomain') {
+                const d = JSON.parse(content) as { name: string; volatileBlock: string; motto: string }
+                renderedHabituated.set(name, `<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
+              } else if (name === 'behaviorMirror') {
+                renderedHabituated.set(name, `<behavior-mirror>\n${content}\n</behavior-mirror>`)
+              } else if (name === 'strategyShift') {
+                renderedHabituated.set(name, `<strategy-shift>\n${content}\n</strategy-shift>`)
+              } else if (name === 'routingReason') {
+                renderedHabituated.set(name, `<routing-reason>\n${content}\n</routing-reason>`)
+              } else if (name === 'playbookLessons') {
+                renderedHabituated.set(name, `<historical-lessons>\n${content.split('|').map((l: string) => `- ${l}`).join('\n')}\n</historical-lessons>`)
+              }
+            }
+
+            const newConsolidated = buildConsolidatedBlock(renderedHabituated)
+            if (newConsolidated !== this.consolidatedBlock) {
+              this.consolidatedBlock = newConsolidated
+              this.volatileBlock = newConsolidated
+                ? this.frozenBase + '\n' + newConsolidated
+                : this.frozenBase
+            }
+
+            const activeCtx = { ...dynamicCtx }
+            const habituated = this.tracker.getHabituated()
+            if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
+            if (habituated.has('behaviorMirror')) activeCtx.behaviorMirror = undefined
+            if (habituated.has('strategyShift')) activeCtx.strategyShift = undefined
+            if (habituated.has('routingReason')) activeCtx.routingReason = undefined
+            if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
+
+            const activeAppendix = buildDynamicAppendix(activeCtx)
+            const freshBlock = activeAppendix
+              ? this.volatileBlock + '\n' + activeAppendix
+              : this.volatileBlock
+            result.push({ role: 'user', content: freshBlock })
+          } else {
+            const freshBlock = buildLatestTurnVolatileBlock(dynamicCtx)
+            result.push({ role: 'user', content: freshBlock })
+          }
         } else {
-          // Frozen volatile block for historical turns — preserves prefix cache
           result.push({ role: 'user', content: this.volatileBlock })
         }
       }
@@ -180,6 +240,14 @@ export class PromptEngine {
 
   updateSessionMemory(block: string): void {
     this.config.volatileCtx.sessionMemoryBlock = block
+    this.rebuildFrozenBase()
+  }
+
+  private rebuildFrozenBase(): void {
+    this.frozenBase = buildStableVolatileBlock(this.config.volatileCtx)
+    this.volatileBlock = this.consolidatedBlock
+      ? this.frozenBase + '\n' + this.consolidatedBlock
+      : this.frozenBase
   }
 
   updateActiveClaims(claims: ContextClaim[]): void {
