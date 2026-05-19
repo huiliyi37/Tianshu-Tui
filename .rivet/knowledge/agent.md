@@ -1,3 +1,43 @@
+### 2026-05-20 — session tianshu-star-soul (current)
+
+**Summary**: Star domain partner dialogue Phase 1 — Layer 2 heartbeat + Layer 4 domain voice fully implemented and verified. 天枢 now speaks with personality-aware tone per star domain (破军/天府/天梁).
+
+**New files created**:
+- `src/agent/domain-voice.ts` — pure function tone converter with per-domain tone tables
+- `src/agent/__tests__/domain-voice.test.ts` — 18 tests for tone conversion
+- `docs/superpowers/specs/2026-05-20-star-domain-partner-dialogue-design.md` — four-layer dialogue model design
+- `docs/superpowers/plans/2026-05-20-star-domain-partner-iteration.md` — implementation plan (3 iterations)
+
+**Modified files**:
+- `src/agent/radio-templates.ts` — added HEARTBEAT_TEMPLATES by phaseClass, formatHeartbeatMessage()
+- `src/agent/hooks/radio-hook.ts` — heartbeat trigger, domain voice pipeline, separate stuck cooldown
+- `src/agent/create-runtime-hooks.ts` — added getDomainId to RuntimeHookDeps
+- `src/agent/loop.ts` — wired getDomainId: () => this.sessionDomain?.id ?? null
+- `src/agent/star-domain.ts` — added `id` field to ActiveStarDomain
+
+**Key decisions**:
+- Domain voice is harness-layer template replacement — zero LLM overhead
+- Heartbeat interval: 6 turns, with phase-aware templates (explore/plan/execute/verify/deliver)
+- Stuck detection uses separate `lastStuckEmitTurn` to avoid heartbeat cooldown interference
+- `PhaseClass` type centralized in radio-templates.ts, consumed by radio-hook
+- Tone tables contain 14 phrases per domain with distinct personality (破军: bold, 天府: cautious, 天梁: methodical)
+
+**Tests**: ✅ 2025 passed, 0 failed — full suite
+**Typecheck**: ✅ 0 errors
+
+---
+
+### 2026-05-20 — prior session (Opus 4.6)
+
+**Completed by Opus side**:
+- Habituation v3: confidence accumulator + phaseHint wiring (4 commits)
+- Hard separation (方向 A): behaviorMirror, strategyShift, routingReason, contextLedger, cerebellarHint, activeClaims removed from LLM context — ~1,700 tokens/turn saved
+- Starbridge: Chronicle event queue, ChronicleView, StarmapView, constellation renderer, mode switching (1=main 2=starmap 3=chronicle)
+- Radio→Chronicle wiring
+- Starspine task contract ledger
+
+---
+
 ### 2026-05-19 — session ea5cf850
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-runtime-hooks.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts
