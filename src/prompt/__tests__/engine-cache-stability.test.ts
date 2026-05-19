@@ -195,6 +195,7 @@ describe('habituation: three-zone consolidation', () => {
 
   it('no consolidated block before reaching threshold', () => {
     const engine = createEngineH(5)
+    engine.setPhaseHint('explore') // alpha=0.1 → 4 turns ≈ 0.34, well below 0.8
 
     // 3 turns + 1 check = 4 recordTurn calls, below threshold of 5
     for (let t = 0; t < 3; t++) {
@@ -209,9 +210,10 @@ describe('habituation: three-zone consolidation', () => {
   })
 
   it('consolidated block appears after threshold turns with stable domain', () => {
-    const engine = createEngineH(3) // lower threshold for test speed
+    const engine = createEngineH(3)
+    engine.setPhaseHint('execute') // alpha=0.35 → 5 turns crosses 0.8
 
-    for (let t = 0; t < 3; t++) {
+    for (let t = 0; t < 5; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
       const messages: Message[] = []
       for (let m = 0; m <= t; m++) {
@@ -230,9 +232,10 @@ describe('habituation: three-zone consolidation', () => {
 
   it('historical volatile includes consolidated block after promotion', () => {
     const engine = createEngineH(3)
+    engine.setPhaseHint('execute') // alpha=0.35 → 5 turns crosses 0.8
 
-    // Promote domain over 3 turns
-    for (let t = 0; t < 3; t++) {
+    // Promote domain over 5 turns
+    for (let t = 0; t < 5; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
       engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
     }
@@ -251,9 +254,10 @@ describe('habituation: three-zone consolidation', () => {
 
   it('dehabituation removes field from consolidated block', () => {
     const engine = createEngineH(3)
+    engine.setPhaseHint('execute') // alpha=0.35 → 5 turns crosses 0.8
 
     // Promote
-    for (let t = 0; t < 3; t++) {
+    for (let t = 0; t < 5; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
       engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
     }
@@ -272,9 +276,10 @@ describe('habituation: three-zone consolidation', () => {
 
   it('FROZEN+CONSOLIDATED is byte prefix of FRESH with active appendix', () => {
     const engine = createEngineH(3)
+    engine.setPhaseHint('execute') // alpha=0.35 → 5 turns crosses 0.8
 
     // Promote domain
-    for (let t = 0; t < 3; t++) {
+    for (let t = 0; t < 5; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
       engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
     }
