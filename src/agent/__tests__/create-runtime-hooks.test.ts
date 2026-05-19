@@ -14,10 +14,10 @@ describe('createDefaultRuntimeHooks', () => {
       getPredictionAccumulator: () => ({ history: [] }),
     })
 
-    assert.equal(hooks.length, 8)
+    assert.equal(hooks.length, 9)
 
     const phases = hooks.map(h => h.phase)
-    assert.deepEqual(phases, ['preTurn', 'preTurn', 'preTurn', 'preTurn', 'afterPerception', 'postTool', 'postTool', 'postTool'])
+    assert.deepEqual(phases, ['preTurn', 'preTurn', 'preTurn', 'preTurn', 'afterPerception', 'postTool', 'postTool', 'postTool', 'postTool'])
 
     const names = hooks.map(h => h.name)
     assert.deepEqual(names, [
@@ -29,6 +29,7 @@ describe('createDefaultRuntimeHooks', () => {
       'theta-runtime',
       'stigmergy-runtime',
       'vigor-post-tool',
+      'tianshu-radio',
     ])
   })
 
