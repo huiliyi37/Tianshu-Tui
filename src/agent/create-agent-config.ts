@@ -1,6 +1,7 @@
 import { createProviderClient } from '../api/factory.js'
 import { resolveCapabilities } from '../api/provider.js'
 import { PromptEngine } from '../prompt/engine.js'
+import { createVolatileSnapshot } from '../prompt/volatile-snapshot.js'
 import type { AgentConfig } from './loop.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
@@ -52,7 +53,10 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     model: model.id,
     maxTokens: model.maxTokens,
     staticCtx: { tools: input.toolDefinitions },
-    volatileCtx: { cwd, sessionMemoryBlock: input.sessionMemoryBlock },
+    volatileCtx: createVolatileSnapshot({
+      cwd,
+      sessionMemoryBlock: input.sessionMemoryBlock,
+    }),
   })
 
   let compactClient: AgentConfig['compactClient']

@@ -25,3 +25,47 @@ describe('applyCacheStrategy', () => {
     assert.deepEqual(result, messages)
   })
 })
+
+describe('applyExplicitBreakpoints — frozen/working boundary', () => {
+  const bp = { cacheType: 'explicit-breakpoint' as const, persistent: false, minCacheTokens: 0, contextWindow: 200_000 }
+
+  it('places breakpoint on last assistant in frozen zone (multi-turn)', () => {
+    const messages: Message[] = [
+      { role: 'user', content: '<context>frozen</context>' },
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi there' },          // ← should get breakpoint
+      { role: 'user', content: '<context>fresh</context>' },
+      { role: 'user', content: 'read file' },
+    ]
+    const result = applyCacheStrategy(messages, bp)
+    assert.ok((result[2] as any).cache_control, 'breakpoint should be on message[2]')
+    assert.equal((result[2] as any).cache_control.type, 'ephemeral')
+    // No other message should have cache_control
+    assert.equal((result[0] as any).cache_control, undefined)
+    assert.equal((result[4] as any).cache_control, undefined)
+  })
+
+  it('falls back to anchor index for single-turn (no historical messages)', () => {
+    const messages: Message[] = [
+      { role: 'user', content: '<context>volatile</context>' },
+      { role: 'user', content: 'hello' },
+    ]
+    const result = applyCacheStrategy(messages, bp)
+    assert.ok((result[1] as any).cache_control, 'fallback: breakpoint on index 1')
+  })
+
+  it('handles 3-turn conversation correctly', () => {
+    const messages: Message[] = [
+      { role: 'user', content: '<context>frozen</context>' },
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' },
+      { role: 'user', content: '<context>frozen</context>' },
+      { role: 'user', content: 'read file' },
+      { role: 'assistant', content: 'here is the file' },    // ← should get breakpoint
+      { role: 'user', content: '<context>fresh</context>' },
+      { role: 'user', content: 'fix the bug' },
+    ]
+    const result = applyCacheStrategy(messages, bp)
+    assert.ok((result[5] as any).cache_control, 'breakpoint should be on message[5] (last frozen assistant)')
+  })
+})

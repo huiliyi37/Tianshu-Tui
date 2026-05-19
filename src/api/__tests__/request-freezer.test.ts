@@ -72,7 +72,7 @@ describe('canonicalizeRequest', () => {
       { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 1024, ttlSeconds: 300, contextWindow: 200_000 },
       [],
     )
-    // explicit-breakpoint injects cache_control on anchor message (CACHE_ANCHOR_MESSAGES - 1 = index 1)
-    assert.ok('cache_control' in result.messages[1]!)
+    // explicit-breakpoint injects cache_control on the last assistant before trailing user messages (index 2)
+    assert.ok('cache_control' in result.messages[2]!)
   })
 })
