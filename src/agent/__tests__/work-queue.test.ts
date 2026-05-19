@@ -93,4 +93,101 @@ describe('WorkOrderQueue', () => {
     q.enqueue(order('free'))
     assert.equal(q.dequeue()?.id, 'free')
   })
+
+  it('emits enqueued events', () => {
+    const q = new WorkOrderQueue()
+    const events: string[] = []
+    q.on(e => events.push(e.type))
+
+    q.enqueue(order('a'))
+    assert.deepEqual(events, ['enqueued'])
+  })
+
+  it('emits dequeued, completed, failed events', () => {
+    const q = new WorkOrderQueue()
+    const events: string[] = []
+    q.on(e => events.push(e.type))
+
+    q.enqueue(order('a'))
+    const dequeued = q.dequeue()!
+    q.markInFlight(dequeued)
+    q.markCompleted(dequeued)
+    q.markFailed(order('b'))
+
+    assert.deepEqual(events, ['enqueued', 'dequeued', 'completed', 'failed'])
+  })
+
+  it('on() returns unsubscribe function', () => {
+    const q = new WorkOrderQueue()
+    const events: string[] = []
+    const unsub = q.on(e => events.push(e.type))
+
+    q.enqueue(order('a'))
+    unsub()
+    q.enqueue(order('b'))
+
+    assert.equal(events.length, 1)
+  })
+
+  it('hasFileConflict detects shared files with in-flight orders', () => {
+    const q = new WorkOrderQueue()
+    const a = createReadOnlyWorkOrder({
+      id: 'a', parentTurnId: 't', kind: 'code_search', profile: 'code_scout',
+      objective: 'A', scope: { files: ['src/agent/loop.ts'] },
+    })
+    const b = createReadOnlyWorkOrder({
+      id: 'b', parentTurnId: 't', kind: 'code_search', profile: 'code_scout',
+      objective: 'B', scope: { files: ['src/agent/loop.ts'] },
+    })
+
+    q.enqueue(a)
+    const dequeued = q.dequeue()!
+    q.markInFlight(dequeued)
+
+    assert.equal(q.hasFileConflict(b), true)
+  })
+
+  it('hasFileConflict returns false when no files', () => {
+    const q = new WorkOrderQueue()
+    const a = createReadOnlyWorkOrder({
+      id: 'a', parentTurnId: 't', kind: 'code_search', profile: 'code_scout',
+      objective: 'A', scope: {},
+    })
+    q.enqueue(a)
+    q.markInFlight(q.dequeue()!)
+
+    const b = createReadOnlyWorkOrder({
+      id: 'b', parentTurnId: 't', kind: 'code_search', profile: 'code_scout',
+      objective: 'B', scope: {},
+    })
+    assert.equal(q.hasFileConflict(b), false)
+  })
+
+  it('dequeue skips orders with file conflicts', () => {
+    const q = new WorkOrderQueue()
+    const a = createReadOnlyWorkOrder({
+      id: 'a', parentTurnId: 't', kind: 'code_search', profile: 'code_scout',
+      objective: 'A', scope: { files: ['src/agent/loop.ts'] },
+    })
+    const b = createReadOnlyWorkOrder({
+      id: 'b', parentTurnId: 't', kind: 'code_search', profile: 'code_scout',
+      objective: 'B', scope: { files: ['src/agent/loop.ts'] },
+    })
+    const c = createReadOnlyWorkOrder({
+      id: 'c', parentTurnId: 't', kind: 'code_search', profile: 'code_scout',
+      objective: 'C', scope: { files: ['src/prompt/engine.ts'] },
+    })
+
+    q.enqueue(a)
+    q.enqueue(b)
+    q.enqueue(c)
+
+    // a dequeued first
+    const first = q.dequeue()!
+    q.markInFlight(first)
+
+    // b has file conflict with a, so c should dequeue
+    const second = q.dequeue()!
+    assert.equal(second.id, 'c')
+  })
 })
