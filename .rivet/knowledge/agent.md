@@ -1,3 +1,11 @@
+### 2026-05-19 — session a867cb0a
+
+**Modified** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/__tests__/engine.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/loop.test.ts
+**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/__tests__/engine.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/loop.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×15, bash×11, read_file×10, todo×5, grep×5, git×3, diff×3
+- Decision: make sure to include a test using an engine variable to capture the request
+
 ### 2026-05-18 — session 87b03c0c
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/turn-stream.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/turn-stream.test.ts

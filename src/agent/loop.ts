@@ -46,6 +46,7 @@ import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
+import { isStarSoulEnabled } from './star-soul-gate.js'
 import { TurnStreamController } from './turn-stream.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
@@ -372,7 +373,7 @@ export class AgentLoop {
 
   private bindSessionDomain(taskDescription: string): void {
     if (this.sessionDomain !== undefined) return
-    this.sessionDomain = buildActiveDomain(taskDescription)
+    this.sessionDomain = isStarSoulEnabled() ? buildActiveDomain(taskDescription) : null
     this.config.promptEngine.setActiveDomain(this.sessionDomain)
   }
 
