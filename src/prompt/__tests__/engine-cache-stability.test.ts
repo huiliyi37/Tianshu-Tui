@@ -433,4 +433,23 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
       else assert.equal(vol, firstVol, `Turn ${turn}: volatile must match Turn 0`)
     }
   })
+
+  it('cognitive projection updates invalidate same-user fresh cache without changing fingerprint', () => {
+    const engine = createEngine()
+    const messages: Message[] = [
+      { role: 'user', content: 'implement feature X' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'c_1', name: 'read_file', input: {} }] as any },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c_1', content: 'ok' }] as any },
+    ]
+
+    const before = engine.buildRequest(messages)
+    assert.doesNotMatch(before.messages[0]!.content as string, /task-contract/)
+
+    engine.setCognitiveProjection('<task-contract status="executing"><objective>implement feature X</objective></task-contract>')
+    const after = engine.buildRequest(messages)
+    const context = after.messages[0]!.content as string
+
+    assert.match(context, /<task-contract status="executing">/)
+    assert.equal(engine.checkDrift(), null)
+  })
 })

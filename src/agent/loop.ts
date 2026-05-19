@@ -53,6 +53,8 @@ import type { VigorState } from './vigor.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
+import { buildCognitivePromptProjection, createCognitiveLedger } from '../context/cognitive-ledger.js'
+import { advanceContractStatus, contractStatusFromPhaseClass, extractTaskContract, type TaskContract } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
 import { ProviderHealthTracker } from './provider-health.js'
@@ -188,6 +190,7 @@ export class AgentLoop {
   private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
   private sensoriumSnapshots: SensoriumEntry[] = []
+  private taskContract?: TaskContract
   private persist: SessionPersist | null = null
 
   constructor(
@@ -561,6 +564,7 @@ export class AgentLoop {
     this.contextInjection.recordUserInputClaims(userInput)
     this.contextInjection.refreshPlaybookLessons(userInput)
     this.session.addUserMessage(userInput)
+    this.taskContract = extractTaskContract(userInput, this.session.getTurnCount())
 
     if (this.config.autoReasoning) {
       this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
@@ -636,6 +640,10 @@ export class AgentLoop {
         // Wire StarPhase → phaseClass for field habituation modulation
         const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
         this.config.promptEngine.setPhaseHint(phaseClass)
+        const contractStatus = contractStatusFromPhaseClass(phaseClass)
+        if (this.taskContract && contractStatus) {
+          this.taskContract = advanceContractStatus(this.taskContract, contractStatus, this.session.getTurnCount())
+        }
 
         const intentResult = await this.intent.evaluate({
           strategy: currentStrategy,
@@ -657,6 +665,13 @@ export class AgentLoop {
 
         this.compaction.enforceContextCeiling()
         this.contextInjection.refreshActiveClaims()
+        const cognitiveLedger = createCognitiveLedger({
+          contract: this.taskContract,
+          evidence: this.evidence.getState(),
+          trace: this.traceStore,
+          turn: this.session.getTurnCount(),
+        })
+        this.config.promptEngine.setCognitiveProjection(buildCognitivePromptProjection(cognitiveLedger))
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const streamResult = await this.turnStream!.streamTurn({
           request,

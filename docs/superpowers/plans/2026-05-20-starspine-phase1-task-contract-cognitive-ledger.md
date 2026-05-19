@@ -38,14 +38,25 @@
 
 ## 文件结构
 
+> **实施修正（2026-05-20）：** 采纳架构审查意见后，TaskContract / CognitiveLedger 不放在 `src/agent/`，而放在 `src/context/`，作为 agent runtime、prompt projection、TUI 态势图都可共享的认知中层。PromptEngine 不 import TaskContract 对象，只接收已经渲染好的 minimal projection string，避免 `prompt -> agent` 反向依赖。
+
 | 文件 | 职责 |
 |------|------|
-| 新建 `src/agent/task-contract.ts` | TaskContract interface + 从 user message 提取 contract 的纯函数 |
-| 新建 `src/agent/__tests__/task-contract.test.ts` | TaskContract 提取测试 |
-| 新建 `src/agent/cognitive-ledger.ts` | CognitiveLedger 只读聚合器 — 统一查询现有 store |
-| 新建 `src/agent/__tests__/cognitive-ledger.test.ts` | Ledger 投影测试 |
-| 修改 `src/agent/loop.ts` | 首轮提取 TaskContract，创建 CognitiveLedger，传入 PromptEngine |
-| 修改 `src/prompt/engine.ts` | 新增 setTaskContract()，minimal projection 替代散射注入 |
+| 新建 `src/context/task-contract.ts` | TaskContract interface + 从 user message 提取 contract 的纯函数 + XML-safe projection |
+| 新建 `src/context/__tests__/task-contract.test.ts` | TaskContract 提取、XML escape、单调状态推进测试 |
+| 新建 `src/context/cognitive-ledger.ts` | CognitiveLedger 纯 read model — 统一查询现有 store 并生成 projection |
+| 新建 `src/context/__tests__/cognitive-ledger.test.ts` | Ledger 投影与 phase snapshot 测试 |
+| 修改 `src/agent/loop.ts` | 从 userInput 提取 TaskContract，每轮创建 CognitiveLedger，传入 PromptEngine projection |
+| 修改 `src/prompt/engine.ts` | 新增 setCognitiveProjection()，minimal projection 替代散射注入，并失效 latest fresh cache |
+
+### 实施偏离原计划的原因
+
+1. **避免 prompt -> agent 反向依赖**：TaskContract 是认知上下文结构，不是 AgentLoop 私有逻辑。
+2. **PromptEngine 只接 projection string**：prompt 层不理解 TaskContract lifecycle，只负责拼接最新 turn 动态上下文。
+3. **CognitiveLedger 使用 plain object + pure functions**：符合项目“data 不用 class”的约定。
+4. **约束提取不用单一大正则**：原正则路径在中文无空格约束与英文多句约束上脆弱，改为 clause split + marker detection。
+5. **exploring 阶段仍投影 actionable contract**：探索阶段最容易漂移，不能因 status=exploring 省略锚点；通过 isActionable 过滤闲聊。
+6. **projection setter 失效 cachedFreshForUser**：同一 user message 的 tool-call turns 中 contract 状态会变化，必须避免 stale fresh block。
 
 ---
 

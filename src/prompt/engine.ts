@@ -102,6 +102,7 @@ export class PromptEngine {
   private sessionMemoryOverride?: string
   private contextLayerReportData: ContextLayerReport
   private phaseHint?: string
+  private cognitiveProjection?: string
 
   constructor(config: PromptEngineConfig) {
     this.config = config
@@ -193,11 +194,15 @@ export class PromptEngine {
               if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
 
               const activeAppendix = buildDynamicAppendix(activeCtx)
-              this.cachedFreshBlock = activeAppendix
-                ? this.volatileBlock + '\n' + activeAppendix
+              const fullAppendix = [this.cognitiveProjection, activeAppendix].filter(Boolean).join('\n')
+              this.cachedFreshBlock = fullAppendix
+                ? this.volatileBlock + '\n' + fullAppendix
                 : this.volatileBlock
             } else {
-              this.cachedFreshBlock = buildLatestTurnVolatileBlock(dynamicCtx)
+              const latest = buildLatestTurnVolatileBlock(dynamicCtx)
+              this.cachedFreshBlock = this.cognitiveProjection
+                ? latest + '\n' + this.cognitiveProjection
+                : latest
             }
           }
           result.push({ role: 'user', content: this.cachedFreshBlock })
@@ -289,6 +294,13 @@ export class PromptEngine {
 
   setPhaseHint(hint: string): void {
     this.phaseHint = hint
+  }
+
+  setCognitiveProjection(projection: string | null): void {
+    const next = projection && projection.trim().length > 0 ? projection : undefined
+    if (this.cognitiveProjection === next) return
+    this.cognitiveProjection = next
+    this.cachedFreshForUser = ''
   }
 
   setActiveDomain(domain: VolatileContext['activeDomain']): void {
