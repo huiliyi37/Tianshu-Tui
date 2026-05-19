@@ -36,6 +36,7 @@ export interface RuntimeHookDeps {
   playbookStore?: PlaybookStore
   buildRetrospectInput?: () => RetrospectInput
   getDoomLoopLevel?: () => DoomLoopLevel
+  chronicle?: { addRadio: (message: string, turn: number) => void; addPhaseTransition: (input: { fromPhase: string; toPhase: string; turn: number; summary: string }) => void }
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -58,7 +59,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     createVigorPostToolHook({
       getPredictionAccumulator: deps.getPredictionAccumulator,
     }),
-    createRadioHook(),
+    createRadioHook({ chronicle: deps.chronicle }),
   ]
 
   if (deps.playbookStore && deps.buildRetrospectInput && deps.getDoomLoopLevel) {

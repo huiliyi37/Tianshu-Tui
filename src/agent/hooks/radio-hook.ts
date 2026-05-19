@@ -89,7 +89,14 @@ function buildStarPhaseContext(
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createRadioHook(): PostToolRuntimeHook {
+export interface RadioHookDeps {
+  chronicle?: {
+    addRadio: (message: string, turn: number) => void
+    addPhaseTransition: (input: { fromPhase: string; toPhase: string; turn: number; summary: string }) => void
+  }
+}
+
+export function createRadioHook(deps?: RadioHookDeps): PostToolRuntimeHook {
   // Internal state
   let lastPhase: PhaseClass | null = null
   let lastEmitTurn = -Infinity
@@ -123,6 +130,7 @@ export function createRadioHook(): PostToolRuntimeHook {
         lastPhase = currentPhase
         lastEmitTurn = turn
         effects.emitPhaseChange('tianshu-radio', { reason: '[天枢] 收到任务，开始分析。' })
+        deps?.chronicle?.addRadio('[天枢] 收到任务，开始分析。', turn)
         return
       }
 
@@ -139,9 +147,12 @@ export function createRadioHook(): PostToolRuntimeHook {
         vars.turnCount = turn
         const message = formatRadioMessage({ transition, vars })
 
+        const prevPhase = lastPhase ?? 'tianshu-planning'
         lastPhase = currentPhase
         lastEmitTurn = turn
         effects.emitPhaseChange('tianshu-radio', { reason: message })
+        deps?.chronicle?.addRadio(message, turn)
+        deps?.chronicle?.addPhaseTransition({ fromPhase: prevPhase, toPhase: currentPhase, turn, summary: message })
         return
       }
 
@@ -163,6 +174,7 @@ export function createRadioHook(): PostToolRuntimeHook {
 
         lastEmitTurn = turn
         effects.emitPhaseChange('tianshu-radio', { reason: message })
+        deps?.chronicle?.addRadio(message, turn)
         return
       }
 
@@ -174,6 +186,7 @@ export function createRadioHook(): PostToolRuntimeHook {
       ) {
         lastEmitTurn = turn
         effects.emitPhaseChange('tianshu-radio', { reason: '[天枢] ✓ 测试通过。' })
+        deps?.chronicle?.addRadio('[天枢] ✓ 测试通过。', turn)
         return
       }
 
@@ -203,6 +216,7 @@ export function createRadioHook(): PostToolRuntimeHook {
 
           lastEmitTurn = turn
           effects.emitPhaseChange('tianshu-radio', { reason: message })
+          deps?.chronicle?.addRadio(message, turn)
         }
       }
     },
