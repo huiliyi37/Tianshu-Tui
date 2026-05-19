@@ -1,6 +1,14 @@
 import type { AggregationPolicy, WorkerResult } from './work-order.js'
 import { verifyWorkerEvidence } from './worker-evidence.js'
 
+const CONFIDENCE_WEIGHTS: Record<string, number> = { high: 3, medium: 2, low: 1 }
+
+function confidenceScore(result: WorkerResult): number {
+  if (result.findings.length === 0) return 0
+  const total = result.findings.reduce((sum, f) => sum + (CONFIDENCE_WEIGHTS[f.confidence] ?? 1), 0)
+  return total / result.findings.length
+}
+
 export function aggregateResults(results: WorkerResult[], policy: AggregationPolicy): WorkerResult[] {
   const gated = results.map(verifyWorkerEvidence)
 
@@ -37,6 +45,13 @@ export function aggregateResults(results: WorkerResult[], policy: AggregationPol
       return gated.filter(r => r.status === majorityStatus)
     }
     return gated
+  }
+
+  if (policy === 'weighted_confidence') {
+    const passed = gated.filter(r => r.status === 'passed')
+    if (passed.length === 0) return gated
+    const best = passed.reduce((a, b) => confidenceScore(a) >= confidenceScore(b) ? a : b)
+    return [best]
   }
 
   return gated

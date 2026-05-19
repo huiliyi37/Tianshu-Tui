@@ -98,4 +98,31 @@ describe('aggregateResults', () => {
     const aggregated = aggregateResults(results, 'primary_decides')
     assert.equal(aggregated[0]!.status, 'passed')
   })
+
+  it('weighted_confidence: selects result with highest average confidence', () => {
+    const results = [
+      result('a', 'passed', 'low'),
+      result('b', 'passed', 'high'),
+      result('c', 'passed', 'medium'),
+    ]
+    const aggregated = aggregateResults(results, 'weighted_confidence')
+    assert.equal(aggregated.length, 1)
+    assert.equal(aggregated[0]!.workOrderId, 'b')
+  })
+
+  it('weighted_confidence: returns all when no passed results', () => {
+    const results = [result('a', 'failed', 'high'), result('b', 'blocked', 'low')]
+    const aggregated = aggregateResults(results, 'weighted_confidence')
+    assert.equal(aggregated.length, 2)
+  })
+
+  it('weighted_confidence: prefers result with findings over no findings', () => {
+    const results = [
+      result('a', 'passed'),
+      result('b', 'passed', 'medium'),
+    ]
+    const aggregated = aggregateResults(results, 'weighted_confidence')
+    assert.equal(aggregated.length, 1)
+    assert.equal(aggregated[0]!.workOrderId, 'b')
+  })
 })

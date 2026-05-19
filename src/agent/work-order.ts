@@ -34,6 +34,7 @@ export const aggregationPolicySchema = z.enum([
   'first_success',
   'majority',
   'primary_decides',
+  'weighted_confidence',
 ])
 
 export type AggregationPolicy = z.infer<typeof aggregationPolicySchema>
