@@ -797,6 +797,13 @@ async function main() {
 
   _pipedInput = readPipedStdin()
 
+  // Prevent MaxPerformanceEntryBufferExceededWarning from Ink's render loop.
+  // Ink calls performance.now() on every render, and Node.js accumulates
+  // performance entries indefinitely. Clear the buffer periodically.
+  const perfCleanup = setInterval(() => {
+    try { performance.clearMeasures() } catch { /* noop */ }
+  }, 60_000)
+
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),
     { exitOnCtrlC: false },
@@ -806,6 +813,7 @@ async function main() {
   process.on('SIGTERM', gracefulShutdown)
 
   await waitUntilExit()
+  clearInterval(perfCleanup)
 }
 
 main().catch((err) => {

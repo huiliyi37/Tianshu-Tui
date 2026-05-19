@@ -180,6 +180,18 @@ function classifyByPattern(error: unknown): ClassifiedError {
     }
   }
 
+  // Upstream stream closed before first payload (cliproxy / proxy errors)
+  if (/empty_stream|upstream.*stream.*closed|stream.*closed.*before.*payload/i.test(lower)) {
+    return {
+      retryable: true,
+      retryDelayMs: 2000,
+      shouldReconnect: true,
+      category: 'server_error',
+      userMessage: 'Upstream stream closed. Retrying.',
+      maxRetries: 3,
+    }
+  }
+
   // AbortError — user-initiated cancellation, never retry
   if (name === 'AbortError') {
     return {
