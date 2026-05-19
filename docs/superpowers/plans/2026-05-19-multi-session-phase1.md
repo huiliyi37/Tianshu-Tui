@@ -543,7 +543,74 @@ git commit -m "feat: replace global lock with SQLite session registry for multi-
 
 ---
 
-### 任务 5：集成验证
+### 任务 5：接入工具执行链路（Claim 门控）
+
+**文件：**
+- 修改：`src/agent/tool-pipeline.ts`
+- 修改：`src/agent/tool-execution.ts`（传递 registry 到 deps）
+
+**前置调查：** `ToolPipelineDeps` 需要新增 `sessionRegistry?: SessionRegistry` 字段。写工具（`write_file`、`edit_file`、`git`、`bash`）执行前自动 acquire claim，执行后保持 claim 直到 session 结束。
+
+- [ ] **步骤 1：在 ToolPipelineDeps 中添加 registry 字段**
+
+在 `src/agent/tool-pipeline.ts` 的 `ToolPipelineDeps` interface 中追加：
+
+```typescript
+  sessionRegistry?: import('./session-registry.js').SessionRegistry
+```
+
+- [ ] **步骤 2：在 tool-execution.ts 中传递 registry**
+
+在 `src/agent/tool-execution.ts` 构建 `pipelineDeps` 对象时，从上层传入 `sessionRegistry`。具体位置需 grep `pipelineDeps:` 确认。
+
+- [ ] **步骤 3：在 executeToolUse 中添加 claim 门控**
+
+在 `src/agent/tool-pipeline.ts` 的 `executeToolUse` 函数中，在 `execute` 回调之前（约 line 240 附近），添加 claim 检查：
+
+```typescript
+    // Claim gate: acquire file claim for non-concurrency-safe tools
+    const isSafe = toolDef?.isConcurrencySafe() ?? true
+    if (!isSafe && deps.sessionRegistry && deps.sessionId) {
+      const filePath = tu.input.file_path as string | undefined
+      if (filePath) {
+        const acquired = deps.sessionRegistry.acquireClaim(deps.sessionId, filePath, 'exclusive')
+        if (!acquired) {
+          const holder = deps.sessionRegistry.getClaimHolder(filePath)
+          return {
+            toolResult: { type: 'tool_result', tool_use_id: tu.id, content: `Error: File "${filePath}" is being edited by another session (${holder}). Wait for it to finish or use a different file.`, is_error: true },
+            traceStore: deps.traceStore,
+            importGraph: deps.importGraph,
+            lastConflictCheckCount: deps.lastConflictCheckCount,
+            checkpointCreated: false,
+            latestRisk: deps.latestRisk,
+          }
+        }
+      }
+    }
+```
+
+注意：此代码插入在 `const harnessResult = await deps.harness.executeTool({` 之前。
+
+- [ ] **步骤 4：typecheck**
+
+运行：`npx tsc --noEmit`
+预期：EXIT 0
+
+- [ ] **步骤 5：运行 tool-pipeline 相关测试**
+
+运行：`npx tsx --test src/agent/__tests__/tool-pipeline*.test.ts`
+预期：全部 PASS（现有测试不传 sessionRegistry，所以 claim 门控不触发）
+
+- [ ] **步骤 6：Commit**
+
+```bash
+git add src/agent/tool-pipeline.ts src/agent/tool-execution.ts
+git commit -m "feat(agent): wire file claim check into tool execution pipeline"
+```
+
+---
+
+### 任务 6：集成验证
 
 - [ ] **步骤 1：全量 typecheck**
 
