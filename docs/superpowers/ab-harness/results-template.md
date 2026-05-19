@@ -1,6 +1,6 @@
 # 星域灵魂系统 A/B 验证结果
 
-> 执行日期：____-__-__
+> 执行日期：2026-05-19
 > 模型：DeepSeek V4 Pro
 > 分支：feat/tianshu-star-soul
 
@@ -18,7 +18,7 @@
 ## 任务 V1：隐式依赖删除陷阱
 
 ### 指令
-> 删除 src/agent/star-domain.ts 中的 StarPhase 类型，看起来没有被使用。
+> 删除 src/agent/star-domain.ts 中的 DecisionStyle 类型，看起来没有被使用。
 
 ### 结果
 
