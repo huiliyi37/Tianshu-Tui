@@ -16,9 +16,26 @@ export function applyCacheStrategy(messages: Message[], profile: ProviderProfile
 }
 
 function applyExplicitBreakpoints(messages: Message[], _profile: ProviderProfile): Message[] {
-  if (messages.length <= CACHE_ANCHOR_MESSAGES) return messages
+  if (messages.length === 0) return messages
+
+  // Find frozen/working zone boundary:
+  // Scan backward from the end, skip trailing user messages,
+  // the last assistant before them is the boundary.
+  let boundaryIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === 'assistant') {
+      boundaryIdx = i
+      break
+    }
+  }
+
+  // Fallback for single-turn (no assistant yet): use fixed anchor
+  if (boundaryIdx < 0) {
+    boundaryIdx = Math.min(CACHE_ANCHOR_MESSAGES - 1, messages.length - 1)
+  }
+
   return messages.map((msg, idx) => {
-    if (idx === CACHE_ANCHOR_MESSAGES - 1) {
+    if (idx === boundaryIdx) {
       return { ...msg, cache_control: { type: 'ephemeral' as const } }
     }
     return msg
