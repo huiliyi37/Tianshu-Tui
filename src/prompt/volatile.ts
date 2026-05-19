@@ -103,24 +103,127 @@ function readKnowledgeFiles(cwd: string): string | undefined {
   } catch { return undefined }
 }
 
-/** Build stable volatile block — excludes per-turn dynamic sections, active claims, and git status (lazy injection). */
+/** Build stable volatile block — excludes per-turn dynamic sections for exact-prefix cache stability. */
 export function buildStableVolatileBlock(ctx: VolatileContext): string {
   return buildVolatileBlockInternal({
     ...ctx,
-    gitStatus: undefined,
+    // Per-turn dynamic fields — strip from FROZEN
     activeDomain: undefined,
+    contextLedger: undefined,
     activeClaims: undefined,
     playbookLessons: undefined,
     toolHistory: undefined,
     taskProgress: undefined,
     behaviorMirror: undefined,
     decisions: undefined,
+    strategyShift: undefined,
+    repairHint: undefined,
+    impactHint: undefined,
+    routingReason: undefined,
+    cerebellarHint: undefined,
+    // Session snapshot fields — KEEP in FROZEN:
+    // gitStatus, rivetMd, workingSet, sessionMemoryBlock
   })
 }
 
-/** Build latest-turn volatile block — includes all sections. */
+/**
+ * Render ONLY the per-turn dynamic fields into a separate `<context-update>` XML block.
+ * Returns empty string if no dynamic fields are present.
+ */
+export function buildDynamicAppendix(ctx: VolatileContext): string {
+  const parts: string[] = []
+
+  if (ctx.activeDomain) {
+    parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
+  }
+
+  if (ctx.contextLedger) {
+    const sections = ctx.contextLedger.rounds.length > 0
+      ? ` rounds="${ctx.contextLedger.rounds.length}"`
+      : ''
+    const healthAttr = ` health="${ctx.contextLedger.tokenBudget.compactionState}"`
+    const safeAttr = ` api_safe="${ctx.contextLedger.apiInvariantStatus.brokenRounds === 0}"`
+    const tokensAttr = ` tokens="${ctx.contextLedger.tokenBudget.estimatedTokens}"`
+    const maxAttr = ` max_tokens="${ctx.contextLedger.tokenBudget.maxTokens}"`
+    parts.push(`<context-ledger${healthAttr}${safeAttr}${tokensAttr}${maxAttr}${sections} />`)
+  }
+
+  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
+    const entries = ctx.toolHistory.map(e => {
+      const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
+      if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
+      return `  <tool-summary ${attrs.join(' ')} />`
+    }).join('\n')
+    parts.push(`<tool-history recent="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
+  }
+
+  if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
+    const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
+    const remaining = ctx.taskProgress.remaining.length > 0
+      ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
+      : ''
+    parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
+  }
+
+  if (ctx.behaviorMirror) {
+    parts.push(`<behavior-mirror>\n${escapeXml(ctx.behaviorMirror)}\n</behavior-mirror>`)
+  }
+
+  if (ctx.strategyShift) {
+    parts.push(`<strategy-shift>\n${escapeXml(ctx.strategyShift)}\n</strategy-shift>`)
+  }
+
+  if (ctx.repairHint) {
+    parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
+  }
+
+  if (ctx.decisions && ctx.decisions.length > 0) {
+    const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
+    parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
+  }
+
+  if (ctx.cerebellarHint) {
+    parts.push(`<cerebellar-hint>
+${escapeXml(ctx.cerebellarHint)}
+</cerebellar-hint>`)
+  }
+
+  if (ctx.activeClaims && ctx.activeClaims.length > 0) {
+    const relevanceInput: ClaimRelevanceInput = {
+      workingSet: ctx.workingSet,
+      recentTools: ctx.toolHistory?.map(t => ({ tool: t.tool, target: t.target, status: t.status })),
+    }
+    const { selected, omitted } = selectRelevantClaims(ctx.activeClaims, relevanceInput)
+    if (selected.length > 0) {
+      const block = renderActiveClaimsBlock(selected)
+      if (block && omitted.length > 0) {
+        parts.push(block.replace('<active-claims', `<active-claims omitted="${omitted.length}"`))
+      } else if (block) {
+        parts.push(block)
+      }
+    }
+  }
+
+  if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
+    const { selected } = scoreLessons(ctx.playbookLessons, {
+      recentToolTargets: ctx.toolHistory?.map(t => t.target),
+    })
+    const toRender = selected.length > 0 ? selected : ctx.playbookLessons.slice(0, 2)
+    const lessons = toRender
+      .map(b => `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`)
+      .join('\n')
+    parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+  }
+
+  return parts.length > 0 ? `<context-update>\n${parts.join('\n\n')}\n</context-update>` : ''
+}
+
+/** Build latest-turn volatile block — FROZEN prefix + dynamic appendix. */
 export function buildLatestTurnVolatileBlock(ctx: VolatileContext): string {
-  return buildVolatileBlockInternal(ctx)
+  const frozen = buildStableVolatileBlock(ctx)
+  const appendix = buildDynamicAppendix(ctx)
+  if (!appendix) return frozen
+  return frozen + '\n' + appendix
 }
 
 /** Backward-compatible alias for buildLatestTurnVolatileBlock. */
