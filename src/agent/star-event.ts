@@ -41,6 +41,18 @@ export const PHASE_GLYPHS: Record<StarPhase, string> = {
   'tianshu-encore': '⭐⭐',
 }
 
+/** Short Chinese labels for strip display (≤4 chars). */
+export const PHASE_SHORT_LABELS: Record<StarPhase, string> = {
+  'tianshu-planning': '观局',
+  'tianxuan-locating': '寻迹',
+  'tianji-decomposing': '拆解',
+  'tianquan-contracting': '定标',
+  'yuheng-implementing': '铸形',
+  'kaiyang-testing': '试锋',
+  'yaoguang-delivering': '归航',
+  'tianshu-encore': '再临',
+}
+
 // ─── Star Event ─────────────────────────────────────────────────────
 
 /**
