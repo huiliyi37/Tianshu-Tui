@@ -25,6 +25,7 @@ export interface VolatileContext {
   activeDomain?: { name: string; volatileBlock: string; motto: string } | null
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
+  _knowledgeSnapshot?: string
   playbookLessons?: PlaybookBullet[]
   activeClaims?: ContextClaim[]
   toolHistory?: ToolHistoryEntry[]
@@ -245,8 +246,8 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<project-instructions>\n${escapeXml(md)}\n</project-instructions>`)
   }
 
-  // Inject project memory from previous sessions (Dream distillation)
-  const knowledge = readKnowledgeFiles(ctx.cwd)
+  // Inject project memory — prefer snapshot, fall back to filesystem
+  const knowledge = ctx._knowledgeSnapshot ?? readKnowledgeFiles(ctx.cwd)
   if (knowledge) {
     parts.push(`<project-memory>\n${escapeXml(knowledge)}\n</project-memory>`)
   }
