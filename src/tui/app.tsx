@@ -82,6 +82,7 @@ interface AppProps {
   initialInput?: string
   mcpManagerRef: RefObject<McpManager | null>
   claimStoreRef: RefObject<import('../context/claim-store.js').ContextClaimStore | null>
+  approvalMode?: 'auto-accept' | 'auto-safe' | 'suggest' | 'manual'
 }
 
 const THINKING_FLUSH_MS = 200
@@ -174,7 +175,7 @@ function parseInterviewMarker(text: string): { state: InterviewState; cleanText:
 
 // --- Main App ---
 
-export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode }: AppProps) {
   const [frozenItems, setFrozenItems] = useState<LogEntry[]>([])
   const [activeItems, setActiveItems] = useState<LogEntry[]>([])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
@@ -1067,6 +1068,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       },
       onApprovalRequired: async (id, name, input) => {
         fluencyRef.current.recordApproval()
+        // Auto-approve in auto-accept mode — no user confirmation needed
+        if (approvalMode === 'auto-accept') {
+          return true
+        }
         const target = String(input?.path ?? input?.command ?? name)
         setSummaryState(prev => ({ ...prev, approvalNeeded: { tool: name, target } }))
         return new Promise<boolean>((resolve) => {
@@ -1075,6 +1080,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       },
       onIntentPreview: async (intent) => {
         pushStatic(createLogEntry({ type: 'system', content: formatIntentPreview(intent) }))
+        // Auto-continue in auto-accept mode — no user confirmation needed
+        if (approvalMode === 'auto-accept') {
+          return 'continue'
+        }
         return new Promise<IntentPreviewAction>((resolve) => {
           setPendingIntent({ intent, resolve })
         })

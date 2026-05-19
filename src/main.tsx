@@ -481,6 +481,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     initialInput,
     mcpManagerRef,
     claimStoreRef,
+    approvalMode: config.agent.approval,
   })
 }
 
