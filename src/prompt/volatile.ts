@@ -150,16 +150,11 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
   }
 
-  if (ctx.contextLedger) {
-    const sections = ctx.contextLedger.rounds.length > 0
-      ? ` rounds="${ctx.contextLedger.rounds.length}"`
-      : ''
-    const healthAttr = ` health="${ctx.contextLedger.tokenBudget.compactionState}"`
-    const safeAttr = ` api_safe="${ctx.contextLedger.apiInvariantStatus.brokenRounds === 0}"`
-    const tokensAttr = ` tokens="${ctx.contextLedger.tokenBudget.estimatedTokens}"`
-    const maxAttr = ` max_tokens="${ctx.contextLedger.tokenBudget.maxTokens}"`
-    parts.push(`<context-ledger${healthAttr}${safeAttr}${tokensAttr}${maxAttr}${sections} />`)
-  }
+  // Harness-only fields (contextLedger, behaviorMirror, strategyShift,
+  // routingReason, cerebellarHint, activeClaims) are NOT rendered into
+  // the LLM prompt. They remain available for TUI/logging via setters
+  // on PromptEngine and getVolatilePayloadReport(). This reduces volatile
+  // context by ~1,700 tokens/turn — "thorns not leaves" (direction A).
 
   if (ctx.toolHistory && ctx.toolHistory.length > 0) {
     const entries = ctx.toolHistory.map(e => {
@@ -178,14 +173,6 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
   }
 
-  if (ctx.behaviorMirror) {
-    parts.push(`<behavior-mirror>\n${escapeXml(ctx.behaviorMirror)}\n</behavior-mirror>`)
-  }
-
-  if (ctx.strategyShift) {
-    parts.push(`<strategy-shift>\n${escapeXml(ctx.strategyShift)}\n</strategy-shift>`)
-  }
-
   if (ctx.repairHint) {
     parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
   }
@@ -193,28 +180,6 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
   if (ctx.decisions && ctx.decisions.length > 0) {
     const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
     parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
-  }
-
-  if (ctx.cerebellarHint) {
-    parts.push(`<cerebellar-hint>
-${escapeXml(ctx.cerebellarHint)}
-</cerebellar-hint>`)
-  }
-
-  if (ctx.activeClaims && ctx.activeClaims.length > 0) {
-    const relevanceInput: ClaimRelevanceInput = {
-      workingSet: ctx.workingSet,
-      recentTools: ctx.toolHistory?.map(t => ({ tool: t.tool, target: t.target, status: t.status })),
-    }
-    const { selected, omitted } = selectRelevantClaims(ctx.activeClaims, relevanceInput)
-    if (selected.length > 0) {
-      const block = renderActiveClaimsBlock(selected)
-      if (block && omitted.length > 0) {
-        parts.push(block.replace('<active-claims', `<active-claims omitted="${omitted.length}"`))
-      } else if (block) {
-        parts.push(block)
-      }
-    }
   }
 
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
@@ -284,16 +249,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<working-set>\n${files}\n</working-set>`)
   }
 
-  if (ctx.contextLedger) {
-    const sections = ctx.contextLedger.rounds.length > 0
-      ? ` rounds="${ctx.contextLedger.rounds.length}"`
-      : ''
-    const healthAttr = ` health="${ctx.contextLedger.tokenBudget.compactionState}"`
-    const safeAttr = ` api_safe="${ctx.contextLedger.apiInvariantStatus.brokenRounds === 0}"`
-    const tokensAttr = ` tokens="${ctx.contextLedger.tokenBudget.estimatedTokens}"`
-    const maxAttr = ` max_tokens="${ctx.contextLedger.tokenBudget.maxTokens}"`
-    parts.push(`<context-ledger${healthAttr}${safeAttr}${tokensAttr}${maxAttr}${sections} />`)
-  }
+  // Harness-only fields omitted from LLM context (direction A: hard separation)
 
   if (ctx.toolHistory && ctx.toolHistory.length > 0) {
     const entries = ctx.toolHistory.map(e => {
@@ -312,14 +268,6 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
   }
 
-  if (ctx.behaviorMirror) {
-    parts.push(`<behavior-mirror>\n${escapeXml(ctx.behaviorMirror)}\n</behavior-mirror>`)
-  }
-
-  if (ctx.strategyShift) {
-    parts.push(`<strategy-shift>\n${escapeXml(ctx.strategyShift)}\n</strategy-shift>`)
-  }
-
   if (ctx.repairHint) {
     parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
   }
@@ -327,12 +275,6 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   if (ctx.decisions && ctx.decisions.length > 0) {
     const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
     parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
-  }
-
-  if (ctx.cerebellarHint) {
-    parts.push(`<cerebellar-hint>
-${escapeXml(ctx.cerebellarHint)}
-</cerebellar-hint>`)
   }
 
   if (ctx.activeClaims && ctx.activeClaims.length > 0) {

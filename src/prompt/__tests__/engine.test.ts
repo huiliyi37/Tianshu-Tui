@@ -164,8 +164,9 @@ describe('PromptEngine active claims projection', () => {
     const contextMessages = request.messages.filter(message => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<context>'))
 
     assert.equal(contextMessages.length, 2)
+    // Harness-only: activeClaims are no longer rendered into the LLM prompt (direction A)
     assert.doesNotMatch(contextMessages[0]!.content as string, /active-claims/)
-    assert.match(contextMessages[1]!.content as string, /Run tests before claiming done/)
+    assert.doesNotMatch(contextMessages[1]!.content as string, /active-claims/)
   })
 
   it('updated session memory appears in the latest turn request', () => {

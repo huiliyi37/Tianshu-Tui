@@ -30,7 +30,8 @@ describe('volatile context layers', () => {
 
     assert.match(block, /<context>/)
     assert.match(block, /<environment/)
-    assert.match(block, /<context-ledger health="healthy" api_safe="true"/)
+    // contextLedger is harness-only — no longer rendered in the LLM prompt (direction A)
+    assert.doesNotMatch(block, /<context-ledger/)
     assert.match(block, /<working-set>/)
     assert.match(block, /<session-memory/)
     assert.match(block, /<git-status>/)
@@ -178,30 +179,12 @@ describe('recent-commits XML section', () => {
 describe('behavior-mirror XML section', () => {
   const base: VolatileContext = { cwd: '/project' }
 
-  it('renders <behavior-mirror> when provided', () => {
-    const ctx: VolatileContext = {
-      ...base,
-      behaviorMirror: 'You have edited auth.ts 3 times. What is the root cause?',
-    }
-    const block = buildVolatileBlock(ctx)
-    assert.ok(block.includes('<behavior-mirror>'))
-    assert.ok(block.includes('auth.ts 3 times'))
-    assert.ok(block.includes('</behavior-mirror>'))
-  })
+  // behaviorMirror is harness-only — no longer rendered into LLM prompt (direction A)
+  // Tests for rendering and XML escaping removed.
 
   it('omits when null or undefined', () => {
     assert.ok(!buildVolatileBlock({ ...base, behaviorMirror: null }).includes('<behavior-mirror>'))
     assert.ok(!buildVolatileBlock(base).includes('<behavior-mirror>'))
-  })
-
-  it('escapes XML in mirror text', () => {
-    const ctx: VolatileContext = {
-      ...base,
-      behaviorMirror: 'Error: "type" is not assignable to <T>',
-    }
-    const block = buildVolatileBlock(ctx)
-    assert.ok(block.includes('&lt;T&gt;'))
-    assert.ok(block.includes('&quot;type&quot;'))
   })
 })
 
@@ -304,12 +287,12 @@ describe('stable/latest volatile split', () => {
       cwd: '/repo',
       toolHistory: [{ tool: 'read_file', target: 'src/a.ts', status: 'success' }],
       taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'] },
-      behaviorMirror: 'repeated edits',
       decisions: ['use middleware'],
     })
     assert.ok(latest.includes('<tool-history'))
     assert.ok(latest.includes('<task-progress'))
-    assert.ok(latest.includes('<behavior-mirror'))
+    // behaviorMirror is harness-only — no longer rendered (direction A)
+    assert.ok(!latest.includes('<behavior-mirror'))
     assert.ok(latest.includes('<decisions'))
   })
 
@@ -323,7 +306,7 @@ describe('stable/latest volatile split', () => {
 })
 
 describe('active claims volatile context', () => {
-  it('active claims are excluded from stable volatile block and included in latest turn block', () => {
+  it('active claims are excluded from both stable and latest volatile blocks (harness-only)', () => {
     const ctx: VolatileContext = {
       cwd: '/repo',
       activeClaims: [{
@@ -347,8 +330,8 @@ describe('active claims volatile context', () => {
     const stable = buildStableVolatileBlock(ctx)
     const latest = buildLatestTurnVolatileBlock(ctx)
 
+    // activeClaims is harness-only — no longer rendered in LLM prompt (direction A)
     assert.doesNotMatch(stable, /active-claims/)
-    assert.match(latest, /<active-claims count="1">/)
-    assert.match(latest, /Prefer &lt;tests&gt; first/)
+    assert.doesNotMatch(latest, /active-claims/)
   })
 })

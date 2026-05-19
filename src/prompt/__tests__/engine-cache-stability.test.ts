@@ -392,15 +392,13 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     assert.equal(vol1, vol2, 'Same user message → cached volatile')
 
     // Turn 3: NEW user message "read file" → volatile regenerated
-    engine.setBehaviorMirror('some new mirror')
+    engine.setRepairHint('fix the path')
     const req3 = engine.buildRequest([
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'done' },
       { role: 'user', content: 'read file' },
     ])
-    // Historical "hello" gets FROZEN
-    const histVol = (req3.messages[0] as { content: string }).content
-    // "read file" gets new FRESH (with behaviorMirror)
+    // "read file" gets new FRESH (with repairHint)
     let freshVol = ''
     for (let i = req3.messages.length - 1; i >= 0; i--) {
       const m = req3.messages[i] as { role: string; content: string }

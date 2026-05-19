@@ -163,9 +163,6 @@ export class PromptEngine {
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
               if (dynamicCtx.activeDomain) fieldValues['activeDomain'] = JSON.stringify(dynamicCtx.activeDomain)
-              if (dynamicCtx.behaviorMirror) fieldValues['behaviorMirror'] = dynamicCtx.behaviorMirror
-              if (dynamicCtx.strategyShift) fieldValues['strategyShift'] = dynamicCtx.strategyShift
-              if (dynamicCtx.routingReason) fieldValues['routingReason'] = dynamicCtx.routingReason
               if (dynamicCtx.playbookLessons && dynamicCtx.playbookLessons.length > 0) {
                 fieldValues['playbookLessons'] = dynamicCtx.playbookLessons.map(b => b.lesson).join('|')
               }
@@ -177,12 +174,6 @@ export class PromptEngine {
                 if (name === 'activeDomain') {
                   const d = JSON.parse(content) as { name: string; volatileBlock: string; motto: string }
                   renderedHabituated.set(name, `<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
-                } else if (name === 'behaviorMirror') {
-                  renderedHabituated.set(name, `<behavior-mirror>\n${content}\n</behavior-mirror>`)
-                } else if (name === 'strategyShift') {
-                  renderedHabituated.set(name, `<strategy-shift>\n${content}\n</strategy-shift>`)
-                } else if (name === 'routingReason') {
-                  renderedHabituated.set(name, `<routing-reason>\n${content}\n</routing-reason>`)
                 } else if (name === 'playbookLessons') {
                   renderedHabituated.set(name, `<historical-lessons>\n${content.split('|').map((l: string) => `- ${l}`).join('\n')}\n</historical-lessons>`)
                 }
@@ -199,9 +190,6 @@ export class PromptEngine {
               const activeCtx = { ...dynamicCtx }
               const habituated = this.tracker.getHabituated()
               if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
-              if (habituated.has('behaviorMirror')) activeCtx.behaviorMirror = undefined
-              if (habituated.has('strategyShift')) activeCtx.strategyShift = undefined
-              if (habituated.has('routingReason')) activeCtx.routingReason = undefined
               if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
 
               const activeAppendix = buildDynamicAppendix(activeCtx)

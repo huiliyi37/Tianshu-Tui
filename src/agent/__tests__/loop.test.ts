@@ -807,12 +807,13 @@ describe('AgentLoop — active claims projection', () => {
     const activeClaims = claimStore.listActiveClaims()
     assert.equal(activeClaims.length, 1)
 
-    // Verify the request context contains active claims
+    // Harness-only: activeClaims are no longer rendered into the LLM prompt (direction A)
     const streamMock = client.stream as unknown as ReturnType<typeof mock.fn>
     const callArgs = streamMock.mock.calls[0]!.arguments[0] as { messages: Array<{ role: string; content: string }> }
     const requestText = callArgs.messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n')
 
-    assert.match(requestText, /<active-claims count="1">/)
+    assert.doesNotMatch(requestText, /<active-claims/)
+    // Claim text still appears in the original user message (not the claims XML)
     assert.match(requestText, /always run tests before saying done/)
   })
 

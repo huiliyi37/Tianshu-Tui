@@ -80,14 +80,16 @@ describe('ContextInjectionController', () => {
       controller.refreshActiveClaims()
       const request = engine.buildRequest([{ role: 'user', content: 'next' }])
       const joined = request.messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n')
-      assert.match(joined, /<active-claims count="1">/)
+      // Harness-only: activeClaims are no longer rendered into the LLM prompt (direction A)
+      assert.doesNotMatch(joined, /<active-claims/)
+      // Consumers are still recorded on the claim object regardless of prompt rendering
       assert.ok(claimStore.listClaims().some(c => c.consumers.some(consumer => consumer.kind === 'prompt')))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('projects repair and cerebellar hints through prompt engine', () => {
+  it('projects repair hint through prompt engine (cerebellar hint is harness-only)', () => {
     const engine = makeEngine()
     const controller = makeController({ engine, repairHint: '<repair-hint tool="read_file">check path</repair-hint>' })
 
@@ -96,11 +98,9 @@ describe('ContextInjectionController', () => {
 
     const request = engine.buildRequest([{ role: 'user', content: 'next' }])
     const joined = request.messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n')
+    // repairHint IS still rendered in the LLM prompt
     assert.match(joined, /&lt;repair-hint tool=&quot;read_file&quot;&gt;check path&lt;\/repair-hint&gt;/)
-    assert.match(joined, /Prediction error rate elevated \(hint\)/)
-
-    controller.clearCerebellarHint()
-    const cleared = engine.buildRequest([{ role: 'user', content: 'next' }]).messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n')
-    assert.doesNotMatch(cleared, /Prediction error rate elevated/)
+    // cerebellarHint is harness-only — NOT rendered in the LLM prompt (direction A)
+    assert.doesNotMatch(joined, /Prediction error rate elevated/)
   })
 })
