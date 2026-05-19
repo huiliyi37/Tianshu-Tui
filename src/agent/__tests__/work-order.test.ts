@@ -217,4 +217,42 @@ describe('work-order contract', () => {
     const result = buildBlockedWorkerResult(order, 'Parse error')
     assert.equal(result.evidenceStatus, 'blocked')
   })
+
+  it('creates work order without domain (backward compatible)', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_nodomain',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Scan codebase.',
+      scope: { files: ['src/main.tsx'] },
+    })
+    assert.equal(order.domain, undefined)
+  })
+
+  it('creates work order with domain field', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_domain',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Analyze TUI components.',
+      scope: { files: ['src/tui/app.tsx'] },
+      domain: 'frontend',
+    })
+    assert.equal(order.domain, 'frontend')
+  })
+
+  it('creates write work order with domain field', () => {
+    const order = createWriteWorkOrder({
+      id: 'wo_write_domain',
+      parentTurnId: 'turn_1',
+      kind: 'patch_proposal',
+      objective: 'Fix prompt engine.',
+      scope: { files: ['src/prompt/engine.ts'] },
+      domain: 'prompt',
+    })
+    assert.equal(order.domain, 'prompt')
+    assert.equal(order.profile, 'patcher')
+  })
 })

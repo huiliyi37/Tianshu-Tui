@@ -7,6 +7,18 @@ export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'ins
 export const WRITE_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
 export const PHASE1_DISALLOWED_WORKER_TOOLS = ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'] as const
 
+/** 领域轴 — 代码区域，团队协同的天然边界 */
+export const domainAreaSchema = z.enum([
+  'frontend',   // src/tui/
+  'backend',    // src/agent/, src/api/, src/compact/, src/context/
+  'prompt',     // src/prompt/
+  'tools',      // src/tools/
+  'config',     // src/config/
+  'docs',       // docs/
+  'tests',      // *.test.ts, *.spec.ts
+])
+export type DomainArea = z.infer<typeof domainAreaSchema>
+
 export const workOrderKindSchema = z.enum([
   'code_search',
   'doc_research',
@@ -71,6 +83,7 @@ export const workOrderSchema = z.object({
   dependencies: z.array(z.string()),
   aggregationPolicy: aggregationPolicySchema,
   budget: workerBudgetSchema,
+  domain: domainAreaSchema.optional(),
 })
 
 export type WorkOrder = z.infer<typeof workOrderSchema>
@@ -143,6 +156,7 @@ export interface CreateReadOnlyWorkOrderInput {
   dependencies?: string[]
   aggregationPolicy?: AggregationPolicy
   budget?: Partial<WorkerBudget>
+  domain?: DomainArea
 }
 
 export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): WorkOrder {
@@ -170,6 +184,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
       timeoutMs: input.budget?.timeoutMs ?? 120_000,
       maxRetries: input.budget?.maxRetries ?? 2,
     },
+    domain: input.domain,
   })
 }
 
@@ -202,6 +217,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
       timeoutMs: input.budget?.timeoutMs ?? 180_000,
       maxRetries: input.budget?.maxRetries ?? 1,
     },
+    domain: input.domain,
   })
 }
 
