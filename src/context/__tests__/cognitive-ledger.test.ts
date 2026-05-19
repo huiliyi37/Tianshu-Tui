@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildCognitivePromptProjection,
+  buildVerificationGapProjection,
   createCognitiveLedger,
   getCognitivePhaseSnapshot,
 } from '../cognitive-ledger.js'
@@ -9,14 +10,14 @@ import { advanceContractStatus, extractTaskContract, type TaskContract } from '.
 import type { EvidenceState } from '../../agent/evidence.js'
 import type { TraceStore } from '../../agent/trace-store.js'
 
-function makeEvidence(): EvidenceState {
+function makeEvidence(overrides: Partial<EvidenceState> = {}): EvidenceState {
   return {
-    filesRead: new Set(['src/auth.ts', 'src/types.ts']),
-    filesModified: new Set(['src/auth.ts']),
-    verifications: [],
-    deliveryStatus: 'unverified',
-    impactedFiles: new Set(),
-    impactedTests: new Set(),
+    filesRead: overrides.filesRead ?? new Set(['src/auth.ts', 'src/types.ts']),
+    filesModified: overrides.filesModified ?? new Set(['src/auth.ts']),
+    verifications: overrides.verifications ?? [],
+    deliveryStatus: overrides.deliveryStatus ?? 'unverified',
+    impactedFiles: overrides.impactedFiles ?? new Set(),
+    impactedTests: overrides.impactedTests ?? new Set(),
   }
 }
 
@@ -36,16 +37,19 @@ describe('CognitiveLedger read model', () => {
     assert.ok(projection.includes('task-contract'))
   })
 
-  it('buildCognitivePromptProjection is short for simple contract', () => {
+  it('buildCognitivePromptProjection is short for simple contract with verification gap', () => {
     const ledger = createCognitiveLedger({ contract: makeContract(), evidence: makeEvidence(), trace: makeTrace(), turn: 5 })
     const projection = buildCognitivePromptProjection(ledger)
-    assert.ok(projection.length < 600, `Projection too long: ${projection.length}`)
+    assert.ok(projection.length < 800, `Projection too long: ${projection.length}`)
+    assert.match(projection, /<verification-gap/)
   })
 
-  it('omits non-actionable contracts', () => {
+  it('omits non-actionable contract while preserving other cognitive projections', () => {
     const contract = extractTaskContract('hello')
     const ledger = createCognitiveLedger({ contract, evidence: makeEvidence(), trace: makeTrace(), turn: 1 })
-    assert.equal(buildCognitivePromptProjection(ledger), '')
+    const projection = buildCognitivePromptProjection(ledger)
+    assert.doesNotMatch(projection, /<task-contract/)
+    assert.match(projection, /<verification-gap/)
   })
 
   it('keeps actionable exploring contracts as anti-drift anchors', () => {
@@ -70,10 +74,56 @@ describe('CognitiveLedger read model', () => {
     assert.equal(getCognitivePhaseSnapshot(ledger).doomLevel, 'blocked')
   })
 
-  it('works without contract', () => {
+  it('works without contract while still projecting verification gap when needed', () => {
     const ledger = createCognitiveLedger({ evidence: makeEvidence(), trace: makeTrace(), turn: 0 })
     const snapshot = getCognitivePhaseSnapshot(ledger)
     assert.equal(snapshot.contractStatus, undefined)
-    assert.equal(buildCognitivePromptProjection(ledger), '')
+    assert.match(buildCognitivePromptProjection(ledger), /<verification-gap/)
+  })
+})
+
+describe('verification gap projection', () => {
+  it('omits gap when no files were modified', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence({ filesModified: new Set() }),
+      trace: makeTrace(),
+      turn: 1,
+    })
+    assert.equal(buildVerificationGapProjection(ledger), '')
+  })
+
+  it('projects compact gap when files are modified but unverified', () => {
+    const ledger = createCognitiveLedger({ evidence: makeEvidence(), trace: makeTrace(), turn: 1 })
+    const gap = buildVerificationGapProjection(ledger)
+    assert.match(gap, /<verification-gap status="unverified" modified="1">/)
+    assert.match(gap, /Run relevant verification before claiming done/)
+    assert.ok(gap.length < 160, `Gap projection too long: ${gap.length}`)
+  })
+
+  it('omits gap when modified files are verified', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence({ deliveryStatus: 'verified' }),
+      trace: makeTrace(),
+      turn: 1,
+    })
+    assert.equal(buildVerificationGapProjection(ledger), '')
+  })
+
+  it('omits gap when verification failed because repairHint handles that path', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence({ deliveryStatus: 'failed' }),
+      trace: makeTrace(),
+      turn: 1,
+    })
+    assert.equal(buildVerificationGapProjection(ledger), '')
+  })
+
+  it('omits gap when verification is blocked', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence({ deliveryStatus: 'blocked' }),
+      trace: makeTrace(),
+      turn: 1,
+    })
+    assert.equal(buildVerificationGapProjection(ledger), '')
   })
 })

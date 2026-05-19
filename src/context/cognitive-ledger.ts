@@ -31,8 +31,18 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
   return { ...input }
 }
 
+export function buildVerificationGapProjection(ledger: CognitiveLedger): string {
+  const modifiedCount = ledger.evidence.filesModified.size
+  if (modifiedCount === 0) return ''
+  if (ledger.evidence.deliveryStatus !== 'unverified') return ''
+  return `<verification-gap status="unverified" modified="${modifiedCount}">Run relevant verification before claiming done.</verification-gap>`
+}
+
 export function buildCognitivePromptProjection(ledger: CognitiveLedger): string {
-  return ledger.contract ? renderContractProjection(ledger.contract) : ''
+  return [
+    ledger.contract ? renderContractProjection(ledger.contract) : '',
+    buildVerificationGapProjection(ledger),
+  ].filter(Boolean).join('\n')
 }
 
 export function getCognitivePhaseSnapshot(ledger: CognitiveLedger): CognitivePhaseSnapshot {

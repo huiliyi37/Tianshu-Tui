@@ -1,10 +1,12 @@
-# 紫微天文台 + 天枢文武双身 实施计划
+# 天枢星君 · 国风双身 + 五色星辰 实施计划
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** 实现 Observatory 主题色板 + 天枢文武双身 Avatar + 侧边栏星图面板，让星图与会话始终联动可见。
+**目标：** 实现天枢星君国风 Avatar（印章冠 + kaomoji 面 + 中国礼仪手势）+ 五色星辰色板 + 侧边栏星图面板。
 
-**架构：** v0.1 先建立 Avatar 核心（表情系统 + 文武帧 + 渲染器），纯函数无 UI 依赖。v0.2 建立 Observatory 主题色板 + 侧边栏面板 + app.tsx 侧边栏布局。每个任务独立可测试。
+**设计哲学：** 东方美学不是封闭的审美部落，而是开放的文化语言。三层可读性：表层 kaomoji（全球通用）→ 中层印章冠（东亚文化圈）→ 深层星君叙事（中国文化爱好者）。
+
+**架构：** v0.1 建立星君核心（表情系统 + 帧模板 + 渲染器），纯函数无 UI 依赖。v0.2 建立五色星辰色板 + 侧边栏面板 + app.tsx 侧边栏布局。每个任务独立可测试。
 
 **技术栈：** TypeScript strict, node:test + node:assert/strict, ESM (.js extension), Ink 6, chalk
 
@@ -15,15 +17,15 @@
 | 文件 | 职责 |
 |------|------|
 | 新建 `src/tui/avatar/types.ts` | AvatarFrame, AvatarMode, AvatarMood, AvatarContext 类型 |
-| 新建 `src/tui/avatar/expressions.ts` | 萌三角表情系统：getFace(), phaseToMood(), phaseToMode() |
-| 新建 `src/tui/avatar/frames.ts` | 文生/武生帧模板 + buildFrame() 纯函数 |
-| 新建 `src/tui/avatar/avatar-renderer.ts` | renderAvatar() — 组合表情+帧+着色 |
+| 新建 `src/tui/avatar/expressions.ts` | 星君表情系统：getFace(), phaseToMood(), phaseToMode() |
+| 新建 `src/tui/avatar/frames.ts` | 天玑星君/玉衡星君帧模板 + buildFrame() 纯函数 |
+| 新建 `src/tui/avatar/avatar-renderer.ts` | renderAvatar() — 组合印章冠+表情+帧+着色 |
 | 新建 `src/tui/avatar/__tests__/expressions.test.ts` | 表情系统测试 |
 | 新建 `src/tui/avatar/__tests__/frames.test.ts` | 帧模板测试 |
 | 新建 `src/tui/avatar/__tests__/avatar-renderer.test.ts` | 渲染器集成测试 |
-| 修改 `src/tui/theme.ts` | 新增 `'observatory'` 主题色板 |
-| 新建 `src/tui/star-panel-colors.ts` | 星图面板专用色常量 |
-| 新建 `src/tui/star-panel.tsx` | 侧边星图面板 React 组件 (Avatar + 七星 + 感官 + 电报) |
+| 修改 `src/tui/theme.ts` | 新增 `'observatory'` 五色星辰主题色板 |
+| 新建 `src/tui/star-panel-colors.ts` | 星图面板专用色常量（五色星辰） |
+| 新建 `src/tui/star-panel.tsx` | 侧边星图面板 React 组件 (星君 + 七星 + 感官 + 电报) |
 | 修改 `src/tui/constellation.ts` | 新增 renderConstellationVertical() |
 | 修改 `src/tui/app.tsx` | side-by-side 布局 + 宽度检测 + 自动展开 |
 | 修改 `src/tui/__tests__/theme.test.ts` | observatory 主题测试 |
@@ -31,7 +33,7 @@
 
 ---
 
-### 任务 1：Avatar 类型定义
+### 任务 1：星君类型定义
 
 **文件：**
 - 新建：`src/tui/avatar/types.ts`
@@ -45,32 +47,48 @@ import type { AlchemyStage } from '../alchemy-bar.js'
 
 export type DomainId = 'pojun' | 'tianfu' | 'tianliang' | null
 
+/** 文星模式：天玑星君（文星）或玉衡星君（武曲） */
 export type AvatarMode = 'wenxing' | 'wuxing'
 
+/** 星君情绪状态 */
 export type AvatarMood =
-  | 'calm'
-  | 'searching'
-  | 'focused'
-  | 'satisfied'
-  | 'content'
-  | 'tense'
-  | 'serious'
-  | 'confused'
-  | 'surprised'
-  | 'greeting'
+  | 'calm'       // 平静 — 天玑星君观局
+  | 'searching'  // 搜索 — 天玑星君寻迹
+  | 'focused'    // 专注 — 玉衡星君铸形
+  | 'satisfied'  // 满意 — 天玑星君定标
+  | 'content'    // 欣慰 — 天玑星君归航
+  | 'tense'      // 紧张 — 玉衡星君试锋
+  | 'serious'    // 严肃 — 天枢再临
+  | 'confused'   // 困惑 — 卡住
+  | 'surprised'  // 惊讶 — 测试失败
+  | 'greeting'   // 致意 — 开场
 
+/** 印章冠：CJK 字符 + 边框 */
+export interface SealCrown {
+  top: string      // '╭文╮'
+  middle: string   // '│星│'
+  bottom: string   // '╰┬╯'
+}
+
+/** kaomoji 面部表达（全球通用） */
 export interface FaceExpression {
   leftEye: string
   mouth: string
   rightEye: string
 }
 
+/** 完整星君帧 */
 export interface AvatarFrame {
-  lines: string[]
+  crown: SealCrown        // 印章冠
+  face: FaceExpression    // kaomoji 面部
+  gesture: string         // 中国礼仪手势（拱手/抱拳）
+  status: string          // 状态文字
+  lines: string[]         // 渲染后的完整帧（每行一个字符串）
   width: number
   height: number
 }
 
+/** 星君渲染上下文 */
 export interface AvatarContext {
   phase: StarPhase
   alchemy: AlchemyStage
@@ -93,7 +111,7 @@ export interface AvatarContext {
 
 ```bash
 git add src/tui/avatar/types.ts
-git commit -m "feat(tui): add avatar type definitions — AvatarMode, AvatarMood, AvatarContext"
+git commit -m "feat(tui): add star-lord avatar type definitions — SealCrown, AvatarMode, AvatarMood"
 ```
 
 ---

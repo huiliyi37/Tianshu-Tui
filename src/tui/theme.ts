@@ -14,7 +14,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory'
 
 interface ColorSet {
   primary: string
@@ -64,6 +64,26 @@ const CYBERPUNK_FALLBACK: ColorSet = {
   dim: 'gray',
 }
 
+// Observatory theme — 五色星辰 (Five-Color Star Palette)
+// 基于中国传统五色体系，北斗七星在北方 → 水 → 玄色
+const OBSERVATORY_TRUECOLOR: ColorSet = {
+  primary: '#4f46e5',   // 靛蓝 (indigo) — 天玑星君主色，青出于蓝
+  secondary: '#a78bfa', // 星云紫 — 星云/辅助色
+  success: '#34d399',   // 验证翠 — 测试通过/归航
+  warning: '#f59e0b',   // 星金黄 — 活跃星/炼金高阶
+  error: '#f87171',     // 警报珊 — 错误/高风险
+  dim: '#64748b',       // 远星灰 — 非活跃/次要信息
+}
+
+const OBSERVATORY_FALLBACK: ColorSet = {
+  primary: 'blue',
+  secondary: 'magenta',
+  success: 'green',
+  warning: 'yellow',
+  error: 'red',
+  dim: 'gray',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -103,6 +123,10 @@ const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetTheme }>
   cyberpunk: {
     truecolor: buildTheme(CYBERPUNK_TRUECOLOR),
     fallback: buildTheme(CYBERPUNK_FALLBACK),
+  },
+  observatory: {
+    truecolor: buildTheme(OBSERVATORY_TRUECOLOR),
+    fallback: buildTheme(OBSERVATORY_FALLBACK),
   },
 }
 

@@ -1,3 +1,10 @@
+### 2026-05-19 — session edfd1210
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-20-starspine-phase2a-verification-gap.md
+**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×6, diff×6, todo×4, bash×4, git×2, read_file×2, glob×1, write_file×1
+
 ### 2026-05-19 — session dc47b5e7
 
 **Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/output-store.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/playbook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/volatile.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/dead-end-rules.ts
