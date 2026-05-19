@@ -660,6 +660,22 @@ sqlite3 ~/.rivet/state/registry.db "SELECT id, pid, cwd FROM sessions"
 
 ---
 
+## 设计要求覆盖矩阵（追溯补充）
+
+> 2026-05-19 补充：基于 workflow iteration 教训，回查设计文档成功标准并映射到计划任务。
+
+| 设计文档要求 | 对应计划任务 | 状态 | 备注 |
+|-------------|-------------|------|------|
+| 实现 ClaimRegistry 类（acquire/release/check/reap_stale） | Task 3 | ✅ | 已实现，包含在 SessionRegistry 中 |
+| **现有 DelegationCoordinator 的 hands worker 使用 claim 检查** | ~~缺失~~ → 补充 commit a5afe29 | ✅ | 原计划遗漏，已追溯补充 |
+| 允许多 Rivet 实例同时运行（各自注册，claim 互斥） | Task 4 | ✅ | main.tsx 已替换 LWTGuard |
+| SQLite WAL 模式 | Task 1 + Task 2 | ✅ | better-sqlite3 + WAL pragma |
+| 崩溃检测（PID 探测） | Task 2 | ✅ | detectCrashedSessions + reap |
+
+**教训**：原计划覆盖了 4/5 条设计要求，遗漏了"hands worker 使用 claim 棚查"这条。原因是 Worker 生成计划时没有逐条对照设计文档的成功标准。后续计划文档必须包含此矩阵。
+
+---
+
 ## 注意事项
 
 - `LWTGuard` 类和测试**不删除**——保持向后兼容，避免破坏其他可能的引用
