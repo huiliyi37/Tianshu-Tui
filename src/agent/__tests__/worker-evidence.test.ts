@@ -69,3 +69,43 @@ test('does not duplicate an existing risk', () => {
 
   assert.equal(checked.risks.filter(r => r.includes('unverified')).length, 1)
 })
+
+test('read-only profile skips verification gate when changedFiles is empty', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    examinedFiles: ['src/auth.ts'],
+    evidenceStatus: 'unverified',
+  }), 'code_scout')
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('read-only profile skips verification gate for reviewer', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    examinedFiles: ['src/config.ts'],
+    evidenceStatus: 'unverified',
+  }), 'reviewer')
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('write profile does not skip verification gate', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'unverified',
+  }), 'patcher')
+
+  assert.equal(checked.status, 'blocked')
+})
+
+test('verifier profile does not skip verification gate', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'unverified',
+  }), 'verifier')
+
+  assert.equal(checked.status, 'blocked')
+})
