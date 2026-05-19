@@ -97,6 +97,9 @@ export class PromptEngine {
   private cerebellarHint?: string | null
   private decisions?: string[]
   private activeDomain?: VolatileContext['activeDomain']
+  private activeClaims?: VolatileContext['activeClaims']
+  private playbookLessons?: VolatileContext['playbookLessons']
+  private sessionMemoryOverride?: string
   private contextLayerReportData: ContextLayerReport
 
   constructor(config: PromptEngineConfig) {
@@ -154,7 +157,7 @@ export class PromptEngine {
           // Tool-call turns (same user message, more tool results) reuse the cache.
           if (userContent !== this.cachedFreshForUser) {
             this.cachedFreshForUser = userContent
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain, activeClaims: this.activeClaims ?? this.config.volatileCtx.activeClaims, playbookLessons: this.playbookLessons ?? this.config.volatileCtx.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -243,23 +246,24 @@ export class PromptEngine {
   }
 
   updateSessionMemory(block: string): void {
-    this.config.volatileCtx.sessionMemoryBlock = block
+    this.sessionMemoryOverride = block
     this.rebuildFrozenBase()
   }
 
   private rebuildFrozenBase(): void {
-    this.frozenBase = buildStableVolatileBlock(this.config.volatileCtx)
+    const ctx = { ...this.config.volatileCtx, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock }
+    this.frozenBase = buildStableVolatileBlock(ctx)
     this.volatileBlock = this.consolidatedBlock
       ? this.frozenBase + '\n' + this.consolidatedBlock
       : this.frozenBase
   }
 
   updateActiveClaims(claims: ContextClaim[]): void {
-    this.config.volatileCtx.activeClaims = claims
+    this.activeClaims = claims
   }
 
   updatePlaybookLessons(lessons: PlaybookBullet[]): void {
-    this.config.volatileCtx.playbookLessons = lessons
+    this.playbookLessons = lessons
   }
 
   setTaskProgress(state: TaskState): void {
@@ -311,6 +315,9 @@ export class PromptEngine {
       cerebellarHint: this.cerebellarHint,
       decisions: this.decisions,
       activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain,
+      activeClaims: this.activeClaims ?? this.config.volatileCtx.activeClaims,
+      playbookLessons: this.playbookLessons ?? this.config.volatileCtx.playbookLessons,
+      sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock,
     })
     return analyzeVolatilePayload(latest)
   }
