@@ -8,8 +8,8 @@ import { runHandsSession, type HandsSessionConfig } from '../hands-session.js'
 import { WorktreeCoordinator } from '../worktree-coordinator.js'
 import { createWriteWorkOrder, parseWorkerResult, type WorkOrder } from '../work-order.js'
 
-function initGitRepo(dir: string): void {
-  execSync('git init -b main', { cwd: dir, stdio: 'pipe' })
+function initGitRepo(dir: string, branch = 'main'): void {
+  execSync(`git init -b ${branch}`, { cwd: dir, stdio: 'pipe' })
   execSync('git config user.email "test@test"', { cwd: dir, stdio: 'pipe' })
   execSync('git config user.name "Test"', { cwd: dir, stdio: 'pipe' })
   writeFileSync(join(dir, 'README.md'), '# test\n')
@@ -85,6 +85,47 @@ describe('runHandsSession', () => {
 
     // Worktree should be cleaned up
     assert.equal(wtCoordinator.getActiveCount(), 0)
+  })
+
+  it('diffs worker changes against the current feature branch when baseRef is not provided', async () => {
+    const featureBaseDir = mkdtempSync(join(tmpdir(), 'rivet-hands-feature-base-'))
+    initGitRepo(featureBaseDir, 'feature/base')
+    const featureCoordinator = new WorktreeCoordinator(featureBaseDir)
+    try {
+      const order = testOrder({ id: 'wo-feature-base' })
+      const config: HandsSessionConfig = {
+        order,
+        wtCoordinator: featureCoordinator,
+        cwd: featureBaseDir,
+        maxTurns: 2,
+        contextWindow: 128_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        runAgent: async (_prompt, _callbacks, workerCwd) => {
+          mkdirSync(join(workerCwd, 'src'), { recursive: true })
+          writeFileSync(join(workerCwd, 'src', 'output.ts'), 'export const fromFeature = true\n')
+          execSync('git add -A && git commit -m "worker output"', { cwd: workerCwd, stdio: 'pipe' })
+          return JSON.stringify({
+            workOrderId: order.id,
+            status: 'passed',
+            summary: 'Created src/output.ts',
+            findings: [],
+            artifacts: [],
+            changedFiles: ['src/output.ts'],
+            risks: [],
+            nextActions: [],
+            evidenceStatus: 'verified',
+          })
+        },
+      }
+
+      const run = await runHandsSession(config)
+      const diffArtifact = run.result.artifacts.find(a => a.kind === 'diff')
+      assert.ok(diffArtifact, 'must collect diff against feature/base instead of hard-coded main')
+      assert.ok(diffArtifact!.content.includes('fromFeature'), diffArtifact!.content)
+    } finally {
+      featureCoordinator.cleanupAll()
+      rmSync(featureBaseDir, { recursive: true, force: true })
+    }
   })
 
   it('cleans up worktree even on worker failure', async () => {

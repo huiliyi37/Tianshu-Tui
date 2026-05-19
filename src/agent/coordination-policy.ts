@@ -31,10 +31,13 @@ export function classifyProfile(profile: WorkerProfile): AgentRole {
   }
 }
 
+const BRAIN_TOOL_SET = new Set<string>(BRAIN_TOOLS)
+const HANDS_TOOL_SET = new Set<string>(HANDS_ALL_TOOLS)
+
 export function isBrainTool(name: string): boolean {
-  return (BRAIN_TOOLS as unknown as readonly string[]).includes(name)
+  return BRAIN_TOOL_SET.has(name)
 }
 
 export function isHandsTool(name: string): boolean {
-  return (HANDS_ALL_TOOLS as unknown as readonly string[]).includes(name)
+  return HANDS_TOOL_SET.has(name)
 }

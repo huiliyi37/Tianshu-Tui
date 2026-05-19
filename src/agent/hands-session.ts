@@ -1,5 +1,6 @@
 import type { CompactionConfig } from '../compact/constants.js'
 import { WorktreeCoordinator } from './worktree-coordinator.js'
+import { getCurrentGitRef } from './worktree.js'
 import { collectDiff, formatDiffArtifact } from './diff-collector.js'
 import {
   buildBlockedWorkerResult,
@@ -19,6 +20,8 @@ export interface HandsSessionConfig {
   contextWindow: number
   compact: CompactionConfig
   activeClaims?: import('../context/claims.js').ContextClaim[]
+  /** Base git ref to diff worker changes against. Defaults to current branch/HEAD of cwd. */
+  baseRef?: string
   /**
    * Run the worker agent in the worktree.
    * Receives the worker prompt and AgentCallbacks; returns the full text output
@@ -67,7 +70,8 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
       }
     }
 
-    const diff = collectDiff(config.cwd, wt.path, 'main')
+    const baseRef = config.baseRef ?? getCurrentGitRef(config.cwd)
+    const diff = baseRef ? collectDiff(config.cwd, wt.path, baseRef) : ''
 
     let result: WorkerResult
     try {

@@ -96,6 +96,16 @@ export function removeWorktree(cwd: string, wtPath: string, branch?: string): vo
   if (branch) git(cwd, ['branch', '-D', branch])
 }
 
+export function getCurrentGitRef(cwd: string): string | undefined {
+  const branch = git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const branchName = branch.stdout.trim()
+  if (branch.ok && branchName && branchName !== 'HEAD') return branchName
+
+  const commit = git(cwd, ['rev-parse', 'HEAD'])
+  const commitHash = commit.stdout.trim()
+  return commit.ok && commitHash ? commitHash : undefined
+}
+
 export function listWorktrees(cwd: string): WorktreeEntry[] {
   const output = git(cwd, ['worktree', 'list', '--porcelain'])
   return output.ok ? parseWorktreeList(output.stdout) : []
