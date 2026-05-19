@@ -49,12 +49,12 @@ function buildWriteResultShape(): string {
 }`
 }
 
-export function buildWorkerPrompt(order: WorkOrder): string {
+export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): string {
   const hasWriteTools = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
   const capability = hasWriteTools ? 'write-capable' : 'read-only'
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
 
-  return [
+  const parts = [
     `You are a headless ${capability} Rivet worker.`,
     `WorkOrder ID: ${order.id}`,
     `Kind: ${order.kind}`,
@@ -70,7 +70,13 @@ export function buildWorkerPrompt(order: WorkOrder): string {
     'Return exactly one JSON object and no prose outside the object.',
     'The JSON object must match this shape:',
     resultShape,
-  ].join('\n')
+  ]
+
+  if (authoritySuffix) {
+    parts.push('', '## 权域指令', '', authoritySuffix)
+  }
+
+  return parts.join('\n')
 }
 
 export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, parseError: string): string {
