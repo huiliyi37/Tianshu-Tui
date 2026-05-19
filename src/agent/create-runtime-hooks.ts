@@ -9,6 +9,7 @@ import { createPlaybookReflectHook } from './hooks/playbook-reflect-hook.js'
 import { createTelemetryFlushHook } from './hooks/telemetry-flush-hook.js'
 import { createDreamHook } from './hooks/dream-hook.js'
 import { createCourageHook } from './hooks/courage-hook.js'
+import { createRadioHook } from './hooks/radio-hook.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput } from './retrospect.js'
@@ -57,6 +58,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     createVigorPostToolHook({
       getPredictionAccumulator: deps.getPredictionAccumulator,
     }),
+    createRadioHook(),
   ]
 
   if (deps.playbookStore && deps.buildRetrospectInput && deps.getDoomLoopLevel) {
