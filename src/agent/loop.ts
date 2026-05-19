@@ -62,6 +62,18 @@ import type { PlaybookStore } from './playbook-store.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 
+/** Map StarPhase values to PromptEngine phaseClass strings. */
+const PHASE_CLASS_MAP: Record<string, string> = {
+  'tianshu-planning': 'plan',
+  'tianxuan-locating': 'explore',
+  'tianji-decomposing': 'plan',
+  'tianquan-contracting': 'plan',
+  'yuheng-implementing': 'execute',
+  'kaiyang-testing': 'verify',
+  'yaoguang-delivering': 'deliver',
+  'tianshu-encore': 'plan',
+}
+
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
 function mapQueriedPheromones(results: PheromoneQueryResult[]): Pheromone[] {
@@ -620,6 +632,10 @@ export class AgentLoop {
         this.sensoriumSnapshots = this.perception.getSnapshots()
         const currentSensorium: Sensorium = perceptionResult.sensorium
         const currentStrategy: StrategyProfile = perceptionResult.strategy
+
+        // Wire StarPhase → phaseClass for field habituation modulation
+        const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
+        this.config.promptEngine.setPhaseHint(phaseClass)
 
         const intentResult = await this.intent.evaluate({
           strategy: currentStrategy,
