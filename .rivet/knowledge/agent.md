@@ -1,3 +1,11 @@
+### 2026-05-19 — session ea5cf850
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-runtime-hooks.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts
+**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×7, bash×4, read_file×3, grep×1, git×1, todo×1
+- Decision: the `name` field is '破军', '天府', or '天梁'
+
 ## Workflow Rules (2026-05-19 迭代)
 
 - **计划-设计对齐**：执行计划文档前，必须回查设计文档的成功标准。集成验证不只做 typecheck + tests，还要逐条验证设计要求是否被满足。

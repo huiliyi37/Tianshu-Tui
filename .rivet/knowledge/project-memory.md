@@ -1,3 +1,11 @@
+### 2026-05-19 — session ea5cf850
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-runtime-hooks.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts
+**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×7, bash×4, read_file×3, grep×1, git×1, todo×1
+- Decision: the `name` field is '破军', '天府', or '天梁'
+
 ### 2026-05-19 — session dc47b5e7
 
 **Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/output-store.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/playbook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/volatile.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/dead-end-rules.ts
@@ -43,10 +51,3 @@ Let me build first
 **Tests**: ⚠️ unverified
 **Tools used**: edit_file×15, bash×11, read_file×10, todo×5, grep×5, git×3, diff×3
 - Decision: make sure to include a test using an engine variable to capture the request
-
-### 2026-05-18 — session 0bba0331
-
-**Modified** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/payload-diagnostic.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/payload-diagnostic.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/slash-commands.test.ts
-**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/slash-commands.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/__tests__/volatile.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×11, read_file×6, diff×6, todo×5, bash×4, git×2, write_file×2, grep×1
