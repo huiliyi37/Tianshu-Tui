@@ -3,6 +3,9 @@ import { Box, Text, useInput, Static } from 'ink'
 import gradient from 'gradient-string'
 import { StatusBar } from './status-bar.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
+import { StarmapView } from './starmap-view.js'
+import { ChronicleView } from './chronicle-view.js'
+import { Chronicle } from '../agent/chronicle.js'
 import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
 import { ThinkingCollapser } from './thinking.js'
@@ -225,6 +228,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   })
   const [cockpitPanel, setCockpitPanel] = useState<Panel | null>(null)
   const cockpitPanelRef = useRef<Panel | null>(null)
+  const chronicleRef = useRef(new Chronicle())
+  const [starbridgeMode, setStarbridgeMode] = useState<'conversation' | 'starmap' | 'chronicle'>('conversation')
   const [interviewState, setInterviewState] = useState<InterviewState | null>(null)
   const [clarityHistory, setClarityHistory] = useState<number[]>([])
   useEffect(() => { cockpitPanelRef.current = cockpitPanel }, [cockpitPanel])
@@ -437,8 +442,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       return
     }
 
-    // Escape — close cockpit or double-press to interrupt streaming
+    // Escape — close starbridge/cockpit or double-press to interrupt streaming
     if (_key.escape) {
+      if (starbridgeMode !== 'conversation') {
+        setStarbridgeMode('conversation')
+        return
+      }
       if (cockpitPanel) {
         setCockpitPanel(null)
         return
@@ -457,6 +466,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         return
       }
       return
+    }
+    // Starbridge mode switching (during streaming, no pending prompts)
+    if (isStreaming && !pendingApproval && !pendingIntent) {
+      if (_input === '2') { setStarbridgeMode(prev => prev === 'starmap' ? 'conversation' : 'starmap'); setCockpitPanel(null); return }
+      if (_input === '3') { setStarbridgeMode(prev => prev === 'chronicle' ? 'conversation' : 'chronicle'); setCockpitPanel(null); return }
     }
     if (sessionPrompt === 'waiting') {
       const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
@@ -1003,7 +1017,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       },
       onPhaseChange: (phase, detail) => {
         if (phase === 'tianshu-radio' && detail?.reason) {
-          pushStatic(createLogEntry({ type: 'system', content: detail.reason }))
+          chronicleRef.current.addRadio(detail.reason, turnCountRef.current)
         }
         const knownPhases: readonly string[] = [
           'tianshu-planning', 'tianxuan-locating', 'tianji-decomposing',
@@ -1162,6 +1176,21 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           reasoningEffort={reasoningEffort}
         />
         {isStreaming && !cockpitPanel && <SummaryBar state={summaryState} />}
+        {starbridgeMode === 'starmap' && (
+          <StarmapView
+            activePhase={(summaryState.starPhaseLabel ? Object.entries(PHASE_SHORT_LABELS).find(([, v]) => v === summaryState.starPhaseLabel)?.[0] as StarPhase : 'tianshu-planning') ?? 'tianshu-planning'}
+            turnCount={summaryState.turnCount ?? 0}
+            maxTurns={summaryState.maxTurns ?? 50}
+            elapsedMs={summaryState.elapsedMs}
+            recentRadio={chronicleRef.current.getRecentRadio(5)}
+          />
+        )}
+        {starbridgeMode === 'chronicle' && (
+          <ChronicleView
+            segments={chronicleRef.current.getPhaseSegments()}
+            elapsedMs={summaryState.elapsedMs}
+          />
+        )}
         {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">

@@ -22,7 +22,7 @@ export interface StarmapViewProps {
   turnCount: number
   maxTurns: number
   elapsedMs: number
-  recentRadio: ChronicleEntry[]
+  recentRadio: readonly ChronicleEntry[]
 }
 
 // ─── Gauge Helper ────────────────────────────────────────────────────
