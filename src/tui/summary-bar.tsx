@@ -2,6 +2,7 @@ import { Box, Text } from 'ink'
 import { memo, useState, useEffect } from 'react'
 import type { Phase, LastAction } from './phase-tracker.js'
 import { getTheme } from './theme.js'
+import { alchemyBar, ALCHEMY_COLORS, alchemyStage } from './alchemy-bar.js'
 
 export interface SummaryState {
   task: string
@@ -20,6 +21,11 @@ export interface SummaryState {
   /** Current turn / max turns */
   turnCount?: number
   maxTurns?: number
+  // 天枢之眼 — star phase + alchemy
+  starPhaseGlyph?: string        // e.g. "🔨"
+  starPhaseLabel?: string        // e.g. "铸形" (short Chinese label)
+  alchemyConfidence?: number     // 0-1, maps to alchemy 4-stage bar
+  recentToolSummary?: string[]   // last 3 tool labels, e.g. ["write auth.ts", "test", "fix bug"]
 }
 
 function truncate(s: string, max: number): string {
@@ -70,14 +76,42 @@ export function contextBar(pct: number, width = 5): string {
 const HEARTBEAT_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 export function formatSummaryLine1(state: SummaryState, heartbeatFrame: number): string {
-  const task = truncate(state.task || 'working', 30)
-  const phase = state.phase
-  const steps = state.totalSteps > 0 ? ` (${state.stepCount}/${state.totalSteps})` : ''
-  const pct = Math.round(state.contextPct * 100)
   const elapsed = formatElapsed(state.elapsedMs)
   const spinner = HEARTBEAT_FRAMES[heartbeatFrame % HEARTBEAT_FRAMES.length]!
-  const turn = state.turnCount && state.maxTurns ? ` T${state.turnCount}/${state.maxTurns}` : ''
-  return `${spinner} ${task} → ${phase}${steps}${turn} │ ${contextBar(state.contextPct)} ${pct}% │ ${elapsed}`
+  const turn = state.turnCount && state.maxTurns ? `T${state.turnCount}/${state.maxTurns}` : ''
+  const steps = state.totalSteps > 0 ? `${state.stepCount}/${state.totalSteps}` : ''
+
+  // Star phase strip (天枢之眼): glyph + label | steps | turn | alchemy bar | tools | elapsed
+  if (state.starPhaseGlyph || state.starPhaseLabel) {
+    const glyph = state.starPhaseGlyph ?? ''
+    const label = state.starPhaseLabel ?? ''
+    const phaseDisplay = [glyph, label].filter(Boolean).join(' ')
+
+    const segments: string[] = [phaseDisplay]
+    if (steps) segments.push(steps)
+    if (turn) segments.push(turn)
+
+    // Alchemy bar (replaces context bar when confidence is provided)
+    if (state.alchemyConfidence !== undefined) {
+      segments.push(alchemyBar(state.alchemyConfidence))
+    } else {
+      segments.push(`${contextBar(state.contextPct)} ${Math.round(state.contextPct * 100)}%`)
+    }
+
+    // Recent tool summary
+    if (state.recentToolSummary && state.recentToolSummary.length > 0) {
+      segments.push(state.recentToolSummary.join(' → '))
+    }
+
+    segments.push(elapsed)
+    return `${spinner} ${segments.join(' │ ')}`
+  }
+
+  // Legacy format (backward compat)
+  const task = truncate(state.task || 'working', 30)
+  const phase = state.phase
+  const pct = Math.round(state.contextPct * 100)
+  return `${spinner} ${task} → ${phase}${steps ? ` (${steps})` : ''}${turn ? ` ${turn}` : ''} │ ${contextBar(state.contextPct)} ${pct}% │ ${elapsed}`
 }
 
 export function formatSummaryLine2(state: SummaryState): string {
@@ -115,24 +149,70 @@ export const SummaryBar = memo(function SummaryBar({ state }: { state: SummarySt
   const line1 = formatSummaryLine1(state, heartbeat)
   const line2 = formatSummaryLine2(state)
 
+  // Star phase strip colors
+  const alchemyColor = state.alchemyConfidence !== undefined
+    ? ALCHEMY_COLORS[alchemyStage(state.alchemyConfidence)]
+    : undefined
+
+  const hasStarPhase = !!(state.starPhaseGlyph || state.starPhaseLabel)
+
   return (
     <Box flexDirection="column" paddingX={1}>
       <Text>
         <Text color={theme.primary}>{line1.slice(0, line1.indexOf(' '))}</Text>
-        <Text bold>{line1.slice(line1.indexOf(' ') + 1, line1.indexOf(' →'))}</Text>
-        <Text color={theme.dim}> → </Text>
-        <Text color={theme.primary}>{state.phase}</Text>
-        {state.totalSteps > 0 && <Text dimColor> ({state.stepCount}/{state.totalSteps})</Text>}
-        {state.turnCount && state.maxTurns && (
-          <Text dimColor> T{state.turnCount}/{state.maxTurns}</Text>
+        {hasStarPhase ? (
+          <>
+            {/* Star phase glyph + label */}
+            {state.starPhaseGlyph && <Text bold> {state.starPhaseGlyph}</Text>}
+            {state.starPhaseLabel && <Text color={theme.primary}> {state.starPhaseLabel}</Text>}
+            {/* Step progress */}
+            {state.totalSteps > 0 && <Text dimColor> │ {state.stepCount}/{state.totalSteps}</Text>}
+            {/* Turn counter */}
+            {state.turnCount && state.maxTurns && (
+              <Text dimColor> │ T{state.turnCount}/{state.maxTurns}</Text>
+            )}
+            {/* Alchemy bar or context bar */}
+            <Text color={theme.dim}> │ </Text>
+            {state.alchemyConfidence !== undefined ? (
+              <Text color={alchemyColor} bold={state.alchemyConfidence >= 0.8}>{alchemyBar(state.alchemyConfidence)}</Text>
+            ) : (
+              <>
+                <Text color={ctxColor} bold={state.contextPct >= 0.95}>{contextBar(state.contextPct)} {Math.round(state.contextPct * 100)}%</Text>
+                {state.tokenHistory && state.tokenHistory.length > 1 && (
+                  <Text color={theme.dim}> {brailleSparkline(state.tokenHistory)}</Text>
+                )}
+              </>
+            )}
+            {/* Recent tool summary */}
+            {state.recentToolSummary && state.recentToolSummary.length > 0 && (
+              <>
+                <Text color={theme.dim}> │ </Text>
+                <Text dimColor>{state.recentToolSummary.join(' → ')}</Text>
+              </>
+            )}
+            {/* Elapsed */}
+            <Text color={theme.dim}> │ </Text>
+            <Text dimColor>{formatElapsed(state.elapsedMs)}</Text>
+          </>
+        ) : (
+          <>
+            {/* Legacy rendering (backward compat) */}
+            <Text bold>{line1.slice(line1.indexOf(' ') + 1, line1.indexOf(' →'))}</Text>
+            <Text color={theme.dim}> → </Text>
+            <Text color={theme.primary}>{state.phase}</Text>
+            {state.totalSteps > 0 && <Text dimColor> ({state.stepCount}/{state.totalSteps})</Text>}
+            {state.turnCount && state.maxTurns && (
+              <Text dimColor> T{state.turnCount}/{state.maxTurns}</Text>
+            )}
+            <Text color={theme.dim}> │ </Text>
+            <Text color={ctxColor} bold={state.contextPct >= 0.95}>{contextBar(state.contextPct)} {Math.round(state.contextPct * 100)}%</Text>
+            {state.tokenHistory && state.tokenHistory.length > 1 && (
+              <Text color={theme.dim}> {brailleSparkline(state.tokenHistory)}</Text>
+            )}
+            <Text color={theme.dim}> │ </Text>
+            <Text dimColor>{formatElapsed(state.elapsedMs)}</Text>
+          </>
         )}
-        <Text color={theme.dim}> │ </Text>
-        <Text color={ctxColor} bold={state.contextPct >= 0.95}>{contextBar(state.contextPct)} {Math.round(state.contextPct * 100)}%</Text>
-        {state.tokenHistory && state.tokenHistory.length > 1 && (
-          <Text color={theme.dim}> {brailleSparkline(state.tokenHistory)}</Text>
-        )}
-        <Text color={theme.dim}> │ </Text>
-        <Text dimColor>{formatElapsed(state.elapsedMs)}</Text>
       </Text>
       <Text>
         <Text color={theme.dim}>├ </Text>
