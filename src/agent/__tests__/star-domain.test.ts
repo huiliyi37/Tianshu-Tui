@@ -35,6 +35,38 @@ describe('StarDomain', () => {
     assert.equal(matchDomain('帮我看看'), null)
     assert.equal(matchDomain('探索并修复缓存问题'), null)
   })
+
+  it('pojun toolWhitelist includes write_file (explorer can modify)', () => {
+    assert.ok(STAR_DOMAINS.pojun.toolWhitelist.includes('write_file'))
+    assert.ok(STAR_DOMAINS.pojun.toolWhitelist.includes('edit_file'))
+    assert.ok(STAR_DOMAINS.pojun.toolWhitelist.includes('bash'))
+  })
+
+  it('tianfu toolWhitelist is read-only (guardian cannot modify)', () => {
+    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('read_file'))
+    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('write_file'))
+    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('edit_file'))
+    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('bash'))
+  })
+
+  it('tianliang toolWhitelist includes write_file + run_tests (executor delivers)', () => {
+    assert.ok(STAR_DOMAINS.tianliang.toolWhitelist.includes('write_file'))
+    assert.ok(STAR_DOMAINS.tianliang.toolWhitelist.includes('run_tests'))
+  })
+
+  it('all domains have systemPromptSuffix', () => {
+    for (const domain of Object.values(STAR_DOMAINS)) {
+      assert.ok(domain.systemPromptSuffix.length > 0, `${domain.name} missing suffix`)
+    }
+  })
+
+  it('matchDomain result has toolWhitelist accessible via STAR_DOMAINS', () => {
+    const id = matchDomain('探索新功能')
+    assert.ok(id)
+    const domain = STAR_DOMAINS[id]
+    assert.ok(domain.toolWhitelist.length > 0)
+    assert.ok(domain.systemPromptSuffix.length > 0)
+  })
 })
 
 describe('buildActiveDomain', () => {

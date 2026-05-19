@@ -10,6 +10,10 @@ export interface StarDomain {
   courageThreshold: number
   keywords: string[]
   isCustom: boolean
+  /** Worker 执行时允许的工具白名单 */
+  toolWhitelist: readonly string[]
+  /** Worker system prompt 末尾追加的权域指令 */
+  systemPromptSuffix: string
 }
 
 export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
@@ -22,6 +26,8 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.3,
     keywords: ['探索', '实验', 'POC', '新功能', '边界', '尝试', '突破', 'experiment', 'explore', 'prototype'],
     isCustom: false,
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests'],
+    systemPromptSuffix: '你是破军——探索者。大胆尝试，容忍失败，追求突破。遇到不确定的路径时，倾向于探索而非保守。',
   },
   tianfu: {
     id: 'tianfu',
@@ -32,6 +38,8 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.5,
     keywords: ['重构', '优化', '修复', '稳定', '审查', '性能', 'refactor', 'fix', 'optimize', 'review', 'stable'],
     isCustom: false,
+    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests'],
+    systemPromptSuffix: '你是天府——守护者。评估风险，保护资产，谨慎决策。在修改代码前先充分理解现有结构。',
   },
   tianliang: {
     id: 'tianliang',
@@ -42,6 +50,8 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.7,
     keywords: ['实现', '落地', '按计划', '交付', '测试', '编写', 'implement', 'deliver', 'test', 'build'],
     isCustom: false,
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests'],
+    systemPromptSuffix: '你是天梁——执行者。严格按计划，精确交付，不妥协质量。每一步都要有验证。',
   },
 }
 
