@@ -322,3 +322,112 @@ describe('habituation: three-zone consolidation', () => {
     assert.ok(!vol.includes('<consolidated>'), 'No consolidated when habituation disabled')
   })
 })
+
+describe('agent loop mode: volatile block cached across tool-call turns', () => {
+  function createEngine() {
+    return new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: {
+        cwd: '/test/project',
+        gitStatus: 'Current branch: main',
+        rivetMd: '# Test',
+      },
+    })
+  }
+
+  it('volatile block is identical across 5 tool-call turns (same user message)', () => {
+    const engine = createEngine()
+    const volatileBlocks: string[] = []
+
+    // Simulate agent loop: 1 user message, 5 tool-call turns
+    for (let turn = 0; turn < 5; turn++) {
+      const messages: Message[] = [
+        { role: 'user', content: 'refactor the auth module' },
+      ]
+      // Add accumulated tool_use/tool_result pairs
+      for (let t = 0; t < turn; t++) {
+        messages.push({ role: 'assistant', content: [{ type: 'tool_use', id: `call_${t}`, name: 'read_file', input: { path: `file${t}.ts` } }] as any })
+        messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: `call_${t}`, content: `content of file${t}` }] as any })
+      }
+
+      const toolHistory = turn > 0
+        ? [{ tool: 'read_file', target: `file${turn - 1}.ts`, status: 'success' as const }]
+        : undefined
+
+      const req = engine.buildRequest(messages, toolHistory)
+      // First message is always the volatile block
+      volatileBlocks.push((req.messages[0] as { content: string }).content)
+    }
+
+    // ALL volatile blocks must be byte-identical (cached from first call)
+    for (let i = 1; i < volatileBlocks.length; i++) {
+      assert.equal(volatileBlocks[i], volatileBlocks[0],
+        `Turn ${i}: volatile block must be identical to Turn 0 (same user message → cached)`)
+    }
+  })
+
+  it('volatile block regenerates when a NEW user message arrives', () => {
+    const engine = createEngine()
+
+    // Turn 1: user message "hello"
+    const req1 = engine.buildRequest([
+      { role: 'user', content: 'hello' },
+    ])
+    const vol1 = (req1.messages[0] as { content: string }).content
+
+    // Turn 2: same user message + tool result → cached, same volatile
+    const req2 = engine.buildRequest([
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'bash', input: { command: 'ls' } }] as any },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'file1\nfile2' }] as any },
+    ])
+    const vol2 = (req2.messages[0] as { content: string }).content
+    assert.equal(vol1, vol2, 'Same user message → cached volatile')
+
+    // Turn 3: NEW user message "read file" → volatile regenerated
+    engine.setBehaviorMirror('some new mirror')
+    const req3 = engine.buildRequest([
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'done' },
+      { role: 'user', content: 'read file' },
+    ])
+    // Historical "hello" gets FROZEN
+    const histVol = (req3.messages[0] as { content: string }).content
+    // "read file" gets new FRESH (with behaviorMirror)
+    let freshVol = ''
+    for (let i = req3.messages.length - 1; i >= 0; i--) {
+      const m = req3.messages[i] as { role: string; content: string }
+      if (m.role === 'user' && m.content === 'read file') {
+        freshVol = (req3.messages[i - 1] as { content: string }).content
+        break
+      }
+    }
+    assert.notEqual(freshVol, vol1, 'New user message → regenerated volatile')
+  })
+
+  it('10 tool-call turns: volatile block never changes', () => {
+    const engine = createEngine()
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'b', motto: 'm' })
+
+    let firstVol = ''
+    for (let turn = 0; turn < 10; turn++) {
+      const messages: Message[] = [
+        { role: 'user', content: 'implement feature X' },
+      ]
+      for (let t = 0; t < turn; t++) {
+        messages.push({ role: 'assistant', content: [{ type: 'tool_use', id: `c_${t}`, name: 'edit_file', input: {} }] as any })
+        messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: `c_${t}`, content: 'ok' }] as any })
+      }
+
+      const req = engine.buildRequest(messages, [
+        { tool: 'edit_file', target: `file${turn}.ts`, status: 'success' },
+      ])
+      const vol = (req.messages[0] as { content: string }).content
+
+      if (turn === 0) firstVol = vol
+      else assert.equal(vol, firstVol, `Turn ${turn}: volatile must match Turn 0`)
+    }
+  })
+})

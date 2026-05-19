@@ -85,6 +85,9 @@ export class PromptEngine {
   private config: PromptEngineConfig
   private tracker: FieldHabituationTracker | null
   private consolidatedBlock: string = ''
+  /** Cached FRESH volatile block — only regenerated when a NEW user message arrives */
+  private cachedFreshBlock: string = ''
+  private cachedFreshForUser: string = ''
   private taskProgress?: TaskState
   private behaviorMirror?: string | null
   private strategyShift?: string | null
@@ -117,27 +120,21 @@ export class PromptEngine {
 
   /**
    * Build a request. Volatile context is injected as an independent user message
-   * prepended before each user message with string content. This produces a
-   * consistent prefix structure every turn, which is crucial for DeepSeek since
-   * it ignores cache_control: ephemeral on system blocks.
+   * prepended before each user message with string content.
    *
-   * Only the LAST user text message gets a fresh volatile context block.
-   * Historical messages pass through unchanged — this preserves the literal
-   * prefix that DeepSeek cached on previous turns.
+   * Cache-critical design for agent loop mode (1 user message → 50 tool calls):
+   * - The FRESH volatile block is generated ONCE per user message, then cached.
+   * - Subsequent tool-call turns reuse the cached FRESH → prefix stays stable.
+   * - Only when a NEW user text message arrives does FRESH get regenerated.
+   * - Historical user text messages always use FROZEN (this.volatileBlock).
    *
-   * Turn 1: [system, user(<context>), user("hello")]
-   * Turn 2: [system, user(<context>), user("hello"), assistant, user(<context>), user("read")]
-   *
-   * The <context> blocks for turn 1 are identical across both requests because
-   * they come from the stored message history, not re-generated.
-   *
-   * User messages with ContentBlock[] (tool results) pass through unchanged.
+   * This ensures DeepSeek's exact-prefix cache hits on API calls 2-50 within
+   * a single user message's execution, not just across user messages.
    */
   buildRequest(messages: Message[], toolHistory?: ToolHistoryEntry[]): MessageRequest {
     const result: Message[] = []
     const normalized = normalizeToolResultPairs(messages)
 
-    // Find the last user text message index so we can inject fresh tool history there
     let lastUserTextIdx = -1
     for (let i = normalized.length - 1; i >= 0; i--) {
       if (normalized[i]!.role === 'user' && typeof normalized[i]!.content === 'string') {
@@ -150,61 +147,67 @@ export class PromptEngine {
       const msg = normalized[i]!
       if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
         if (i === lastUserTextIdx) {
-          const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions }
+          const userContent = msg.content
 
-          if (this.tracker) {
-            const fieldValues: Record<string, string> = {}
-            if (dynamicCtx.activeDomain) fieldValues['activeDomain'] = JSON.stringify(dynamicCtx.activeDomain)
-            if (dynamicCtx.behaviorMirror) fieldValues['behaviorMirror'] = dynamicCtx.behaviorMirror
-            if (dynamicCtx.strategyShift) fieldValues['strategyShift'] = dynamicCtx.strategyShift
-            if (dynamicCtx.routingReason) fieldValues['routingReason'] = dynamicCtx.routingReason
-            if (dynamicCtx.playbookLessons && dynamicCtx.playbookLessons.length > 0) {
-              fieldValues['playbookLessons'] = dynamicCtx.playbookLessons.map(b => b.lesson).join('|')
-            }
-            this.tracker.recordTurn(fieldValues)
+          // Only regenerate FRESH when a NEW user message arrives.
+          // Tool-call turns (same user message, more tool results) reuse the cache.
+          if (userContent !== this.cachedFreshForUser) {
+            this.cachedFreshForUser = userContent
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions }
 
-            const habituatedContent = this.tracker.getHabituatedContent()
-            const renderedHabituated = new Map<string, string>()
-            for (const [name, content] of habituatedContent) {
-              if (name === 'activeDomain') {
-                const d = JSON.parse(content) as { name: string; volatileBlock: string; motto: string }
-                renderedHabituated.set(name, `<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
-              } else if (name === 'behaviorMirror') {
-                renderedHabituated.set(name, `<behavior-mirror>\n${content}\n</behavior-mirror>`)
-              } else if (name === 'strategyShift') {
-                renderedHabituated.set(name, `<strategy-shift>\n${content}\n</strategy-shift>`)
-              } else if (name === 'routingReason') {
-                renderedHabituated.set(name, `<routing-reason>\n${content}\n</routing-reason>`)
-              } else if (name === 'playbookLessons') {
-                renderedHabituated.set(name, `<historical-lessons>\n${content.split('|').map((l: string) => `- ${l}`).join('\n')}\n</historical-lessons>`)
+            if (this.tracker) {
+              const fieldValues: Record<string, string> = {}
+              if (dynamicCtx.activeDomain) fieldValues['activeDomain'] = JSON.stringify(dynamicCtx.activeDomain)
+              if (dynamicCtx.behaviorMirror) fieldValues['behaviorMirror'] = dynamicCtx.behaviorMirror
+              if (dynamicCtx.strategyShift) fieldValues['strategyShift'] = dynamicCtx.strategyShift
+              if (dynamicCtx.routingReason) fieldValues['routingReason'] = dynamicCtx.routingReason
+              if (dynamicCtx.playbookLessons && dynamicCtx.playbookLessons.length > 0) {
+                fieldValues['playbookLessons'] = dynamicCtx.playbookLessons.map(b => b.lesson).join('|')
               }
+              this.tracker.recordTurn(fieldValues)
+
+              const habituatedContent = this.tracker.getHabituatedContent()
+              const renderedHabituated = new Map<string, string>()
+              for (const [name, content] of habituatedContent) {
+                if (name === 'activeDomain') {
+                  const d = JSON.parse(content) as { name: string; volatileBlock: string; motto: string }
+                  renderedHabituated.set(name, `<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
+                } else if (name === 'behaviorMirror') {
+                  renderedHabituated.set(name, `<behavior-mirror>\n${content}\n</behavior-mirror>`)
+                } else if (name === 'strategyShift') {
+                  renderedHabituated.set(name, `<strategy-shift>\n${content}\n</strategy-shift>`)
+                } else if (name === 'routingReason') {
+                  renderedHabituated.set(name, `<routing-reason>\n${content}\n</routing-reason>`)
+                } else if (name === 'playbookLessons') {
+                  renderedHabituated.set(name, `<historical-lessons>\n${content.split('|').map((l: string) => `- ${l}`).join('\n')}\n</historical-lessons>`)
+                }
+              }
+
+              const newConsolidated = buildConsolidatedBlock(renderedHabituated)
+              if (newConsolidated !== this.consolidatedBlock) {
+                this.consolidatedBlock = newConsolidated
+                this.volatileBlock = newConsolidated
+                  ? this.frozenBase + '\n' + newConsolidated
+                  : this.frozenBase
+              }
+
+              const activeCtx = { ...dynamicCtx }
+              const habituated = this.tracker.getHabituated()
+              if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
+              if (habituated.has('behaviorMirror')) activeCtx.behaviorMirror = undefined
+              if (habituated.has('strategyShift')) activeCtx.strategyShift = undefined
+              if (habituated.has('routingReason')) activeCtx.routingReason = undefined
+              if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
+
+              const activeAppendix = buildDynamicAppendix(activeCtx)
+              this.cachedFreshBlock = activeAppendix
+                ? this.volatileBlock + '\n' + activeAppendix
+                : this.volatileBlock
+            } else {
+              this.cachedFreshBlock = buildLatestTurnVolatileBlock(dynamicCtx)
             }
-
-            const newConsolidated = buildConsolidatedBlock(renderedHabituated)
-            if (newConsolidated !== this.consolidatedBlock) {
-              this.consolidatedBlock = newConsolidated
-              this.volatileBlock = newConsolidated
-                ? this.frozenBase + '\n' + newConsolidated
-                : this.frozenBase
-            }
-
-            const activeCtx = { ...dynamicCtx }
-            const habituated = this.tracker.getHabituated()
-            if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
-            if (habituated.has('behaviorMirror')) activeCtx.behaviorMirror = undefined
-            if (habituated.has('strategyShift')) activeCtx.strategyShift = undefined
-            if (habituated.has('routingReason')) activeCtx.routingReason = undefined
-            if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
-
-            const activeAppendix = buildDynamicAppendix(activeCtx)
-            const freshBlock = activeAppendix
-              ? this.volatileBlock + '\n' + activeAppendix
-              : this.volatileBlock
-            result.push({ role: 'user', content: freshBlock })
-          } else {
-            const freshBlock = buildLatestTurnVolatileBlock(dynamicCtx)
-            result.push({ role: 'user', content: freshBlock })
           }
+          result.push({ role: 'user', content: this.cachedFreshBlock })
         } else {
           result.push({ role: 'user', content: this.volatileBlock })
         }
