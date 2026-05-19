@@ -377,7 +377,9 @@ export class ApiClient implements StreamClient {
                 const stopReason = data.delta_stop_reason ?? ''
                 const rawUsage = data.usage ?? {}
                 const usage = this.config.mapUsage ? this.config.mapUsage(rawUsage) : rawUsage
-                callbacks.onStopReason(stopReason, usage)
+                if (stopReason || Object.keys(rawUsage).length > 0) {
+                  callbacks.onStopReason(stopReason || 'end_turn', usage)
+                }
                 break
               }
 
@@ -428,12 +430,15 @@ export class ApiClient implements StreamClient {
                   }
                 }
 
-                // Stop reason / usage may arrive in any event shape
+                // Stop reason / usage may arrive in any event shape.
+                // DeepSeek-compatible streams may emit a final usage-only payload
+                // without delta_stop_reason; still propagate it so cache telemetry
+                // can record prompt_cache_hit_tokens / prompt_cache_miss_tokens.
                 const stopReason = data.delta_stop_reason ?? ''
                 const rawUsage = data.usage ?? {}
-                if (stopReason) {
+                if (stopReason || Object.keys(rawUsage).length > 0) {
                   const usage = this.config.mapUsage ? this.config.mapUsage(rawUsage) : rawUsage
-                  callbacks.onStopReason(stopReason, usage)
+                  callbacks.onStopReason(stopReason || 'end_turn', usage)
                 }
                 break
               }

@@ -3,6 +3,7 @@ import { OpenAIClient } from './openai-client.js'
 import { CodexClient } from './codex-client.js'
 import type { StreamClient } from './stream-client.js'
 import type { ProviderCapabilities } from './provider.js'
+import { getProviderProfile } from './provider-profile.js'
 import type { ProviderConfig } from '../config/schema.js'
 import type { AuthProvider } from '../auth/types.js'
 
@@ -67,6 +68,7 @@ export function createProviderClient(
       reasoningEffort: params.reasoningEffort,
       sessionId: params.sessionId,
       providerName: provider.name,
+      providerProfile: getProviderProfile(provider.name, modelContextWindow(provider, params.model)),
       unsupported: provider.unsupported.length > 0
         ? provider.unsupported
         : capabilities.stripParams,
@@ -91,7 +93,12 @@ export function createProviderClient(
       : capabilities.stripParams,
     hasToolJsonInContentBug: capabilities.hasToolJsonInContentBug,
     mapUsage: capabilities.mapUsage,
+    providerProfile: getProviderProfile(provider.name, modelContextWindow(provider, params.model)),
   }
 
   return new ApiClient(clientConfig)
+}
+
+function modelContextWindow(provider: ProviderConfig, modelId: string): number | undefined {
+  return provider.models.find(model => model.id === modelId || model.alias === modelId)?.contextWindow
 }

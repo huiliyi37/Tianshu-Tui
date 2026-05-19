@@ -1,7 +1,8 @@
-import { describe, it } from 'node:test'
+import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
+import { ReadableStream } from 'node:stream/web'
 import { createProviderClient, resolveApiKey, type RuntimeParams } from '../factory.js'
-import { resolveCapabilities, DEEPSEEK_CAPABILITIES, WELL_KNOWN_DEFAULTS } from '../provider.js'
+import { resolveCapabilities } from '../provider.js'
 import { OpenAIClient } from '../openai-client.js'
 import { ApiKeyAuth } from '../../auth/api-key.js'
 import type { ProviderConfig } from '../../config/schema.js'
@@ -87,6 +88,31 @@ describe('createProviderClient', () => {
     assert.ok(client)
   })
 
+  it('passes providerProfile into deepseek anthropic client for canonical cache strategy', async () => {
+    const capabilities = resolveCapabilities('deepseek')
+    const client = createProviderClient(deepseekProvider, capabilities, runtimeParams)
+    const originalFetch = globalThis.fetch
+    let body = ''
+    globalThis.fetch = mock.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      body = String(init?.body ?? '')
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('event: message_delta\ndata: {"delta_stop_reason":"end_turn","usage":{}}\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(stream as unknown as ReadableStream, { status: 200 })
+    }) as unknown as typeof fetch
+
+    await client.stream(
+      { model: 'test-model', messages: [{ role: 'user', content: 'x', cache_control: { type: 'ephemeral' } }], max_tokens: 100, stream: true },
+      { onTextDelta: () => {}, onThinkingDelta: () => {}, onContentBlock: () => {}, onStopReason: () => {}, onError: error => { throw error } },
+    )
+
+    globalThis.fetch = originalFetch
+    assert.ok(!body.includes('cache_control'), body)
+  })
+
   it('accepts AuthProvider in runtime params', () => {
     const auth = new ApiKeyAuth('sk-from-auth')
     const openaiProvider: ProviderConfig = {
@@ -100,6 +126,18 @@ describe('createProviderClient', () => {
       ...runtimeParams,
       auth,
     })
+    assert.ok(client instanceof OpenAIClient)
+  })
+
+  it('passes providerProfile into OpenAIClient', () => {
+    const openaiProvider: ProviderConfig = {
+      ...deepseekProvider,
+      name: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      protocol: 'openai',
+    }
+    const caps = resolveCapabilities('openai')
+    const client = createProviderClient(openaiProvider, caps, runtimeParams)
     assert.ok(client instanceof OpenAIClient)
   })
 })

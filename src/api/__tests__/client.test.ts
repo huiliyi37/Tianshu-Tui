@@ -2,7 +2,7 @@ import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { ReadableStream } from 'node:stream/web'
 import { ApiClient } from '../client.js'
-import type { ContentBlock } from '../types.js'
+import type { ContentBlock, Usage } from '../types.js'
 
 function sseResponse(events: string[]): Response {
   const body = new ReadableStream({
@@ -87,6 +87,47 @@ describe('ApiClient provider capabilities', () => {
 
     globalThis.fetch = originalFetch
     assert.equal(blocks.some(block => block.type === 'tool_use'), false)
+  })
+
+  it('propagates usage-only fallback events so cache telemetry is recorded', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mock.fn(async () => sseResponse([
+      'data: {"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20}}\n\n',
+    ])) as unknown as typeof fetch
+
+    let stopReason = ''
+    let stopUsage: Partial<Usage> = {}
+    const client = new ApiClient({
+      baseUrl: 'https://example.test',
+      apiKey: 'test-key',
+      model: 'test-model',
+      maxTokens: 100,
+      thinking: 'disabled',
+      unsupported: [],
+      hasToolJsonInContentBug: false,
+      mapUsage: raw => ({
+        input_tokens: raw.prompt_tokens as number,
+        output_tokens: raw.completion_tokens as number,
+        cache_read_input_tokens: raw.prompt_cache_hit_tokens as number,
+        cache_creation_input_tokens: raw.prompt_cache_miss_tokens as number,
+      }),
+    })
+
+    await client.stream(
+      { model: 'test-model', messages: [{ role: 'user', content: 'x' }], max_tokens: 100, stream: true },
+      {
+        onTextDelta: () => {},
+        onThinkingDelta: () => {},
+        onContentBlock: () => {},
+        onStopReason: (reason, usage) => { stopReason = reason; stopUsage = usage },
+        onError: error => { throw error },
+      },
+    )
+
+    globalThis.fetch = originalFetch
+    assert.equal(stopReason, 'end_turn')
+    assert.equal(stopUsage.cache_read_input_tokens, 80)
+    assert.equal(stopUsage.cache_creation_input_tokens, 20)
   })
 })
 
