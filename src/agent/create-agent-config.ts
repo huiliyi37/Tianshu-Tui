@@ -27,6 +27,7 @@ export interface AgentConfigInput {
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual'
   auth?: AuthProvider
+  habituationThreshold?: number
 }
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
@@ -57,6 +58,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
       cwd,
       sessionMemoryBlock: input.sessionMemoryBlock,
     }),
+    habituationThreshold: input.habituationThreshold ?? 5,
   })
 
   let compactClient: AgentConfig['compactClient']
