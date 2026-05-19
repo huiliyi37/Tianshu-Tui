@@ -12,6 +12,7 @@ export interface PlaybookBullet {
   useCount: number
   lastUsedAt: number | null
   importance: number
+  details?: string
 }
 
 export interface ExtractBulletsOptions {
@@ -96,7 +97,18 @@ export function extractBullets(report: string, options: ExtractBulletsOptions = 
   const maxBullets = options.maxBullets ?? DEFAULT_MAX_BULLETS
   const rootCauseLines = sectionLines(report, /^##\s+3\.\s+根因判定/)
   const recommendationLines = sectionLines(report, /^##\s+4\.\s+寻址建议/)
-  const candidates = [...rootCauseLines, ...recommendationLines]
+  const allRawLines = [...rootCauseLines, ...recommendationLines]
+
+  // Build lesson → raw line mapping for details
+  const lessonToRaw = new Map<string, string>()
+  for (const raw of allRawLines) {
+    const lesson = lessonFromLine(raw)
+    if (lesson && !lessonToRaw.has(lesson)) {
+      lessonToRaw.set(lesson, stripMarkdown(raw))
+    }
+  }
+
+  const candidates = allRawLines
     .map(lessonFromLine)
     .filter((lesson): lesson is string => Boolean(lesson && !lesson.includes('无需特别调整') && !lesson.includes('无明显故障模式')))
 
@@ -105,6 +117,11 @@ export function extractBullets(report: string, options: ExtractBulletsOptions = 
     .map((lesson) => {
       const keywords = extractKeywords(lesson)
       const context = rootCauseLines.some(line => line.includes(lesson)) ? 'root-cause' : 'recommendation'
+      const rawDetail = lessonToRaw.get(lesson)
+      // Use raw line as details if it's longer than the lesson (contains extra info)
+      const details = rawDetail && rawDetail.length > lesson.length + 4
+        ? rawDetail.slice(0, 200)
+        : undefined
       return {
         id: hashId(`${lesson}:${context}`),
         createdAt: now,
@@ -114,6 +131,7 @@ export function extractBullets(report: string, options: ExtractBulletsOptions = 
         useCount: 0,
         lastUsedAt: null,
         importance: 0.6,
+        ...(details ? { details } : {}),
       }
     })
 }

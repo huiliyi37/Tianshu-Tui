@@ -188,7 +188,10 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     })
     const toRender = selected.length > 0 ? selected : ctx.playbookLessons.slice(0, 2)
     const lessons = toRender
-      .map(b => `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`)
+      .map(b => {
+        const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
+        return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
+      })
       .join('\n')
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
   }
@@ -303,7 +306,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     })
     const toRender = selected.length > 0 ? selected : ctx.playbookLessons.slice(0, 2)
     const lessons = toRender
-      .map(b => `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`)
+      .map(b => {
+        const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
+        return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
+      })
       .join('\n')
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
   }

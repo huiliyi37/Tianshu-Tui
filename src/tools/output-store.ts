@@ -76,7 +76,8 @@ export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
   const head = lines.slice(0, MODEL_HEAD_LINES)
   const tail = lines.slice(-MODEL_TAIL_LINES)
   const omitted = lines.length - MODEL_HEAD_LINES - MODEL_TAIL_LINES
-  return `${header}\n${head.join('\n')}\n... (${omitted} lines omitted) ...\n${tail.join('\n')}`
+  const kept = MODEL_HEAD_LINES + MODEL_TAIL_LINES
+  return `${header}\n${head.join('\n')}\n... (${omitted} lines omitted) ...\n${tail.join('\n')}\n[truncated: ${lines.length} lines → ${kept} shown]`
 }
 
 export function buildUiOutput(raw: string, meta: ToolOutputMeta, maxLines = 20): string {
@@ -90,5 +91,5 @@ export function buildUiOutput(raw: string, meta: ToolOutputMeta, maxLines = 20):
 
   const tail = lines.slice(-maxLines)
   const omitted = lines.length - maxLines
-  return `${header}\n... ${omitted} lines omitted ...\n${tail.join('\n')}`
+  return `${header}\n... ${omitted} lines omitted ...\n${tail.join('\n')}\n[truncated: ${lines.length} lines → ${maxLines} shown]`
 }

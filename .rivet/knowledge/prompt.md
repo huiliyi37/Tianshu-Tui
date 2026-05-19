@@ -1,3 +1,17 @@
+### 2026-05-19 — session dc47b5e7
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/output-store.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/playbook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/volatile.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/dead-end-rules.ts
+**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/output-store.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/retrospect.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/playbook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/volatile.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/dead-end-rules.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×7, read_file×6, bash×6, todo×3, git×1, grep×1
+
+### 2026-05-19 — session edfd1210
+
+**Modified** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/task-contract.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/task-contract.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/__tests__/engine-cache-stability.test.ts
+**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/__tests__/engine-cache-stability.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/__tests__/engine.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/task-contract.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts
+**Tests**: ❌ 0 passed, 0 failed (npx tsx --test src/context/__tests__/task-contract.test.ts src/context/__tests__/cognitive-ledger.test.ts)
+**Tools used**: bash×7, edit_file×7, read_file×6, write_file×4, todo×3, git×2, glob×2, diff×2, delegate_batch×1, run_tests×1
+
 ### 2026-05-18 — session 0bba0331
 
 **Modified** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/payload-diagnostic.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/payload-diagnostic.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/slash-commands.test.ts

@@ -1,6 +1,7 @@
 import type { PreTurnRuntimeHook } from '../runtime-hooks.js'
 import type { PheromoneRef } from '../sensorium.js'
 import { compressDeadEnds, formatDeadEndRules } from '../../context/dead-end-rules.js'
+import type { DeadEndEntry } from '../../context/dead-end-rules.js'
 
 export interface SignalConsumerRuntimeHookOptions {
   /** Avoid repeating identical injected hints across turns. Default true. */
@@ -45,8 +46,15 @@ export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHo
 
       const deadEnds = pheromones.filter(p => p.signal === 'dead-end' && p.strength > 0)
       if (deadEnds.length > 0) {
-        const deadEndPaths = [...new Set(deadEnds.map(p => p.path))]
-        const rules = compressDeadEnds(deadEndPaths)
+        const seen = new Set<string>()
+        const entries: DeadEndEntry[] = []
+        for (const p of deadEnds) {
+          if (!seen.has(p.path)) {
+            seen.add(p.path)
+            entries.push({ path: p.path, context: p.context })
+          }
+        }
+        const rules = compressDeadEnds(entries)
         if (rules.length > 0) {
           const key = `dead-end:${rules.map(r => r.kind).sort().join('|')}`
           once(key, () => {

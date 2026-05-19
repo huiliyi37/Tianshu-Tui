@@ -96,26 +96,43 @@ const MAX_EXAMPLE_LENGTH = 60
 
 // ─── Public API ─────────────────────────────────────────────────────
 
-/**
- * Compress a deduplicated list of dead-end paths into at most 3 rules.
- * Same-kind paths are merged; severity takes the highest; examples are capped.
- */
-export function compressDeadEnds(paths: string[]): DeadEndRule[] {
-  if (paths.length === 0) return []
+export interface DeadEndEntry {
+  path: string
+  context?: string
+}
 
-  // Map each path to its matching rule definition (first match wins)
-  const pathToKind = new Map<string, { kind: DeadEndRule['kind']; def: RuleDef }>()
-  for (const path of paths) {
-    const def = RULE_DEFS.find(d => d.test(path))
+/**
+ * Compress a deduplicated list of dead-end entries into at most 3 rules.
+ * Same-kind paths are merged; severity takes the highest; examples are capped.
+ * Generic fallback uses the first available entry context as recommendation.
+ */
+export function compressDeadEnds(entries: DeadEndEntry[]): DeadEndRule[] {
+  if (entries.length === 0) return []
+
+  // Deduplicate by path, keeping the entry with the richest context
+  const byPath = new Map<string, DeadEndEntry>()
+  for (const entry of entries) {
+    const existing = byPath.get(entry.path)
+    if (!existing || (!existing.context && entry.context)) {
+      byPath.set(entry.path, entry)
+    }
+  }
+
+  // Map each entry to its matching rule definition (first match wins)
+  const entryToKind = new Map<DeadEndEntry, { kind: DeadEndRule['kind']; def: RuleDef }>()
+  for (const entry of byPath.values()) {
+    const def = RULE_DEFS.find(d => d.test(entry.path))
     if (def) {
-      pathToKind.set(path, { kind: def.kind, def })
+      entryToKind.set(entry, { kind: def.kind, def })
     } else {
-      pathToKind.set(path, {
+      entryToKind.set(entry, {
         kind: 'generic',
         def: {
           kind: 'generic',
           pattern: 'unknown',
-          recommendation: 'This approach has been tried and failed.',
+          recommendation: entry.context
+            ? `Previously failed: ${entry.context}`
+            : 'This approach has been tried and failed.',
           severity: 'low',
           test: () => false,
         },
@@ -125,15 +142,19 @@ export function compressDeadEnds(paths: string[]): DeadEndRule[] {
 
   // Group by kind, preserving first-seen rule def for each kind
   const byKind = new Map<DeadEndRule['kind'], { def: RuleDef; examples: string[] }>()
-  for (const [path, { kind, def }] of pathToKind) {
-    const truncated = path.length > MAX_EXAMPLE_LENGTH
-      ? path.slice(0, MAX_EXAMPLE_LENGTH)
-      : path
+  for (const [entry, { kind, def }] of entryToKind) {
+    const truncated = entry.path.length > MAX_EXAMPLE_LENGTH
+      ? entry.path.slice(0, MAX_EXAMPLE_LENGTH)
+      : entry.path
     const existing = byKind.get(kind)
     if (existing) {
       // Merge: accumulate examples, upgrade severity
       existing.examples.push(truncated)
       if (SEVERITY_RANK[def.severity] > SEVERITY_RANK[existing.def.severity]) {
+        existing.def = { ...def }
+      }
+      // Keep the richest generic recommendation (with context)
+      if (kind === 'generic' && def.recommendation !== 'This approach has been tried and failed.') {
         existing.def = { ...def }
       }
     } else {

@@ -29,13 +29,14 @@ function makeInput(overrides: Partial<SensoriumInput> = {}): SensoriumInput {
   }
 }
 
-function makeDeadEnd(path: string): PheromoneRef {
+function makeDeadEnd(path: string, context?: string): PheromoneRef {
   return {
     path,
     signal: 'dead-end',
     strength: 0.9,
     depositedAt: 1,
     halfLife: 1000,
+    ...(context ? { context } : {}),
   }
 }
 
@@ -145,5 +146,21 @@ describe('createSignalConsumerRuntimeHook', () => {
     await hook.run(ctx)
 
     assert.deepEqual(messages, ['<search-breadth mode="wide" />'])
+  })
+
+  it('preserves dead-end context in generic recommendations', async () => {
+    const { hook, ctx, messages } = runHook({
+      sensoriumInput: makeInput({
+        pheromones: [
+          makeDeadEnd('bash-command', 'npm run build failed with TS2345: type mismatch'),
+        ],
+      }),
+    })
+
+    await hook.run(ctx)
+
+    assert.equal(messages.length, 1)
+    assert.match(messages[0]!, /<file-warnings/)
+    assert.match(messages[0]!, /npm run build failed with TS2345/)
   })
 })

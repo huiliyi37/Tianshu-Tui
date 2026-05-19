@@ -20,6 +20,7 @@ export interface PheromoneRef {
   strength: number
   depositedAt: number
   halfLife: number
+  context?: string
 }
 
 // ─── Sensorium ──────────────────────────────────────────────────────
