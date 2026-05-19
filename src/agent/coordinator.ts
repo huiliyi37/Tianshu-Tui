@@ -67,6 +67,10 @@ export interface DelegationCoordinatorConfig {
   /** Optional provider health tracker for Physarum-style routing.
    *  When set, cold-tier providers are excluded from model selection. */
   providerHealth?: ProviderHealthTracker
+  /** Optional session registry for cross-process file claim coordination. */
+  sessionRegistry?: import('./session-registry.js').SessionRegistry
+  /** Current session ID for claim management. */
+  sessionId?: string
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -172,6 +176,40 @@ export class DelegationCoordinator {
 
     let run: { result: WorkerResult }
     if (role === 'hands') {
+      // Check file claims before dispatching write worker
+      if (this.config.sessionRegistry && this.config.sessionId && order.scope.files?.length) {
+        const registry = this.config.sessionRegistry
+        const sid = this.config.sessionId
+        const conflictedFiles: string[] = []
+        for (const f of order.scope.files) {
+          if (!registry.acquireClaim(sid, f, 'exclusive')) {
+            conflictedFiles.push(f)
+          }
+        }
+        if (conflictedFiles.length > 0) {
+          // Release any claims we did acquire
+          for (const f of order.scope.files) {
+            if (!conflictedFiles.includes(f)) registry.releaseClaim(sid, f)
+          }
+          return {
+            status: 'completed',
+            order,
+            results: [{
+              workOrderId: order.id,
+              status: 'blocked',
+              summary: `File claim conflict: ${conflictedFiles.join(', ')} held by another session`,
+              findings: [],
+              artifacts: [{ kind: 'risk', title: 'Claim conflict', content: `Files claimed by another session: ${conflictedFiles.join(', ')}` }],
+              changedFiles: [],
+              risks: [`file claim conflict: ${conflictedFiles.join(', ')}`],
+              nextActions: ['Wait for other session to release claims, or use read-only profile'],
+              evidenceStatus: 'blocked',
+            }],
+            packet: buildPrimaryWorkerPacket([]),
+          }
+        }
+      }
+
       const activeClaims = this.config.activeClaims?.() ?? workerConfig.activeClaims ?? []
       const cwd = this.config.cwd ?? workerConfig.cwd
       const handsRun = await this.runHands({
