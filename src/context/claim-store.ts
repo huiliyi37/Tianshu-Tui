@@ -1,10 +1,14 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 import { assertValidSessionId } from '../validation.js'
 import {
   createClaimFromProposal,
   isPromptEligibleClaim,
+  loadClaimSnapshot,
+  checkpointClaims,
   type ClaimProposal,
+  type ClaimSnapshot,
   type ContextClaim,
   type ContextClaimStatus,
   type EvidenceRef,
@@ -32,6 +36,12 @@ export interface ClaimUseInput {
   usedAt: number
 }
 
+export interface ClaimStoreCheckpointResult {
+  snapshotPath: string
+  claimCount: number
+  truncatedPath: string
+}
+
 export class ContextClaimStore {
   readonly path: string
 
@@ -41,12 +51,14 @@ export class ContextClaimStore {
   private lastFileSize: number = -1
   private cachedClaims: ContextClaim[] | null = null
   private lastProcessedLineCount: number = 0
+  private readonly snapshotPath: string
 
   constructor(dir: string, sessionId: string) {
     assertValidSessionId(sessionId)
     this.sessionId = sessionId
     mkdirSync(dir, { recursive: true })
     this.path = join(dir, `${this.sessionId}.claims.jsonl`)
+    this.snapshotPath = join(dir, `${this.sessionId}.claims.snapshot.json`)
   }
 
   appendEvent(event: ContextClaimEvent): void {
@@ -181,6 +193,52 @@ export class ContextClaimStore {
     return readFileSync(this.path, 'utf-8')
   }
 
+  /**
+   * Checkpoint: write current claims state as a snapshot, then truncate JSONL.
+   * Follows Redis 7.0 Base+Incr pattern:
+   * - Snapshot = full projected state (base)
+   * - JSONL = incremental events after snapshot (incr)
+   * - Load = read snapshot + replay incr events
+   */
+  checkpoint(now = Date.now()): ClaimStoreCheckpointResult {
+    const snapshot = checkpointClaims(this.listClaims(), now)
+    writeFileAtomicSync(this.snapshotPath, JSON.stringify(snapshot, null, 2) + '\n')
+
+    // Truncate JSONL — start fresh incremental log.
+    writeFileAtomicSync(this.path, '')
+
+    // Keep the projected snapshot in memory so the current store remains usable.
+    this.cachedEvents = []
+    this.cachedClaims = loadClaimSnapshot(snapshot, now)
+    this.lastProcessedLineCount = 0
+    this.lastFileSize = 0
+
+    return { snapshotPath: this.snapshotPath, claimCount: snapshot.claims.length, truncatedPath: this.path }
+  }
+
+  /**
+   * Load claims from checkpoint snapshot. Incremental JSONL events are replayed
+   * by projectClaims() after this base state is loaded.
+   */
+  private loadFromCheckpoint(now = Date.now()): ContextClaim[] | null {
+    if (!existsSync(this.snapshotPath)) return null
+
+    try {
+      const raw = readFileSync(this.snapshotPath, 'utf-8')
+      const snapshot = JSON.parse(raw) as ClaimSnapshot
+      return loadClaimSnapshot(snapshot, now)
+    } catch {
+      return null
+    }
+  }
+
+  /** Delete checkpoint snapshot file (for testing or cleanup). */
+  deleteCheckpoint(): void {
+    if (existsSync(this.snapshotPath)) {
+      unlinkSync(this.snapshotPath)
+    }
+  }
+
   static loadDurableClaims(dir: string, sessionId: string): ContextClaim[] {
     const filePath = join(dir, `${sessionId}.claims.jsonl`)
     if (!existsSync(filePath)) return []
@@ -253,6 +311,18 @@ export class ContextClaimStore {
       return this.cachedClaims
     }
 
+    // Try loading from checkpoint snapshot first
+    const checkpointClaims = this.loadFromCheckpoint()
+    if (checkpointClaims) {
+      const claims = new Map(checkpointClaims.map(c => [c.id, c]))
+      // Replay any incremental events after the snapshot
+      this.applyEventsToMap(claims, events)
+      this.cachedClaims = [...claims.values()]
+      this.lastProcessedLineCount = events.length
+      return this.cachedClaims
+    }
+
+    // Full rebuild from events
     const claims = new Map<string, ContextClaim>()
     this.applyEventsToMap(claims, events)
     this.cachedClaims = [...claims.values()]

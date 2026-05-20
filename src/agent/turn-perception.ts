@@ -39,6 +39,7 @@ export interface PerceptionInput {
   loadedPheromones: Pheromone[]
   traceStore: TraceStore
   gitChangeRate: number
+  fsEventRate?: number
   sensorium: Sensorium | null
   strategy: StrategyProfile | null
   vigor: VigorState
@@ -81,6 +82,7 @@ export class TurnPerceptionController {
       pheromones: input.loadedPheromones,
       doomLevel: getDoomLoopLevel(input.traceStore.toolFingerprints),
       gitChangeRate: input.gitChangeRate,
+      fsEventRate: input.fsEventRate,
     }
 
     let nextSensorium = input.sensorium

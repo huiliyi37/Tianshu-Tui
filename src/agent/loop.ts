@@ -54,6 +54,8 @@ import type { VigorState } from './vigor.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
+import { createFsWatcher } from '../context/fs-watcher.js'
+import type { FsWatcherState } from '../context/fs-watcher.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
@@ -125,6 +127,8 @@ export interface AgentConfig {
   playbookStore?: PlaybookStore
   /** Optional resource sensor injection for reliability tests and custom deployments. */
   resourceSensorOptions?: ResourceSensorOptions
+  /** Disable fs watcher in tests or constrained environments. Enabled by default. */
+  fsWatcherEnabled?: boolean
 }
 
 export interface AgentCallbacks {
@@ -203,6 +207,8 @@ export class AgentLoop {
   private resourceSensor: ResourceSensor
   private latestResourceSnapshot: ResourceSensorSnapshot | null = null
   private latestReliabilityDecision: ReliabilityDecision | null = null
+  private fsWatcher: ReturnType<typeof createFsWatcher> | null = null
+  private latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
 
   constructor(
     private config: AgentConfig,
@@ -218,6 +224,7 @@ export class AgentLoop {
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
     this.resourceSensor = new ResourceSensor(this.config.resourceSensorOptions)
+    this.fsWatcher = this.config.fsWatcherEnabled === false ? null : createFsWatcher({ cwd: this.cwd })
     this.telemetryWriter = createTelemetryWriter(this.cwd)
     const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
     this.stigmergyStore = new StigmergyStore(pheromonesPath)
@@ -242,6 +249,7 @@ export class AgentLoop {
       getDoomLoopLevel: () => this.getDoomLoopLevel(),
       telemetryWriter: this.telemetryWriter,
       getDomainId: () => this.sessionDomain?.id ?? null,
+      getFileObservations: () => this.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
       ...(this.config.sessionId ? {
         dream: {
           cwd: this.cwd,
@@ -596,8 +604,22 @@ export class AgentLoop {
       { emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) } }))
   }
 
+  private async startFsWatcher(): Promise<void> {
+    try {
+      await this.fsWatcher?.start()
+    } catch {
+      // fs.watch is an opportunistic external signal; unavailable watchers must not block turns.
+    }
+  }
+
+  private stopFsWatcher(): void {
+    this.fsWatcher?.stop()
+    this.latestFsWatcherState = { eventRate: 0, eventCount: 0, active: false }
+  }
+
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
+    await this.startFsWatcher()
     this.turnStream = this.createTurnStreamController()
     this.turnCompletion = this.createTurnCompletionController(callbacks)
     this.trajectory.reset()
@@ -675,6 +697,9 @@ export class AgentLoop {
           this.gitChangeRate = smoothChangeRate(rate, this.gitChangeRate)
         }).catch(() => {})
 
+        // ── FS freshness: realtime external Zeitgeber signal ──
+        this.latestFsWatcherState = this.fsWatcher?.getState() ?? { eventRate: 0, eventCount: 0, active: false }
+
         // ── StarFlow v2: Sensorium computation ──
         const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
         const perceptionResult = await this.perception.perceive({
@@ -687,6 +712,7 @@ export class AgentLoop {
           loadedPheromones: this.loadedPheromones,
           traceStore: this.traceStore,
           gitChangeRate: this.gitChangeRate,
+          fsEventRate: this.latestFsWatcherState.eventRate,
           sensorium: this.sensorium,
           strategy: this.strategy,
           vigor: this.vigorState,
@@ -823,6 +849,8 @@ export class AgentLoop {
       } else {
         callbacks.onError(err as Error)
       }
+    } finally {
+      this.stopFsWatcher()
     }
   }
 }

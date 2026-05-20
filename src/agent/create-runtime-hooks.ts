@@ -10,6 +10,7 @@ import { createTelemetryFlushHook } from './hooks/telemetry-flush-hook.js'
 import { createDreamHook } from './hooks/dream-hook.js'
 import { createCourageHook } from './hooks/courage-hook.js'
 import { createRadioHook, type RadioHookDeps } from './hooks/radio-hook.js'
+import { createConsistencyCheckHook } from './hooks/consistency-check-hook.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput } from './retrospect.js'
@@ -18,6 +19,7 @@ import type { TelemetryWriter } from './telemetry-writer.js'
 import type { EvidenceState } from './evidence.js'
 import type { TrajectoryEntry } from './trajectory.js'
 import type { DomainVoiceId } from './domain-voice.js'
+import type { ContextClaim } from '../context/claims.js'
 
 export interface RuntimeHookDeps {
   stigmergyDeposit: (deposit: any) => Promise<void>
@@ -40,6 +42,8 @@ export interface RuntimeHookDeps {
   chronicle?: { addRadio: (message: string, turn: number) => void; addPhaseTransition: (input: { fromPhase: string; toPhase: string; turn: number; summary: string }) => void }
   /** Returns current star domain id for radio voice modulation. null when no domain matched. */
   getDomainId?: () => DomainVoiceId
+  /** File observation claims for cross-store consistency checks. */
+  getFileObservations?: () => Array<Pick<ContextClaim, 'id' | 'text' | 'evidence'>>
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -59,6 +63,9 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getEvidenceState: deps.getEvidenceState,
       setLoadedPheromones: deps.setLoadedPheromones,
     }),
+    ...(deps.getFileObservations
+      ? [createConsistencyCheckHook({ getFileObservations: deps.getFileObservations })]
+      : []),
     createVigorPostToolHook({
       getPredictionAccumulator: deps.getPredictionAccumulator,
     }),

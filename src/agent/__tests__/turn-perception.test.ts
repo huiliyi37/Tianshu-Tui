@@ -83,6 +83,7 @@ describe('TurnPerceptionController', () => {
     })
 
     assert.equal(result.sensorium.complexity, 0.8)
+    assert.equal(result.sensoriumInput.fsEventRate, undefined)
     assert.equal(result.strategy.reasoningEffort, 'high')
     assert.equal(result.thetaState.interval, 3)
     assert.equal(reasoningEffort, 'high')
@@ -90,6 +91,37 @@ describe('TurnPerceptionController', () => {
     assert.deepEqual(phases, ['tianji-decomposing'])
     assert.equal(snapshots.length, 1)
     assert.equal(controller.getSnapshots().length, 1)
+  })
+
+  it('passes filesystem event rate through to sensorium input', async () => {
+    let observedFsEventRate: number | undefined
+    const writer: TelemetryWriter = { write: () => {}, flush: async () => {} }
+    const runtimeHooks = new RuntimeHookPipeline([{
+      phase: 'preTurn',
+      name: 'perception-fs-rate-test',
+      run: ctx => {
+        observedFsEventRate = ctx.snapshot.sensoriumInput?.fsEventRate
+        ctx.effects.setSensorium({ momentum: 0.1, pressure: 0.2, confidence: 0.9, complexity: 0.1, freshness: 0.5, stability: 1 })
+        ctx.effects.setStrategy({ reasoningEffort: 'medium', explorationBreadth: 0.3, commitThreshold: 0.6, shouldEscalate: false, thetaCycleInterval: 7 })
+      },
+    }])
+    const controller = new TurnPerceptionController({
+      cwd: '/tmp/project',
+      maxTurns: 5,
+      runtimeHooks,
+      telemetryWriter: writer,
+      getRuntimeSnapshot: extra => ({ cwd: '/tmp/project', turn: 1, recentToolHistory: [], sensorium: null, strategy: null, vigor: null, gitChangeRate: 0, ...extra }),
+      getProviderDegradationRatio: () => 0,
+      addUserMessage: () => {},
+      requestThetaCheck: () => {},
+      setReasoningEffort: () => {},
+      getFingerprint: () => fingerprint('same'),
+    })
+
+    const result = await controller.perceive({ ...makeInput(), fsEventRate: 0.75 }, { emitPhaseChange: () => {} })
+
+    assert.equal(result.sensoriumInput.fsEventRate, 0.75)
+    assert.equal(observedFsEventRate, 0.75)
   })
 
   it('keeps only the latest 100 sensorium snapshots', async () => {

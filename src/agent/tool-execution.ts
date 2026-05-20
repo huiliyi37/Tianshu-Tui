@@ -156,6 +156,13 @@ export class ToolExecutionController {
           {
             setVigor: (vigor) => { this.deps.setVigorState(vigor) },
             requestThetaCheck: (reason) => { this.deps.requestThetaCheck(reason) },
+            markClaimStale: claimId => {
+              this.deps.config.contextClaimStore?.updateClaimStatus(
+                claimId,
+                'stale',
+                `invalidated by ${tu.name}${target ? ` on ${target}` : ''}`,
+              )
+            },
           },
         ),
         {
