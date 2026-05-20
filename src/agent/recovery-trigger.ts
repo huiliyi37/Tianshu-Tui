@@ -5,11 +5,12 @@
  * the user must choose a recovery strategy. Panic is NOT "any failure" — it
  * is a specific state where forward progress is blocked.
  *
- * Four trigger categories:
+ * Five trigger categories:
  *   1. repeated_interrupt  — 2+ interrupts in same turn, or pending tools after interrupt
  *   2. doom_loop_blocked    — same tool/fingerprint failed to blocking threshold
  *   3. context_thrashing    — consecutive compactions still high-pressure, or compact failures
  *   4. session_integrity    — broken tool_use/tool_result pairs, session file damage
+ *   5. resource_pressure    — memory/disk sensors report dangerous pressure
  */
 
 import type { DoomLoopLevel } from './trace-store.js'
@@ -21,6 +22,7 @@ export type RecoveryTrigger =
   | 'doom_loop_blocked'
   | 'context_thrashing'
   | 'session_integrity'
+  | 'resource_pressure'
 
 export interface RecoveryTriggerResult {
   /** Which trigger fired, or null if no recovery needed */
@@ -76,6 +78,21 @@ export interface IntegrityClassifierInput {
   syntheticResultsInserted: number
   /** Total message count in the session */
   messageCount: number
+}
+
+export interface ResourcePressureClassifierInput {
+  /** Resident set size in bytes */
+  rssBytes: number
+  /** Heap used in bytes */
+  heapUsedBytes: number
+  /** Process memory limit in bytes (usually v8 heap size limit or configured cap) */
+  memoryLimitBytes: number
+  /** Session JSONL bytes on disk */
+  sessionBytes: number
+  /** Disk threshold in bytes */
+  sessionByteLimit: number
+  /** Optional memory leak trend slope, bytes per sample */
+  memoryTrendBytesPerSample?: number
 }
 
 // ─── Classifiers ──────────────────────────────────────────────
@@ -219,6 +236,52 @@ export function classifyThrashing(input: ThrashingClassifierInput): RecoveryTrig
   }
 }
 
+export function classifyResourcePressure(input: ResourcePressureClassifierInput): RecoveryTriggerResult | null {
+  const evidence: string[] = []
+  const actions: string[] = []
+
+  const memoryRatio = input.memoryLimitBytes > 0 ? input.rssBytes / input.memoryLimitBytes : 0
+  const diskRatio = input.sessionByteLimit > 0 ? input.sessionBytes / input.sessionByteLimit : 0
+  const trend = input.memoryTrendBytesPerSample ?? 0
+
+  if (memoryRatio >= 0.85) {
+    evidence.push(`RSS memory at ${(memoryRatio * 100).toFixed(1)}% of limit (${input.rssBytes}/${input.memoryLimitBytes} bytes)`)
+    actions.push('Enter minimal mode and trigger auto-compact before continuing')
+    actions.push('Start a fresh session if memory does not drop after compaction')
+  } else if (memoryRatio >= 0.7) {
+    evidence.push(`RSS memory at ${(memoryRatio * 100).toFixed(1)}% of limit (${input.rssBytes}/${input.memoryLimitBytes} bytes)`)
+    actions.push('Enter degraded mode and avoid high-risk or memory-heavy tools')
+  }
+
+  if (trend > 0 && input.memoryLimitBytes > 0 && trend / input.memoryLimitBytes >= 0.02) {
+    evidence.push(`Memory trend rising by ${trend} bytes/sample`)
+    actions.push('Watch for leaks; compact or restart if trend continues')
+  }
+
+  if (diskRatio >= 1) {
+    evidence.push(`Session JSONL exceeds disk sensor limit (${input.sessionBytes}/${input.sessionByteLimit} bytes)`)
+    actions.push('Checkpoint and truncate session persistence')
+    actions.push('Archive old transcript segments before continuing')
+  } else if (diskRatio >= 0.8) {
+    evidence.push(`Session JSONL at ${(diskRatio * 100).toFixed(1)}% of disk sensor limit (${input.sessionBytes}/${input.sessionByteLimit} bytes)`)
+    actions.push('Schedule session persistence checkpoint soon')
+  }
+
+  if (evidence.length === 0) return null
+
+  return {
+    trigger: 'resource_pressure',
+    severity: memoryRatio >= 0.85 || diskRatio >= 1 ? 'error' : 'warn',
+    summary: memoryRatio >= 0.85
+      ? 'Memory pressure critical — minimal mode recommended'
+      : diskRatio >= 1
+        ? 'Session persistence too large — checkpoint/truncate required'
+        : 'Resource pressure rising — degraded mode recommended',
+    evidence,
+    suggestedActions: [...new Set(actions)],
+  }
+}
+
 export function classifySessionIntegrity(
   input: IntegrityClassifierInput,
 ): RecoveryTriggerResult | null {
@@ -274,6 +337,7 @@ export type ClassifyInputs = {
   doomLoop: DoomLoopClassifierInput
   thrashing: ThrashingClassifierInput
   integrity: IntegrityClassifierInput
+  resourcePressure?: ResourcePressureClassifierInput
 }
 
 /**
@@ -295,6 +359,11 @@ export function classifyRecoveryTrigger(inputs: ClassifyInputs): RecoveryTrigger
 
   const integrity = classifySessionIntegrity(inputs.integrity)
   if (integrity) results.push(integrity)
+
+  if (inputs.resourcePressure) {
+    const resourcePressure = classifyResourcePressure(inputs.resourcePressure)
+    if (resourcePressure) results.push(resourcePressure)
+  }
 
   if (results.length === 0) return null
 

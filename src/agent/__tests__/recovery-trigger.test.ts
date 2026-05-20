@@ -5,11 +5,13 @@ import {
   classifyDoomLoop,
   classifyThrashing,
   classifySessionIntegrity,
+  classifyResourcePressure,
   classifyRecoveryTrigger,
   type InterruptClassifierInput,
   type DoomLoopClassifierInput,
   type ThrashingClassifierInput,
   type IntegrityClassifierInput,
+  type ResourcePressureClassifierInput,
   type RecoveryTriggerResult,
 } from '../recovery-trigger.js'
 
@@ -329,6 +331,56 @@ test('classifySessionIntegrity error priority over warn for orphan tool_use', ()
   assert.equal(result!.severity, 'error')
 })
 
+// ─── Resource Pressure Tests ──────────────────────────────────
+
+function makeResourcePressure(overrides?: Partial<ResourcePressureClassifierInput>): ResourcePressureClassifierInput {
+  return {
+    rssBytes: 100,
+    heapUsedBytes: 50,
+    memoryLimitBytes: 1_000,
+    sessionBytes: 100,
+    sessionByteLimit: 1_000,
+    memoryTrendBytesPerSample: 0,
+    ...overrides,
+  }
+}
+
+test('classifyResourcePressure returns null when memory and disk are healthy', () => {
+  assert.equal(classifyResourcePressure(makeResourcePressure()), null)
+})
+
+test('classifyResourcePressure warns at memory degraded threshold', () => {
+  const result = classifyResourcePressure(makeResourcePressure({ rssBytes: 750 }))
+  assert.notEqual(result, null)
+  assert.equal(result!.trigger, 'resource_pressure')
+  assert.equal(result!.severity, 'warn')
+  assert.ok(result!.summary.includes('Resource pressure'))
+  assert.ok(result!.suggestedActions.some(action => action.includes('degraded')))
+})
+
+test('classifyResourcePressure errors at memory minimal threshold', () => {
+  const result = classifyResourcePressure(makeResourcePressure({ rssBytes: 900 }))
+  assert.notEqual(result, null)
+  assert.equal(result!.severity, 'error')
+  assert.ok(result!.summary.includes('Memory pressure critical'))
+  assert.ok(result!.suggestedActions.some(action => action.includes('minimal')))
+})
+
+test('classifyResourcePressure detects oversized session JSONL', () => {
+  const result = classifyResourcePressure(makeResourcePressure({ sessionBytes: 1_200 }))
+  assert.notEqual(result, null)
+  assert.equal(result!.severity, 'error')
+  assert.ok(result!.evidence.some(e => e.includes('Session JSONL exceeds')))
+  assert.ok(result!.suggestedActions.some(action => action.includes('Checkpoint')))
+})
+
+test('classifyResourcePressure includes rising memory trend', () => {
+  const result = classifyResourcePressure(makeResourcePressure({ memoryTrendBytesPerSample: 30 }))
+  assert.notEqual(result, null)
+  assert.equal(result!.severity, 'warn')
+  assert.ok(result!.evidence.some(e => e.includes('Memory trend rising')))
+})
+
 // ─── Aggregator Tests ─────────────────────────────────────────
 
 function makeInterrupt(overrides?: Partial<InterruptClassifierInput>): InterruptClassifierInput {
@@ -419,6 +471,18 @@ test('classifyRecoveryTrigger returns single integrity trigger', () => {
   })
   assert.notEqual(result, null)
   assert.equal(result!.trigger, 'session_integrity')
+})
+
+test('classifyRecoveryTrigger returns resource pressure trigger', () => {
+  const result = classifyRecoveryTrigger({
+    interrupt: makeInterrupt(),
+    doomLoop: makeDoomLoop(),
+    thrashing: makeThrashing(),
+    integrity: makeIntegrity(),
+    resourcePressure: makeResourcePressure({ rssBytes: 750 }),
+  })
+  assert.notEqual(result, null)
+  assert.equal(result!.trigger, 'resource_pressure')
 })
 
 test('classifyRecoveryTrigger error takes priority over warn', () => {
