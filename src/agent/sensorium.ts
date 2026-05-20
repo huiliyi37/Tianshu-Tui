@@ -67,6 +67,8 @@ export interface SensoriumInput {
   /** Git file change rate (0-1), blended into freshness.
    *  Undefined when git is unavailable — freshness falls back to pure pheromone mode. */
   gitChangeRate?: number
+  /** Filesystem event rate (0-1) from fs-watcher — 原则③ external Zeitgeber */
+  fsEventRate?: number
 }
 
 // ─── Strategy Profile ───────────────────────────────────────────────
@@ -110,18 +112,34 @@ function computeComplexity(toolHistory: string[]): number {
   return clamp(unique / toolHistory.length)
 }
 
-function computeFreshness(pheromones: PheromoneRef[], gitChangeRate?: number): number {
+function computeFreshness(
+  pheromones: PheromoneRef[],
+  gitChangeRate?: number,
+  fsEventRate?: number,
+): number {
   // Base: pheromone signal (cross-session memory). Default 0.5 for unknown codebase.
   const pheromoneAvg = pheromones.length === 0
     ? 0.5
     : clamp(pheromones.reduce((sum, p) => sum + p.strength, 0) / pheromones.length)
 
-  if (gitChangeRate === undefined || gitChangeRate < 0) return pheromoneAvg
+  // Dimension weights: pheromone is long-term memory, git/Zeitgeber is medium-term, fs is real-time
+  let result = pheromoneAvg
+  let weight = 1.0
 
-  // Blend: 70% pheromone memory + 30% git Zeitgeber signal.
-  // Git change rate provides real-time code volatility; pheromones provide
-  // accumulated cross-session familiarity. Higher git change → lower freshness.
-  return clamp(0.7 * pheromoneAvg + 0.3 * (1 - gitChangeRate))
+  if (gitChangeRate !== undefined && gitChangeRate >= 0) {
+    // Git Zeitgeber: 70% pheromone + 30% git (inverse — high change = low freshness)
+    result = 0.7 * result + 0.3 * (1 - gitChangeRate)
+    weight = 1.0
+  }
+
+  if (fsEventRate !== undefined && fsEventRate >= 0) {
+    // FS Zeitgeber: blend in with diminishing weight
+    // 60% current + 40% fs-inverse. Git and fs are correlated but not identical —
+    // fs captures file watchers, formatters, auto-saves that git doesn't see.
+    result = 0.6 * result + 0.4 * (1 - fsEventRate)
+  }
+
+  return clamp(result)
 }
 
 function computeStability(doomLevel: DoomLoopLevel): number {
@@ -146,7 +164,7 @@ export function computeSensorium(input: SensoriumInput): Sensorium {
     pressure: computePressure(input.pressureResult),
     confidence: computeConfidence(input.evidenceState),
     complexity: computeComplexity(input.toolCallHistory),
-    freshness: computeFreshness(input.pheromones, input.gitChangeRate),
+    freshness: computeFreshness(input.pheromones, input.gitChangeRate, input.fsEventRate),
     stability: computeStability(input.doomLevel),
   }
 }

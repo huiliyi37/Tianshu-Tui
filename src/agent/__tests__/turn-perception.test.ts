@@ -34,7 +34,7 @@ function makeInput(turn = 1) {
   return {
     turn,
     estimatedTokens: 100,
-    pressureResult: { ratio: 0.1, tier: 0 as const, shouldCompact: false, thrashing: false },
+    pressureResult: { ratio: 0.1, tier: 0 as const, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0 },
     evidenceState: evidenceState(),
     predictionAccumulator: createPredictionAccumulator(),
     recentToolHistory: [],

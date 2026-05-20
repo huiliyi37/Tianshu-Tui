@@ -19,7 +19,7 @@ function makeStrategy(overrides: Partial<StrategyProfile> = {}): StrategyProfile
 function makeInput(overrides: Partial<SensoriumInput> = {}): SensoriumInput {
   return {
     predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 5 },
-    pressureResult: { ratio: 0.2, tier: 0, shouldCompact: false, thrashing: false },
+    pressureResult: { ratio: 0.2, tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0 },
     evidenceState: { filesModified: 0, verifiedCount: 0 },
     toolCallHistory: [],
     pheromones: [],
@@ -92,7 +92,7 @@ describe('createSignalConsumerRuntimeHook', () => {
           ratio: 0.9,
           tier: 3,
           shouldCompact: true,
-          thrashing: true,
+          thrashing: true, fastGrowth: false, growthRate: 0,
           suggestion: 'task_decomposition',
         },
       }),

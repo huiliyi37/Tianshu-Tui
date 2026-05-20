@@ -45,6 +45,7 @@ function makeCtx(
         emitPhaseChange: (_phase: string, detail?: { reason?: string }) => {
           emitted.push(detail?.reason ?? _phase)
         },
+        markClaimStale: () => {},
       },
     },
     emitted,

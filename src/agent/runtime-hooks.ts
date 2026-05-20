@@ -37,6 +37,7 @@ export interface RuntimeHookEffects {
   injectUserMessage(message: string): void
   requestThetaCheck(reason: string): void
   emitPhaseChange(phase: string, detail?: RuntimePhaseChangeDetail): void
+  markClaimStale(claimId: string): void
 }
 
 export interface RuntimeHookContext {
@@ -124,6 +125,7 @@ export function createRuntimeHookContext(
       injectUserMessage: effects.injectUserMessage ?? noop,
       requestThetaCheck: effects.requestThetaCheck ?? noop,
       emitPhaseChange: effects.emitPhaseChange ?? noop,
+      markClaimStale: effects.markClaimStale ?? noop,
     },
   }
 }

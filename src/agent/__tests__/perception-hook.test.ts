@@ -9,7 +9,7 @@ import type { PheromoneDeposit } from '../../context/stigmergy.js'
 function makeInput(overrides: Partial<SensoriumInput> = {}): SensoriumInput {
   return {
     predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 1 },
-    pressureResult: { ratio: 0.2, tier: 0, shouldCompact: false, thrashing: false },
+    pressureResult: { ratio: 0.2, tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0 },
     evidenceState: { filesModified: 1, verifiedCount: 1 },
     toolCallHistory: ['read_file', 'edit_file'],
     pheromones: [],
@@ -26,7 +26,7 @@ describe('createPerceptionRuntimeHook', () => {
       turn: 1,
       recentToolHistory: [],
       sensorium: null,
-      sensoriumInput: makeInput({ pressureResult: { ratio: 0.4, tier: 0, shouldCompact: false, thrashing: false } }),
+      sensoriumInput: makeInput({ pressureResult: { ratio: 0.4, tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0 } }),
       strategy: null,
       vigor: null,
       gitChangeRate: 0,

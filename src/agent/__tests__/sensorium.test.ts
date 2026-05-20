@@ -9,7 +9,7 @@ describe('computeSensorium', () => {
   it('computes momentum from prediction accumulator', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 7 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0.3 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0.3 },
       evidenceState: { filesModified: 3, verifiedCount: 2 },
       toolCallHistory: ['bash', 'read_file', 'bash', 'write_file', 'bash'],
       pheromones: [],
@@ -24,7 +24,7 @@ describe('computeSensorium', () => {
   it('computes momentum as 0 when no predictions yet', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0.1 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0.1 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
       toolCallHistory: [],
       pheromones: [],
@@ -37,7 +37,7 @@ describe('computeSensorium', () => {
   it('computes complexity from tool diversity in sliding window', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0.1 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0.1 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
       toolCallHistory: ['bash', 'read_file', 'write_file', 'edit_file', 'grep'],
       pheromones: [],
@@ -50,7 +50,7 @@ describe('computeSensorium', () => {
   it('computes low complexity for repeated tools', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0.1 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0.1 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
       toolCallHistory: ['read_file', 'read_file', 'read_file', 'read_file', 'read_file'],
       pheromones: [],
@@ -63,7 +63,7 @@ describe('computeSensorium', () => {
   it('computes stability from doom level', () => {
     const none: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
       toolCallHistory: [],
       pheromones: [],
@@ -81,7 +81,7 @@ describe('computeSensorium', () => {
   it('computes confidence from evidence state', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0 },
       evidenceState: { filesModified: 5, verifiedCount: 4 },
       toolCallHistory: [],
       pheromones: [],
@@ -94,7 +94,7 @@ describe('computeSensorium', () => {
   it('confidence defaults to 1.0 when no files modified', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0 },
       evidenceState: { filesModified: 0, verifiedCount: 3 },
       toolCallHistory: [],
       pheromones: [],
@@ -107,7 +107,7 @@ describe('computeSensorium', () => {
   it('clamps all dimensions to 0-1', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 5, predictions: [], consecutiveCorrect: 20 },
-      pressureResult: { tier: 4, shouldCompact: true, thrashing: true, ratio: 1.5 },
+      pressureResult: { tier: 4, shouldCompact: true, thrashing: true, fastGrowth: false, growthRate: 0, ratio: 1.5 },
       evidenceState: { filesModified: 2, verifiedCount: 10 },
       toolCallHistory: [],
       pheromones: [{ path: 'a.ts', signal: 'well-tested', strength: 1.0, depositedAt: Date.now(), halfLife: 604_800_000 }],
@@ -125,7 +125,7 @@ describe('computeSensorium', () => {
   it('defaults freshness to 0.5 when no pheromones', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
       toolCallHistory: [],
       pheromones: [],
@@ -139,7 +139,7 @@ describe('computeSensorium', () => {
     const now = Date.now()
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
       toolCallHistory: [],
       pheromones: [
@@ -155,7 +155,7 @@ describe('computeSensorium', () => {
   it('handles empty tool history (complexity=0)', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, ratio: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
       toolCallHistory: [],
       pheromones: [],
@@ -168,7 +168,7 @@ describe('computeSensorium', () => {
   it('all dimensions are frozen/immutable result', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 5 },
-      pressureResult: { tier: 1, shouldCompact: true, thrashing: false, ratio: 0.65 },
+      pressureResult: { tier: 1, shouldCompact: true, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0.65 },
       evidenceState: { filesModified: 3, verifiedCount: 2 },
       toolCallHistory: ['bash', 'read_file'],
       pheromones: [],

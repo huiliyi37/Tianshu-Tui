@@ -196,3 +196,40 @@ export function renderActiveClaimsBlock(claims: ContextClaim[], options?: Active
 
   return `<active-claims count="${active.length}">\n${entries.join('\n')}\n</active-claims>`
 }
+
+// ── Checkpoint: 溶解即新生 ────────────────────────────────────────
+
+export interface ClaimSnapshot {
+  version: 1
+  createdAt: number
+  claims: ContextClaim[]
+}
+
+/**
+ * 导出当前活跃 claims 的快照。
+ * 只包含 non-stale, non-expired claims — 溶解时丢弃已失效的信息。
+ */
+export function checkpointClaims(claims: ContextClaim[], now = Date.now()): ClaimSnapshot {
+  const alive = claims.filter(c => {
+    if (c.status === 'stale' || c.status === 'quarantined') return false
+    if (c.expiresAt !== undefined && c.expiresAt <= now) return false
+    return true
+  })
+  return {
+    version: 1,
+    createdAt: now,
+    claims: alive,
+  }
+}
+
+/**
+ * 从快照恢复 claims。
+ * 恢复后所有 claims 的 lastUsedAt 更新为 now，标记为「刚刚被唤醒」。
+ */
+export function loadClaimSnapshot(snapshot: ClaimSnapshot, now = Date.now()): ContextClaim[] {
+  if (snapshot.version !== 1) return []
+  return snapshot.claims.map(claim => ({
+    ...claim,
+    lastUsedAt: now,
+  }))
+}

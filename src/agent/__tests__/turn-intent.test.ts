@@ -25,7 +25,7 @@ const strategy = {
 const pressureResult: PressureResult = {
   tier: 0,
   shouldCompact: false,
-  thrashing: false,
+  thrashing: false, fastGrowth: false, growthRate: 0,
   ratio: 0.1,
 }
 
