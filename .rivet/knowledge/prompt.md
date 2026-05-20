@@ -1,3 +1,10 @@
+### 2026-05-20 — session 16f2680e
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts
+**Read** (7): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/uncertainty-framing.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/sycophancy-trap.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/uncertainty-framing.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts
+**Tests**: ⚠️ unverified
+**Tools used**: read_file×11, bash×8, grep×7, edit_file×7, todo×3, ask_user_question×1
+
 ### 2026-05-20 — session 5571fde9
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/pressure-monitor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cvm-overhead.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
