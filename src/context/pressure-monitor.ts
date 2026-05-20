@@ -5,12 +5,18 @@ export interface PressureResult {
   tier: CompactTier
   shouldCompact: boolean
   thrashing: boolean
+  fastGrowth: boolean
   suggestion?: 'task_decomposition'
   ratio: number
+  growthRate: number
 }
+
+/** Minimum ratio delta between consecutive checks to flag fast growth. */
+const FAST_GROWTH_THRESHOLD = 0.15
 
 export class PressureMonitor {
   private compactionTurns: number[] = []
+  private tokenHistory: Array<{ turn: number; tokens: number }> = []
 
   constructor(private contextWindow: number) {}
 
@@ -19,12 +25,24 @@ export class PressureMonitor {
     const tier = tierForRatio(ratio)
     const thrashing = this.detectThrashing(currentTurn)
 
+    // ── Growth rate: ratio delta since last check ──
+    const prevRatio = this.tokenHistory.length > 0
+      ? (this.tokenHistory[this.tokenHistory.length - 1]!.tokens / this.contextWindow)
+      : ratio
+    const growthRate = ratio - prevRatio
+    const fastGrowth = growthRate >= FAST_GROWTH_THRESHOLD
+
+    // Record for next comparison
+    this.tokenHistory = [...this.tokenHistory, { turn: currentTurn, tokens: estimatedTokens }].slice(-20)
+
     return {
       tier,
       shouldCompact: tier > 0,
       thrashing,
+      fastGrowth,
       suggestion: thrashing ? 'task_decomposition' : undefined,
       ratio,
+      growthRate,
     }
   }
 
