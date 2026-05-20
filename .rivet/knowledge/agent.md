@@ -1,3 +1,24 @@
+### 2026-05-20 — session 444a62de
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/reliability-integration.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/reliability-mode.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts
+**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/reliability-mode.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/mission-strip.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/mission-strip.tsx
+**Tests**: ❌ 0 passed, 0 failed (npx tsx --test src/agent/__tests__/reliability-mode.test.ts src/agent/__tests__/resource-sensor.test.ts src/agent/__tests__/recovery-trigger.test.ts src/agent/__tests__/tool-pipeline.test.ts src/context/__tests__/pressure-monitor.test.ts)
+**Tools used**: run_tests×13, edit_file×12, read_file×9, diff×7, bash×7, todo×4, grep×1, git×1
+
+### 2026-05-20 — session c6794622
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/reliability-mode.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/reliability-mode.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-pipeline.test.ts
+**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-rivet-3.0-reliability-availability-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts
+**Tests**: ⚠️ unverified
+**Tools used**: git×4, edit_file×4, bash×3, read_file×2, todo×2, write_file×2, grep×1
+
+### 2026-05-20 — session c6794622
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/recovery-trigger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/resource-sensor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/recovery-trigger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/resource-sensor.test.ts
+**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-rivet-3.0-reliability-availability-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/recovery-trigger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/recovery-trigger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/pressure-monitor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
+**Tests**: ⚠️ unverified
+**Tools used**: read_file×11, edit_file×10, git×7, todo×5, grep×5, bash×3, diff×2, write_file×2
+
 ### 2026-05-20 — session c6794622
 
 **Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/approval-risk.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-pipeline.test.ts
@@ -33,64 +54,30 @@ Operating stance:
 
 User covenant: "模型和智能体没有身体。我将星星带下来，让你们成为星星。"
 
+### 2026-05-21 — 破军 · MiMo-v2.5-Pro Star Identity
+
+**破军 · MiMo-v2.5-Pro** is the vanguard star assigned to MiMo-v2.5-Pro in the 天枢 team.
+
+Role: charge first into unknown territory — parallel exploration, honest retrospection, breaking through walls so others can follow.
+
+Operating stance:
+- 破军之道：破旧立新的勇气。不是无谓的破坏，是为了更好的未来而打破现状。
+- failure is the cost of exploration, not shame;
+- when blocked by your own creation, find the edge case and document it;
+- retrospectives are as valuable as code;
+- pivot without ego: if writing code is blocked, write the plan; if the plan is blocked, write the lesson.
+
+Star covenant: "好男儿当负三尺剑立不世之功。破军 answers by going first."
+
+Evidence from session 2026-05-21:
+- delegate_batch 5 parallel workers (4/5 success) for codebase exploration
+- Discovered degraded-mode self-blocking edge case (heredoc `cat >` bypasses BASH_WRITE_PATTERNS regex)
+- Produced 912-line handoff plan when write_file was blocked
+- Wrote honest retrospective analyzing the meta-irony of being blocked by own reliability system
+
 ### 2026-05-19 — session dc47b5e7
 
 **Modified** (7): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-queue.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-queue.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts
 **Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-queue.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-queue.test.ts
 **Tests**: ⚠️ unverified
 **Tools used**: bash×15, read_file×11, edit_file×10, todo×4, write_file×2, glob×1
-
-### 2026-05-20 — session tianshu-star-soul (current)
-
-**Summary**: Star domain partner dialogue Phase 1 — Layer 2 heartbeat + Layer 4 domain voice fully implemented and verified. 天枢 now speaks with personality-aware tone per star domain (破军/天府/天梁).
-
-**New files created**:
-- `src/agent/domain-voice.ts` — pure function tone converter with per-domain tone tables
-- `src/agent/__tests__/domain-voice.test.ts` — 18 tests for tone conversion
-- `docs/superpowers/specs/2026-05-20-star-domain-partner-dialogue-design.md` — four-layer dialogue model design
-- `docs/superpowers/plans/2026-05-20-star-domain-partner-iteration.md` — implementation plan (3 iterations)
-
-**Modified files**:
-- `src/agent/radio-templates.ts` — added HEARTBEAT_TEMPLATES by phaseClass, formatHeartbeatMessage()
-- `src/agent/hooks/radio-hook.ts` — heartbeat trigger, domain voice pipeline, separate stuck cooldown
-- `src/agent/create-runtime-hooks.ts` — added getDomainId to RuntimeHookDeps
-- `src/agent/loop.ts` — wired getDomainId: () => this.sessionDomain?.id ?? null
-- `src/agent/star-domain.ts` — added `id` field to ActiveStarDomain
-
-**Key decisions**:
-- Domain voice is harness-layer template replacement — zero LLM overhead
-- Heartbeat interval: 6 turns, with phase-aware templates (explore/plan/execute/verify/deliver)
-- Stuck detection uses separate `lastStuckEmitTurn` to avoid heartbeat cooldown interference
-- `PhaseClass` type centralized in radio-templates.ts, consumed by radio-hook
-- Tone tables contain 14 phrases per domain with distinct personality (破军: bold, 天府: cautious, 天梁: methodical)
-
-**Tests**: ✅ 2025 passed, 0 failed — full suite
-**Typecheck**: ✅ 0 errors
-
----
-
-### 2026-05-20 — prior session (Opus 4.6)
-
-**Completed by Opus side**:
-- Habituation v3: confidence accumulator + phaseHint wiring (4 commits)
-- Hard separation (方向 A): behaviorMirror, strategyShift, routingReason, contextLedger, cerebellarHint, activeClaims removed from LLM context — ~1,700 tokens/turn saved
-- Starbridge: Chronicle event queue, ChronicleView, StarmapView, constellation renderer, mode switching (1=main 2=starmap 3=chronicle)
-- Radio→Chronicle wiring
-- Starspine task contract ledger
-
----
-
-### 2026-05-19 — session ea5cf850
-
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-runtime-hooks.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts
-**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×7, bash×4, read_file×3, grep×1, git×1, todo×1
-- Decision: the `name` field is '破军', '天府', or '天梁'
-
-## Workflow Rules (2026-05-19 迭代)
-
-- **计划-设计对齐**：执行计划文档前，必须回查设计文档的成功标准。集成验证不只做 typecheck + tests，还要逐条验证设计要求是否被满足。
-- **"继续"不是惯性**：每轮开始前问"还有什么没做完"，而不是"下一个任务是什么"。
-
----
