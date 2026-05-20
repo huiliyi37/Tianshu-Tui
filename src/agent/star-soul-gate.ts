@@ -12,6 +12,8 @@
  */
 
 const ENV_KEY = 'STAR_SOUL'
+const ACTIVATION_WINDOW = 5
+const ACTIVATION_THRESHOLD = 0.7
 
 /**
  * Returns true if the star-soul system is enabled.
@@ -21,4 +23,26 @@ export function isStarSoulEnabled(): boolean {
   const val = process.env[ENV_KEY]
   if (val === undefined) return true // default: enabled
   return val !== '0' && val.toLowerCase() !== 'false'
+}
+
+/**
+ * Emergence activation — star-soul unlocks when confidence stays high.
+ *
+ * Returns true when:
+ * - STAR_SOUL=1 (manual override), OR
+ * - STAR_SOUL is unset AND confidence >= 0.7 for the last 5 consecutive turns
+ *
+ * Returns false when:
+ * - STAR_SOUL=0 (manual disable), OR
+ * - confidence history is too short, OR
+ * - any recent turn dropped below threshold
+ */
+export function shouldActivateStarSoul(confidenceHistory: number[]): boolean {
+  const val = process.env[ENV_KEY]
+  if (val === '0' || val?.toLowerCase() === 'false') return false
+  if (val === '1' || val?.toLowerCase() === 'true') return true
+
+  if (confidenceHistory.length < ACTIVATION_WINDOW) return false
+  const recent = confidenceHistory.slice(-ACTIVATION_WINDOW)
+  return recent.every(c => c >= ACTIVATION_THRESHOLD)
 }
