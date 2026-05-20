@@ -19,7 +19,7 @@ import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, recordTraceEvent } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
-import { assessToolRisk, CONFIDENCE_THRESHOLDS } from './approval-risk.js'
+import { assessToolRisk, CONFIDENCE_THRESHOLDS, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed } from './permissions.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
@@ -198,15 +198,18 @@ export async function executeToolUse(
       && approvalMode === 'auto-safe'
 
     const allowlisted = isToolAllowed(tu.name, tu.input, deps.config.permissions?.allow)
-    const shouldAsk = allowlisted
-      ? false
-      : canAutoApprove
+    const bashWriteRequiresApproval = requiresBashWriteApproval(tu.name, tu.input) && !allowlisted
+    const shouldAsk = bashWriteRequiresApproval
+      ? true
+      : allowlisted
         ? false
-        : approvalMode === 'manual'
-          ? needsApproval
-          : approvalMode === 'auto-safe'
-            ? isHighRisk
-            : false
+        : canAutoApprove
+          ? false
+          : approvalMode === 'manual'
+            ? needsApproval
+            : approvalMode === 'auto-safe'
+              ? isHighRisk
+              : false
 
     if (shouldAsk) {
       const approvalResult = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)

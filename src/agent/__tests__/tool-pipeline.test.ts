@@ -147,6 +147,63 @@ describe('executeToolUse', () => {
     assert.match(content, /TAIL_MARKER|Diagnosis:/)
   })
 
+  it('requires approval for bash writes even with high confidence auto-safe mode', async () => {
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+      getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+
+    const result = await executeToolUse(
+      { id: 'tu-bash-write', name: 'bash', input: { command: 'echo hello > out.txt' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.equal(approvalCalls, 1)
+    assert.equal(executed, false)
+    assert.equal((result.toolResult as any).is_error, true)
+    assert.match((result.toolResult as any).content, /requires user approval/)
+  })
+
+  it('lets explicit allowlist override bash write approval', async () => {
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [{ tool: 'bash', params: { command: 'echo hello > out.txt' } }] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+      getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+
+    const result = await executeToolUse(
+      { id: 'tu-bash-allow', name: 'bash', input: { command: 'echo hello > out.txt' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.equal(approvalCalls, 0)
+    assert.equal(executed, true)
+    assert.equal((result.toolResult as any).is_error, false)
+  })
+
   it('handles tool execution error gracefully', async () => {
     const deps = makeDeps({
       harness: {

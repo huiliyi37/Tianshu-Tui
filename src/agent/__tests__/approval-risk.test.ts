@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { assessToolRisk, DANGEROUS_BASH_PATTERNS, CONFIDENCE_THRESHOLDS } from '../approval-risk.js'
+import { assessToolRisk, DANGEROUS_BASH_PATTERNS, BASH_WRITE_PATTERNS, bashCommandMayWrite, requiresBashWriteApproval, CONFIDENCE_THRESHOLDS } from '../approval-risk.js'
 import type { ContextClaim } from '../../context/claims.js'
 import type { Sensorium } from '../sensorium.js'
 
@@ -130,6 +130,12 @@ describe('assessToolRisk', () => {
     const result = assessToolRisk('bash', { command: 'ls' })
     assert.equal(result.level, 'none')
     assert.deepEqual(result.reasons, [])
+  })
+
+  it('flags bash write side effects as medium risk even when not destructive', () => {
+    const result = assessToolRisk('bash', { command: 'echo hello > out.txt' })
+    assert.equal(result.level, 'medium')
+    assert.ok(result.reasons.some(r => r.includes('may write')))
   })
 
   it('flags web_fetch with non-http protocol as high risk', () => {
@@ -272,6 +278,30 @@ describe('assessToolRisk — sensorium confidence', () => {
     const aboveThreshold: Sensorium = { ...midConfidence, confidence: 0.35 }
     const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'none', [], aboveThreshold)
     assert.equal(result.level, 'none')
+  })
+})
+
+describe('BASH_WRITE_PATTERNS — deny bash writes by default', () => {
+  it('detects output redirection writes', () => {
+    assert.ok(bashCommandMayWrite('echo hi > out.txt'))
+    assert.ok(bashCommandMayWrite('npm test >> test.log'))
+  })
+
+  it('detects filesystem, git, and package-manager mutations', () => {
+    assert.ok(BASH_WRITE_PATTERNS.some(p => p.test('touch src/new.ts')))
+    assert.ok(bashCommandMayWrite('git add src/a.ts && git commit -m "x"'))
+    assert.ok(bashCommandMayWrite('npm install lodash'))
+  })
+
+  it('does not flag common read-only verification commands', () => {
+    assert.equal(bashCommandMayWrite('npm test'), false)
+    assert.equal(bashCommandMayWrite('npx tsc --noEmit'), false)
+    assert.equal(bashCommandMayWrite('git status'), false)
+  })
+
+  it('is scoped to bash tool calls', () => {
+    assert.equal(requiresBashWriteApproval('bash', { command: 'touch x' }), true)
+    assert.equal(requiresBashWriteApproval('read_file', { file_path: 'touch x' }), false)
   })
 })
 

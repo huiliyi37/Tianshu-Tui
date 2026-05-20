@@ -35,6 +35,33 @@ export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\bgit\s+push\b[^\n]*\s--force(?:-with-lease)?\b/i,
 ]
 
+/**
+ * Bash commands with write side effects. These are not always destructive, but
+ * they must not be silently auto-approved by sensorium confidence. This is the
+ * Phase-1 safety base: deny bash writes by default, then allow explicit
+ * user/project/session permission rules to re-enable trusted command shapes.
+ */
+export const BASH_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  /(^|[^<])>>?\s*[^&\s]/,                         // shell output redirection: echo hi > file
+  /\|\s*tee\b/,                                    // pipe writes via tee
+  /\b(?:rm|mv|cp|mkdir|touch|truncate|dd)\b/,       // filesystem mutations
+  /\bsed\b[^\n]*\s-i(?:\b|\s|['"])/,              // sed -i
+  /\bperl\b[^\n]*\s-pi(?:\b|\s|['"])/,            // perl -pi
+  /\b(?:chmod|chown|chgrp)\b/,                      // permission/ownership mutations
+  /\bgit\s+(?:add|commit|checkout|switch|restore|reset|clean|merge|rebase|cherry-pick|push|pull)\b/,
+  /\b(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|remove|rm|update|upgrade|dedupe)\b/,
+]
+
+export function bashCommandMayWrite(command: string): boolean {
+  return BASH_WRITE_PATTERNS.some(pattern => pattern.test(command))
+}
+
+export function requiresBashWriteApproval(toolName: string, input: Record<string, unknown>): boolean {
+  if (toolName !== 'bash') return false
+  const command = typeof input.command === 'string' ? input.command : ''
+  return bashCommandMayWrite(command)
+}
+
 /** Confidence thresholds for sensorium-driven adaptive approval. */
 export const CONFIDENCE_THRESHOLDS = {
   /** Above this + risk='none'|'low' → eligible for auto-approve */
@@ -87,6 +114,10 @@ export function assessToolRisk(
     if (cmd.includes('curl') && cmd.includes('|')) {
       reasons.push('Pipe from network')
       level = level === 'high' ? 'high' : 'medium'
+    }
+    if (bashCommandMayWrite(cmd)) {
+      reasons.push('bash command may write to filesystem, package state, or git state')
+      if (level === 'none') level = 'medium'
     }
   }
 
