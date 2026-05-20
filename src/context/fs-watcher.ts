@@ -39,6 +39,7 @@ export function createFsWatcher(config: FsWatcherConfig) {
   const debounceMs = config.debounceMs ?? 2_000
 
   let fsWatcher: FSWatcher | undefined
+  let subWatchers: FSWatcher[] = []
   let events: number[] = []
   let lastEventTime = 0
 
@@ -78,9 +79,10 @@ export function createFsWatcher(config: FsWatcherConfig) {
         const entries = await readdir(config.cwd, { withFileTypes: true })
         for (const entry of entries) {
           if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
-            watch(join(config.cwd, entry.name), { recursive: false }, () => {
+            const sub = watch(join(config.cwd, entry.name), { recursive: false }, () => {
               recordEvent()
             })
+            subWatchers.push(sub)
           }
         }
       } catch {
@@ -95,6 +97,8 @@ export function createFsWatcher(config: FsWatcherConfig) {
   function stop(): void {
     fsWatcher?.close()
     fsWatcher = undefined
+    for (const sub of subWatchers) sub.close()
+    subWatchers = []
     events = []
   }
 
