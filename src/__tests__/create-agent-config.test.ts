@@ -36,6 +36,8 @@ describe('createAgentConfig', () => {
     assert.ok(cfg.promptEngine)
     assert.equal(cfg.contextWindow, 128000)
     assert.equal(cfg.sessionId, 'session-1')
+    assert.equal(cfg.providerProfile?.cacheType, 'exact-prefix')
+    assert.equal(cfg.providerProfile?.contextWindow, 128000)
   })
 
   it('creates compactClient when compactModel provided', () => {

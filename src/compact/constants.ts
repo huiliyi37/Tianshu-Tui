@@ -68,8 +68,9 @@ export function compactPolicyRatios(providerProfile?: Pick<ProviderProfile, 'cac
 
 export function compactThresholds(input: number | CompactStrategyInput): CompactThresholds {
   const contextWindow = typeof input === 'number' ? input : input.contextWindow
-  const providerProfile = typeof input === 'number' ? undefined : input.providerProfile
-  const ratios = compactPolicyRatios(providerProfile)
+  const ratios = typeof input === 'number'
+    ? { watch: 0.6, compact: 0.78, reactive: 0.8, ceiling: 0.95 }
+    : compactPolicyRatios(input.providerProfile)
   const isLargeWindow = contextWindow >= LARGE_CONTEXT_WINDOW_TOKENS
   const toolResultHardCap = isLargeWindow ? 200_000 : 100_000
 

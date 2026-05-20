@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { shouldAutoCompact, buildSummaryPrompt, smartCompact } from '../auto.js'
+import { shouldAutoCompact, buildSummaryPrompt, smartCompact, compactionSummaryMaxTokens } from '../auto.js'
 import type { Message } from '../../api/types.js'
 
 describe('shouldAutoCompact', () => {
@@ -101,8 +101,40 @@ describe('buildSummaryPrompt', () => {
 
   it('uses large context limits for 500K+ tokens', () => {
     const msgs: Message[] = [{ role: 'user', content: 'x'.repeat(1000) }]
-    const prompt = buildSummaryPrompt(msgs, 600_000)
+    const prompt = buildSummaryPrompt(msgs, 600_000, 500_000)
     assert.ok(prompt.includes('900 words'))
+  })
+
+  it('scales summary prompt budget for 1M windows', () => {
+    const msgs: Message[] = [{ role: 'user', content: 'a'.repeat(130_000) + 'MIDDLE_MARKER' + 'z'.repeat(190_000) }]
+    const prompt500K = buildSummaryPrompt(msgs, 800_000, 500_000)
+    const prompt1M = buildSummaryPrompt(msgs, 800_000, 1_000_000)
+
+    assert.ok(prompt1M.includes('1800 words'))
+    assert.ok(prompt1M.length > prompt500K.length)
+    assert.ok(!prompt500K.includes('MIDDLE_MARKER'))
+    assert.ok(prompt1M.includes('MIDDLE_MARKER'))
+  })
+
+  it('scales summary output tokens for large windows', () => {
+    assert.equal(compactionSummaryMaxTokens(100_000, 1_000_000), 1_024)
+    assert.equal(compactionSummaryMaxTokens(600_000, 500_000), 2_048)
+    assert.equal(compactionSummaryMaxTokens(800_000, 1_000_000), 4_096)
+  })
+
+  it('passes dynamic max_tokens to smart compact', async () => {
+    let seenMaxTokens = 0
+    const client = {
+      stream: async (request: { max_tokens: number }, callbacks: { onTextDelta: (text: string) => void }) => {
+        seenMaxTokens = request.max_tokens
+        callbacks.onTextDelta('summary of long context')
+      },
+    } as any
+
+    const messages = Array.from({ length: 20 }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: `message ${i}` })) as Message[]
+    await smartCompact(client, messages, 800_000, 1_000_000, 'compact-model')
+
+    assert.equal(seenMaxTokens, 4_096)
   })
 
   it('truncates with head+tail when content exceeds max chars', () => {
