@@ -27,6 +27,7 @@ import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.j
 import { PrewarmCache } from './prewarm.js'
 import { compactThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
+import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
 
 /** Failure classes that trigger onPhaseChange('blocked') — user-visible state. */
 const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
@@ -78,6 +79,8 @@ export interface ToolPipelineDeps {
   recordPrediction?(correct: boolean): void
   /** Current sensorium snapshot — enables confidence-driven adaptive approval. */
   getSensorium?(): Sensorium | null
+  /** Current reliability mode decision — blocks risky tools before approval/execution. */
+  getReliabilityDecision?(): ReliabilityDecision | null
 }
 
 export interface ToolExecResult {
@@ -164,6 +167,14 @@ export async function executeToolUse(
           })
         }
       }
+    }
+
+    // Reliability mode gate — Phase 2 degraded/minimal executor.
+    const reliabilityDecision = deps.getReliabilityDecision?.() ?? null
+    if (reliabilityDecision && !isToolAllowedInReliabilityMode(reliabilityDecision.mode, tu.name, tu.input)) {
+      const msg = reliabilityBlockMessage(reliabilityDecision, tu.name)
+      callbacks.onToolResult(tu.id, tu.name, msg, true)
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
     }
 
     // Strategy shift + doom loop check

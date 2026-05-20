@@ -147,6 +147,58 @@ describe('executeToolUse', () => {
     assert.match(content, /TAIL_MARKER|Diagnosis:/)
   })
 
+  it('blocks write tools in degraded reliability mode before approval', async () => {
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+      getReliabilityDecision: () => ({ mode: 'degraded', reason: 'resource pressure rising', blockedTools: ['bash_write'] }),
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return true } }
+
+    const result = await executeToolUse(
+      { id: 'tu-degraded-write', name: 'bash', input: { command: 'echo hello > out.txt' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.equal(approvalCalls, 0)
+    assert.equal(executed, false)
+    assert.equal((result.toolResult as any).is_error, true)
+    assert.match((result.toolResult as any).content, /reliability mode: degraded/)
+  })
+
+  it('allows read-only tools in minimal reliability mode', async () => {
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'read', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+      getReliabilityDecision: () => ({ mode: 'minimal', reason: 'memory pressure critical', blockedTools: ['bash'] }),
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-minimal-read', name: 'read_file', input: { file_path: 'README.md' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(executed, true)
+    assert.equal((result.toolResult as any).is_error, false)
+  })
+
   it('requires approval for bash writes even with high confidence auto-safe mode', async () => {
     let approvalCalls = 0
     let executed = false
