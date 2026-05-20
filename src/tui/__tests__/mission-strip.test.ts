@@ -10,11 +10,7 @@ function makeSnapshot(overrides: Partial<CognitivePhaseSnapshot> = {}): Cognitiv
     scopeFileCount: 1,
     isActionableTask: true,
     hasVerificationGap: true,
-    filesRead: 2,
-    filesModified: 1,
     deliveryStatus: 'unverified',
-    doomLevel: 'none',
-    turn: 3,
     ...overrides,
   }
 }

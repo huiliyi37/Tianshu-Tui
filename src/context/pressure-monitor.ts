@@ -32,6 +32,10 @@ export class PressureMonitor {
     this.compactionTurns = [...this.compactionTurns, turn].slice(-10)
   }
 
+  getCompactionTurns(): number[] {
+    return [...this.compactionTurns]
+  }
+
   private detectThrashing(currentTurn: number): boolean {
     return this.compactionTurns.filter(turn => currentTurn - turn <= 4).length >= 3
   }

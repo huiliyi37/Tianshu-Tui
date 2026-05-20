@@ -13,6 +13,7 @@ import type { ContextInjectionController } from './context-injection.js'
 import type { RiskAssessment } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import type { TrajectoryRecorder } from './trajectory.js'
+import type { ReliabilityDecision } from './reliability-mode.js'
 import { PrewarmCache } from './prewarm.js'
 import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import {
@@ -51,6 +52,7 @@ export interface ToolExecutionDeps {
   getReasoningEffort: () => ReasoningEffort | undefined
   setClientReasoningEffort: (effort: ReasoningEffort) => void
   getSensorium: () => Sensorium | null
+  getReliabilityDecision: () => ReliabilityDecision | null
 }
 
 export interface ToolExecBatchInput {
@@ -112,6 +114,7 @@ export class ToolExecutionController {
           )
         },
         getSensorium: () => this.deps.getSensorium(),
+        getReliabilityDecision: () => this.deps.getReliabilityDecision(),
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)

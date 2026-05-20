@@ -55,6 +55,9 @@ import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
+import { classifyRecoveryTrigger } from './recovery-trigger.js'
+import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
+import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
 import { advanceContractStatus, contractStatusFromPhaseClass, extractTaskContract, type TaskContract } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -120,6 +123,8 @@ export interface AgentConfig {
    *  Degradation ratio affects sensorium stability dimension. */
   providerHealth?: ProviderHealthTracker
   playbookStore?: PlaybookStore
+  /** Optional resource sensor injection for reliability tests and custom deployments. */
+  resourceSensorOptions?: ResourceSensorOptions
 }
 
 export interface AgentCallbacks {
@@ -195,6 +200,9 @@ export class AgentLoop {
   private taskContract?: TaskContract
   private latestCognitiveSnapshot?: CognitivePhaseSnapshot
   private persist: SessionPersist | null = null
+  private resourceSensor: ResourceSensor
+  private latestResourceSnapshot: ResourceSensorSnapshot | null = null
+  private latestReliabilityDecision: ReliabilityDecision | null = null
 
   constructor(
     private config: AgentConfig,
@@ -209,6 +217,7 @@ export class AgentLoop {
       this.trajectory,
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
+    this.resourceSensor = new ResourceSensor(this.config.resourceSensorOptions)
     this.telemetryWriter = createTelemetryWriter(this.cwd)
     const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
     this.stigmergyStore = new StigmergyStore(pheromonesPath)
@@ -358,6 +367,7 @@ export class AgentLoop {
       getReasoningEffort: () => this.config.reasoningEffort,
       setClientReasoningEffort: effort => { this.config.reasoningEffort = effort; this.config.client.setReasoningEffort?.(effort) },
       getSensorium: () => this.sensorium,
+      getReliabilityDecision: () => this.latestReliabilityDecision,
     })
   }
 
@@ -464,6 +474,53 @@ export class AgentLoop {
 
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
 
+  getReliabilityDecision(): ReliabilityDecision | null { return this.latestReliabilityDecision }
+
+  private sessionPersistPath(): string | undefined {
+    return this.persist?.getFilePath()
+  }
+
+  private refreshReliabilityDecision(): void {
+    this.latestResourceSnapshot = this.resourceSensor.sample(this.sessionPersistPath())
+    const disk = this.latestResourceSnapshot.disk
+    const trigger = classifyRecoveryTrigger({
+      interrupt: {
+        interruptCountThisTurn: 0,
+        hasPendingTools: false,
+        turn: this.session.getTurnCount(),
+      },
+      doomLoop: {
+        doomLoopLevel: this.getDoomLoopLevel(),
+        recentFingerprints: this.traceStore.toolFingerprints.slice(-20),
+        uniqueFingerprintCount: new Set(this.traceStore.toolFingerprints.slice(-20)).size,
+      },
+      thrashing: {
+        compactionTurns: this.pressureMonitor.getCompactionTurns(),
+        currentTurn: this.session.getTurnCount(),
+        consecutiveCompactFailures: this.compactFailures.consecutiveFailures,
+        estimatedTokens: this.session.getEstimatedTokens(),
+        contextWindow: this.config.contextWindow,
+        lastCompactFailed: this.compactFailures.consecutiveFailures > 0,
+      },
+      integrity: {
+        orphanToolUseCount: 0,
+        orphanToolResultCount: 0,
+        wasRepaired: false,
+        syntheticResultsInserted: 0,
+        messageCount: this.session.getMessages().length,
+      },
+      resourcePressure: {
+        rssBytes: this.latestResourceSnapshot.memory.rssBytes,
+        heapUsedBytes: this.latestResourceSnapshot.memory.heapUsedBytes,
+        memoryLimitBytes: this.latestResourceSnapshot.memory.memoryLimitBytes,
+        sessionBytes: disk?.sessionBytes ?? 0,
+        sessionByteLimit: disk?.sessionByteLimit ?? Number.POSITIVE_INFINITY,
+        memoryTrendBytesPerSample: this.latestResourceSnapshot.memoryTrendBytesPerSample,
+      },
+    })
+    this.latestReliabilityDecision = modeForRecoveryTrigger(trigger)
+  }
+
   private requestThetaCheck(reason: string): void {
     if (this.thetaCheckInFlight) return
     this.thetaCheckInFlight = true
@@ -557,6 +614,8 @@ export class AgentLoop {
     this.outputTokenEscalationCount = 0
     this.sensorium = null
     this.strategy = null
+    this.latestResourceSnapshot = null
+    this.latestReliabilityDecision = null
     this.thetaState = createThetaState(7)
     this.loadedPheromones = []
     this.intent.reset()
@@ -671,6 +730,8 @@ export class AgentLoop {
 
         // Pass 5: adaptive repair hint injection
         this.contextInjection.refreshRepairHint()
+
+        this.refreshReliabilityDecision()
 
         this.compaction.enforceContextCeiling()
         this.contextInjection.refreshActiveClaims()

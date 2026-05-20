@@ -1,3 +1,37 @@
+### 2026-05-20 — session 444a62de
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/reliability-integration.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/reliability-mode.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts
+**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/reliability-mode.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/mission-strip.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/mission-strip.tsx
+**Tests**: ❌ 0 passed, 0 failed (npx tsx --test src/agent/__tests__/reliability-mode.test.ts src/agent/__tests__/resource-sensor.test.ts src/agent/__tests__/recovery-trigger.test.ts src/agent/__tests__/tool-pipeline.test.ts src/context/__tests__/pressure-monitor.test.ts)
+**Tools used**: run_tests×13, edit_file×12, read_file×9, diff×7, bash×7, todo×4, grep×1, git×1
+
+### 2026-05-20 — session c6794622
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/reliability-mode.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/reliability-mode.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-pipeline.test.ts
+**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-rivet-3.0-reliability-availability-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts
+**Tests**: ⚠️ unverified
+**Tools used**: git×4, edit_file×4, bash×3, read_file×2, todo×2, write_file×2, grep×1
+
+### 2026-05-20 — session c6794622
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/recovery-trigger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/resource-sensor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/recovery-trigger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/resource-sensor.test.ts
+**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-rivet-3.0-reliability-availability-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/recovery-trigger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/recovery-trigger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/pressure-monitor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
+**Tests**: ⚠️ unverified
+**Tools used**: read_file×11, edit_file×10, git×7, todo×5, grep×5, bash×3, diff×2, write_file×2
+
+### 2026-05-20 — session c6794622
+
+**Modified** (9): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/lwt-guard.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/log-state.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/block-stream-writer.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/api/client.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/log-state.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/block-stream-writer.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/session-persist.test.ts +1 more
+**Read** (10): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-rivet-3.0-reliability-availability-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/lwt-guard.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/log-state.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/block-stream-writer.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/api/client.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/lwt-guard.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/log-state.test.ts +2 more
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×18, read_file×12, glob×8, grep×7, git×5, todo×3, bash×3, diff×1
+
+### 2026-05-20 — session 2e72c32f
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/CLAUDE.md, /Users/banxia/app/deepseek-tui/opencode-tui/.rivet.md
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×3, bash×2, grep×1, git×1
+
 ### 2026-05-20 — session 1258c845
 
 **Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-three-kingdoms-heroes-companion-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts
@@ -18,38 +52,3 @@
 **Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/CHANGELOG.md, /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/CONTRIBUTING.md
 **Tests**: ⚠️ unverified
 **Tools used**: edit_file×4, todo×3, read_file×3, git×2, delegate_batch×1, bash×1
-
-### 2026-05-20 — session c6794622
-
-**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/approval-risk.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-pipeline.test.ts
-**Read** (8): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-rivet-vs-claude-code-maturity-gap.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/permissions.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-pipeline.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/registry.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/approval-risk.test.ts
-**Tests**: ⚠️ unverified
-**Tools used**: read_file×15, edit_file×9, git×5, todo×5, bash×5, diff×5, glob×4, grep×4
-
-### 2026-05-20 — session 2e72c32f
-
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/approval-risk.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx
-**Read** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx
-**Tests**: ⚠️ unverified
-**Tools used**: bash×7, read_file×5, edit_file×5, todo×4, git×3, grep×2, diff×1
-
-### 2026-05-20 — session c6794622
-
-**Modified** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/compact-thresholds.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/compact-policy.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/auto.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/__tests__/create-agent-config.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts
-**Read** (9): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/compact-thresholds.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/compact-policy.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/auto.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/compaction-controller.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-agent-config.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/auto.ts +1 more
-**Tests**: ❌ 0 passed, 0 failed (npx tsx --test src/compact/__tests__/compact-thresholds.test.ts src/context/__tests__/compact-policy.test.ts src/compact/__tests__/auto.test.ts src/agent/__tests__/compaction-controller.test.ts src/__tests__/create-agent-config.test.ts)
-**Tools used**: read_file×11, edit_file×10, bash×6, diff×4, todo×3, git×2, grep×2, run_tests×1, inspect_project×1
-
-### 2026-05-19 — session dc47b5e7
-
-**Modified** (7): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-prompts.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/dispatcher-hook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher-hook.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/task-board.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/task-board.test.ts
-**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-prompts.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/signal-consumer-hook.test.ts
-**Tests**: ⚠️ unverified
-**Tools used**: bash×11, write_file×5, todo×4, read_file×4, edit_file×3
-
-### 2026-05-19 — session dc47b5e7
-
-**Modified** (7): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-queue.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-queue.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts
-**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-queue.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-queue.test.ts
-**Tests**: ⚠️ unverified
-**Tools used**: bash×15, read_file×11, edit_file×10, todo×4, write_file×2, glob×1

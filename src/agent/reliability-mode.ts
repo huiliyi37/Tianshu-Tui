@@ -7,6 +7,7 @@ export interface ReliabilityDecision {
   mode: ReliabilityMode
   reason: string
   blockedTools: string[]
+  evidence?: string[]
 }
 
 const READ_ONLY_MINIMAL_TOOLS = new Set([
@@ -21,8 +22,13 @@ const READ_ONLY_MINIMAL_TOOLS = new Set([
   'ask_user_question',
 ])
 
-function decision(mode: ReliabilityMode, reason: string, blockedTools: string[] = []): ReliabilityDecision {
-  return { mode, reason, blockedTools }
+function decision(
+  mode: ReliabilityMode,
+  reason: string,
+  blockedTools: string[] = [],
+  evidence?: string[],
+): ReliabilityDecision {
+  return { mode, reason, blockedTools, ...(evidence && evidence.length > 0 ? { evidence } : {}) }
 }
 
 export function modeForRecoveryTrigger(trigger: RecoveryTriggerResult | null | undefined): ReliabilityDecision {
@@ -30,27 +36,27 @@ export function modeForRecoveryTrigger(trigger: RecoveryTriggerResult | null | u
 
   if (trigger.trigger === 'resource_pressure') {
     return trigger.severity === 'error'
-      ? decision('minimal', trigger.summary, ['bash', 'write_file', 'edit_file'])
-      : decision('degraded', trigger.summary, ['bash_write', 'high_risk'])
+      ? decision('minimal', trigger.summary, ['bash', 'write_file', 'edit_file'], trigger.evidence)
+      : decision('degraded', trigger.summary, ['bash_write', 'high_risk'], trigger.evidence)
   }
 
   if (trigger.trigger === 'context_thrashing' && trigger.severity === 'error') {
-    return decision('minimal', trigger.summary, ['bash', 'write_file', 'edit_file'])
+    return decision('minimal', trigger.summary, ['bash', 'write_file', 'edit_file'], trigger.evidence)
   }
 
   if (trigger.trigger === 'doom_loop_blocked') {
-    return decision('degraded', trigger.summary, ['bash_write', 'high_risk'])
+    return decision('degraded', trigger.summary, ['bash_write', 'high_risk'], trigger.evidence)
   }
 
   if (trigger.trigger === 'session_integrity' && trigger.severity === 'error') {
-    return decision('minimal', trigger.summary, ['bash', 'write_file', 'edit_file'])
+    return decision('minimal', trigger.summary, ['bash', 'write_file', 'edit_file'], trigger.evidence)
   }
 
   if (trigger.severity === 'warn') {
-    return decision('degraded', trigger.summary, ['bash_write', 'high_risk'])
+    return decision('degraded', trigger.summary, ['bash_write', 'high_risk'], trigger.evidence)
   }
 
-  return decision('degraded', trigger.summary, ['bash_write', 'high_risk'])
+  return decision('degraded', trigger.summary, ['bash_write', 'high_risk'], trigger.evidence)
 }
 
 export function isToolAllowedInReliabilityMode(
@@ -78,6 +84,9 @@ export function reliabilityBlockMessage(
     `Tool execution blocked by reliability mode: ${decision.mode}`,
     `Tool: ${toolName}`,
     `Reason: ${decision.reason}`,
+    ...(decision.evidence && decision.evidence.length > 0
+      ? [`Evidence: ${decision.evidence.join('; ')}`]
+      : []),
     decision.mode === 'minimal'
       ? 'Allowed tools: read_file, grep, glob, diff, inspect_project, repo_map, related_tests, recall, ask_user_question.'
       : 'Degraded mode blocks write_file, edit_file, and bash commands with write side effects.',

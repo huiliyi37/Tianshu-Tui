@@ -65,16 +65,18 @@ describe('CognitiveLedger read model', () => {
     assert.equal(snapshot.scopeFileCount, 1)
     assert.equal(snapshot.isActionableTask, true)
     assert.equal(snapshot.hasVerificationGap, true)
-    assert.equal(snapshot.filesRead, 2)
-    assert.equal(snapshot.filesModified, 1)
     assert.equal(snapshot.deliveryStatus, 'unverified')
-    assert.equal(snapshot.doomLevel, 'none')
-    assert.equal(snapshot.turn, 5)
   })
 
-  it('reuses TraceStore doom-loop detection', () => {
+  it('getCognitivePhaseSnapshot omits doom-level and turn (pruned fields)', () => {
     const ledger = createCognitiveLedger({ contract: makeContract(), evidence: makeEvidence(), trace: makeTrace(['same', 'same', 'same']), turn: 5 })
-    assert.equal(getCognitivePhaseSnapshot(ledger).doomLevel, 'blocked')
+    const snapshot = getCognitivePhaseSnapshot(ledger)
+    // doomLevel and turn are no longer in snapshot — they were pruned as unread
+    const keys = Object.keys(snapshot)
+    assert.ok(!keys.includes('doomLevel'))
+    assert.ok(!keys.includes('turn'))
+    assert.ok(!keys.includes('filesRead'))
+    assert.ok(!keys.includes('filesModified'))
   })
 
   it('works without contract while still projecting verification gap when needed', () => {

@@ -1,6 +1,5 @@
 import type { EvidenceState } from '../agent/evidence.js'
 import type { TraceStore } from '../agent/trace-store.js'
-import { getDoomLoopLevel, type DoomLoopLevel } from '../agent/trace-store.js'
 import { renderContractProjection, type TaskContract } from './task-contract.js'
 
 export interface CognitiveLedgerInput {
@@ -23,11 +22,7 @@ export interface CognitivePhaseSnapshot {
   scopeFileCount: number
   isActionableTask: boolean
   hasVerificationGap: boolean
-  filesRead: number
-  filesModified: number
   deliveryStatus: string
-  doomLevel: DoomLoopLevel
-  turn: number
 }
 
 export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLedger {
@@ -55,10 +50,6 @@ export function getCognitivePhaseSnapshot(ledger: CognitiveLedger): CognitivePha
     scopeFileCount: ledger.contract?.scope.mentionedFiles.length ?? 0,
     isActionableTask: ledger.contract?.isActionable ?? false,
     hasVerificationGap: buildVerificationGapProjection(ledger).length > 0,
-    filesRead: ledger.evidence.filesRead.size,
-    filesModified: ledger.evidence.filesModified.size,
     deliveryStatus: ledger.evidence.deliveryStatus,
-    doomLevel: getDoomLoopLevel(ledger.trace.toolFingerprints),
-    turn: ledger.turn,
   }
 }
