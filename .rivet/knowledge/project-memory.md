@@ -1,3 +1,13 @@
+### 2026-05-20 — session fd1e07dc
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/config/default.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/api/openai-client.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/static.ts
+**Read** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/api/provider.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/api/openai-client.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/api/provider-registry.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/static.ts
+**Tests**: ⚠️ unverified
+**Tools used**: bash×10, read_file×6, todo×5, grep×3, edit_file×2, delegate_task×1, write_file×1
+- Decision: also need to enable thinking mode for MiMo in the config file
+- Decision: get a 400 error
+- Decision: rewrite this file to match the main branch version exactly
+
 ### 2026-05-20 — session 5571fde9
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/pressure-monitor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cvm-overhead.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
@@ -60,10 +70,3 @@
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/CLAUDE.md, /Users/banxia/app/deepseek-tui/opencode-tui/.rivet.md
 **Tests**: ⚠️ unverified
 **Tools used**: edit_file×3, bash×2, grep×1, git×1
-
-### 2026-05-20 — session 1258c845
-
-**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-three-kingdoms-heroes-companion-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts
-**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×6, read_file×3, bash×3, write_file×1, todo×1

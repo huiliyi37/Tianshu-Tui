@@ -332,8 +332,8 @@ export class OpenAIClient implements StreamClient {
 
     // Thinking / reasoning dispatch.
     // Providers that accept {thinking: {type: 'enabled'}} (DeepSeek, GLM, Claude
-    // via proxy, Kimi): send the thinking block.
-    // Pure OpenAI-compatible providers (MiMo, MiniMax, OpenCode Go): the thinking
+    // via proxy, Kimi, MiMo): send the thinking block.
+    // Pure OpenAI-compatible providers (MiniMax, OpenCode Go): the thinking
     // block is unrecognized and returns 400. Use reasoning_effort instead, or
     // nothing if the provider doesn't support effort control either.
     // GLM is a hybrid: thinkingFormat='openai' for response parsing but it
@@ -341,6 +341,7 @@ export class OpenAIClient implements StreamClient {
     const usesThinkingBlock = this.config.thinkingFormat === 'anthropic'
       || this.config.providerName === 'glm'
       || this.config.providerName === 'claude'
+      || this.config.providerName === 'mimo'
 
     if (this.config.thinking === 'enabled') {
       if (usesThinkingBlock) {

@@ -133,7 +133,7 @@ export const DEFAULT_CONFIG: Config = {
           toolJsonBug: false,
           prefixCache: 'none' as const,
         },
-        thinking: 'disabled',
+        thinking: 'enabled',
         maxTokens: 64000,
         models: [
           {
