@@ -8,6 +8,26 @@ import type { AlchemyStage } from '../alchemy-bar.js'
 export type DomainId = 'pojun' | 'tianfu' | 'tianliang' | null
 
 /**
+ * 三国英雄 ID — 工程预留
+ *
+ * 用于标识当前激活的英雄伴侣。
+ * null = 使用默认星君（文/武双身模式）
+ *
+ * 设计文档：docs/superpowers/specs/2026-05-20-three-kingdoms-heroes-companion-design.md
+ *
+ * 注：当前阶段仅预留类型，实际英雄帧模板待美工设计完成后填入。
+ */
+export type HeroId =
+  | 'liubei'    // 刘备 — 天枢，仁德之主
+  | 'zhuge'     // 诸葛亮 — 天璇，智慧化身
+  | 'pangtong'  // 庞统 — 天玑，凤雏之智
+  | 'guanyu'    // 关羽 — 天权，义薄云天
+  | 'zhangfei'  // 张飞 — 玉衡，万夫莫敌
+  | 'zhaoyun'   // 赵云 — 开阳，浑身是胆
+  | 'huangzhong' // 黄忠 — 摇光，老当益壮
+  | null        // 默认星君模式
+
+/**
  * 文星模式：天玑星君（文星）或玉衡星君（武曲）
  *
  * - wenxing (文星): 观局、寻迹、拆解、定标、归航 — 缓慢、儒雅、拱手礼
@@ -18,7 +38,7 @@ export type AvatarMode = 'wenxing' | 'wuxing'
 /**
  * 星君情绪状态
  *
- * 12 种离散情绪，通过 kaomoji 面部表达。
+ * 10 种离散情绪，通过 kaomoji 面部表达。
  * 设计原则：模式切换 > 微表情变化（来自布袋戏洞察）
  */
 export type AvatarMood =
@@ -106,4 +126,13 @@ export interface AvatarContext {
   isTestFailing: number
   /** 空闲秒数 */
   idleSeconds: number
+  /**
+   * 当前激活的英雄（工程预留）
+   *
+   * null = 默认星君模式（文/武双身）
+   * 具体英雄 ID = 英雄伴侣模式（待美工设计后实现）
+   *
+   * 设计文档：docs/superpowers/specs/2026-05-20-three-kingdoms-heroes-companion-design.md
+   */
+  hero?: HeroId
 }

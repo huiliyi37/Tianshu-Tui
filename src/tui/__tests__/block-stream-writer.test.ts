@@ -6,7 +6,7 @@ describe('BlockStreamWriter', () => {
   let emitted: string[]
   let writer: BlockStreamWriter
 
-  const config: BlockStreamConfig = { minChars: 10, maxChars: 20, idleMs: 5 }
+  const config: BlockStreamConfig = { minChars: 10, maxChars: 20, idleMs: 5, maxBufferSize: 64 * 1024 }
 
   beforeEach(() => {
     emitted = []
@@ -66,5 +66,18 @@ describe('BlockStreamWriter', () => {
   it('flush with empty buffer does not call onBlock', async () => {
     await writer.flush()
     assert.equal(emitted.length, 0)
+  })
+
+  it('enforces absolute buffer cap under burst input', async () => {
+    const capped = new BlockStreamWriter(
+      { minChars: 1_000, maxChars: 50, idleMs: 100, maxBufferSize: 120 },
+      (text) => { emitted.push(text) },
+    )
+
+    capped.push('x'.repeat(500))
+    await capped.flush()
+
+    assert.ok(emitted.length > 1)
+    assert.ok(emitted.every(chunk => chunk.length <= 120))
   })
 })

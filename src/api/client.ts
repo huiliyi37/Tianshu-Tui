@@ -468,9 +468,9 @@ export class ApiClient implements StreamClient {
       })
       toolUseBuffer = null
     }
-    if (streamIdleTimeout) clearTimeout(streamIdleTimeout)
     if (streamTimedOut) throw new Error('SSE stream idle timeout')
     } finally {
+      if (streamIdleTimeout) clearTimeout(streamIdleTimeout)
       signal?.removeEventListener('abort', abortHandler)
       reader.releaseLock()
     }

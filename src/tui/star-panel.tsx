@@ -7,7 +7,7 @@ import { renderAvatar } from './avatar/avatar-renderer.js'
 import { renderConstellationVertical, getActiveStarIndex } from './constellation.js'
 import { PHASE_LABELS, PHASE_GLYPHS } from '../agent/star-event.js'
 import { alchemyBar, alchemyStage } from './alchemy-bar.js'
-import { MODE_COLORS, PANEL_BORDER, PHASE_LABEL, RADIO_TEXT } from './star-panel-colors.js'
+import { MODE_COLORS, PANEL_BORDER, PHASE_LABEL, RADIO_TEXT, ACTIVE_STAR_GLOW, FAR_STAR_GRAY, CONSTELLATION_LINE } from './star-panel-colors.js'
 
 /**
  * 紫微星桥 — 侧边星图面板
@@ -190,7 +190,7 @@ export function StarPanel({
         {constellationLines.map((line, i) => (
           <Text
             key={i}
-            color={i % 2 === 0 ? (Math.floor(i / 2) === activeIdx ? '#fbbf24' : '#64748b') : '#475569'}
+            color={i % 2 === 0 ? (Math.floor(i / 2) === activeIdx ? ACTIVE_STAR_GLOW : FAR_STAR_GRAY) : CONSTELLATION_LINE}
           >
             {line}
           </Text>

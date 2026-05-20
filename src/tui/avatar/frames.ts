@@ -1,5 +1,5 @@
 import type { StarPhase } from '../../agent/star-event.js'
-import type { AvatarMode, AvatarFrame, FaceExpression, DomainId, SealCrown } from './types.js'
+import type { AvatarMode, AvatarFrame, FaceExpression, DomainId, SealCrown, HeroId } from './types.js'
 
 /**
  * 星君帧模板
@@ -7,6 +7,35 @@ import type { AvatarMode, AvatarFrame, FaceExpression, DomainId, SealCrown } fro
  * 国风设计：印章冠 + kaomoji 面 + 中国礼仪手势
  * 印章是中国最小的完整信息单元 — 方寸之间，气象万千。
  */
+
+// ─── CJK 显示宽度计算 ───────────────────────────────────────────────
+
+/**
+ * 计算字符串的终端显示宽度
+ *
+ * CJK 字符（中日韩）占 2 列，其他字符占 1 列。
+ * 基于 Unicode 码点范围判断。
+ */
+export function getStringWidth(str: string): number {
+  let width = 0
+  for (const char of str) {
+    const code = char.codePointAt(0) ?? 0
+    // CJK Unified Ideographs + CJK Compatibility Ideographs + Katakana + Hiragana
+    if (
+      (code >= 0x4E00 && code <= 0x9FFF) ||   // CJK Unified Ideographs
+      (code >= 0x3000 && code <= 0x303F) ||   // CJK Symbols and Punctuation
+      (code >= 0x3040 && code <= 0x309F) ||   // Hiragana
+      (code >= 0x30A0 && code <= 0x30FF) ||   // Katakana
+      (code >= 0xFF00 && code <= 0xFFEF) ||   // Fullwidth Forms
+      (code >= 0xF900 && code <= 0xFAFF)      // CJK Compatibility Ideographs
+    ) {
+      width += 2
+    } else {
+      width += 1
+    }
+  }
+  return width
+}
 
 // ─── 印章冠定义 ─────────────────────────────────────────────────────
 
@@ -116,6 +145,7 @@ function selectSeal(mode: AvatarMode, phase: StarPhase): SealCrown {
  * @param face kaomoji 面部表达
  * @param phase 星相位
  * @param domain 星域（破军/天府/天梁）
+ * @param hero 英雄 ID（工程预留，默认 null）
  * @returns 完整的 AvatarFrame
  */
 export function buildFrame(
@@ -123,6 +153,7 @@ export function buildFrame(
   face: FaceExpression,
   phase: StarPhase,
   domain: DomainId,
+  hero: HeroId = null,
 ): AvatarFrame {
   const seal = selectSeal(mode, phase)
   const gesture = GESTURES[mode]
@@ -145,9 +176,14 @@ export function buildFrame(
     status,                     // 状态文字
   ]
 
-  // 计算最大宽度并填充
-  const maxWidth = Math.max(...rawLines.map(l => [...l].length))
-  const lines = rawLines.map(l => l.padEnd(maxWidth - [...l].length + l.length))
+  // 计算最大显示宽度并填充
+  // 使用 getStringWidth 处理 CJK 字符（占 2 列）
+  const maxWidth = Math.max(...rawLines.map(l => getStringWidth(l)))
+  const lines = rawLines.map(l => {
+    const currentWidth = getStringWidth(l)
+    const padding = maxWidth - currentWidth
+    return padding > 0 ? l + ' '.repeat(padding) : l
+  })
 
   return {
     crown: seal,

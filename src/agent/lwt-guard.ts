@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync, mkdirSync, writeFileSync, openSync, closeSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, mkdirSync, writeFileSync, openSync, closeSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 
@@ -73,15 +73,23 @@ export class LWTGuard {
       }
     }
 
-    // 原子创建：O_CREAT|O_EXCL 在文件已存在时会失败
+    // 原子创建：O_CREAT|O_EXCL 在文件已存在时会失败。
+    // Write the PID through the same fd to avoid a create→close→write TOCTOU gap.
+    let fd: number | null = null
     try {
-      const fd = openSync(this.lockPath, 'wx') // wx = O_CREAT|O_EXCL
-      closeSync(fd)
-      // 写入 PID
-      writeFileSync(this.lockPath, String(process.pid))
+      fd = openSync(this.lockPath, 'wx') // wx = O_CREAT|O_EXCL
+      writeSync(fd, String(process.pid))
       return true
     } catch {
+      if (fd !== null) {
+        try { closeSync(fd) } catch { /* ignore */ }
+        try { unlinkSync(this.lockPath) } catch { /* ignore */ }
+      }
       return false
+    } finally {
+      if (fd !== null) {
+        try { closeSync(fd) } catch { /* ignore */ }
+      }
     }
   }
 

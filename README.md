@@ -4,7 +4,7 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter complete and merged to `main` — 1685 tests passing, typecheck/build clean.
+Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter + Self-Regulating Safety + Three-Authority Coroutine foundation complete — **2340 tests passing**, typecheck/build clean.
 
 ### 2026-05-20 — Self-Regulating Safety + Three-Authority Coroutine
 

@@ -93,3 +93,45 @@ export const DOMAIN_BADGE_COLORS = {
   tianfu: INDIGO,
   tianliang: STAR_GOLD,
 } as const
+
+// ─── 256 色降级方案 ─────────────────────────────────────────────────
+
+/**
+ * 256 色终端降级方案
+ *
+ * 三级渲染降级策略（规格要求）：
+ * 1. truecolor (24-bit) → 使用上面的 hex 色值
+ * 2. 256色 → 使用下面的 ANSI 256 色名
+ * 3. 16色 → 使用 chalk 基础色名
+ *
+ * 当 chalk.level < 3 时，使用此降级方案。
+ */
+export const FALLBACK_256 = {
+  indigo: 'blue',
+  cinnabar: 'red',
+  starGold: 'yellow',
+  moonwhite: 'white',
+  inkBlack: 'black',
+  farStarGray: 'gray',
+  panelBorder: 'gray',
+  constellationLine: 'gray',
+  activeStarGlow: 'yellow',
+  radioText: 'cyan',
+  phaseLabel: 'white',
+} as const
+
+/**
+ * 获取降级色值
+ *
+ * @param truecolor truecolor hex 值
+ * @param fallbackKey 降级色的键名
+ * @param colorLevel chalk.level
+ * @returns 合适的色值
+ */
+export function getColorWithFallback(
+  truecolor: string,
+  fallbackKey: keyof typeof FALLBACK_256,
+  colorLevel: number,
+): string {
+  return colorLevel >= 3 ? truecolor : FALLBACK_256[fallbackKey]
+}

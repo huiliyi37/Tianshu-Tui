@@ -2,12 +2,14 @@ export interface BlockStreamConfig {
   minChars: number
   maxChars: number
   idleMs: number
+  maxBufferSize: number
 }
 
 const DEFAULT_CONFIG: BlockStreamConfig = {
   minChars: 100,
   maxChars: 600,
   idleMs: 500,
+  maxBufferSize: 64 * 1024,
 }
 
 export class BlockStreamWriter {
@@ -26,6 +28,7 @@ export class BlockStreamWriter {
   push(chunk: string): void {
     if (!chunk) return
     this.buffer += chunk
+    this.enforceBufferLimit()
     this.resetIdleTimer()
     this.checkEmit()
   }
@@ -71,6 +74,17 @@ export class BlockStreamWriter {
     if (paraIdx !== -1 && paraIdx >= Math.floor(this.config.minChars * 0.5)) {
       const block = this.buffer.slice(0, paraIdx + 2)
       this.buffer = this.buffer.slice(paraIdx + 2)
+      this.enqueue(block)
+    }
+  }
+
+  private enforceBufferLimit(): void {
+    if (this.buffer.length <= this.config.maxBufferSize) return
+
+    while (this.buffer.length > this.config.maxBufferSize) {
+      const pos = this.findBreakPoint(this.buffer, Math.min(this.config.maxChars, this.buffer.length))
+      const block = this.buffer.slice(0, pos)
+      this.buffer = this.buffer.slice(pos)
       this.enqueue(block)
     }
   }

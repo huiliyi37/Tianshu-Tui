@@ -59,7 +59,7 @@ export function renderConstellationVertical(activePhase: StarPhase): string[] {
 
     // 连接线（最后一颗星不加）
     if (i < STAR_ORDER.length - 1) {
-      lines.push(isActive ? '│' : '│')
+      lines.push('│')
     }
   }
 

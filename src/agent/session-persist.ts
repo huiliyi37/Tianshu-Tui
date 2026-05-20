@@ -23,6 +23,42 @@ function ensureDir(dir: string): void {
   }
 }
 
+export const MAX_SESSION_MESSAGE_JSON_CHARS = 100_000
+
+function truncateString(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value
+  const marker = `\n<session-message-truncated original_chars="${value.length}" kept_chars="${maxChars}" />`
+  const keep = Math.max(0, maxChars - marker.length)
+  return value.slice(0, keep) + marker
+}
+
+function capJsonValue(value: unknown, maxChars: number): unknown {
+  if (typeof value === 'string') return truncateString(value, maxChars)
+  if (Array.isArray(value)) return value.map(item => capJsonValue(item, maxChars))
+  if (value && typeof value === 'object') {
+    const capped: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      capped[key] = capJsonValue(child, maxChars)
+    }
+    return capped
+  }
+  return value
+}
+
+export function serializeSessionMessage(message: Message, maxChars = MAX_SESSION_MESSAGE_JSON_CHARS): string {
+  let json = JSON.stringify(message)
+  if (json.length <= maxChars) return json
+
+  const capped = capJsonValue(message, Math.max(1_000, Math.floor(maxChars * 0.8))) as Message
+  json = JSON.stringify(capped)
+  if (json.length <= maxChars) return json
+
+  return JSON.stringify({
+    role: message.role,
+    content: truncateString(json, maxChars),
+  })
+}
+
 export class SessionPersist {
   private filePath: string
   private metadataPath: string
@@ -51,7 +87,7 @@ export class SessionPersist {
 
   /** Append a single message to the session file */
   async append(message: Message): Promise<void> {
-    const line = JSON.stringify(message) + '\n'
+    const line = serializeSessionMessage(message) + '\n'
     await appendFile(this.filePath, line)
   }
 
@@ -98,7 +134,7 @@ export class SessionPersist {
 
   /** Compact the session file with the given messages (with checksums) */
   compact(messages: Message[]): void {
-    const content = messages.map(m => appendChecksum(JSON.stringify(m))).join('\n') + '\n'
+    const content = messages.map(m => appendChecksum(serializeSessionMessage(m))).join('\n') + '\n'
     writeFileAtomicSync(this.filePath, content)
   }
 
@@ -111,7 +147,7 @@ export class SessionPersist {
    * 带校验和的 append
    */
   async appendWithChecksum(message: Message): Promise<void> {
-    const json = JSON.stringify(message)
+    const json = serializeSessionMessage(message)
     const line = appendChecksum(json) + '\n'
     await appendFile(this.filePath, line)
   }

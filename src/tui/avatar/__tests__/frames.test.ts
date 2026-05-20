@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildFrame, WENXING_SEAL, WUXING_SEAL, TIANXU_SEAL, STAR_SEAL, STATUS_LABELS, GESTURES } from '../frames.js'
+import { buildFrame, WENXING_SEAL, WUXING_SEAL, TIANXU_SEAL, STAR_SEAL, STATUS_LABELS, GESTURES, getStringWidth } from '../frames.js'
 import type { FaceExpression } from '../types.js'
 
 describe('WENXING_SEAL', () => {
@@ -171,15 +171,17 @@ describe('buildFrame', () => {
 
   it('width is consistent across all lines', () => {
     const frame = buildFrame('wenxing', calmFace, 'tianshu-planning', null)
+    const expectedWidth = getStringWidth(frame.lines[0]!)
     for (const line of frame.lines) {
-      assert.equal(line.length, frame.width)
+      assert.equal(getStringWidth(line), expectedWidth)
     }
   })
 
   it('lines are padded to consistent width', () => {
     const frame = buildFrame('wuxing', focusedFace, 'yuheng-implementing', null)
+    const expectedWidth = getStringWidth(frame.lines[0]!)
     for (const line of frame.lines) {
-      assert.equal(line.length, frame.width)
+      assert.equal(getStringWidth(line), expectedWidth)
     }
   })
 })

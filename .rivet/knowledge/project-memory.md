@@ -1,3 +1,17 @@
+### 2026-05-20 — session 1258c845
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-three-kingdoms-heroes-companion-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts
+**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×6, read_file×3, bash×3, write_file×1, todo×1
+
+### 2026-05-20 — session 1258c845
+
+**Modified** (8): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/expressions.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/constellation.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/star-panel.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/star-panel-colors.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/__tests__/frames.test.ts
+**Read** (8): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/expressions.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/constellation.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/star-panel.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/star-panel-colors.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/__tests__/frames.test.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×13, read_file×9, bash×7, todo×3
+
 ### 2026-05-20 — session 2e72c32f
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/CHANGELOG.md, /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/CONTRIBUTING.md
@@ -39,19 +53,3 @@
 **Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-queue.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-queue.test.ts
 **Tests**: ⚠️ unverified
 **Tools used**: bash×15, read_file×11, edit_file×10, todo×4, write_file×2, glob×1
-
-### 2026-05-19 — session edfd1210
-
-**Modified** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/mission-strip.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/mission-strip.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-20-starspine-phase2b-mission-strip.md
-**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×11, todo×7, read_file×5, bash×4, write_file×3, diff×3, git×2
-
-### 2026-05-19 — session edfd1210
-
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-20-starspine-phase2a-verification-gap.md
-**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×6, diff×6, todo×4, bash×4, git×2, read_file×2, glob×1, write_file×1
-
-## 2026-05-20 — 天枢伙伴对话迭代 总结

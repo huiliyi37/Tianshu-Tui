@@ -26,7 +26,7 @@ Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 22+ / Type
 
 ```bash
 npm install && npm run build
-npm test          # 1685 tests, node:test + node:assert/strict
+npm test          # 2340 tests, node:test + node:assert/strict
 npm run typecheck # tsc --noEmit
 ```
 

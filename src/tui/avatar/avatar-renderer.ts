@@ -1,6 +1,6 @@
 import type { StarPhase } from '../../agent/star-event.js'
 import type { AlchemyStage } from '../alchemy-bar.js'
-import type { AvatarContext, AvatarMood, AvatarFrame } from './types.js'
+import type { AvatarContext, AvatarMood, AvatarFrame, HeroId } from './types.js'
 import { getFace, phaseToMood, phaseToMode } from './expressions.js'
 import { buildFrame } from './frames.js'
 
@@ -20,17 +20,21 @@ import { buildFrame } from './frames.js'
  * - 0-30秒：保持当前情绪
  * - 30-60秒：升级为搜索（四处张望）
  * - 60秒+：升级为困惑（打盹/百思不解）
- * - 首次回合：致意（初出茅庐）
+ * - 首次渲染：致意（初出茅庐）
  *
  * 只覆盖 calm 情绪，不干扰其他状态。
+ *
+ * @param mood 当前情绪
+ * @param tick 动画帧计数器（首次渲染 = 1）
+ * @param idleSeconds 空闲秒数
  */
 export function idleMoodOverride(
   mood: AvatarMood,
-  turn: number,
+  tick: number,
   idleSeconds: number,
 ): AvatarMood {
-  // 首次回合：致意
-  if (turn === 1 && idleSeconds === 0) return 'greeting'
+  // 首次渲染：致意（tick === 1 表示第一次渲染帧）
+  if (tick === 1 && idleSeconds === 0) return 'greeting'
   // 只覆盖 calm 情绪
   if (mood !== 'calm') return mood
   // 空闲时间升级
@@ -82,6 +86,7 @@ export function renderAvatar(ctx: AvatarContext): AvatarFrame & {
   phase: StarPhase
   mode: ReturnType<typeof phaseToMode>
   mood: AvatarMood
+  hero: HeroId
 } {
   // 1. 基础情绪
   let mood = phaseToMood(ctx.phase, ctx.isStuck, ctx.isTestFailing > 0)
@@ -94,13 +99,14 @@ export function renderAvatar(ctx: AvatarContext): AvatarFrame & {
   const face = getFace(mood, ctx.tick)
   // 5. 获取模式
   const mode = phaseToMode(ctx.phase)
-  // 6. 构建帧
-  const frame = buildFrame(mode, face, ctx.phase, ctx.domain)
+  // 6. 构建帧（传递 hero 参数，工程预留）
+  const frame = buildFrame(mode, face, ctx.phase, ctx.domain, ctx.hero ?? null)
 
   return {
     ...frame,
     phase: ctx.phase,
     mode,
     mood,
+    hero: ctx.hero ?? null,
   }
 }

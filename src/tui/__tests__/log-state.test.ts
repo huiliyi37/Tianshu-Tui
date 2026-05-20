@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendLogInPlace, summarizeToolOutput, updateToolLog, visibleLogs, createLogEntry, type LogEntry } from '../log-state.js'
+import { appendLog, appendLogInPlace, summarizeToolOutput, updateToolLog, visibleLogs, createLogEntry, type LogEntry } from '../log-state.js'
 
 describe('TUI log state helpers', () => {
   it('updates an existing tool log instead of appending a duplicate', () => {
@@ -75,14 +75,28 @@ describe('TUI log state helpers', () => {
     assert.equal(entry.id, 'tool-42')
   })
 
-  it('appends in place and trims when exceeding store limit', () => {
-    const logs: LogEntry[] = []
+  it('appends immutably and trims when exceeding store limit', () => {
+    let logs: LogEntry[] = []
+    const original = logs
+    logs = appendLog(logs, { type: 'user_message', id: 'first', content: 'first' })
+
+    assert.notEqual(logs, original)
+    assert.equal(original.length, 0)
+    assert.equal(logs.length, 1)
+
     for (let i = 0; i < 250; i++) {
-      appendLogInPlace(logs, { type: 'user_message', id: `l${i}`, content: String(i) })
+      logs = appendLog(logs, { type: 'user_message', id: `l${i}`, content: String(i) })
     }
 
     assert.ok(logs.length < 250)
     assert.ok(logs.length > 0)
+  })
+
+  it('keeps appendLogInPlace as a compatibility wrapper', () => {
+    const logs: LogEntry[] = []
+    appendLogInPlace(logs, { type: 'user_message', id: 'l1', content: '1' })
+
+    assert.deepEqual(logs, [{ type: 'user_message', id: 'l1', content: '1' }])
   })
 })
 

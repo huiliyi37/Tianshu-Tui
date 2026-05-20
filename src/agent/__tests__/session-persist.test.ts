@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SessionPersist, evictOldSessionsInternal } from '../session-persist.js'
+import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, serializeSessionMessage } from '../session-persist.js'
 
 describe('SessionPersist', () => {
   let tempDir: string
@@ -49,6 +49,22 @@ describe('SessionPersist', () => {
     const dir = persist.getBackupDir()
     assert.equal(typeof dir, 'string')
     assert.ok(dir.includes('test-session-005'))
+  })
+
+  it('caps oversized session message JSON lines', () => {
+    const serialized = serializeSessionMessage({ role: 'user', content: 'x'.repeat(MAX_SESSION_MESSAGE_JSON_CHARS * 2) } as any)
+
+    assert.ok(serialized.length <= MAX_SESSION_MESSAGE_JSON_CHARS + 512)
+    assert.match(serialized, /session-message-truncated/)
+  })
+
+  it('persists truncated oversized messages as loadable JSON', async () => {
+    const persist = new SessionPersist('test-session-large-message')
+    await persist.appendWithChecksum({ role: 'user', content: 'x'.repeat(MAX_SESSION_MESSAGE_JSON_CHARS * 2) } as any)
+
+    const messages = persist.load()
+    assert.equal(messages.length, 1)
+    assert.match(String(messages[0]!.content), /session-message-truncated/)
   })
 })
 

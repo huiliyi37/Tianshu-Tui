@@ -58,6 +58,11 @@ describe('LWTGuard', () => {
       assert.equal(guard.acquireLock(), true)
     })
 
+    it('writes pid into the atomically-created lock file', () => {
+      assert.equal(guard.acquireLock(), true)
+      assert.equal(readFileSync(join(tempDir, 'agent.lock'), 'utf-8'), String(process.pid))
+    })
+
     it('fails to acquire lock when lock file exists and process is running', () => {
       writeFileSync(join(tempDir, 'agent.lock'), String(process.pid))
 

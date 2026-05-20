@@ -37,11 +37,16 @@ export function createLogEntry(entry: {
   return { ...entry, id: entry.id ?? `l${_nextLogId++}` }
 }
 
+export function appendLog(logs: readonly LogEntry[], entry: LogEntry): LogEntry[] {
+  const next = [...logs, entry]
+  if (next.length <= MAX_LOG_STORE) return next
+  return next.slice(next.length - MAX_LOG_STORE + 50)
+}
+
 export function appendLogInPlace(logs: LogEntry[], entry: LogEntry): void {
-  logs.push(entry)
-  if (logs.length > MAX_LOG_STORE) {
-    logs.splice(0, logs.length - MAX_LOG_STORE + 50)
-  }
+  const next = appendLog(logs, entry)
+  logs.length = 0
+  logs.push(...next)
 }
 
 export function visibleLogs(logs: LogEntry[], maxVisible: number): LogEntry[] {

@@ -13,7 +13,7 @@ import type { AvatarMode, AvatarMood, FaceExpression } from './types.js'
 // ─── 表情映射表 ─────────────────────────────────────────────────────
 
 /**
- * 12 种情绪的 kaomoji 面部表达
+ * 10 种情绪的 kaomoji 面部表达
  *
  * 全球通用：kaomoji 是终端原生语言，零学习成本。
  * 不触发恐怖谷效应。
@@ -117,5 +117,10 @@ export function phaseToMood(phase: StarPhase, isStuck: boolean, isTestFailing: b
     case 'kaiyang-testing': return 'tense'
     case 'yaoguang-delivering': return 'content'
     case 'tianshu-encore': return 'serious'
+    default: {
+      // Exhaustive check — TypeScript will error if a new StarPhase is added
+      const _exhaustive: never = phase
+      return _exhaustive
+    }
   }
 }
