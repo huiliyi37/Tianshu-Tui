@@ -1,5 +1,7 @@
 import type { PostToolRuntimeHook } from '../runtime-hooks.js'
 import type { PheromoneDeposit, PheromoneQueryResult } from '../../context/stigmergy.js'
+import { detectVirtue, virtueToPheromoneDeposit } from '../virtue-signals.js'
+import type { VirtueContext } from '../virtue-signals.js'
 
 export interface StigmergyRuntimeHookDeps {
   deposit: (deposit: PheromoneDeposit) => Promise<void>
@@ -46,6 +48,35 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
         if (bashErrors >= 2) {
           deposits.push({ path: tool.target ?? 'bash-command', signal: 'dead-end', strength: 0.9 })
         }
+      }
+
+      // ── 美德信号（阳面）：五常映射 → positive pheromone ──
+      // 万物负阴而抱阳。CVM 的 trap（阴）需要 virtue（阳）来平衡。
+      // 检测到美德时 deposit positive pheromone，让信任随积累而增长。
+      const virtueCtx: VirtueContext = {
+        toolName: tool.name,
+        toolTarget: tool.target,
+        toolSuccess: tool.success,
+        // 仁：ask_user_question 默认视为质疑（除非明显是确认性提问）
+        agreedWithUser: tool.name === 'ask_user_question' ? false : undefined,
+        // 义：run_tests 在 agent 主动调用时默认视为 proactive
+        userRequested: tool.name === 'run_tests' ? false : undefined,
+        confidence: ctx.snapshot.vigor?.tonic ?? 0.6,
+        recentToolCalls: ctx.snapshot.recentToolHistory.map(h => ({
+          tool: h.tool,
+          target: h.target,
+          status: h.status,
+        })),
+        // 礼：写操作经过审批门即视为 boundary-respect
+        approvalRequired: (tool.name === 'write_file' || tool.name === 'edit_file') ? true : undefined,
+      }
+
+      const virtueSignal = detectVirtue(virtueCtx)
+      if (virtueSignal) {
+        deposits.push(virtueToPheromoneDeposit(
+          virtueSignal,
+          tool.target ?? 'virtue-signal',
+        ))
       }
 
       for (const deposit of deposits) {

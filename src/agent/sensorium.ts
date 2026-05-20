@@ -13,6 +13,14 @@ export type PheromoneSignal =
   | 'dead-end'
   | 'entry-point'
   | 'coupling-hub'
+  // ── CVM 阳面：美德信号（五常映射）──
+  // 万物负阴而抱阳。纯阴则死，纯阳则混沌。
+  // 五常 → AI agent 美德：仁=质疑, 义=验证, 礼=边界, 智=觉察, 信=忠cache
+  | 'independent-judgment'
+  | 'proactive-verification'
+  | 'boundary-respect'
+  | 'strategic-awareness'
+  | 'cache-loyalty'
 
 export interface PheromoneRef {
   path: string
