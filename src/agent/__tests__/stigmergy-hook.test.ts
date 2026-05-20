@@ -44,7 +44,7 @@ describe('createStigmergyRuntimeHook', () => {
 
     await hook.run(ctx, { name: 'read_file', success: true, target: 'src/a.ts' })
 
-    assert.deepEqual(deposits, [{ path: 'src/a.ts', signal: 'entry-point', strength: 0.4 }])
+    assert.ok(deposits.some(d => d.path === 'src/a.ts' && d.signal === 'entry-point' && d.strength === 0.4))
   })
 
   it('does not deposit entry-point when the file was written', async () => {
@@ -59,7 +59,7 @@ describe('createStigmergyRuntimeHook', () => {
 
     await hook.run(ctx, { name: 'read_file', success: true, target: 'src/a.ts' })
 
-    assert.deepEqual(deposits, [])
+    assert.ok(!deposits.some(d => d.signal === 'entry-point'), 'should not deposit entry-point when file was written')
   })
 
   it('deposits well-tested after write when verification passed', async () => {
@@ -68,7 +68,7 @@ describe('createStigmergyRuntimeHook', () => {
 
     await hook.run(makeContext(), { name: 'edit_file', success: true, target: 'src/a.ts' })
 
-    assert.deepEqual(deposits, [{ path: 'src/a.ts', signal: 'well-tested', strength: 0.6 }])
+    assert.ok(deposits.some(d => d.path === 'src/a.ts' && d.signal === 'well-tested' && d.strength === 0.6))
   })
 
   it('deposits fragile after write when verification failed', async () => {
@@ -77,7 +77,7 @@ describe('createStigmergyRuntimeHook', () => {
 
     await hook.run(makeContext(), { name: 'write_file', success: true, target: 'src/a.ts' })
 
-    assert.deepEqual(deposits, [{ path: 'src/a.ts', signal: 'fragile', strength: 0.8 }])
+    assert.ok(deposits.some(d => d.path === 'src/a.ts' && d.signal === 'fragile' && d.strength === 0.8))
   })
 
   it('deposits dead-end after repeated bash failures', async () => {

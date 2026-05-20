@@ -192,7 +192,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
 
     const agent = new AgentLoop({ client, promptEngine: engine, toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
 
-    await agent.run('探索一个新的缓存方案', makeCallbacks())
+    await agent.run('实验一个新的缓存方案 POC prototype', makeCallbacks())
     await agent.run('修复内存泄漏', makeCallbacks())
 
     assert.equal(seenContexts.length, 2)
