@@ -58,6 +58,7 @@ import { PressureMonitor } from '../context/pressure-monitor.js'
 import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
+import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
 import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
@@ -176,6 +177,7 @@ export class AgentLoop {
   private sessionDomain: ActiveStarDomain | null | undefined
   private static readonly MAX_OUTPUT_ESCALATION = 3
   private pressureMonitor: PressureMonitor
+  private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   private sensorium: Sensorium | null = null
   private strategy: StrategyProfile | null = null
   private vigorState: VigorState = createVigorState()
@@ -776,6 +778,24 @@ export class AgentLoop {
 
         this.compaction.enforceContextCeiling()
         this.contextInjection.refreshActiveClaims()
+
+        // ── Sycophancy Trap: record previous turn agreement ──
+        // 仁者必有勇。连续同意 + confidence 下降 → 质疑注入。
+        // agreedWithUser: 最近是否使用了 ask_user_question（质疑）？
+        // 没质疑就执行 → 过度服从 = agreed；先质疑再执行 → 独立判断。
+        const recentToolNames = this.recentToolHistory.slice(-8).map(h => h.tool)
+        const hadAskTool = recentToolNames.includes('ask_user_question')
+        const hadDestructive = recentToolNames.some(
+          t => t === 'write_file' || t === 'edit_file' || t === 'bash'
+        )
+        const agreedWithUser = hadDestructive && !hadAskTool
+        if (hadDestructive || hadAskTool) {
+          this.sycophancyTrap.recordTurn({
+            agreedWithUser,
+            confidence: this.sensorium?.confidence ?? 0.5,
+          })
+        }
+
         const cognitiveLedger = createCognitiveLedger({
           contract: this.taskContract,
           evidence: this.evidence.getState(),
@@ -790,7 +810,8 @@ export class AgentLoop {
           riskLevel: this.latestRisk.level,
         })
         this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
-        const projection = buildCognitivePromptProjection(cognitiveLedger)
+        const sycophancyHint = this.sycophancyTrap.getHint()
+        const projection = buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint })
         this.config.promptEngine.setCognitiveProjection(projection)
 
         // ── CVM overhead tracking ──

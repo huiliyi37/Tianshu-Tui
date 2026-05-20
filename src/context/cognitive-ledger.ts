@@ -128,12 +128,18 @@ function formatDim(value: number): string {
   return value.toFixed(2)
 }
 
-export function buildCognitivePromptProjection(ledger: CognitiveLedger): string {
+export function buildCognitivePromptProjection(
+  ledger: CognitiveLedger,
+  opts?: {
+    sycophancyHint?: string | null
+  },
+): string {
   return [
     ledger.contract ? renderContractProjection(ledger.contract) : '',
     buildVerificationGapProjection(ledger),
     buildCognitiveMirror(ledger),
     buildUncertaintyProjection(ledger),
+    opts?.sycophancyHint ?? '',
   ].filter(Boolean).join('\n')
 }
 
