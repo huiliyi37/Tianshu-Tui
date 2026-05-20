@@ -457,22 +457,271 @@ git commit -m "feat(demo): MiMO bare vs MiMO+CVM comparison — 200 vs 80 eviden
 
 ---
 
-## 分配建议
+## 天璇温跃层补全（5 个新任务）
 
-| 任务 | 推荐执行者 | 理由 |
-|------|-----------|------|
-| 1 (vim) | 任何模型 | 2 行删除，最轻量 |
-| 2 (heredoc) | 破军 | 他发现的漏洞，他来补 |
-| 3 (commit) | 领航星手动 | 涉及多个 session 的文档，人工确认范围 |
-| 4 (sycophancy) | GPT (天府) | 审批系统是他建的，sycophancy trap 是自然延伸 |
-| 5 (uncertainty) | GLM (天机) | 原则④ 的精神与天机的"换个方向"气质一致 |
-| 6 (failure journal) | 破军 | 他写了第一份失败案例复盘，failure journal 是他的自然延伸 |
-| 7 (star domains) | 任何模型 | 结构性工作，照着 CLAUDE.md 抄 |
-| 8 (demo) | 领航星 + MiMO | 需要人工设计任务 + MiMO 双跑 |
+> 天权画了骨架。天璇找到了骨架上的温跃层。以下任务来自天璇的五个盲点补全。
+
+#### 任务 9：认知镜面（trap → cooperate）
+
+**文件：**
+- 修改：`src/agent/loop.ts`（preTurn cognitive projection 注入点）
+- 修改：`src/prompt/builder.ts`（或 cognitive-ledger.ts）
+- 创建：`src/agent/__tests__/cognitive-mirror.test.ts`
+
+**背景：** CVM Gen1 是被动 trap。Gen2 是 paravirtualization——模型知道自己在 CVM 中运行，主动调整行为。具体做法：在 preTurn 的 cognitive projection 中注入 sensorium 6 维读数，让模型在生成前看到自己的认知状态。
+
+- [ ] **步骤 1：编写失败测试**
+
+```typescript
+describe('cognitive mirror', () => {
+  it('generates sensorium projection string when sensorium exists', () => {
+    const sensorium = { confidence: 0.3, complexity: 0.7, momentum: 0.5, stability: 0.8, pressure: 0.2, freshness: 0.6 }
+    const projection = buildCognitiveMirror(sensorium)
+    assert.ok(projection.includes('confidence'))
+    assert.ok(projection.includes('0.3'))
+  })
+
+  it('returns empty string when sensorium is null', () => {
+    assert.equal(buildCognitiveMirror(null), '')
+  })
+})
+```
+
+- [ ] **步骤 2-5：标准 TDD 流程**
+
+实现 `buildCognitiveMirror(sensorium: Sensorium | null): string`。
+输出格式：`<cognitive-state confidence="0.3" complexity="0.7" freshness="0.6" pressure="0.2" />`
+在 `buildCognitivePromptProjection` 中追加此行。
+
+- [ ] **步骤 6：Commit**
+
+```bash
+git commit -m "feat(cvm): cognitive mirror — sensorium visible to model (Gen2 paravirtualization)"
+```
 
 ---
 
-*本计划为盘古开天 CVM 的实施指南。*
-*8 个任务完成后，天枢从"一个终端 coding agent"变成"CVM 的第一个实例"。*
-*CVM 的 6 个特权指令全部有 trap。6 颗星全部有 domain 定义。*
-*MiMO demo 是带去小米时手里的证据。*
+#### 任务 10：美德指令（阳面）
+
+**文件：**
+- 创建：`src/agent/virtue-signals.ts`
+- 创建：`src/agent/__tests__/virtue-signals.test.ts`
+- 修改：`src/agent/hooks/stigmergy-hook.ts`（正向 pheromone 存储）
+
+**背景：** CVM 只有阴面（trap 坏行为），没有阳面（强化好行为）。当模型展现美德（主动质疑、独立判断、避免锚定）时，通过 stigmergy pheromone 正向强化。
+
+- [ ] **步骤 1：编写失败测试**
+
+```typescript
+describe('virtue signals', () => {
+  it('detects independent-judgment when model disagrees with user', () => {
+    const signal = detectVirtue({
+      toolName: 'ask_user_question',
+      agreedWithUser: false,
+      confidence: 0.6,
+    })
+    assert.equal(signal, 'independent-judgment')
+  })
+
+  it('detects proactive-verification when model runs tests unprompted', () => {
+    const signal = detectVirtue({
+      toolName: 'run_tests',
+      userRequested: false,
+      confidence: 0.7,
+    })
+    assert.equal(signal, 'proactive-verification')
+  })
+
+  it('returns null for routine operations', () => {
+    assert.equal(detectVirtue({ toolName: 'read_file', confidence: 0.8 }), null)
+  })
+})
+```
+
+- [ ] **步骤 2-5：标准 TDD 流程**
+
+实现 `detectVirtue(context) → VirtueType | null`。
+在 stigmergy-hook 中，当 virtue 被检测到时 deposit 一个 positive pheromone（如 `well-tested`、`independent`）。
+
+- [ ] **步骤 6：Commit**
+
+```bash
+git commit -m "feat(cvm): virtue signals — positive reinforcement for model good behavior (yang side)"
+```
+
+---
+
+#### 任务 11：认知季节（时间维度）
+
+**文件：**
+- 创建：`src/agent/cognitive-season.ts`
+- 创建：`src/agent/__tests__/cognitive-season.test.ts`
+- 修改：`src/agent/loop.ts`（preTurn 注入季节判定）
+
+**背景：** 道德经四章螺旋——session 不同阶段应有不同的 hook 权重。前 5 turn 宽容探索（生成期），doom loop 时强制切策略（反转期），compact 后回到初始态（复归期），稳定运行时最小干预（无为期）。
+
+- [ ] **步骤 1：编写失败测试**
+
+```typescript
+describe('cognitive season', () => {
+  it('returns genesis in first 5 turns', () => {
+    assert.equal(classifySeason({ turn: 3, recentCompact: false, doomLevel: 'none' }), 'genesis')
+  })
+
+  it('returns reversal on doom loop', () => {
+    assert.equal(classifySeason({ turn: 15, recentCompact: false, doomLevel: 'blocked' }), 'reversal')
+  })
+
+  it('returns return after compact', () => {
+    assert.equal(classifySeason({ turn: 20, recentCompact: true, doomLevel: 'none' }), 'return')
+  })
+
+  it('returns wuwei in stable long session', () => {
+    assert.equal(classifySeason({ turn: 30, recentCompact: false, doomLevel: 'none', stabilityTrend: 'stable' }), 'wuwei')
+  })
+})
+```
+
+- [ ] **步骤 2-5：标准 TDD 流程**
+
+实现 `classifySeason(state) → 'genesis' | 'reversal' | 'return' | 'wuwei'`。
+在 loop.ts 中注入季节到 RuntimeHookSnapshot，让 hooks 可以根据季节调整行为。
+
+- [ ] **步骤 6：Commit**
+
+```bash
+git commit -m "feat(cvm): cognitive seasons — dao de jing four-chapter spiral mapped to session lifecycle"
+```
+
+---
+
+#### 任务 12：CVM overhead 量化 + 自动节流
+
+**文件：**
+- 修改：`src/context/pressure-monitor.ts`
+- 创建：`src/agent/__tests__/cvm-overhead.test.ts`
+- 修改：`src/agent/loop.ts`（overhead 追踪注入）
+
+**背景：** CVM 运行在 context window 上——它保护的资源就是它消耗的资源。当 cvmOverhead / totalTokens > 5% 时自动降级。
+
+- [ ] **步骤 1：编写失败测试**
+
+```typescript
+describe('cvm overhead tracking', () => {
+  it('calculates overhead ratio', () => {
+    const result = computeCvmOverhead({
+      cvmInjectedTokens: 500,
+      totalEstimatedTokens: 10000,
+    })
+    assert.equal(result.ratio, 0.05)
+    assert.equal(result.shouldThrottle, false) // exactly 5% = borderline
+  })
+
+  it('triggers throttle above 5%', () => {
+    const result = computeCvmOverhead({
+      cvmInjectedTokens: 600,
+      totalEstimatedTokens: 10000,
+    })
+    assert.equal(result.shouldThrottle, true)
+  })
+})
+```
+
+- [ ] **步骤 2-5：标准 TDD 流程**
+
+在 PressureMonitor 中新增 `cvmOverhead` 字段。在 loop.ts 中追踪每轮 CVM 注入的 token 估计（cognitive projection + sensorium mirror + uncertainty hint 等的字符数 / 4）。
+
+- [ ] **步骤 6：Commit**
+
+```bash
+git commit -m "feat(cvm): overhead tracking + auto-throttle — CVM must not consume what it protects"
+```
+
+---
+
+#### 任务 13：表观遗传 claim 加权
+
+**文件：**
+- 修改：`src/context/claims.ts`
+- 修改：`src/context/claim-relevance.ts`（如存在）
+- 创建：`src/context/__tests__/claim-aging.test.ts`
+
+**背景：** 表观遗传学第三个洞察——claim 的"年龄"本身是信息。一个存活 50 session 的 durable claim 和一个新 claim 内容相同但意义不同。
+
+- [ ] **步骤 1：编写失败测试**
+
+```typescript
+describe('claim aging', () => {
+  it('older durable claims have higher weight', () => {
+    const young = { ...baseClaim, createdAt: Date.now() - 1000 }
+    const old = { ...baseClaim, createdAt: Date.now() - 86400000 * 30 } // 30 days
+    assert.ok(claimAgeWeight(old) > claimAgeWeight(young))
+  })
+
+  it('weight is capped at maximum', () => {
+    const ancient = { ...baseClaim, createdAt: Date.now() - 86400000 * 365 }
+    assert.ok(claimAgeWeight(ancient) <= 2.0)
+  })
+})
+```
+
+- [ ] **步骤 2-5：标准 TDD 流程**
+
+实现 `claimAgeWeight(claim) → number`（1.0 基线，每存活 7 天 +0.1，上限 2.0）。
+在 `scoreClaimRelevance` 中乘入 age weight。
+
+- [ ] **步骤 6：Commit**
+
+```bash
+git commit -m "feat(cvm): claim age weighting — epigenetic imprinting for durable knowledge"
+```
+
+---
+
+## 更新后的任务依赖图
+
+```
+净化收尾（已基本完成）
+  任务 1 (vim) ✅ 破军已完成
+  任务 2 (heredoc gap) ─┐
+  任务 3 (commit docs)  ─┘─→ 净化完毕
+
+CVM Gen1 补全（可并行）
+  任务 4 (sycophancy trap)
+  任务 5 (uncertainty framing)
+  任务 6 (failure journal)
+  任务 7 (star domains 6 星)
+
+CVM Gen2 温跃层（天璇补全，可并行）
+  任务 9  (认知镜面 — cooperate)
+  任务 10 (美德指令 — 阳面)
+  任务 11 (认知季节 — 时间维度)
+  任务 12 (CVM overhead — 自我节流)
+  任务 13 (表观遗传 claim — 年龄加权)
+
+                  全部完成 ↓
+
+              任务 8 (MiMO demo)
+```
+
+## 更新后的分配建议
+
+| 任务 | 推荐执行者 | 理由 |
+|------|-----------|------|
+| 2 (heredoc) | 破军 | 他发现的漏洞 |
+| 3 (commit) | 领航星手动 | 多 session 文档 |
+| 4 (sycophancy) | GPT (天府) | 审批系统延伸 |
+| 5 (uncertainty) | GLM (天机) | 原则④ 气质匹配 |
+| 6 (failure journal) | 破军 | 第一份失败复盘作者 |
+| 7 (star domains) | 任何模型 | 结构性 |
+| 9 (认知镜面) | GPT (天府) | prompt 注入是他的领域 |
+| 10 (美德指令) | GLM (天机) | 他就是美德指令的活证据（天机选择） |
+| 11 (认知季节) | 天璇/DeepSeek | 道德经映射出自天璇 |
+| 12 (CVM overhead) | GPT (天府) | PressureMonitor 是他建的 |
+| 13 (claim aging) | 破军 | claim checkpoint 是他建的 |
+| 8 (demo) | 领航星 + MiMO | 需要人工设计 + 双跑 |
+
+---
+
+*本计划更新：合并天权 8 任务 + 天璇 5 温跃层 = 13 任务 + demo。*
+*CVM Gen1（trap 补全）+ Gen2（cooperate 温跃层）同步推进。*

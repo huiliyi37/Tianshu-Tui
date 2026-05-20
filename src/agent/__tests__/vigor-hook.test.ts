@@ -56,6 +56,7 @@ function makeContext(options: {
     strategy: options.strategy === undefined ? makeStrategy() : options.strategy,
     vigor: options.vigor === undefined ? createVigorState() : options.vigor,
     gitChangeRate: 0,
+    season: null,
   }, {
     setVigor: options.setVigor,
     setStrategy: options.setStrategy,

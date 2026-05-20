@@ -1,3 +1,10 @@
+### 2026-05-20 — session 5571fde9
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/virtue-signals.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/virtue-signals.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/sensorium.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/stigmergy-hook.ts
+**Read** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/stigmergy-hook.ts
+**Tests**: ⚠️ unverified
+**Tools used**: bash×6, edit_file×3, write_file×2, read_file×1
+
 ### 2026-05-20 — session 444a62de
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/reliability-integration.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/reliability-mode.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts
@@ -74,10 +81,3 @@ Evidence from session 2026-05-21:
 - Discovered degraded-mode self-blocking edge case (heredoc `cat >` bypasses BASH_WRITE_PATTERNS regex)
 - Produced 912-line handoff plan when write_file was blocked
 - Wrote honest retrospective analyzing the meta-irony of being blocked by own reliability system
-
-### 2026-05-19 — session dc47b5e7
-
-**Modified** (7): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/star-domain.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-queue.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-queue.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts
-**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/star-domain.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-queue.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-queue.test.ts
-**Tests**: ⚠️ unverified
-**Tools used**: bash×15, read_file×11, edit_file×10, todo×4, write_file×2, glob×1

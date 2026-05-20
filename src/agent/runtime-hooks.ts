@@ -1,4 +1,5 @@
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
+import type { CognitiveSeason } from './cognitive-season.js'
 import type { Sensorium, SensoriumInput, StrategyProfile } from './sensorium.js'
 import type { VigorState } from './vigor.js'
 
@@ -21,6 +22,7 @@ export interface RuntimeHookSnapshot {
   strategy: StrategyProfile | null
   vigor: VigorState | null
   gitChangeRate: number
+  season: CognitiveSeason | null
 }
 
 export interface RuntimePhaseChangeDetail {

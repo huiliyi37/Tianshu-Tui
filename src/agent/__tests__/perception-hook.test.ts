@@ -15,6 +15,7 @@ function makeInput(overrides: Partial<SensoriumInput> = {}): SensoriumInput {
     pheromones: [],
     doomLevel: 'none',
     gitChangeRate: 0,
+    season: null,
     ...overrides,
   }
 }
@@ -30,6 +31,7 @@ describe('createPerceptionRuntimeHook', () => {
       strategy: null,
       vigor: null,
       gitChangeRate: 0,
+    season: null,
     })
     const hook = createPerceptionRuntimeHook()
 
@@ -51,6 +53,7 @@ describe('createPerceptionRuntimeHook', () => {
       strategy: null,
       vigor: null,
       gitChangeRate: 0,
+    season: null,
     })
     const hook = createPerceptionRuntimeHook()
 
@@ -77,6 +80,7 @@ describe('createPerceptionRuntimeHook', () => {
       strategy: null,
       vigor: null,
       gitChangeRate: 0,
+    season: null,
     }, {
       injectUserMessage: message => { messages.push(message) },
     })

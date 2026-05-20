@@ -61,6 +61,7 @@ function runHook(options: {
     strategy: null,
     vigor: null,
     gitChangeRate: 0,
+    season: null,
   }, {
     emitPhaseChange: (phase, detail) => { phases.push({ phase, reason: detail?.reason, suggestion: detail?.suggestion }) },
   })

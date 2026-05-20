@@ -49,6 +49,7 @@ import { CompactionController } from './compaction-controller.js'
 import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import { TurnStreamController } from './turn-stream.js'
+import { classifySeason, type CognitiveSeason } from './cognitive-season.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
@@ -209,6 +210,8 @@ export class AgentLoop {
   private latestReliabilityDecision: ReliabilityDecision | null = null
   private fsWatcher: ReturnType<typeof createFsWatcher> | null = null
   private latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
+  private currentSeason: CognitiveSeason | null = null
+  private lastCompactTurn: number | null = null
 
   constructor(
     private config: AgentConfig,
@@ -388,6 +391,7 @@ export class AgentLoop {
       strategy: this.strategy,
       vigor: this.vigorState,
       gitChangeRate: this.gitChangeRate,
+      season: this.currentSeason,
       ...extra,
     }
   }
@@ -683,6 +687,7 @@ export class AgentLoop {
           failures: this.compactFailures,
         })
         this.compactFailures = compactResult.failures
+        if (compactResult.compacted) this.lastCompactTurn = turn
         
         // Fuzzy checkpoint: 记录 compact 结束
         if (this.persist) {
@@ -732,6 +737,15 @@ export class AgentLoop {
         const currentSensorium: Sensorium = perceptionResult.sensorium
         const currentStrategy: StrategyProfile = perceptionResult.strategy
 
+        // ── 认知季节 — 道德经四章螺旋 ──
+        const seasonResult = classifySeason({
+          turn,
+          doomLevel: this.getDoomLoopLevel(),
+          recentCompactTurn: this.lastCompactTurn,
+          sensoriumStability: currentSensorium.stability,
+        })
+        this.currentSeason = seasonResult.season
+
         // Wire StarPhase → phaseClass for field habituation modulation
         const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
         this.config.promptEngine.setPhaseHint(phaseClass)
@@ -771,6 +785,7 @@ export class AgentLoop {
           sensorium: pressureResult.shouldThrottleCvm ? null : this.sensorium,
           strategy: pressureResult.shouldThrottleCvm ? null : this.strategy,
           vigor: pressureResult.shouldThrottleCvm ? null : this.vigorState,
+          season: pressureResult.shouldThrottleCvm ? null : this.currentSeason,
         })
         this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
         const projection = buildCognitivePromptProjection(cognitiveLedger)

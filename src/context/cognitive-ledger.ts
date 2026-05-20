@@ -1,5 +1,6 @@
 import type { EvidenceState } from '../agent/evidence.js'
 import type { TraceStore } from '../agent/trace-store.js'
+import type { CognitiveSeason } from '../agent/cognitive-season.js'
 import type { Sensorium, StrategyProfile } from '../agent/sensorium.js'
 import type { VigorState } from '../agent/vigor.js'
 import { renderContractProjection, type TaskContract } from './task-contract.js'
@@ -13,6 +14,7 @@ export interface CognitiveLedgerInput {
   sensorium?: Sensorium | null
   strategy?: StrategyProfile | null
   vigor?: VigorState | null
+  season?: CognitiveSeason | null
 }
 
 export interface CognitiveLedger {
@@ -23,6 +25,7 @@ export interface CognitiveLedger {
   sensorium?: Sensorium | null
   strategy?: StrategyProfile | null
   vigor?: VigorState | null
+  season?: CognitiveSeason | null
 }
 
 export interface CognitivePhaseSnapshot {
@@ -43,6 +46,7 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     sensorium: input.sensorium ?? null,
     strategy: input.strategy ?? null,
     vigor: input.vigor ?? null,
+    season: input.season ?? null,
   }
 }
 
@@ -103,6 +107,11 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
     const v = ledger.vigor
     const tonic = v.tonic ?? v.phasic ?? 0.5
     parts.push(`vigor="${formatDim(tonic)}"`)
+  }
+
+  // Season: 道德经四章螺旋 — session lifecycle phase
+  if (ledger.season) {
+    parts.push(`season="${ledger.season}"`)
   }
 
   return `<cognitive-mirror ${parts.join(' ')} />`

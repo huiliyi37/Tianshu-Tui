@@ -43,6 +43,7 @@ function ctx(phases: Array<{ phase: string; suggestion?: string }> = []) {
     strategy: null,
     vigor: createVigorState({ variability: 0.35 }),
     gitChangeRate: 0,
+    season: null,
   }, {
     emitPhaseChange: (phase, detail) => { phases.push({ phase, suggestion: detail?.suggestion }) },
   })
@@ -90,6 +91,7 @@ describe('createPlaybookReflectHook', () => {
         strategy: null,
         vigor: createVigorState({ variability: 0.1 }),
         gitChangeRate: 0,
+    season: null,
       })
 
       hook.run(smooth)

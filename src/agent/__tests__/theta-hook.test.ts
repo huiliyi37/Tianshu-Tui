@@ -27,6 +27,7 @@ function makeContext(sensorium: Sensorium | null = makeSensorium(), requests: st
     strategy: null,
     vigor: null,
     gitChangeRate: 0,
+    season: null,
   }, {
     requestThetaCheck: reason => { requests.push(reason) },
   })

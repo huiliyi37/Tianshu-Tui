@@ -30,6 +30,7 @@ function makeCtx(
     strategy: null,
     vigor: null,
     gitChangeRate: 0,
+    season: null,
     ...overrides,
   }
   return {

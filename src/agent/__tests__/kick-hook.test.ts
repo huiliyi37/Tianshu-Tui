@@ -32,6 +32,7 @@ function makeContext(options: {
     strategy: null,
     vigor: null,
     gitChangeRate: 0,
+    season: null,
   }, {
     injectUserMessage: message => { options.messages?.push(message) },
     emitPhaseChange: (phase, detail) => { options.phases?.push({ phase, detail }) },

@@ -18,6 +18,7 @@ describe('parseSensoriumLog', () => {
         complexity: 0.3, freshness: 0.65, stability: 1.0,
         strategy: { reasoningEffort: 'low', shouldEscalate: false, thetaInterval: 7 },
         gitChangeRate: 0.2,
+    season: null,
       }),
     ].join('\n')
 

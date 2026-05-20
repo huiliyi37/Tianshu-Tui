@@ -13,6 +13,7 @@ function makeCtx(overrides: { markClaimStale?: (id: string) => void } = {}): Run
       strategy: null,
       vigor: null,
       gitChangeRate: 0,
+    season: null,
     },
     effects: {
       setSensorium: () => {},

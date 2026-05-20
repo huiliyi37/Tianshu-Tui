@@ -23,6 +23,7 @@ function makeContext(): RuntimeHookContext {
     strategy: null,
     vigor: null,
     gitChangeRate: 0,
+    season: null,
   })
 }
 
@@ -56,6 +57,7 @@ describe('RuntimeHookPipeline', () => {
       strategy: { reasoningEffort: 'medium', explorationBreadth: 0.3, commitThreshold: 0.6, shouldEscalate: false, thetaCycleInterval: 7 },
       vigor: null,
       gitChangeRate: 0,
+    season: null,
     })
     const pipeline = new RuntimeHookPipeline([hook])
 
@@ -165,6 +167,7 @@ describe('RuntimeHookPipeline', () => {
       strategy: null,
       vigor: null,
       gitChangeRate: 0,
+    season: null,
     }, {
       injectUserMessage: message => { messages.push(message) },
       requestThetaCheck: reason => { thetaRequests.push(reason) },

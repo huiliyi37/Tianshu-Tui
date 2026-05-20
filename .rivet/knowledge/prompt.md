@@ -1,3 +1,25 @@
+### 2026-05-20 — session 5571fde9
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/pressure-monitor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cvm-overhead.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
+**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/pressure-monitor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×5, bash×4, read_file×2, write_file×1, grep×1
+- Decision: accumulate these as `cvmInjectedTokens` ≈ characters / 4 (crude token estimate)
+- Decision: add the token tracking right after `buildCognitivePromptProjection`
+
+### 2026-05-20 — session 5571fde9
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-mirror.test.ts
+**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-21-pangu-cvm-implementation.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/sensorium.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-mirror.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/vigor.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×11, bash×8, read_file×6, grep×6, write_file×1
+- Decision: create:
+```
+<cognitive-mirror 
+  confidence="0
+- Decision: create a clean, Eastern-philosophy-infused cognitive mirror
+- Decision: compute it from stored pheromones (which are available as `this
+
 ### 2026-05-19 — session edfd1210
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-20-starspine-phase2a-verification-gap.md

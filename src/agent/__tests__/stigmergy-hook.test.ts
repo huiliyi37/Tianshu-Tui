@@ -14,6 +14,7 @@ function makeContext(history: Array<Pick<ToolHistoryEntry, 'tool' | 'status' | '
     strategy: null,
     vigor: null,
     gitChangeRate: 0,
+    season: null,
   })
 }
 

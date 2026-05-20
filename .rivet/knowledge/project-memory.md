@@ -1,3 +1,32 @@
+### 2026-05-20 — session 5571fde9
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/pressure-monitor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cvm-overhead.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
+**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/pressure-monitor.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×5, bash×4, read_file×2, write_file×1, grep×1
+- Decision: accumulate these as `cvmInjectedTokens` ≈ characters / 4 (crude token estimate)
+- Decision: add the token tracking right after `buildCognitivePromptProjection`
+
+### 2026-05-20 — session 5571fde9
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-mirror.test.ts
+**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-21-pangu-cvm-implementation.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/sensorium.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-mirror.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/vigor.ts
+**Tests**: ⚠️ unverified
+**Tools used**: edit_file×11, bash×8, read_file×6, grep×6, write_file×1
+- Decision: create:
+```
+<cognitive-mirror 
+  confidence="0
+- Decision: create a clean, Eastern-philosophy-infused cognitive mirror
+- Decision: compute it from stored pheromones (which are available as `this
+
+### 2026-05-20 — session 5571fde9
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/virtue-signals.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/virtue-signals.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/sensorium.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/stigmergy-hook.ts
+**Read** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/stigmergy-hook.ts
+**Tests**: ⚠️ unverified
+**Tools used**: bash×6, edit_file×3, write_file×2, read_file×1
+
 ### 2026-05-20 — session 444a62de
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/reliability-integration.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/reliability-mode.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts
@@ -38,17 +67,3 @@
 **Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts
 **Tests**: ⚠️ unverified
 **Tools used**: edit_file×6, read_file×3, bash×3, write_file×1, todo×1
-
-### 2026-05-20 — session 1258c845
-
-**Modified** (8): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/expressions.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/constellation.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/star-panel.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/star-panel-colors.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/__tests__/frames.test.ts
-**Read** (8): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/expressions.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/frames.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/avatar-renderer.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/constellation.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/star-panel.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/star-panel-colors.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/avatar/__tests__/frames.test.ts
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×13, read_file×9, bash×7, todo×3
-
-### 2026-05-20 — session 2e72c32f
-
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/CHANGELOG.md, /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/CONTRIBUTING.md
-**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/CHANGELOG.md, /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/CONTRIBUTING.md
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×4, todo×3, read_file×3, git×2, delegate_batch×1, bash×1
