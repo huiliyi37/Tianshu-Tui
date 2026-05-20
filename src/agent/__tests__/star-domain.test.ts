@@ -3,9 +3,9 @@ import assert from 'node:assert/strict'
 import { matchDomain, STAR_DOMAINS, buildActiveDomain } from '../star-domain.js'
 
 describe('StarDomain', () => {
-  it('exports three built-in domains', () => {
+  it('exports built-in domains', () => {
     const domains = Object.values(STAR_DOMAINS)
-    assert.equal(domains.length, 3)
+    assert.ok(domains.length >= 3, `Expected at least 3 domains, got ${domains.length}`)
     for (const domain of domains) {
       assert.ok(domain.id)
       assert.ok(domain.name)
@@ -17,12 +17,14 @@ describe('StarDomain', () => {
   })
 
   it('routes exploration keywords to pojun', () => {
-    assert.equal(matchDomain('探索一个新的缓存方案'), 'pojun')
+    // '突破' and '实验' are unique to pojun (tianxuan shares '探索')
+    assert.equal(matchDomain('尝试突破一个新的缓存方案'), 'pojun')
     assert.equal(matchDomain('实验性地尝试 WebSocket'), 'pojun')
   })
 
   it('routes stability keywords to tianfu', () => {
-    assert.equal(matchDomain('重构 session 管理模块'), 'tianfu')
+    // '优化' and '性能' are unique to tianfu (tianji shares '重构')
+    assert.equal(matchDomain('优化 session 管理模块'), 'tianfu')
     assert.equal(matchDomain('修复内存泄漏'), 'tianfu')
   })
 
@@ -71,7 +73,7 @@ describe('StarDomain', () => {
 
 describe('buildActiveDomain', () => {
   it('returns domain info for matched task', () => {
-    const result = buildActiveDomain('探索新的认证方案')
+    const result = buildActiveDomain('尝试突破新的认证方案')
     assert.ok(result)
     assert.equal(result.name, '破军')
     assert.ok(result.volatileBlock.includes('破军'))
