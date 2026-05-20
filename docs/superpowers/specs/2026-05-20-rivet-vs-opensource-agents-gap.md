@@ -2,7 +2,7 @@
 
 > 日期：2026-05-20
 > 方法：Deep Brainstorm (4 scout + 3 轮演化)
-> 对标：OpenClaw (27.9万 stars) / Ruflo (4.5万 stars) / Hermes Agent (15.8万 stars)
+> 对标：OpenClaw / Ruflo / Hermes Agent（star 数来自 scout 搜索，可能存在搜索幻觉，具体数字仅供量级参考）
 > 前置：天枢 vs Claude Code 差距分析（同日）
 > 核心洞察：Rivet 的学习闭环已存在（playbook → volatile → prompt），瓶颈不在架构而在三个质量节点：蒸馏质量（模板式）、检索精度（keyword substring）、claims 消费不对称。
 
@@ -151,19 +151,19 @@ Scout 4 深入 Rivet 代码库后发现假设需修正：
 
 ## 两轮差距分析的合并优先级
 
-结合 Claude Code 差距分析 + 本轮三竞品分析：
+结合 Claude Code 差距分析 + 本轮三竞品分析。标注执行状态避免重复分配：
 
-| 优先级 | 差距 | 来源 | 预期工作量 |
-|--------|------|------|-----------|
-| **P0** | Sandbox 轻量进程隔离 | Claude Code / OpenClaw | 2 周 |
-| **P0** | Dream LLM 蒸馏 (Phase 2) | Hermes Agent | 1 周 |
-| **P0** | Durable claims auto-surface | OpenClaw / 内部不对称 | 3 天 |
-| **P1** | 自适应审批 (sensorium→approval) | Claude Code / 自调节路径 | 1 周 |
-| **P1** | FTS5 知识检索升级 | Hermes / Ruflo | 1 周 |
-| **P1** | 多模型成本路由 | Ruflo / OpenClaw | 1 周 |
-| **P2** | 用户 Hook API 暴露 | Claude Code | 1 周 |
-| **P2** | LSP 集成 | Claude Code | 2 周 |
-| **P2** | Playbook 可编辑性 (export/import) | OpenClaw Markdown | 3 天 |
-| **P2** | Fluency inspect 知识可观测 | 自研 | 3 天 |
+| 优先级 | 差距 | 来源 | 预期工作量 | 状态 |
+|--------|------|------|-----------|------|
+| **P0** | Sandbox 轻量进程隔离 | Claude Code / OpenClaw | 2 周 | 待排期 |
+| **P0** | Dream LLM 蒸馏 (Phase 2) | Hermes Agent | 1 周 | 待排期 |
+| **P0** | Durable claims auto-surface | OpenClaw / 内部不对称 | 3 天 | 待排期 |
+| **P1** | 自适应审批 (sensorium→approval) | Claude Code / 自调节路径 | 1 周 | ⚙️ **GLM 执行中** |
+| **P1** | FTS5 知识检索升级 | Hermes / Ruflo | 1 周 | 待排期 |
+| **P1** | 多模型成本路由 | Ruflo / OpenClaw | 1 周 | 待排期 |
+| **P2** | 用户 Hook API 暴露 | Claude Code | 1 周 | 待排期 |
+| **P2** | LSP 集成 | Claude Code | 2 周 | 待排期 |
+| **P2** | Playbook 可编辑性 (export/import) | OpenClaw Markdown | 3 天 | 待排期 |
+| **P2** | Fluency inspect 知识可观测 | 自研 | 3 天 | 待排期 |
 | **P3** | 远程 agent 隔离 | Claude Code / Ruflo | 长期 |
 | **P3** | FSM 协调层显式化 | OpenClaw | 长期 |

@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-05-20 — Self-Regulating Safety + Three-Authority Coroutine Foundation
+
+### Added
+- **Sensorium-driven adaptive approval**: `assessToolRisk()` now accepts optional `Sensorium` parameter. High confidence (>0.8) + low risk + auto-safe mode → auto-approve bypass. Low confidence (<0.3) → risk escalated one level. This is the "self-regulating safety" path unique to Rivet — no other terminal agent uses real-time agent state to modulate approval decisions.
+- **Three-layer config resolution**: `loadConfig()` supports layered loading: defaults → user (`~/.rivet/config.json`) → project (`.rivet-config.json` found by walking cwd) → session overlay (runtime-only). `findProjectConfig()` walks up directory tree. `main.tsx` now delegates to `manager.ts` instead of maintaining its own duplicate loader.
+- **DANGEROUS_BASH_PATTERNS single source of truth**: Consolidated from duplicate definitions in `approval-risk.ts` and `bash.ts` into one exported array. Patterns refined for precision: `sudo` only flags destructive subcommands (rm, chmod, dd, mkfs, etc), `pkill` only flags forceful flags (-9, -KILL, -f), `chmod` catches any world-writable octal (not just 777), `curl|bash` correctly detected as high risk via destructive pattern match.
+- **Provider-aware compaction thresholds**: `compactThresholds()` now accepts `CompactStrategyInput` with `providerProfile`, selecting `cache-preserving` (DeepSeek), `balanced`, or `aggressive` (MiMo/no-cache) strategies with different ratio presets. `tool-pipeline.ts` uses provider-aware truncation.
+- **Three-Authority Coroutine foundation**: Dispatcher (data-flow domain decomposition), Dispatcher Hook (TaskContract → coordinator delegation), TaskBoard (read projection from WorkOrderQueue events for TUI).
+- **Star domain voice pipeline**: Domain-voice tone converter (破军/天府/天梁), phase-aware heartbeat templates, heartbeat + domain voice wired through radio-hook.
+- **StarBridge observability**: StarmapView (sensorium gauges), ChronicleView (phase-by-phase timeline), constellation renderer, mode switching (2=starmap, 3=chronicle).
+- **Maturity gap analysis**: `docs/superpowers/specs/2026-05-20-rivet-vs-claude-code-maturity-gap.md` — structured comparison identifying Rivet's structural advantages (agent kernel, prefix cache, multi-model) and gaps (sandbox, user hook API, LSP).
+
+### Changed
+- `assessToolRisk()` signature: `(toolName, input, doomLoopLevel?, antibodies?, sensorium?)` — backward compatible (new params optional).
+- `loadConfig()` signature: `(options?)` — backward compatible (no options = global-only load).
+- `truncateSuccessfulToolResult()` in `tool-pipeline.ts`: now takes `AgentConfig` instead of raw `number` for context window.
+- `main.tsx`: removed duplicate `deepMerge()` + `loadConfig()` in favor of `manager.ts`'s layered implementation.
+
+### Files Changed
+- `src/agent/approval-risk.ts` — sensorium param, DANGEROUS_BASH_PATTERNS, CONFIDENCE_THRESHOLDS
+- `src/agent/tool-pipeline.ts` — getSensorium() dep, adaptive approval gate, provider-aware truncation
+- `src/agent/tool-execution.ts` — getSensorium wire-through
+- `src/agent/loop.ts` — sensorium → ToolExecutionController, provider-aware compaction
+- `src/tools/bash.ts` — import shared DANGEROUS_BASH_PATTERNS
+- `src/config/manager.ts` — 3-layer loadConfig, findProjectConfig
+- `src/main.tsx` — deduplicate loadConfig, delegate to manager.ts
+- `src/compact/constants.ts` — CompactStrategyInput, provider strategy + ratios
+- `src/agent/dispatcher.ts` — data-flow domain decomposition
+- `src/agent/hooks/dispatcher-hook.ts` — coordinator delegation hook
+- `src/agent/task-board.ts` — TUI read projection
+
+### Tests
+- 47 approval-risk tests (sensorium confidence 8, dangerous patterns 9, existing 30)
+- 13 layered-config tests (3-layer resolution 7, findProjectConfig 5, loadConfigDefault 1)
+- 5 provider-aware compaction threshold tests
+- 77 total across security + config modules, all passing
+
+---
+
 ## 2026-05-19 — Claude Provider (CLI Proxy)
 
 ### Added

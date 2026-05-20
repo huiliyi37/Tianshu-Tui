@@ -4,33 +4,21 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter complete and merged to `main` — 1685 tests passing, typecheck/build clean. Session restore, stream error persistence, process-tree timeout cleanup, MCP timeout degradation, compaction safety, prompt volatile escaping, bounded live stream rendering, and cerebellar/thinking edge cases are covered by tests.
+Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter complete and merged to `main` — 1685 tests passing, typecheck/build clean.
 
-### Session HA Closure — completed this round
+### 2026-05-20 — Self-Regulating Safety + Three-Authority Coroutine
 
-This round closed the remaining high-availability gaps for interrupted, long-running, or degraded sessions:
+**Self-regulating approval (天枢 unique):** `assessToolRisk()` now consumes the Sensorium 6D state vector. High confidence (>0.8) + low risk → auto-approve bypass. Low confidence (<0.3) → risk escalated. No other terminal agent uses real-time agent state to modulate approval decisions.
 
-- **Recoverable session restore:** `/resume` repairs interrupted tool transcripts with synthetic recovered `tool_result` blocks, and rolls back to the last valid turn snapshot when a transcript is unsafe.
-- **Durable partial assistant output:** stream failures persist already-received assistant content before surfacing the error, so visible work is not lost after a dropped SSE connection.
-- **Process-tree timeout cleanup:** bash timeouts terminate the whole spawned process group, including background descendants, instead of only killing the shell wrapper.
-- **MCP degradation boundaries:** MCP connect, tool discovery, and tool calls have timeout limits; hung calls mark the server degraded instead of hanging the agent loop indefinitely.
-- **Compaction safety gate:** smart compaction rejects empty, oversized, or prompt-like unsafe summaries and falls back to deterministic micro-compaction.
-- **Prompt boundary hardening:** volatile repair hints and session-memory blocks are escaped inside fixed XML tags before injection into the prompt context.
-- **Bounded live TUI state:** live assistant rendering keeps a capped tail window in React state while preserving the full final assistant content outside render state.
-- **Cerebellar/thinking coverage:** prediction-error reset/escalation behavior and ThinkingCollapser formatting have focused regression coverage.
+**Three-layer config:** `loadConfig()` resolves defaults → user (`~/.rivet/config.json`) → project (`.rivet-config.json`) → session overlay. Project-level config walks up from cwd. `main.tsx` deduplicated to use `manager.ts`'s loader.
 
-Merge validation for this round passed `npm run typecheck`, `npm test`, `npm run build`, and `git diff --check`.
+**Dangerous pattern consolidation:** Single source of truth for bash dangerous patterns in `DANGEROUS_BASH_PATTERNS`. Precision improved: `sudo` only flags destructive subcommands, `pkill` only flags forceful flags, `chmod` catches all world-writable octals.
 
-### Activity Status Layer
+**Provider-aware compaction:** `compactThresholds()` selects cache-preserving / balanced / aggressive ratios based on provider cache type (DeepSeek persistent exact-prefix vs MiMo no-cache).
 
-Rivet now surfaces the current long-running activity instead of leaving the terminal looking idle. The TUI shows elapsed time and stale/no-update indicators for thinking, streaming answers, tool execution, MCP waits, large-result analysis, compaction, and restore/preflight phases. Activity is projected to existing `AgentStatus` and `ThinkingCollapser` surfaces at low frequency (1 Hz max) without adding a trace timeline, fake percentages, or a high-frequency render loop.
+**Three-Authority Coroutine foundation:** Dispatcher (data-flow domain decomposition), Dispatcher Hook (coordinator delegation), TaskBoard (TUI read projection). Star domain voice pipeline (破军/天府/天梁). StarBridge observability (StarmapView, ChronicleView).
 
-Examples:
-
-- `Thinking… 42s · 655 chars`
-- `Reading src/tui/app.tsx… 52s · no update 14s`
-- `Waiting for MCP context7… 24s`
-- `Analyzing tool results… 46s`
+See `CHANGELOG.md` for full details.
 
 ## Quick Start
 

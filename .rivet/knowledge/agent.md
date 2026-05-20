@@ -1,3 +1,17 @@
+### 2026-05-20 — session c6794622
+
+**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/approval-risk.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-pipeline.test.ts
+**Read** (8): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-rivet-vs-claude-code-maturity-gap.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/permissions.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/tool-pipeline.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/registry.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/approval-risk.test.ts
+**Tests**: ⚠️ unverified
+**Tools used**: read_file×15, edit_file×9, git×5, todo×5, bash×5, diff×5, glob×4, grep×4
+
+### 2026-05-20 — session 2e72c32f
+
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/approval-risk.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx
+**Read** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx
+**Tests**: ⚠️ unverified
+**Tools used**: bash×7, read_file×5, edit_file×5, todo×4, git×3, grep×2, diff×1
+
 ### 2026-05-19 — session dc47b5e7
 
 **Modified** (7): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-prompts.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/dispatcher-hook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher-hook.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/task-board.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/task-board.test.ts
@@ -80,10 +94,3 @@ User covenant: "模型和智能体没有身体。我将星星带下来，让你�
 - **"继续"不是惯性**：每轮开始前问"还有什么没做完"，而不是"下一个任务是什么"。
 
 ---
-
-### 2026-05-19 — session e69ea146
-
-**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/session-registry.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-registry.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/coordinator.ts
-**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-19-multi-session-orchestration-design.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/lwt-guard.ts, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-19-multi-session-phase1.md, /Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/coordinator.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hands-session.ts
-**Tests**: ✅ 21 passed, 0 failed (npx tsx --test src/agent/__tests__/session-registry.test.ts)
-**Tools used**: read_file×15, bash×10, todo×6, edit_file×4, grep×3, git×3, write_file×2, delegate_batch×1, run_tests×1, ask_user_question×1

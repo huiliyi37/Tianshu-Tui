@@ -160,7 +160,7 @@
 
 不照搬 Claude Code 的控制面（prefix cache 不兼容），走 Rivet 独有的路径：
 1. **Sandbox**：轻量进程隔离，仅 high-risk 命令走隔离
-2. **权限**：sensorium confidence + risk assessment 驱动自适应审批
+2. **权限**：sensorium confidence + risk assessment 驱动自适应审批（⚙️ GLM 执行中）
 3. **可观测**：fluency inspect 模式展示决策理由
 4. **配置**：3 级配置（user/project/session），暴露用户 hook API
 
