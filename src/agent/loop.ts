@@ -767,12 +767,21 @@ export class AgentLoop {
           evidence: this.evidence.getState(),
           trace: this.traceStore,
           turn: this.session.getTurnCount(),
-          sensorium: this.sensorium,
-          strategy: this.strategy,
-          vigor: this.vigorState,
+          // 道常无为而无不为：CVM throttle — skip mirror when overhead > 5%
+          sensorium: pressureResult.shouldThrottleCvm ? null : this.sensorium,
+          strategy: pressureResult.shouldThrottleCvm ? null : this.strategy,
+          vigor: pressureResult.shouldThrottleCvm ? null : this.vigorState,
         })
         this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
-        this.config.promptEngine.setCognitiveProjection(buildCognitivePromptProjection(cognitiveLedger))
+        const projection = buildCognitivePromptProjection(cognitiveLedger)
+        this.config.promptEngine.setCognitiveProjection(projection)
+
+        // ── CVM overhead tracking ──
+        // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
+        // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
+        // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
+        const cvmTokenEstimate = Math.ceil(projection.length / 4)
+        this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const streamResult = await this.turnStream!.streamTurn({
           request,
