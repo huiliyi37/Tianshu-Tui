@@ -283,7 +283,7 @@ describe('StigmergyStore integration with Sensorium freshness', () => {
 
     const sensorium = computeSensorium({
       predictionAcc: { windowSize: 1, predictions: [true], consecutiveCorrect: 1 },
-      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, ratio: 0.1 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.1 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
       toolCallHistory: [],
       pheromones,

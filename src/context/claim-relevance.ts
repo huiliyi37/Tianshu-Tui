@@ -73,6 +73,25 @@ function isHardKeep(claim: ContextClaim): boolean {
   return false
 }
 
+/**
+ * Epigenetic imprinting: age itself is information.
+ * A durable claim that has survived 30 sessions carries more weight than
+ * a fresh claim with identical content — it has been validated by time.
+ *
+ * Weight: 1.0 baseline, +0.1 per 7 days of survival, capped at 2.0.
+ * Only applies to durable and durable_candidate claims.
+ */
+const AGE_WEIGHT_PER_WEEK = 0.1
+const AGE_WEIGHT_CAP = 2.0
+const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000
+
+function claimAgeWeight(claim: ContextClaim, now: number): number {
+  if (claim.status !== 'durable' && claim.status !== 'durable_candidate') return 1.0
+  const ageMs = now - claim.createdAt
+  const weeks = ageMs / MS_PER_WEEK
+  return Math.min(1.0 + weeks * AGE_WEIGHT_PER_WEEK, AGE_WEIGHT_CAP)
+}
+
 export function scoreClaimRelevance(claim: ContextClaim, input: ClaimRelevanceInput = {}): ScoredClaim | null {
   const now = input.now ?? Date.now()
   if (!isPromptEligibleClaim(claim, now)) return null
@@ -122,6 +141,13 @@ export function scoreClaimRelevance(claim: ContextClaim, input: ClaimRelevanceIn
   if (claim.kind === 'worker_finding' && !hasAnyMatch) {
     score -= 20
     reasons.push('unmatched-worker-finding-20')
+  }
+
+  // Epigenetic imprinting: age weight for durable claims
+  const ageWeight = claimAgeWeight(claim, now)
+  if (ageWeight > 1.0) {
+    score = Math.round(score * ageWeight)
+    reasons.push(`age-weight×${ageWeight.toFixed(1)}`)
   }
 
   if (isHardKeep(claim)) {
