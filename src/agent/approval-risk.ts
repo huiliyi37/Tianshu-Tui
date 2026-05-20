@@ -15,20 +15,23 @@ export interface RiskAssessment {
  * Shared dangerous command patterns — single source of truth for both
  * approval-risk and bash.ts requiresApproval().
  *
- * Previously these patterns were duplicated between bash.ts DANGEROUS_PATTERNS
- * and assessToolRisk()'s inline regex. Now we centralize them here.
+ * Design principles:
+ * - Match dangerous *intent*, not just keywords
+ * - Minimize false positives (sudo ls should not trigger)
+ * - Catch destructive, irreversible, or privilege-escalating commands
  */
 export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
-  /\brm\s+-/,
+  /\brm\s+-(?:[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\b/,  // rm -rf, rm -fr
   /\bgit\s+reset\s+--hard\b/,
-  /\bgit\s+clean\s+-/,
+  /\bgit\s+clean\s+-[a-zA-Z]*f\b/,
   /\bkillall\b/,
-  /\bpkill\b/,
+  /\bpkill\s+-[9Kf]\b/,               // pkill -9, pkill -KILL, pkill -f (forceful)
   /\bdrop\s+table\b/i,
-  /\bsudo\b/,
-  /\bchmod\s+777\b/,
-  /\bwget\b.*\|\s*sh\b/,
-  /\beval\b.*\$[({]/,
+  /\bsudo\s+(?:rm|chmod|chown|dd|mkfs|mount|umount|systemctl|shutdown|reboot|passwd|user(?:add|del|mod))\b/,  // sudo + destructive subcommand
+  /\bchmod\s+(?:777|[0-7]*7[0-7]*7)\b/,  // chmod 777, chmod 757, chmod 737, etc.
+  /\bwget\b.*\|\s*(?:sh|bash|zsh|fish)\b/,
+  /\bcurl\b.*\|\s*(?:sh|bash|zsh|fish)\b/,
+  /\beval\b.*\$[({]/,                   // eval "$(curl ...)" or eval $(...)
   /\bgit\s+push\b[^\n]*\s--force(?:-with-lease)?\b/i,
 ]
 

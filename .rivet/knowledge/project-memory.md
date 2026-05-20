@@ -1,3 +1,10 @@
+### 2026-05-20 — session c6794622
+
+**Modified** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/compact-thresholds.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/compact-policy.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/auto.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/__tests__/create-agent-config.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts
+**Read** (9): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/compact-thresholds.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/compact-policy.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/auto.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/compaction-controller.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-agent-config.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/auto.ts +1 more
+**Tests**: ❌ 0 passed, 0 failed (npx tsx --test src/compact/__tests__/compact-thresholds.test.ts src/context/__tests__/compact-policy.test.ts src/compact/__tests__/auto.test.ts src/agent/__tests__/compaction-controller.test.ts src/__tests__/create-agent-config.test.ts)
+**Tools used**: read_file×11, edit_file×10, bash×6, diff×4, todo×3, git×2, grep×2, run_tests×1, inspect_project×1
+
 ### 2026-05-19 — session dc47b5e7
 
 **Modified** (7): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-prompts.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/dispatcher-hook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher-hook.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/task-board.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/task-board.test.ts
@@ -84,10 +91,3 @@
 **Tests**: ⚠️ unverified
 **Tools used**: edit_file×7, bash×4, read_file×3, grep×1, git×1, todo×1
 - Decision: the `name` field is '破军', '天府', or '天梁'
-
-### 2026-05-19 — session dc47b5e7
-
-**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/output-store.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/playbook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/volatile.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/dead-end-rules.ts
-**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/output-store.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/retrospect.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/playbook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/volatile.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/dead-end-rules.ts
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×7, read_file×6, bash×6, todo×3, git×1, grep×1

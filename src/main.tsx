@@ -27,9 +27,7 @@ import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 import { killAll } from './tools/process-tracker.js'
-import { configSchema } from './config/schema.js'
-import { DEFAULT_CONFIG } from './config/default.js'
-import { runConfigCLI } from './config/manager.js'
+import { runConfigCLI, loadConfig as loadLayeredConfig } from './config/manager.js'
 import { McpManager } from './mcp/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
@@ -38,34 +36,8 @@ import { PlaybookStore } from './agent/playbook-store.js'
 import type { Config, ProviderConfig } from './config/schema.js'
 import { SessionRegistry } from './agent/session-registry.js'
 
-function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
-  const result = { ...target }
-  for (const key of Object.keys(source)) {
-    const sv = source[key]
-    const tv = target[key]
-    if (sv && typeof sv === 'object' && !Array.isArray(sv) && tv && typeof tv === 'object' && !Array.isArray(tv)) {
-      result[key] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>)
-    } else {
-      result[key] = sv
-    }
-  }
-  return result
-}
-
-function loadConfig(): Config {
-  const configPath = join(homedir(), '.rivet', 'config.json')
-
-  if (existsSync(configPath)) {
-    try {
-      const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
-      const merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, raw as Record<string, unknown>)
-      return configSchema.parse(merged)
-    } catch (err) {
-      console.error('Config file error, using defaults:', (err as Error).message)
-    }
-  }
-
-  return configSchema.parse(DEFAULT_CONFIG)
+function loadConfig(cwd?: string): Config {
+  return loadLayeredConfig({ cwd })
 }
 
 function getOrCreateSessionId(): string {
