@@ -650,6 +650,7 @@ export class AgentLoop {
     // Use query() so Sensorium sees decayed currentStrength, and prune stale entries opportunistically.
     this.stigmergyStore.prune().catch(() => {})
     this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
+
     this.bindSessionDomain(userInput)
     this.contextInjection.recordUserInputClaims(userInput)
     this.contextInjection.refreshPlaybookLessons(userInput)
@@ -766,6 +767,9 @@ export class AgentLoop {
           evidence: this.evidence.getState(),
           trace: this.traceStore,
           turn: this.session.getTurnCount(),
+          sensorium: this.sensorium,
+          strategy: this.strategy,
+          vigor: this.vigorState,
         })
         this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
         this.config.promptEngine.setCognitiveProjection(buildCognitivePromptProjection(cognitiveLedger))

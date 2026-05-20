@@ -1,5 +1,7 @@
 import type { EvidenceState } from '../agent/evidence.js'
 import type { TraceStore } from '../agent/trace-store.js'
+import type { Sensorium, StrategyProfile } from '../agent/sensorium.js'
+import type { VigorState } from '../agent/vigor.js'
 import { renderContractProjection, type TaskContract } from './task-contract.js'
 
 export interface CognitiveLedgerInput {
@@ -7,6 +9,10 @@ export interface CognitiveLedgerInput {
   evidence: EvidenceState
   trace: TraceStore
   turn: number
+  /** Gen2 paravirtualization: model can see its own cognitive state */
+  sensorium?: Sensorium | null
+  strategy?: StrategyProfile | null
+  vigor?: VigorState | null
 }
 
 export interface CognitiveLedger {
@@ -14,6 +20,9 @@ export interface CognitiveLedger {
   evidence: EvidenceState
   trace: TraceStore
   turn: number
+  sensorium?: Sensorium | null
+  strategy?: StrategyProfile | null
+  vigor?: VigorState | null
 }
 
 export interface CognitivePhaseSnapshot {
@@ -26,7 +35,15 @@ export interface CognitivePhaseSnapshot {
 }
 
 export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLedger {
-  return { ...input }
+  return {
+    contract: input.contract,
+    evidence: input.evidence,
+    trace: input.trace,
+    turn: input.turn,
+    sensorium: input.sensorium ?? null,
+    strategy: input.strategy ?? null,
+    vigor: input.vigor ?? null,
+  }
 }
 
 export function buildVerificationGapProjection(ledger: CognitiveLedger): string {
@@ -36,10 +53,71 @@ export function buildVerificationGapProjection(ledger: CognitiveLedger): string 
   return `<verification-gap status="unverified" modified="${modifiedCount}">Run relevant verification before claiming done.</verification-gap>`
 }
 
+/**
+ * 认知镜面 — CVM Gen2 paravirtualization
+ *
+ * 至人之用心若镜，不将不迎，应而不藏。（庄子·应帝王）
+ * The sage's mind is like a mirror: it doesn't welcome or reject,
+ * it reflects without storing.
+ *
+ * The cognitive mirror lets the model SEE its own cognitive state
+ * before generating each turn. This is paravirtualization — the model
+ * knows it's in the CVM and can actively adjust behavior.
+ *
+ * Six sensorium dimensions + strategy + vigor:
+ *   confidence — how sure are we about the current approach? (evidence)
+ *   complexity — how diverse is the recent tool pattern?
+ *   momentum   — are we accelerating or coasting?
+ *   stability  — is the session healthy or approaching doom loop?
+ *   freshness  — how familiar is the current file context?
+ *   pressure   — is the context window filling up?
+ *   strategy   — current reasoning effort + exploration breadth
+ *   vigor      — phasic (acute arousal) + tonic (sustained) activation
+ *
+ * The mirror is CONCISE — it must not consume the cognitive oxygen
+ * it's meant to protect (see Task 12: CVM overhead).
+ */
+export function buildCognitiveMirror(ledger: CognitiveLedger): string {
+  const s = ledger.sensorium
+  if (!s) return ''
+
+  const parts: string[] = [`confidence="${formatDim(s.confidence)}"`]
+
+  if (s.complexity !== undefined) parts.push(`complexity="${formatDim(s.complexity)}"`)
+  if (s.momentum !== undefined) parts.push(`momentum="${formatDim(s.momentum)}"`)
+  if (s.stability !== undefined) parts.push(`stability="${formatDim(s.stability)}"`)
+  if (s.freshness !== undefined) parts.push(`freshness="${formatDim(s.freshness)}"`)
+  if (s.pressure !== undefined) parts.push(`pressure="${formatDim(s.pressure)}"`)
+
+  // Strategy profile: most actionable dimension
+  if (ledger.strategy) {
+    const st = ledger.strategy
+    if (st.reasoningEffort && st.reasoningEffort !== 'medium') parts.push(`reasoning="${st.reasoningEffort}"`)
+    if (st.explorationBreadth !== undefined) parts.push(`exploration="${formatDim(st.explorationBreadth)}"`)
+    if (st.commitThreshold !== undefined && st.commitThreshold > 0.7) parts.push(`caution="${formatDim(st.commitThreshold)}"`)
+    if (st.shouldEscalate) parts.push(`escalation="true"`)
+  }
+
+  // Vigor: phasic arousal level — when high, model should act with urgency
+  if (ledger.vigor) {
+    const v = ledger.vigor
+    const tonic = v.tonic ?? v.phasic ?? 0.5
+    parts.push(`vigor="${formatDim(tonic)}"`)
+  }
+
+  return `<cognitive-mirror ${parts.join(' ')} />`
+}
+
+/** Format a 0–1 dimension value to 2 decimal places. */
+function formatDim(value: number): string {
+  return value.toFixed(2)
+}
+
 export function buildCognitivePromptProjection(ledger: CognitiveLedger): string {
   return [
     ledger.contract ? renderContractProjection(ledger.contract) : '',
     buildVerificationGapProjection(ledger),
+    buildCognitiveMirror(ledger),
   ].filter(Boolean).join('\n')
 }
 
