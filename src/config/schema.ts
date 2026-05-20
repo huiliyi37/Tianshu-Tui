@@ -72,9 +72,7 @@ export const cacheSchema = z.object({
   showHitRate: z.boolean().default(true),
 })
 
-export const editorSchema = z.object({
-  vim: z.boolean().default(false),
-})
+export const editorSchema = z.object({})
 
 export const workerProfileSchema = z.object({
   provider: z.string(),

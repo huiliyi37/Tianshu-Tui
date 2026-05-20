@@ -1,9 +1,7 @@
 import type { Config } from './schema.js'
 
 export const DEFAULT_CONFIG: Config = {
-  editor: {
-    vim: false,
-  },
+  editor: {},
   provider: {
     default: 'deepseek',
     providers: {
