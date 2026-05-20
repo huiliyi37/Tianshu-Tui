@@ -2,9 +2,9 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   classifySeason,
-  type SeasonClassification,
   type SeasonInput,
 } from '../cognitive-season.js'
+import { buildCognitiveMirror, createCognitiveLedger } from '../../context/cognitive-ledger.js'
 
 function makeInput(overrides: Partial<SeasonInput> = {}): SeasonInput {
   return {
@@ -149,6 +149,34 @@ describe('cognitive-season', () => {
         assert.ok(result.intensity >= 0 && result.intensity <= 1,
           `intensity ${result.intensity} out of range for ${JSON.stringify(input)}`)
       }
+    })
+  })
+
+  describe('cognitive mirror integration', () => {
+    const baseLedgerInput = {
+      evidence: {
+        filesRead: new Set<string>(),
+        filesModified: new Set<string>(),
+        verifications: [],
+        deliveryStatus: 'unverified' as const,
+        impactedFiles: new Set<string>(),
+        impactedTests: new Set<string>(),
+      },
+      trace: { maxEvents: 100, events: [], toolFingerprints: [] },
+      turn: 3,
+      sensorium: { confidence: 0.7, complexity: 0.5, momentum: 0.6, stability: 0.8, freshness: 0.5, pressure: 0.3 },
+    }
+
+    it('season appears in cognitive mirror output', () => {
+      const ledger = createCognitiveLedger({ ...baseLedgerInput, season: 'genesis' })
+      const mirror = buildCognitiveMirror(ledger)
+      assert.ok(mirror.includes('season="genesis"'), `mirror should include season: ${mirror}`)
+    })
+
+    it('season is omitted from mirror when null', () => {
+      const ledger = createCognitiveLedger({ ...baseLedgerInput, season: null })
+      const mirror = buildCognitiveMirror(ledger)
+      assert.ok(!mirror.includes('season='), `mirror should not include season: ${mirror}`)
     })
   })
 })
