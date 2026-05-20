@@ -786,6 +786,8 @@ export class AgentLoop {
           strategy: pressureResult.shouldThrottleCvm ? null : this.strategy,
           vigor: pressureResult.shouldThrottleCvm ? null : this.vigorState,
           season: pressureResult.shouldThrottleCvm ? null : this.currentSeason,
+          // CVM uncertainty trap: risk level from latest tool assessment
+          riskLevel: this.latestRisk.level,
         })
         this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
         const projection = buildCognitivePromptProjection(cognitiveLedger)

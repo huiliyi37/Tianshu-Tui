@@ -9,6 +9,7 @@ import {
 import { advanceContractStatus, extractTaskContract, type TaskContract } from '../task-contract.js'
 import type { EvidenceState } from '../../agent/evidence.js'
 import type { TraceStore } from '../../agent/trace-store.js'
+import type { Sensorium } from '../../agent/sensorium.js'
 
 function makeEvidence(overrides: Partial<EvidenceState> = {}): EvidenceState {
   return {
@@ -133,5 +134,104 @@ describe('verification gap projection', () => {
       turn: 1,
     })
     assert.equal(buildVerificationGapProjection(ledger), '')
+  })
+})
+
+describe('uncertainty framing projection — 万物为一原则④', () => {
+  function makeSensorium(confidence: number): Sensorium {
+    return {
+      momentum: 0.5,
+      pressure: 0.3,
+      confidence,
+      complexity: 0.4,
+      freshness: 0.5,
+      stability: 0.8,
+    }
+  }
+
+  it('injects uncertainty hint when confidence < 0.4 + risk high', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence(),
+      trace: makeTrace(),
+      turn: 3,
+      sensorium: makeSensorium(0.25),
+      riskLevel: 'high',
+    })
+    const projection = buildCognitivePromptProjection(ledger)
+    assert.match(projection, /\[Uncertainty Framing\]/)
+    assert.match(projection, /0\.25/)
+  })
+
+  it('injects uncertainty hint when confidence < 0.4 + risk medium', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence(),
+      trace: makeTrace(),
+      turn: 3,
+      sensorium: makeSensorium(0.3),
+      riskLevel: 'medium',
+    })
+    const projection = buildCognitivePromptProjection(ledger)
+    assert.match(projection, /\[Uncertainty Framing\]/)
+  })
+
+  it('omits uncertainty when confidence >= 0.4', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence(),
+      trace: makeTrace(),
+      turn: 3,
+      sensorium: makeSensorium(0.5),
+      riskLevel: 'high',
+    })
+    const projection = buildCognitivePromptProjection(ledger)
+    assert.doesNotMatch(projection, /\[Uncertainty Framing\]/)
+  })
+
+  it('omits uncertainty when risk is low', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence(),
+      trace: makeTrace(),
+      turn: 3,
+      sensorium: makeSensorium(0.2),
+      riskLevel: 'low',
+    })
+    const projection = buildCognitivePromptProjection(ledger)
+    assert.doesNotMatch(projection, /\[Uncertainty Framing\]/)
+  })
+
+  it('omits uncertainty when no sensorium present', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence(),
+      trace: makeTrace(),
+      turn: 3,
+      riskLevel: 'high',
+    })
+    const projection = buildCognitivePromptProjection(ledger)
+    assert.doesNotMatch(projection, /\[Uncertainty Framing\]/)
+  })
+
+  it('omits uncertainty when no risk level present', () => {
+    const ledger = createCognitiveLedger({
+      evidence: makeEvidence(),
+      trace: makeTrace(),
+      turn: 3,
+      sensorium: makeSensorium(0.2),
+    })
+    const projection = buildCognitivePromptProjection(ledger)
+    assert.doesNotMatch(projection, /\[Uncertainty Framing\]/)
+  })
+
+  it('coexists with cognitive mirror and verification gap', () => {
+    const ledger = createCognitiveLedger({
+      contract: makeContract(),
+      evidence: makeEvidence(),
+      trace: makeTrace(),
+      turn: 5,
+      sensorium: makeSensorium(0.15),
+      riskLevel: 'high',
+    })
+    const projection = buildCognitivePromptProjection(ledger)
+    assert.match(projection, /<cognitive-mirror/)
+    assert.match(projection, /<verification-gap/)
+    assert.match(projection, /\[Uncertainty Framing\]/)
   })
 })

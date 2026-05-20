@@ -1,9 +1,11 @@
+import type { RiskLevel } from '../agent/approval-risk.js'
 import type { EvidenceState } from '../agent/evidence.js'
 import type { TraceStore } from '../agent/trace-store.js'
 import type { CognitiveSeason } from '../agent/cognitive-season.js'
 import type { Sensorium, StrategyProfile } from '../agent/sensorium.js'
 import type { VigorState } from '../agent/vigor.js'
 import { renderContractProjection, type TaskContract } from './task-contract.js'
+import { buildUncertaintyFraming } from '../agent/uncertainty-framing.js'
 
 export interface CognitiveLedgerInput {
   contract?: TaskContract
@@ -15,6 +17,8 @@ export interface CognitiveLedgerInput {
   strategy?: StrategyProfile | null
   vigor?: VigorState | null
   season?: CognitiveSeason | null
+  /** CVM trap: latest tool risk level for uncertainty framing */
+  riskLevel?: RiskLevel
 }
 
 export interface CognitiveLedger {
@@ -26,6 +30,7 @@ export interface CognitiveLedger {
   strategy?: StrategyProfile | null
   vigor?: VigorState | null
   season?: CognitiveSeason | null
+  riskLevel?: RiskLevel
 }
 
 export interface CognitivePhaseSnapshot {
@@ -47,6 +52,7 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     strategy: input.strategy ?? null,
     vigor: input.vigor ?? null,
     season: input.season ?? null,
+    riskLevel: input.riskLevel,
   }
 }
 
@@ -127,7 +133,23 @@ export function buildCognitivePromptProjection(ledger: CognitiveLedger): string 
     ledger.contract ? renderContractProjection(ledger.contract) : '',
     buildVerificationGapProjection(ledger),
     buildCognitiveMirror(ledger),
+    buildUncertaintyProjection(ledger),
   ].filter(Boolean).join('\n')
+}
+
+/**
+ * Uncertainty Framing — 万物为一原则④ "模糊是力量"
+ *
+ * When sensorium.confidence < 0.4 + risk >= medium, inject structured
+ * uncertainty hint into cognitive projection. This is the CVM trap for
+ * preventing overconfident destructive actions.
+ */
+function buildUncertaintyProjection(ledger: CognitiveLedger): string {
+  const confidence = ledger.sensorium?.confidence
+  const riskLevel = ledger.riskLevel
+  if (confidence === undefined || confidence === null || !riskLevel) return ''
+  const framing = buildUncertaintyFraming({ confidence, riskLevel })
+  return framing.hint ?? ''
 }
 
 export function getCognitivePhaseSnapshot(ledger: CognitiveLedger): CognitivePhaseSnapshot {
