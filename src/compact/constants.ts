@@ -1,9 +1,8 @@
+import type { CacheType, ProviderProfile } from '../api/provider-profile.js'
+
 /**
- * Compaction constants ported from DeepSeek TUI compaction.rs (v0.8.11+).
- *
- * DeepSeek V4 has a 1M context window. Auto compaction triggers at 80%
- * (800K tokens) with a hard floor of 500K to avoid destroying a healthy
- * prefix cache.
+ * Compaction constants ported from DeepSeek TUI compaction.rs (v0.8.11+),
+ * then generalized by ACF into provider-aware ratios.
  */
 
 /** Auto compaction trigger: 80% of 1M context window */
@@ -18,11 +17,66 @@ export interface CompactThresholds {
   toolResultMaxTokens: number
 }
 
-export function compactThresholds(contextWindow: number): CompactThresholds {
+export type CompactProviderStrategy = 'cache-preserving' | 'balanced' | 'aggressive'
+
+export interface CompactStrategyInput {
+  contextWindow: number
+  providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent' | 'ttlSeconds'>
+}
+
+export interface CompactPolicyRatios {
+  watch: number
+  compact: number
+  reactive: number
+  ceiling: number
+}
+
+const DEFAULT_POLICY_RATIOS: CompactPolicyRatios = {
+  watch: 0.6,
+  compact: 0.78,
+  reactive: 0.88,
+  ceiling: 0.95,
+}
+
+const STRATEGY_POLICY_RATIOS: Record<CompactProviderStrategy, CompactPolicyRatios> = {
+  // DeepSeek-style persistent exact-prefix cache: compaction is expensive because
+  // reshaping history can invalidate a valuable prefix. Delay non-emergency
+  // compaction while retaining the 95% hard ceiling.
+  'cache-preserving': { watch: 0.72, compact: 0.86, reactive: 0.92, ceiling: 0.95 },
+  // OpenAI/Gemini/Claude-like cache paths: some cache survives or TTL is short,
+  // so keep the existing ACF behaviour.
+  balanced: DEFAULT_POLICY_RATIOS,
+  // MiMO/local/no-cache providers: no prefix-cache loss, so compact earlier to
+  // keep the active context cleaner.
+  aggressive: { watch: 0.5, compact: 0.7, reactive: 0.84, ceiling: 0.95 },
+}
+
+function strategyForCacheType(cacheType: CacheType, persistent: boolean): CompactProviderStrategy {
+  if (cacheType === 'exact-prefix' && persistent) return 'cache-preserving'
+  if (cacheType === 'none') return 'aggressive'
+  return 'balanced'
+}
+
+export function compactProviderStrategy(providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>): CompactProviderStrategy {
+  if (!providerProfile) return 'balanced'
+  return strategyForCacheType(providerProfile.cacheType, providerProfile.persistent)
+}
+
+export function compactPolicyRatios(providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>): CompactPolicyRatios {
+  return STRATEGY_POLICY_RATIOS[compactProviderStrategy(providerProfile)]
+}
+
+export function compactThresholds(input: number | CompactStrategyInput): CompactThresholds {
+  const contextWindow = typeof input === 'number' ? input : input.contextWindow
+  const providerProfile = typeof input === 'number' ? undefined : input.providerProfile
+  const ratios = compactPolicyRatios(providerProfile)
+  const isLargeWindow = contextWindow >= LARGE_CONTEXT_WINDOW_TOKENS
+  const toolResultHardCap = isLargeWindow ? 200_000 : 100_000
+
   return {
-    autoThreshold: Math.floor(contextWindow * 0.8),
-    autoFloor: Math.min(Math.floor(contextWindow * 0.6), MINIMUM_AUTO_COMPACT_TOKENS),
-    toolResultMaxTokens: Math.min(Math.floor(contextWindow * 0.3), 100_000),
+    autoThreshold: Math.floor(contextWindow * ratios.reactive),
+    autoFloor: Math.min(Math.floor(contextWindow * ratios.watch), MINIMUM_AUTO_COMPACT_TOKENS),
+    toolResultMaxTokens: Math.min(Math.floor(contextWindow * 0.3), toolResultHardCap),
   }
 }
 

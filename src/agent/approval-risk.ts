@@ -1,6 +1,7 @@
 import { isIP } from 'node:net'
 import { evaluateMcpPolicy } from '../mcp/policy.js'
 import type { ContextClaim } from '../context/claims.js'
+import type { Sensorium } from './sensorium.js'
 
 export type RiskLevel = 'none' | 'low' | 'medium' | 'high'
 
@@ -10,11 +11,41 @@ export interface RiskAssessment {
   suggestedAction: string
 }
 
+/**
+ * Shared dangerous command patterns — single source of truth for both
+ * approval-risk and bash.ts requiresApproval().
+ *
+ * Previously these patterns were duplicated between bash.ts DANGEROUS_PATTERNS
+ * and assessToolRisk()'s inline regex. Now we centralize them here.
+ */
+export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  /\brm\s+-/,
+  /\bgit\s+reset\s+--hard\b/,
+  /\bgit\s+clean\s+-/,
+  /\bkillall\b/,
+  /\bpkill\b/,
+  /\bdrop\s+table\b/i,
+  /\bsudo\b/,
+  /\bchmod\s+777\b/,
+  /\bwget\b.*\|\s*sh\b/,
+  /\beval\b.*\$[({]/,
+  /\bgit\s+push\b[^\n]*\s--force(?:-with-lease)?\b/i,
+]
+
+/** Confidence thresholds for sensorium-driven adaptive approval. */
+export const CONFIDENCE_THRESHOLDS = {
+  /** Above this + risk='none'|'low' → eligible for auto-approve */
+  autoApproveConfidence: 0.8,
+  /** Below this → risk escalated one level */
+  escalateConfidence: 0.3,
+} as const
+
 export function assessToolRisk(
   toolName: string,
   input: Record<string, unknown>,
   doomLoopLevel: 'none' | 'warn' | 'blocked' = 'none',
   antibodies: ContextClaim[] = [],
+  sensorium?: Sensorium,
 ): RiskAssessment {
   const reasons: string[] = []
   let level: RiskLevel = 'none'
@@ -35,18 +66,20 @@ export function assessToolRisk(
     level = level === 'high' ? 'high' : 'medium'
   }
 
-  // Destructive commands
+  // Destructive commands — uses shared pattern list
   if (toolName === 'bash') {
     const cmd = typeof input.command === 'string' ? input.command : ''
-    const destructive = /\b(rm\s+-|git\s+reset\s+--hard|git\s+clean\s+-|killall|pkill|drop\s+table)\b/i
-    const forcePush = /\bgit\s+push\b[^\n]*\s--force(?:-with-lease)?\b/i
-    if (destructive.test(cmd)) {
-      reasons.push('destructive shell command')
-      level = 'high'
-    }
-    if (forcePush.test(cmd)) {
-      reasons.push('force push can overwrite shared remote history')
-      level = 'high'
+    for (const pattern of DANGEROUS_BASH_PATTERNS) {
+      if (pattern.test(cmd)) {
+        // Distinguish force push for clearer reason
+        if (pattern === DANGEROUS_BASH_PATTERNS[DANGEROUS_BASH_PATTERNS.length - 1]) {
+          reasons.push('force push can overwrite shared remote history')
+        } else {
+          reasons.push('destructive shell command')
+        }
+        level = 'high'
+        break
+      }
     }
     if (cmd.includes('curl') && cmd.includes('|')) {
       reasons.push('Pipe from network')
@@ -118,6 +151,20 @@ export function assessToolRisk(
       if (level === 'none') level = 'low'
       break
     }
+  }
+
+  // ── Sensorium-driven adaptive confidence ──────────────────────
+  if (sensorium) {
+    if (sensorium.confidence < CONFIDENCE_THRESHOLDS.escalateConfidence) {
+      // Low confidence → escalate risk one level (never downgrade)
+      if (level === 'none') { level = 'low'; reasons.push('low sensorium confidence (escalated)') }
+      else if (level === 'low') { level = 'medium'; reasons.push('low sensorium confidence (escalated)') }
+      else if (level === 'medium') { level = 'high'; reasons.push('low sensorium confidence (escalated)') }
+      // 'high' stays 'high'
+    }
+    // Note: confidence > autoApproveConfidence does NOT downgrade here.
+    // The auto-approve decision is made downstream in tool-pipeline.ts
+    // based on the combination of risk level + confidence.
   }
 
   const suggestedAction = level === 'high'

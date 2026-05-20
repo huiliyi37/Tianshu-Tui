@@ -11,6 +11,7 @@ import type { VigorState } from './vigor.js'
 import type { RuntimeHookSnapshot, RuntimeHookPipeline } from './runtime-hooks.js'
 import type { ContextInjectionController } from './context-injection.js'
 import type { RiskAssessment } from './approval-risk.js'
+import type { Sensorium } from './sensorium.js'
 import type { TrajectoryRecorder } from './trajectory.js'
 import { PrewarmCache } from './prewarm.js'
 import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
@@ -49,6 +50,7 @@ export interface ToolExecutionDeps {
   getAutoReasoning: () => boolean
   getReasoningEffort: () => ReasoningEffort | undefined
   setClientReasoningEffort: (effort: ReasoningEffort) => void
+  getSensorium: () => Sensorium | null
 }
 
 export interface ToolExecBatchInput {
@@ -109,6 +111,7 @@ export class ToolExecutionController {
             recordPrediction(this.deps.getPredictionAccumulator(), correct),
           )
         },
+        getSensorium: () => this.deps.getSensorium(),
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { compactThresholds } from '../constants.js'
+import { compactPolicyRatios, compactProviderStrategy, compactThresholds } from '../constants.js'
 
 describe('compactThresholds', () => {
   it('scales to 128K window', () => {

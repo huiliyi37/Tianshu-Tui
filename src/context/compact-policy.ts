@@ -1,17 +1,21 @@
 import type { CompactCircuitBreakerState, CompactDecision, CompactTier } from './types.js'
+import { compactPolicyRatios } from '../compact/constants.js'
+import type { ProviderProfile } from '../api/provider-profile.js'
 
 export interface CompactPolicyInput {
   estimatedTokens: number
   maxTokens: number
   turn: number
   failures: CompactCircuitBreakerState
+  providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
 }
 
-export function tierForRatio(ratio: number): CompactTier {
-  if (ratio >= 0.95) return 4
-  if (ratio >= 0.88) return 3
-  if (ratio >= 0.78) return 2
-  if (ratio >= 0.6) return 1
+export function tierForRatio(ratio: number, providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>): CompactTier {
+  const ratios = compactPolicyRatios(providerProfile)
+  if (ratio >= ratios.ceiling) return 4
+  if (ratio >= ratios.reactive) return 3
+  if (ratio >= ratios.compact) return 2
+  if (ratio >= ratios.watch) return 1
   return 0
 }
 
@@ -28,7 +32,7 @@ export function decideCompactTier(input: CompactPolicyInput): CompactDecision {
     return { tier: 0, reason: 'automatic compact circuit breaker is open', shouldCompact: false }
   }
   const ratio = input.maxTokens > 0 ? input.estimatedTokens / input.maxTokens : 1
-  const tier = tierForRatio(ratio)
+  const tier = tierForRatio(ratio, input.providerProfile)
   return { tier, reason: reasonForTier(tier), shouldCompact: tier > 0 }
 }
 

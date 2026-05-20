@@ -9,7 +9,7 @@ describe('WENXING_SEAL', () => {
   })
 
   it('has correct middle line', () => {
-    assert.equal(WENXING_SEAL.middle, '│星│')
+    assert.equal(WENXING_SEAL.middle, '星│星')
   })
 
   it('has correct bottom line', () => {
@@ -23,7 +23,7 @@ describe('WUXING_SEAL', () => {
   })
 
   it('has correct middle line', () => {
-    assert.equal(WUXING_SEAL.middle, '│曲│')
+    assert.equal(WUXING_SEAL.middle, '曲│曲')
   })
 
   it('has correct bottom line', () => {
@@ -37,14 +37,14 @@ describe('TIANXU_SEAL', () => {
   })
 
   it('has correct middle line', () => {
-    assert.equal(TIANXU_SEAL.middle, '│枢│')
+    assert.equal(TIANXU_SEAL.middle, '枢│枢')
   })
 })
 
 describe('STAR_SEAL', () => {
   it('has star character', () => {
     assert.equal(STAR_SEAL.top, '╭✦╮')
-    assert.equal(STAR_SEAL.middle, '│星│')
+    assert.equal(STAR_SEAL.middle, '星│星')
   })
 })
 

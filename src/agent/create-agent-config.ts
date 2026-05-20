@@ -7,6 +7,7 @@ import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
 import type { ProviderConfig } from '../config/schema.js'
 import type { AuthProvider } from '../auth/types.js'
+import { getProviderProfile } from '../api/provider-profile.js'
 
 export interface ModelSpec {
   id: string
@@ -32,7 +33,7 @@ export interface AgentConfigInput {
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'compactClient' | 'compactModel' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'compactClient' | 'compactModel' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -79,6 +80,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     promptEngine,
     contextWindow: model.contextWindow,
     compact: input.compact,
+    providerProfile: getProviderProfile(provider.name, model.contextWindow),
     compactClient,
     compactModel: compactModelId,
     sessionId: input.sessionId,

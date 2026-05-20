@@ -1,4 +1,5 @@
 import { spawn, execFileSync } from 'child_process'
+import { DANGEROUS_BASH_PATTERNS } from '../agent/approval-risk.js'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
@@ -11,20 +12,6 @@ function rtkRewrite(command: string): string {
     return command
   }
 }
-
-const DANGEROUS_PATTERNS: RegExp[] = [
-  /\brm\s+-/,                                    // rm -rf, rm -r, etc.
-  /\bgit\s+push\b[^\n]*\s--force/,               // git push --force / --force-with-lease
-  /\bgit\s+reset\s+--hard/,                       // git reset --hard
-  /\bsudo\b/,                                     // sudo
-  /\bchmod\s+(777|666)\b/,                        // chmod 777 / 666
-  /\bkillall\b/,                                  // killall
-  /\bpkill\b/,                                    // pkill (not pgrep)
-  /\bcurl\b.*\|\s*(sh|bash|zsh|fish)\b/,         // curl | sh
-  /\bwget\b.*\|\s*(sh|bash|zsh|fish)\b/,         // wget | sh
-  /\beval\s+["']/,                                // eval "..."
-  /\beval\s+\$/,                                  // eval $(...)
-]
 
 export const BASH_TOOL: Tool = {
   definition: {
@@ -153,7 +140,7 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
 
   requiresApproval(params: ToolCallParams): boolean {
     const command = params.input.command as string
-    return DANGEROUS_PATTERNS.some(pattern => pattern.test(command))
+    return DANGEROUS_BASH_PATTERNS.some(pattern => pattern.test(command))
   },
 
   isConcurrencySafe: () => false,

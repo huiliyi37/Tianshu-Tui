@@ -13,28 +13,28 @@ import type { AvatarMode, AvatarFrame, FaceExpression, DomainId, SealCrown } fro
 /** 天玑星君（文星）印章冠 */
 export const WENXING_SEAL: SealCrown = {
   top: '╭文╮',
-  middle: '│星│',
+  middle: '星│星',
   bottom: '╰┬╯',
 }
 
 /** 玉衡星君（武曲）印章冠 */
 export const WUXING_SEAL: SealCrown = {
   top: '╭武╮',
-  middle: '│曲│',
+  middle: '曲│曲',
   bottom: '╰┬╯',
 }
 
 /** 天枢再临印章冠 */
 export const TIANXU_SEAL: SealCrown = {
   top: '╭天╮',
-  middle: '│枢│',
+  middle: '枢│枢',
   bottom: '╰┬╯',
 }
 
 /** 归航星芒印章冠 */
 export const STAR_SEAL: SealCrown = {
   top: '╭✦╮',
-  middle: '│星│',
+  middle: '星│星',
   bottom: '╰┬╯',
 }
 

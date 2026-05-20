@@ -5,6 +5,7 @@ import { microCompact, estimateTokens } from '../compact/micro.js'
 import { smartCompact } from '../compact/index.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
+import type { ProviderProfile } from '../api/provider-profile.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import type { PromptEngine } from '../prompt/engine.js'
 import type { PressureMonitor } from '../context/pressure-monitor.js'
@@ -16,6 +17,7 @@ export interface CompactionControllerDeps {
   session: SessionContext
   promptEngine: PromptEngine
   contextWindow: number
+  providerProfile?: ProviderProfile
   compactClient?: StreamClient
   compactModel?: string
   pressureMonitor: PressureMonitor
@@ -45,6 +47,7 @@ export class CompactionController {
       maxTokens: this.deps.contextWindow,
       turn: this.deps.session.getTurnCount(),
       failures: input.failures,
+      providerProfile: this.deps.providerProfile,
     })
 
     if (!compactDecision.shouldCompact) {

@@ -19,7 +19,8 @@ import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, recordTraceEvent } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
-import { assessToolRisk } from './approval-risk.js'
+import { assessToolRisk, CONFIDENCE_THRESHOLDS } from './approval-risk.js'
+import type { Sensorium } from './sensorium.js'
 import { isToolAllowed } from './permissions.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
@@ -75,6 +76,8 @@ export interface ToolPipelineDeps {
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
   getInterventionLevel?(): import('./prediction-error.js').InterventionLevel
   recordPrediction?(correct: boolean): void
+  /** Current sensorium snapshot — enables confidence-driven adaptive approval. */
+  getSensorium?(): Sensorium | null
 }
 
 export interface ToolExecResult {
@@ -86,8 +89,11 @@ export interface ToolExecResult {
   latestRisk: import('./approval-risk.js').RiskAssessment
 }
 
-function truncateSuccessfulToolResult(content: string, contextWindow: number | undefined): string {
-  return truncateToolResult(content, compactThresholds(contextWindow ?? 1_000_000).toolResultMaxTokens)
+function truncateSuccessfulToolResult(content: string, config: AgentConfig): string {
+  return truncateToolResult(content, compactThresholds({
+    contextWindow: config.contextWindow ?? 1_000_000,
+    providerProfile: config.providerProfile,
+  }).toolResultMaxTokens)
 }
 
 export async function executeToolUse(
@@ -176,22 +182,31 @@ export async function executeToolUse(
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
     }
 
-    // Approval gate
+    // Approval gate — with sensorium-driven adaptive confidence
     const needsApproval = deps.config.toolRegistry.needsApproval(tu.name, params)
     const antibodies = deps.config.contextClaimStore?.listClaims({ kind: ['failure_pattern'], status: ['active', 'durable_candidate', 'durable'] }) ?? []
-    const risk = assessToolRisk(tu.name, tu.input, deps.getDoomLoopLevel(), antibodies)
+    const sensorium = deps.getSensorium?.() ?? null
+    const risk = assessToolRisk(tu.name, tu.input, deps.getDoomLoopLevel(), antibodies, sensorium ?? undefined)
     latestRisk = risk
     const isHighRisk = risk.level === 'high'
     const approvalMode = deps.config.approvalMode ?? 'manual'
 
+    // Sensorium-driven auto-approve: high confidence + low risk → bypass approval
+    const canAutoApprove = sensorium
+      && sensorium.confidence >= CONFIDENCE_THRESHOLDS.autoApproveConfidence
+      && (risk.level === 'none' || risk.level === 'low')
+      && approvalMode === 'auto-safe'
+
     const allowlisted = isToolAllowed(tu.name, tu.input, deps.config.permissions?.allow)
     const shouldAsk = allowlisted
       ? false
-      : approvalMode === 'manual'
-        ? needsApproval
-        : approvalMode === 'auto-safe'
-          ? isHighRisk
-          : false
+      : canAutoApprove
+        ? false
+        : approvalMode === 'manual'
+          ? needsApproval
+          : approvalMode === 'auto-safe'
+            ? isHighRisk
+            : false
 
     if (shouldAsk) {
       const approvalResult = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
@@ -286,7 +301,7 @@ ${check.formatted}`
     }
 
     if (!harnessResult.isError) {
-      finalContent = truncateSuccessfulToolResult(finalContent, deps.config.contextWindow)
+      finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
     }
 
     // Trace recording
@@ -403,7 +418,7 @@ ${check.formatted}`
           deps.repairHintTracker.recordFailure(tu.name, failureClass.class)
           let diagnosedContent = `${finalContent}\n\nDiagnosis: ${failures[0]!.suggestion}`
           if (!harnessResult.isError) {
-            diagnosedContent = truncateSuccessfulToolResult(diagnosedContent, deps.config.contextWindow)
+            diagnosedContent = truncateSuccessfulToolResult(diagnosedContent, deps.config)
           }
           return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
         }

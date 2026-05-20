@@ -9,6 +9,10 @@ import {
   LARGE_CONTEXT_WINDOW_TOKENS,
   KEEP_RECENT_MESSAGES,
   COMPACTION_SUMMARY_MAX_TOKENS,
+  LARGE_CONTEXT_SUMMARY_INPUT_MAX_CHARS,
+  LARGE_CONTEXT_SUMMARY_INPUT_HEAD_CHARS,
+  LARGE_CONTEXT_SUMMARY_INPUT_TAIL_CHARS,
+  LARGE_CONTEXT_SUMMARY_MAX_TOKENS,
 } from './constants.js'
 import { microCompact, estimateTokens } from './micro.js'
 import type { CompactionConfig } from './constants.js'
@@ -65,11 +69,13 @@ export function shouldAutoCompact(
 export function buildSummaryPrompt(
   oldMessages: Message[],
   tokenCount: number,
+  contextWindow = LARGE_CONTEXT_WINDOW_TOKENS,
 ): string {
   const isLargeContext = tokenCount >= LARGE_CONTEXT_WINDOW_TOKENS
-  const maxChars = isLargeContext ? 120_000 : SUMMARY_INPUT_MAX_CHARS
-  const headChars = isLargeContext ? 72_000 : SUMMARY_INPUT_HEAD_CHARS
-  const tailChars = isLargeContext ? 36_000 : SUMMARY_INPUT_TAIL_CHARS
+  const scale = isLargeContext ? Math.min(2.5, Math.max(1, contextWindow / LARGE_CONTEXT_WINDOW_TOKENS)) : 1
+  const maxChars = isLargeContext ? Math.floor(LARGE_CONTEXT_SUMMARY_INPUT_MAX_CHARS * scale) : SUMMARY_INPUT_MAX_CHARS
+  const headChars = isLargeContext ? Math.floor(LARGE_CONTEXT_SUMMARY_INPUT_HEAD_CHARS * scale) : SUMMARY_INPUT_HEAD_CHARS
+  const tailChars = isLargeContext ? Math.floor(LARGE_CONTEXT_SUMMARY_INPUT_TAIL_CHARS * scale) : SUMMARY_INPUT_TAIL_CHARS
 
   const serialized = oldMessages.map(m => {
     const content = typeof m.content === 'string'
@@ -79,16 +85,27 @@ export function buildSummaryPrompt(
   }).join('\n')
 
   if (serialized.length <= maxChars) {
-    return buildSummaryInstruction(serialized, isLargeContext)
+    return buildSummaryInstruction(serialized, isLargeContext, contextWindow)
   }
 
   const head = serialized.slice(0, headChars)
   const tail = serialized.slice(-tailChars)
-  return buildSummaryInstruction(`${head}\n\n... (${oldMessages.length} messages omitted) ...\n\n${tail}`, isLargeContext)
+  return buildSummaryInstruction(`${head}\n\n... (${oldMessages.length} messages omitted) ...\n\n${tail}`, isLargeContext, contextWindow)
 }
 
-function buildSummaryInstruction(history: string, isLargeContext: boolean): string {
-  const wordLimit = isLargeContext ? 900 : 500
+function summaryWordLimit(isLargeContext: boolean, contextWindow: number): number {
+  if (!isLargeContext) return 500
+  return Math.min(1_800, Math.max(900, Math.floor(900 * (contextWindow / LARGE_CONTEXT_WINDOW_TOKENS))))
+}
+
+export function compactionSummaryMaxTokens(tokenCount: number, contextWindow: number): number {
+  if (tokenCount < LARGE_CONTEXT_WINDOW_TOKENS) return COMPACTION_SUMMARY_MAX_TOKENS
+  const scaled = Math.floor(LARGE_CONTEXT_SUMMARY_MAX_TOKENS * Math.min(2, Math.max(1, contextWindow / LARGE_CONTEXT_WINDOW_TOKENS)))
+  return Math.min(4_096, Math.max(COMPACTION_SUMMARY_MAX_TOKENS, scaled))
+}
+
+function buildSummaryInstruction(history: string, isLargeContext: boolean, contextWindow: number): string {
+  const wordLimit = summaryWordLimit(isLargeContext, contextWindow)
   return `Summarize the following conversation history in ${wordLimit} words or fewer. Focus on:
 1. Key decisions made
 2. Files changed and why
@@ -142,7 +159,7 @@ export async function smartCompact(
   const oldMessages = messages.slice(CACHE_ANCHOR_MESSAGES, -KEEP_RECENT_MESSAGES)
 
   // Build summary prompt from old messages
-  const summaryPrompt = buildSummaryPrompt(oldMessages, tokenCount)
+  const summaryPrompt = buildSummaryPrompt(oldMessages, tokenCount, contextWindow)
 
   // Call LLM for summary
   let summary = ''
@@ -151,7 +168,7 @@ export async function smartCompact(
       {
         model: compactModel,
         messages: [{ role: 'user', content: summaryPrompt }],
-        max_tokens: COMPACTION_SUMMARY_MAX_TOKENS,
+        max_tokens: compactionSummaryMaxTokens(tokenCount, contextWindow),
         stream: true,
       },
       {

@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { assessToolRisk } from '../approval-risk.js'
+import { assessToolRisk, DANGEROUS_BASH_PATTERNS, CONFIDENCE_THRESHOLDS } from '../approval-risk.js'
 import type { ContextClaim } from '../../context/claims.js'
+import type { Sensorium } from '../sensorium.js'
 
 function antibodyClaim(text: string, evidenceSummary?: string): ContextClaim {
   return {
@@ -207,5 +208,86 @@ describe('assessToolRisk — antibody boost', () => {
 
     assert.equal(result.level, 'none')
     assert.ok(!result.reasons.some(r => r.includes('antibody')))
+  })
+})
+
+describe('assessToolRisk — sensorium confidence', () => {
+  const highConfidence: Sensorium = {
+    momentum: 0.8, pressure: 0.3, confidence: 0.9, complexity: 0.4, freshness: 0.7, stability: 0.9,
+  }
+  const lowConfidence: Sensorium = {
+    momentum: 0.2, pressure: 0.8, confidence: 0.15, complexity: 0.6, freshness: 0.3, stability: 0.4,
+  }
+  const midConfidence: Sensorium = {
+    momentum: 0.5, pressure: 0.5, confidence: 0.5, complexity: 0.5, freshness: 0.5, stability: 0.5,
+  }
+
+  it('does not change risk without sensorium', () => {
+    const result = assessToolRisk('read_file', { file_path: 'src/a.ts' })
+    assert.equal(result.level, 'none')
+  })
+
+  it('does not escalate with high confidence', () => {
+    const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'none', [], highConfidence)
+    assert.equal(result.level, 'none')
+    assert.ok(!result.reasons.some(r => r.includes('confidence')))
+  })
+
+  it('escalates none → low with very low confidence', () => {
+    const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'none', [], lowConfidence)
+    assert.equal(result.level, 'low')
+    assert.ok(result.reasons.some(r => r.includes('sensorium confidence')))
+  })
+
+  it('escalates low → medium with very low confidence', () => {
+    const result = assessToolRisk('write_file', { file_path: 'src/a.ts', content: 'x' }, 'none', [], lowConfidence)
+    assert.equal(result.level, 'medium')
+    assert.ok(result.reasons.some(r => r.includes('sensorium confidence')))
+  })
+
+  it('escalates medium → high with very low confidence', () => {
+    const result = assessToolRisk('read_file', { file_path: '../../../etc/shadow' }, 'none', [], lowConfidence)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('sensorium confidence')))
+  })
+
+  it('does not change high risk with low confidence', () => {
+    const result = assessToolRisk('bash', { command: 'rm -rf /' }, 'none', [], lowConfidence)
+    assert.equal(result.level, 'high')
+  })
+
+  it('does not escalate at threshold boundary (0.3)', () => {
+    const atThreshold: Sensorium = { ...midConfidence, confidence: 0.3 }
+    const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'none', [], atThreshold)
+    assert.equal(result.level, 'none')
+  })
+
+  it('does not escalate above threshold', () => {
+    const aboveThreshold: Sensorium = { ...midConfidence, confidence: 0.35 }
+    const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'none', [], aboveThreshold)
+    assert.equal(result.level, 'none')
+  })
+})
+
+describe('DANGEROUS_BASH_PATTERNS — shared pattern coverage', () => {
+  it('catches rm -rf', () => {
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -rf /tmp')) )
+  })
+
+  it('catches git push --force', () => {
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('git push origin main --force')) )
+  })
+
+  it('catches sudo', () => {
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('sudo apt install foo')) )
+  })
+
+  it('catches killall', () => {
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('killall node')) )
+  })
+
+  it('does not match safe commands', () => {
+    const safe = 'ls -la src/'
+    assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test(safe)) )
   })
 })

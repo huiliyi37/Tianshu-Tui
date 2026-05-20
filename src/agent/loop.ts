@@ -1,5 +1,6 @@
 import type { StreamClient } from '../api/stream-client.js'
 import type { Usage } from '../api/types.js'
+import type { ProviderProfile } from '../api/provider-profile.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { ToolRegistry } from '../tools/registry.js'
@@ -53,7 +54,7 @@ import type { VigorState } from './vigor.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
-import { buildCognitivePromptProjection, createCognitiveLedger } from '../context/cognitive-ledger.js'
+import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { advanceContractStatus, contractStatusFromPhaseClass, extractTaskContract, type TaskContract } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -96,6 +97,7 @@ export interface AgentConfig {
   maxTurns: number
   contextWindow: number
   compact: CompactionConfig
+  providerProfile?: ProviderProfile
   compactClient?: StreamClient
   compactModel?: string
   approvalMode?: ApprovalMode
@@ -191,6 +193,7 @@ export class AgentLoop {
   private baselineFingerprint: PrefixFingerprint | null = null
   private sensoriumSnapshots: SensoriumEntry[] = []
   private taskContract?: TaskContract
+  private latestCognitiveSnapshot?: CognitivePhaseSnapshot
   private persist: SessionPersist | null = null
 
   constructor(
@@ -272,6 +275,7 @@ export class AgentLoop {
       session: this.session,
       promptEngine: this.config.promptEngine,
       contextWindow: this.config.contextWindow,
+      providerProfile: this.config.providerProfile,
       compactClient: this.config.compactClient,
       compactModel: this.config.compactModel,
       pressureMonitor: this.pressureMonitor,
@@ -353,6 +357,7 @@ export class AgentLoop {
       getAutoReasoning: () => this.config.autoReasoning ?? false,
       getReasoningEffort: () => this.config.reasoningEffort,
       setClientReasoningEffort: effort => { this.config.reasoningEffort = effort; this.config.client.setReasoningEffort?.(effort) },
+      getSensorium: () => this.sensorium,
     })
   }
 
@@ -501,6 +506,8 @@ export class AgentLoop {
 
   getLedger() { return this.session.getContextLedger() }
 
+  getCognitiveSnapshot(): CognitivePhaseSnapshot | undefined { return this.latestCognitiveSnapshot }
+
   addAnchor(kind: ContextAnchor['kind'], text: string): void {
     this.contextInjection.addAnchor(kind, text)
   }
@@ -555,6 +562,7 @@ export class AgentLoop {
     this.intent.reset()
     this.perception.reset()
     this.sensoriumSnapshots = this.perception.getSnapshots()
+    this.latestCognitiveSnapshot = undefined
     // Capture baseline canonical prefix fingerprint for drift detection
     this.baselineFingerprint = this.config.promptEngine.getFingerprint()
     // Load cross-session pheromones for Sensorium.freshness computation.
@@ -672,6 +680,7 @@ export class AgentLoop {
           trace: this.traceStore,
           turn: this.session.getTurnCount(),
         })
+        this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
         this.config.promptEngine.setCognitiveProjection(buildCognitivePromptProjection(cognitiveLedger))
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const streamResult = await this.turnStream!.streamTurn({

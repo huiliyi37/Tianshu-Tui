@@ -1,11 +1,14 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { configSchema, type Config, type ProviderConfig, type ModelConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 
 const CONFIG_PATH = join(homedir(), '.rivet', 'config.json')
+
+/** Project-level config file name (checked in cwd and parent dirs) */
+const PROJECT_CONFIG_FILE = '.rivet-config.json'
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target }
@@ -21,15 +24,75 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
   return result
 }
 
-export function loadConfig(): Config {
-  if (!existsSync(CONFIG_PATH)) return configSchema.parse(DEFAULT_CONFIG)
-  try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'))
-    const merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, raw as Record<string, unknown>)
-    return configSchema.parse(merged)
-  } catch {
-    return configSchema.parse(DEFAULT_CONFIG)
+/**
+ * Walk up from startDir to find the nearest .rivet-config.json.
+ * Returns the absolute path or undefined if not found.
+ */
+export function findProjectConfig(startDir: string): string | undefined {
+  let dir = resolve(startDir)
+  for (let i = 0; i < 20; i++) {
+    const candidate = join(dir, PROJECT_CONFIG_FILE)
+    if (existsSync(candidate)) return candidate
+    const parent = resolve(dir, '..')
+    if (parent === dir) break // reached root
+    dir = parent
   }
+  return undefined
+}
+
+/**
+ * Load config with 3-layer resolution: user → project → session overlay.
+ *
+ * Priority (highest wins):
+ * 1. sessionOverlay — runtime-only, per-session overrides (never persisted here)
+ * 2. projectConfig — .rivet-config.json found by walking up from cwd
+ * 3. userConfig — ~/.rivet/config.json (global)
+ * 4. DEFAULT_CONFIG — built-in defaults
+ *
+ * Each layer is deep-merged onto the previous, then the result is
+ * validated through the Zod configSchema.
+ */
+export function loadConfig(options?: {
+  cwd?: string
+  projectConfigPath?: string
+  sessionOverlay?: Record<string, unknown>
+}): Config {
+  // Layer 1: defaults
+  let base = DEFAULT_CONFIG as unknown as Record<string, unknown>
+
+  // Layer 2: user global config
+  if (existsSync(CONFIG_PATH)) {
+    try {
+      const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'))
+      base = deepMerge(base, raw as Record<string, unknown>)
+    } catch {
+      // malformed user config — fall through to defaults
+    }
+  }
+
+  // Layer 3: project config
+  const projectPath = options?.projectConfigPath
+    ?? (options?.cwd ? findProjectConfig(options.cwd) : undefined)
+  if (projectPath && existsSync(projectPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(projectPath, 'utf-8'))
+      base = deepMerge(base, raw as Record<string, unknown>)
+    } catch {
+      // malformed project config — skip
+    }
+  }
+
+  // Layer 4: session overlay (runtime-only, e.g. from CLI flags)
+  if (options?.sessionOverlay) {
+    base = deepMerge(base, options.sessionOverlay)
+  }
+
+  return configSchema.parse(base)
+}
+
+/** Load config with backward-compatible signature (no options). */
+export function loadConfigDefault(): Config {
+  return loadConfig()
 }
 
 function saveConfig(config: Config): void {

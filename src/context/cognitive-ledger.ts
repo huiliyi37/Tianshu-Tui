@@ -20,6 +20,9 @@ export interface CognitiveLedger {
 export interface CognitivePhaseSnapshot {
   contractStatus?: string
   objective?: string
+  scopeFileCount: number
+  isActionableTask: boolean
+  hasVerificationGap: boolean
   filesRead: number
   filesModified: number
   deliveryStatus: string
@@ -49,6 +52,9 @@ export function getCognitivePhaseSnapshot(ledger: CognitiveLedger): CognitivePha
   return {
     contractStatus: ledger.contract?.status,
     objective: ledger.contract?.objective,
+    scopeFileCount: ledger.contract?.scope.mentionedFiles.length ?? 0,
+    isActionableTask: ledger.contract?.isActionable ?? false,
+    hasVerificationGap: buildVerificationGapProjection(ledger).length > 0,
     filesRead: ledger.evidence.filesRead.size,
     filesModified: ledger.evidence.filesModified.size,
     deliveryStatus: ledger.evidence.deliveryStatus,
