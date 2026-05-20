@@ -118,7 +118,6 @@ describe('buildTelemetrySnapshot', () => {
         requestedCount: 3,
       },
       gitChangeRate: 0.25,
-    season: null,
       prefixDrift: true,
     })
 
