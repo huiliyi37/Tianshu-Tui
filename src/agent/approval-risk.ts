@@ -50,6 +50,7 @@ export const BASH_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\b(?:chmod|chown|chgrp)\b/,                      // permission/ownership mutations
   /\bgit\s+(?:add|commit|checkout|switch|restore|reset|clean|merge|rebase|cherry-pick|push|pull)\b/,
   /\b(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|remove|rm|update|upgrade|dedupe)\b/,
+  /<<[-']?\w*['"]?/,                                // heredoc start (cat > file <<'EOF')
 ]
 
 export function bashCommandMayWrite(command: string): boolean {

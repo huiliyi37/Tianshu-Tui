@@ -303,6 +303,13 @@ describe('BASH_WRITE_PATTERNS — deny bash writes by default', () => {
     assert.equal(requiresBashWriteApproval('bash', { command: 'touch x' }), true)
     assert.equal(requiresBashWriteApproval('read_file', { file_path: 'touch x' }), false)
   })
+
+  it('detects heredoc write patterns', () => {
+    assert.ok(bashCommandMayWrite("cat > output.txt <<'EOF'"))
+    assert.ok(bashCommandMayWrite('cat <<EOF > file.txt'))
+    assert.ok(bashCommandMayWrite("tee file.txt <<'MARKER'"))
+    assert.ok(bashCommandMayWrite("cat > /tmp/test.ts << 'TEST_EOF'"))
+  })
 })
 
 describe('DANGEROUS_BASH_PATTERNS — shared pattern coverage', () => {
