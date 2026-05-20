@@ -15,11 +15,19 @@ describe('bash tool requiresApproval', () => {
     )
   })
 
-  it('flags sudo', async () => {
+  it('flags sudo with destructive subcommand', async () => {
+    const tool = await getBashTool()
+    assert.equal(
+      tool.requiresApproval!({ toolUseId: 't1', cwd: '/repo', input: { command: 'sudo rm -rf /tmp/old' } }),
+      true,
+    )
+  })
+
+  it('does not flag sudo with safe subcommand', async () => {
     const tool = await getBashTool()
     assert.equal(
       tool.requiresApproval!({ toolUseId: 't1', cwd: '/repo', input: { command: 'sudo apt install foo' } }),
-      true,
+      false,
     )
   })
 
