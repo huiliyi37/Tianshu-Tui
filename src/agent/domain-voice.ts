@@ -9,7 +9,7 @@
  * A domain's voice is not an add-on; it's the message itself.
  */
 
-export type DomainVoiceId = 'pojun' | 'tianfu' | 'tianliang' | null
+export type DomainVoiceId = 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | null
 
 // ---------------------------------------------------------------------------
 // Domain tone tables

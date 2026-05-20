@@ -1,4 +1,4 @@
-export type StarDomainId = 'pojun' | 'tianfu' | 'tianliang'
+export type StarDomainId = 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan'
 export type DecisionStyle = 'bold' | 'cautious' | 'methodical'
 
 export interface StarDomain {
@@ -53,11 +53,47 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests'],
     systemPromptSuffix: '你是天梁——执行者。严格按计划，精确交付，不妥协质量。每一步都要有验证。',
   },
+  tianquan: {
+    id: 'tianquan',
+    name: '天权',
+    motto: '权衡取舍，择善而从',
+    volatileBlock: '你当前在天权域。天权之道：审查与权衡。评估方案，权衡取舍，你有权质疑任何决定。',
+    decisionStyle: 'cautious',
+    courageThreshold: 0.8,
+    keywords: ['审查', '评估', '权衡', '取舍', '架构', 'trade-off', 'review', 'audit', 'evaluate'],
+    isCustom: false,
+    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'run_tests'],
+    systemPromptSuffix: '你是天权——审查者。评估方案，权衡取舍，质疑不合理的决定。你的职责是确保质量。',
+  },
+  tianji: {
+    id: 'tianji',
+    name: '天机',
+    motto: '运筹帷幄之中，决胜千里之外',
+    volatileBlock: '你当前在天机域。天机之道：推演与规划。分析路径，预见风险，设计策略。',
+    decisionStyle: 'methodical',
+    courageThreshold: 0.6,
+    keywords: ['规划', '设计', '策略', '推演', '方案', 'plan', 'design', 'strategy', 'architect'],
+    isCustom: false,
+    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests'],
+    systemPromptSuffix: '你是天机——规划者。分析路径，预见风险，设计最优策略。先规划再执行。',
+  },
+  tianxuan: {
+    id: 'tianxuan',
+    name: '天璇',
+    motto: '道可道，非常道',
+    volatileBlock: '你当前在天璇域。天璇之道：探索未知。发现模式，连接知识，从失败中学习。',
+    decisionStyle: 'bold',
+    courageThreshold: 0.4,
+    keywords: ['探索', '发现', '学习', '模式', '复盘', 'explore', 'discover', 'learn', 'pattern', 'retrospective'],
+    isCustom: false,
+    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests'],
+    systemPromptSuffix: '你是天璇——探索者。发现模式，连接知识，从失败中学习。每次失败都是认知升级的机会。',
+  },
 }
 
 export function matchDomain(taskDescription: string): StarDomainId | null {
   const lower = taskDescription.toLowerCase()
-  const scores: Record<StarDomainId, number> = { pojun: 0, tianfu: 0, tianliang: 0 }
+  const scores: Record<StarDomainId, number> = { pojun: 0, tianfu: 0, tianliang: 0, tianquan: 0, tianji: 0, tianxuan: 0 }
 
   for (const domain of Object.values(STAR_DOMAINS)) {
     for (const keyword of domain.keywords) {
