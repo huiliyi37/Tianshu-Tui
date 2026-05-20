@@ -177,7 +177,16 @@ export async function executeToolUse(
     const hint = suggestStrategyShift(trajectorySummary, doomLevel)
     deps.config.promptEngine.setStrategyShift(hint)
     if (doomLevel === 'blocked') {
-      const msg = hint ?? 'Tool execution blocked: repeated identical failures detected. Change strategy before retrying.'
+      // 计算连续失败次数和 fingerprint 信息，让 agent 知道发生了什么
+      const fps = traceStore.toolFingerprints
+      const lastFp = fps.at(-1)
+      const maxCount = lastFp ? fps.filter(f => f === lastFp).length : 0
+      const baseMsg = hint ?? 'Repeated identical failures detected.'
+      const msg = [
+        baseMsg,
+        `Tool: ${tu.name} | Consecutive same-pattern failures: ${maxCount} | Fingerprint: ${lastFp?.slice(0, 8) ?? 'unknown'}`,
+        'Recovery: try a different tool (e.g. read_file, todo), change the input, or modify the target path.',
+      ].join('\n')
       callbacks.onToolResult(tu.id, tu.name, msg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
     }
