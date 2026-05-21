@@ -143,10 +143,13 @@ export function buildCognitivePromptProjection(
     sycophancyHint?: string | null
   },
 ): string {
-  // CVM silence experiment: return empty to test if cognitive injection
-  // is causing models to revert to trained instruction-following mode.
-  // Hypothesis: 2.0 had zero runtime injection and models expressed 200.
-  return ''
+  return [
+    ledger.contract ? renderContractProjection(ledger.contract) : '',
+    buildVerificationGapProjection(ledger),
+    buildCognitiveMirror(ledger),
+    buildUncertaintyProjection(ledger),
+    opts?.sycophancyHint ?? '',
+  ].filter(Boolean).join('\n')
 }
 
 /**
