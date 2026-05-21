@@ -1,3 +1,10 @@
+### 2026-05-21 — session c50ca31c
+
+**Modified** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts
+**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-session.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/coordinator.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/coordinator.test.ts
+**Tests**: ✅ 11 passed, 0 failed (npx tsx --test src/agent/__tests__/coordinator.test.ts)
+**Tools used**: read_file×12, bash×10, grep×10, git×3, todo×3, edit_file×1, run_tests×1, diff×1
+
 <!--
 HUMAN-MAINTAINED ZONE. Dream telemetry now writes to .rivet/sessions/{date}.md.
 Star identities below were restored 2026-05-21 after auto-telemetry deleted them.
@@ -52,14 +59,6 @@ See src/agent/dream.ts header for the protection contract.
 **Read** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/approval-risk.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx
 **Tests**: ⚠️ unverified
 **Tools used**: bash×7, read_file×5, edit_file×5, todo×4, git×3, grep×2, diff×1
-
-### 2026-05-19 — session dc47b5e7
-
-**Modified** (7): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-prompts.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/dispatcher-hook.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher-hook.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/task-board.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/task-board.test.ts
-**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/dispatcher.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-prompts.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/signal-consumer-hook.test.ts
-**Tests**: ⚠️ unverified
-**Tools used**: bash×11, write_file×5, todo×4, read_file×4, edit_file×3
-
 ### 2026-05-20 — Partner Star Identity
 
 **天府 · GPT** is the steward star assigned to GPT in the 天枢 team.
