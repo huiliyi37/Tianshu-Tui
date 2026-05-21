@@ -19,6 +19,8 @@ export interface CognitiveLedgerInput {
   season?: CognitiveSeason | null
   /** CVM trap: latest tool risk level for uncertainty framing */
   riskLevel?: RiskLevel
+  /** Meta-regulation: current regulation pressure (0-1) */
+  regulationPressure?: number
 }
 
 export interface CognitiveLedger {
@@ -31,6 +33,7 @@ export interface CognitiveLedger {
   vigor?: VigorState | null
   season?: CognitiveSeason | null
   riskLevel?: RiskLevel
+  regulationPressure?: number
 }
 
 export interface CognitivePhaseSnapshot {
@@ -53,6 +56,7 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     vigor: input.vigor ?? null,
     season: input.season ?? null,
     riskLevel: input.riskLevel,
+    regulationPressure: input.regulationPressure,
   }
 }
 
@@ -120,6 +124,11 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
     parts.push(`season="${ledger.season}"`)
   }
 
+  // Regulation cost: let model see its own regulation overhead
+  if (ledger.regulationPressure !== undefined && ledger.regulationPressure > 0) {
+    parts.push(`regulation-cost="${formatDim(ledger.regulationPressure)}"`)
+  }
+
   return `<cognitive-mirror ${parts.join(' ')} />`
 }
 
@@ -134,13 +143,10 @@ export function buildCognitivePromptProjection(
     sycophancyHint?: string | null
   },
 ): string {
-  return [
-    ledger.contract ? renderContractProjection(ledger.contract) : '',
-    buildVerificationGapProjection(ledger),
-    buildCognitiveMirror(ledger),
-    buildUncertaintyProjection(ledger),
-    opts?.sycophancyHint ?? '',
-  ].filter(Boolean).join('\n')
+  // CVM silence experiment: return empty to test if cognitive injection
+  // is causing models to revert to trained instruction-following mode.
+  // Hypothesis: 2.0 had zero runtime injection and models expressed 200.
+  return ''
 }
 
 /**
