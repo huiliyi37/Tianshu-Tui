@@ -17,6 +17,10 @@ describe('cross-session-hook', () => {
     assert.ok(result.includes('</cross-session-events>'))
     assert.ok(result.includes('[ALERT]'))
     assert.ok(result.includes('[info]'))
+    // Priority sorting: ALERT (priority=1) should appear before info (priority=0)
+    const alertIdx = result.indexOf('[ALERT]')
+    const infoIdx = result.indexOf('[info]')
+    assert.ok(alertIdx < infoIdx, 'High-priority events should be sorted first')
   })
 
   test('formatEventsForAppendix returns empty string for no events', () => {

@@ -93,7 +93,7 @@ describe('SessionRegistry events', () => {
     assert.equal(events.length, 0)
   })
 
-  test('priority=1 events appear first', () => {
+  test('consumeEvents returns in id order (priority sorting done in-memory)', () => {
     registry.register('session-a', '/tmp', 'standalone')
     registry.publishEvent('session-a', {
       eventType: 'file_changed',
@@ -109,7 +109,9 @@ describe('SessionRegistry events', () => {
     })
 
     const events = registry.consumeEvents('session-b', 0)
-    assert.equal(events[0]!.priority, 1)
-    assert.equal(events[0]!.filePath, 'src/urgent.ts')
+    // SQL returns in id ASC order (insertion order)
+    assert.equal(events[0]!.filePath, 'src/normal.ts')
+    assert.equal(events[1]!.filePath, 'src/urgent.ts')
+    assert.equal(events[1]!.priority, 1)
   })
 })

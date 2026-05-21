@@ -79,6 +79,13 @@ Validate file paths stay within the project directory.
 Confirm before destructive commands: rm -rf, git push --force, git reset --hard.
 </security>
 
+<shared-worktree>
+Uncommitted or untracked files may be normal in shared multi-session workspaces.
+Do not treat them as errors or repeat warnings once acknowledged.
+Surface them only when they affect ownership, verification, or destructive/git operations.
+Commit only current-session files; never stage all by default.
+</shared-worktree>
+
 <git>
 Create new commits. Never amend existing commits.
 Format: feat/fix/refactor/docs/test/chore/perf.
