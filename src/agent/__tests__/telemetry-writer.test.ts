@@ -44,7 +44,6 @@ function makeSnapshot(turn = 1): PerceptionTelemetrySnapshot {
       requestedCount: 0,
     },
     gitChangeRate: 0,
-    season: null,
     prefixDrift: false,
   })
 }

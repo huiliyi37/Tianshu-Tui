@@ -35,7 +35,6 @@ function makeSnapshot(turn: number, phase: string, overrides: Partial<{
       lastErrorCount: 0, lastTimedOut: false, requestedCount: 0,
     },
     gitChangeRate: 0,
-    season: null,
     prefixDrift: false,
   })
 }

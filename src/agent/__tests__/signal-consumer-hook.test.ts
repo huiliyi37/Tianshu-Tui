@@ -25,7 +25,6 @@ function makeInput(overrides: Partial<SensoriumInput> = {}): SensoriumInput {
     pheromones: [],
     doomLevel: 'none',
     gitChangeRate: 0,
-    season: null,
     ...overrides,
   }
 }
@@ -56,8 +55,8 @@ function runHook(options: {
     sensoriumInput: options.sensoriumInput ?? makeInput(),
     strategy: options.strategy === undefined ? makeStrategy() : options.strategy,
     vigor: null,
-    gitChangeRate: 0,
     season: null,
+    gitChangeRate: 0,
   }, {
     injectUserMessage: message => { messages.push(message) },
     emitPhaseChange: (phase, detail) => { phases.push({ phase, reason: detail?.reason }) },
