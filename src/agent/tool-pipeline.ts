@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentCallbacks } from './loop.js'
+import type { TurnBudget } from './turn-budget.js'
 import type { ContentBlock } from '../api/types.js'
 import type { ToolCallParams } from '../tools/types.js'
 import type { TurnHarness } from './turn-harness.js'
@@ -81,6 +82,8 @@ export interface ToolPipelineDeps {
   getSensorium?(): Sensorium | null
   /** Current reliability mode decision — blocks risky tools before approval/execution. */
   getReliabilityDecision?(): ReliabilityDecision | null
+  /** Turn-level token budget — degrades tool results when exhausted. */
+  turnBudget: TurnBudget
 }
 
 export interface ToolExecResult {
@@ -325,6 +328,13 @@ ${check.formatted}`
 
     if (!harnessResult.isError) {
       finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
+      const tokenEstimate = Math.ceil(finalContent.length / 4)
+      deps.turnBudget.consume(tokenEstimate)
+      if (deps.turnBudget.isExhausted()) {
+        const preview = finalContent.slice(0, 500)
+        const refPath = rawToolResult?.rawPath ?? 'unknown'
+        finalContent = `<stored ref="${refPath}" chars=${finalContent.length} tool="${tu.name}">\n${preview}\n...(turn budget exceeded — use read_file with offset/limit for full content)</stored>`
+      }
     }
 
     // Trace recording
