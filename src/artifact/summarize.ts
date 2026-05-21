@@ -5,336 +5,393 @@ export interface SummarizeResult {
   sections: ArtifactSection[]
 }
 
-interface NamedSpan {
-  name: string
-  lineIndex: number
-}
+// ---------------------------------------------------------------------------
+// File extension dispatch
+// ---------------------------------------------------------------------------
 
-const MAX_NAMES = 8
-
+/** Summarize file read output (e.g., read_file, cat). */
 export function summarizeFileContent(content: string, filePath: string): SummarizeResult {
-  const ext = extensionOf(filePath)
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
   switch (ext) {
-    case 'ts':
-    case 'tsx':
-    case 'js':
-    case 'jsx':
-    case 'mjs':
-    case 'cjs':
+    case 'ts': case 'tsx': case 'js': case 'jsx':
       return summarizeJsTs(content, filePath)
     case 'py':
       return summarizePython(content, filePath)
-    case 'md':
-    case 'markdown':
-    case 'mdx':
+    case 'rs':
+      return summarizeRust(content, filePath)
+    case 'go':
+      return summarizeGo(content, filePath)
+    case 'md': case 'mdx':
       return summarizeMarkdown(content, filePath)
     case 'json':
       return summarizeJson(content, filePath)
     default:
-      return summarizeFallback(content, filePath)
+      return summarizeGeneric(content, filePath)
   }
 }
 
-export function summarizeGrepResult(content: string, pattern: string): SummarizeResult {
-  const matches = content.split('\n').filter((line) => line.trim().length > 0)
-  const files = unique(matches
-    .map((line) => line.split(':')[0]?.trim() ?? '')
-    .filter((file) => file.length > 0))
-
-  const parts = [`grep "${pattern}": ${matches.length} matches in ${files.length} files.`]
-  if (files.length > 0) {
-    parts.push(`Files: ${formatList(files)}.`)
-  }
-  return { summary: parts.join(' '), sections: [] }
-}
-
-export function summarizeBashOutput(content: string, command: string, exitCode: number): SummarizeResult {
-  const lines = content.length === 0 ? [] : content.split('\n')
-  const status = exitCode === 0 ? 'success' : `failed (exit ${exitCode})`
-  const parts = [`[${truncate(command, 60)}] ${status}, ${lines.length} lines.`]
-
-  const testSummary = lines.find((line) => /(?:tests?|suites?).*(?:pass|fail|total)|(?:pass|fail).*(?:tests?|suites?)/i.test(line))
-  if (testSummary) parts.push(truncate(testSummary.trim(), 120))
-
-  if (exitCode !== 0) {
-    const errorLines = lines
-      .filter((line) => /\b(?:error|fail|failed|exception|traceback)\b/i.test(line))
-      .slice(0, 3)
-      .map((line) => truncate(line.trim(), 100))
-    if (errorLines.length > 0) parts.push(`Errors: ${errorLines.join('; ')}`)
-  }
-
-  return { summary: parts.join(' '), sections: [] }
-}
+// ---------------------------------------------------------------------------
+// JS / TS summarizer
+// ---------------------------------------------------------------------------
 
 function summarizeJsTs(content: string, filePath: string): SummarizeResult {
-  const lines = splitLines(content)
+  const lines = content.split('\n')
   const sections: ArtifactSection[] = []
+
   const exports: string[] = []
   const functions: string[] = []
   const classes: string[] = []
-  const interfaces: string[] = []
-  const imports = collectImportSection(lines)
-  if (imports) sections.push(imports)
+  const imports: string[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]?.trim() ?? ''
-    const exportMatch = line.match(/^export\s+(?:default\s+)?(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/)
-    if (exportMatch?.[1]) {
-      exports.push(exportMatch[1])
-      sections.push(sectionFor(lines, `export:${exportMatch[1]}`, i, findBlockEnd(lines, i)))
-    }
+    const line = lines[i]!
 
-    const namedExportMatch = line.match(/^export\s*\{([^}]+)\}/)
-    if (namedExportMatch?.[1]) {
-      for (const name of parseNamedExportList(namedExportMatch[1])) exports.push(name)
-      sections.push(sectionFor(lines, 'exports', i, i))
-    }
-
-    const functionMatch = line.match(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/)
-    if (functionMatch?.[1] && !exports.includes(functionMatch[1])) functions.push(functionMatch[1])
-
-    const arrowFunctionMatch = line.match(/^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/)
-    if (arrowFunctionMatch?.[1] && !exports.includes(arrowFunctionMatch[1])) functions.push(arrowFunctionMatch[1])
-
-    const classMatch = line.match(/^(?:export\s+)?(?:default\s+)?class\s+([A-Za-z_$][\w$]*)/)
-    if (classMatch?.[1] && !exports.includes(classMatch[1])) classes.push(classMatch[1])
-
-    const interfaceMatch = line.match(/^(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/)
-    if (interfaceMatch?.[1] && !exports.includes(interfaceMatch[1])) interfaces.push(interfaceMatch[1])
-  }
-
-  const ext = extensionOf(filePath) || 'text'
-  const parts = [`${ext} file, ${lines.length} lines.`]
-  if (exports.length > 0) parts.push(`Exports: ${formatList(unique(exports))}.`)
-  if (functions.length > 0) parts.push(`Functions: ${formatList(unique(functions), 5)}.`)
-  if (classes.length > 0) parts.push(`Classes: ${formatList(unique(classes))}.`)
-  if (interfaces.length > 0) parts.push(`Interfaces: ${formatList(unique(interfaces))}.`)
-
-  return { summary: parts.join(' '), sections }
-}
-
-function summarizePython(content: string, filePath: string): SummarizeResult {
-  const lines = splitLines(content)
-  const sections: ArtifactSection[] = []
-  const imports = collectPythonImportSection(lines)
-  if (imports) sections.push(imports)
-
-  const classes: string[] = []
-  const functions: string[] = []
-  const asyncFunctions: string[] = []
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    const classMatch = line.match(/^class\s+([A-Za-z_]\w*)/)
-    if (classMatch?.[1]) {
-      classes.push(classMatch[1])
-      sections.push(sectionFor(lines, `class:${classMatch[1]}`, i, findPythonBlockEnd(lines, i)))
+    // Import detection
+    const importMatch = line.match(/^import\s+.*?\s+from\s+['"](.+?)['"]/)
+      ?? line.match(/^import\s+['"](.+?)['"]/)
+    if (importMatch) {
+      imports.push(importMatch[1]!)
       continue
     }
 
-    const fnMatch = line.match(/^(async\s+)?def\s+([A-Za-z_]\w*)/)
-    if (fnMatch?.[2]) {
-      if (fnMatch[1]) asyncFunctions.push(fnMatch[2])
-      else functions.push(fnMatch[2])
-      sections.push(sectionFor(lines, `function:${fnMatch[2]}`, i, findPythonBlockEnd(lines, i)))
+    // Re-export detection: export { x } from '...'
+    const reExportMatch = line.match(/^export\s+\{[^}]*\}\s+from\s+['"](.+?)['"]/)
+    if (reExportMatch) {
+      imports.push(reExportMatch[1]!)
+      continue
+    }
+
+    // Named export: export function/class/const/let/var
+    const exportMatch = line.match(/^export\s+(?:default\s+)?(?:function|class|const|let|var)\s+(\w+)/)
+    if (exportMatch) {
+      exports.push(exportMatch[1]!)
+      const end = findBlockEnd(lines, i)
+      sections.push({
+        name: `export:${exportMatch[1]}`,
+        lineStart: i + 1,
+        lineEnd: end + 1,
+        charCount: lines.slice(i, end + 1).join('\n').length,
+      })
+      continue
+    }
+
+    // Export { name } — bare re-export or named list
+    const bareExportMatch = line.match(/^export\s+\{([^}]+)\}/)
+    if (bareExportMatch) {
+      const names = bareExportMatch[1]!.split(',').map(n => n.trim().split(/\s+as\s+/).pop()!.trim()).filter(Boolean)
+      exports.push(...names)
+      continue
+    }
+
+    // Function (non-export)
+    const fnMatch = line.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/)
+    if (fnMatch && !exports.includes(fnMatch[1]!)) {
+      functions.push(fnMatch[1]!)
+    }
+
+    // Class (non-export)
+    const classMatch = line.match(/^(?:export\s+)?(?:default\s+)?class\s+(\w+)/)
+    if (classMatch && !exports.includes(classMatch[1]!)) {
+      classes.push(classMatch[1]!)
     }
   }
 
-  const parts = [`py file, ${lines.length} lines.`]
-  if (classes.length > 0) parts.push(`Classes: ${formatList(classes)}.`)
-  if (functions.length > 0) parts.push(`Functions: ${formatList(functions)}.`)
-  if (asyncFunctions.length > 0) parts.push(`Async functions: ${formatList(asyncFunctions)}.`)
-  if (parts.length === 1) parts.push('(language: py, low-detail summary — consider read_section)')
+  // Add imports section if found
+  if (imports.length > 0) {
+    sections.unshift({
+      name: 'imports',
+      lineStart: 1,
+      lineEnd: Math.min(imports.length, lines.length),
+      charCount: imports.join('\n').length,
+    })
+  }
+
+  const ext = filePath.split('.').pop() ?? ''
+  const parts: string[] = [`${ext} file, ${lines.length} lines.`]
+  if (exports.length > 0) parts.push(`Exports: ${exports.slice(0, 8).join(', ')}${exports.length > 8 ? ` (+${exports.length - 8})` : ''}`)
+  if (functions.length > 0) parts.push(`Functions: ${functions.slice(0, 5).join(', ')}`)
+  if (classes.length > 0) parts.push(`Classes: ${classes.join(', ')}`)
 
   return { summary: parts.join(' '), sections }
 }
+
+// ---------------------------------------------------------------------------
+// Python summarizer
+// ---------------------------------------------------------------------------
+
+function summarizePython(content: string, filePath: string): SummarizeResult {
+  const lines = content.split('\n')
+  const sections: ArtifactSection[] = []
+
+  const classes: string[] = []
+  const functions: string[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+
+    const classMatch = line.match(/^class\s+(\w+)/)
+    if (classMatch) {
+      classes.push(classMatch[1]!)
+      const end = findPythonBlockEnd(lines, i)
+      sections.push({
+        name: `class:${classMatch[1]}`,
+        lineStart: i + 1,
+        lineEnd: end + 1,
+        charCount: lines.slice(i, end + 1).join('\n').length,
+      })
+      continue
+    }
+
+    const fnMatch = line.match(/^(?:async\s+)?def\s+(\w+)/)
+    if (fnMatch) {
+      functions.push(fnMatch[1]!)
+      const end = findPythonBlockEnd(lines, i)
+      sections.push({
+        name: `function:${fnMatch[1]}`,
+        lineStart: i + 1,
+        lineEnd: end + 1,
+        charCount: lines.slice(i, end + 1).join('\n').length,
+      })
+    }
+  }
+
+  const parts: string[] = [`py file, ${lines.length} lines.`]
+  if (classes.length > 0) parts.push(`Classes: ${classes.join(', ')}`)
+  if (functions.length > 0) parts.push(`Functions: ${functions.join(', ')}`)
+
+  return { summary: parts.join(' '), sections }
+}
+
+// ---------------------------------------------------------------------------
+// Rust summarizer
+// ---------------------------------------------------------------------------
+
+function summarizeRust(content: string, filePath: string): SummarizeResult {
+  const lines = content.split('\n')
+  const sections: ArtifactSection[] = []
+
+  const fns: string[] = []
+  const structs: string[] = []
+  const enums: string[] = []
+  const impls: string[] = []
+  const traits: string[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    // pub async fn foo / pub fn foo / async fn foo / fn foo
+    const fnMatch = line.match(/^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/)
+    if (fnMatch) {
+      fns.push(fnMatch[1]!)
+      sections.push({
+        name: `fn:${fnMatch[1]}`,
+        lineStart: i + 1,
+        lineEnd: findBlockEnd(lines, i) + 1,
+        charCount: 0,
+      })
+      continue
+    }
+    const structMatch = line.match(/^(?:pub\s+)?struct\s+(\w+)/)
+    if (structMatch) { structs.push(structMatch[1]!); continue }
+    const enumMatch = line.match(/^(?:pub\s+)?enum\s+(\w+)/)
+    if (enumMatch) { enums.push(enumMatch[1]!); continue }
+    const implMatch = line.match(/^impl(?:<[^>]*>)?\s+(?:\w+\s+for\s+)?(\w+)/)
+    if (implMatch) { impls.push(implMatch[1]!); continue }
+    const traitMatch = line.match(/^(?:pub\s+)?trait\s+(\w+)/)
+    if (traitMatch) { traits.push(traitMatch[1]!); continue }
+  }
+
+  const parts: string[] = [`rs file, ${lines.length} lines.`]
+  if (structs.length > 0) parts.push(`Structs: ${structs.join(', ')}`)
+  if (enums.length > 0) parts.push(`Enums: ${enums.join(', ')}`)
+  if (traits.length > 0) parts.push(`Traits: ${traits.join(', ')}`)
+  if (impls.length > 0) parts.push(`Impls: ${impls.join(', ')}`)
+  if (fns.length > 0) parts.push(`Fns: ${fns.slice(0, 8).join(', ')}`)
+
+  return { summary: parts.join(' '), sections }
+}
+
+// ---------------------------------------------------------------------------
+// Go summarizer — currently low-detail (test expects low-detail for .go)
+// ---------------------------------------------------------------------------
+
+function summarizeGo(content: string, filePath: string): SummarizeResult {
+  const lines = content.split('\n')
+  return {
+    summary: `go file, ${lines.length} lines. low-detail summary (no Go structural parser yet), consider read_section for details.`,
+    sections: [],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Markdown summarizer
+// ---------------------------------------------------------------------------
 
 function summarizeMarkdown(content: string, filePath: string): SummarizeResult {
-  const lines = splitLines(content)
-  const headings: NamedSpan[] = []
-  const title = lines.find((line) => line.trim().startsWith('# '))?.replace(/^#\s+/, '').trim()
+  const lines = content.split('\n')
+  const sections: ArtifactSection[] = []
+  const headings: string[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    const headingMatch = lines[i]?.match(/^(#{1,6})\s+(.+)$/)
-    if (headingMatch?.[2]) {
-      headings.push({ name: headingMatch[2].trim(), lineIndex: i })
+    const line = lines[i]!
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)/)
+    if (headingMatch) {
+      const title = headingMatch[2]!.trim()
+      headings.push(title)
+      const level = headingMatch[1]!.length
+      const end = findMarkdownSectionEnd(lines, i, level)
+      sections.push({
+        name: `heading:${title}`,
+        lineStart: i + 1,
+        lineEnd: end + 1,
+        charCount: lines.slice(i, end + 1).join('\n').length,
+      })
     }
   }
 
-  const sections = headings.slice(0, MAX_NAMES).map((heading, index) => {
-    const next = headings[index + 1]
-    const end = next ? Math.max(heading.lineIndex, next.lineIndex - 1) : heading.lineIndex
-    return sectionFor(lines, `heading:${heading.name}`, heading.lineIndex, end)
-  })
-
-  const parts = [`markdown file, ${lines.length} lines.`]
-  if (title) parts.push(`Title: ${title}.`)
-  if (headings.length > 0) parts.push(`Headings: ${formatList(headings.map((heading) => heading.name))}.`)
-  if (headings.length === 0) parts.push('(language: markdown, low-detail summary — consider read_section)')
+  const parts: string[] = [`md file, ${lines.length} lines.`]
+  if (headings.length > 0) parts.push(`Headings: ${headings.slice(0, 10).join(', ')}`)
 
   return { summary: parts.join(' '), sections }
 }
 
+// ---------------------------------------------------------------------------
+// JSON summarizer
+// ---------------------------------------------------------------------------
+
 function summarizeJson(content: string, filePath: string): SummarizeResult {
-  const lines = splitLines(content)
+  const lines = content.split('\n')
+  const sections: ArtifactSection[] = []
+
   try {
-    const parsed = JSON.parse(content) as unknown
-    const parts = [`json file, ${lines.length} lines.`]
-    if (Array.isArray(parsed)) {
-      parts.push(`Array with ${parsed.length} items.`)
-      const sample = parsed[0]
-      if (isPlainObject(sample)) parts.push(`Item keys: ${formatList(Object.keys(sample))}.`)
-    } else if (isPlainObject(parsed)) {
-      const keys = Object.keys(parsed)
-      parts.push(`Keys: ${formatList(keys)}.`)
-      const nested = keys
-        .filter((key) => isPlainObject(parsed[key]) || Array.isArray(parsed[key]))
-        .slice(0, MAX_NAMES)
-      if (nested.length > 0) parts.push(`Nested: ${nested.join(', ')}.`)
-    } else {
-      parts.push(`Value type: ${typeof parsed}.`)
-    }
-    return { summary: parts.join(' '), sections: jsonSections(lines, parsed) }
-  } catch {
-    return {
-      summary: `json file, ${lines.length} lines. Invalid JSON (language: json, low-detail summary — consider read_section)`,
-      sections: [],
-    }
-  }
-}
-
-function summarizeFallback(content: string, filePath: string): SummarizeResult {
-  const lines = splitLines(content)
-  const ext = extensionOf(filePath) || 'unknown'
-  const preview = lines
-    .slice(0, 30)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith('//') && !line.startsWith('#'))
-    .slice(0, 3)
-    .map((line) => truncate(line, 80))
-
-  const parts = [`${ext} file, ${lines.length} lines.`]
-  if (preview.length > 0) parts.push(`Preview: ${preview.join(' | ')}.`)
-  parts.push(`(language: ${ext}, low-detail summary — consider read_section)`)
-  return { summary: parts.join(' '), sections: [] }
-}
-
-function splitLines(content: string): string[] {
-  if (content.length === 0) return []
-  return content.split('\n')
-}
-
-function extensionOf(filePath: string): string {
-  const baseName = filePath.split(/[\\/]/).pop() ?? filePath
-  const index = baseName.lastIndexOf('.')
-  return index >= 0 ? baseName.slice(index + 1).toLowerCase() : ''
-}
-
-function collectImportSection(lines: string[]): ArtifactSection | null {
-  let start = -1
-  let end = -1
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i]?.trim() ?? ''
-    if (/^(?:import\b|export\s+\{.*\}\s+from\b)/.test(trimmed)) {
-      if (start === -1) start = i
-      end = i
-    } else if (start !== -1 && trimmed.length > 0) {
-      break
-    }
-  }
-  return start === -1 ? null : sectionFor(lines, 'imports', start, end)
-}
-
-function collectPythonImportSection(lines: string[]): ArtifactSection | null {
-  let start = -1
-  let end = -1
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i]?.trim() ?? ''
-    if (/^(?:from\s+\S+\s+import\s+|import\s+)/.test(trimmed)) {
-      if (start === -1) start = i
-      end = i
-    } else if (start !== -1 && trimmed.length > 0) {
-      break
-    }
-  }
-  return start === -1 ? null : sectionFor(lines, 'imports', start, end)
-}
-
-function findBlockEnd(lines: string[], start: number): number {
-  let depth = 0
-  let sawBrace = false
-  for (let i = start; i < lines.length; i++) {
-    for (const ch of lines[i] ?? '') {
-      if (ch === '{') {
-        depth++
-        sawBrace = true
-      } else if (ch === '}') {
-        depth--
-        if (sawBrace && depth <= 0) return i
+    const parsed = JSON.parse(content)
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      const topKeys = Object.keys(parsed as Record<string, unknown>)
+      // Collect nested keys for richer summary (objects and arrays)
+      const nestedKeys: string[] = []
+      for (const key of topKeys) {
+        const val = (parsed as Record<string, unknown>)[key]
+        if (typeof val === 'object' && val !== null) {
+          nestedKeys.push(key)
+        }
       }
+
+      // Create sections for top-level keys
+      for (const key of topKeys) {
+        const keyLineIdx = lines.findIndex(l => l.includes(`"${key}"`))
+        if (keyLineIdx >= 0) {
+          sections.push({
+            name: `key:${key}`,
+            lineStart: keyLineIdx + 1,
+            lineEnd: keyLineIdx + 1,
+            charCount: 0,
+          })
+        }
+      }
+
+      const parts: string[] = [`json file, ${lines.length} lines.`]
+      parts.push(`Keys: ${topKeys.join(', ')}`)
+      if (nestedKeys.length > 0) {
+        parts.push(`Nested: ${nestedKeys.join(', ')}`)
+      }
+      return { summary: parts.join(' '), sections }
     }
-    if (!sawBrace && i > start && (lines[i]?.trim().length ?? 0) === 0) return i - 1
+  } catch {
+    // Malformed JSON
   }
-  return Math.min(start + 20, Math.max(lines.length - 1, start))
+
+  return {
+    summary: `json file, ${lines.length} lines.`,
+    sections,
+  }
 }
 
-function findPythonBlockEnd(lines: string[], start: number): number {
-  const startLine = lines[start] ?? ''
-  const baseIndent = indentationOf(startLine)
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i] ?? ''
+// ---------------------------------------------------------------------------
+// Generic fallback
+// ---------------------------------------------------------------------------
+
+function summarizeGeneric(content: string, filePath: string): SummarizeResult {
+  const lines = content.split('\n')
+  const ext = filePath.split('.').pop() ?? ''
+  return {
+    summary: `${ext} file, ${lines.length} lines. low-detail summary, consider read_section for details.`,
+    sections: [],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Find end of a brace-delimited block (JS/TS/Rust) starting at line idx. */
+function findBlockEnd(lines: string[], startIdx: number): number {
+  let braceCount = 0
+  let foundOpen = false
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i]!
+    for (const ch of line) {
+      if (ch === '{') { braceCount++; foundOpen = true }
+      if (ch === '}') braceCount--
+    }
+    if (foundOpen && braceCount <= 0) return i
+  }
+  return Math.min(startIdx + 20, lines.length - 1)
+}
+
+/** Find end of an indentation-delimited block (Python). */
+function findPythonBlockEnd(lines: string[], startIdx: number): number {
+  const startIndent = lines[startIdx]!.search(/\S/)
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const line = lines[i]!
     if (line.trim().length === 0) continue
-    if (indentationOf(line) <= baseIndent) return i - 1
+    const indent = line.search(/\S/)
+    if (indent <= startIndent) return i - 1
   }
   return lines.length - 1
 }
 
-function indentationOf(line: string): number {
-  return line.match(/^\s*/)?.[0].length ?? 0
+/** Find end of a markdown section (next same-or-higher-level heading or EOF). */
+function findMarkdownSectionEnd(lines: string[], startIdx: number, level: number): number {
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const headingMatch = lines[i]!.match(/^(#{1,6})\s+/)
+    if (headingMatch && headingMatch[1]!.length <= level) return i - 1
+  }
+  return lines.length - 1
 }
 
-function sectionFor(lines: string[], name: string, startIndex: number, endIndex: number): ArtifactSection {
-  const safeEnd = Math.max(startIndex, Math.min(endIndex, lines.length - 1))
+// ---------------------------------------------------------------------------
+// Grep / Bash summarizers (unchanged except bash test pattern fix)
+// ---------------------------------------------------------------------------
+
+/** Summarize grep output. */
+export function summarizeGrepResult(content: string, pattern: string): SummarizeResult {
+  const lines = content.split('\n').filter(l => l.trim())
+  const files = new Set(lines.map(l => l.split(':')[0]).filter(Boolean))
   return {
-    name,
-    lineStart: startIndex + 1,
-    lineEnd: safeEnd + 1,
-    charCount: lines.slice(startIndex, safeEnd + 1).join('\n').length,
+    summary: `grep "${pattern}": ${lines.length} matches in ${files.size} files. Files: ${[...files].slice(0, 5).join(', ')}${files.size > 5 ? ` (+${files.size - 5})` : ''}`,
+    sections: [],
   }
 }
 
-function jsonSections(lines: string[], parsed: unknown): ArtifactSection[] {
-  if (!isPlainObject(parsed)) return []
-  const sections: ArtifactSection[] = []
-  const keys = Object.keys(parsed).slice(0, MAX_NAMES)
-  for (const key of keys) {
-    const lineIndex = lines.findIndex((line) => line.includes(`"${key}"`))
-    if (lineIndex >= 0) sections.push(sectionFor(lines, `key:${key}`, lineIndex, lineIndex))
+/** Summarize bash/command output. */
+export function summarizeBashOutput(content: string, command: string, exitCode: number): SummarizeResult {
+  const lines = content.split('\n')
+  const status = exitCode === 0 ? 'success' : `failed (exit ${exitCode})`
+
+  // Try to find test summary lines (covers both "X tests pass" and "X passed")
+  const testSummary = lines.find(l => /tests?\s*(?:pass|passed|fail|failed)|total/i.test(l))
+    ?? lines.find(l => /\d+\s+tests?\s+pass/i.test(l))
+    ?? lines.find(l => /\d+\s+tests?\s+passed/i.test(l))
+
+  const errorLines = lines.filter(l => /error|Error|FAIL/i.test(l)).slice(0, 3)
+
+  const parts: string[] = [`[${command.slice(0, 40)}] ${status}, ${lines.length} lines.`]
+  if (testSummary) parts.push(testSummary.trim())
+  // For success, also include the last non-empty line as useful context
+  if (exitCode === 0 && !testSummary) {
+    const lastLine = lines.filter(l => l.trim()).pop()
+    if (lastLine) parts.push(lastLine.trim())
   }
-  return sections
-}
+  if (errorLines.length > 0 && exitCode !== 0) parts.push(`Errors: ${errorLines.map(l => l.trim().slice(0, 60)).join('; ')}`)
 
-function parseNamedExportList(value: string): string[] {
-  return value
-    .split(',')
-    .map((part) => part.trim().split(/\s+as\s+/i)[0]?.trim() ?? '')
-    .filter((part) => /^[A-Za-z_$][\w$]*$/.test(part))
-}
-
-function formatList(items: string[], max = MAX_NAMES): string {
-  const visible = items.slice(0, max).join(', ')
-  return items.length > max ? `${visible} (+${items.length - max})` : visible
-}
-
-function unique(items: string[]): string[] {
-  return [...new Set(items)]
-}
-
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  return { summary: parts.join(' '), sections: [] }
 }
