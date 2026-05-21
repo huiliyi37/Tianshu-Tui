@@ -100,5 +100,81 @@ describe('worker prompts', () => {
     assert.ok(packet.includes('Found the seam.'))
     assert.ok(packet.includes('main constructs AgentLoop'))
     assert.ok(packet.includes('</worker_results>'))
+    // Compact JSON — no pretty-print indentation
+    assert.ok(!packet.includes('\n  '))
+  })
+
+  it('strips empty arrays from packet to reduce size', () => {
+    const packet = buildPrimaryWorkerPacket([
+      {
+        workOrderId: 'wo_2',
+        status: 'passed',
+        summary: 'Done.',
+        findings: [],
+        artifacts: [],
+        changedFiles: [],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'verified',
+      },
+    ])
+
+    // Empty arrays should be stripped
+    assert.ok(!packet.includes('"findings"'))
+    assert.ok(!packet.includes('"risks"'))
+    assert.ok(!packet.includes('"artifacts"'))
+    assert.ok(packet.includes('"workOrderId"'))
+    assert.ok(packet.includes('"summary"'))
+  })
+
+  it('truncates artifact content to 500 chars', () => {
+    const longContent = 'x'.repeat(1000)
+    const packet = buildPrimaryWorkerPacket([
+      {
+        workOrderId: 'wo_3',
+        status: 'passed',
+        summary: 'Has artifact.',
+        findings: [],
+        artifacts: [{ kind: 'note', title: 'test', content: longContent }],
+        changedFiles: [],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'verified',
+      },
+    ])
+
+    // Artifact content should be truncated
+    assert.ok(packet.length < 2000)
+    assert.ok(packet.includes('…'))
+    assert.ok(!packet.includes('x'.repeat(1000)))
+  })
+
+  it('caps total packet size at 8K chars by dropping low-value fields', () => {
+    // Create a result with many fields that would exceed 8K
+    const manyFindings = Array.from({ length: 50 }, (_, i) => ({
+      claim: `Finding ${i}: ${'detail '.repeat(20)}`,
+      evidence: `src/file-${i}.ts`,
+      confidence: 'high' as const,
+    }))
+    const packet = buildPrimaryWorkerPacket([
+      {
+        workOrderId: 'wo_big',
+        status: 'passed',
+        summary: 'Big result.',
+        findings: manyFindings,
+        artifacts: [],
+        changedFiles: Array.from({ length: 30 }, (_, i) => `src/file-${i}.ts`),
+        examinedFiles: Array.from({ length: 30 }, (_, i) => `src/other-${i}.ts`),
+        risks: ['risk1', 'risk2'],
+        nextActions: Array.from({ length: 20 }, (_, i) => `action ${i}`),
+        evidenceStatus: 'verified',
+      },
+    ])
+
+    // Packet should be capped at ~8K
+    assert.ok(packet.length <= 8200, `packet too large: ${packet.length}`)
+    // Core fields should survive
+    assert.ok(packet.includes('wo_big'))
+    assert.ok(packet.includes('Big result.'))
   })
 })

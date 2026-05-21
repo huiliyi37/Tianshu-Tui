@@ -101,24 +101,70 @@ export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, 
   ].join('\n')
 }
 
-export function buildPrimaryWorkerPacket(results: WorkerResult[]): string {
-  const compact = results.map(result => ({
-    workOrderId: result.workOrderId,
-    status: result.status,
-    summary: result.summary,
-    findings: result.findings,
-    artifacts: result.artifacts,
-    verification: result.verification,
-    changedFiles: result.changedFiles,
-    examinedFiles: result.examinedFiles,
-    risks: result.risks,
-    nextActions: result.nextActions,
-    evidenceStatus: result.evidenceStatus,
-  }))
+/** Maximum characters for the entire worker packet returned to primary session.
+ *  ~8K chars ≈ 2K tokens. Enough for 2-3 workers with concise findings,
+ *  but prevents a single delegate_task from consuming 50K+ tokens. */
+const MAX_WORKER_PACKET_CHARS = 8_000
 
-  return [
-    '<worker_results>',
-    JSON.stringify(compact, null, 2),
-    '</worker_results>',
-  ].join('\n')
+/** Maximum characters for a single artifact content field. */
+const MAX_ARTIFACT_CONTENT_CHARS = 500
+
+/** Strip empty arrays/strings/undefined from an object to reduce JSON size. */
+function stripEmpty<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const result: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined || v === null) continue
+    if (Array.isArray(v) && v.length === 0) continue
+    if (typeof v === 'string' && v === '') continue
+    result[k] = v
+  }
+  return result as Partial<T>
+}
+
+function truncateArtifactContent(artifacts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return artifacts.map(a => {
+    if (typeof a.content === 'string' && a.content.length > MAX_ARTIFACT_CONTENT_CHARS) {
+      return { ...a, content: a.content.slice(0, MAX_ARTIFACT_CONTENT_CHARS) + '…' }
+    }
+    return a
+  })
+}
+
+export function buildPrimaryWorkerPacket(results: WorkerResult[]): string {
+  const compact = results.map(result => {
+    const raw = {
+      workOrderId: result.workOrderId,
+      status: result.status,
+      summary: result.summary,
+      findings: result.findings,
+      artifacts: result.artifacts ? truncateArtifactContent(result.artifacts as Array<Record<string, unknown>>) : undefined,
+      verification: result.verification,
+      changedFiles: result.changedFiles,
+      examinedFiles: result.examinedFiles,
+      risks: result.risks,
+      nextActions: result.nextActions,
+      evidenceStatus: result.evidenceStatus,
+    }
+    return stripEmpty(raw)
+  })
+
+  let json = JSON.stringify(compact)
+
+  // Hard cap: if packet exceeds budget, progressively drop low-value fields
+  if (json.length > MAX_WORKER_PACKET_CHARS) {
+    for (const result of compact) {
+      delete result.examinedFiles
+      delete result.risks
+      delete result.nextActions
+      delete result.verification
+    }
+    json = JSON.stringify(compact)
+  }
+
+  // Final safety: truncate raw JSON if still over budget (shouldn't happen normally)
+  if (json.length > MAX_WORKER_PACKET_CHARS) {
+    json = json.slice(0, MAX_WORKER_PACKET_CHARS) + '…"'
+  }
+
+  return `<worker_results>${json}</worker_results>`
 }
