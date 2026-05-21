@@ -35,7 +35,7 @@
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
-    "start": "node dist/main.js",
+    "start": "node --expose-gc --max-old-space-size=1536 dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test $(find src -name '*.test.ts')",
     "test:unit": "tsx --test $(find src -name '*.test.ts' -not -path '*/integration/*')",
@@ -50,6 +50,7 @@
     "ink": "^6.8.0",
     "react": "^19.2.6",
     "turndown": "^7.2.4",
+    "undici": "^8.3.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

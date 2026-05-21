@@ -2,6 +2,7 @@ import type { StreamClient } from '../api/stream-client.js'
 import type { Usage } from '../api/types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 import { PromptEngine } from '../prompt/engine.js'
+import type { PromptMode } from '../prompt/mode.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { ToolRegistry } from '../tools/registry.js'
 import { killAll } from '../tools/process-tracker.js'
@@ -59,6 +60,7 @@ import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { compactStaleRounds } from '../compact/stale-round.js'
+import { microCompact } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
@@ -486,6 +488,18 @@ export class AgentLoop {
 
   getEvidenceState() { return this.evidence.getState() }
 
+  getVerificationSummary() { return this.evidence.getVerificationSummary() }
+
+  setPromptMode(mode: PromptMode): void {
+    this.config.promptEngine.setMode(mode)
+  }
+
+  getPromptMode(): PromptMode {
+    return this.config.promptEngine.getMode()
+  }
+
+  getLatestPheromones() { return this.loadedPheromones }
+
   getDecisions(): string[] { return this.decisions }
 
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }
@@ -665,9 +679,10 @@ export class AgentLoop {
     this.contextInjection.recordUserInputClaims(userInput)
     this.contextInjection.refreshPlaybookLessons(userInput)
     this.session.addUserMessage(userInput)
-    this.taskContract = extractTaskContract(userInput, this.session.getTurnCount())
+    const isChatMode = this.config.promptEngine.getMode() === 'chat'
+    this.taskContract = isChatMode ? undefined : extractTaskContract(userInput, this.session.getTurnCount())
 
-    if (this.config.autoReasoning) {
+    if (this.config.autoReasoning && !isChatMode) {
       this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
       this.config.client.setReasoningEffort?.(this.config.reasoningEffort)
     }
@@ -699,7 +714,11 @@ export class AgentLoop {
           failures: this.compactFailures,
         })
         this.compactFailures = compactResult.failures
-        if (compactResult.compacted) this.lastCompactTurn = turn
+        if (compactResult.compacted) {
+          this.lastCompactTurn = turn
+          // Hint V8 to release freed message objects sooner
+          if (typeof globalThis.gc === 'function') globalThis.gc()
+        }
 
         // Stale round compaction: proactively shrink N-2+ tool_results
         if (!compactResult.compacted) {
@@ -707,6 +726,21 @@ export class AgentLoop {
           const after = compactStaleRounds(before, this.config.contextWindow ?? 1_000_000)
           if (after !== before) {
             this.session.replaceMessages(after)
+            if (typeof globalThis.gc === 'function') globalThis.gc()
+          }
+        }
+
+        // RSS-driven forced compaction: when memory pressure is high but token
+        // threshold hasn't been reached (100万 window is too large to fill),
+        // force compaction by pretending contextWindow is smaller.
+        if (!compactResult.compacted && rssRatio >= 0.7 && this.session.getMessages().length >= 10) {
+          const before = this.session.getMessages()
+          // Use microCompact with a virtual smaller window to force message dropping
+          const virtualWindow = Math.floor((this.config.contextWindow ?? 1_000_000) * 0.3)
+          const { messages: trimmed } = microCompact(before, virtualWindow, this.session.getEstimatedTokens())
+          if (trimmed.length < before.length || trimmed !== before) {
+            this.session.replaceMessages(trimmed)
+            if (typeof globalThis.gc === 'function') globalThis.gc()
           }
         }
 
@@ -729,6 +763,75 @@ export class AgentLoop {
 
         // ── StarFlow v2: Sensorium computation ──
         const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
+        if (isChatMode) {
+          this.config.promptEngine.setCognitiveProjection(null)
+          this.config.promptEngine.setTaskProgress({ steps: [], current: 'chat-mode' })
+          const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
+          const streamResult = await this.turnStream!.streamTurn({
+            request,
+            turn,
+            lastTurnTextFingerprint: this.lastTurnTextFingerprint,
+            callbacks: {
+              onTextDelta: callbacks.onTextDelta,
+              onThinkingDelta: callbacks.onThinkingDelta,
+              onToolUse: callbacks.onToolUse,
+              onError: callbacks.onError,
+            },
+          })
+          const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
+          this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
+
+          if (this.abortController.signal.aborted) {
+            if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
+            await this.runPostSession(callbacks)
+            callbacks.onAbort()
+            return
+          }
+
+          if (streamError) {
+            if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); this.recordTurnSnapshot() }
+            callbacks.onError(streamError)
+            return
+          }
+
+          if (collectedBlocks.length > 0) this.session.addAssistantBlocks(collectedBlocks)
+
+          if (stopReason === 'max_output_tokens' && toolUses.length === 0 && this.outputTokenEscalationCount < AgentLoop.MAX_OUTPUT_ESCALATION) {
+            this.outputTokenEscalationCount++
+            this.session.addUserMessage('Continue your response from where you left off.')
+            continue
+          }
+
+          if (toolUses.length > 0) {
+            const r = await this.toolExecution.executeBatch({
+              toolUses, callbacks, turn, checkpointCreatedThisTurn,
+              abortSignal: this.abortController.signal,
+              traceStore: this.traceStore, importGraph: this.importGraph,
+              lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk,
+            })
+            ;({ traceStore: this.traceStore, importGraph: this.importGraph,
+               lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk } = r)
+            if (r.checkpointCreated) checkpointCreatedThisTurn = true
+            await this.turnCompletion.complete({ turn, isFinal: false, callbacks })
+            continue
+          }
+
+          const thinkingResult = evaluateThinkingRetry({
+            streamedText: this.streamedText, collectedBlockCount: collectedBlocks.length,
+            thinkingAccum, thinkingOnlyRetries: this.thinkingOnlyRetries,
+            lastThinkingContent: this.lastThinkingContent,
+          })
+          this.lastThinkingContent = thinkingResult.nextState.lastThinkingContent
+          this.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
+          if (thinkingResult.shouldRetry) {
+            this.session.addUserMessage(thinkingResult.retryMessage)
+            continue
+          }
+
+          await this.turnCompletion.complete({ turn, isFinal: true, emitBadge: true, callbacks })
+          this.evidence.reset()
+          break
+        }
         const perceptionResult = await this.perception.perceive({
           turn: this.session.getTurnCount(),
           estimatedTokens: estTokens,

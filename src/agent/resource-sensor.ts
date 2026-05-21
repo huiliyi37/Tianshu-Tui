@@ -27,7 +27,7 @@ export interface ResourceSensorOptions {
   memoryUsage?: () => Pick<NodeJS.MemoryUsage, 'rss' | 'heapUsed'>
 }
 
-const DEFAULT_MEMORY_LIMIT_BYTES = 512 * 1024 * 1024
+const DEFAULT_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024
 export const DEFAULT_SESSION_BYTE_LIMIT = 50 * 1024 * 1024
 const MAX_MEMORY_SAMPLES = 12
 

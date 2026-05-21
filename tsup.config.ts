@@ -7,7 +7,8 @@ export default defineConfig({
   dts: true,
   clean: true,
   shims: true,
+  treeshake: true,
   banner: {
-    js: '#!/usr/bin/env node',
+    js: '#!/usr/bin/env -S node --expose-gc --max-old-space-size=1536',
   },
 })
