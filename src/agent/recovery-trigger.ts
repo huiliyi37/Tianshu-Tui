@@ -240,20 +240,22 @@ export function classifyResourcePressure(input: ResourcePressureClassifierInput)
   const evidence: string[] = []
   const actions: string[] = []
 
-  const memoryRatio = input.memoryLimitBytes > 0 ? input.rssBytes / input.memoryLimitBytes : 0
+  // Use heapUsed as primary signal — RSS is inflated in Node.js because V8
+  // retains freed pages. heapUsed reflects actual live object pressure.
+  const heapRatio = input.memoryLimitBytes > 0 ? input.heapUsedBytes / input.memoryLimitBytes : 0
   const diskRatio = input.sessionByteLimit > 0 ? input.sessionBytes / input.sessionByteLimit : 0
   const trend = input.memoryTrendBytesPerSample ?? 0
 
-  if (memoryRatio >= 0.85) {
-    evidence.push(`RSS memory at ${(memoryRatio * 100).toFixed(1)}% of limit (${input.rssBytes}/${input.memoryLimitBytes} bytes)`)
+  if (heapRatio >= 0.9) {
+    evidence.push(`Heap used at ${(heapRatio * 100).toFixed(1)}% of limit (${input.heapUsedBytes}/${input.memoryLimitBytes} bytes)`)
     actions.push('Enter minimal mode and trigger auto-compact before continuing')
     actions.push('Start a fresh session if memory does not drop after compaction')
-  } else if (memoryRatio >= 0.7) {
-    evidence.push(`RSS memory at ${(memoryRatio * 100).toFixed(1)}% of limit (${input.rssBytes}/${input.memoryLimitBytes} bytes)`)
+  } else if (heapRatio >= 0.75) {
+    evidence.push(`Heap used at ${(heapRatio * 100).toFixed(1)}% of limit (${input.heapUsedBytes}/${input.memoryLimitBytes} bytes)`)
     actions.push('Enter degraded mode and avoid high-risk or memory-heavy tools')
   }
 
-  if (trend > 0 && input.memoryLimitBytes > 0 && trend / input.memoryLimitBytes >= 0.02) {
+  if (trend > 0 && input.memoryLimitBytes > 0 && trend / input.memoryLimitBytes >= 0.03) {
     evidence.push(`Memory trend rising by ${trend} bytes/sample`)
     actions.push('Watch for leaks; compact or restart if trend continues')
   }
@@ -271,8 +273,8 @@ export function classifyResourcePressure(input: ResourcePressureClassifierInput)
 
   return {
     trigger: 'resource_pressure',
-    severity: memoryRatio >= 0.85 || diskRatio >= 1 ? 'error' : 'warn',
-    summary: memoryRatio >= 0.85
+    severity: heapRatio >= 0.9 || diskRatio >= 1 ? 'error' : 'warn',
+    summary: heapRatio >= 0.9
       ? 'Memory pressure critical — minimal mode recommended'
       : diskRatio >= 1
         ? 'Session persistence too large — checkpoint/truncate required'

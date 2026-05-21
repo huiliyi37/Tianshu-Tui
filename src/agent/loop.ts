@@ -730,10 +730,13 @@ export class AgentLoop {
           }
         }
 
-        // RSS-driven forced compaction: when memory pressure is high but token
+        // Heap-driven forced compaction: when memory pressure is high but token
         // threshold hasn't been reached (100万 window is too large to fill),
         // force compaction by pretending contextWindow is smaller.
-        if (!compactResult.compacted && rssRatio >= 0.7 && this.session.getMessages().length >= 10) {
+        const heapRatio = snap
+          ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
+          : 0
+        if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
           const before = this.session.getMessages()
           // Use microCompact with a virtual smaller window to force message dropping
           const virtualWindow = Math.floor((this.config.contextWindow ?? 1_000_000) * 0.3)
@@ -765,72 +768,7 @@ export class AgentLoop {
         const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
         if (isChatMode) {
           this.config.promptEngine.setCognitiveProjection(null)
-          this.config.promptEngine.setTaskProgress({ steps: [], current: 'chat-mode' })
-          const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
-          const streamResult = await this.turnStream!.streamTurn({
-            request,
-            turn,
-            lastTurnTextFingerprint: this.lastTurnTextFingerprint,
-            callbacks: {
-              onTextDelta: callbacks.onTextDelta,
-              onThinkingDelta: callbacks.onThinkingDelta,
-              onToolUse: callbacks.onToolUse,
-              onError: callbacks.onError,
-            },
-          })
-          const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
-          this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
-
-          if (this.abortController.signal.aborted) {
-            if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
-            await this.runPostSession(callbacks)
-            callbacks.onAbort()
-            return
-          }
-
-          if (streamError) {
-            if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); this.recordTurnSnapshot() }
-            callbacks.onError(streamError)
-            return
-          }
-
-          if (collectedBlocks.length > 0) this.session.addAssistantBlocks(collectedBlocks)
-
-          if (stopReason === 'max_output_tokens' && toolUses.length === 0 && this.outputTokenEscalationCount < AgentLoop.MAX_OUTPUT_ESCALATION) {
-            this.outputTokenEscalationCount++
-            this.session.addUserMessage('Continue your response from where you left off.')
-            continue
-          }
-
-          if (toolUses.length > 0) {
-            const r = await this.toolExecution.executeBatch({
-              toolUses, callbacks, turn, checkpointCreatedThisTurn,
-              abortSignal: this.abortController.signal,
-              traceStore: this.traceStore, importGraph: this.importGraph,
-              lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk,
-            })
-            ;({ traceStore: this.traceStore, importGraph: this.importGraph,
-               lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk } = r)
-            if (r.checkpointCreated) checkpointCreatedThisTurn = true
-            await this.turnCompletion.complete({ turn, isFinal: false, callbacks })
-            continue
-          }
-
-          const thinkingResult = evaluateThinkingRetry({
-            streamedText: this.streamedText, collectedBlockCount: collectedBlocks.length,
-            thinkingAccum, thinkingOnlyRetries: this.thinkingOnlyRetries,
-            lastThinkingContent: this.lastThinkingContent,
-          })
-          this.lastThinkingContent = thinkingResult.nextState.lastThinkingContent
-          this.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
-          if (thinkingResult.shouldRetry) {
-            this.session.addUserMessage(thinkingResult.retryMessage)
-            continue
-          }
-
-          await this.turnCompletion.complete({ turn, isFinal: true, emitBadge: true, callbacks })
-          this.evidence.reset()
-          break
+          this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [] })
         }
         const perceptionResult = await this.perception.perceive({
           turn: this.session.getTurnCount(),
@@ -911,7 +849,7 @@ export class AgentLoop {
           t => t === 'write_file' || t === 'edit_file' || t === 'bash'
         )
         const agreedWithUser = hadDestructive && !hadAskTool
-        if (hadDestructive || hadAskTool) {
+        if (!isChatMode && (hadDestructive || hadAskTool)) {
           this.sycophancyTrap.recordTurn({
             agreedWithUser,
             confidence: this.sensorium?.confidence ?? 0.5,
@@ -932,16 +870,18 @@ export class AgentLoop {
           riskLevel: this.latestRisk.level,
         })
         this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
-        const sycophancyHint = this.sycophancyTrap.getHint()
-        const projection = buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint })
+        const sycophancyHint = isChatMode ? undefined : this.sycophancyTrap.getHint()
+        const projection = isChatMode ? '' : buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint })
         this.config.promptEngine.setCognitiveProjection(projection)
 
         // ── CVM overhead tracking ──
         // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
         // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
         // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
-        const cvmTokenEstimate = Math.ceil(projection.length / 4)
-        this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
+        if (!isChatMode) {
+          const cvmTokenEstimate = Math.ceil(projection.length / 4)
+          this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
+        }
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const streamResult = await this.turnStream!.streamTurn({
           request,

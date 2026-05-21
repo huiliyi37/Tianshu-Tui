@@ -350,7 +350,7 @@ test('classifyResourcePressure returns null when memory and disk are healthy', (
 })
 
 test('classifyResourcePressure warns at memory degraded threshold', () => {
-  const result = classifyResourcePressure(makeResourcePressure({ rssBytes: 750 }))
+  const result = classifyResourcePressure(makeResourcePressure({ heapUsedBytes: 800 }))
   assert.notEqual(result, null)
   assert.equal(result!.trigger, 'resource_pressure')
   assert.equal(result!.severity, 'warn')
@@ -359,7 +359,7 @@ test('classifyResourcePressure warns at memory degraded threshold', () => {
 })
 
 test('classifyResourcePressure errors at memory minimal threshold', () => {
-  const result = classifyResourcePressure(makeResourcePressure({ rssBytes: 900 }))
+  const result = classifyResourcePressure(makeResourcePressure({ heapUsedBytes: 950 }))
   assert.notEqual(result, null)
   assert.equal(result!.severity, 'error')
   assert.ok(result!.summary.includes('Memory pressure critical'))
@@ -375,7 +375,7 @@ test('classifyResourcePressure detects oversized session JSONL', () => {
 })
 
 test('classifyResourcePressure includes rising memory trend', () => {
-  const result = classifyResourcePressure(makeResourcePressure({ memoryTrendBytesPerSample: 30 }))
+  const result = classifyResourcePressure(makeResourcePressure({ memoryTrendBytesPerSample: 40 }))
   assert.notEqual(result, null)
   assert.equal(result!.severity, 'warn')
   assert.ok(result!.evidence.some(e => e.includes('Memory trend rising')))
@@ -479,7 +479,7 @@ test('classifyRecoveryTrigger returns resource pressure trigger', () => {
     doomLoop: makeDoomLoop(),
     thrashing: makeThrashing(),
     integrity: makeIntegrity(),
-    resourcePressure: makeResourcePressure({ rssBytes: 750 }),
+    resourcePressure: makeResourcePressure({ heapUsedBytes: 800 }),
   })
   assert.notEqual(result, null)
   assert.equal(result!.trigger, 'resource_pressure')
