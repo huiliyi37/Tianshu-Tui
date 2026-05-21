@@ -58,6 +58,7 @@ import { PressureMonitor } from '../context/pressure-monitor.js'
 import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
+import { compactStaleRounds } from '../compact/stale-round.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
@@ -699,7 +700,16 @@ export class AgentLoop {
         })
         this.compactFailures = compactResult.failures
         if (compactResult.compacted) this.lastCompactTurn = turn
-        
+
+        // Stale round compaction: proactively shrink N-2+ tool_results
+        if (!compactResult.compacted) {
+          const before = this.session.getMessages()
+          const after = compactStaleRounds(before, this.config.contextWindow ?? 1_000_000)
+          if (after !== before) {
+            this.session.replaceMessages(after)
+          }
+        }
+
         // Fuzzy checkpoint: 记录 compact 结束
         if (this.persist) {
           this.persist.appendCompactEnd(turn, this.session.getMessages().length)
