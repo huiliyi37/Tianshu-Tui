@@ -76,8 +76,8 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         const text = data.toString()
         stdout += text
         params.onOutput?.(text)
-        if (stdout.length > 100_000) {
-          stdout = stdout.slice(-80_000)
+        if (stdout.length > 32_000) {
+          stdout = stdout.slice(-24_000)
         }
       })
 
@@ -85,8 +85,8 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         const text = data.toString()
         stderr += text
         params.onOutput?.(text)
-        if (stderr.length > 100_000) {
-          stderr = stderr.slice(-80_000)
+        if (stderr.length > 32_000) {
+          stderr = stderr.slice(-24_000)
         }
       })
 
