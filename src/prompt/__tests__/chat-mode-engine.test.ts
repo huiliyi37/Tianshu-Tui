@@ -36,8 +36,9 @@ describe('Chat Mode PromptEngine', () => {
     ]
 
     const request = engine.buildRequest(messages)
-    const lastUserMsg = request.messages.filter(m => m.role === 'user').pop()
-    const content = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : ''
+    // buildRequest emits [volatile-block, original-msg]; check volatile (first user msg)
+    const volatileMsg = request.messages.filter(m => m.role === 'user')[0]
+    const content = typeof volatileMsg?.content === 'string' ? volatileMsg.content : ''
     
     // In chat mode, CVM projection should NOT be injected
     assert.equal(content.includes('cognitive-mirror'), false)
@@ -52,8 +53,8 @@ describe('Chat Mode PromptEngine', () => {
     ]
 
     const request = engine.buildRequest(messages)
-    const lastUserMsg = request.messages.filter(m => m.role === 'user').pop()
-    const content = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : ''
+    const volatileMsg = request.messages.filter(m => m.role === 'user')[0]
+    const content = typeof volatileMsg?.content === 'string' ? volatileMsg.content : ''
     
     // In task mode, CVM projection SHOULD be injected
     assert.equal(content.includes('cognitive-mirror'), true)
@@ -70,8 +71,8 @@ describe('Chat Mode PromptEngine', () => {
     ]
 
     const request = engine.buildRequest(messages)
-    const lastUserMsg = request.messages.filter(m => m.role === 'user').pop()
-    const content = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : ''
+    const volatileMsg = request.messages.filter(m => m.role === 'user')[0]
+    const content = typeof volatileMsg?.content === 'string' ? volatileMsg.content : ''
     
     // In chat mode, dynamic appendix should NOT be injected
     assert.equal(content.includes('behavior-mirror'), false)
@@ -90,8 +91,8 @@ describe('Chat Mode PromptEngine', () => {
     ]
 
     const request = engine.buildRequest(messages)
-    const lastUserMsg = request.messages.filter(m => m.role === 'user').pop()
-    const content = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : ''
+    const volatileMsg = request.messages.filter(m => m.role === 'user')[0]
+    const content = typeof volatileMsg?.content === 'string' ? volatileMsg.content : ''
     
     // In task mode, dynamic appendix SHOULD be injected
     assert.equal(content.includes('task-progress'), true)
@@ -117,8 +118,8 @@ describe('Chat Mode PromptEngine', () => {
     ]
 
     const request = engine.buildRequest(messages)
-    const lastUserMsg = request.messages.filter(m => m.role === 'user').pop()
-    const content = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : ''
+    const volatileMsg = request.messages.filter(m => m.role === 'user')[0]
+    const content = typeof volatileMsg?.content === 'string' ? volatileMsg.content : ''
     
     // In chat mode, domain info should still be in volatile block (not consolidated)
     assert.equal(content.includes('test-domain'), true)

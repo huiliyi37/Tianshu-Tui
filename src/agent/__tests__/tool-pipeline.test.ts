@@ -27,7 +27,7 @@ describe('executeToolUse', () => {
         },
       } as any,
       prewarm: { get: () => null, invalidate: () => {} } as any,
-      evidence: { trackFileRead: () => {}, trackFileModified: () => {}, trackImpact: () => {}, trackVerification: () => {} } as any,
+      evidence: { trackFileRead: () => {}, trackFileModified: () => {}, trackImpact: () => {}, trackVerification: () => {}, getState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }) } as any,
       traceStore: { events: [], toolFingerprints: [] } as any,
       repairHintTracker: { recordSuccess: () => {}, recordFailure: () => {} } as any,
       repairPipeline: { run: (input: any) => ({ output: input, telemetry: [] }) } as any,

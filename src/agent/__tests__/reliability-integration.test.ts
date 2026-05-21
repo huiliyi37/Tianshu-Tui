@@ -92,7 +92,7 @@ describe('AgentLoop reliability integration', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       resourceSensorOptions: {
         memoryLimitBytes: 1_000,
-        memoryUsage: () => ({ rss: 750, heapUsed: 100 }),
+        memoryUsage: () => ({ rss: 750, heapUsed: 750 }),
       },
     }, session, '/test')
 
@@ -105,7 +105,7 @@ describe('AgentLoop reliability integration', () => {
       `expected degraded reliability block, got:\n${results.join('\n---\n')}`,
     )
     assert.ok(
-      results.some(result => result.includes('RSS memory at 75.0% of limit')),
+      results.some(result => result.includes('Heap used at 75.0% of limit')),
       `expected resource evidence, got:\n${results.join('\n---\n')}`,
     )
     assert.equal(agent.getReliabilityDecision()?.mode, 'degraded')
