@@ -3,6 +3,7 @@ import { buildDeliveryGate } from './delivery-gate.js'
 import { buildFinalVerificationReport, type VerificationState } from './verification.js'
 
 export type DeliveryVerificationStatus = 'verified' | 'failed' | 'blocked' | 'unverified'
+export type VerificationLevel = 'tested' | 'typed' | 'linted' | 'pending'
 
 export interface EvidenceState {
   filesRead: Set<string>
@@ -11,6 +12,14 @@ export interface EvidenceState {
   deliveryStatus: DeliveryVerificationStatus
   impactedFiles: Set<string>
   impactedTests: Set<string>
+  fileVerificationLevels?: Map<string, VerificationLevel>
+}
+
+export interface VerificationSummary {
+  total: number
+  verified: number
+  pending: number
+  files: Array<{ path: string; level: VerificationLevel }>
 }
 
 const MAX_VERIFICATIONS = 50
@@ -26,6 +35,7 @@ export class EvidenceTracker {
       deliveryStatus: 'unverified',
       impactedFiles: new Set(),
       impactedTests: new Set(),
+      fileVerificationLevels: new Map(),
     }
   }
 
@@ -35,6 +45,7 @@ export class EvidenceTracker {
 
   trackFileModified(path: string): void {
     this.state.filesModified.add(path)
+    this.state.fileVerificationLevels?.set(path, 'pending')
     this.refreshDeliveryStatus()
   }
 
@@ -43,12 +54,52 @@ export class EvidenceTracker {
     if (this.state.verifications.length > MAX_VERIFICATIONS) {
       this.state.verifications = this.state.verifications.slice(-MAX_VERIFICATIONS)
     }
+    this.applyVerificationLevels(result)
     this.refreshDeliveryStatus()
   }
 
   trackImpact(files: string[], tests: string[]): void {
     for (const f of files) this.state.impactedFiles.add(f)
     for (const t of tests) this.state.impactedTests.add(t)
+  }
+
+  getVerificationSummary(): VerificationSummary {
+    const files = [...this.state.filesModified]
+      .sort((a, b) => a.localeCompare(b))
+      .map(path => ({ path, level: this.state.fileVerificationLevels?.get(path) ?? 'pending' }))
+    const verified = files.filter(f => f.level !== 'pending').length
+    return { total: files.length, verified, pending: files.length - verified, files }
+  }
+
+  private applyVerificationLevels(result: VerificationMetadata): void {
+    if (result.status !== 'passed') return
+    const level = this.inferVerificationLevel(result.command)
+    const targets = this.inferVerifiedFiles(result.command, level)
+    for (const file of targets) {
+      if (this.state.filesModified.has(file)) {
+        this.state.fileVerificationLevels?.set(file, level)
+      }
+    }
+  }
+
+  private inferVerificationLevel(command: string): VerificationLevel {
+    if (/\\btsc\\b|typecheck|--noEmit/.test(command)) return 'typed'
+    if (/\\blint\\b|eslint/.test(command)) return 'linted'
+    return 'tested'
+  }
+
+  private inferVerifiedFiles(command: string, level: VerificationLevel): string[] {
+    const modified = [...this.state.filesModified]
+    if (level === 'typed') return modified.filter(f => /\.tsx?$/.test(f))
+    if (level === 'linted') return modified
+    if (command.includes('src/**/__tests__') || command.includes('npm test') || command.includes('run_tests')) return modified
+    const normalizedCommand = command.replaceAll('\\\\', '/')
+    return modified.filter(file => {
+      const normalizedFile = file.replaceAll('\\\\', '/')
+      const base = normalizedFile.split('/').pop() ?? normalizedFile
+      const stem = base.replace(/\.[^.]+$/, '')
+      return normalizedCommand.includes(normalizedFile) || normalizedCommand.includes(base) || normalizedCommand.includes(stem)
+    })
   }
 
   private refreshDeliveryStatus(): void {
@@ -125,6 +176,7 @@ export class EvidenceTracker {
     this.state.deliveryStatus = 'unverified'
     this.state.impactedFiles.clear()
     this.state.impactedTests.clear()
+    this.state.fileVerificationLevels?.clear()
   }
 
   getState(): EvidenceState { return this.state }

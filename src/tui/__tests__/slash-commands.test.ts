@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveAppPromptInput, handleSlashCommand, type SlashHandlerContext } from '../slash-commands.js'
+import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
 import type { LogEntry } from '../log-state.js'
 
 function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext {
@@ -23,6 +23,11 @@ function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext 
       }),
       setApprovalMode: () => {},
       addAnchor: () => {},
+      setPromptMode: () => {},
+      getPromptMode: () => 'task',
+      getVerificationSummary: () => ({ total: 0, verified: 0, pending: 0, files: [] }),
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set(), fileVerificationLevels: new Map() }),
+      getLatestPheromones: () => [],
     } as any,
     session: null as any,
     persist: null as any,
@@ -151,5 +156,37 @@ describe('handleSlashCommand', () => {
     })
     assert.equal(handleSlashCommand(ctx), true)
     assert.deepEqual(values, [true])
+  })
+
+  it('/chat and /task switch prompt mode', () => {
+    const modes: string[] = []
+    const chatCtx = makeCtx({ parts: ['/chat'], agent: { ...makeCtx().agent, setPromptMode: (m: string) => modes.push(m) } as any })
+    const taskCtx = makeCtx({ parts: ['/task'], agent: { ...makeCtx().agent, setPromptMode: (m: string) => modes.push(m) } as any })
+
+    assert.equal(handleSlashCommand(chatCtx), true)
+    assert.equal(handleSlashCommand(taskCtx), true)
+    assert.deepEqual(modes, ['chat', 'task'])
+  })
+
+  it('formats verification status with per-file levels', () => {
+    const agent = {
+      getVerificationSummary: () => ({
+        total: 2,
+        verified: 1,
+        pending: 1,
+        files: [
+          { path: 'src/prompt/mode.ts', level: 'tested' },
+          { path: 'src/tui/app.tsx', level: 'pending' },
+        ],
+      }),
+      getEvidenceState: () => ({
+        verifications: [{ status: 'passed', command: 'npx tsx --test src/prompt/__tests__/mode.test.ts' }],
+      }),
+    } as any
+
+    const formatted = formatVerificationStatus(agent)
+    assert.match(formatted, /src\/prompt\/mode\.ts \(tested\)/)
+    assert.match(formatted, /src\/tui\/app\.tsx \(pending\)/)
+    assert.match(formatted, /Verification: 1\/2/)
   })
 })

@@ -11,6 +11,7 @@ function state(overrides: Partial<EvidenceState>): EvidenceState {
     deliveryStatus: 'unverified',
     impactedFiles: new Set(),
     impactedTests: new Set(),
+    fileVerificationLevels: new Map(),
     ...overrides,
   }
 }

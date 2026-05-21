@@ -125,7 +125,7 @@ export const workerResultSchema = z.object({
   examinedFiles: z.array(z.string()).optional(),
   risks: z.array(z.string()),
   nextActions: z.array(z.string()),
-  evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified']).default('unverified'),
+  evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
 })
 
 const workerResultIngestSchema = z.object({
@@ -140,7 +140,7 @@ const workerResultIngestSchema = z.object({
   examinedFiles: z.array(z.string()).optional(),
   risks: z.array(z.string()).default([]),
   nextActions: z.array(z.string()).default([]),
-  evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified']).default('unverified'),
+  evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
 })
 
 export type WorkerResult = z.infer<typeof workerResultSchema>

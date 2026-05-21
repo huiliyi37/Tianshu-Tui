@@ -13,6 +13,7 @@ import {
 } from './fingerprint.js'
 import { FieldHabituationTracker } from './field-habituation.js'
 import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
+import { DEFAULT_MODE, shouldInjectCvm, shouldInjectDynamicAppendix, type PromptMode } from './mode.js'
 
 export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
 
@@ -103,6 +104,7 @@ export class PromptEngine {
   private contextLayerReportData: ContextLayerReport
   private phaseHint?: string
   private cognitiveProjection?: string
+  private mode: PromptMode = DEFAULT_MODE
 
   constructor(config: PromptEngineConfig) {
     this.config = config
@@ -193,15 +195,17 @@ export class PromptEngine {
               if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
               if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
 
-              const activeAppendix = buildDynamicAppendix(activeCtx)
-              const fullAppendix = [this.cognitiveProjection, activeAppendix].filter(Boolean).join('\n')
+              const activeAppendix = shouldInjectDynamicAppendix(this.mode) ? buildDynamicAppendix(activeCtx) : ''
+              const projection = shouldInjectCvm(this.mode) ? this.cognitiveProjection : null
+              const fullAppendix = [projection, activeAppendix].filter(Boolean).join('\n')
               this.cachedFreshBlock = fullAppendix
                 ? this.volatileBlock + '\n' + fullAppendix
                 : this.volatileBlock
             } else {
               const latest = buildLatestTurnVolatileBlock(dynamicCtx)
-              this.cachedFreshBlock = this.cognitiveProjection
-                ? latest + '\n' + this.cognitiveProjection
+              const projection = shouldInjectCvm(this.mode) ? this.cognitiveProjection : null
+              this.cachedFreshBlock = projection
+                ? latest + '\n' + projection
                 : latest
             }
           }
@@ -242,6 +246,7 @@ export class PromptEngine {
   updateSessionMemory(block: string): void {
     this.sessionMemoryOverride = block
     this.rebuildFrozenBase()
+    this.invalidateFreshCache()
   }
 
   private rebuildFrozenBase(): void {
@@ -250,6 +255,16 @@ export class PromptEngine {
     this.volatileBlock = this.consolidatedBlock
       ? this.frozenBase + '\n' + this.consolidatedBlock
       : this.frozenBase
+  }
+
+  setMode(mode: PromptMode): void {
+    if (this.mode === mode) return
+    this.mode = mode
+    this.invalidateFreshCache()
+  }
+
+  getMode(): PromptMode {
+    return this.mode
   }
 
   updateActiveClaims(claims: ContextClaim[]): void {
@@ -300,7 +315,12 @@ export class PromptEngine {
     const next = projection && projection.trim().length > 0 ? projection : undefined
     if (this.cognitiveProjection === next) return
     this.cognitiveProjection = next
+    this.invalidateFreshCache()
+  }
+
+  private invalidateFreshCache(): void {
     this.cachedFreshForUser = ''
+    this.cachedFreshBlock = ''
   }
 
   setActiveDomain(domain: VolatileContext['activeDomain']): void {

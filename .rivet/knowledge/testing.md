@@ -1,3 +1,11 @@
+### 2026-05-21 — session c50ca31c
+
+**Modified** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/aggregation-profile.test.ts
+**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/aggregation.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-evidence.ts
+**Tests**: ✅ 3 passed, 0 failed (npx tsx --test src/agent/__tests__/aggregation-profile.test.ts)
+**Tools used**: read_file×4, bash×2, todo×1, write_file×1, run_tests×1
+- Decision: use bash to read it
+
 ### 2026-05-20 — session c6794622
 
 **Modified** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/compact-thresholds.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/compact-policy.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/__tests__/auto.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/__tests__/create-agent-config.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts

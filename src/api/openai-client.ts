@@ -217,9 +217,12 @@ export class OpenAIClient implements StreamClient {
     const messages: Record<string, unknown>[] = []
 
     if (request.system) {
-      const text = typeof request.system === 'string'
+      let text = typeof request.system === 'string'
         ? request.system
         : request.system.map(b => b.text).join('')
+      if (this.config.providerName === 'mimo' && this.config.thinking === 'enabled') {
+        text += '\n\nPlease think and reason in Chinese (中文) during your internal chain of thought.'
+      }
       messages.push({ role: 'system', content: text })
     }
 

@@ -44,9 +44,16 @@ interface StatusBarProps {
   interview?: InterviewState | null
   clarityHistory?: number[]
   reasoningEffort?: string
+  verification?: { verified: number; total: number }
 }
 
-export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheStatus = 'healthy', totalCost, currentTokens, maxTokens, contextHealth = 'healthy', apiSafe = true, interview, clarityHistory, reasoningEffort }: StatusBarProps) {
+export function verificationColor(summary: { verified: number; total: number }, theme: ReturnType<typeof getTheme>): string {
+  if (summary.total === 0 || summary.verified === summary.total) return theme.success
+  if (summary.verified === 0) return theme.error
+  return theme.warning
+}
+
+export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheStatus = 'healthy', totalCost, currentTokens, maxTokens, contextHealth = 'healthy', apiSafe = true, interview, clarityHistory, reasoningEffort, verification }: StatusBarProps) {
   const theme = getTheme()
   const { stdout } = useStdout()
   const cols = stdout?.columns ?? 80
@@ -118,6 +125,11 @@ export const StatusBar = memo(function StatusBar({ model, cacheHitRate, cacheSta
         <Text dimColor>
           ¥{totalCost}
         </Text>
+        {verification && verification.total > 0 && (
+          <Text color={verificationColor(verification, theme)}>
+            ✓{verification.verified}/{verification.total} files verified
+          </Text>
+        )}
       </Box>
       <Box gap={1}>
         <Text color={usageColor}>{shortBar}</Text>

@@ -1,15 +1,15 @@
 /**
  * Dream distillation — session-end knowledge extraction.
  *
- * Phase 1 uses template-based extraction (no LLM). Phase 2 will upgrade
- * to LLM-powered distillation via compactClient.
+ * Telemetry writes to .rivet/sessions/{YYYY-MM-DD}.md — machine-only zone.
+ * Never writes to .rivet/knowledge/*, which is reserved for human-maintained content
+ * (star identities, design decisions, retrospectives).
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'node:path'
 import type { VerificationMetadata } from '../tools/types.js'
-import { classifyEntry } from './dream-classify.js'
 
 export interface TrajectoryEntry {
   tool: string
@@ -104,50 +104,32 @@ function countTools(entries: TrajectoryEntry[]): Record<string, number> {
   return counts
 }
 
-const MAX_FILE_SIZE = 8000
-
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
 }
 
-/** Persist a distilled session entry to the project knowledge file. */
+/** Persist a distilled session entry to the machine-only session log. */
 export function persistDream(cwd: string, input: DreamInput): void {
   const entry = distillSession(input)
   if (!entry) return
 
-  const dir = join(cwd, '.rivet', 'knowledge')
+  const dir = join(cwd, '.rivet', 'sessions')
   ensureDir(dir)
 
-  // Always write to main index
-  writeToKnowledgeFile(join(dir, 'project-memory.md'), entry, input)
-
-  // Also write to topic-specific file
-  const topic = classifyEntry(entry)
-  if (topic !== 'general') {
-    writeToKnowledgeFile(join(dir, `${topic}.md`), entry, input)
-  }
+  const date = new Date().toISOString().slice(0, 10)
+  writeSessionEntry(join(dir, `${date}.md`), entry, input)
 }
 
-function writeToKnowledgeFile(path: string, entry: string, input: DreamInput): void {
+function writeSessionEntry(path: string, entry: string, input: DreamInput): void {
   let existing = ''
   try { existing = readFileSync(path, 'utf-8') } catch {}
 
   const dedupKey = buildDedupKey(input)
   const deduped = dedupKey ? removeMatchingEntry(existing, dedupKey) : existing
 
-  const combined = entry + '\n' + deduped
-  const trimmed = trimToEntryBoundary(combined, MAX_FILE_SIZE)
-  writeFileAtomicSync(path, trimmed)
-}
-
-function trimToEntryBoundary(content: string, maxSize: number): string {
-  if (content.length <= maxSize) return content
-  const cut = content.slice(0, maxSize)
-  const lastEntry = cut.lastIndexOf('\n### ')
-  if (lastEntry <= 0) return cut
-  return cut.slice(0, lastEntry).trimEnd() + '\n'
+  writeFileAtomicSync(path, entry + '\n' + deduped)
 }
 
 function buildDedupKey(input: DreamInput): string | null {

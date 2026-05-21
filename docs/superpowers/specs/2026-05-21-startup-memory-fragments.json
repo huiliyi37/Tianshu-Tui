@@ -1,0 +1,138 @@
+{
+  "session": "2026-05-21-startup-memory-optimization",
+  "phases": ["diverge", "select", "adapt"],
+  "fragments": [
+    {
+      "text": "V8 snapshots save 81% require() time in Electron but cannot snapshot native addons (better-sqlite3), process/stdout-touching modules (Ink), or network modules (MCP SDK)",
+      "fragmentType": "mechanism",
+      "source": "scout-1-v8-snapshots",
+      "tags": ["v8", "snapshot", "limitation", "native-addon"]
+    },
+    {
+      "text": "Unreal Engine LOD: load lightweight stub first, swap to full asset when player approaches. Node.js: Proxy-based module stub that replaces itself on first method call",
+      "fragmentType": "analogy",
+      "source": "scout-2-game-streaming",
+      "tags": ["lod", "stub-and-swap", "proxy", "unreal"]
+    },
+    {
+      "text": "id Software virtual textures: page table maps export names to byte ranges in concatenated bundle. Only the called export's bytes are read from disk",
+      "fragmentType": "mechanism",
+      "source": "scout-2-game-streaming",
+      "tags": ["megatexture", "demand-paging", "mmap"]
+    },
+    {
+      "text": "UE5 World Partition: pre-compute minimum dependency subgraph per CLI command at build time. Only bootstrap the intersection of all commands (~5MB core)",
+      "fragmentType": "mechanism",
+      "source": "scout-2-game-streaming",
+      "tags": ["world-partition", "subgraph", "build-time"]
+    },
+    {
+      "text": "Bacillus subtilis spore germination: Stage I structural restore in seconds (Ca-DPA release, SASP degradation), Stage II slow metabolic resume. Software: render TUI frame in Stage I, load agent in Stage II",
+      "fragmentType": "analogy",
+      "source": "scout-3-biology",
+      "tags": ["spore-boot", "two-phase", "germination"]
+    },
+    {
+      "text": "Tardigrade anhydrobiosis: replace water with trehalose glass matrix, lose 97% volume, restore on rehydration. Software: serialize config to frozen JSON blob at exit, JSON.parse (<1ms) to restore",
+      "fragmentType": "analogy",
+      "source": "scout-3-biology",
+      "tags": ["vitrification", "config-cache", "tardigrade"]
+    },
+    {
+      "text": "ESP32 three-stage boot: ROM bootloader → second-stage from flash → full app with FreeRTOS. Each stage only loads what the next needs. Stage N has zero imports from stage N+2",
+      "fragmentType": "mechanism",
+      "source": "scout-4-embedded",
+      "tags": ["multi-stage-boot", "esp32", "decoupled-stages"]
+    },
+    {
+      "text": "Embedded hot/cold module partitioning: linker places .text in flash (XIP), .data in RAM. Hot code in fast SRAM. Build-time lint enforces the boundary",
+      "fragmentType": "mechanism",
+      "source": "scout-4-embedded",
+      "tags": ["hot-cold", "linker-sections", "build-lint"]
+    },
+    {
+      "text": "Chrome zygote pattern: fork pre-initialized process before threads start. COW shares ~8MB library state. Constraint: must fork before libuv thread pool starts, macOS Mach port issues",
+      "fragmentType": "mechanism",
+      "source": "scout-5-forking",
+      "tags": ["zygote", "fork", "cow", "macos-risk"]
+    },
+    {
+      "text": "Daemon + Unix socket: 130μs round-trip. PM2 uses this pattern. Eliminates cold start entirely but makes memory permanent (worse for 'reduce memory' goal)",
+      "fragmentType": "mechanism",
+      "source": "scout-5-forking",
+      "tags": ["daemon", "unix-socket", "persistent-memory"]
+    },
+    {
+      "text": "Bun memory data is contradictory: Trigger.dev reports -55%, but production reports show +75% for long-running processes. Ink on Bun is untested. No reliable step-function improvement",
+      "fragmentType": "risk",
+      "source": "scout-6-runtimes",
+      "tags": ["bun", "unreliable", "compatibility-risk"]
+    },
+    {
+      "text": "CRITICAL: PrefixFingerprint depends on toolsSha256 from ToolRegistry. If PromptEngine or ToolRegistry are deferred to Stage 2, first API call gets wrong hash → prefix cache miss. This is Rivet's core competitive advantage",
+      "fragmentType": "contradiction",
+      "source": "scout-7-counter",
+      "tags": ["prefix-cache", "hard-constraint", "showstopper"]
+    },
+    {
+      "text": "App.tsx is a 40+ import monolith coupling TUI and agent. There is no 'shell-only' boundary. React.lazy/Suspense not documented for Ink. Cannot split Stage 1 TUI from Stage 2 agent without major refactoring",
+      "fragmentType": "observation",
+      "source": "scout-7-counter",
+      "tags": ["monolith", "coupling", "refactor-required"]
+    },
+    {
+      "text": "AgentLoop constructor eagerly instantiates 15+ subsystems with side effects (file I/O, filesystem watches). Proxy stubs cannot defer constructors, only method calls",
+      "fragmentType": "contradiction",
+      "source": "scout-7-counter",
+      "tags": ["constructor-side-effects", "proxy-limitation"]
+    },
+    {
+      "text": "V2 (dual process) extinct: worker_threads don't share V8 heap, each has ~40MB baseline. Two processes = 140MB, worse than single process 135MB",
+      "fragmentType": "risk",
+      "source": "selection-round",
+      "tags": ["extinct-v2", "worker-threads", "memory-additive"]
+    },
+    {
+      "text": "V3 (daemon) extinct: contradicts user's core concern 'memory usage'. 135MB permanent resident is worse than 135MB transient",
+      "fragmentType": "risk",
+      "source": "selection-round",
+      "tags": ["extinct-v3", "permanent-memory"]
+    },
+    {
+      "text": "Convergence insight: Rivet's startup memory problem is not 'too many modules' but 'loaded too early'. The fix is identifying 'when is it actually needed' and deferring to that moment",
+      "fragmentType": "observation",
+      "source": "adaptation-round",
+      "tags": ["convergence", "core-insight", "timing-not-quantity"]
+    }
+  ],
+  "candidates": [
+    {
+      "id": "V1",
+      "niche": "minimal risk surgical optimization",
+      "oneLiner": "Dynamic import() for MCP SDK (24MB), better-sqlite3 (6MB), turndown (2MB) — load on first use, not at startup",
+      "status": "survived",
+      "fragmentRefs": ["CRITICAL: PrefixFingerprint", "ESP32 three-stage boot", "Convergence insight"]
+    },
+    {
+      "id": "V2",
+      "niche": "process-level separation",
+      "oneLiner": "TUI process + Agent process via worker_threads/IPC",
+      "status": "extinct",
+      "extinctionReason": "worker_threads don't share V8 heap; dual process memory is additive (140MB > 135MB)"
+    },
+    {
+      "id": "V3",
+      "niche": "eliminate cold start via persistence",
+      "oneLiner": "Daemon with Unix socket thin client",
+      "status": "extinct",
+      "extinctionReason": "135MB permanent resident contradicts user's core 'reduce memory' goal"
+    },
+    {
+      "id": "V4",
+      "niche": "build-time optimization",
+      "oneLiner": "tsup treeshake + multi-entry subgraph analysis",
+      "status": "survived",
+      "fragmentRefs": ["UE5 World Partition", "Embedded hot/cold module"]
+    }
+  ]
+}

@@ -5,6 +5,11 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { distillSession, persistDream, type DreamInput } from '../dream.js'
 
+function todaySessionPath(cwd: string): string {
+  const date = new Date().toISOString().slice(0, 10)
+  return join(cwd, '.rivet', 'sessions', `${date}.md`)
+}
+
 describe('distillSession', () => {
   it('returns null when no files modified', () => {
     const input: DreamInput = {
@@ -93,7 +98,7 @@ describe('persistDream', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('writes knowledge file when files modified', () => {
+  it('writes session log when files modified', () => {
     const input: DreamInput = {
       filesModified: ['src/a.ts'],
       filesRead: [],
@@ -103,7 +108,7 @@ describe('persistDream', () => {
       sessionId: 'test-session',
     }
     persistDream(tmpDir, input)
-    const path = join(tmpDir, '.rivet', 'knowledge', 'project-memory.md')
+    const path = todaySessionPath(tmpDir)
     assert.ok(existsSync(path))
     const content = readFileSync(path, 'utf-8')
     assert.ok(content.includes('src/a.ts'))
@@ -111,10 +116,9 @@ describe('persistDream', () => {
   })
 
   it('does not create file when no files modified', () => {
-    // Ensure clean state
-    const knowledgeDir = join(tmpDir, '.rivet', 'knowledge')
-    const path = join(knowledgeDir, 'project-memory.md')
-    try { rmSync(knowledgeDir, { recursive: true, force: true }) } catch { /* ok */ }
+    const sessionsDir = join(tmpDir, '.rivet', 'sessions')
+    const path = todaySessionPath(tmpDir)
+    try { rmSync(sessionsDir, { recursive: true, force: true }) } catch { /* ok */ }
 
     const input: DreamInput = {
       filesModified: [],
@@ -128,7 +132,7 @@ describe('persistDream', () => {
     assert.ok(!existsSync(path))
   })
 
-  it('prepends new entries to existing file', () => {
+  it('prepends new entries to existing session file', () => {
     const input1: DreamInput = {
       filesModified: ['src/a.ts'],
       filesRead: [],
@@ -149,42 +153,12 @@ describe('persistDream', () => {
     }
     persistDream(tmpDir, input2)
 
-    const path = join(tmpDir, '.rivet', 'knowledge', 'project-memory.md')
+    const path = todaySessionPath(tmpDir)
     const content = readFileSync(path, 'utf-8')
     const idxA = content.indexOf('src/a.ts')
     const idxB = content.indexOf('src/b.ts')
     // Most recent entry (b) should come first
     assert.ok(idxB < idxA, `b.ts should come before a.ts, got b at ${idxB} a at ${idxA}`)
-  })
-
-  it('truncates at entry boundary, not mid-line', () => {
-    // Use a fresh tmpDir for this test
-    const truncDir = mkdtempSync(join(tmpdir(), 'dream-trunc-'))
-    try {
-      for (let i = 0; i < 15; i++) {
-        persistDream(truncDir, {
-          filesModified: Array.from({ length: 8 }, (_, j) => `src/module${i}/file${j}.ts`),
-          filesRead: [],
-          verifications: [{ command: 'npm test', status: 'passed', scope: 'full' as const, exitCode: 0, passed: 10, failed: 0, skipped: 0, durationMs: 100 }],
-          decisions: [`Decision for session ${i}`],
-          trajectoryEntries: [{ tool: 'edit_file', target: `src/module${i}/file0.ts`, status: 'success' as const }],
-          sessionId: `session-${String(i).padStart(4, '0')}`,
-        })
-      }
-      const path = join(truncDir, '.rivet', 'knowledge', 'project-memory.md')
-      const content = readFileSync(path, 'utf-8')
-      // File should not exceed MAX_FILE_SIZE (8000)
-      assert.ok(content.length <= 8000, `content length ${content.length} exceeds 8000`)
-      // Every ### header should be complete
-      const lines = content.split('\n')
-      for (const line of lines) {
-        if (line.startsWith('### ')) {
-          assert.match(line, /^### \d{4}-\d{2}-\d{2}/)
-        }
-      }
-    } finally {
-      rmSync(truncDir, { recursive: true, force: true })
-    }
   })
 
   it('deduplicates entries with same files in same day', () => {
@@ -202,12 +176,34 @@ describe('persistDream', () => {
       persistDream(dedupDir, { ...baseInput, sessionId: 'session-dup2' })
       persistDream(dedupDir, { ...baseInput, sessionId: 'session-dup3' })
 
-      const path = join(dedupDir, '.rivet', 'knowledge', 'project-memory.md')
+      const path = todaySessionPath(dedupDir)
       const content = readFileSync(path, 'utf-8')
       const entryCount = (content.match(/^### /gm) || []).length
       assert.ok(entryCount <= 2, `expected <=2 entries but got ${entryCount}`)
     } finally {
       rmSync(dedupDir, { recursive: true, force: true })
+    }
+  })
+
+  it('never writes to .rivet/knowledge/ — human-maintained zone', () => {
+    const isolatedDir = mkdtempSync(join(tmpdir(), 'dream-protect-'))
+    try {
+      const knowledgeDir = join(isolatedDir, '.rivet', 'knowledge')
+      persistDream(isolatedDir, {
+        filesModified: ['src/anything.ts', 'src/agent/loop.ts', 'src/tui/app.tsx'],
+        filesRead: [],
+        verifications: [],
+        decisions: [],
+        trajectoryEntries: [],
+        sessionId: 'protect-test',
+      })
+      assert.ok(
+        !existsSync(knowledgeDir),
+        '.rivet/knowledge/ must NEVER be auto-created by dream telemetry — it is the human zone',
+      )
+      assert.ok(existsSync(todaySessionPath(isolatedDir)), 'telemetry should land in .rivet/sessions/')
+    } finally {
+      rmSync(isolatedDir, { recursive: true, force: true })
     }
   })
 })

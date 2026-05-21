@@ -1,0 +1,1104 @@
+[
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.949919,
+    "depositedAt": 1779283175425,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-session.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.948615,
+    "depositedAt": 1779279481550,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "virtue-signal",
+    "signal": "proactive-verification",
+    "strength": 0.998729,
+    "depositedAt": 1779291295544,
+    "halfLife": 1209600000,
+    "context": "模型在无人要求时主动运行测试——义之所在，不待人言"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/client.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.956323,
+    "depositedAt": 1779279869239,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/provider.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.962875,
+    "depositedAt": 1779279893500,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/openai-client.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999987,
+    "depositedAt": 1779311346625,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/openai-client.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779310741363,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tools",
+    "signal": "strategic-awareness",
+    "strength": 0.994719,
+    "depositedAt": 1779280044362,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "cd /Users/banxia/app/deepseek-tui/opencode-tui && ",
+    "signal": "strategic-awareness",
+    "strength": 0.995511,
+    "depositedAt": 1779349852846,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/CLAUDE.md",
+    "signal": "strategic-awareness",
+    "strength": 0.916328,
+    "depositedAt": 1779280657062,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui",
+    "signal": "strategic-awareness",
+    "strength": 0.778147,
+    "depositedAt": 1779349597023,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/CLAUDE.md",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779280657062,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/stars/archive/CLAUDE.tianshu-2.0.md",
+    "signal": "boundary-respect",
+    "strength": 0.939547,
+    "depositedAt": 1779280793843,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src",
+    "signal": "strategic-awareness",
+    "strength": 0.901562,
+    "depositedAt": 1779349991811,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/stars/tianshu-gpt-5.5.md",
+    "signal": "boundary-respect",
+    "strength": 0.956323,
+    "depositedAt": 1779280861311,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/stars/tianfu-gpt.md",
+    "signal": "boundary-respect",
+    "strength": 0.962875,
+    "depositedAt": 1779280861339,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/stars/pojun-mimo-v2.5-pro.md",
+    "signal": "boundary-respect",
+    "strength": 0.968444,
+    "depositedAt": 1779280861439,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/stars/tianxuan-opus-4.6.md",
+    "signal": "boundary-respect",
+    "strength": 0.973177,
+    "depositedAt": 1779280861475,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/stars/tianquan-deepseek-v4-pro.md",
+    "signal": "boundary-respect",
+    "strength": 0.9772,
+    "depositedAt": 1779280922527,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/stars/tianji-glm-5.1.md",
+    "signal": "boundary-respect",
+    "strength": 0.98062,
+    "depositedAt": 1779280922528,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/stars/README.md",
+    "signal": "boundary-respect",
+    "strength": 0.998561,
+    "depositedAt": 1779281329844,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/openai-client.ts",
+    "signal": "boundary-respect",
+    "strength": 0.963865,
+    "depositedAt": 1779310763441,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/CLAUDE.md",
+    "signal": "boundary-respect",
+    "strength": 0.985998,
+    "depositedAt": 1779280949396,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/__tests__/openai-client.test.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.799504,
+    "depositedAt": 1779280960513,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/default.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779334179013,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/default.ts",
+    "signal": "boundary-respect",
+    "strength": 0.843986,
+    "depositedAt": 1779310700736,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/openai-client.ts",
+    "signal": "fragile",
+    "strength": 0.8,
+    "depositedAt": 1779281399832,
+    "halfLife": 604800000
+  },
+  {
+    "path": "virtue-signal",
+    "signal": "independent-judgment",
+    "strength": 0.999874,
+    "depositedAt": 1779350110861,
+    "halfLife": 1209600000,
+    "context": "模型在置信度充足时选择质疑而非附和——仁者必有勇"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/api/factory.ts",
+    "signal": "boundary-respect",
+    "strength": 0.876793,
+    "depositedAt": 1779281724479,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent",
+    "signal": "strategic-awareness",
+    "strength": 0.997209,
+    "depositedAt": 1779323105809,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/coordinator.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779283203877,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/coordinator.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.991949,
+    "depositedAt": 1779284586347,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779333236492,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779333236492,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/runtime-hooks.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.901562,
+    "depositedAt": 1779281837493,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/runbooks/2026-05-20-mimo-400-troubleshooting.md",
+    "signal": "boundary-respect",
+    "strength": 0.896263,
+    "depositedAt": 1779282205451,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx",
+    "signal": "strategic-awareness",
+    "strength": 0.999362,
+    "depositedAt": 1779349959247,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__",
+    "signal": "strategic-awareness",
+    "strength": 0.884191,
+    "depositedAt": 1779282951477,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779283175424,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-20-three-authority-coroutine-implementation.md",
+    "signal": "strategic-awareness",
+    "strength": 0.996838,
+    "depositedAt": 1779283255537,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-20-three-authority-coroutine-implementation.md",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779283255536,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-20-三权协程闭环-Dispatcher-Hook接入与缺陷修复.md",
+    "signal": "boundary-respect",
+    "strength": 0.998986,
+    "depositedAt": 1779284367051,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": ".rivet",
+    "signal": "strategic-awareness",
+    "strength": 0.778147,
+    "depositedAt": 1779284266665,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs",
+    "signal": "strategic-awareness",
+    "strength": 0.884191,
+    "depositedAt": 1779310649292,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/hooks/dispatcher-hook.ts",
+    "signal": "boundary-respect",
+    "strength": 0.99947,
+    "depositedAt": 1779284396942,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/dispatcher-hook.test.ts",
+    "signal": "boundary-respect",
+    "strength": 0.999675,
+    "depositedAt": 1779284423597,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-queue.ts",
+    "signal": "boundary-respect",
+    "strength": 0.92165,
+    "depositedAt": 1779284473633,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-queue.test.ts",
+    "signal": "boundary-respect",
+    "strength": 0.951884,
+    "depositedAt": 1779284504108,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/task-board.ts",
+    "signal": "boundary-respect",
+    "strength": 0.997136,
+    "depositedAt": 1779291221594,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/task-board.test.ts",
+    "signal": "boundary-respect",
+    "strength": 0.911789,
+    "depositedAt": 1779308767987,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/coordinator.ts",
+    "signal": "boundary-respect",
+    "strength": 0.993157,
+    "depositedAt": 1779284594448,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/coordinator.test.ts",
+    "signal": "boundary-respect",
+    "strength": 0.995798,
+    "depositedAt": 1779284620969,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-runtime-hooks.ts",
+    "signal": "boundary-respect",
+    "strength": 0.998855,
+    "depositedAt": 1779284668280,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/create-runtime-hooks.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.998653,
+    "depositedAt": 1779284660844,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts",
+    "signal": "boundary-respect",
+    "strength": 0.999633,
+    "depositedAt": 1779284710254,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/create-runtime-hooks.test.ts",
+    "signal": "boundary-respect",
+    "strength": 0.999735,
+    "depositedAt": 1779284728754,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-tianshu-starspine-next-architecture.md",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779284799822,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "src/main.tsx",
+    "signal": "strategic-awareness",
+    "strength": 0.999901,
+    "depositedAt": 1779287255975,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx",
+    "signal": "boundary-respect",
+    "strength": 0.999504,
+    "depositedAt": 1779289900468,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "du -sh ~/Downloads 2>/dev/null",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287338977,
+    "halfLife": 604800000
+  },
+  {
+    "path": "du -sh ~/.Trash 2>/dev/null",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287338980,
+    "halfLife": 604800000
+  },
+  {
+    "path": "find ~ -type f -size +500M 2>/dev/null | head -20",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287338981,
+    "halfLife": 604800000
+  },
+  {
+    "path": "du -sh ~/Library/Caches/* 2>/dev/null | sort -rh |",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287351711,
+    "halfLife": 604800000
+  },
+  {
+    "path": "du -sh ~/Library/Application\\ Support/* 2>/dev/nul",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287351715,
+    "halfLife": 604800000
+  },
+  {
+    "path": "mdfind 'kMDItemFSSize > 500000000' -onlyin ~ 2>/de",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287351717,
+    "halfLife": 604800000
+  },
+  {
+    "path": "du -sh ~/app 2>/dev/null",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287357070,
+    "halfLife": 604800000
+  },
+  {
+    "path": "du -sh ~/Library/Containers 2>/dev/null",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287357071,
+    "halfLife": 604800000
+  },
+  {
+    "path": "docker system df 2>/dev/null || echo \"Docker not r",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287357072,
+    "halfLife": 604800000
+  },
+  {
+    "path": "du -sh /opt/homebrew 2>/dev/null; du -sh ~/.bun 2>",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779287357073,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/schema.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.998904,
+    "depositedAt": 1779287395498,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-20-三权协程闭环-交接文档.md",
+    "signal": "boundary-respect",
+    "strength": 0.999997,
+    "depositedAt": 1779287691774,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/.rivet.md",
+    "signal": "boundary-respect",
+    "strength": 0.985998,
+    "depositedAt": 1779289269237,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/task-board-panel.test.ts",
+    "signal": "boundary-respect",
+    "strength": 0.993543,
+    "depositedAt": 1779291150490,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx",
+    "signal": "strategic-awareness",
+    "strength": 0.863754,
+    "depositedAt": 1779349991810,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779308715022,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/task-board-panel.tsx",
+    "signal": "boundary-respect",
+    "strength": 0.998505,
+    "depositedAt": 1779291289172,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/.rivet.md",
+    "signal": "strategic-awareness",
+    "strength": 0.983527,
+    "depositedAt": 1779289262968,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/.rivet.md",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779289262967,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/task-board-panel.test.ts",
+    "signal": "fragile",
+    "strength": 0.8,
+    "depositedAt": 1779289433385,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/task-board-panel.tsx",
+    "signal": "well-tested",
+    "strength": 0.6,
+    "depositedAt": 1779289404524,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/task-board-panel.tsx",
+    "signal": "fragile",
+    "strength": 0.8,
+    "depositedAt": 1779289404525,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/task-board-panel.test.ts",
+    "signal": "well-tested",
+    "strength": 0.6,
+    "depositedAt": 1779289433384,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui",
+    "signal": "strategic-awareness",
+    "strength": 0.968444,
+    "depositedAt": 1779289612113,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/app.tsx",
+    "signal": "boundary-respect",
+    "strength": 0.998453,
+    "depositedAt": 1779289760024,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999986,
+    "depositedAt": 1779332803910,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts",
+    "signal": "boundary-respect",
+    "strength": 0.985272,
+    "depositedAt": 1779291557112,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/command-palette.tsx",
+    "signal": "boundary-respect",
+    "strength": 0.999193,
+    "depositedAt": 1779289855199,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/auto-reasoning.ts",
+    "signal": "boundary-respect",
+    "strength": 0.999314,
+    "depositedAt": 1779289873297,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/slash-commands.test.ts",
+    "signal": "boundary-respect",
+    "strength": 0.999578,
+    "depositedAt": 1779289923001,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "npx tsc --noEmit",
+    "signal": "strategic-awareness",
+    "strength": 0.813543,
+    "depositedAt": 1779289971369,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/volatile.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.995682,
+    "depositedAt": 1779329451317,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/volatile.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779329378257,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt",
+    "signal": "strategic-awareness",
+    "strength": 0.811425,
+    "depositedAt": 1779290950996,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/micro.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779334353106,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "src/tui/task-board-panel.tsx",
+    "signal": "strategic-awareness",
+    "strength": 0.954058,
+    "depositedAt": 1779291332061,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/tui/slash-commands.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779332890560,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.998762,
+    "depositedAt": 1779323136954,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779291764759,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-20-three-authority-coroutine-architecture.md",
+    "signal": "strategic-awareness",
+    "strength": 0.927889,
+    "depositedAt": 1779292242711,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/engine.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779332790087,
+    "halfLife": 604800000
+  },
+  {
+    "path": "cd /Users/banxia/app/deepseek-tui/opencode-tui && ",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779308546086,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/task-board.test.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.896222,
+    "depositedAt": 1779308756098,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/context/__tests__/cognitive-ledger.test.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.973177,
+    "depositedAt": 1779308751930,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "grep -r \"language\" src/api/",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779310309416,
+    "halfLife": 604800000
+  },
+  {
+    "path": "grep -r \"language\" src/api/",
+    "signal": "strategic-awareness",
+    "strength": 0.803157,
+    "depositedAt": 1779310309417,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "grep -r \"reasoning\" src/config/",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779310313365,
+    "halfLife": 604800000
+  },
+  {
+    "path": "grep -r \"language\" src/config/",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779310331847,
+    "halfLife": 604800000
+  },
+  {
+    "path": "grep -r \"lang\" src/api/",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779310374871,
+    "halfLife": 604800000
+  },
+  {
+    "path": "grep -r \"lang\" src/config/",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779310354125,
+    "halfLife": 604800000
+  },
+  {
+    "path": "grep -A 10 -B 10 \"mimo\" src/config/default.ts",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779310360780,
+    "halfLife": 604800000
+  },
+  {
+    "path": "grep -A 10 -B 10 \"mimo\" src/config/default.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.574992,
+    "depositedAt": 1779310360781,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "find src/api -name \"*.ts\" | grep -v __tests__",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779310365088,
+    "halfLife": 604800000
+  },
+  {
+    "path": "grep -r \"lang\" src/",
+    "signal": "dead-end",
+    "strength": 0.9,
+    "depositedAt": 1779310380943,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/static.ts",
+    "signal": "boundary-respect",
+    "strength": 0.977808,
+    "depositedAt": 1779310793600,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/.rivet/knowledge/project-memory.md",
+    "signal": "boundary-respect",
+    "strength": 0.987362,
+    "depositedAt": 1779312646184,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-21-branch-recovery-diagnosis.md",
+    "signal": "boundary-respect",
+    "strength": 0.824019,
+    "depositedAt": 1779322239398,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-prompts.ts",
+    "signal": "boundary-respect",
+    "strength": 0.827668,
+    "depositedAt": 1779323486673,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/worker-prompts.test.ts",
+    "signal": "boundary-respect",
+    "strength": 0.87549,
+    "depositedAt": 1779323522389,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/context/claims.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.931584,
+    "depositedAt": 1779329373933,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/.rivet/knowledge/project-memory.md",
+    "signal": "strategic-awareness",
+    "strength": 0.999946,
+    "depositedAt": 1779331966520,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/session-persist.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.992969,
+    "depositedAt": 1779329422787,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/.rivet/knowledge/project-memory.md",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779331966519,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/prompt/static.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999992,
+    "depositedAt": 1779332823630,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/context-injection.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779332947442,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/turn-perception.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779332959925,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/turn-perception.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779332959925,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/context/cognitive-ledger.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779333102323,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/sycophancy-trap.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779333117916,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/context/task-contract.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779333184147,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-21-chat-mode-implementation.md",
+    "signal": "boundary-respect",
+    "strength": 0.999997,
+    "depositedAt": 1779334829201,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/resource-sensor.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779333730344,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/agent/recovery-trigger.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779334383878,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "wc -c /Users/banxia/app/deepseek-tui/opencode-tui/",
+    "signal": "strategic-awareness",
+    "strength": 0.999997,
+    "depositedAt": 1779333998311,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/default.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779334179012,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/compact/micro.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779334353105,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/.rivet/knowledge/session-retro-2026-05-21-chat-mode-identity.md",
+    "signal": "boundary-respect",
+    "strength": 0.999997,
+    "depositedAt": 1779334774500,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  },
+  {
+    "path": "/Users/banxia/.cli-proxy-api",
+    "signal": "strategic-awareness",
+    "strength": 0.859438,
+    "depositedAt": 1779337564711,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-21-tianshu-pure-delivery-roadmap.md",
+    "signal": "strategic-awareness",
+    "strength": 0.999826,
+    "depositedAt": 1779350088701,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/manager.ts",
+    "signal": "strategic-awareness",
+    "strength": 0.939547,
+    "depositedAt": 1779349767043,
+    "halfLife": 1209600000,
+    "context": "模型在重复操作后觉察并调整策略——知止不殆"
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/manager.ts",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779349767041,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/main.tsx",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779349838247,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-21-tianshu-pure-delivery-roadmap.md",
+    "signal": "entry-point",
+    "strength": 0.4,
+    "depositedAt": 1779350088700,
+    "halfLife": 604800000
+  },
+  {
+    "path": "/Users/banxia/app/deepseek-tui/opencode-tui/src/config/first-run.ts",
+    "signal": "boundary-respect",
+    "strength": 0.999852,
+    "depositedAt": 1779350102335,
+    "halfLife": 1209600000,
+    "context": "模型在修改文件前经过审批确认——非礼勿动"
+  }
+]

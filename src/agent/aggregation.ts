@@ -9,8 +9,8 @@ function confidenceScore(result: WorkerResult): number {
   return total / result.findings.length
 }
 
-export function aggregateResults(results: WorkerResult[], policy: AggregationPolicy): WorkerResult[] {
-  const gated = results.map(r => verifyWorkerEvidence(r))
+export function aggregateResults(results: WorkerResult[], policy: AggregationPolicy, profiles?: Map<string, string>): WorkerResult[] {
+  const gated = results.map(r => verifyWorkerEvidence(r, profiles?.get(r.workOrderId)))
 
   if (policy === 'primary_decides') return gated
 

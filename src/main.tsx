@@ -1,3 +1,10 @@
+import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici'
+
+const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
+if (proxyUrl) {
+  setGlobalDispatcher(new EnvHttpProxyAgent())
+}
+
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'

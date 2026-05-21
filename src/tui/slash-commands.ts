@@ -18,7 +18,8 @@ import { loadProjectRules } from '../context/rules-loader.js'
 import { exportDurableClaims, importClaims } from '../context/claim-export.js'
 import { resolveEcosystemWorkflowInput } from '../workflows/ecosystem-workflows.js'
 import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { parsePromptMode } from '../prompt/mode.js'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -65,6 +66,74 @@ export function formatContextClaimsCommand(store: ContextClaimStore, status?: Co
   return claims.map(formatClaimLine).join('\n')
 }
 
+export function formatVerificationStatus(agent: AgentLoop): string {
+  const summary = agent.getVerificationSummary()
+  if (summary.total === 0) return 'Verification Status\n\nNo modified files tracked in this turn.'
+  const lines = summary.files.map(file => {
+    const icon = file.level === 'pending' ? '✗' : '✓'
+    return `  ${icon} ${file.path} (${file.level})`
+  })
+  const percent = Math.round((summary.verified / summary.total) * 100)
+  const state = agent.getEvidenceState()
+  const last = state.verifications.at(-1)
+  const lastLine = last ? `\nLast verification: ${last.status} — ${last.command}` : '\nLast verification: none'
+  return `Verification Status\n\nModified files:\n${lines.join('\n')}\n\nVerification: ${summary.verified}/${summary.total} (${percent}%)${lastLine}`
+}
+
+function knowledgeDir(): string {
+  return join(process.cwd(), '.rivet', 'knowledge')
+}
+
+function appendProjectKnowledge(text: string): string {
+  const dir = knowledgeDir()
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, 'memory.md')
+  const line = `- ${new Date().toISOString()} ${text}\n`
+  writeFileSync(file, line, { flag: 'a' })
+  return file
+}
+
+export function formatMemoryOverview(ctx: SlashHandlerContext): string {
+  const memory = ctx.persist.loadMemory()
+  const sessionLines = memory.entries.length === 0
+    ? ['  (empty)']
+    : memory.entries.slice(-8).map(e => `  • [${e.id}] ${e.text}`)
+
+  const pheromones = ctx.agent.getLatestPheromones?.() ?? []
+  const pheromoneLines = pheromones.length === 0
+    ? ['  (none loaded yet)']
+    : pheromones.slice(0, 8).map(p => `  • ${p.path} — ${p.signal} (${p.strength.toFixed(2)})`)
+
+  const dir = knowledgeDir()
+  const knowledgeFiles = existsSync(dir)
+    ? readdirSync(dir).filter(f => f.endsWith('.md')).slice(0, 8)
+    : []
+  const knowledgeLines = knowledgeFiles.length === 0
+    ? ['  (none)']
+    : knowledgeFiles.map(f => `  • ${f}`)
+
+  return `天枢记忆\n\n📝 当前 session (${memory.entries.length} 条)\n${sessionLines.join('\n')}\n\n🧠 项目直觉 (${pheromones.length} 条)\n${pheromoneLines.join('\n')}\n\n📚 项目知识 (${knowledgeFiles.length} 篇)\n${knowledgeLines.join('\n')}\n\n命令: /memory add <内容> | /memory search <query> | /memory forget <id>`
+}
+
+export function searchMemory(ctx: SlashHandlerContext, query: string): string {
+  const needle = query.toLowerCase()
+  const sessionHits = ctx.persist.loadMemory().entries
+    .filter(e => e.text.toLowerCase().includes(needle))
+    .map(e => `session:${e.id} ${e.text}`)
+  const pheromoneHits = (ctx.agent.getLatestPheromones?.() ?? [])
+    .filter(p => `${p.path} ${p.signal} ${p.context ?? ''}`.toLowerCase().includes(needle))
+    .map(p => `pheromone:${p.path} ${p.signal} ${p.context ?? ''}`)
+  const dir = knowledgeDir()
+  const knowledgeHits = existsSync(dir)
+    ? readdirSync(dir).filter(f => f.endsWith('.md')).flatMap(file => {
+      const content = readFileSync(join(dir, file), 'utf-8')
+      return content.toLowerCase().includes(needle) ? [`knowledge:${file} ${content.slice(0, 160).replaceAll('\n', ' ')}`] : []
+    })
+    : []
+  const hits = [...sessionHits, ...pheromoneHits, ...knowledgeHits].slice(0, 20)
+  return hits.length === 0 ? `No memory found for "${query}".` : `Memory search: ${query}\n${hits.map(h => `- ${h}`).join('\n')}`
+}
+
 export function resolveAppPromptInput(input: string, cwd: string): string {
   if (!input.startsWith('/')) return input
   const workflow = resolveEcosystemWorkflowInput(input)
@@ -84,6 +153,10 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /quit — Exit
 /compact — Compact conversation context
 /model [name|list] — Show or switch model
+/chat — Switch to lightweight chat mode
+/task — Switch to full task execution mode
+/mode [chat|task] — Show or switch prompt mode
+/verify — Show verification status
 /verbose — Toggle verbose tool output
 /effort [off|low|medium|high|max] — Set reasoning effort (max = always full reasoning)
 /debug [prompt|fingerprint|cache|context-payload|mcp] — Debug prefix cache, prompt, context payload, and MCP connections
@@ -153,6 +226,34 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         } else {
           pushStatic(createLogEntry({ type: 'system', content: result.error ?? `Model "${targetModel}" not found.` }))
         }
+      }
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/chat': {
+      ctx.agent.setPromptMode('chat')
+      pushStatic(createLogEntry({ type: 'system', content: 'Mode switched to chat. CVM/task-contract overhead will be skipped for lightweight conversation.' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/task': {
+      ctx.agent.setPromptMode('task')
+      pushStatic(createLogEntry({ type: 'system', content: 'Mode switched to task. Full execution pipeline is enabled.' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/mode': {
+      const requested = parsePromptMode(parts[1])
+      if (!parts[1]) {
+        pushStatic(createLogEntry({ type: 'system', content: `Current mode: ${ctx.agent.getPromptMode()}\nUsage: /mode chat | /mode task` }))
+      } else if (requested) {
+        ctx.agent.setPromptMode(requested)
+        pushStatic(createLogEntry({ type: 'system', content: `Mode switched to ${requested}.` }))
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: 'Unknown mode. Usage: /mode chat | /mode task', isError: true }))
       }
       setIsStreaming(false)
       return true
@@ -443,16 +544,35 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       return true
     }
 
+    case '/verify': {
+      pushStatic(createLogEntry({ type: 'system', content: formatVerificationStatus(ctx.agent) }))
+      setIsStreaming(false)
+      return true
+    }
+
     case '/memory': {
-      const text = parts.slice(1).join(' ').trim()
-      if (!text) {
-        const memory = ctx.persist.loadMemory()
-        const content = memory.entries.length === 0
-          ? 'Session memory is empty.'
-          : memory.entries.map(entry => `- [${entry.source}] ${entry.text}`).join('\n')
-        pushStatic(createLogEntry({ type: 'system', content }))
+      const subcmd = parts[1]
+      const text = parts.slice(2).join(' ').trim()
+      if (!subcmd) {
+        pushStatic(createLogEntry({ type: 'system', content: formatMemoryOverview(ctx) }))
+      } else if (subcmd === 'add') {
+        if (!text) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /memory add <content>', isError: true }))
+        } else {
+          const file = appendProjectKnowledge(text)
+          pushStatic(createLogEntry({ type: 'system', content: `Saved to project knowledge: ${file}` }))
+        }
+      } else if (subcmd === 'search') {
+        if (!text) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /memory search <query>', isError: true }))
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: searchMemory(ctx, text) }))
+        }
+      } else if (subcmd === 'forget') {
+        pushStatic(createLogEntry({ type: 'system', content: 'Forget is not yet destructive in Wave 1. Use the displayed memory id/file to remove manually for now.' }))
       } else {
-        ctx.persist.appendMemory({ text, source: 'manual', createdAt: Date.now() })
+        const legacyText = parts.slice(1).join(' ').trim()
+        ctx.persist.appendMemory({ text: legacyText, source: 'manual', createdAt: Date.now() })
         ctx.agent.updateSessionMemory(ctx.persist.buildMemoryBlock())
         pushStatic(createLogEntry({ type: 'system', content: 'Saved to session memory.' }))
       }

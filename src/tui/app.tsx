@@ -1174,6 +1174,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           interview={interviewState}
           clarityHistory={clarityHistory}
           reasoningEffort={reasoningEffort}
+          verification={agent.getVerificationSummary()}
         />
         {isStreaming && !cockpitPanel && <SummaryBar state={summaryState} />}
         {starbridgeMode === 'starmap' && (

@@ -30,6 +30,12 @@ function cacheStatusColor(status: string, rate: number): string {
   return cacheColor(rate)
 }
 
+function verificationSummaryColor(verified: number, total: number): string {
+  if (total === 0 || verified === total) return 'green'
+  if (verified === 0) return 'red'
+  return 'yellow'
+}
+
 describe('StatusBar color logic', () => {
   it('maps context health levels to correct colors', () => {
     assert.equal(contextColor('healthy'), 'green')
@@ -61,5 +67,12 @@ describe('StatusBar color logic', () => {
     assert.equal(cacheStatusColor('recovering', 0.5), 'yellow')
     assert.equal(cacheStatusColor('healthy', 0.2), 'red')
     assert.equal(cacheStatusColor('healthy', 0.9), 'green')
+  })
+
+  it('maps verification summary to correct colors', () => {
+    assert.equal(verificationSummaryColor(0, 0), 'green')
+    assert.equal(verificationSummaryColor(0, 2), 'red')
+    assert.equal(verificationSummaryColor(1, 2), 'yellow')
+    assert.equal(verificationSummaryColor(2, 2), 'green')
   })
 })
