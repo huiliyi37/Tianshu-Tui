@@ -7,6 +7,8 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { truncateContent } from './truncation.js'
 import { GitignoreFilter } from './gitignore.js'
 import { validatePathSafe } from './path-validate.js'
+import { summarizeGrepResult } from '../artifact/summarize.js'
+import type { ArtifactStore } from '../artifact/store.js'
 
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
@@ -53,7 +55,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const absPath = validated.path
 
     // Try ripgrep first, fall back to native search
-    const rgResult = await tryRipgrep(pattern, absPath, glob, maxResults, params.cwd, literal)
+    const rgResult = await tryRipgrep(pattern, absPath, glob, maxResults, params.cwd, literal, params.artifactStore)
     if (rgResult !== null) return rgResult
 
     // Native fallback
@@ -70,6 +72,22 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
       const text = results.length > maxResults
         ? results.slice(0, maxResults).join('\n') + '\n... (truncated)'
         : results.join('\n')
+
+      // Use ArtifactStore if available
+      if (params.artifactStore) {
+        const { summary, sections } = summarizeGrepResult(text, pattern)
+        const artifactId = await params.artifactStore.save({
+          tool: 'grep',
+          target: searchPath,
+          rawContent: text,
+          summary,
+          sections,
+        })
+        return {
+          content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to load details.`,
+        }
+      }
+
       return { content: truncateContent(text, 8000, 4000, 2000) }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
@@ -98,6 +116,7 @@ async function tryRipgrep(
   maxResults: number,
   cwd: string,
   literal: boolean,
+  artifactStore?: ArtifactStore,
 ): Promise<ToolResult | null> {
   return new Promise((resolve) => {
     const args = [
@@ -163,7 +182,29 @@ async function tryRipgrep(
       }
       const lines = stdout.split('\n').filter(l => l.length > 0).slice(0, maxResults)
       const suffix = lineCount >= maxResults ? '\n... (truncated)' : ''
-      resolve({ content: truncateContent(lines.join('\n') + suffix, 8000, 4000, 2000) })
+      const text = lines.join('\n') + suffix
+
+      // Use ArtifactStore if available
+      if (artifactStore) {
+        const { summary, sections } = summarizeGrepResult(text, pattern)
+        void artifactStore.save({
+          tool: 'grep',
+          target: absPath,
+          rawContent: text,
+          summary,
+          sections,
+        }).then(artifactId => {
+          resolve({
+            content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to load details.`,
+          })
+        }).catch(() => {
+          // Fallback to truncation if artifact save fails
+          resolve({ content: truncateContent(text, 8000, 4000, 2000) })
+        })
+        return
+      }
+
+      resolve({ content: truncateContent(text, 8000, 4000, 2000) })
     })
   })
 }

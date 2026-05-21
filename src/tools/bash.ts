@@ -4,6 +4,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
+import { summarizeBashOutput } from '../artifact/summarize.js'
 
 function rtkRewrite(command: string): string {
   try {
@@ -96,6 +97,24 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         const exitCode = isTimeout ? -1 : code
         const meta = { command: rawCommand, exitCode, durationMs }
         const rawPath = await persistRawOutput(params.toolUseId, raw)
+
+        // Use ArtifactStore if available, otherwise fallback to output-store
+        if (params.artifactStore) {
+          const { summary, sections } = summarizeBashOutput(raw, rawCommand, exitCode)
+          const artifactId = await params.artifactStore.save({
+            tool: 'bash',
+            target: rawCommand,
+            rawContent: raw,
+            summary,
+            sections,
+          })
+          return {
+            content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to load details.`,
+            uiContent: buildUiOutput(raw, meta),
+            rawPath,
+            isError: exitCode !== 0,
+          }
+        }
 
         return {
           content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),

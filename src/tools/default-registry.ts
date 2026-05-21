@@ -6,6 +6,7 @@ import { GLOB_TOOL } from './glob.js'
 import { GREP_TOOL } from './grep.js'
 import { INSPECT_PROJECT_TOOL } from './inspect-project.js'
 import { READ_FILE_TOOL } from './read-file.js'
+import { READ_SECTION_TOOL } from './read-section.js'
 import { RELATED_TESTS_TOOL } from './related-tests.js'
 import { REPO_MAP_TOOL } from './repo-map.js'
 import { RUN_TESTS_TOOL } from './run-tests.js'
@@ -33,6 +34,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(REPO_MAP_TOOL)
   registry.register(RELATED_TESTS_TOOL)
   registry.register(WEB_SEARCH_TOOL)
+  registry.register(READ_SECTION_TOOL)
   for (const tool of extraTools) registry.register(tool)
   return registry
 }

@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../api/types.js'
+import type { ArtifactStore } from '../artifact/store.js'
 
 export interface ToolCallParams {
   input: Record<string, unknown>
@@ -7,6 +8,8 @@ export interface ToolCallParams {
   onOutput?: (chunk: string) => void
   /** Files this session/tool pipeline owns and may safely include in scoped write operations. */
   sessionModifiedFiles?: string[]
+  /** Artifact store for persisting tool output — no global setter, always inject via params */
+  artifactStore?: ArtifactStore
 }
 
 export interface VerificationMetadata {
