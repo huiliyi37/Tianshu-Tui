@@ -180,7 +180,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
       maxTurns: input.budget?.maxTurns ?? 4,
-      maxTokens: input.budget?.maxTokens ?? 8192,
+      maxTokens: input.budget?.maxTokens ?? 4096,
       timeoutMs: input.budget?.timeoutMs ?? 120_000,
       maxRetries: input.budget?.maxRetries ?? 2,
     },
@@ -213,7 +213,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
       maxTurns: input.budget?.maxTurns ?? 8,
-      maxTokens: input.budget?.maxTokens ?? 8192,
+      maxTokens: input.budget?.maxTokens ?? 16384,
       timeoutMs: input.budget?.timeoutMs ?? 180_000,
       maxRetries: input.budget?.maxRetries ?? 1,
     },
