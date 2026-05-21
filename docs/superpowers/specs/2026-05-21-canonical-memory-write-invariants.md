@@ -271,3 +271,23 @@ verify_session_did_not_violate_invariants(session):
 - 修订内容：上方 X 段应理解为 Y
 - 修订原因：...
 -->
+
+### 2026-05-22 — 校准 1.1（append-only-artifact-log plan）— 天枢
+
+- **修订内容**：§"路径分类" → "Ephemeral Memory" 表追加两条路径
+- **修订原因**：Plan `docs/superpowers/plans/2026-05-22-append-only-artifact-log.md` 引入 `.rivet/artifacts/{sessionId}/` 目录存放 tool output 原始全文与 artifact metadata 索引。这些路径是 session-scoped、machine-only 的运行时数据，必须显式归类为 ephemeral，否则下一个 writer 不知道这条边界 → 违反 Invariant 2（Namespace Separation）。
+
+**追加 Ephemeral 路径：**
+
+| 路径 | 内容性质 |
+|------|---------|
+| `.rivet/artifacts/{sessionId}/*.raw` | tool output 原始全文（machine-only, session-scoped） |
+| `.rivet/artifacts/{sessionId}/_index.jsonl` | artifact metadata 持久化索引（machine-only） |
+
+**新增边界模糊带条目**（待实施后归类）：
+
+| 路径 | 当前状态 | 需要的决定 |
+|------|---------|----------|
+| `.rivet/artifacts/{sessionId}/` | artifact plan Task 2-3 实施后将创建 | 自动归类 ephemeral。若未来需要跨 session 持久化（如 Task 11 GC TTL > 0），需重新审视 Invariant 2 的 promotion gate |
+
+**Plan §"文件结构 / 新建文件" reference**：上述两条路径对应 plan 中 `src/artifact/store.ts`（ArtifactStore）管理的磁盘落点。
