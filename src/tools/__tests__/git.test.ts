@@ -52,7 +52,7 @@ describe('GIT_TOOL', () => {
     assert.ok(result.content.includes('a.txt'))
   })
 
-  it('commits changes with message', async () => {
+  it('commits staged changes with message when no session files are available', async () => {
     writeFileSync(join(TMP, 'a.txt'), 'hello')
     execSync('git add .', { cwd: TMP })
     execSync('git commit -m "init"', { cwd: TMP })
@@ -66,6 +66,55 @@ describe('GIT_TOOL', () => {
     })
     assert.equal(result.isError, undefined)
     assert.ok(result.content.includes('Add b.txt'))
+  })
+
+  it('commits only session modified files and leaves unrelated worktree changes alone', async () => {
+    writeFileSync(join(TMP, 'owned.txt'), 'base owned')
+    writeFileSync(join(TMP, 'other.txt'), 'base other')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "init"', { cwd: TMP })
+
+    writeFileSync(join(TMP, 'owned.txt'), 'owned change')
+    writeFileSync(join(TMP, 'new-owned.txt'), 'new owned')
+    writeFileSync(join(TMP, 'other.txt'), 'other session change')
+    writeFileSync(join(TMP, 'other-new.txt'), 'other new')
+
+    const result = await GIT_TOOL.execute({
+      input: { action: 'commit', message: 'Commit owned files' },
+      toolUseId: 'tu_scoped',
+      cwd: TMP,
+      sessionModifiedFiles: [join(TMP, 'owned.txt'), join(TMP, 'new-owned.txt')],
+    })
+    assert.equal(result.isError, undefined)
+
+    const committedFiles = execSync('git show --name-only --pretty=format: HEAD', { cwd: TMP, encoding: 'utf-8' })
+      .split('\n')
+      .filter(Boolean)
+      .sort()
+    assert.deepEqual(committedFiles, ['new-owned.txt', 'owned.txt'])
+
+    const status = execSync('git status --porcelain', { cwd: TMP, encoding: 'utf-8' })
+    assert.match(status, / M other\.txt/)
+    assert.match(status, /\?\? other-new\.txt/)
+    assert.ok(!status.includes('owned.txt'))
+    assert.ok(!status.includes('new-owned.txt'))
+  })
+
+  it('refuses to commit unstaged changes when session ownership is unknown', async () => {
+    writeFileSync(join(TMP, 'a.txt'), 'hello')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "init"', { cwd: TMP })
+    const headBefore = execSync('git rev-parse --short HEAD', { cwd: TMP, encoding: 'utf-8' }).trim()
+    writeFileSync(join(TMP, 'a.txt'), 'dirty')
+
+    const result = await GIT_TOOL.execute({
+      input: { action: 'commit', message: 'Should not auto stage' },
+      toolUseId: 'tu_unscoped_dirty',
+      cwd: TMP,
+    })
+    assert.equal(result.isError, true)
+    assert.match(result.content, /No session-owned files/)
+    assert.equal(execSync('git rev-parse --short HEAD', { cwd: TMP, encoding: 'utf-8' }).trim(), headBefore)
   })
 
   it('rejects unknown action', async () => {

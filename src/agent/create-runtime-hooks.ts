@@ -30,6 +30,10 @@ export interface RuntimeHookDeps {
   setThetaState: (state: any) => void
   getPredictionAccumulator: () => any
   telemetryWriter?: TelemetryWriter
+  /** Publish cross-session event (file changes, type errors, etc.) */
+  publishEvent?: (input: { eventType: string; filePath?: string; detail?: string; priority?: number }) => void
+  /** Current session ID for event attribution */
+  sessionId?: string
   dream?: {
     cwd: string
     sessionId: string
@@ -62,6 +66,8 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       query: deps.stigmergyQuery,
       getEvidenceState: deps.getEvidenceState,
       setLoadedPheromones: deps.setLoadedPheromones,
+      publishEvent: deps.publishEvent,
+      sessionId: deps.sessionId,
     }),
     ...(deps.getFileObservations
       ? [createConsistencyCheckHook({ getFileObservations: deps.getFileObservations })]

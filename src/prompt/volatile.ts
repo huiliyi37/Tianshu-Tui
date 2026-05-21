@@ -37,6 +37,8 @@ export interface VolatileContext {
   impactHint?: string | null
   routingReason?: string | null
   cerebellarHint?: string | null
+  /** Cross-session events formatted for injection (cache-safe: only in dynamic appendix) */
+  crossSessionEvents?: string
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -194,6 +196,10 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
       })
       .join('\n')
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+  }
+
+  if (ctx.crossSessionEvents) {
+    parts.push(ctx.crossSessionEvents)
   }
 
   return parts.length > 0 ? `<context-update>\n${parts.join('\n\n')}\n</context-update>` : ''

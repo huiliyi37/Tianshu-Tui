@@ -118,6 +118,7 @@ export async function executeToolUse(
     onOutput: (chunk) => {
       callbacks.onToolResult(tu.id, tu.name, chunk)
     },
+    sessionModifiedFiles: [...deps.evidence.getState().filesModified],
   }
 
   try {

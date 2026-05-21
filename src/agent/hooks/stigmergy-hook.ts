@@ -8,6 +8,10 @@ export interface StigmergyRuntimeHookDeps {
   query: () => Promise<PheromoneQueryResult[]>
   getEvidenceState: () => { verifications: Array<{ status: string }> }
   setLoadedPheromones: (pheromones: PheromoneQueryResult[]) => void
+  /** Publish cross-session event to SQLite events table */
+  publishEvent?: (input: { eventType: string; filePath?: string; detail?: string; priority?: number }) => void
+  /** Current session ID for event attribution */
+  sessionId?: string
 }
 
 export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): PostToolRuntimeHook {
@@ -81,6 +85,20 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
 
       for (const deposit of deposits) {
         await deps.deposit(deposit)
+      }
+
+      // Publish cross-session event for file modifications
+      if (deps.publishEvent && deps.sessionId) {
+        if ((tool.name === 'write_file' || tool.name === 'edit_file') && tool.target && tool.success) {
+          try {
+            deps.publishEvent({
+              eventType: 'file_changed',
+              filePath: tool.target,
+              detail: `Modified by session ${deps.sessionId.slice(0, 8)}`,
+              priority: 0,
+            })
+          } catch { /* cross-session events are best-effort */ }
+        }
       }
 
       const pheromones = await deps.query()

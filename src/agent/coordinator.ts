@@ -24,6 +24,8 @@ import { classifyProfile } from './coordination-policy.js'
 import { aggregateResults } from './aggregation.js'
 import { CoordinatorState } from './coordinator-state.js'
 import { WorkOrderQueue } from './work-queue.js'
+import { CollaborationProtocol, type CollaborationConfig } from './collaboration-protocol.js'
+import type { LockIntent } from './semantic-lock.js'
 
 export interface DelegationRequest {
   parentTurnId: string
@@ -71,6 +73,8 @@ export interface DelegationCoordinatorConfig {
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   /** Current session ID for claim management. */
   sessionId?: string
+  /** Optional collaboration protocol for semantic locking and merge coordination. */
+  collaboration?: CollaborationConfig
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -97,11 +101,13 @@ export class DelegationCoordinator {
   private runWorker: (config: WorkerSessionConfig) => Promise<WorkerSessionRun>
   private runHands: (config: HandsSessionConfig) => Promise<HandsSessionRun>
   private state: CoordinatorState
+  private collaboration: CollaborationProtocol | null
 
   constructor(private config: DelegationCoordinatorConfig) {
     this.runWorker = config.runWorker ?? runWorkerSession
     this.runHands = config.runHands ?? runHandsSession
     this.state = new CoordinatorState(config.maxWorkers)
+    this.collaboration = config.collaboration ? new CollaborationProtocol(config.collaboration) : null
   }
 
   getState(): CoordinatorState {
@@ -165,6 +171,34 @@ export class DelegationCoordinator {
     const role = classifyProfile(order.profile)
     const isWrite = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
     this.state.recordEvent({ type: 'queued', workOrderId: order.id, timestamp: Date.now() })
+
+    // Acquire semantic lock via CollaborationProtocol if configured
+    if (this.collaboration && this.config.sessionId && order.scope.files?.length) {
+      const intent: LockIntent = {
+        operation: isWrite ? 'edit' : 'refactor',
+        files: order.scope.files,
+        description: order.objective,
+      }
+      const lockResult = this.collaboration.acquireLock(this.config.sessionId, intent)
+      if (!lockResult.acquired) {
+        return {
+          status: 'completed',
+          order,
+          results: [{
+            workOrderId: order.id,
+            status: 'blocked',
+            summary: `Semantic lock conflict: ${lockResult.conflictingFiles.join(', ')} held by another session`,
+            findings: [],
+            artifacts: [{ kind: 'risk', title: 'Lock conflict', content: `Files locked by another session: ${lockResult.conflictingFiles.join(', ')}` }],
+            changedFiles: [],
+            risks: [`semantic lock conflict: ${lockResult.conflictingFiles.join(', ')}`],
+            nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
+            evidenceStatus: 'blocked',
+          }],
+          packet: buildPrimaryWorkerPacket([]),
+        }
+      }
+    }
 
     const task = mapWorkOrderKindToCapabilityTask(order.kind)
     const selected = this.selectModelForTask(task)
@@ -234,6 +268,11 @@ export class DelegationCoordinator {
       run = { result: handsRun.result }
     } else {
       run = await this.runWorker(workerConfig)
+    }
+
+    // Release semantic lock after worker completes
+    if (this.collaboration && this.config.sessionId) {
+      this.collaboration.releaseLocks(this.config.sessionId)
     }
 
     this.state.recordEvent({ type: run.result.status === 'passed' ? 'passed' : run.result.status === 'blocked' ? 'blocked' : 'failed', workOrderId: order.id, timestamp: Date.now() })

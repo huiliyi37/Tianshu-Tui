@@ -10,7 +10,8 @@ import {
   shouldDelegateObjective,
   type WorkerRuntimeFactory,
 } from '../coordinator.js'
-import { READ_ONLY_WORKER_TOOLS, type WorkerResult } from '../work-order.js'
+import { READ_ONLY_WORKER_TOOLS, WRITE_WORKER_TOOLS, type WorkerResult } from '../work-order.js'
+import { CollaborationProtocol } from '../collaboration-protocol.js'
 
 function fakeTool(name: string): Tool {
   return {
@@ -580,5 +581,87 @@ describe('DelegationCoordinator', () => {
 
     // recommendModelForTask('repo_summarization') picks 'large-cache' (strong cacheEconomics + 1M context)
     assert.equal(selectedModels[0], 'large-cache')
+  })
+
+  it('blocks worker when CollaborationProtocol lock is held by another session', async () => {
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as ApiClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      sessionId: 's-main',
+      collaboration: {},
+    })
+
+    // External session holds a lock on the same file
+    const external = new CollaborationProtocol()
+    external.acquireLock('external-session', { operation: 'edit', files: ['src/locked.ts'], description: 'held externally' })
+
+    // Pre-acquire via the coordinator's own protocol (simulating lock conflict)
+    // We access the internal collaboration protocol and pre-lock the file
+    const cp = (coordinator as unknown as { collaboration: CollaborationProtocol }).collaboration
+    cp.acquireLock('other-session', { operation: 'edit', files: ['src/locked.ts'], description: '' })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_lock_1',
+      objective: 'Edit the locked file to add new feature implementation details.',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      scope: { files: ['src/locked.ts'] },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results[0]?.status, 'blocked')
+    assert.ok(run.results[0]?.summary.includes('Semantic lock conflict'))
+  })
+
+  it('allows worker when CollaborationProtocol lock is available', async () => {
+    let workerCalled = false
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as ApiClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      sessionId: 's-main',
+      collaboration: {},
+      runWorker: async config => {
+        workerCalled = true
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_lock_2',
+      objective: 'Read the source files to understand the module structure and patterns.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/free.ts'] },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.ok(workerCalled)
   })
 })

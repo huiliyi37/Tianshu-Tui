@@ -104,6 +104,7 @@ export class PromptEngine {
   private contextLayerReportData: ContextLayerReport
   private phaseHint?: string
   private cognitiveProjection?: string
+  private crossSessionEvents?: string
   private mode: PromptMode = DEFAULT_MODE
 
   constructor(config: PromptEngineConfig) {
@@ -161,7 +162,7 @@ export class PromptEngine {
           // Tool-call turns (same user message, more tool results) reuse the cache.
           if (userContent !== this.cachedFreshForUser) {
             this.cachedFreshForUser = userContent
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain, activeClaims: this.activeClaims ?? this.config.volatileCtx.activeClaims, playbookLessons: this.playbookLessons ?? this.config.volatileCtx.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain, activeClaims: this.activeClaims ?? this.config.volatileCtx.activeClaims, playbookLessons: this.playbookLessons ?? this.config.volatileCtx.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -305,6 +306,10 @@ export class PromptEngine {
 
   setDecisions(decisions: string[]): void {
     this.decisions = decisions
+  }
+
+  setCrossSessionEvents(events: string | null): void {
+    this.crossSessionEvents = events ?? undefined
   }
 
   setPhaseHint(hint: string): void {

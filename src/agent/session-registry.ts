@@ -16,6 +16,23 @@ export interface ClaimEntry {
   filePath: string
 }
 
+export interface EventInput {
+  eventType: string
+  filePath?: string
+  detail?: string
+  priority?: number
+}
+
+export interface EventRecord {
+  id: number
+  sessionId: string
+  eventType: string
+  filePath: string | null
+  detail: string | null
+  priority: number
+  createdAt: string
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -37,6 +54,18 @@ CREATE TABLE IF NOT EXISTS claims (
 
 CREATE INDEX IF NOT EXISTS idx_claims_file ON claims(file_path, claim_type);
 CREATE INDEX IF NOT EXISTS idx_sessions_pid ON sessions(pid);
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  file_path TEXT,
+  detail TEXT,
+  priority INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 `
 
 export class SessionRegistry {
@@ -47,6 +76,7 @@ export class SessionRegistry {
     const dbPath = join(stateDir, 'registry.db')
     this.db = new Database(dbPath)
     this.db.pragma('journal_mode = WAL')
+    this.db.pragma('busy_timeout = 3000')
     this.db.pragma('foreign_keys = ON')
     this.db.exec(SCHEMA)
   }
@@ -157,6 +187,32 @@ export class SessionRegistry {
 
   close(): void {
     this.db.close()
+  }
+
+  // ── Events (cross-session communication) ──────────────────
+
+  publishEvent(sessionId: string, input: EventInput): void {
+    this.db.prepare(`
+      INSERT INTO events (session_id, event_type, file_path, detail, priority)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, input.eventType, input.filePath ?? null, input.detail ?? null, input.priority ?? 0)
+  }
+
+  consumeEvents(mySessionId: string, lastSeenId: number, limit = 50): EventRecord[] {
+    return this.db.prepare(`
+      SELECT id, session_id AS sessionId, event_type AS eventType,
+             file_path AS filePath, detail, priority, created_at AS createdAt
+      FROM events
+      WHERE id > ? AND session_id != ?
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(lastSeenId, mySessionId, limit) as EventRecord[]
+  }
+
+  cleanupOldEvents(maxAgeMs: number): number {
+    const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
+    const result = this.db.prepare('DELETE FROM events WHERE created_at < ?').run(cutoff)
+    return result.changes
   }
 
   private isProcessRunning(pid: number): boolean {

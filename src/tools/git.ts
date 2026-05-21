@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { isAbsolute, relative, resolve } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 
 const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash'] as const
@@ -18,13 +19,37 @@ function runGit(args: string[], cwd: string): string {
   return output
 }
 
+function normalizeProjectRelativePath(cwd: string, filePath: string): string | null {
+  const resolved = resolve(cwd, filePath)
+  const rel = relative(cwd, resolved)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null
+  return rel
+}
+
+function getScopedCommitFiles(cwd: string, sessionModifiedFiles: string[] | undefined): string[] {
+  if (!sessionModifiedFiles?.length) return []
+  const files = sessionModifiedFiles
+    .map(filePath => normalizeProjectRelativePath(cwd, filePath))
+    .filter((filePath): filePath is string => filePath !== null)
+  return [...new Set(files)].sort((a, b) => a.localeCompare(b))
+}
+
+function hasStagedChanges(cwd: string, pathspecs?: string[]): boolean {
+  const args = ['diff', '--cached', '--quiet']
+  if (pathspecs?.length) args.push('--', ...pathspecs)
+  const result = spawnSync('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
+  if (result.status === 0) return false
+  if (result.status === 1) return true
+  throw new Error((result.stderr ?? '').trim() || `git diff exited with status ${result.status}`)
+}
+
 export const GIT_TOOL: Tool = {
   definition: {
     name: 'git',
     description: `Structured git operations. Actions:
 - status: Show working tree status, current branch, and file changes
 - diff_summary: Show diff stats for staged and unstaged changes
-- commit: Stage all changes (including untracked files) and commit with a message
+- commit: Commit only this session's modified files when available; otherwise commit already staged changes only
 - log: Show recent commit history (default 20, configurable with maxCount)
 - stash: Stash current working directory changes
 
@@ -91,12 +116,20 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           if (!message) {
             return { content: 'Commit requires a "message" parameter.', isError: true }
           }
-          const status = runGit(['status', '--porcelain'], cwd).trim()
-          if (!status) {
-            return { content: 'Nothing to commit. Working tree clean.' }
+
+          const scopedFiles = getScopedCommitFiles(cwd, params.sessionModifiedFiles)
+          const commitArgs = ['commit', '-m', message]
+          if (scopedFiles.length > 0) {
+            runGit(['add', '--', ...scopedFiles], cwd)
+            commitArgs.push('--only', '--', ...scopedFiles)
+          } else if (!hasStagedChanges(cwd)) {
+            return {
+              content: 'No session-owned files to commit and no staged changes. Stage explicit files first, or modify files in this session before using git commit.',
+              isError: true,
+            }
           }
-          runGit(['add', '-A'], cwd)
-          const result = spawnSync('git', ['commit', '-m', message], {
+
+          const result = spawnSync('git', commitArgs, {
             cwd,
             encoding: 'utf-8',
             timeout: 10_000,

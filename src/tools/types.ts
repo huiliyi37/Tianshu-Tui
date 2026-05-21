@@ -5,6 +5,8 @@ export interface ToolCallParams {
   toolUseId: string
   cwd: string
   onOutput?: (chunk: string) => void
+  /** Files this session/tool pipeline owns and may safely include in scoped write operations. */
+  sessionModifiedFiles?: string[]
 }
 
 export interface VerificationMetadata {

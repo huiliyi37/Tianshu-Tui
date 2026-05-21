@@ -75,6 +75,7 @@ import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
+import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 
 /** Map StarPhase values to PromptEngine phaseClass strings. */
 const PHASE_CLASS_MAP: Record<string, string> = {
@@ -113,6 +114,8 @@ export interface AgentConfig {
   compactModel?: string
   approvalMode?: ApprovalMode
   sessionId?: string
+  /** Optional session registry for cross-session event communication. */
+  sessionRegistry?: import('./session-registry.js').SessionRegistry
   transcriptPath?: string
   getSessionMemoryState?: () => import('../context/types.js').LedgerSessionMemoryState | undefined
   hooks?: HookRegistry
@@ -205,6 +208,7 @@ export class AgentLoop {
   private thetaState: ThetaState = createThetaState(7)
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
+  private lastSeenEventId = 0
   private gitChangeRate = 0
   private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
@@ -243,6 +247,10 @@ export class AgentLoop {
       stigmergyQuery: () => this.stigmergyStore.query(),
       getEvidenceState: () => this.evidence.getState(),
       setLoadedPheromones: pheromones => { this.loadedPheromones = mapQueriedPheromones(pheromones) },
+      publishEvent: this.config.sessionRegistry && this.config.sessionId
+        ? (input) => this.config.sessionRegistry!.publishEvent(this.config.sessionId!, input)
+        : undefined,
+      sessionId: this.config.sessionId,
       getThetaState: () => this.thetaState,
       setThetaState: state => { this.thetaState = state },
       getPredictionAccumulator: () => this.predictionAccumulator,
@@ -626,6 +634,10 @@ export class AgentLoop {
   private async runPostSession(callbacks: AgentCallbacks): Promise<void> {
     await this.runtimeHooks.runPostSession(createRuntimeHookContext(this.buildRuntimeSnapshot(),
       { emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) } }))
+    // Cleanup old cross-session events (2h TTL)
+    if (this.config.sessionRegistry) {
+      try { this.config.sessionRegistry.cleanupOldEvents(2 * 60 * 60 * 1000) } catch { /* ignore */ }
+    }
   }
 
   private async startFsWatcher(): Promise<void> {
@@ -881,6 +893,17 @@ export class AgentLoop {
         if (!isChatMode) {
           const cvmTokenEstimate = Math.ceil(projection.length / 4)
           this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
+        }
+        // ── Cross-session event sync ──
+        // Read events from other sessions (cache-safe: injected into dynamic appendix only)
+        if (this.config.sessionRegistry && this.config.sessionId) {
+          const events = this.config.sessionRegistry.consumeEvents(this.config.sessionId, this.lastSeenEventId)
+          if (events.length > 0) {
+            this.lastSeenEventId = Math.max(...events.map(e => e.id))
+            this.config.promptEngine.setCrossSessionEvents(formatEventsForAppendix(events))
+          } else {
+            this.config.promptEngine.setCrossSessionEvents(null)
+          }
         }
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const streamResult = await this.turnStream!.streamTurn({
