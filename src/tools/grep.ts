@@ -70,7 +70,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
       const text = results.length > maxResults
         ? results.slice(0, maxResults).join('\n') + '\n... (truncated)'
         : results.join('\n')
-      return { content: truncateContent(text, 12000, 6000, 4000) }
+      return { content: truncateContent(text, 8000, 4000, 2000) }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       return { content: `Error: ${message}`, isError: true }
@@ -163,7 +163,7 @@ async function tryRipgrep(
       }
       const lines = stdout.split('\n').filter(l => l.length > 0).slice(0, maxResults)
       const suffix = lineCount >= maxResults ? '\n... (truncated)' : ''
-      resolve({ content: truncateContent(lines.join('\n') + suffix, 12000, 6000, 4000) })
+      resolve({ content: truncateContent(lines.join('\n') + suffix, 8000, 4000, 2000) })
     })
   })
 }
