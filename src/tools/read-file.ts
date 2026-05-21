@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, statSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent } from './truncation.js'
 import { validatePath } from './path-validate.js'
@@ -36,6 +36,7 @@ function getGitignoreFilter(cwd: string): GitignoreFilter {
 const MODEL_MAX_CHARS = 8000
 const MODEL_HEAD_CHARS = 4000
 const MODEL_TAIL_CHARS = 2000
+const MAX_TOOL_INPUT_BYTES = 100 * 1024
 
 /** TUI display: head + tail with line numbers, compact for large files. */
 function buildFileUiOutput(raw: string, maxLines: number): string {
@@ -81,6 +82,15 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
   const filter = getGitignoreFilter(cwd)
   if (filter.isIgnored(cwd, filePath)) {
     throw new Error(`File is gitignored (node_modules, build artifacts, etc.): ${filePath}`)
+  }
+
+  const fileSize = statSync(filePath).size
+  if (fileSize > MAX_TOOL_INPUT_BYTES && !options.offset && !options.limit) {
+    const sizeKB = (fileSize / 1024).toFixed(0)
+    const estLines = Math.ceil(fileSize / 80)
+    throw new Error(
+      `File too large (${sizeKB}KB, ~${estLines} lines). Use offset and limit to read specific ranges.`
+    )
   }
 
   let content = readFileSync(filePath, 'utf-8')

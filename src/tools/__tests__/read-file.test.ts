@@ -55,4 +55,22 @@ describe('readFilePayload', () => {
     assert.equal(payload.rawContent, 'hello\nworld\n')
     assert.ok(payload.modelContent.includes('hello'))
   })
+
+  it('rejects files >100KB without offset/limit', () => {
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    const big = 'x'.repeat(101 * 1024)
+    writeFileSync(join(dir, 'src/big.ts'), big, 'utf-8')
+    assert.throws(
+      () => readFilePayload(dir, { filePath: 'src/big.ts' }),
+      /File too large/,
+    )
+  })
+
+  it('allows files >100KB when offset/limit specified', () => {
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    const big = Array.from({ length: 2000 }, (_, i) => `line ${i}`).join('\n')
+    writeFileSync(join(dir, 'src/big2.ts'), big, 'utf-8')
+    const payload = readFilePayload(dir, { filePath: 'src/big2.ts', offset: 1, limit: 10 })
+    assert.ok(payload.rawContent.includes('line 0'))
+  })
 })
