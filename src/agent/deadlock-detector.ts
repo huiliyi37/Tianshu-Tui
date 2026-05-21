@@ -156,10 +156,12 @@ export function detectCycle(edges: WaitEdge[]): DeadlockReport | null {
   for (const node of allNodes) {
     if (color.get(node) === WHITE) {
       if (dfs(node) && foundCycle && foundResources) {
-        const victim = foundCycle.reduce((a, b) => (a > b ? a : b))
+        const cycle: string[] = foundCycle
+        const resources: string[] = foundResources
+        const victim = cycle.reduce((a, b) => (a > b ? a : b))
         return {
-          cycle: foundCycle,
-          resources: [...new Set(foundResources)],
+          cycle,
+          resources: [...new Set(resources)],
           victim,
         }
       }

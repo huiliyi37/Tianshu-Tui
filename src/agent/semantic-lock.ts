@@ -10,9 +10,8 @@
  * - 锁兼容矩阵决定两个操作是否可以并行
  */
 
-import type { DomainArea } from './work-order.js'
-
-// ─── Types ────────────────────────────────────────────────
+// DomainArea from work-order: frontend | backend | prompt | tools | config | docs | tests
+// Inlined to avoid pulling zod through the import chain (tsx module resolution issue)
 
 /** 操作类型 */
 export type LockOperation = 'edit' | 'create' | 'delete' | 'rename' | 'refactor'
@@ -26,7 +25,7 @@ export interface LockIntent {
   /** 语义描述，如 "修改 AgentLoop 的 turn 处理逻辑" */
   description: string
   /** 预估影响区域 */
-  domainHints?: DomainArea[]
+  domainHints?: string[] // e.g. 'frontend' | 'backend' | 'prompt' | 'tools' | 'config' | 'docs' | 'tests'
 }
 
 /** 运行时锁实例 */
