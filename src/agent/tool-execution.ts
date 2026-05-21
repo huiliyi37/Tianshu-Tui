@@ -1,4 +1,5 @@
 import type { ContentBlock } from '../api/types.js'
+import type { TurnBudget } from './turn-budget.js'
 import type { AgentConfig, AgentCallbacks } from './loop.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTracker } from './evidence.js'
@@ -53,6 +54,7 @@ export interface ToolExecutionDeps {
   setClientReasoningEffort: (effort: ReasoningEffort) => void
   getSensorium: () => Sensorium | null
   getReliabilityDecision: () => ReliabilityDecision | null
+  getTurnBudget: () => TurnBudget
 }
 
 export interface ToolExecBatchInput {
@@ -115,6 +117,7 @@ export class ToolExecutionController {
         },
         getSensorium: () => this.deps.getSensorium(),
         getReliabilityDecision: () => this.deps.getReliabilityDecision(),
+        turnBudget: this.deps.getTurnBudget(),
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)

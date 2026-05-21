@@ -59,6 +59,7 @@ import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
+import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
 import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
@@ -178,6 +179,7 @@ export class AgentLoop {
   private static readonly MAX_OUTPUT_ESCALATION = 3
   private pressureMonitor: PressureMonitor
   private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
+  private turnBudget: TurnBudget = createTurnBudget(0)
   private sensorium: Sensorium | null = null
   private strategy: StrategyProfile | null = null
   private vigorState: VigorState = createVigorState()
@@ -381,6 +383,7 @@ export class AgentLoop {
       setClientReasoningEffort: effort => { this.config.reasoningEffort = effort; this.config.client.setReasoningEffort?.(effort) },
       getSensorium: () => this.sensorium,
       getReliabilityDecision: () => this.latestReliabilityDecision,
+      getTurnBudget: () => this.turnBudget,
     })
   }
 
@@ -678,6 +681,12 @@ export class AgentLoop {
         }
 
         const estTokens = this.session.getEstimatedTokens()
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- TS narrows to null but later turns reassign
+        const snap = this.latestResourceSnapshot as ResourceSensorSnapshot | null
+        const rssRatio = snap
+          ? snap.memory.rssBytes / snap.memory.memoryLimitBytes
+          : 0
+        this.turnBudget = createTurnBudget(rssRatio)
         
         // Fuzzy checkpoint: 记录 compact 开始
         if (this.persist) {

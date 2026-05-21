@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { executeToolUse, type ToolPipelineDeps } from '../tool-pipeline.js'
+import { createTurnBudget } from '../turn-budget.js'
 
 describe('executeToolUse', () => {
   function makeDeps(overrides?: Partial<ToolPipelineDeps>): ToolPipelineDeps {
@@ -38,6 +39,7 @@ describe('executeToolUse', () => {
       sessionTurnCount: 1,
       sessionId: 'test-session',
       recordToolHistory: () => {},
+      turnBudget: createTurnBudget(0),
       ...overrides,
     }
   }
