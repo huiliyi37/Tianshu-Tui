@@ -3,7 +3,7 @@ import type { TurnBudget } from './turn-budget.js'
 import type { ContentBlock } from '../api/types.js'
 import type { ToolCallParams } from '../tools/types.js'
 import type { TurnHarness } from './turn-harness.js'
-import type { EvidenceTracker } from './evidence.js'
+import type { EvidenceTrackerPublic } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
 import type { RepairHintTracker } from './repair-hint.js'
 import type { ImportGraph } from './import-graph.js'
@@ -63,7 +63,7 @@ export interface ToolPipelineDeps {
   cwd: string
   harness: TurnHarness
   prewarm: PrewarmCache
-  evidence: EvidenceTracker
+  evidence: EvidenceTrackerPublic
   traceStore: TraceStore
   repairHintTracker: RepairHintTracker
   repairPipeline: import('./repair-pipeline.js').RepairPipeline

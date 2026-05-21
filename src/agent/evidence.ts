@@ -24,7 +24,18 @@ export interface VerificationSummary {
 
 const MAX_VERIFICATIONS = 50
 
-export class EvidenceTracker {
+export interface EvidenceTrackerPublic {
+  trackFileRead(path: string): void
+  trackFileModified(path: string): void
+  trackImpact(files: string[], tests: string[]): void
+  trackVerification(result: VerificationMetadata): void
+  getState(): EvidenceState
+  getVerificationSummary(): VerificationSummary
+  buildBadge(): string | null
+  reset(): void
+}
+
+export class EvidenceTracker implements EvidenceTrackerPublic {
   private state: EvidenceState
 
   constructor() {

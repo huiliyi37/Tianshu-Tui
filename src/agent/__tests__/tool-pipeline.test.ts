@@ -2,6 +2,25 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { executeToolUse, type ToolPipelineDeps } from '../tool-pipeline.js'
 import { createTurnBudget } from '../turn-budget.js'
+import type { EvidenceTrackerPublic } from '../evidence.js'
+
+const mockEvidence = {
+  trackFileRead: () => {},
+  trackFileModified: () => {},
+  trackImpact: () => {},
+  trackVerification: () => {},
+  getState: () => ({
+    filesRead: new Set<string>(),
+    filesModified: new Set<string>(),
+    verifications: [],
+    deliveryStatus: 'unverified' as const,
+    impactedFiles: new Set<string>(),
+    impactedTests: new Set<string>(),
+  }),
+  getVerificationSummary: () => ({ total: 0, verified: 0, pending: 0, files: [] }),
+  buildBadge: () => null,
+  reset: () => {},
+} satisfies EvidenceTrackerPublic
 
 describe('executeToolUse', () => {
   function makeDeps(overrides?: Partial<ToolPipelineDeps>): ToolPipelineDeps {
@@ -27,7 +46,7 @@ describe('executeToolUse', () => {
         },
       } as any,
       prewarm: { get: () => null, invalidate: () => {} } as any,
-      evidence: { trackFileRead: () => {}, trackFileModified: () => {}, trackImpact: () => {}, trackVerification: () => {}, getState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }) } as any,
+      evidence: mockEvidence,
       traceStore: { events: [], toolFingerprints: [] } as any,
       repairHintTracker: { recordSuccess: () => {}, recordFailure: () => {} } as any,
       repairPipeline: { run: (input: any) => ({ output: input, telemetry: [] }) } as any,
