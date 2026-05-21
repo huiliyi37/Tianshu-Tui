@@ -4,7 +4,8 @@ import { CACHE_ANCHOR_MESSAGES } from './constants.js'
 const STALE_PREVIEW_CHARS = 1_200
 const RECENT_MESSAGES_TO_KEEP = 4
 
-export function compactStaleRounds(messages: Message[], contextWindow: number): Message[] {
+/** Proactively truncate tool_result blocks in stale rounds (N-2+). contextWindow reserved for future dynamic tuning. */
+export function compactStaleRounds(messages: Message[], _contextWindow: number): Message[] {
   if (messages.length <= CACHE_ANCHOR_MESSAGES + RECENT_MESSAGES_TO_KEEP) {
     return messages
   }

@@ -328,12 +328,13 @@ ${check.formatted}`
 
     if (!harnessResult.isError) {
       finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
-      const tokenEstimate = Math.ceil(finalContent.length / 4)
+      const contentChars = finalContent.length
+      const tokenEstimate = Math.ceil(contentChars / 4)
       deps.turnBudget.consume(tokenEstimate)
       if (deps.turnBudget.isExhausted()) {
         const preview = finalContent.slice(0, 500)
         const refPath = rawToolResult?.rawPath ?? 'unknown'
-        finalContent = `<stored ref="${refPath}" chars=${finalContent.length} tool="${tu.name}">\n${preview}\n...(turn budget exceeded — use read_file with offset/limit for full content)</stored>`
+        finalContent = `<stored ref="${refPath}" chars=${contentChars} tool="${tu.name}">\n${preview}\n...(turn budget exceeded — use read_file with offset/limit for full content)</stored>`
       }
     }
 
