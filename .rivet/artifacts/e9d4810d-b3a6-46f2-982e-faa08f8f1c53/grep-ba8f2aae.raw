@@ -1,0 +1,2 @@
+1:import type { ContentBlock } from '../api/types.js'
+29:function isToolUseBlock(block: ContentBlock): block is ContentBlock & { type: 'tool_use'; id: string } {

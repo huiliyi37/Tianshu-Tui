@@ -1,0 +1,30 @@
+▶ PromptEngine OpenAI-native request building
+  ✔ injects volatile user messages around OAI user messages only (5.201666ms)
+  ✔ reuses cached fresh volatile across tool-call turns for the same latest user message (0.219583ms)
+  ✔ refreshes cached fresh volatile at a new user message boundary (0.199833ms)
+  ✔ produces stable canonical OAI body bytes for equivalent construction (0.299791ms)
+✔ PromptEngine OpenAI-native request building (6.403833ms)
+▶ PromptEngine message normalization
+  ✔ inserts a synthetic tool_result immediately after an unmatched tool_use (0.620333ms)
+  ✔ keeps a valid tool_use/tool_result pair unchanged (0.166792ms)
+  ✔ drops orphan tool_result messages that no longer follow a tool_use (0.177542ms)
+  ✔ normalizes broken history into API-safe rounds (0.428834ms)
+✔ PromptEngine message normalization (1.530959ms)
+▶ PromptEngine context layer report
+  ✔ reports context layers with channels and fingerprint policy (0.285125ms)
+  ✔ omits layers with no content (0.149209ms)
+✔ PromptEngine context layer report (0.506375ms)
+▶ PromptEngine active claims projection
+  ✔ updated active claims appear in the latest turn request without entering historical stable context (0.207292ms)
+  ✔ updated session memory appears in the latest turn request (0.179125ms)
+  ✔ updated active domain appears only in latest volatile context (0.224792ms)
+✔ PromptEngine active claims projection (0.665875ms)
+ℹ tests 13
+ℹ suites 4
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 216.840542
+TypeScript compilation completed

@@ -1,0 +1,5 @@
+}
+
+export class OpenAIClient implements StreamClient {
+  private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
+  private pendingStopReason: string | null = null

@@ -1,0 +1,6 @@
+TypeScript: 3 errors in 1 files
+═══════════════════════════════════════
+src/compact/__tests__/stale-round-oai.test.ts (3 errors)
+  L44: TS2531 Object is possibly 'null'.
+  L45: TS2531 Object is possibly 'null'.
+  L47: TS2531 Object is possibly 'null'.

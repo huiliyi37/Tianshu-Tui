@@ -1,0 +1,15 @@
+123:  private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
+146:    this.toolCallBuffer.clear()
+152:      this.toolCallBuffer.clear()
+197:        await this.parseStreamFromReader(reader, callbacks, signal)
+381:  async parseStreamFromReader(
+428:            this.processDelta(parsed, callbacks)
+448:              this.processDelta(parsed, callbacks)
+458:      this.flushToolCalls(callbacks)
+484:  processDelta(
+527:        const buf = this.toolCallBuffer.get(idx) ?? { function: { arguments: '' } }
+536:        this.toolCallBuffer.set(idx, buf)
+541:      this.flushToolCalls(callbacks)
+547:  private flushToolCalls(callbacks: Partial<Pick<StreamCallbacks, 'onContentBlock' | 'onStopReason'>>): void {
+548:    for (const [, buf] of this.toolCallBuffer) {
+563:    this.toolCallBuffer.clear()

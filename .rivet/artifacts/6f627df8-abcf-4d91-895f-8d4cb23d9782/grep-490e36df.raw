@@ -1,0 +1,137 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:1:import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:81:export class PromptEngine {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:83:  private volatileBlock: string
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:91:  private cachedFreshForUser: string = ''
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:115:    this.volatileBlock = this.frozenBase
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:116:    this.fingerprint = computeFingerprint(this.systemPrompt, config.staticCtx.tools, this.volatileBlock)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:139:   * - Historical user text messages always use FROZEN (this.volatileBlock).
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:144:  buildRequest(messages: Message[], toolHistory?: ToolHistoryEntry[]): MessageRequest {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:158:      if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:164:          if (userContent !== this.cachedFreshForUser) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:165:            this.cachedFreshForUser = userContent
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:180:                  const d = JSON.parse(content) as { name: string; volatileBlock: string; motto: string }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:181:                  renderedHabituated.set(name, `<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:190:                this.volatileBlock = newConsolidated
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:204:                ? this.volatileBlock + '\n' + fullAppendix
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:205:                : this.volatileBlock
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:216:          result.push({ role: 'user', content: this.volatileBlock })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:240:    const current = computeFingerprint(this.systemPrompt, this.config.staticCtx.tools, this.volatileBlock)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:257:    this.volatileBlock = this.consolidatedBlock
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:323:  setSessionState(text: string | null): void {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/engine.ts:339:    this.cachedFreshForUser = ''
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:25:  activeDomain?: { name: string; volatileBlock: string; motto: string } | null
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:45:   * MUST stay out of buildVolatileBlockInternal so historical user messages keep their
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:46:   * frozen prefix byte-stable across tool-call turns. setSessionState() must not invalidate
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:119:  return buildVolatileBlockInternal({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:153: * Render ONLY the per-turn dynamic fields into a separate `<context-update>` XML block.
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:160:    parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:217:  return parts.length > 0 ? `<context-update>\n${parts.join('\n\n')}\n</context-update>` : ''
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:229:export function buildVolatileBlock(ctx: VolatileContext): string {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:233:function buildVolatileBlockInternal(ctx: VolatileContext): string {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile.ts:239:    parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:4:import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext } from '../volatile.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:22:    const block = buildVolatileBlock({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:42:    const block = buildVolatileBlock({ cwd: '/repo' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:63:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:73:    assert.ok(!buildVolatileBlock({ ...base, toolHistory: [] }).includes('<tool-history'))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:74:    assert.ok(!buildVolatileBlock(base).includes('<tool-history'))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:83:        volatileBlock: '你当前在破军域。突破 <边界> & 记录失败。',
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:101:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:115:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:126:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:137:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:150:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:163:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:173:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:186:    assert.ok(!buildVolatileBlock({ ...base, behaviorMirror: null }).includes('<behavior-mirror>'))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:187:    assert.ok(!buildVolatileBlock(base).includes('<behavior-mirror>'))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:199:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:206:    assert.ok(!buildVolatileBlock({ ...base, decisions: [] }).includes('<decisions>'))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:207:    assert.ok(!buildVolatileBlock(base).includes('<decisions>'))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:215:    const block = buildVolatileBlock(ctx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:249:    const block = buildVolatileBlock({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:299:  it('buildVolatileBlock aliases buildLatestTurnVolatileBlock', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile.test.ts:304:    assert.equal(buildVolatileBlock(ctx), buildLatestTurnVolatileBlock(ctx))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/chat-mode-engine.test.ts:38:    const request = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/chat-mode-engine.test.ts:39:    // buildRequest emits [volatile-block, original-msg]; check volatile (first user msg)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/chat-mode-engine.test.ts:55:    const request = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/chat-mode-engine.test.ts:73:    const request = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/chat-mode-engine.test.ts:93:    const request = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/chat-mode-engine.test.ts:110:        volatileBlock: 'test content',
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/chat-mode-engine.test.ts:113:      engine.buildRequest([{ role: 'user', content: `turn ${i}` }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/chat-mode-engine.test.ts:120:    const request = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile-snapshot.test.ts:63:    const domain = { name: 'test', volatileBlock: 'block', motto: 'motto' }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:54:    assert.ok(appendix.includes('<context-update>'))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:91:    const req1 = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:96:    const req2 = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:110:    const volatileBlocks: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:125:      const req = engine.buildRequest(messages, toolHistory)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:129:      volatileBlocks.push(firstVol)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:133:    for (let i = 1; i < volatileBlocks.length; i++) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:134:      assert.equal(volatileBlocks[i], volatileBlocks[0],
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:142:    const req = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:168:    const req1 = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:171:    const req2 = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:202:      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:203:      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:206:    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:207:    const req = engine.buildRequest([{ role: 'user', content: 'check' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:217:      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:223:      engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:227:    const req = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:239:      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:240:      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:244:    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:245:    const req = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:261:      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:262:      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:266:    let req = engine.buildRequest([{ role: 'user', content: 'check' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:271:    engine.setActiveDomain({ name: 'tianji', volatileBlock: 'other', motto: 'other-motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:272:    req = engine.buildRequest([{ role: 'user', content: 'after change' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:283:      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:284:      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:288:    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:289:    const req = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:320:    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:322:      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:325:    const req = engine.buildRequest([{ role: 'user', content: 'test' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:347:    const volatileBlocks: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:364:      const req = engine.buildRequest(messages, toolHistory)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:366:      volatileBlocks.push((req.messages[0] as { content: string }).content)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:370:    for (let i = 1; i < volatileBlocks.length; i++) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:371:      assert.equal(volatileBlocks[i], volatileBlocks[0],
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:380:    const req1 = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:386:    const req2 = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:396:    const req3 = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:415:    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'b', motto: 'm' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:427:      const req = engine.buildRequest(messages, [
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:445:    const before = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:449:    const after = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:470:    engine.setSessionState('<session-state>\nTask: alpha [executing]\n</session-state>')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:472:    const req = engine.buildRequest([{ role: 'user', content: 'hello' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:480:    engine.setSessionState('<session-state>\nTask: beta [verifying]\n</session-state>')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:482:    const req = engine.buildRequest([{ role: 'user', content: 'hello' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:488:  it('volatile block stays byte-identical across 5 tool-call turns even when setSessionState is called per turn', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:494:      engine.setSessionState(`<session-state>\nFiles tracked: ${turn}\n</session-state>`)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:502:      const req = engine.buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:507:        `Turn ${turn}: volatile block must stay byte-identical to turn 0 — setSessionState in mid-conversation must NOT invalidate prefix cache`)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:513:    engine.setSessionState('<session-state>\nState: A\n</session-state>')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:515:    const req1 = engine.buildRequest([{ role: 'user', content: 'first task' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:520:    engine.setSessionState('<session-state>\nState: B\n</session-state>')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:523:    const req2 = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:543:    engine.setSessionState('<session-state>\nState: live\n</session-state>')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine-cache-stability.test.ts:545:    const req = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile-cache.test.ts:6:import { buildVolatileBlock } from '../volatile.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile-cache.test.ts:16:      const blockA = buildVolatileBlock({ cwd: a })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/volatile-cache.test.ts:17:      const blockB = buildVolatileBlock({ cwd: b })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/fingerprint.test.ts:198:  it('fingerprint is stable across buildRequest calls', async () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/fingerprint.test.ts:209:    engine.buildRequest([{ role: 'user', content: 'hello' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/fingerprint.test.ts:210:    engine.buildRequest([{ role: 'user', content: 'another message' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:27:    const request = makeEngine().buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:54:    const request = makeEngine().buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:66:    const request = makeEngine().buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:82:    const request = makeEngine().buildRequest(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:158:    const request = engine.buildRequest([
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:182:    const request = engine.buildRequest([{ role: 'user', content: 'remember this' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:199:    engine.setActiveDomain({ name: '破军', motto: '好男儿当负三尺剑立不世之功', volatileBlock: '你当前在破军域。' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:201:    const request = engine.buildRequest([

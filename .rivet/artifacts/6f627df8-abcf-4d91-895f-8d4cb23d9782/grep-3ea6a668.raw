@@ -1,0 +1,12 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/dispatcher-hook.ts:17:export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionRuntimeHook {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/dispatcher-hook.ts:22:    name: 'task-dispatcher',
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/dispatcher-hook.test.ts:4:import { createDispatcherHook } from '../hooks/dispatcher-hook.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/dispatcher-hook.test.ts:69:  const hook = createDispatcherHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/dispatcher-hook.test.ts:79:describe('createDispatcherHook', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/cross-session-hook.test.ts:3:import { createCrossSessionHook, formatEventsForAppendix } from '../hooks/cross-session-hook.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/cross-session-hook.test.ts:30:  test('createCrossSessionHook reads events and updates state', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/cross-session-hook.test.ts:37:    const hook = createCrossSessionHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/cross-session-hook.test.ts:53:  test('createCrossSessionHook does nothing when no new events', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/cross-session-hook.test.ts:56:    const hook = createCrossSessionHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/cross-session-hook.ts:33:export function createCrossSessionHook(deps: CrossSessionHookDeps) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/cross-session-hook.ts:35:    name: 'cross-session-sync',

@@ -1,0 +1,11 @@
+54:import { TurnStreamController } from './turn-stream.js'
+161:export class AgentLoop {
+199:  private turnStream: TurnStreamController | null = null
+334:    this.turnStream = this.createTurnStreamController()
+344:  private createTurnStreamController(): TurnStreamController {
+345:    return new TurnStreamController({
+649:  private async runPostSession(callbacks: AgentCallbacks): Promise<void> {
+671:  async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
+674:    this.turnStream = this.createTurnStreamController()
+709:    const isChatMode = this.config.promptEngine.getMode() === 'chat'
+798:          this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [] })

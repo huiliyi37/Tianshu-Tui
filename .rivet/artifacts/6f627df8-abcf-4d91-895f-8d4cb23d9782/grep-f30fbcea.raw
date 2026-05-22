@@ -1,0 +1,20 @@
+341:- [ ] **步骤 1：新增 buildOaiRequest 方法（不删旧方法）**
+348:buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[]): OaiChatRequest {
+387:/** @deprecated Use buildOaiRequest. This method converts internally. */
+403:git commit -m "feat(prompt): add buildOaiRequest for OpenAI-native output (dual-path)"
+524:> 当 AgentLoop 切换到使用 `buildOaiRequest` + `getOaiMessages` 后，openai-client 不再需要 Anthropic→OpenAI 转换。
+569:> 这是切换点。AgentLoop 从使用 `buildRequest` + `stream` 切换到 `buildOaiRequest` + `streamOai`。
+585:- [ ] **步骤 3：loop.ts 使用 buildOaiRequest**
+591:const request = this.config.promptEngine.buildOaiRequest(this.session.getOaiMessages(), this.recentToolHistory)
+721:| Phase 3 | 删除 `buildOaiRequest`，旧 `buildRequest` 仍在 |
+722:| Phase 4 | revert loop.ts 的 `buildOaiRequest` 调用，回到旧路径 |
+824:原 acceptance criteria 只在最末验证 cache hit。这不够——任何中间 Phase 引入字节差异（JSON key 顺序、stableStringify 漏调用、消息结构改变）都会到最末才发现。
+907:每格一个测试，验证 `buildOaiRequest` 输出符合期望。
+909:**当前状态（2026-05-22）**：`buildOaiRequest` 尚未实现，已先在 `src/api/__tests__/openai-client.test.ts` 锁定现有 `openai-client.buildRequestBody` 的 provider × thinking 行为，作为迁移前兼容基准：
+912:- [x] DeepSeek: thinking + no text + tool_calls → no `content` + `reasoning_content` + `tool_calls`（现有行为；Phase 3 `buildOaiRequest` 可再决定是否统一为 `content: ''`）
+918:Phase 3 新增 `buildOaiRequest` 后，需把上述锁定测试迁移/复制到新路径，并按最终 OpenAI-native 规范确认 tool-call-only assistant 是否要求显式 `content: ''`。
+967:### I · Phase 3-4 期间双路径 A/B sanity
+969:Phase 3-4 是 `buildRequest`（旧）和 `buildOaiRequest`（新）共存窗口。利用这个窗口做字节稳定性探针：
+971:**Patch**：Phase 3 task 1 后新增"双路径 sanity"步骤——
+975:- `stableStringify(A)` vs `stableStringify(B)` → diff
+978:把"我们测不出 cache"反转成"用 cache 测自己"——迁移本身就是字节稳定性探针。

@@ -1,0 +1,80 @@
+▶ SessionContext bounded collections
+  ✔ evicts oldest filesRead when cap exceeded (0.545084ms)
+  ✔ evicts oldest filesModified when cap exceeded (0.187166ms)
+  ✔ evicts oldest testResults when cap exceeded (0.139167ms)
+  ✔ evicts oldest turnCacheHistory when cap exceeded (0.169042ms)
+✔ SessionContext bounded collections (1.512292ms)
+▶ SessionContext OpenAI-native message storage
+  ✖ stores user messages as OAI messages while exposing legacy view (0.151541ms)
+  ✖ converts assistant content blocks to a single OAI assistant message (0.096458ms)
+  ✖ converts legacy tool_result blocks to OAI tool messages (0.094208ms)
+  ✖ migrates loaded legacy messages to OAI canonical storage (0.114708ms)
+✖ SessionContext OpenAI-native message storage (0.586042ms)
+✔ getLatestTurnHitRate returns null with no turn cache snapshots (0.063708ms)
+✔ getLatestTurnHitRate returns null when latest turn has no cache counters (0.066625ms)
+✔ getLatestTurnHitRate returns latest turn cache read ratio (0.049125ms)
+▶ getRecentTurnHitRate
+  ✔ returns null with no turn cache snapshots (0.090209ms)
+  ✔ returns average over available turns when fewer than requested (0.041708ms)
+  ✔ returns average over last N turns (0.05125ms)
+  ✔ returns null when all turns have zero cache counters (0.037875ms)
+✔ getRecentTurnHitRate (0.289375ms)
+ℹ tests 15
+ℹ suites 3
+ℹ pass 11
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 223.011833
+
+✖ failing tests:
+
+test at src/agent/__tests__/context.test.ts:1:1522
+✖ stores user messages as OAI messages while exposing legacy view (0.151541ms)
+  TypeError [Error]: ctx.getOaiMessages is not a function
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context.test.ts:58:26)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.start (node:internal/test_runner/test:959:17)
+      at node:internal/test_runner/test:1464:71
+      at node:internal/per_context/primordials:483:82
+      at new Promise (<anonymous>)
+      at new SafePromise (node:internal/per_context/primordials:451:29)
+      at node:internal/per_context/primordials:483:9
+      at Array.map (<anonymous>)
+
+test at src/agent/__tests__/context.test.ts:1:1794
+✖ converts assistant content blocks to a single OAI assistant message (0.096458ms)
+  TypeError [Error]: ctx.getOaiMessages is not a function
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context.test.ts:74:26)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1466:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7)
+
+test at src/agent/__tests__/context.test.ts:1:2551
+✖ converts legacy tool_result blocks to OAI tool messages (0.094208ms)
+  TypeError [Error]: ctx.getOaiMessages is not a function
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context.test.ts:107:26)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:752:7)
+
+test at src/agent/__tests__/context.test.ts:1:3129
+✖ migrates loaded legacy messages to OAI canonical storage (0.114708ms)
+  TypeError [Error]: ctx.getOaiMessages is not a function
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context.test.ts:146:26)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:752:7)

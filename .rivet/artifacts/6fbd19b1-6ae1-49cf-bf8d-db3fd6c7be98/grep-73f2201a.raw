@@ -1,0 +1,12 @@
+237:    this.evidence = new EvidenceTracker()
+261:      getEvidenceState: () => this.evidence.getState(),
+272:        const es = this.evidence.getState()
+364:      evidence: this.evidence,
+388:      evidence: this.evidence,
+512:  getEvidenceState() { return this.evidence.getState() }
+514:  getVerificationSummary() { return this.evidence.getVerificationSummary() }
+684:    this.evidence.reset()
+804:          evidenceState: this.evidence.getState(),
+888:          evidence: this.evidence.getState(),
+996:        this.evidence.reset()
+1000:      this.evidence.reset()

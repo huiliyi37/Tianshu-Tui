@@ -1,0 +1,54 @@
+▶ PromptEngine OpenAI-native request building
+  ✔ injects volatile user messages around OAI user messages only (5.829041ms)
+  ✔ reuses cached fresh volatile across tool-call turns for the same latest user message (0.245209ms)
+  ✔ refreshes cached fresh volatile at a new user message boundary (0.206167ms)
+  ✔ produces stable canonical OAI body bytes for equivalent construction (0.305709ms)
+  ✖ matches canonical legacy bytes for equivalent tool-call transcript without changing production code (2.283625ms)
+✖ PromptEngine OpenAI-native request building (9.577083ms)
+▶ PromptEngine message normalization
+  ✔ inserts a synthetic tool_result immediately after an unmatched tool_use (0.267583ms)
+  ✔ keeps a valid tool_use/tool_result pair unchanged (0.139584ms)
+  ✔ drops orphan tool_result messages that no longer follow a tool_use (0.1765ms)
+  ✔ normalizes broken history into API-safe rounds (0.396084ms)
+✔ PromptEngine message normalization (1.102083ms)
+▶ PromptEngine context layer report
+  ✔ reports context layers with channels and fingerprint policy (0.268791ms)
+  ✔ omits layers with no content (0.111125ms)
+✔ PromptEngine context layer report (0.443417ms)
+▶ PromptEngine active claims projection
+  ✔ updated active claims appear in the latest turn request without entering historical stable context (0.178625ms)
+  ✔ updated session memory appears in the latest turn request (0.165291ms)
+  ✔ updated active domain appears only in latest volatile context (0.198ms)
+✔ PromptEngine active claims projection (0.599917ms)
+ℹ tests 14
+ℹ suites 4
+ℹ pass 13
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 247.065916
+
+✖ failing tests:
+
+test at src/prompt/__tests__/engine.test.ts:1:4900
+✖ matches canonical legacy bytes for equivalent tool-call transcript without changing production code (2.283625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '{"max_tokens":1024,"messages":[{"content":"<context>\\n<environment platform=\\"darwin\\" cwd=\\"/repo\\" os=\\"Darwin 25.4.0\\" />\\n</context>","role":"user"},{"content":"hello","role":"user"},{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\\"file_path\\":\\"a.ts\\"}","name":"edit_file"},"id":"call_1","type":"function"}]},{"content":"done","role":"tool","tool_call_id":"call_1"}],"model":"test","stream":true,"tool_choice":"auto","tools":[{"function":{"description":"Edit file","name":"edit_file","parameters":{"properties":{},"type":"object"}},"type":"function"}]}'
+  - '{"max_tokens":1024,"messages":[{"content":"<context>\\n<environment platform=\\"darwin\\" cwd=\\"/repo\\" os=\\"Darwin 25.4.0\\" />\\n</context>","role":"user"},{"content":"hello","role":"user"},{"role":"assistant","tool_calls":[{"function":{"arguments":"{\\"file_path\\":\\"a.ts\\"}","name":"edit_file"},"id":"call_1","type":"function"}]},{"content":"done","role":"tool","tool_call_id":"call_1"}],"model":"test","stream":true,"tool_choice":"auto","tools":[{"function":{"description":"Edit file","name":"edit_file","parameters":{"properties":{},"type":"object"}},"type":"function"}]}'
+  
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/__tests__/engine.test.ts:168:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '{"max_tokens":1024,"messages":[{"content":"<context>\\n<environment platform=\\"darwin\\" cwd=\\"/repo\\" os=\\"Darwin 25.4.0\\" />\\n</context>","role":"user"},{"content":"hello","role":"user"},{"content":null,"role":"assistant","tool_calls":[{"function":{"arguments":"{\\"file_path\\":\\"a.ts\\"}","name":"edit_file"},"id":"call_1","type":"function"}]},{"content":"done","role":"tool","tool_call_id":"call_1"}],"model":"test","stream":true,"tool_choice":"auto","tools":[{"function":{"description":"Edit file","name":"edit_file","parameters":{"properties":{},"type":"object"}},"type":"function"}]}',
+    expected: '{"max_tokens":1024,"messages":[{"content":"<context>\\n<environment platform=\\"darwin\\" cwd=\\"/repo\\" os=\\"Darwin 25.4.0\\" />\\n</context>","role":"user"},{"content":"hello","role":"user"},{"role":"assistant","tool_calls":[{"function":{"arguments":"{\\"file_path\\":\\"a.ts\\"}","name":"edit_file"},"id":"call_1","type":"function"}]},{"content":"done","role":"tool","tool_call_id":"call_1"}],"model":"test","stream":true,"tool_choice":"auto","tools":[{"function":{"description":"Edit file","name":"edit_file","parameters":{"properties":{},"type":"object"}},"type":"function"}]}',
+    operator: 'strictEqual'
+  }

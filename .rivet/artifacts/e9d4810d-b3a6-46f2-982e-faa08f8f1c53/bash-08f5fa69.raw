@@ -1,0 +1,21 @@
+17 matches in 1F:
+
+[file] src/api/__tests__/openai-client.test.ts (17):
+    41: it('buildRequestBody produces valid OpenAI request body', () => {
+    43: y = (client as any).buildRequestBody(makeRequest('Hello'))
+    63: y = (client as any).buildRequestBody(request)
+    84: y = (client as any).buildRequestBody(request)
+   110: y = (client as any).buildRequestBody(request)
+   122: y = (client as any).buildRequestBody(assistantRequest([
+   133: y = (client as any).buildRequestBody(assistantRequest([
+   149: y = (client as any).buildRequestBody(assistantRequest([
+   163: y = (client as any).buildRequestBody(assistantRequest([
+   176: y = (client as any).buildRequestBody(assistantRequest([
+   191: y = (client as any).buildRequestBody(assistantRequest([
+   205: y = (client as any).buildRequestBody(assistantRequest([
+   233: y = (client as any).buildRequestBody(request)
+   259: y = (client as any).buildRequestBody(request)
+   546: y = (client as any).buildRequestBody(makeRequest('Hello'))
+   553: y = (client as any).buildRequestBody(makeRequest('Hello'))
+   576: y = (client as any).buildRequestBody(request)
+

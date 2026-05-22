@@ -1,0 +1,50 @@
+TypeScript: 9 errors in 4 files
+═══════════════════════════════════════
+Top codes: TS2322 (4x), TS2304 (2x), TS2339 (2x), TS2345 (1x)
+
+src/api/codex-client.ts (3 errors)
+  L111: TS2339 Property 'length' does not exist on type '{}'.
+  L171: TS2304 Cannot find name 'ContentBlock'.
+  L293: TS2304 Cannot find name 'ContentBlock'.
+
+src/agent/__tests__/turn-stream.test.ts (3 errors)
+  L59: TS2322 Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+  L93: TS2322 Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+  L120: TS2322 Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+
+src/api/client.ts (2 errors)
+  L210: TS2322 Type '{ name: string; description: string; input_schema: Record<string, unknown>; }[]' is not assignable to type 'Too...
+    Type '{ name: string; description: string; input_schema: Record<string, unknown>; }' is not assignable to type 'ToolD...
+    Types of property 'input_schema' are incompatible.
+    Type 'Record<string, unknown>' is missing the following properties from type '{ type: "object"; properties: Record<st...
+  L238: TS2339 Property 'stripUnsupported' does not exist on type 'ApiClient'.
+
+src/agent/turn-stream.ts (1 errors)
+  L98: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+[full output: ~/Library/Application Support/rtk/tee/1779453665_tsc.log]

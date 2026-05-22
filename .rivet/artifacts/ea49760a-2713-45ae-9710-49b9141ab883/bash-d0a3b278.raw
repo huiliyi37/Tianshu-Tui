@@ -1,0 +1,5 @@
+3083902 docs(plan): record Task 3B completion status
+2cbe2de feat(prompt): buildOaiRequest outputs system message and stream_options
+ec652ee test(prompt): add canonical parity checks for OpenAI-native requests
+8b33a38 feat(prompt): add OpenAI-native request builder
+51091ac feat(agent): add OpenAI-native session persistence path

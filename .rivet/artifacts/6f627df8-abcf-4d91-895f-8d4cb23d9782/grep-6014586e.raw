@@ -1,0 +1,40 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/signal-consumer-hook.ts:25:      const strategy = ctx.snapshot.strategy
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/signal-consumer-hook.ts:26:      const pressure = ctx.snapshot.sensoriumInput?.pressureResult
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/signal-consumer-hook.ts:27:      const pheromones = ctx.snapshot.sensoriumInput?.pheromones ?? []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/kick-hook.ts:19:      const sensorium = ctx.snapshot.sensorium
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/kick-hook.ts:23:      const currentTurn = ctx.snapshot.turn
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/kick-hook.ts:28:      const recentFailed = ctx.snapshot.recentToolHistory
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/kick-hook.ts:33:      const kickActions = buildKickActions(sensorium, ctx.snapshot.cwd, recentFailed)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/perception-hook.ts:10:      if (!ctx.snapshot.sensoriumInput) return
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/perception-hook.ts:12:      const baseSensorium = computeSensorium(ctx.snapshot.sensoriumInput)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/perception-hook.ts:15:        ctx.snapshot.providerDegradationRatio ?? 0,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/playbook-reflect-hook.ts:10:  buildRetrospectInput: () => RetrospectInput
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/playbook-reflect-hook.ts:23:      const report = generateRetrospect(deps.buildRetrospectInput())
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/theta-hook.ts:18:      const sensorium = ctx.snapshot.sensorium
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/theta-hook.ts:20:      if (!tickTheta(advanced, ctx.snapshot.turn)) return
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/courage-hook.ts:39:      const turn = ctx.snapshot.turn
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/courage-hook.ts:41:      if (!shouldTriggerCourage(ctx.snapshot.recentToolHistory, courageThreshold)) return
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/vigor-hook.ts:19:      const sensorium = ctx.snapshot.sensorium
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/vigor-hook.ts:22:      const prev = ctx.snapshot.vigor ?? createVigorState()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/telemetry-flush-hook.ts:9:      await writer.flush()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:16:import type { PostToolRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:80:  tool: RuntimeToolEvent,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:84:    turn: ctx.snapshot.turn,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:88:    shouldEscalate: ctx.snapshot.strategy?.shouldEscalate ?? false,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:125:    run(ctx: RuntimeHookContext, tool: RuntimeToolEvent): void {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:129:      if (!snapshot.sensorium) return
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:132:      if (snapshot.sensorium.complexity > 0.5) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:138:      const starPhase = mapSensoriumToPhase(snapshot.sensorium, phaseCtx)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:140:      const turn = snapshot.turn
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:163:        const toolHistory = snapshot.recentToolHistory.map(e => ({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:186:        const history = snapshot.recentToolHistory
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:191:          if (classifyPhase(mapSensoriumToPhase(snapshot.sensorium, {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:221:        const toolHistory = snapshot.recentToolHistory.map(e => ({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:243:        const toolHistory = snapshot.recentToolHistory.map(e => ({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/cross-session-hook.ts:6:  setCrossSessionAppendix: (content: string) => void
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/cross-session-hook.ts:43:        deps.setCrossSessionAppendix(formatEventsForAppendix(events))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/stigmergy-hook.ts:25:        const readCount = ctx.snapshot.recentToolHistory.filter(
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/stigmergy-hook.ts:28:        const hasWrite = ctx.snapshot.recentToolHistory.some(
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/stigmergy-hook.ts:49:        const bashErrors = ctx.snapshot.recentToolHistory.filter(
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/stigmergy-hook.ts:68:        confidence: ctx.snapshot.vigor?.tonic ?? 0.6,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/stigmergy-hook.ts:69:        recentToolCalls: ctx.snapshot.recentToolHistory.map(h => ({

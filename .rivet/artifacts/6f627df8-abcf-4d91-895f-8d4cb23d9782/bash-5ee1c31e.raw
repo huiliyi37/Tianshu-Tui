@@ -1,0 +1,101 @@
+▶ ContextInjectionController
+  ✔ refreshes ledger with user anchors (12.708291ms)
+  ✔ projects active claims into prompt context and records prompt consumers (2.255083ms)
+  ✔ projects repair hint through prompt engine (cerebellar hint is harness-only) (0.294667ms)
+✔ ContextInjectionController (16.177375ms)
+▶ SessionContext context ledger state
+  ✔ stores context ledger immutably (1.44375ms)
+  ✔ records compact events immutably (0.3075ms)
+  ✔ returns unique working set from read and modified files (1.473417ms)
+✔ SessionContext context ledger state (4.517334ms)
+▶ SessionContext bounded collections
+  ✔ evicts oldest filesRead when cap exceeded (1.52025ms)
+  ✔ evicts oldest filesModified when cap exceeded (0.515917ms)
+  ✔ evicts oldest testResults when cap exceeded (0.444042ms)
+  ✔ evicts oldest turnCacheHistory when cap exceeded (0.29775ms)
+✔ SessionContext bounded collections (4.249625ms)
+▶ SessionContext OpenAI-native message storage
+  ✔ stores user messages as OAI messages while exposing legacy view (1.989041ms)
+  ✔ converts assistant content blocks to a single OAI assistant message (0.334917ms)
+  ✔ converts legacy tool_result blocks to OAI tool messages (0.458416ms)
+  ✔ migrates loaded legacy messages to OAI canonical storage (0.553625ms)
+✔ SessionContext OpenAI-native message storage (3.619625ms)
+✔ getLatestTurnHitRate returns null with no turn cache snapshots (0.216833ms)
+✔ getLatestTurnHitRate returns null when latest turn has no cache counters (0.207833ms)
+✔ getLatestTurnHitRate returns latest turn cache read ratio (0.169333ms)
+▶ getRecentTurnHitRate
+  ✔ returns null with no turn cache snapshots (0.391792ms)
+  ✔ returns average over available turns when fewer than requested (0.172584ms)
+  ✔ returns average over last N turns (0.12175ms)
+  ✔ returns null when all turns have zero cache counters (0.119792ms)
+✔ getRecentTurnHitRate (1.084375ms)
+▶ AgentLoop — multi-turn tool_use
+  ✔ completes a simple text turn (no tool_use) (21.700083ms)
+  ✔ syncs auto reasoning effort to the client without going below the configured floor (11.399583ms)
+  ✔ executes tool_use and continues loop (22.635542ms)
+  ✔ binds a matched star domain once per session and injects it into latest volatile context (15.877583ms)
+  ✔ stores cache diagnostic when latest turn hit rate is low (7.626542ms)
+  ✔ clears cache diagnostic when latest turn hit rate is healthy (7.251ms)
+  ✔ clears cache diagnostic when latest turn has no cache counters (5.736416ms)
+  ✔ prewarms recent successful read_file history at turn start (17.778125ms)
+  ✔ respects maxTurns limit (37.478417ms)
+  ✔ aborts during multi-turn loop (5.783208ms)
+  ✔ delivers complete tool input after JSON accumulation (9.875542ms)
+  ✔ delivers text from all turns including after tool_use and passes isFinal correctly (13.002958ms)
+  ✔ suppresses repeated pre-tool narration across tool-use turns (17.673209ms)
+✔ AgentLoop — multi-turn tool_use (194.923125ms)
+▶ AgentLoop — session lifecycle
+  ✔ runs postSession before final turn completion (1.513416ms)
+  ✔ runs postSession on AbortError before abort callback (1.320625ms)
+✔ AgentLoop — session lifecycle (2.896292ms)
+▶ AgentLoop — error handling
+  ✔ persists partial assistant blocks before returning stream error (1.310125ms)
+  ✔ handles tool execution errors gracefully and continues (25.961458ms)
+✔ AgentLoop — error handling (27.366333ms)
+▶ AgentLoop — compact policy
+  ✔ compacts on small context windows without legacy absolute-threshold approval (19.045792ms)
+  ✔ falls back to cache anchors plus resume state when compaction cannot fit the ceiling (50.682084ms)
+✔ AgentLoop — compact policy (69.858375ms)
+▶ AgentLoop — active claims projection
+  ✔ promotes user constraint anchors into active claim prompt context (8.756833ms)
+  ✔ records prompt consumers and promotes repeatedly projected claims (21.566834ms)
+✔ AgentLoop — active claims projection (30.4565ms)
+▶ AgentLoop — antibody generation
+  ✔ generates failure_pattern claim after tool error with classifiable failure (13.277167ms)
+  ✔ does not suppress first-turn text when it matches previous run last turn (10.433208ms)
+✔ AgentLoop — antibody generation (23.822458ms)
+▶ AgentLoop — playbook telemetry bounds
+  ✔ caps sensorium snapshots retained for playbook reflection (660.716542ms)
+✔ AgentLoop — playbook telemetry bounds (660.842208ms)
+▶ AgentLoop — output token escalation
+  ✔ continues on max_output_tokens stop reason (11.575333ms)
+  ✔ stops escalating after repeated max_output_tokens turns (21.042ms)
+✔ AgentLoop — output token escalation (32.764167ms)
+▶ TurnCompletionController
+  ✔ runs turn-end side effects and emits final completion (2.344584ms)
+✔ TurnCompletionController (3.491667ms)
+▶ runWorkerSession
+  ✔ runs a headless worker and returns a schema-valid result (25.054083ms)
+  ✔ uses an independent SessionContext instead of mutating the primary session (9.751542ms)
+  ✔ recovers without repair when prose contains incidental JSON before the result packet (8.975666ms)
+  ✔ runs one repair prompt after invalid worker JSON (16.740083ms)
+  ✔ returns blocked after retry budget is exhausted (9.993875ms)
+✔ runWorkerSession (71.276833ms)
+ℹ tests 53
+ℹ suites 15
+ℹ pass 53
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2601.938125
+TypeScript: 2 errors in 1 files
+═══════════════════════════════════════
+Top codes: TS2353 (1x), TS2322 (1x)
+
+src/agent/context.ts (2 errors)
+  L58: TS2353 Object literal may only specify known properties, and '[LEGACY_CONTENT_SHAPE]' does not exist in type 'OaiUserMessage...
+  L71: TS2322 Type '(OaiToolMessage | { role: "user"; content: string; [LEGACY_CONTENT_SHAPE]: "blocks"; })[]' is not assignable to...
+    Type 'OaiToolMessage | { role: "user"; content: string; [LEGACY_CONTENT_SHAPE]: "blocks"; }' is not assignable to typ...
+    Object literal may only specify known properties, and '[LEGACY_CONTENT_SHAPE]' does not exist in type 'OaiUserMessage'.
+[full output: ~/Library/Application Support/rtk/tee/1779438104_tsc.log]

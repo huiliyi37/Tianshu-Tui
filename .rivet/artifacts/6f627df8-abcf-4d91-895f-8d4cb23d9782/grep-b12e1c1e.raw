@@ -1,0 +1,25 @@
+6: * 直接使用 OpenAI 格式。验证：sessionState 变化不破坏 prefix cache。
+15:import { stableStringify } from '../src/api/stable-json.js'
+27:const SYSTEM_BASE = `You are a coding assistant. Use tools to find TODO/FIXME comments, read files, edit them (dry run), and run tests. Be concise. Call one tool at a time.`
+85:interface TurnStats { turn: number; toolCalls: number; inputTokens: number; cacheHit: number; cacheMiss: number; hitRate: string; stateChars: number }
+88:// Track frozen volatile suffix per user-message index (mimics engine.ts cachedFreshForUser)
+89:const frozenUserSuffixes = new Map<number, string>()
+92:  const stateBlock = sessionState.renderForVolatile()
+94:  // Mimic Rivet's cachedFreshForUser: freeze suffix on first send of each user msg.
+101:  if (lastUserIdx >= 0 && !frozenUserSuffixes.has(lastUserIdx)) {
+102:    frozenUserSuffixes.set(lastUserIdx, stateBlock)
+107:    const suffix = frozenUserSuffixes.get(i)
+109:      apiMessages.push({ ...msg, content: `${msg.content}\n\n<context-update>\n${suffix}\n</context-update>` })
+118:    body: stableStringify({ model: 'deepseek-chat', messages: [{ role: 'system', content: SYSTEM_BASE }, ...apiMessages], tools: TOOLS, tool_choice: 'auto', max_tokens: 2048, stream: false }),
+124:  const hit = usage.prompt_cache_hit_tokens ?? 0
+125:  const miss = usage.prompt_cache_miss_tokens ?? 0
+126:  const hitRate = (hit + miss) > 0 ? (hit / (hit + miss) * 100).toFixed(1) : '0.0'
+131:    stats: { turn: turnLabel, toolCalls: data.choices[0].message.tool_calls?.length ?? 0, inputTokens: usage.prompt_tokens, cacheHit: hit, cacheMiss: miss, hitRate: `${hitRate}%`, stateChars: stateBlock.length },
+139:  console.log(`   验证：sessionState 每轮变化是否破坏 prefix cache`)
+152:      console.log(`done (${text.length} chars) — hit: ${stats.hitRate} | state: ${stats.stateChars}ch`)
+157:    console.log(`${toolCalls.length} tool(s) — hit: ${stats.hitRate} | state: ${stats.stateChars}ch`)
+175:    console.log(`│  ${String(s.turn).padStart(2)}  │   ${String(s.toolCalls).padStart(2)}  │ ${String(s.inputTokens).padStart(10)} │ ${String(s.cacheHit).padStart(9)} │ ${String(s.cacheMiss).padStart(9)} │ ${s.hitRate.padStart(8)} │ ${String(s.stateChars).padStart(9)} │`)
+181:    const totalHit = recent3.reduce((s, r) => s + r.cacheHit, 0)
+182:    const totalMiss = recent3.reduce((s, r) => s + r.cacheMiss, 0)
+185:    console.log(`\n📊 Recent 3 turns 平均命中率: ${avgRate}%`)
+190:    if (rate >= 80 && stateGrew) console.log('\n✅ SessionState 变化未破坏 prefix cache')

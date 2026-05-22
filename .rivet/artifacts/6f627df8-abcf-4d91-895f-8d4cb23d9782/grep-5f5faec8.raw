@@ -1,0 +1,41 @@
+27:  providerName?: string
+143:    const body = this.buildRequestBody(canonicalReq)
+216:  buildRequestBody(request: MessageRequest): Record<string, unknown> {
+223:      if (this.config.providerName === 'mimo' && this.config.thinking === 'enabled') {
+261:        const thinkingParts: string[] = []
+272:            thinkingParts.push(block.thinking)
+279:                arguments: stableStringify(block.input),
+289:        // DeepSeek requires reasoning_content to be passed back in tool-call rounds.
+290:        // GLM with clear_thinking=true (default): API ignores reasoning_content in
+292:        if (thinkingParts.length > 0 && this.config.providerName !== 'glm') {
+293:          assistant.reasoning_content = thinkingParts.join('')
+296:          assistant.tool_calls = toolCalls
+298:        // OpenAI API requires content or tool_calls on every assistant message.
+301:        if (!assistant.content && !assistant.tool_calls) {
+325:      const applicableTools = this.config.providerName === 'glm'
+345:      || this.config.providerName === 'glm'
+346:      || this.config.providerName === 'claude'
+347:      || this.config.providerName === 'mimo'
+352:        if (this.config.providerName === 'glm') {
+353:          ;(body.thinking as Record<string, unknown>)['clear_thinking'] = true
+355:        if (this.config.providerName === 'claude') {
+383:    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onContentBlock' | 'onStopReason'>>,
+390:    // GLM-5.1 mandatory thinking mode outputs everything as reasoning_content
+431:            if (parsed.choices?.[0]?.delta?.reasoning_content) {
+432:              reasoningAccum += parsed.choices[0].delta.reasoning_content
+450:              if (parsed.choices?.[0]?.delta?.reasoning_content) {
+451:                reasoningAccum += parsed.choices[0].delta.reasoning_content
+460:      // Emit thinking content block so reasoning_content can be passed back
+462:      // providers that return reasoning_content require it to be echoed.
+464:        callbacks.onContentBlock?.({ type: 'thinking', thinking: reasoningAccum })
+467:      // GLM-5.1 mandatory thinking: if only reasoning_content arrived (no content),
+487:        delta: { content?: string | null; reasoning_content?: string | null; tool_calls?: Array<ToolCallChunk> }
+492:    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onThinkingDelta' | 'onContentBlock' | 'onStopReason'>>,
+515:    // DeepSeek reasoning_content → thinking delta
+516:    if (delta.reasoning_content) {
+517:      callbacks.onThinkingDelta?.(delta.reasoning_content)
+524:    if (delta.tool_calls) {
+525:      for (const tc of delta.tool_calls) {
+547:  private flushToolCalls(callbacks: Partial<Pick<StreamCallbacks, 'onContentBlock' | 'onStopReason'>>): void {
+556:      callbacks.onContentBlock?.({
+570:    case 'tool_calls': return 'tool_use'

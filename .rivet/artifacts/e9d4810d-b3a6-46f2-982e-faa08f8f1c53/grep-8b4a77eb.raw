@@ -1,0 +1,7 @@
+8:export interface OpenAIClientConfig {
+58:function sanitizeSchemaProperties(properties: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+81:function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
+108:function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+122:export class OpenAIClient implements StreamClient {
+567:function mapFinishReason(reason: string): string {
+577:export function parseOpenAIError(status: number, body: string): string {

@@ -1,0 +1,2 @@
+2:import type { MessageRequest, ToolDefinition } from './types.js'
+243:  /** Convert Anthropic MessageRequest to OpenAI chat completions body */

@@ -1,0 +1,186 @@
+▶ ContextInjectionController
+  ✔ refreshes ledger with user anchors (21.51ms)
+  ✔ projects active claims into prompt context and records prompt consumers (3.86025ms)
+  ✔ projects repair hint through prompt engine (cerebellar hint is harness-only) (0.391458ms)
+✔ ContextInjectionController (26.42425ms)
+▶ SessionContext context ledger state
+  ✔ stores context ledger immutably (0.595625ms)
+  ✔ records compact events immutably (0.108333ms)
+  ✔ returns unique working set from read and modified files (0.499875ms)
+✔ SessionContext context ledger state (1.741667ms)
+▶ SessionContext bounded collections
+  ✔ evicts oldest filesRead when cap exceeded (0.961583ms)
+  ✔ evicts oldest filesModified when cap exceeded (0.6535ms)
+  ✔ evicts oldest testResults when cap exceeded (0.191959ms)
+  ✔ evicts oldest turnCacheHistory when cap exceeded (0.44125ms)
+✔ SessionContext bounded collections (3.568542ms)
+▶ SessionContext OpenAI-native message storage
+  ✖ stores user messages as OAI messages while exposing legacy view (3.750666ms)
+  ✖ converts assistant content blocks to a single OAI assistant message (1.3205ms)
+  ✔ converts legacy tool_result blocks to OAI tool messages (0.78575ms)
+  ✖ migrates loaded legacy messages to OAI canonical storage (0.981084ms)
+✖ SessionContext OpenAI-native message storage (7.2585ms)
+✔ getLatestTurnHitRate returns null with no turn cache snapshots (0.174875ms)
+✔ getLatestTurnHitRate returns null when latest turn has no cache counters (0.09725ms)
+✔ getLatestTurnHitRate returns latest turn cache read ratio (0.064042ms)
+▶ getRecentTurnHitRate
+  ✔ returns null with no turn cache snapshots (0.122125ms)
+  ✔ returns average over available turns when fewer than requested (0.056208ms)
+  ✔ returns average over last N turns (0.05425ms)
+  ✔ returns null when all turns have zero cache counters (0.045791ms)
+✔ getRecentTurnHitRate (0.39725ms)
+▶ AgentLoop — multi-turn tool_use
+  ✔ completes a simple text turn (no tool_use) (23.329125ms)
+  ✔ syncs auto reasoning effort to the client without going below the configured floor (11.453792ms)
+  ✔ executes tool_use and continues loop (20.602166ms)
+  ✔ binds a matched star domain once per session and injects it into latest volatile context (16.4015ms)
+  ✔ stores cache diagnostic when latest turn hit rate is low (8.200458ms)
+  ✔ clears cache diagnostic when latest turn hit rate is healthy (7.526709ms)
+  ✔ clears cache diagnostic when latest turn has no cache counters (7.883667ms)
+  ✔ prewarms recent successful read_file history at turn start (19.580708ms)
+  ✔ respects maxTurns limit (25.011667ms)
+  ✔ aborts during multi-turn loop (6.386166ms)
+  ✔ delivers complete tool input after JSON accumulation (20.53175ms)
+  ✔ delivers text from all turns including after tool_use and passes isFinal correctly (12.054042ms)
+  ✔ suppresses repeated pre-tool narration across tool-use turns (18.397208ms)
+✔ AgentLoop — multi-turn tool_use (198.590208ms)
+▶ AgentLoop — session lifecycle
+  ✔ runs postSession before final turn completion (1.65525ms)
+  ✔ runs postSession on AbortError before abort callback (1.579958ms)
+✔ AgentLoop — session lifecycle (3.303834ms)
+▶ AgentLoop — error handling
+  ✔ persists partial assistant blocks before returning stream error (1.32ms)
+  ✔ handles tool execution errors gracefully and continues (23.620083ms)
+✔ AgentLoop — error handling (25.038084ms)
+▶ AgentLoop — compact policy
+  ✔ compacts on small context windows without legacy absolute-threshold approval (18.094ms)
+  ✔ falls back to cache anchors plus resume state when compaction cannot fit the ceiling (52.567458ms)
+✔ AgentLoop — compact policy (70.861542ms)
+▶ AgentLoop — active claims projection
+  ✔ promotes user constraint anchors into active claim prompt context (10.269625ms)
+  ✔ records prompt consumers and promotes repeatedly projected claims (23.3735ms)
+✔ AgentLoop — active claims projection (33.775167ms)
+▶ AgentLoop — antibody generation
+  ✔ generates failure_pattern claim after tool error with classifiable failure (15.115667ms)
+  ✔ does not suppress first-turn text when it matches previous run last turn (11.823708ms)
+✔ AgentLoop — antibody generation (27.084416ms)
+▶ AgentLoop — playbook telemetry bounds
+  ✔ caps sensorium snapshots retained for playbook reflection (700.897958ms)
+✔ AgentLoop — playbook telemetry bounds (701.017291ms)
+▶ AgentLoop — output token escalation
+  ✔ continues on max_output_tokens stop reason (15.058875ms)
+  ✔ stops escalating after repeated max_output_tokens turns (18.321292ms)
+✔ AgentLoop — output token escalation (33.498625ms)
+▶ TurnCompletionController
+  ✔ runs turn-end side effects and emits final completion (1.974209ms)
+✔ TurnCompletionController (2.782958ms)
+▶ runWorkerSession
+  ✔ runs a headless worker and returns a schema-valid result (25.35625ms)
+  ✔ uses an independent SessionContext instead of mutating the primary session (8.792541ms)
+  ✔ recovers without repair when prose contains incidental JSON before the result packet (7.263875ms)
+  ✔ runs one repair prompt after invalid worker JSON (15.856375ms)
+  ✔ returns blocked after retry budget is exhausted (9.196375ms)
+✔ runWorkerSession (67.268583ms)
+ℹ tests 53
+ℹ suites 15
+ℹ pass 50
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2606.62725
+
+✖ failing tests:
+
+test at src/agent/__tests__/context.test.ts:1:1522
+✖ stores user messages as OAI messages while exposing legacy view (3.750666ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      {
+  +     Symbol(legacyContentShape): 'string',
+        content: 'Hello',
+        role: 'user'
+      }
+    ]
+  
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context.test.ts:58:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.start (node:internal/test_runner/test:959:17)
+      at node:internal/test_runner/test:1464:71
+      at node:internal/per_context/primordials:483:82
+      at new Promise (<anonymous>)
+      at new SafePromise (node:internal/per_context/primordials:451:29)
+      at node:internal/per_context/primordials:483:9
+      at Array.map (<anonymous>) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { role: 'user', content: 'Hello' } ],
+    expected: [ { role: 'user', content: 'Hello' } ],
+    operator: 'deepStrictEqual'
+  }
+
+test at src/agent/__tests__/context.test.ts:1:1794
+✖ converts assistant content blocks to a single OAI assistant message (1.3205ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      {
+  +     Symbol(legacyContentShape): 'blocks',
+        content: 'I will inspect.',
+        reasoning_content: 'Need to inspect.',
+        role: 'assistant',
+        tool_calls: [
+          {
+  
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context.test.ts:74:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1466:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { role: 'assistant', content: 'I will inspect.', reasoning_content: 'Need to inspect.', tool_calls: [Array] } ],
+    expected: [ { role: 'assistant', content: 'I will inspect.', reasoning_content: 'Need to inspect.', tool_calls: [Array] } ],
+    operator: 'deepStrictEqual'
+  }
+
+test at src/agent/__tests__/context.test.ts:1:3129
+✖ migrates loaded legacy messages to OAI canonical storage (0.981084ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      {
+  +     Symbol(legacyContentShape): 'string',
+        content: 'Start',
+        role: 'user'
+      },
+      {
+  +     Symbol(legacyContentShape): 'blocks',
+        content: 'Reading.',
+        role: 'assistant',
+        tool_calls: [
+          {
+            function: {
+  
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context.test.ts:146:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { role: 'user', content: 'Start' }, { role: 'assistant', content: 'Reading.', tool_calls: [Array] }, { role: 'tool', tool_call_id: 'tu_1', content: 'contents' } ],
+    expected: [ { role: 'user', content: 'Start' }, { role: 'assistant', content: 'Reading.', tool_calls: [Array] }, { role: 'tool', tool_call_id: 'tu_1', content: 'contents' } ],
+    operator: 'deepStrictEqual'
+  }

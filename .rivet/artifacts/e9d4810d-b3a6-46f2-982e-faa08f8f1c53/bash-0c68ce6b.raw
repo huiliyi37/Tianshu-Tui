@@ -1,0 +1,8 @@
+403 │ 
+404 │     return body
+405 │   }
+406 │ 
+407 │   /** Parse SSE stream from a reader — exposed for testing */
+408 │   async parseStreamFromReader(
+409 │     reader: ReadableStreamDefaultReader<Uint8Array>,
+410 │     callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onContentBlock' | 'onStopReason'>>,

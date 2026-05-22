@@ -1,0 +1,51 @@
+81:### Phase 1：新类型定义
+88:### Phase 2：SessionContext 迁移
+96:### Phase 3：PromptEngine 迁移
+107:### Phase 4：Client 层清理
+115:### Phase 5：清理
+129:## 任务 1：定义 OpenAI 原生类型系统（Phase 1）
+134:- [x] **步骤 1：创建 OaiMessage 类型定义**
+226:- [x] **步骤 2：验证类型编译**
+231:- [x] **步骤 3：在 types.ts 中标记旧类型为 deprecated**
+241:- [ ] **步骤 4：Commit**
+250:## 任务 2：SessionContext 双格式支持（Phase 2）
+258:- [x] **步骤 1：添加 OaiMessage 存储和转换方法**
+289:- [x] **步骤 2：添加旧格式 → OaiMessage 的加载兼容（SessionContext load/replace 层）**
+315:- [x] **步骤 3：运行现有测试确认不破坏（Task 2A targeted）**
+325:- [ ] **步骤 4：Commit**
+334:## 任务 3：PromptEngine 输出 OpenAI 格式（Phase 3）
+341:- [x] **步骤 1：新增 buildOaiRequest 方法（不删旧方法）**
+384:- [x] **步骤 2：保留旧 buildRequest 作为兼容层**
+394:- [x] **步骤 3：运行测试（Task 3A targeted）**
+403:- [ ] **步骤 4：Commit**
+412:## 任务 4：Compaction 管线适配（Phase 3 续）
+422:- [ ] **步骤 1：stale-round.ts 适配**
+448:- [ ] **步骤 2：rounds.ts 适配**
+490:- [ ] **步骤 3：resume-preflight.ts 适配**
+509:- [ ] **步骤 4：运行测试**
+514:- [ ] **步骤 5：Commit**
+523:## 任务 5：openai-client 删除转换层（Phase 4）
+530:- [ ] **步骤 1：新增 streamOai 方法（直接透传）**
+553:- [ ] **步骤 2：保留旧 stream 方法（过渡期）**
+557:- [ ] **步骤 3：Commit**
+566:## 任务 6：AgentLoop 切换到 OAI 路径（Phase 4 续）
+575:- [ ] **步骤 1：turn-stream.ts 解析响应后存 OaiMessage**
+582:- [ ] **步骤 2：tool-execution.ts 构建 OaiToolMessage**
+589:- [ ] **步骤 3：loop.ts 使用 buildOaiRequest**
+598:- [ ] **步骤 4：全量测试**
+603:- [ ] **步骤 5：Commit**
+612:## 任务 7：TUI 和 Headless 适配（Phase 5）
+618:- [ ] **步骤 1：history-replay.ts 适配 OaiMessage**
+625:- [ ] **步骤 2：headless.ts 输出适配**
+633:- [ ] **步骤 3：Commit**
+642:## 任务 8：删除旧类型和兼容层（Phase 5 续）
+651:- [ ] **步骤 1：删除旧类型**
+659:- [ ] **步骤 2：删除 openai-client 转换代码**
+663:- [ ] **步骤 3：删除 SessionContext 兼容方法**
+668:- [ ] **步骤 4：全量测试 + 更新所有测试文件**
+673:- [ ] **步骤 5：Commit**
+682:## 任务 9：测试全量更新
+688:- [ ] **步骤 1：批量替换 tool_use content blocks**
+697:- [ ] **步骤 2：批量替换 tool_result content blocks**
+706:- [ ] **步骤 3：运行全量测试**
+711:- [ ] **步骤 4：Commit**

@@ -1,0 +1,10 @@
+33:function isToolResultBlock(block: ContentBlock): block is ContentBlock & { type: 'tool_result'; tool_use_id: string } {
+37:function toolUseIds(message: Message): string[] {
+42:function toolResultIds(message: Message | undefined): string[] {
+44:  return message.content.filter(isToolResultBlock).map(block => block.tool_use_id)
+47:function makeSyntheticToolResult(id: string): ContentBlock {
+61:    if (msg.role === 'user' && Array.isArray(msg.content) && msg.content.some(isToolResultBlock)) {
+63:      if (!previous || toolUseIds(previous).length === 0) continue
+68:    const ids = toolUseIds(msg)
+72:    const results = toolResultIds(next)
+75:      normalized.push({ role: 'user', content: missing.map(makeSyntheticToolResult) })

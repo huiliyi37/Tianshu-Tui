@@ -1,0 +1,196 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/tool-execution.ts:48:  addToolResults: (results: ContentBlock[]) => void
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/tool-execution.ts:146:    this.deps.addToolResults(toolResults)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/recovery-trigger.ts:158:      'Review the failing tool and its error messages',
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/recovery-trigger.ts:318:    evidence.push(`Large session (${input.messageCount} messages) with integrity issues`)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:10:import { SessionPersist } from './session-persist.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:54:import { TurnStreamController } from './turn-stream.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:316:      getMessages: () => this.session.getMessages(),
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:401:      addToolResults: results => { this.session.addToolResults(results) },
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:565:        messageCount: this.session.getMessages().length,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:644:      messageCount: this.session.getMessages().length,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:736:          this.persist.appendCompactStart(turn, this.session.getMessages().length)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:752:          const before = this.session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:766:        if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:767:          const before = this.session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:770:          const { messages: trimmed } = microCompact(before, virtualWindow, this.session.getEstimatedTokens())
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:779:          this.persist.appendCompactEnd(turn, this.session.getMessages().length)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:927:        const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:950:          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); this.recordTurnSnapshot() }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/loop.ts:955:        if (collectedBlocks.length > 0) this.session.addAssistantBlocks(collectedBlocks)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context-injection.ts:22:  getMessages: () => Message[]
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context-injection.ts:122:      this.deps.getMessages(),
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-state.ts:37:export interface SessionState {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:24:export interface SessionState {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:25:  messages: Message[]
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:39:export class SessionContext {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:44:      messages: [],
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:60:    this.state.messages.push(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:65:  /** Replace all messages (used after compaction) */
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:66:  replaceMessages(messages: Message[]): void {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:67:    this.state.messages = messages
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:68:    this.state.estimatedTokens = estimateTokens(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:71:  /** Load messages from a persisted session (used on startup recovery) */
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:72:  loadMessages(messages: Message[]): void {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:73:    this.state.messages = messages
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:74:    this.state.turnCount = messages.filter(m => m.role === 'user' && typeof m.content === 'string').length
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:75:    this.state.estimatedTokens = estimateTokens(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:79:  addAssistantBlocks(blocks: ContentBlock[]): void {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:81:    this.state.messages.push(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:86:  addToolResults(results: ContentBlock[]): void {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:88:    this.state.messages.push(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:124:  getMessages(): Message[] {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:125:    return this.state.messages
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:5: * Emits Chinese radio messages via `emitPhaseChange` on:
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:12: * v2: All messages pass through applyDomainVoice for personality-aware tone.
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:13: *     Heartbeat messages use phase-aware templates (not bare "第N轮").
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/hooks/radio-hook.ts:183:      //    Uses its own lastStuckEmitTurn so heartbeat messages don't
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-registry.ts:5:export interface SessionEntry {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/chronicle.ts:26: * Collects events (phase transitions, milestones, radio messages) during
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/chronicle.ts:103:   * Return the last `count` radio messages, newest first.
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:94:  /** Load all messages from the session file (with checksum validation) */
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:99:  /** Load messages repaired for resume, rolling back to the last safe snapshot when needed. */
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:101:    messages: Message[]
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:115:      return { messages: preflight.messages, preflight, usedSnapshot: false, hadIncompleteCompact: false }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:120:      return { messages: preflight.messages, preflight, usedSnapshot: false, hadIncompleteCompact }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:127:      messages: snapshotPreflight.messages,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:135:  /** Compact the session file with the given messages (with checksums) */
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:136:  compact(messages: Message[]): void {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:137:    const content = messages.map(m => appendChecksum(serializeSessionMessage(m))).join('\n') + '\n'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:266:    const messages = this.load()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:268:    for (let i = 0; i < messages.length; i++) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:269:      if (messages[i]!.role === 'user' && typeof messages[i]!.content === 'string') {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:271:        if (currentTurn === turn) return messages.slice(0, i + 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:274:    return messages
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:43:    const messages = this.deps.session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:58:      const { messages: compacted } = await this.compactMessages(messages, estimatedTokens)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:72:      if (messages.length >= CACHE_ANCHOR_MESSAGES && compacted.length >= CACHE_ANCHOR_MESSAGES) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:73:        const anchorTouched = messages[CACHE_ANCHOR_MESSAGES - 1]!.content !== compacted[CACHE_ANCHOR_MESSAGES - 1]!.content
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:93:    const messages = this.deps.session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:100:    const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:120:      beforeTokens: estimateTokens(messages),
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:142:    messages: Message[],
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:144:  ): Promise<{ messages: Message[] }> {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:148:        messages,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:153:      return { messages: result.messages }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/compaction-controller.ts:155:    return microCompact(messages, this.deps.contextWindow, tokenCount)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/domain-voice.ts:6: * domain-specific tone to radio messages.
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/virtue-signals.ts:275: * Called from turn-perception preTurn hook when the first 2 messages
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/radio-templates.ts:5: * and warning templates. All messages are in Chinese with the [天枢] prefix.
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/chronicle.test.ts:34:  it('getRecentRadio returns last N messages', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context-injection.test.ts:40:    getMessages: () => session.getMessages(),
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context-injection.test.ts:82:      const joined = request.messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context-injection.test.ts:100:    const joined = request.messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:48:  const messages: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:61:    injectUserMessage: message => { messages.push(message) },
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:65:  return { hook, ctx, messages, phases }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:70:    const { hook, ctx, messages } = runHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:76:    assert.deepEqual(messages, ['<search-breadth mode="wide" />'])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:90:    const { hook, ctx, messages } = runHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:104:    assert.equal(messages.length, 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:105:    assert.match(messages[0]!, /任务过大/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:109:    const { hook, ctx, messages } = runHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:117:    assert.equal(messages.length, 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:118:    assert.match(messages[0]!, /<file-warnings kind="dead-end" compressed="true">/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:120:    assert.match(messages[0]!, /\[generic\]/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:124:    const { hook, ctx, messages } = runHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:135:    assert.equal(messages.length, 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:136:    assert.match(messages[0]!, /<file-warnings kind="dead-end" compressed="true">/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:137:    assert.match(messages[0]!, /\[security\]/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:138:    assert.match(messages[0]!, /\[test-runner\]/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:142:    const { hook, ctx, messages } = runHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:149:    assert.deepEqual(messages, ['<search-breadth mode="wide" />'])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:153:    const { hook, ctx, messages } = runHook({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:163:    assert.equal(messages.length, 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:164:    assert.match(messages[0]!, /<file-warnings/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/signal-consumer-hook.test.ts:165:    assert.match(messages[0]!, /npm run build failed with TS2345/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/recovery-trigger.test.ts:317:  assert.ok(result!.evidence.some(e => e.includes('600 messages')))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/perception-hook.test.ts:65:    const messages: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/perception-hook.test.ts:84:      injectUserMessage: message => { messages.push(message) },
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/perception-hook.test.ts:94:    assert.equal(messages.length, 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:23:  messages?: string[]
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:37:    injectUserMessage: message => { options.messages?.push(message) },
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:45:    const messages: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:48:    await hook.run(makeContext({ sensorium: null, messages }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:51:    assert.deepEqual(messages, [])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:56:    const messages: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:59:    await hook.run(makeContext({ sensorium: makeSensorium({ momentum: 0.8, stability: 0.9 }), messages }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:62:    assert.deepEqual(messages, [])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:67:    const messages: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:70:    await hook.run(makeContext({ messages }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:73:    assert.equal(messages.length, 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:74:    assert.match(messages[0]!, /系统感知/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:75:    assert.match(messages[0]!, /替代框架/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:112:    const messages: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:117:    await hook.run(makeContext({ messages, turn: 1 }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:118:    assert.equal(messages.length, 1, 'turn 1: first kick should fire')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:121:    await hook.run(makeContext({ messages, turn: 2 }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:122:    assert.equal(messages.length, 1, 'turn 2: should be blocked by cooldown')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:125:    await hook.run(makeContext({ messages, turn: 3 }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:126:    assert.equal(messages.length, 1, 'turn 3: should be blocked by cooldown')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:129:    await hook.run(makeContext({ messages, turn: 4 }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:130:    assert.equal(messages.length, 2, 'turn 4: kick should fire after cooldown expires')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:133:    await hook.run(makeContext({ messages, turn: 5 }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:134:    assert.equal(messages.length, 2, 'turn 5: should be blocked again')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:137:    await hook.run(makeContext({ messages, turn: 7 }))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/kick-hook.test.ts:138:    assert.equal(messages.length, 3, 'turn 7: third kick should fire')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/turn-stream.test.ts:3:import { TurnStreamController } from '../turn-stream.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/turn-stream.test.ts:10:  messages: [],
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:80:    const before = primary.getMessages().length
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:102:    assert.equal(primary.getMessages().length, before)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:103:    assert.ok(run.session.getMessages().length > 0)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:6:import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, serializeSessionMessage } from '../session-persist.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:61:  it('persists truncated oversized messages as loadable JSON', async () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:65:    const messages = persist.load()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:66:    assert.equal(messages.length, 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:67:    assert.match(String(messages[0]!.content), /session-message-truncated/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:111:  it('loads messages up to a specific turn', async () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:139:    assert.equal(result.messages.length, 3)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:140:    assert.deepEqual(result.messages[2], {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:165:    assert.equal(result.messages.length, 1)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:166:    assert.deepEqual(result.messages[0], { role: 'user', content: 'first turn' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:224:  it('appends and loads messages with checksum', async () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/subagent-integration.test.ts:138:    const req: MessageRequest = { model: 'test', messages: [], max_tokens: 1024, stream: true }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/subagent-integration.test.ts:157:    const req: MessageRequest = { model: 'test', messages: [], max_tokens: 1024, stream: true }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/subagent-integration.test.ts:177:    const req: MessageRequest = { model: 'test', messages: [], max_tokens: 1024, stream: true }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/subagent-integration.test.ts:207:    const req: MessageRequest = { model: 'test', messages: [], max_tokens: 1024, stream: true }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/subagent-integration.test.ts:223:    const req: MessageRequest = { model: 'deepseek', messages: [], max_tokens: 2048, stream: true }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/subagent-integration.test.ts:317:    assert.equal(primarySession.getMessages().length, 0, 'Primary session should have no messages')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:97:    assert.equal(session.getMessages().length, 2) // user + assistant
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:171:    assert.equal(session.getMessages().length, 5)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:172:    assert.match(String(session.getMessages()[3]?.content ?? ''), /<metacognition>/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:183:      stream: mock.fn(async (req: { messages: Message[] }, cb: StreamCallbacks, _sig?: AbortSignal) => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:184:        const contexts = req.messages.filter(message => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<star-domain'))
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:629:    const messages = session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:631:    assert.equal(messages.at(-1)?.role, 'assistant')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:632:    assert.deepEqual(messages.at(-1)?.content, [{ type: 'text', text: 'partial answer' }])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:753:    const messages = session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:754:    assert.equal(messages[0]?.content, 'anchor user')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:755:    assert.equal(messages[1]?.content, 'anchor assistant')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:756:    assert.match(String(messages[2]?.content), /<checkpoint-resume>/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:812:    const callArgs = streamMock.mock.calls[0]!.arguments[0] as { messages: Array<{ role: string; content: string }> }
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:813:    const requestText = callArgs.messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/compaction-controller.test.ts:97:    const messages = session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/compaction-controller.test.ts:98:    assert.equal(messages[0]?.content, 'anchor user')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/compaction-controller.test.ts:99:    assert.equal(messages[1]?.content, 'anchor assistant')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/compaction-controller.test.ts:100:    assert.match(String(messages[2]?.content), /<checkpoint-resume>/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/runtime-hooks.test.ts:159:    const messages: string[] = []
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/runtime-hooks.test.ts:172:      injectUserMessage: message => { messages.push(message) },
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/runtime-hooks.test.ts:189:    assert.deepEqual(messages, ['hello'])
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:9:  it('messages array stays bounded after 10 simulated turns', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:10:    const messages: Message[] = [
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:27:        messages.push({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:33:      messages.push({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:38:      const compacted = compactStaleRounds(messages, 1_000_000)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:39:      if (compacted !== messages) {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:40:        messages.length = 0
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:41:        messages.push(...compacted)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:45:    const totalTokens = estimateTokens(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:47:    assert.ok(messages.length > 4, 'Should still have meaningful messages')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:61:    const messages: Message[] = [
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:67:      messages.push({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:71:      messages.push({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:77:    const before = estimateTokens(messages)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:78:    const compacted = compactStaleRounds(messages, 1_000_000)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/memory-safety-integration.test.ts:83:    const origLastFour = messages.slice(-4)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/radio-hook.test.ts:114:  it('respects cooldown — no duplicate stuck messages within 5 turns', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/radio-hook.test.ts:204:    // Turns 2-8: no additional messages (stuck threshold not yet reached)

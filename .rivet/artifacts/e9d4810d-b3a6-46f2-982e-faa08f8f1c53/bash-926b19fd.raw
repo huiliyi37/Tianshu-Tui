@@ -1,0 +1,6 @@
+0 matches for '\.buildRequest('
+
+rg: regex parse error:
+    (?:\.buildRequest()
+    ^
+error: unclosed group

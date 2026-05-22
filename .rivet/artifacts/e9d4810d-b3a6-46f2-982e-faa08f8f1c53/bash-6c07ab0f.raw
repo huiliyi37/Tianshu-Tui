@@ -1,0 +1,4 @@
+TypeScript: 1 errors in 1 files
+═══════════════════════════════════════
+src/api/openai-client.ts (1 errors)
+  L93: TS1128 Declaration or statement expected.

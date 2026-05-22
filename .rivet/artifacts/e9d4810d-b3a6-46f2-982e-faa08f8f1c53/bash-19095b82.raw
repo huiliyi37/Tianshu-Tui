@@ -1,0 +1,17 @@
+▶ CodexClient
+  ✔ builds request body with instructions and reasoning (1.2855ms)
+  ✔ converts tool_use to top-level function_call (0.139333ms)
+  ✔ parses SSE stream with output_text and reasoning events (5.828208ms)
+  ✔ buffers message output_item.done until reasoning arrives — preserves thinking→answer order (0.403666ms)
+  ✔ flushes buffered message at stream end when no reasoning events occur (0.251792ms)
+  ✔ emits message immediately when reasoning deltas already arrived (0.279041ms)
+  ✔ does not emit text twice when both delta and output_item.done contain same text (0.244166ms)
+✔ CodexClient (9.324916ms)
+ℹ tests 7
+ℹ suites 1
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 260.660917

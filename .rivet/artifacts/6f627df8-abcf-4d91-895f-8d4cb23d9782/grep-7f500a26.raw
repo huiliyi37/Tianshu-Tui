@@ -1,0 +1,40 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/context/__tests__/claim-store.test.ts:8:import { SessionPersist } from '../../agent/session-persist.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/context/__tests__/claim-store.test.ts:238:test('SessionPersist creates a claim store for the current session id', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/context/__tests__/claim-store.test.ts:239:  const persist = new SessionPersist('session-claims-test')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context-injection.test.ts:40:    getMessages: () => session.getMessages(),
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:6:import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, serializeSessionMessage } from '../session-persist.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:8:describe('SessionPersist', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:22:    const persist = new SessionPersist('test-session-001')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:30:    const persist = new SessionPersist('test-session-002')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:36:    const persist = new SessionPersist('test-session-003')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:42:    const persist = new SessionPersist('test-session-004')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:48:    const persist = new SessionPersist('test-session-005')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:62:    const persist = new SessionPersist('test-session-large-message')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:86:    const persist = new SessionPersist('snap-test-1')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:96:    const persist = new SessionPersist('snap-empty')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:101:    const persist = new SessionPersist('snap-corrupt')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:112:    const persist = new SessionPersist('snap-turn')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:126:  it('loadRecoverableMessages inserts synthetic tool_result for orphan tool_use', async () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:127:    const persist = new SessionPersist('test-session-recoverable-orphan')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:134:    const result = persist.loadRecoverableMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:151:  it('loadRecoverableMessages rolls back to last snapshot when transcript is unsafe', async () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:152:    const persist = new SessionPersist('test-session-recoverable-snapshot')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:161:    const result = persist.loadRecoverableMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:225:    const persist = new SessionPersist('test-checksum')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:239:    const persist = new SessionPersist('test-legacy')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:256:    const persist = new SessionPersist('test-invalid-checksum')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:290:    const persist = new SessionPersist('test-checkpoint')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:304:    const persist = new SessionPersist('test-checkpoint-complete')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:318:  it('loadRecoverableMessages detects incomplete compact', async () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:319:    const persist = new SessionPersist('test-recoverable-checkpoint')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:329:    const result = persist.loadRecoverableMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:80:    const before = primary.getMessages().length
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:102:    assert.equal(primary.getMessages().length, before)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:103:    assert.ok(run.session.getMessages().length > 0)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:97:    assert.equal(session.getMessages().length, 2) // user + assistant
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:171:    assert.equal(session.getMessages().length, 5)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:172:    assert.match(String(session.getMessages()[3]?.content ?? ''), /<metacognition>/)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:629:    const messages = session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:753:    const messages = session.getMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/subagent-integration.test.ts:317:    assert.equal(primarySession.getMessages().length, 0, 'Primary session should have no messages')
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/compaction-controller.test.ts:97:    const messages = session.getMessages()

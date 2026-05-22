@@ -1,0 +1,18 @@
+25d8a8b (HEAD -> feat/openai-native-format-migration) refactor: delete legacy compact functions and types (MessageRequest, SystemBlock, StreamEvent)
+M	src/agent/__tests__/memory-safety-integration.test.ts
+M	src/agent/tool-result-truncate.ts
+M	src/api/types.ts
+D	src/compact/__tests__/auto.test.ts
+D	src/compact/__tests__/compact.test.ts
+M	src/compact/__tests__/micro.test.ts
+M	src/compact/__tests__/stale-round.test.ts
+D	src/compact/auto.ts
+D	src/compact/index.ts
+M	src/compact/micro.ts
+M	src/compact/stale-round.ts
+D	src/context/__tests__/microcompact.test.ts
+D	src/context/__tests__/reactive-compact.test.ts
+D	src/context/microcompact.ts
+D	src/context/reactive-compact.ts
+M	src/context/rounds.ts
+D	src/context/token-estimate.ts

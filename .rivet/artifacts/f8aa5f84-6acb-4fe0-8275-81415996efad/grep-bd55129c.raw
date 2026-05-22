@@ -1,0 +1,200 @@
+src/agent/__tests__/compaction-controller.test.ts:56:      assert.ok(session.getEstimatedTokens() < 96_000 || session.getMessages().length <= 8)
+src/agent/__tests__/compaction-controller.test.ts:87:      const messages = session.getMessages()
+src/agent/__tests__/context-injection.test.ts:40:      getMessages: () => session.getMessages(),
+src/agent/__tests__/context-injection.test.ts:81:        const request = engine.buildOaiRequest([{ role: 'user', content: 'next' }])
+src/agent/__tests__/context-injection.test.ts:97:      const request = engine.buildOaiRequest([{ role: 'user', content: 'next' }])
+src/agent/__tests__/context.test.ts:4:  import type { OaiMessage } from '../../api/oai-types.js'
+src/agent/__tests__/context.test.ts:58:      assert.deepEqual(ctx.getMessages(), [
+src/agent/__tests__/context.test.ts:71:      assert.deepEqual(ctx.getMessages(), [
+src/agent/__tests__/context.test.ts:94:      assert.deepEqual(ctx.getMessages(), [
+src/agent/__tests__/context.test.ts:102:      const messages: OaiMessage[] = [
+src/agent/__tests__/context.test.ts:120:      assert.deepEqual(ctx.getMessages(), messages)
+src/agent/__tests__/loop.test.ts:98:      assert.equal(session.getMessages().length, 2) // user + assistant
+src/agent/__tests__/loop.test.ts:172:      assert.equal(session.getMessages().length, 5)
+src/agent/__tests__/loop.test.ts:173:      assert.match(String(session.getMessages()[3]?.content ?? ''), /<metacognition>/)
+src/agent/__tests__/loop.test.ts:630:      const messages = session.getMessages()
+src/agent/__tests__/loop.test.ts:752:      const messages = session.getMessages()
+src/agent/__tests__/memory-safety-integration.test.ts:6:  import type { OaiMessage } from '../../api/oai-types.js'
+src/agent/__tests__/memory-safety-integration.test.ts:10:      const messages: OaiMessage[] = [
+src/agent/__tests__/memory-safety-integration.test.ts:55:      const messages: OaiMessage[] = [
+src/agent/__tests__/session-persist.test.ts:7:  import type { OaiMessage } from '../../api/oai-types.js'
+src/agent/__tests__/session-persist.test.ts:73:      const messages: OaiMessage[] = [
+src/agent/__tests__/session-persist.test.ts:91:        await persist.appendOaiWithChecksum(message)
+src/agent/__tests__/session-persist.test.ts:94:      assert.deepEqual(persist.loadOai(), messages)
+src/agent/__tests__/session-persist.test.ts:97:    it('migrates legacy session messages to OAI on loadOai', async () => {
+src/agent/__tests__/session-persist.test.ts:113:      assert.deepEqual(persist.loadOai(), [
+src/agent/__tests__/subagent-integration.test.ts:317:      assert.equal(primarySession.getMessages().length, 0, 'Primary session should have no messages')
+src/agent/__tests__/worker-session.test.ts:81:      const before = primary.getMessages().length
+src/agent/__tests__/worker-session.test.ts:103:      assert.equal(primary.getMessages().length, before)
+src/agent/__tests__/worker-session.test.ts:104:      assert.ok(run.session.getMessages().length > 0)
+src/agent/compaction-controller.ts:2:  import type { OaiMessage } from '../api/oai-types.js'
+src/agent/compaction-controller.ts:42:      const messages = this.deps.session.getMessages()
+src/agent/compaction-controller.ts:96:      const messages = this.deps.session.getMessages()
+src/agent/compaction-controller.ts:105:      let candidate: OaiMessage[] = [...anchorMessages, { role: 'user', content: resumeContent }]
+src/agent/compaction-controller.ts:139:      messages: OaiMessage[],
+src/agent/compaction-controller.ts:141:    ): { messages: OaiMessage[] } {
+src/agent/context-injection.ts:2:  import type { OaiMessage } from '../api/oai-types.js'
+src/agent/context-injection.ts:23:    getMessages: () => OaiMessage[]
+src/agent/context-injection.ts:123:        this.deps.getMessages(),
+src/agent/context.ts:2:  import type { OaiMessage, OaiToolCall } from '../api/oai-types.js'
+src/agent/context.ts:4:  import { estimateOaiMessageTokens, estimateOaiTokens } from '../compact/micro.js'
+src/agent/context.ts:27:    oaiMessages: OaiMessage[]
+src/agent/context.ts:62:      this.state.estimatedTokens += estimateOaiMessageTokens({ role: 'user', content })
+src/agent/context.ts:66:    replaceMessages(messages: OaiMessage[]): void {
+src/agent/context.ts:78:      const msg: OaiMessage = {
+src/agent/context.ts:85:      this.state.estimatedTokens += estimateOaiMessageTokens(msg)
+src/agent/context.ts:91:          const msg: OaiMessage = { role: 'tool', tool_call_id: block.tool_use_id, content: block.content }
+src/agent/context.ts:93:          this.state.estimatedTokens += estimateOaiMessageTokens(msg)
+src/agent/context.ts:130:    getMessages(): OaiMessage[] {
+src/agent/loop.ts:316:        getMessages: () => this.session.getMessages(),
+src/agent/loop.ts:565:          messageCount: this.session.getMessages().length,
+src/agent/loop.ts:644:        messageCount: this.session.getMessages().length,
+src/agent/loop.ts:736:            this.persist.appendCompactStart(turn, this.session.getMessages().length)
+src/agent/loop.ts:752:            const before = this.session.getMessages()
+src/agent/loop.ts:766:          if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
+src/agent/loop.ts:767:            const before = this.session.getMessages()
+src/agent/loop.ts:779:            this.persist.appendCompactEnd(turn, this.session.getMessages().length)
+src/agent/loop.ts:927:          const request = this.config.promptEngine.buildOaiRequest(this.session.getMessages(), this.recentToolHistory)
+src/agent/session-persist.ts:7:  import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
+src/agent/session-persist.ts:10:  function legacyMessageToOaiMessages(message: Message): OaiMessage[] {
+src/agent/session-persist.ts:101:  export function serializeOaiSessionMessage(message: OaiMessage, maxChars = MAX_SESSION_MESSAGE_JSON_CHARS): string {
+src/agent/session-persist.ts:106:    } as OaiMessage))
+src/agent/session-persist.ts:120:  function isOaiMessage(value: unknown): value is OaiMessage {
+src/agent/session-persist.ts:176:    async appendOaiWithChecksum(message: OaiMessage): Promise<void> {
+src/agent/session-persist.ts:183:    loadOai(): OaiMessage[] {
+src/agent/session-persist.ts:189:      const messages: OaiMessage[] = []
+src/agent/session-persist.ts:194:          if (isOaiMessage(parsed)) {
+src/agent/session-persist.ts:197:            messages.push(...legacyMessageToOaiMessages(parsed as Message).map(message => JSON.parse(JSON.stringify(message)) as OaiMessage))
+src/agent/session-persist.ts:247:    compactOai(messages: OaiMessage[]): void {
+src/agent/tool-result-truncate.ts:1:  import { estimateOaiMessageTokens } from '../compact/micro.js'
+src/agent/tool-result-truncate.ts:5:    const tokens = estimateOaiMessageTokens({ role: 'user', content })
+src/api/__tests__/oai-types.test.ts:3:  import { isAssistantWithTools, isToolMessage, isUserMessage, type OaiChatRequest, type OaiMessage } from '../oai-types.js'
+src/api/__tests__/oai-types.test.ts:7:      const msg: OaiMessage = {
+src/api/__tests__/oai-types.test.ts:20:      const msg: OaiMessage = {
+src/api/__tests__/oai-types.test.ts:44:      const msg: OaiMessage = {
+src/api/__tests__/oai-types.test.ts:54:      const msg: OaiMessage = {
+src/api/oai-types.ts:40:  export type OaiMessage =
+src/api/oai-types.ts:46:  export function isToolMessage(msg: OaiMessage): msg is OaiToolMessage {
+src/api/oai-types.ts:50:  export function isAssistantWithTools(msg: OaiMessage): msg is OaiAssistantMessage & { tool_calls: OaiToolCall[] } {
+src/api/oai-types.ts:56:  export function isUserMessage(msg: OaiMessage): msg is OaiUserMessage {
+src/api/oai-types.ts:73:    messages: OaiMessage[]
+src/api/openai-client.ts:133:    /** Shared inner retry+fetch+SSE loop used by both stream and streamOai. */
+src/api/types.ts:4:    OaiMessage,
+src/compact/__tests__/micro.test.ts:4:  import type { OaiMessage } from '../../api/oai-types.js'
+src/compact/__tests__/micro.test.ts:8:      const msgs: OaiMessage[] = [{ role: 'user', content: 'Hello world' }]
+src/compact/__tests__/micro.test.ts:19:      const msgs: OaiMessage[] = [{
+src/compact/__tests__/micro.test.ts:30:    const makeMessages = (n: number): OaiMessage[] =>
+src/compact/__tests__/micro.test.ts:70:      const messages: OaiMessage[] = [
+src/compact/__tests__/micro.test.ts:77:        ] as OaiMessage[]).flat(),
+src/compact/__tests__/micro.test.ts:82:        ] as OaiMessage[]).flat(),
+src/compact/__tests__/micro.test.ts:105:      const messages: OaiMessage[] = [
+src/compact/__tests__/micro.test.ts:121:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round-oai.test.ts:4:  import type { OaiMessage } from '../../api/oai-types.js'
+src/compact/__tests__/stale-round-oai.test.ts:7:    function toolMsg(content: string, toolCallId = 'tc_1'): OaiMessage {
+src/compact/__tests__/stale-round-oai.test.ts:11:    function assistantMsg(text: string): OaiMessage {
+src/compact/__tests__/stale-round-oai.test.ts:16:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round-oai.test.ts:31:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round-oai.test.ts:55:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round-oai.test.ts:67:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round-oai.test.ts:76:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round.test.ts:4:  import type { OaiMessage } from '../../api/oai-types.js'
+src/compact/__tests__/stale-round.test.ts:7:    function toolMsg(id: string, content: string): OaiMessage {
+src/compact/__tests__/stale-round.test.ts:11:    function assistantMsg(text: string): OaiMessage {
+src/compact/__tests__/stale-round.test.ts:16:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round.test.ts:30:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round.test.ts:47:      const messages: OaiMessage[] = [
+src/compact/__tests__/stale-round.test.ts:58:      const messages: OaiMessage[] = [
+src/compact/micro.ts:1:  import type { OaiMessage } from '../api/oai-types.js'
+src/compact/micro.ts:8:  function compactToolMessage(msg: OaiMessage, contextWindow: number): { msg: OaiMessage; changed: boolean } {
+src/compact/micro.ts:17:  function compactOaiReasoning(msg: OaiMessage): { msg: OaiMessage; changed: boolean } {
+src/compact/micro.ts:27:  export function estimateOaiMessageTokens(msg: OaiMessage): number {
+src/compact/micro.ts:59:  export function estimateOaiTokens(messages: OaiMessage[]): number {
+src/compact/micro.ts:62:      total += estimateOaiMessageTokens(msg)
+src/compact/micro.ts:68:    messages: OaiMessage[],
+src/compact/micro.ts:71:  ): { messages: OaiMessage[]; truncated: number } {
+src/compact/stale-round.ts:1:  import type { OaiMessage } from '../api/oai-types.js'
+src/compact/stale-round.ts:8:  export function compactStaleRoundsOai(messages: OaiMessage[], _contextWindow: number): OaiMessage[] {
+src/context/__tests__/resume-preflight-oai.test.ts:8:  import type { OaiMessage } from '../../api/oai-types.js'
+src/context/__tests__/resume-preflight-oai.test.ts:12:      const messages: OaiMessage[] = [
+src/context/__tests__/resume-preflight-oai.test.ts:22:      const messages: OaiMessage[] = [
+src/context/__tests__/resume-preflight-oai.test.ts:32:      const messages: OaiMessage[] = [
+src/context/__tests__/resume-preflight-oai.test.ts:50:      const messages: OaiMessage[] = [
+src/context/__tests__/resume-preflight-oai.test.ts:60:      const messages: OaiMessage[] = [
+src/context/__tests__/resume-preflight-oai.test.ts:69:      const messages: OaiMessage[] = [
+src/context/__tests__/resume-preflight-oai.test.ts:80:      const messages: OaiMessage[] = [
+src/context/__tests__/resume-preflight-oai.test.ts:99:      const messages: OaiMessage[] = [
+src/context/__tests__/rounds-oai.test.ts:4:  import type { OaiMessage } from '../../api/oai-types.js'
+src/context/__tests__/rounds-oai.test.ts:8:      const messages: OaiMessage[] = [
+src/context/__tests__/rounds-oai.test.ts:19:      const messages: OaiMessage[] = [
+src/context/__tests__/rounds-oai.test.ts:28:      const messages: OaiMessage[] = [
+src/context/__tests__/rounds-oai.test.ts:44:      const messages: OaiMessage[] = [
+src/context/__tests__/rounds-oai.test.ts:58:      const messages: OaiMessage[] = [
+src/context/__tests__/rounds-oai.test.ts:68:      const messages: OaiMessage[] = [
+src/context/__tests__/rounds-oai.test.ts:89:      const messages: OaiMessage[] = [
+src/context/ledger.ts:1:  import type { OaiMessage } from '../api/oai-types.js'
+src/context/ledger.ts:8:    messages: OaiMessage[],
+src/context/resume-preflight.ts:2:  import type { OaiMessage, OaiToolMessage, OaiAssistantMessage } from '../api/oai-types.js'
+src/context/resume-preflight.ts:79:    messages: OaiMessage[]
+src/context/resume-preflight.ts:86:  export function detectOrphanToolCallsOai(messages: OaiMessage[]): string[] {
+src/context/resume-preflight.ts:106:  export function detectOrphanToolResultsOai(messages: OaiMessage[]): string[] {
+src/context/resume-preflight.ts:131:  export function runResumePreflightOai(messages: OaiMessage[]): OaiResumePreflightReport {
+src/context/rounds.ts:2:  import type { OaiMessage, OaiAssistantMessage } from '../api/oai-types.js'
+src/context/rounds.ts:224:  function hasOaiToolCalls(msg: OaiMessage): msg is OaiAssistantMessage & { tool_calls: NonNullable<OaiAssistantMessage['tool_calls']> } {
+src/context/rounds.ts:228:  function estimateOaiMessageTokens(msg: OaiMessage): number {
+src/context/rounds.ts:255:  export function groupIntoRoundsOai(messages: OaiMessage[]): OaiRound[] {
+src/context/rounds.ts:275:          tokenEstimate: estimateOaiMessageTokens(msg),
+src/context/rounds.ts:291:          tokenEstimate: estimateOaiMessageTokens(msg),
+src/context/rounds.ts:326:          tokenEst += estimateOaiMessageTokens(messages[idx]!)
+src/context/rounds.ts:352:          tokenEstimate: estimateOaiMessageTokens(msg),
+src/context/rounds.ts:367:        tokenEstimate: estimateOaiMessageTokens(msg),
+src/context/types.ts:2:  import type { OaiMessage } from '../api/oai-types.js'
+src/prompt/__tests__/chat-mode-engine.test.ts:33:      const request = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+src/prompt/__tests__/chat-mode-engine.test.ts:44:      const request = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+src/prompt/__tests__/chat-mode-engine.test.ts:57:      const request = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+src/prompt/__tests__/chat-mode-engine.test.ts:72:      const request = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+src/prompt/__tests__/chat-mode-engine.test.ts:90:        engine.buildOaiRequest([{ role: 'user', content: `turn ${i}` }])
+src/prompt/__tests__/chat-mode-engine.test.ts:93:      const request = engine.buildOaiRequest([{ role: 'user', content: 'final check' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:5:  import type { OaiMessage } from '../../api/oai-types.js'
+src/prompt/__tests__/engine-cache-stability.test.ts:90:      const req1 = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:94:      const req2 = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:111:        const messages: OaiMessage[] = []
+src/prompt/__tests__/engine-cache-stability.test.ts:123:        const req = engine.buildOaiRequest(messages, toolHistory)
+src/prompt/__tests__/engine-cache-stability.test.ts:139:      const req = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:165:      const req1 = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:168:      const req2 = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:200:        engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
+src/prompt/__tests__/engine-cache-stability.test.ts:204:      const req = engine.buildOaiRequest([{ role: 'user', content: 'check' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:215:        const messages: OaiMessage[] = []
+src/prompt/__tests__/engine-cache-stability.test.ts:220:        engine.buildOaiRequest(messages)
+src/prompt/__tests__/engine-cache-stability.test.ts:223:      const req = engine.buildOaiRequest([{ role: 'user', content: 'final' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:235:        engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
+src/prompt/__tests__/engine-cache-stability.test.ts:239:      const req = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:255:        engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
+src/prompt/__tests__/engine-cache-stability.test.ts:258:      let req = engine.buildOaiRequest([{ role: 'user', content: 'check' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:263:      req = engine.buildOaiRequest([{ role: 'user', content: 'after change' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:274:        engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
+src/prompt/__tests__/engine-cache-stability.test.ts:278:      const req = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:310:        engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
+src/prompt/__tests__/engine-cache-stability.test.ts:313:      const req = engine.buildOaiRequest([{ role: 'user', content: 'test' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:338:        const messages: OaiMessage[] = [
+src/prompt/__tests__/engine-cache-stability.test.ts:350:        const req = engine.buildOaiRequest(messages, toolHistory)
+src/prompt/__tests__/engine-cache-stability.test.ts:363:      const req1 = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:368:      const req2 = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:377:      const req3 = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:399:        const messages: OaiMessage[] = [
+src/prompt/__tests__/engine-cache-stability.test.ts:407:        const req = engine.buildOaiRequest(messages, [
+src/prompt/__tests__/engine-cache-stability.test.ts:419:      const messages: OaiMessage[] = [
+src/prompt/__tests__/engine-cache-stability.test.ts:425:      const before = engine.buildOaiRequest(messages)
+src/prompt/__tests__/engine-cache-stability.test.ts:429:      const after = engine.buildOaiRequest(messages)
+src/prompt/__tests__/engine-cache-stability.test.ts:452:      const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:462:      const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:475:        const messages: OaiMessage[] = [{ role: 'user', content: 'refactor the auth module' }]
+src/prompt/__tests__/engine-cache-stability.test.ts:481:        const req = engine.buildOaiRequest(messages)
+src/prompt/__tests__/engine-cache-stability.test.ts:494:      const req1 = engine.buildOaiRequest([{ role: 'user', content: 'first task' }])
+src/prompt/__tests__/engine-cache-stability.test.ts:500:      const req2 = engine.buildOaiRequest([
+src/prompt/__tests__/engine-cache-stability.test.ts:521:      const req = engine.buildOaiRequest([
+src/prompt/__tests__/engine.test.ts:5:  import type { OaiChatRequest, OaiMessage } from '../../api/oai-types.js'
+src/prompt/__tests__/engine.test.ts:31:      const messages: OaiMessage[] = [
+src/prompt/__tests__/engine.test.ts:41:      const request = engine.buildOaiRequest(messages)
+src/prompt/__tests__/engine.test.ts:60:      const first = engine.buildOaiRequest([{ role: 'user', content: 'inspect' }])
+src/prompt/__tests__/engine.test.ts:66:      const second = engine.buildOaiRequest([

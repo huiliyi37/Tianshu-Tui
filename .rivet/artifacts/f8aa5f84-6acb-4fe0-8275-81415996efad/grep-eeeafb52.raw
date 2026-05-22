@@ -1,0 +1,13 @@
+161:export class AgentLoop {
+334:    this.turnStream = this.createTurnStreamController()
+344:  private createTurnStreamController(): TurnStreamController {
+671:  async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
+674:    this.turnStream = this.createTurnStreamController()
+709:    const isChatMode = this.config.promptEngine.getMode() === 'chat'
+710:    this.taskContract = isChatMode ? undefined : extractTaskContract(userInput, this.session.getTurnCount())
+712:    if (this.config.autoReasoning && !isChatMode) {
+796:        if (isChatMode) {
+879:        if (!isChatMode && (hadDestructive || hadAskTool)) {
+900:        const sycophancyHint = isChatMode ? undefined : this.sycophancyTrap.getHint()
+901:        const projection = isChatMode ? '' : buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint })
+908:        if (!isChatMode) {

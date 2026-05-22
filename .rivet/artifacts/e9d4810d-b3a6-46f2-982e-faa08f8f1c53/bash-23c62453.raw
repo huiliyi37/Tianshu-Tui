@@ -1,0 +1,30 @@
+TypeScript: 35 errors in 13 files
+═══════════════════════════════════════
+Top codes: TS2345 (17x), TS2339 (7x), TS2551 (5x), TS2322 (3x), TS2305 (1x)
+
+src/tui/slash-commands.ts (7 errors)
+  L184: TS2345 Argument of type 'OaiMessage[]' is not assignable to parameter of type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+  L191: TS2345 Argument of type 'OaiMessage[]' is not assignable to parameter of type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+  L191: TS2345 Argument of type 'OaiMessage[]' is not assignable to parameter of type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+  L192: TS2345 Argument of type 'Message[]' is not assignable to parameter of type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+  L197: TS2345 Argument of type 'OaiMessage[]' is not assignable to parameter of type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.

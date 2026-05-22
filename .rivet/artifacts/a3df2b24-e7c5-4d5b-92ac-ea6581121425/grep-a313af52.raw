@@ -1,0 +1,14 @@
+/Users/banxia/app/deepseek-tui/opencode-tui/src/api/error-classifier.ts:183:  // Upstream stream closed before first payload (cliproxy / proxy errors)
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/cliproxy-fork-optimization.md:5:cliproxy 配置中 codex 账号开启了 `fork: true`，导致每次 Claude Code 请求同时产生两条 Codex API 调用，额度消耗翻倍。
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/cliproxy-fork-optimization.md:25:# 检查 cliproxy 主日志中的模型调用分布
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/cliproxy-fork-optimization.md:78:- cliproxy 支持热加载，修改 config.yaml 后自动生效，无需重启进程
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/cliproxy-fork-optimization.md:79:- **禁止 kill/restart cliproxyapi 进程**
+/Users/banxia/app/deepseek-tui/opencode-tui/CLAUDE.md:56:**主星**：Claude Opus 4.6（经 cliproxy 转接于 127.0.0.1:8891，显示为 opus-4-7，实际模型为 opus 4.6 的 1M context 配置）
+/Users/banxia/app/deepseek-tui/opencode-tui/src/config/__tests__/config-schema-integration.test.ts:44:    assert.equal(config.workers.profiles.capable.provider, 'cliproxy')
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/archive/2026-05-21-pre-w1/CLAUDE.md:56:**主星**：Claude Opus 4.6（经 cliproxy 转接于 127.0.0.1:8891，显示为 opus-4-7，实际模型为 opus 4.6 的 1M context 配置）
+/Users/banxia/app/deepseek-tui/opencode-tui/src/config/__tests__/integration/user-config.test.ts:61:    if (profiles?.capable) assert.equal(profiles.capable.provider, 'cliproxy')
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-17-ctcl-cache-preservation-spine-design.md:197:### 当前开发链路：local CTCL + cliproxy
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-17-ctcl-cache-preservation-spine-design.md:204:  -> cliproxy: 127.0.0.1:8891
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-17-ctcl-cache-preservation-spine-design.md:213:| cliproxy config | `~/.cli-proxy-api/config.yaml` | API key 管理、模型路由、payload filter、session affinity | 否，只是当前本地开发形态 |
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-19-ice-mirror-cache-engine.md:5:**存在性证明：** CTCL + Claude Code + cliproxy 在 DeepSeek V4 Pro 上达到 99.8% 缓存命中率。
+/Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/plans/2026-05-22-append-only-artifact-log.md:1281:> 本节由天权（DeepSeek V4 Pro · 执行之面 / Opus 4.6 via cliproxy）追加。

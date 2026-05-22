@@ -1,0 +1,9 @@
+4:import type { Sensorium } from './sensorium.js'
+8:export interface RiskAssessment {
+23:export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+74:export function assessToolRisk(
+79:  sensorium?: Sensorium,
+80:): RiskAssessment {
+103:    for (const pattern of DANGEROUS_BASH_PATTERNS) {
+106:        if (pattern === DANGEROUS_BASH_PATTERNS[DANGEROUS_BASH_PATTERNS.length - 1]) {
+191:  // ── Sensorium-driven adaptive confidence ──────────────────────

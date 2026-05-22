@@ -1,0 +1,2 @@
+81:function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
+331:          .map(toOpenAITool)

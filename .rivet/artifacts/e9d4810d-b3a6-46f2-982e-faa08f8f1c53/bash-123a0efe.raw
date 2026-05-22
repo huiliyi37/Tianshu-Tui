@@ -1,0 +1,6 @@
+0 matches for 'buildRequestBody\|describe\|it('
+
+rg: regex parse error:
+    (?:buildRequestBody|describe|it()
+    ^
+error: unclosed group

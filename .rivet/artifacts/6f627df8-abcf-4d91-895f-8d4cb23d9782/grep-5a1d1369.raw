@@ -1,0 +1,43 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:24:📊 Recent 3 turns 平均命中率: 84.3%  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:52:📊 Recent 3 turns 平均命中率: 93.3%  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:81:📊 Recent 3 turns 平均命中率: 92.6%  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:109:📊 Recent 3 turns 平均命中率: 92.0%  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:134:📊 Recent 3 turns 平均命中率: 93.8%  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:138:⚠️ 轻微下降 — 检查 sessionState 是否在 tool turn 内刷新  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:159:📊 Recent 3 turns 平均命中率: 93.4%  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:163:⚠️ 轻微下降 — 检查 sessionState 是否在 tool turn 内刷新  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:182:📊 Recent 3 turns 平均命中率: 91.8%  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:186:⚠️ 轻微下降 — 检查 sessionState 是否在 tool turn 内刷新  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:191:│ Turn │ Phase   │ Input Tkns │ Cache Hit │ Cache Miss│ Hit Rate │ State Len │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:193:│   1  │ phase1  │        513 │       512 │         1 │    99.8% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:194:│   2  │ phase1  │        636 │       512 │       124 │    80.5% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:195:│   3  │ phase1  │       2211 │       640 │      1571 │    28.9% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:196:│   4  │ phase1  │       2366 │      2176 │       190 │    92.0% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:197:│   5  │ phase2  │       2464 │      2304 │       160 │    93.5% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:201:   Phase 1 最后一轮: 92.0% (state: 113ch)  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:202:   Phase 2 第一轮:   93.5% (state: 113ch)  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:203:   ✅ Fresh 边界正常 — 第二条 message 仍有高 cache hit  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:207:│ Turn │ Phase   │ Input Tkns │ Cache Hit │ Cache Miss│ Hit Rate │ State Len │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:209:│   1  │ phase1  │        513 │       512 │         1 │    99.8% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:210:│   2  │ phase1  │        638 │       512 │       126 │    80.3% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:211:│   3  │ phase1  │        803 │       640 │       163 │    79.7% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:212:│   4  │ phase1  │        972 │       896 │        76 │    92.2% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:213:│   5  │ phase2  │       1144 │      1024 │       120 │    89.5% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:214:│   6  │ phase2  │       1265 │      1152 │       113 │    91.1% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:215:│   7  │ phase2  │       2839 │      1280 │      1559 │    45.1% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:219:   Phase 1 最后一轮: 92.2% (state: 113ch)  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:220:   Phase 2 第一轮:   89.5% (state: 113ch)  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:221:   ✅ Fresh 边界正常 — 第二条 message 仍有高 cache hit  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:222:   Phase 2 第二轮:   91.1% ✅ 恢复递增  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:227:│ Turn │ Phase   │ Input Tkns │ Cache Hit │ Cache Miss│ Hit Rate │ State Len │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:229:│   1  │ phase1  │        513 │       512 │         1 │    99.8% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:230:│   2  │ phase1  │        636 │       512 │       124 │    80.5% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:231:│   3  │ phase1  │        800 │       640 │       160 │    80.0% │        32 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:232:│   4  │ phase1  │        958 │       768 │       190 │    80.2% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:233:│   5  │ phase2  │       1097 │      1024 │        73 │    93.3% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:234:│   6  │ phase2  │       1222 │      1152 │        70 │    94.3% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:235:│   7  │ phase2  │       2798 │      1280 │      1518 │    45.7% │       113 │  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:239:   Phase 1 最后一轮: 80.2% (state: 113ch)  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:240:   Phase 2 第一轮:   93.3% (state: 113ch)  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:241:   ✅ Fresh 边界正常 — 第二条 message 仍有高 cache hit  
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/docs/cache-baseline/缓存验证 t1.md:242:   Phase 2 第二轮:   94.3% ✅ 恢复递增  

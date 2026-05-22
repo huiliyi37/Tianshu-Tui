@@ -1,0 +1,7 @@
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+export class OpenAIClient implements StreamClient {
+  private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()

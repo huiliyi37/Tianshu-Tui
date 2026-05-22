@@ -1,0 +1,4 @@
+.rivet/playbook.jsonl    |  6 +++---
+ src/api/openai-client.ts | 32 +++++++++++++++++++++++++++++++
+ src/compact/micro.ts     | 49 +++++++++++++-----------------------------------
+ 3 files changed, 48 insertions(+), 39 deletions(-)

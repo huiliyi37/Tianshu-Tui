@@ -1,0 +1,4 @@
+5:import type { EvidenceTracker } from './evidence.js'
+19:  evidence: EvidenceTracker
+28:  const { config, session, trajectory, streamedText, routingMetrics, evidence } = deps
+73:  const badge = evidence.buildBadge()

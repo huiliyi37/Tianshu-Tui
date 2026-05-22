@@ -1,0 +1,93 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/provider.ts:7: * so the shared ApiClient can handle differences without hardcoded branching.
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/codex-client.ts:247:    // SSE idle timeout — same pattern as ApiClient and OpenAIClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/client.ts:142:export class ApiClient implements StreamClient {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/factory.test.ts:77:    // ApiClient doesn't expose config, but construction succeeds
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/client.test.ts:4:import { ApiClient } from '../client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/client.test.ts:30:describe('ApiClient provider capabilities', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/client.test.ts:37:    const client = new ApiClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/client.test.ts:67:    const client = new ApiClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/client.test.ts:100:    const client = new ApiClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/client.test.ts:134:describe('ApiClient abort-aware retry', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/client.test.ts:139:    const client = new ApiClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/factory.ts:1:import { ApiClient, type ClientConfig } from './client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/factory.ts:99:  return new ApiClient(clientConfig)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:3:import type { ApiClient } from '../../api/client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:94:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:157:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:206:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:242:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:291:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:341:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:389:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:430:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:492:            client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:552:          client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:593:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/coordinator.test.ts:635:        client: {} as ApiClient,
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/reliability-integration.test.ts:7:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/reliability-integration.test.ts:42:function mockToolUseClient(block: ContentBlock): ApiClient {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/reliability-integration.test.ts:56:  } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:8:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:92:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:103:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:148:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:162:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:196:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:207:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:251:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:262:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:291:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop-evidence.test.ts:302:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:14:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:26:function mockClient(blocks: ContentBlock[], stopReason = 'end_turn', usage = { input_tokens: 100, output_tokens: 50 }): ApiClient {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:45:  } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:105:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:112:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:138:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:150:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:182:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:191:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:210:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:220:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:240:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:250:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:264:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:274:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:294:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:305:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:334:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:340:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:365:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:371:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:397:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:409:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:436:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:450:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:485:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:504:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:577:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:581:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:607:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:613:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:641:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:652:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:770:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:782:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:828:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:834:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:879:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:890:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:933:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:939:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:988:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:993:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:1028:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:1041:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:1071:    const client: ApiClient = {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:1078:    } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:3:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:15:function clientFromTexts(texts: string[]): ApiClient {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worker-session.test.ts:25:  } as unknown as ApiClient
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/chat-mode-integration.test.ts:8:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/chat-mode-integration.test.ts:15:function mockClient(blocks: ContentBlock[]): ApiClient {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/chat-mode-integration.test.ts:24:  } as unknown as ApiClient

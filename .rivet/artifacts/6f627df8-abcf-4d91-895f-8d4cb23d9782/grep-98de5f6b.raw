@@ -1,0 +1,9 @@
+316:      getMessages: () => this.session.getMessages(),
+565:        messageCount: this.session.getMessages().length,
+644:      messageCount: this.session.getMessages().length,
+736:          this.persist.appendCompactStart(turn, this.session.getMessages().length)
+752:          const before = this.session.getMessages()
+766:        if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
+767:          const before = this.session.getMessages()
+779:          this.persist.appendCompactEnd(turn, this.session.getMessages().length)
+927:        const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)

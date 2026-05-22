@@ -1,0 +1,10 @@
+4 matches in 2F:
+
+[file] 272 (1):
+     0: MessageRequest): Record<string, unknown> {
+
+[file] src/api/openai-client.ts (3):
+   253: await this.parseStreamFromReader(reader, callbacks, signal)
+   433: return body
+   437: async parseStreamFromReader(
+

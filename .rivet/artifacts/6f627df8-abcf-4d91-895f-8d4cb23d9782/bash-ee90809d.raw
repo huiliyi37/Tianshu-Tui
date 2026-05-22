@@ -1,0 +1,58 @@
+▶ SessionContext context ledger state
+  ✔ stores context ledger immutably (0.525ms)
+  ✖ records compact events immutably (1.047083ms)
+  ✔ returns unique working set from read and modified files (0.433375ms)
+✖ SessionContext context ledger state (2.513917ms)
+▶ SessionContext bounded collections
+  ✔ evicts oldest filesRead when cap exceeded (0.572542ms)
+  ✔ evicts oldest filesModified when cap exceeded (0.208292ms)
+  ✔ evicts oldest testResults when cap exceeded (0.152125ms)
+  ✔ evicts oldest turnCacheHistory when cap exceeded (0.180166ms)
+✔ SessionContext bounded collections (1.604542ms)
+▶ SessionContext OpenAI-native message storage
+  ✔ stores user messages as OAI messages while exposing legacy view (0.670917ms)
+  ✔ converts assistant content blocks to a single OAI assistant message (0.359375ms)
+  ✔ converts legacy tool_result blocks to OAI tool messages (0.164958ms)
+  ✔ migrates loaded legacy messages to OAI canonical storage (0.208208ms)
+✔ SessionContext OpenAI-native message storage (1.60025ms)
+✔ getLatestTurnHitRate returns null with no turn cache snapshots (0.082375ms)
+✔ getLatestTurnHitRate returns null when latest turn has no cache counters (0.076167ms)
+✔ getLatestTurnHitRate returns latest turn cache read ratio (0.062542ms)
+▶ getRecentTurnHitRate
+  ✔ returns null with no turn cache snapshots (0.104791ms)
+  ✔ returns average over available turns when fewer than requested (0.0555ms)
+  ✔ returns average over last N turns (0.046875ms)
+  ✔ returns null when all turns have zero cache counters (0.046ms)
+✔ getRecentTurnHitRate (0.320167ms)
+ℹ tests 18
+ℹ suites 4
+ℹ pass 17
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 219.2225
+
+✖ failing tests:
+
+test at src/agent/__tests__/context-ledger-state.test.ts:1:733
+✖ records compact events immutably (1.047083ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  3 !== 2
+  
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context-ledger-state.test.ts:45:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1466:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 3,
+    expected: 2,
+    operator: 'strictEqual'
+  }

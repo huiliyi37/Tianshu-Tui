@@ -1,0 +1,23 @@
+import { describe, it, mock } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { AgentLoop } from '../loop.js'
+import { SessionContext } from '../context.js'
+import { RuntimeHookPipeline } from '../runtime-hooks.js'
+import { PromptEngine } from '../../prompt/engine.js'
+import { ToolRegistry } from '../../tools/registry.js'
+import { READ_FILE_TOOL } from '../../tools/read-file.js'
+import { ContextClaimStore } from '../../context/claim-store.js'
+import { PlaybookStore } from '../playbook-store.js'
+import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamClient } from '../../api/stream-client.js'
+import type { ContentBlock, Message } from '../../api/types.js'
+    // ... 1089 lines omitted
+function makeTextBlock(text: string): ContentBlock {
+    // ... 1088 lines omitted
+}
+    // ... 1087 lines omitted
+function makeToolUseBlock(id: string, name: string, input: Record<string, unknown>): ContentBlock {
+// ... 1086 more lines (total: 1105)

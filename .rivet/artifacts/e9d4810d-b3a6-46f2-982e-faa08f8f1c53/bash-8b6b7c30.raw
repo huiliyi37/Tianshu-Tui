@@ -1,0 +1,145 @@
+TypeScript: 18 errors in 7 files
+═══════════════════════════════════════
+Top codes: TS2345 (9x), TS2322 (4x), TS2304 (2x), TS2339 (1x), TS2353 (1x)
+
+src/agent/__tests__/subagent-integration.test.ts (8 errors)
+  L139: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+  L167: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+  L168: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+  L186: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+  L190: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+  L209: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+  L210: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+  L224: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+
+src/agent/__tests__/turn-stream.test.ts (3 errors)
+  L59: TS2322 Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+  L93: TS2322 Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+  L120: TS2322 Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+
+src/api/codex-client.ts (3 errors)
+  L111: TS2339 Property 'length' does not exist on type '{}'.
+  L171: TS2304 Cannot find name 'ContentBlock'.
+  L293: TS2304 Cannot find name 'ContentBlock'.
+
+src/agent/turn-stream.ts (1 errors)
+  L98: TS2345 Argument of type 'MessageRequest' is not assignable to parameter of type 'OaiChatRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'Message[]' is not assignable to type 'OaiMessage[]'.
+    Type 'Message' is not assignable to type 'OaiMessage'.
+    Type 'Message' is not assignable to type 'OaiUserMessage | OaiAssistantMessage'.
+    Type 'Message' is not assignable to type 'OaiAssistantMessage'.
+    Types of property 'role' are incompatible.
+    Type '"user" | "assistant"' is not assignable to type '"assistant"'.
+    Type '"user"' is not assignable to type '"assistant"'.
+
+src/api/__tests__/factory.test.ts (1 errors)
+  L108: TS2353 Object literal may only specify known properties, and 'cache_control' does not exist in type 'OaiUserMessage'.
+
+src/api/factory.ts (1 errors)
+  L99: TS2322 Type 'ApiClient' is not assignable to type 'StreamClient'.
+    Types of property 'stream' are incompatible.
+    Type '(request: MessageRequest, callbacks: StreamCallbacks, signal?: AbortSignal | undefined) => Promise<void>' is no...
+    Types of parameters 'request' and 'request' are incompatible.
+    Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+
+src/api/client.ts (1 errors)
+  L173: TS2416 Property 'stream' in type 'ApiClient' is not assignable to the same property in base type 'StreamClient'.
+    Type '(request: MessageRequest, callbacks: StreamCallbacks, signal?: AbortSignal | undefined) => Promise<void>' is no...
+    Types of parameters 'request' and 'request' are incompatible.
+    Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+[full output: ~/Library/Application Support/rtk/tee/1779453021_tsc.log]

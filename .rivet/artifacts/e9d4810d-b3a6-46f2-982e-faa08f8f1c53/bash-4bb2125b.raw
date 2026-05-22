@@ -1,0 +1,13 @@
+src/agent/__tests__/chat-mode-integration.test.ts  |   7 +-
+ src/agent/__tests__/coordinator.test.ts            |  26 ++---
+ src/agent/__tests__/loop-evidence.test.ts          |  23 ++--
+ src/agent/__tests__/loop.test.ts                   |  95 ++++++++--------
+ src/agent/__tests__/mocks.ts                       |   6 +-
+ .../__tests__/reliability-integration.test.ts      |   7 +-
+ src/agent/__tests__/turn-stream.test.ts            |  12 +-
+ src/agent/__tests__/worker-session.test.ts         |   7 +-
+ src/api/codex-client.ts                            | 123 ++++++---------------
+ src/api/openai-client.ts                           |  28 +++--
+ src/api/stream-client.ts                           |   4 +-
+ src/compact/micro.ts                               |  49 +++-----
+ 12 files changed, 166 insertions(+), 221 deletions(-)

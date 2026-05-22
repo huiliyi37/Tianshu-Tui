@@ -1,0 +1,116 @@
+▶ ContextInjectionController
+  ✔ refreshes ledger with user anchors (16.829292ms)
+  ✔ projects active claims into prompt context and records prompt consumers (3.074333ms)
+  ✔ projects repair hint through prompt engine (cerebellar hint is harness-only) (0.3965ms)
+✔ ContextInjectionController (20.946208ms)
+▶ SessionContext context ledger state
+  ✔ stores context ledger immutably (1.043542ms)
+  ✔ records compact events immutably (0.114583ms)
+  ✔ returns unique working set from read and modified files (0.47425ms)
+✔ SessionContext context ledger state (2.174667ms)
+▶ SessionContext bounded collections
+  ✔ evicts oldest filesRead when cap exceeded (1.420791ms)
+  ✔ evicts oldest filesModified when cap exceeded (0.246708ms)
+  ✔ evicts oldest testResults when cap exceeded (0.479542ms)
+  ✔ evicts oldest turnCacheHistory when cap exceeded (0.326416ms)
+✔ SessionContext bounded collections (3.500042ms)
+▶ SessionContext OpenAI-native message storage
+  ✔ stores user messages as OAI messages while exposing legacy view (0.823917ms)
+  ✔ converts assistant content blocks to a single OAI assistant message (2.787292ms)
+  ✔ converts legacy tool_result blocks to OAI tool messages (1.776833ms)
+  ✔ migrates loaded legacy messages to OAI canonical storage (0.339875ms)
+✔ SessionContext OpenAI-native message storage (8.237625ms)
+✔ getLatestTurnHitRate returns null with no turn cache snapshots (0.114125ms)
+✔ getLatestTurnHitRate returns null when latest turn has no cache counters (0.084084ms)
+✔ getLatestTurnHitRate returns latest turn cache read ratio (0.070042ms)
+▶ getRecentTurnHitRate
+  ✔ returns null with no turn cache snapshots (0.105291ms)
+  ✔ returns average over available turns when fewer than requested (0.048834ms)
+  ✔ returns average over last N turns (0.078125ms)
+  ✔ returns null when all turns have zero cache counters (0.154167ms)
+✔ getRecentTurnHitRate (0.485375ms)
+▶ AgentLoop — multi-turn tool_use
+  ✔ completes a simple text turn (no tool_use) (28.892875ms)
+  ✔ syncs auto reasoning effort to the client without going below the configured floor (11.68ms)
+  ✔ executes tool_use and continues loop (18.184875ms)
+  ✔ binds a matched star domain once per session and injects it into latest volatile context (17.198708ms)
+  ✔ stores cache diagnostic when latest turn hit rate is low (8.253ms)
+  ✔ clears cache diagnostic when latest turn hit rate is healthy (8.383417ms)
+  ✔ clears cache diagnostic when latest turn has no cache counters (5.677459ms)
+  ✔ prewarms recent successful read_file history at turn start (15.0335ms)
+  ✔ respects maxTurns limit (39.810333ms)
+  ✔ aborts during multi-turn loop (7.01625ms)
+  ✔ delivers complete tool input after JSON accumulation (11.666791ms)
+  ✔ delivers text from all turns including after tool_use and passes isFinal correctly (11.512792ms)
+  ✔ suppresses repeated pre-tool narration across tool-use turns (20.740542ms)
+✔ AgentLoop — multi-turn tool_use (205.22475ms)
+▶ AgentLoop — session lifecycle
+  ✔ runs postSession before final turn completion (2.365541ms)
+  ✔ runs postSession on AbortError before abort callback (1.635667ms)
+✔ AgentLoop — session lifecycle (4.094292ms)
+▶ AgentLoop — error handling
+  ✔ persists partial assistant blocks before returning stream error (1.536125ms)
+  ✔ handles tool execution errors gracefully and continues (25.392ms)
+✔ AgentLoop — error handling (27.0305ms)
+▶ AgentLoop — compact policy
+  ✔ compacts on small context windows without legacy absolute-threshold approval (17.817583ms)
+  ✖ falls back to cache anchors plus resume state when compaction cannot fit the ceiling (52.923542ms)
+✖ AgentLoop — compact policy (71.258292ms)
+▶ AgentLoop — active claims projection
+  ✔ promotes user constraint anchors into active claim prompt context (11.403083ms)
+  ✔ records prompt consumers and promotes repeatedly projected claims (24.359875ms)
+✔ AgentLoop — active claims projection (35.872125ms)
+▶ AgentLoop — antibody generation
+  ✔ generates failure_pattern claim after tool error with classifiable failure (15.395625ms)
+  ✔ does not suppress first-turn text when it matches previous run last turn (12.851916ms)
+✔ AgentLoop — antibody generation (28.377291ms)
+▶ AgentLoop — playbook telemetry bounds
+  ✔ caps sensorium snapshots retained for playbook reflection (616.466583ms)
+✔ AgentLoop — playbook telemetry bounds (616.582084ms)
+▶ AgentLoop — output token escalation
+  ✔ continues on max_output_tokens stop reason (9.575875ms)
+  ✔ stops escalating after repeated max_output_tokens turns (18.502708ms)
+✔ AgentLoop — output token escalation (28.165042ms)
+▶ TurnCompletionController
+  ✔ runs turn-end side effects and emits final completion (1.443833ms)
+✔ TurnCompletionController (1.906833ms)
+▶ runWorkerSession
+  ✔ runs a headless worker and returns a schema-valid result (25.18075ms)
+  ✔ uses an independent SessionContext instead of mutating the primary session (8.550708ms)
+  ✔ recovers without repair when prose contains incidental JSON before the result packet (7.924583ms)
+  ✔ runs one repair prompt after invalid worker JSON (17.908416ms)
+  ✔ returns blocked after retry budget is exhausted (9.225834ms)
+✔ runWorkerSession (69.573833ms)
+ℹ tests 53
+ℹ suites 15
+ℹ pass 52
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2607.54775
+
+✖ failing tests:
+
+test at src/agent/__tests__/loop.test.ts:1:23457
+✖ falls back to cache anchors plus resume state when compaction cannot fit the ceiling (52.923542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     text: 'anchor assistant',
+  +     type: 'text'
+  +   }
+  + ]
+  - 'anchor assistant'
+  
+      at TestContext.<anonymous> (/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/loop.test.ts:755:12)
+      at async Test.run (node:internal/test_runner/test:1069:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { type: 'text', text: 'anchor assistant' } ],
+    expected: 'anchor assistant',
+    operator: 'strictEqual'
+  }

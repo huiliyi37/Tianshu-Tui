@@ -1,0 +1,6 @@
+827:4. Recent 3 turns 平均命中率 vs **基线 cache 测量结果**，差值绝对值 ≤ 5%
+830:基线测量在 Phase 1 开始**之前**完成，记录在文末"基线 cache 测量结果"。
+954:> 1. 全量测试通过（startup-memory 等已知 baseline 失败除外）
+960:### K · 已知 baseline 失败的归类
+969:## 基线 cache 测量结果（待填写）
+993:- **2026-05-22** · 天权 Opus 4.6 创始之面 audit 后补丁 A–K + 基线测量框架 + verify 脚本修正要求 + 已知 baseline 失败归类

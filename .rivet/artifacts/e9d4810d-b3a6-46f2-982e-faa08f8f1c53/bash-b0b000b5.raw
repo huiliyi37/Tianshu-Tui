@@ -1,0 +1,88 @@
+TypeScript: 74 errors in 5 files
+═══════════════════════════════════════
+Top codes: TS2551 (51x), TS7006 (22x), TS2339 (1x)
+
+src/prompt/__tests__/engine-cache-stability.test.ts (32 errors)
+  L91: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L96: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L125: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L142: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L168: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L171: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L203: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L207: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L223: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L227: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L240: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L245: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L262: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L266: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L272: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L284: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L289: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L322: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L325: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L364: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L380: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L386: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L396: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L427: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L445: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L449: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L472: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L482: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L502: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L515: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L523: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L545: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+
+src/prompt/__tests__/engine.test.ts (25 errors)
+  L30: TS2339 Property 'buildRequest' does not exist on type 'PromptEngine'.
+  L38: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L38: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L39: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L48: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L48: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L50: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L51: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L58: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L62: TS7006 Parameter 'tool' implicitly has an 'any' type.
+  L168: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L200: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L218: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L219: TS7006 Parameter 'msg' implicitly has an 'any' type.
+  L245: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L257: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L259: TS7006 Parameter 'msg' implicitly has an 'any' type.
+  L259: TS7006 Parameter 'block' implicitly has an 'any' type.
+  L260: TS7006 Parameter 'msg' implicitly has an 'any' type.
+  L273: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L349: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L355: TS7006 Parameter 'message' implicitly has an 'any' type.
+  L373: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L392: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L397: TS7006 Parameter 'message' implicitly has an 'any' type.
+
+src/prompt/__tests__/chat-mode-engine.test.ts (11 errors)
+  L38: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L40: TS7006 Parameter 'm' implicitly has an 'any' type.
+  L55: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L56: TS7006 Parameter 'm' implicitly has an 'any' type.
+  L73: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L74: TS7006 Parameter 'm' implicitly has an 'any' type.
+  L93: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L94: TS7006 Parameter 'm' implicitly has an 'any' type.
+  L113: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L120: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L121: TS7006 Parameter 'm' implicitly has an 'any' type.
+
+src/agent/__tests__/context-injection.test.ts (4 errors)
+  L81: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L82: TS7006 Parameter 'm' implicitly has an 'any' type.
+  L99: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L100: TS7006 Parameter 'm' implicitly has an 'any' type.
+
+src/prompt/__tests__/fingerprint.test.ts (2 errors)
+  L209: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+  L210: TS2551 Property 'buildRequest' does not exist on type 'PromptEngine'. Did you mean 'buildOaiRequest'?
+[full output: ~/Library/Application Support/rtk/tee/1779458060_tsc.log]

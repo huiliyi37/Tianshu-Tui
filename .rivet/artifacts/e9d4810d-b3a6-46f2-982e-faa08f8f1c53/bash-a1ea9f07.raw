@@ -1,0 +1,5 @@
+17 matches in 1F:
+
+[file] src/api/__tests__/openai-client.test.ts (17):
+    41: it('buildRequestBody produces valid OpenAI request body', () => {
+    43: const body = (client as any).buildRequestBody(makeRequest('Hello'))

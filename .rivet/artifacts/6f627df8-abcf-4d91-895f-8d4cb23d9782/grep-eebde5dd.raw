@@ -1,0 +1,32 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:48:export function serializeSessionMessage(message: Message, maxChars = MAX_SESSION_MESSAGE_JSON_CHARS): string {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:89:  async append(message: Message): Promise<void> {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:90:    const line = serializeSessionMessage(message) + '\n'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:100:  loadRecoverableMessages(): {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:123:    const snapshotMessages = this.loadUpToTurn(snapshot.turn)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:137:    const content = messages.map(m => appendChecksum(serializeSessionMessage(m))).join('\n') + '\n'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:149:  async appendWithChecksum(message: Message): Promise<void> {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:150:    const json = serializeSessionMessage(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:265:  loadUpToTurn(turn: number): Message[] {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:6:import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, serializeSessionMessage } from '../session-persist.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:55:    const serialized = serializeSessionMessage({ role: 'user', content: 'x'.repeat(MAX_SESSION_MESSAGE_JSON_CHARS * 2) } as any)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:63:    await persist.appendWithChecksum({ role: 'user', content: 'x'.repeat(MAX_SESSION_MESSAGE_JSON_CHARS * 2) } as any)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:114:    await persist.append({ role: 'user', content: 'turn 1' } as any)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:115:    await persist.append({ role: 'assistant', content: [{ type: 'text', text: 'reply 1' }] } as any)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:116:    await persist.append({ role: 'user', content: 'turn 2' } as any)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:117:    await persist.append({ role: 'assistant', content: [{ type: 'text', text: 'reply 2' }] } as any)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:118:    await persist.append({ role: 'user', content: 'turn 3' } as any)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:119:    await persist.append({ role: 'assistant', content: [{ type: 'text', text: 'reply 3' }] } as any)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:121:    const upTo2 = persist.loadUpToTurn(2)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:128:    await persist.append({ role: 'user', content: 'run a tool' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:129:    await persist.append({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:134:    const result = persist.loadRecoverableMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:153:    await persist.append({ role: 'user', content: 'first turn' })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:154:    await persist.append({ role: 'assistant', content: [{ type: 'text', text: 'done' }] })
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:156:    await persist.append({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:161:    const result = persist.loadRecoverableMessages()
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:231:    await persist.appendWithChecksum(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:263:    await persist.appendWithChecksum(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:297:    await persist.append(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:311:    await persist.append(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:326:    await persist.append(message)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/session-persist.test.ts:329:    const result = persist.loadRecoverableMessages()

@@ -1,0 +1,2 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/scripts/verify-task-b-session-state.ts:19:import { execFile } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/scripts/verify-task-a-multi-tool.ts:20:import { execFile } from 'node:child_process'

@@ -1,0 +1,20 @@
+TypeScript: 43 errors in 12 files
+═══════════════════════════════════════
+Top codes: TS2322 (29x), TS2345 (9x), TS2304 (2x), TS2416 (1x), TS2353 (1x)
+
+src/agent/__tests__/coordinator.test.ts (12 errors)
+  L94: TS2322 Type 'ApiClient' is not assignable to type 'StreamClient'.
+    Types of property 'stream' are incompatible.
+    Type '(request: MessageRequest, callbacks: StreamCallbacks, signal?: AbortSignal | undefined) => Promise<void>' is no...
+    Types of parameters 'request' and 'request' are incompatible.
+    Type 'OaiChatRequest' is not assignable to type 'MessageRequest'.
+    Types of property 'messages' are incompatible.
+    Type 'OaiMessage[]' is not assignable to type 'Message[]'.
+    Type 'OaiMessage' is not assignable to type 'Message'.
+    Type 'OaiSystemMessage' is not assignable to type 'Message'.
+    Types of property 'role' are incompatible.
+    Type '"system"' is not assignable to type '"user" | "assistant"'.
+  L152: TS2322 Type '(order: { id: string; kind: "plan" | "verify" | "review" | "code_search" | "doc_research" | "patch_proposal"; s...
+    Call signature return types '{ order: { id: string; kind: "plan" | "verify" | "review" | "code_search" | "doc_researc...
+    The types of 'client.stream' are incompatible between these types.
+    Type '(request: MessageRequest, callbacks: StreamCallbacks, signal?: AbortSignal | undefined) => Promise<void>' is no...

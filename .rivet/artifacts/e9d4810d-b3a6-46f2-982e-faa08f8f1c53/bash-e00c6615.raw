@@ -1,0 +1,5 @@
+91:     signal?.addEventListener('abort', onAbort, { once: true })
+92:   })
+93: }
+94: 
+95: export class OpenAIClient implements StreamClient {

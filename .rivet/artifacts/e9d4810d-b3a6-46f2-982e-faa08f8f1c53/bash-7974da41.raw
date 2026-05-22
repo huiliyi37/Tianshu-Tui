@@ -1,0 +1,24 @@
+commit da4faf669d4249863cd185a006f05d7b8c01d12e
+Author: Test <test@test.com>
+Date:   Fri May 22 19:04:24 2026 +0800
+
+    feat(compact): add OAI-format compaction and round grouping
+    
+    Task 4: Add OAI-native variants for compaction pipeline:
+    - compactStaleRoundsOai(): truncate tool message content in stale rounds
+    - microCompactOai(): lightweight round-safe truncation for OAI format
+    - groupIntoRoundsOai(): round detection using tool_calls/tool_call_id
+    - runResumePreflightOai(): detect and repair orphan tool_calls
+    - detectOrphanToolCallsOai(): find tool_calls without matching results
+    - detectOrphanToolResultsOai(): find results without matching calls
+    
+    All 2515 tests pass, typecheck clean.
+
+ src/compact/__tests__/stale-round-oai.test.ts      |  91 ++++++++++++
+ src/compact/micro.ts                               | 153 ++++++++++++++++++++
+ src/compact/stale-round.ts                         |  21 +++
+ src/context/__tests__/resume-preflight-oai.test.ts | 117 +++++++++++++++
+ src/context/__tests__/rounds-oai.test.ts           |  99 +++++++++++++
+ src/context/resume-preflight.ts                    | 110 +++++++++++++-
+ src/context/rounds.ts                              | 160 +++++++++++++++++++++
+ 7 files changed, 750 insertions(+), 1 deletion(-)

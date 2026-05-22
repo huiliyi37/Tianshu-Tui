@@ -1,0 +1,10 @@
+  ✔ records last action failure (0.214209ms)
+  ✔ formats line 2 with failure indicator (4.87825ms)
+ℹ tests 2515
+ℹ suites 479
+ℹ pass 2515
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70037.7905

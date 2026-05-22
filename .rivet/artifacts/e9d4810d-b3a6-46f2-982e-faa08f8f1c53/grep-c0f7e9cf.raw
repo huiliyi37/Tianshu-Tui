@@ -1,0 +1,14 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/codex-client.ts:6:export interface CodexClientConfig {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/codex-client.ts:16:export class CodexClient implements StreamClient {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/codex-client.ts:17:  constructor(private config: CodexClientConfig) {}
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:3:import { CodexClient } from '../codex-client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:5:describe('CodexClient', () => {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:8:    const client = new CodexClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:39:    const client = new CodexClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:79:    const client = new CodexClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:131:    const client = new CodexClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:174:    const client = new CodexClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:209:    const client = new CodexClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/__tests__/codex-client.test.ts:249:    const client = new CodexClient({
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/factory.ts:3:import { CodexClient } from './codex-client.js'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/factory.ts:50:    return new CodexClient({

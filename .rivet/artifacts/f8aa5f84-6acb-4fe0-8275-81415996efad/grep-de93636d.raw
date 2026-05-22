@@ -1,0 +1,66 @@
+69:1. **Phase 1**：定义新类型，新增 `OaiMessage` 类型系统（不删旧类型）
+70:2. **Phase 2**：SessionContext 改为存储 `OaiMessage[]`，但提供 `toLegacy()` 兼容方法
+71:3. **Phase 3**：PromptEngine 改为直接输出 OpenAI 格式的 `MessageRequest`
+72:4. **Phase 4**：openai-client 删除转换层，直接透传
+73:5. **Phase 5**：删除旧类型和兼容方法，清理测试
+81:### Phase 1：新类型定义
+88:### Phase 2：SessionContext 迁移
+96:### Phase 3：PromptEngine 迁移
+107:### Phase 4：Client 层清理
+115:### Phase 5：清理
+129:## 任务 1：定义 OpenAI 原生类型系统（Phase 1）
+237: * 旧的 ContentBlock-based Message 格式将在 Phase 5 删除。
+250:## 任务 2：SessionContext 双格式支持（Phase 2）
+323:**Task 2B 当前状态（2026-05-22）**：`session-persist.ts` 新增 `appendOaiWithChecksum()`、`loadOai()` 与 `serializeOaiSessionMessage()`；`loadOai()` 可直接读取 OAI rows，也可把 legacy rows 迁移为 OAI messages。保留既有 `load()` / `loadRecoverableMessages()` legacy 返回值，避免扩大 Phase 2 改动面。已新增 `session-persist.test.ts` 覆盖 OAI checksum append/load 与 legacy→OAI load 迁移。全量验证通过：`npx tsc --noEmit && ./node_modules/.bin/tsx --test src/**/__tests__/*.test.ts`（2487 pass）。
+334:## 任务 3：PromptEngine 输出 OpenAI 格式（Phase 3）
+401:**Task 3B 当前状态（2026-05-22）**：已补 Patch I 的最小双路径 canonical parity 框架。`buildOaiRequest()` 现输出与旧 `buildRequest()`→OpenAI body 对齐的 `system` message 与 `stream_options: { include_usage: true }`；测试内通过 `canonicalLegacyRequestBody()` 与 `canonicalOaiBody()` 比较 `stableStringify` 字节。已覆盖 tool-call-only assistant 与 assistant text + tool_calls 两条等价 transcript。已验证：`./node_modules/.bin/tsx --test src/prompt/__tests__/engine.test.ts && npx tsc --noEmit`。完整 provider-specific request-body parity 仍留给 Phase 4 client 切换前。
+412:## 任务 4：Compaction 管线适配（Phase 3 续）
+523:## 任务 5：openai-client 删除转换层（Phase 4）
+566:## 任务 6：AgentLoop 切换到 OAI 路径（Phase 4 续）
+612:## 任务 7：TUI 和 Headless 适配（Phase 5）
+642:## 任务 8：删除旧类型和兼容层（Phase 5 续）
+682:## 任务 9：测试全量更新
+724:| Phase 1-2 | 删除 `oai-types.ts`，revert context.ts 改动 |
+725:| Phase 3 | 删除 `buildOaiRequest`，旧 `buildRequest` 仍在 |
+726:| Phase 4 | revert loop.ts 的 `buildOaiRequest` 调用，回到旧路径 |
+727:| Phase 5 | **不可回滚** — 旧类型已删除。必须在 Phase 4 验证通过后才进入 Phase 5 |
+729:**关键检查点**：Phase 4 完成后、Phase 5 开始前，必须：
+781:任务 4（Compaction）→ 依赖任务 1
+782:任务 5（Client 透传）→ 依赖任务 3
+783:任务 6（AgentLoop 切换）→ 依赖任务 2 + 3 + 4 + 5（关键路径）
+784:任务 7（TUI 适配）→ 依赖任务 6
+785:任务 8（删除旧代码）→ 依赖任务 6 + 7（Phase 5 检查点后）
+786:任务 9（测试更新）→ 与任务 6-8 并行进行
+792:- Phase 1-2：0.5 天
+793:- Phase 3-4：1 天
+794:- Phase 5（检查点）：0.5 天验证
+795:- Phase 5 续（删除 + 测试更新）：1-1.5 天
+838:基线测量在 Phase 1 开始**之前**完成，记录在文末"基线 cache 测量结果"。
+866:### D · Phase 2 单一存储，不要双格式
+889:`convertOaiToLegacy` 是 Phase 1 `migrateMessageToOai` 的逆映射，**写在同一个文件**，保证可逆 + round-trip 测试。
+891:### E · Phase 1 必须包含 Provider × Thinking 矩阵
+899:**Patch**：Phase 1 在任务 1 后新增 **任务 1.5：Provider × Thinking 矩阵**。
+916:- [x] DeepSeek: thinking + no text + tool_calls → no `content` + `reasoning_content` + `tool_calls`（现有行为；Phase 3 `buildOaiRequest` 可再决定是否统一为 `content: ''`）
+922:Phase 3 新增 `buildOaiRequest` 后，需把上述锁定测试迁移/复制到新路径，并按最终 OpenAI-native 规范确认 tool-call-only assistant 是否要求显式 `content: ''`。
+928:**Patch**：Phase 1 任务 0（迁移前置）新增：
+932:- [x] Phase 4 切换时，有依赖的 hook 同步更新
+938:| Hook | 文件 | message 格式依赖 | 证据 / Phase 4 行动 |
+940:| signal-consumer | `src/agent/hooks/signal-consumer-hook.ts` | 无直接依赖 | 只读取 `ctx.snapshot.strategy` / `sensoriumInput`，通过 `ctx.effects.injectUserMessage(...)` 注入元提示；不读取历史 messages/content blocks。Phase 4 无需同步改动。 |
+941:| perception | `src/agent/hooks/perception-hook.ts` | 无 | 只根据 `sensoriumInput` 计算 `Sensorium` / `Strategy`；不读取消息历史。Phase 4 无需同步改动。 |
+942:| vigor | `src/agent/hooks/vigor-hook.ts` | 无直接依赖 | `postTool` 只使用 `RuntimeToolEvent` 与 `PredictionAccumulator`；`afterPerception` 只调制 strategy；不读取消息 content。Phase 4 无需同步改动。 |
+943:| theta | `src/agent/hooks/theta-hook.ts` | 无 | 只推进 `ThetaState` 并在复杂度阈值满足时 `requestThetaCheck`；不读取消息历史。Phase 4 无需同步改动。 |
+944:| kick | `src/agent/hooks/kick-hook.ts` | 无直接依赖 | 使用 `ctx.snapshot.recentToolHistory` 的 `{ tool, target, status }` 摘要构建 kick actions；不读取 `Message.content` / `ContentBlock[]`。Phase 4 仅需确认 `recentToolHistory` 仍稳定供给。 |
+945:| stigmergy | `src/agent/hooks/stigmergy-hook.ts` | 无直接依赖 | 使用 `RuntimeToolEvent`、`recentToolHistory`、evidence verifications 与 pheromone store；不读取消息 blocks。Phase 4 仅需确认 tool history 摘要不受消息格式切换影响。 |
+946:| playbook-reflect | `src/agent/hooks/playbook-reflect-hook.ts` | 间接依赖 | hook 本身不读取 messages，但调用 `deps.buildRetrospectInput()`；Phase 4 需审计该 dependency 的构造处是否从 legacy messages 派生 retrospect input。 |
+947:| dream | `src/agent/hooks/dream-hook.ts` | 无 | 使用 evidence、decisions、trajectory 持久化 dream；已确认无 ContentBlock 依赖。Phase 4 无需同步改动。 |
+948:| telemetry-flush | `src/agent/hooks/telemetry-flush-hook.ts` | 无 | 只调用 `writer.flush()`；不读取消息历史。Phase 4 无需同步改动。 |
+950:**额外发现**：`src/agent/hooks/` 目录实际还有非原 9 个 hook：`radio-hook.ts`、`courage-hook.ts`、`consistency-check-hook.ts`、`cross-session-hook.ts`、`dispatcher-hook.ts`。审计结论：均无 legacy ContentBlock 直接依赖；其中 `radio` / `courage` 使用 `recentToolHistory` 摘要，`cross-session` 注入 dynamic appendix 字符串，`consistency-check` 使用 tool event target，`dispatcher` 使用 task contract / sensorium。Phase 4 只需保持 runtime snapshot/effects API 兼容。
+969:**Patch**：Phase 5 中 ctcl-sanitizer 改动**单独 commit**，commit 前三个 verify 脚本 N≥3 次 + 基线对比。
+971:### I · Phase 3-4 期间双路径 A/B sanity
+973:Phase 3-4 是 `buildRequest`（旧）和 `buildOaiRequest`（新）共存窗口。利用这个窗口做字节稳定性探针：
+975:**Patch**：Phase 3 task 1 后新增"双路径 sanity"步骤——
+980:- **字节一致才能进入 Phase 4**
+984:### J · Phase 5 "不可回滚" 的真实语义
+986:原文"Phase 5 不可回滚——旧类型已删除"技术上不准确（git revert 仍可回滚）。**Patch** 改为：
+988:> Phase 5 之后回滚成本陡升——需要重新实现 Anthropic↔OAI 转换层（~85 行 + 3 个 provider 边界）+ 改 13 个测试。Phase 4 完成且通过下列检查点前**禁止**开始 Phase 5：
+1006:> 由人类操作者在 Phase 1 开始**之前**、Verify 脚本完成 Patch C 修正**之后**，用真实 `DEEPSEEK_API_KEY` 跑下列命令。基线是后续每个 Phase 验证的对照。

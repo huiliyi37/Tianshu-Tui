@@ -1,0 +1,33 @@
+src/agent/__tests__/coordinator.test.ts:3:import type { ApiClient } from '../../api/client.js'
+src/agent/__tests__/coordinator.test.ts:94:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:157:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:206:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:242:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:291:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:341:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:389:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:430:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:492:            client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:552:          client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:593:        client: {} as ApiClient,
+src/agent/__tests__/coordinator.test.ts:635:        client: {} as ApiClient,
+src/agent/__tests__/loop-evidence.test.ts:8:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+src/agent/__tests__/loop-evidence.test.ts:92:    const client: ApiClient = {
+src/agent/__tests__/loop-evidence.test.ts:103:    } as unknown as ApiClient
+src/agent/__tests__/loop-evidence.test.ts:148:    const client: ApiClient = {
+src/agent/__tests__/loop-evidence.test.ts:162:    } as unknown as ApiClient
+src/agent/__tests__/loop-evidence.test.ts:196:    const client: ApiClient = {
+src/agent/__tests__/loop-evidence.test.ts:207:    } as unknown as ApiClient
+src/agent/__tests__/loop-evidence.test.ts:251:    const client: ApiClient = {
+src/agent/__tests__/loop-evidence.test.ts:262:    } as unknown as ApiClient
+src/agent/__tests__/loop-evidence.test.ts:291:    const client: ApiClient = {
+src/agent/__tests__/loop-evidence.test.ts:302:    } as unknown as ApiClient
+src/agent/__tests__/reliability-integration.test.ts:7:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+src/agent/__tests__/reliability-integration.test.ts:42:function mockToolUseClient(block: ContentBlock): ApiClient {
+src/agent/__tests__/reliability-integration.test.ts:56:  } as unknown as ApiClient
+src/agent/__tests__/chat-mode-integration.test.ts:8:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+src/agent/__tests__/chat-mode-integration.test.ts:15:function mockClient(blocks: ContentBlock[]): ApiClient {
+src/agent/__tests__/chat-mode-integration.test.ts:24:  } as unknown as ApiClient
+src/agent/__tests__/worker-session.test.ts:3:import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+src/agent/__tests__/worker-session.test.ts:15:function clientFromTexts(texts: string[]): ApiClient {
+src/agent/__tests__/worker-session.test.ts:25:  } as unknown as ApiClient

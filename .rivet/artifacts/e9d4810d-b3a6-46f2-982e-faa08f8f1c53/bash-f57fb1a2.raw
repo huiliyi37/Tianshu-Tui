@@ -1,0 +1,5 @@
+TypeScript: 18 errors in 7 files
+═══════════════════════════════════════
+Top codes: TS2345 (9x), TS2322 (4x), TS2304 (2x), TS2339 (1x), TS2353 (1x)
+
+src/agent/__tests__/subagent-integration.test.ts (8 errors)

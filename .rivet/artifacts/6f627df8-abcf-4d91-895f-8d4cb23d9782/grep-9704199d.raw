@@ -1,0 +1,4 @@
+106:  private phaseHint?: string
+164:            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, phaseHint: this.phaseHint, cognitiveProjection: this.cognitiveProjection, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText }
+228:              this.tracker.recordTurn(fieldValues, this.phaseHint)
+382:    this.phaseHint = hint

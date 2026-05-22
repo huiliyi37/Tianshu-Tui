@@ -1,0 +1,2 @@
+116:  const blocks: ContentBlock[] = []
+132:  return { role: 'assistant', content: blocks }

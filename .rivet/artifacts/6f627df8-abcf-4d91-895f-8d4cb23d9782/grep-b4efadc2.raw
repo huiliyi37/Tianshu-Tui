@@ -1,0 +1,22 @@
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/tools/git.ts:1:import { spawnSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/lsp/client.ts:1:import { execSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/tools/__tests__/git.test.ts:5:import { execSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile-git.ts:1:import { execFile } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/prompt/volatile-git.ts:4:const execFileP = promisify(execFile)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/__tests__/worktree.test.ts:6:import { execFileSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/tui/external-editor.ts:4:import { spawnSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/__tests__/startup-memory.test.ts:3:import { execFile } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/__tests__/startup-memory.test.ts:6:const execFileAsync = promisify(execFile)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/tui/file-completer.ts:1:import { execSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/theta-check.ts:1:import { spawn } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/diff-collector.ts:1:import { spawnSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/merge-protocol.ts:17:import { spawn } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/worktree.ts:1:import { spawnSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/git-freshness.ts:1:import { spawn } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/startup-health-check.ts:1:import { execFile } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/startup-health-check.ts:53:  execFile(cmd, args, {
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/checkpoint.ts:8:const execFileP = promisify(execFile)
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/git-freshness.test.ts:6:import { execSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/worktree-coordinator.test.ts:6:import { execFileSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/diff-collector.test.ts:6:import { spawnSync } from 'node:child_process'
+/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/hands-session.test.ts:6:import { execSync } from 'node:child_process'

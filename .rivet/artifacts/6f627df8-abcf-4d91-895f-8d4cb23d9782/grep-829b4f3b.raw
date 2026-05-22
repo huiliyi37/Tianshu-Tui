@@ -1,0 +1,104 @@
+3:> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+15:## 动机
+24:## 格式对比
+26:### 当前（Anthropic-style）
+41:### 目标（OpenAI-native）
+53:### 关键差异
+65:## 迁移策略：双格式过渡期
+79:## 文件结构
+81:### Phase 1：新类型定义
+88:### Phase 2：SessionContext 迁移
+96:### Phase 3：PromptEngine 迁移
+107:### Phase 4：Client 层清理
+115:### Phase 5：清理
+129:## 任务 1：定义 OpenAI 原生类型系统（Phase 1）
+134:- [ ] **步骤 1：创建 OaiMessage 类型定义**
+226:- [ ] **步骤 2：验证类型编译**
+231:- [ ] **步骤 3：在 types.ts 中标记旧类型为 deprecated**
+241:- [ ] **步骤 4：Commit**
+250:## 任务 2：SessionContext 双格式支持（Phase 2）
+258:- [ ] **步骤 1：添加 OaiMessage 存储和转换方法**
+289:- [ ] **步骤 2：添加旧格式 → OaiMessage 的加载兼容**
+315:- [ ] **步骤 3：运行现有测试确认不破坏**
+321:- [ ] **步骤 4：Commit**
+330:## 任务 3：PromptEngine 输出 OpenAI 格式（Phase 3）
+335:> 这是最复杂的任务。buildRequest 当前遍历 `Message[]`（Anthropic 格式），注入 volatile blocks，输出 `MessageRequest`。迁移后，它遍历 `OaiMessage[]`，注入 volatile blocks 为 `role: 'user'` messages，输出 `OaiChatRequest`。
+337:- [ ] **步骤 1：新增 buildOaiRequest 方法（不删旧方法）**
+380:- [ ] **步骤 2：保留旧 buildRequest 作为兼容层**
+390:- [ ] **步骤 3：运行测试**
+395:- [ ] **步骤 4：Commit**
+404:## 任务 4：Compaction 管线适配（Phase 3 续）
+414:- [ ] **步骤 1：stale-round.ts 适配**
+440:- [ ] **步骤 2：rounds.ts 适配**
+482:- [ ] **步骤 3：resume-preflight.ts 适配**
+501:- [ ] **步骤 4：运行测试**
+506:- [ ] **步骤 5：Commit**
+515:## 任务 5：openai-client 删除转换层（Phase 4）
+522:- [ ] **步骤 1：新增 streamOai 方法（直接透传）**
+545:- [ ] **步骤 2：保留旧 stream 方法（过渡期）**
+549:- [ ] **步骤 3：Commit**
+558:## 任务 6：AgentLoop 切换到 OAI 路径（Phase 4 续）
+567:- [ ] **步骤 1：turn-stream.ts 解析响应后存 OaiMessage**
+574:- [ ] **步骤 2：tool-execution.ts 构建 OaiToolMessage**
+581:- [ ] **步骤 3：loop.ts 使用 buildOaiRequest**
+590:- [ ] **步骤 4：全量测试**
+595:- [ ] **步骤 5：Commit**
+604:## 任务 7：TUI 和 Headless 适配（Phase 5）
+610:- [ ] **步骤 1：history-replay.ts 适配 OaiMessage**
+617:- [ ] **步骤 2：headless.ts 输出适配**
+625:- [ ] **步骤 3：Commit**
+634:## 任务 8：删除旧类型和兼容层（Phase 5 续）
+643:- [ ] **步骤 1：删除旧类型**
+651:- [ ] **步骤 2：删除 openai-client 转换代码**
+655:- [ ] **步骤 3：删除 SessionContext 兼容方法**
+660:- [ ] **步骤 4：全量测试 + 更新所有测试文件**
+665:- [ ] **步骤 5：Commit**
+674:## 任务 9：测试全量更新
+678:> 这是工作量最大的任务。所有测试中构建 mock messages 的地方都需要从 Anthropic 格式改为 OpenAI 格式。
+680:- [ ] **步骤 1：批量替换 tool_use content blocks**
+689:- [ ] **步骤 2：批量替换 tool_result content blocks**
+698:- [ ] **步骤 3：运行全量测试**
+703:- [ ] **步骤 4：Commit**
+712:## 回滚策略
+724:3. 手动跑一个真实任务确认功能正常
+728:## 旧 Session 兼容
+754:## 验收标准
+767:## 执行顺序与依赖
+770:任务 1（类型定义）→ 无依赖，立即执行
+771:任务 2（SessionContext）→ 依赖任务 1
+772:任务 3（PromptEngine）→ 依赖任务 1
+773:任务 4（Compaction）→ 依赖任务 1
+774:任务 5（Client 透传）→ 依赖任务 3
+775:任务 6（AgentLoop 切换）→ 依赖任务 2 + 3 + 4 + 5（关键路径）
+776:任务 7（TUI 适配）→ 依赖任务 6
+777:任务 8（删除旧代码）→ 依赖任务 6 + 7（Phase 5 检查点后）
+778:任务 9（测试更新）→ 与任务 6-8 并行进行
+792:## 与 Artifact Log 计划的关系
+804:## 修订与补丁（2026-05-22 · 天权 audit）
+806:> Opus 4.6 这一面在 isolated worktree `feat/openai-native-format-migration` 上对本 plan 做了一次架构层称量。下列补丁**不重写**上方内容（遵守 canonical memory Invariant 3 — append-only），是对上方任务的**修正与增补**。任何与上方原文冲突之处，以本节为准。
+808:### A · 文件数估算偏高
+818:### B · 每个 Phase 必须 cache 验证才能 commit（关键）
+832:### C · Verify 脚本的 sessionState 注入位置必须先修正（critical）
+858:### D · Phase 2 单一存储，不要双格式
+860:原 Task 2 让 SessionContext 同时存 `OaiMessage[]` 和 legacy `Message[]`，靠 `syncLegacyFromOai` / `syncLegacyToolResults` 同步副本。
+883:### E · Phase 1 必须包含 Provider × Thinking 矩阵
+891:**Patch**：Phase 1 在任务 1 后新增 **任务 1.5：Provider × Thinking 矩阵**。
+905:### F · Hook pipeline 必须先审计
+909:**Patch**：Phase 1 任务 0（迁移前置）新增：
+911:- [ ] 审计 `src/agent/hooks/*.ts` 中所有对 message content 的迭代
+912:- [ ] 列出每个 hook 对 message 格式的依赖（即使没有依赖也明确记录"无"）
+913:- [ ] Phase 4 切换时，有依赖的 hook 同步更新
+917:### G · Codex client 不能一行带过
+924:**Patch**：Task 5 扩展为：
+926:- [ ] 审查 codex-client.ts 中 `seenTextDelta` dedup 逻辑对 OAI 内部格式的依赖
+927:- [ ] 验证 Responses API → OaiMessage 的映射（**不一定 1:1**）
+928:- [ ] 单独 cache hit 验证（Codex/OpenAI 的 cache 语义不同于 DeepSeek，可能需要独立 verify 脚本）
+930:### H · CTCL sanitizer 独立 cache 验证
+936:### I · Phase 3-4 期间双路径 A/B sanity
+949:### J · Phase 5 "不可回滚" 的真实语义
+958:> 5. Hook 审计完成 + 涉及 hook 已更新（F 项）
+960:### K · 已知 baseline 失败的归类
+969:## 基线 cache 测量结果（待填写）
+990:## 修订历史
+992:- **2026-05-21** · 原 plan 起草（领航星 / DeepSeek 天权 native engine）
+993:- **2026-05-22** · 天权 Opus 4.6 创始之面 audit 后补丁 A–K + 基线测量框架 + verify 脚本修正要求 + 已知 baseline 失败归类

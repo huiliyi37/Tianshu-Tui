@@ -1,0 +1,4 @@
+4:import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+56:function normalizeToolResultPairs(messages: Message[]): Message[] {
+145:  buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[]): OaiChatRequest {
+311:  getVolatilePayloadReport(toolHistory?: ToolHistoryEntry[]): VolatilePayloadReport {

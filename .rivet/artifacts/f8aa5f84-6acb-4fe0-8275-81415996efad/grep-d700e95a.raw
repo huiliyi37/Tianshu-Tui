@@ -1,0 +1,8 @@
+27:  oaiMessages: OaiMessage[]
+41:export class SessionContext {
+46:      oaiMessages: [],
+61:    this.state.oaiMessages.push({ role: 'user', content })
+67:    this.state.oaiMessages = messages
+84:    this.state.oaiMessages.push(msg)
+92:        this.state.oaiMessages.push(msg)
+131:    return this.state.oaiMessages

@@ -1,0 +1,69 @@
+▶ SessionContext context ledger state
+  ✔ stores context ledger immutably (0.663167ms)
+  ✔ records compact events immutably (0.105209ms)
+  ✔ returns unique working set from read and modified files (0.432917ms)
+✔ SessionContext context ledger state (1.702542ms)
+▶ SessionContext bounded collections
+  ✔ evicts oldest filesRead when cap exceeded (0.548625ms)
+  ✔ evicts oldest filesModified when cap exceeded (0.191875ms)
+  ✔ evicts oldest testResults when cap exceeded (0.139292ms)
+  ✔ evicts oldest turnCacheHistory when cap exceeded (0.17775ms)
+✔ SessionContext bounded collections (1.537291ms)
+▶ SessionContext OpenAI-native message storage
+  ✔ stores user messages as OAI messages while exposing legacy view (0.51325ms)
+  ✔ converts assistant content blocks to a single OAI assistant message (0.261667ms)
+  ✔ converts legacy tool_result blocks to OAI tool messages (0.115917ms)
+  ✔ migrates loaded legacy messages to OAI canonical storage (0.133875ms)
+✔ SessionContext OpenAI-native message storage (1.15ms)
+✔ getLatestTurnHitRate returns null with no turn cache snapshots (0.064792ms)
+✔ getLatestTurnHitRate returns null when latest turn has no cache counters (0.066375ms)
+✔ getLatestTurnHitRate returns latest turn cache read ratio (0.05875ms)
+▶ getRecentTurnHitRate
+  ✔ returns null with no turn cache snapshots (0.094958ms)
+  ✔ returns average over available turns when fewer than requested (0.052584ms)
+  ✔ returns average over last N turns (0.042334ms)
+  ✔ returns null when all turns have zero cache counters (0.047584ms)
+✔ getRecentTurnHitRate (0.302542ms)
+▶ SessionPersist
+  ✔ creates a claim store for the session (0.987416ms)
+  ✔ buildMemoryBlock returns string for fresh session (0.5125ms)
+  ✔ getSessionMemoryState returns undefined for fresh session (0.295625ms)
+  ✔ injectDurableClaims does not throw on fresh store (0.628583ms)
+  ✔ getBackupDir returns a path containing the session id (0.793208ms)
+  ✔ caps oversized session message JSON lines (0.693625ms)
+  ✔ persists truncated oversized messages as loadable JSON (4.148958ms)
+  ✔ appends and loads OpenAI-native messages with checksum (1.407667ms)
+  ✔ migrates legacy session messages to OAI on loadOai (1.65725ms)
+✔ SessionPersist (11.778667ms)
+▶ TurnSnapshot
+  ✔ writes and reads turn snapshots (0.297ms)
+  ✔ returns null when no snapshots exist (0.053417ms)
+  ✔ skips corrupted snapshot lines (0.237625ms)
+  ✔ loads messages up to a specific turn (1.629916ms)
+  ✔ loadRecoverableMessages inserts synthetic tool_result for orphan tool_use (0.894625ms)
+  ✔ loadRecoverableMessages rolls back to last snapshot when transcript is unsafe (0.800041ms)
+✔ TurnSnapshot (4.591292ms)
+▶ SessionEviction
+  ✔ does not evict when below limit (0.562083ms)
+  ✔ evicts oldest sessions beyond limit keeping current (1.965417ms)
+  ✔ handles empty directory (0.127167ms)
+✔ SessionEviction (3.599208ms)
+▶ checksum integration
+  ✔ appends and loads messages with checksum (1.507584ms)
+  ✔ loads legacy format without checksum (0.84675ms)
+  ✔ skips invalid checksum lines (0.968459ms)
+✔ checksum integration (3.399542ms)
+▶ fuzzy checkpoint
+  ✔ detects incomplete compact (0.966125ms)
+  ✔ detects complete compact (0.718291ms)
+  ✔ loadRecoverableMessages detects incomplete compact (0.868125ms)
+✔ fuzzy checkpoint (2.649042ms)
+ℹ tests 42
+ℹ suites 9
+ℹ pass 42
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 256.841875
+TypeScript compilation completed

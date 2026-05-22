@@ -1,0 +1,9 @@
+6:export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests'] as const
+7:export const WRITE_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
+8:export const PHASE1_DISALLOWED_WORKER_TOOLS = ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'] as const
+22:export const workOrderKindSchema = z.enum([
+31:export type WorkOrderKind = z.infer<typeof workOrderKindSchema>
+75:  kind: workOrderKindSchema,
+176:    allowedTools: [...READ_ONLY_WORKER_TOOLS],
+177:    disallowedTools: [...PHASE1_DISALLOWED_WORKER_TOOLS],
+209:    allowedTools: [...WRITE_WORKER_TOOLS],

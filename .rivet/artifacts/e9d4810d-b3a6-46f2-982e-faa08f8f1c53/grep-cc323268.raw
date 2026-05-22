@@ -1,0 +1,2 @@
+147:  private convertInputBlock(block: ContentBlock): Record<string, unknown> {
+162:  private convertAssistantBlock(block: ContentBlock): Record<string, unknown> {

@@ -1,0 +1,9 @@
+ 88 │       clearTimeout(timer)
+ 89 │       reject(new DOMException('Aborted', 'AbortError'))
+ 90 │     }
+ 91 │     signal?.addEventListener('abort', onAbort, { once: true })
+ 92 │   })
+ 93 │ }
+ 94 │ 
+ 95 │ export class OpenAIClient implements StreamClient {
+ 96 │   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()

@@ -1,0 +1,30 @@
+54 matches in 9F:
+
+[file] 1 (1):
+     0: test'
+
+[file] 532 (1):
+     0: calls onThinkingDelta for reasoning_content delta', () => {
+
+[file] 544 (1):
+     0: includes thinking param in body when thinking is enabled', () => {
+
+[file] 551 (1):
+     0: includes reasoning_effort in body when configured', () => {
+
+[file] 558 (1):
+     0: converts thinking content block to reasoning_content for tool-call round trip...
+
+[file] 585 (1):
+     0: extracts DeepSeek cache stats from usage chunk', () => {
+
+[file] 616 (1):
+     0: maps insufficient_system_resource finish_reason to end_turn', () => {
+
+[file] 641 (1):
+     0: thinking-only turn — onThinkingDelta called, onTextDelta not called', () => {
+
+[file] src/api/__tests__/openai-client.test.ts (46):
+    34: describe('OpenAIClient', () => {
+    35: it('implements StreamClient interface', () => {
+    41: it('buildRequestBody produces valid OpenAI request body', () => {
