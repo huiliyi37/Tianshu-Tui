@@ -1,15 +1,15 @@
 import { describe, it } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { createTurnBudget, BASE_BUDGET_TOKENS, PRESSURE_BUDGET_TOKENS } from '../turn-budget.js'
-import { compactStaleRounds } from '../../compact/stale-round.js'
-import { estimateTokens } from '../../compact/micro.js'
-import type { Message } from '../../api/types.js'
+import { compactStaleRoundsOai } from '../../compact/stale-round.js'
+import { estimateOaiTokens } from '../../compact/micro.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 describe('memory safety integration', () => {
   it('messages array stays bounded after 10 simulated turns', () => {
-    const messages: Message[] = [
+    const messages: OaiMessage[] = [
       { role: 'user', content: 'initial request' },
-      { role: 'assistant', content: [{ type: 'text', text: 'I will help' }] },
+      { role: 'assistant', content: 'I will help' },
     ]
 
     for (let turn = 0; turn < 10; turn++) {
@@ -24,25 +24,19 @@ describe('memory safety integration', () => {
           ? `<stored ref="/tmp/test" chars=${toolContent.length}>preview</stored>`
           : toolContent
 
-        messages.push({
-          role: 'user',
-          content: [{ type: 'tool_result', tool_use_id: `tu_${turn}_${tool}`, content }],
-        })
+        messages.push({ role: 'tool', tool_call_id: `tu_${turn}_${tool}`, content })
       }
 
-      messages.push({
-        role: 'assistant',
-        content: [{ type: 'text', text: `turn ${turn} done` }],
-      })
+      messages.push({ role: 'assistant', content: `turn ${turn} done` })
 
-      const compacted = compactStaleRounds(messages, 1_000_000)
+      const compacted = compactStaleRoundsOai(messages, 1_000_000)
       if (compacted !== messages) {
         messages.length = 0
         messages.push(...compacted)
       }
     }
 
-    const totalTokens = estimateTokens(messages)
+    const totalTokens = estimateOaiTokens(messages)
     assert.ok(totalTokens < 30_000, `Expected <30K tokens, got ${totalTokens}`)
     assert.ok(messages.length > 4, 'Should still have meaningful messages')
   })
@@ -58,25 +52,19 @@ describe('memory safety integration', () => {
   })
 
   it('stale compaction preserves recent content while shrinking old', () => {
-    const messages: Message[] = [
+    const messages: OaiMessage[] = [
       { role: 'user', content: 'anchor' },
-      { role: 'assistant', content: [{ type: 'text', text: 'anchor' }] },
+      { role: 'assistant', content: 'anchor' },
     ]
 
     for (let i = 0; i < 6; i++) {
-      messages.push({
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: `tu_${i}`, content: 'data-'.repeat(1000) }],
-      })
-      messages.push({
-        role: 'assistant',
-        content: [{ type: 'text', text: `round ${i}` }],
-      })
+      messages.push({ role: 'tool', tool_call_id: `tu_${i}`, content: 'data-'.repeat(1000) })
+      messages.push({ role: 'assistant', content: `round ${i}` })
     }
 
-    const before = estimateTokens(messages)
-    const compacted = compactStaleRounds(messages, 1_000_000)
-    const after = estimateTokens(compacted)
+    const before = estimateOaiTokens(messages)
+    const compacted = compactStaleRoundsOai(messages, 1_000_000)
+    const after = estimateOaiTokens(compacted)
 
     assert.ok(after < before, `Expected tokens to decrease: ${after} < ${before}`)
     const lastFour = compacted.slice(-4)

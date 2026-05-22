@@ -1,32 +1,33 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { microCompact, estimateTokens } from '../micro.js'
-import type { Message } from '../../api/types.js'
+import { microCompactOai, estimateOaiTokens } from '../micro.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
-describe('estimateTokens', () => {
+describe('estimateOaiTokens', () => {
   it('estimates tokens for short messages', () => {
-    const msgs: Message[] = [{ role: 'user', content: 'Hello world' }]
-    const est = estimateTokens(msgs)
+    const msgs: OaiMessage[] = [{ role: 'user', content: 'Hello world' }]
+    const est = estimateOaiTokens(msgs)
     assert.ok(est > 0)
     assert.ok(est < 20)
   })
 
   it('handles empty messages array', () => {
-    assert.equal(estimateTokens([]), 0)
+    assert.equal(estimateOaiTokens([]), 0)
   })
 
-  it('handles content blocks (non-string content)', () => {
-    const msgs: Message[] = [{
+  it('handles assistant messages with reasoning', () => {
+    const msgs: OaiMessage[] = [{
       role: 'assistant',
-      content: [{ type: 'text', text: 'Hello' }],
+      content: 'Hello',
+      reasoning_content: 'Let me think...',
     }]
-    const est = estimateTokens(msgs)
+    const est = estimateOaiTokens(msgs)
     assert.ok(est > 0)
   })
 })
 
-describe('microCompact', () => {
-  const makeMessages = (n: number): Message[] =>
+describe('microCompactOai', () => {
+  const makeMessages = (n: number): OaiMessage[] =>
     Array.from({ length: n }, (_, i) => ({
       role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
       content: `Message ${i}: ${'x'.repeat(100)}`,
@@ -34,14 +35,14 @@ describe('microCompact', () => {
 
   it('preserves anchor messages at start', () => {
     const msgs = makeMessages(20)
-    const { messages } = microCompact(msgs, 128_000, 900_000)
+    const { messages } = microCompactOai(msgs, 128_000, 900_000)
     assert.equal(messages[0]?.content, msgs[0]?.content)
     assert.equal(messages[1]?.content, msgs[1]?.content)
   })
 
   it('preserves recent messages at end', () => {
     const msgs = makeMessages(20)
-    const { messages } = microCompact(msgs, 128_000, 900_000)
+    const { messages } = microCompactOai(msgs, 128_000, 900_000)
     const lastOriginal = msgs[msgs.length - 1]!.content
     const lastCompacted = messages[messages.length - 1]!.content
     assert.equal(lastCompacted, lastOriginal)
@@ -49,116 +50,89 @@ describe('microCompact', () => {
 
   it('returns truncated count', () => {
     const msgs = makeMessages(20)
-    const { truncated } = microCompact(msgs, 128_000, 900_000)
+    const { truncated } = microCompactOai(msgs, 128_000, 900_000)
     assert.ok(truncated > 0)
     assert.ok(truncated < 20)
   })
 
   it('does nothing when few messages', () => {
     const msgs = makeMessages(4)
-    const { messages, truncated } = microCompact(msgs, 128_000, 900_000)
+    const { messages, truncated } = microCompactOai(msgs, 128_000, 900_000)
     assert.equal(messages.length, 4)
     assert.equal(truncated, 0)
   })
 })
 
-describe('thinking block compaction', () => {
+describe('reasoning compaction', () => {
   const longThinking = 'Let me analyze this step by step. '.repeat(200) // ~8K chars
 
-  it('truncates thinking blocks in non-recent assistant messages', () => {
-    // Build messages: 2 anchor + 6 history + 4 recent = 12 total
-    const messages: Message[] = [
+  it('truncates reasoning_content in non-recent assistant messages', () => {
+    const messages: OaiMessage[] = [
       { role: 'user', content: 'anchor user' },
-      { role: 'assistant', content: [
-        { type: 'thinking', thinking: longThinking },
-        { type: 'text', text: 'anchor reply' },
-      ]},
+      { role: 'assistant', content: 'anchor reply' },
       // 3 history rounds (6 messages)
       ...Array.from({ length: 3 }, (_, i) => [
         { role: 'user' as const, content: `question ${i}` },
-        { role: 'assistant' as const, content: [
-          { type: 'thinking' as const, thinking: longThinking },
-          { type: 'text' as const, text: `answer ${i}` },
-        ] },
-      ] as Message[]).flat(),
+        { role: 'assistant' as const, content: `answer ${i}`, reasoning_content: longThinking },
+      ] as OaiMessage[]).flat(),
       // 2 recent rounds (4 messages)
       ...Array.from({ length: 2 }, (_, i) => [
         { role: 'user' as const, content: `recent question ${i}` },
-        { role: 'assistant' as const, content: [
-          { type: 'thinking' as const, thinking: longThinking },
-          { type: 'text' as const, text: `recent answer ${i}` },
-        ] },
-      ] as Message[]).flat(),
+        { role: 'assistant' as const, content: `recent answer ${i}`, reasoning_content: longThinking },
+      ] as OaiMessage[]).flat(),
     ]
-    // total = 12 messages
 
-    const { messages: compacted, truncated } = microCompact(messages, 128_000, 900_000)
+    const { messages: compacted, truncated } = microCompactOai(messages, 128_000, 900_000)
 
-    // History assistant messages (index 3,5,7) should have truncated thinking
+    // History assistant messages (index 3,5,7) should have truncated reasoning
     const histAsst = compacted[3]!
-    assert.ok(Array.isArray(histAsst.content))
-    const thinkingBlock = (histAsst.content as any[]).find((b: any) => b.type === 'thinking')
-    assert.ok(thinkingBlock, 'history assistant should still have thinking block')
-    assert.ok(thinkingBlock.thinking.length < longThinking.length,
-      `history thinking should be truncated: got ${thinkingBlock.thinking.length}, original ${longThinking.length}`)
-    assert.ok(thinkingBlock.thinking.length <= 600,
-      `history thinking should be ~500 chars: got ${thinkingBlock.thinking.length}`)
+    assert.ok(histAsst.role === 'assistant' && 'reasoning_content' in histAsst)
+    assert.ok(histAsst.reasoning_content!.length < longThinking.length,
+      `history reasoning should be truncated: got ${histAsst.reasoning_content!.length}, original ${longThinking.length}`)
+    assert.ok(histAsst.reasoning_content!.length <= 600,
+      `history reasoning should be ~500 chars: got ${histAsst.reasoning_content!.length}`)
 
-    // Recent assistant messages (last 2) should have full thinking
+    // Recent assistant messages (last 2) should have full reasoning
     const recentAsst = compacted[compacted.length - 1]!
-    assert.ok(Array.isArray(recentAsst.content))
-    const recentThinking = (recentAsst.content as any[]).find((b: any) => b.type === 'thinking')
-    assert.ok(recentThinking, 'recent assistant should have thinking block')
-    assert.equal(recentThinking.thinking.length, longThinking.length,
-      'recent thinking should NOT be truncated')
+    assert.ok(recentAsst.role === 'assistant' && 'reasoning_content' in recentAsst)
+    assert.equal(recentAsst.reasoning_content!.length, longThinking.length,
+      'recent reasoning should NOT be truncated')
 
     assert.ok(truncated > 0, 'should report truncated count > 0')
   })
 
-  it('does not truncate thinking in recent messages', () => {
-    const messages: Message[] = [
+  it('does not truncate reasoning in recent messages', () => {
+    const messages: OaiMessage[] = [
       { role: 'user', content: 'hi' },
-      { role: 'assistant', content: [
-        { type: 'thinking', thinking: longThinking },
-        { type: 'text', text: 'hello' },
-      ]},
+      { role: 'assistant', content: 'hello', reasoning_content: longThinking },
       { role: 'user', content: 'follow up' },
-      { role: 'assistant', content: [
-        { type: 'thinking', thinking: longThinking },
-        { type: 'text', text: 'answer' },
-      ]},
+      { role: 'assistant', content: 'answer', reasoning_content: longThinking },
     ]
-    // Only 4 messages = KEEP_RECENT_MESSAGES, nothing should be truncated
-    const { messages: compacted, truncated } = microCompact(messages, 128_000, 900_000)
+    const { messages: compacted, truncated } = microCompactOai(messages, 128_000, 900_000)
     assert.equal(truncated, 0)
 
     const lastAsst = compacted[compacted.length - 1]!
-    const thinkingBlock = (lastAsst.content as any[]).find((b: any) => b.type === 'thinking')
-    assert.equal(thinkingBlock!.thinking.length, longThinking.length)
+    assert.ok(lastAsst.role === 'assistant' && 'reasoning_content' in lastAsst)
+    assert.equal(lastAsst.reasoning_content!.length, longThinking.length)
   })
 
-  it('handles short thinking blocks without truncation', () => {
+  it('handles short reasoning without truncation', () => {
     const shortThinking = 'Quick analysis done.'
-    const messages: Message[] = [
+    const messages: OaiMessage[] = [
       { role: 'user', content: 'anchor' },
       { role: 'assistant', content: 'anchor reply' },
       { role: 'user', content: 'q1' },
-      { role: 'assistant', content: [
-        { type: 'thinking', thinking: shortThinking },
-        { type: 'text', text: 'a1' },
-      ]},
+      { role: 'assistant', content: 'a1', reasoning_content: shortThinking },
       ...Array.from({ length: 4 }, (_, i) => ({
         role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
         content: `filler ${i}`,
       })),
     ]
 
-    const { messages: compacted } = microCompact(messages, 128_000, 900_000)
+    const { messages: compacted } = microCompactOai(messages, 128_000, 900_000)
     const asst3 = compacted[3]!
-    if (Array.isArray(asst3.content)) {
-      const tb = (asst3.content as any[]).find((b: any) => b.type === 'thinking')
-      // Short thinking should pass through unchanged (truncation would make it longer)
-      if (tb) assert.equal(tb.thinking, shortThinking)
+    if (asst3.role === 'assistant' && asst3.reasoning_content) {
+      assert.equal(asst3.reasoning_content, shortThinking)
     }
   })
 })

@@ -1,8 +1,8 @@
-import { estimateMessageTokens } from '../compact/micro.js'
+import { estimateOaiMessageTokens } from '../compact/micro.js'
 
 export function truncateToolResult(content: string, maxTokens: number): string {
   if (!content) return content
-  const tokens = estimateMessageTokens({ role: 'user', content })
+  const tokens = estimateOaiMessageTokens({ role: 'user', content })
   if (tokens <= maxTokens) return content
 
   const ratio = maxTokens / tokens

@@ -1,7 +1,11 @@
 import type { ContentBlock, Message } from '../api/types.js'
 import type { OaiMessage, OaiAssistantMessage } from '../api/oai-types.js'
-import { estimateMessageTokens } from './token-estimate.js'
 import type { ApiInvariant, ApiInvariantStatus, ApiRound } from './types.js'
+
+function estimateMessageTokens(msg: Message): number {
+  const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+  return Math.ceil(content.length / 4)
+}
 
 function extractToolUseIds(blocks: ContentBlock[]): string[] {
   return blocks
