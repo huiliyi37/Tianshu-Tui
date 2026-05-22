@@ -1,6 +1,7 @@
 import type { StreamCallbacks } from '../api/client.js'
 import type { StreamClient } from '../api/stream-client.js'
-import type { ContentBlock, MessageRequest, Usage } from '../api/types.js'
+import type { OaiChatRequest } from '../api/oai-types.js'
+import type { ContentBlock, Usage } from '../api/types.js'
 import { stripIntraTurnRepetition } from './dedup.js'
 
 export interface TurnStreamCallbacks {
@@ -23,7 +24,7 @@ export interface TurnStreamDeps {
 }
 
 export interface TurnStreamInput {
-  request: MessageRequest
+  request: OaiChatRequest
   turn: number
   lastTurnTextFingerprint: string
   callbacks: TurnStreamCallbacks

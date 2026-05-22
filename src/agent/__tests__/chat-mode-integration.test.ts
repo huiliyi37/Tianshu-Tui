@@ -5,14 +5,15 @@ import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
 import { READ_FILE_TOOL } from '../../tools/read-file.js'
-import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamClient } from '../../api/stream-client.js'
 import type { ContentBlock } from '../../api/types.js'
 
 function makeTextBlock(text: string): ContentBlock {
   return { type: 'text', text }
 }
 
-function mockClient(blocks: ContentBlock[]): ApiClient {
+function mockClient(blocks: ContentBlock[]): StreamClient {
   return {
     stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
       for (const b of blocks) {
@@ -21,7 +22,7 @@ function mockClient(blocks: ContentBlock[]): ApiClient {
       }
       cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
     }),
-  } as unknown as ApiClient
+  } as unknown as StreamClient
 }
 
 function makeCallbacks() {

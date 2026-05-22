@@ -1,6 +1,7 @@
 import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamClient } from '../../api/stream-client.js'
 import type { ContentBlock } from '../../api/types.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
@@ -12,7 +13,7 @@ function textBlock(text: string): ContentBlock {
   return { type: 'text', text }
 }
 
-function clientFromTexts(texts: string[]): ApiClient {
+function clientFromTexts(texts: string[]): StreamClient {
   let index = 0
   return {
     stream: mock.fn(async (_req: unknown, cb: StreamCallbacks) => {
@@ -22,7 +23,7 @@ function clientFromTexts(texts: string[]): ApiClient {
       cb.onContentBlock(textBlock(text))
       cb.onStopReason('end_turn', { input_tokens: 10, output_tokens: 5 })
     }),
-  } as unknown as ApiClient
+  } as unknown as StreamClient
 }
 
 function makePromptEngine() {

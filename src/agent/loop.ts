@@ -924,7 +924,7 @@ export class AgentLoop {
         if (this.sessionStateManager) {
           this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
         }
-        const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
+        const request = this.config.promptEngine.buildOaiRequest(this.session.getOaiMessages(), this.recentToolHistory)
         const streamResult = await this.turnStream!.streamTurn({
           request,
           turn,

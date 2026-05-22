@@ -3,13 +3,13 @@ import assert from 'node:assert/strict'
 import { TurnStreamController } from '../turn-stream.js'
 import type { StreamCallbacks } from '../../api/client.js'
 import type { StreamClient } from '../../api/stream-client.js'
-import type { MessageRequest, Usage } from '../../api/types.js'
+import type { OaiChatRequest } from '../../api/oai-types.js'
+import type { Usage } from '../../api/types.js'
 
-const request: MessageRequest = {
+const request: OaiChatRequest = {
   model: 'test-model',
   messages: [],
   max_tokens: 1024,
-  stream: true,
 }
 
 function makeController(client: StreamClient) {
@@ -37,7 +37,7 @@ function makeController(client: StreamClient) {
 describe('TurnStreamController', () => {
   it('collects text, thinking, tool uses, usage, and cache counters', async () => {
     const client: StreamClient = {
-      stream: mock.fn(async (_request: MessageRequest, cb: StreamCallbacks) => {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
         cb.onTextDelta('hello ')
         cb.onThinkingDelta('thinking')
         cb.onContentBlock({ type: 'text', text: 'hello ' })
@@ -81,7 +81,7 @@ describe('TurnStreamController', () => {
 
   it('deduplicates repeated display text against the previous turn fingerprint', async () => {
     const client: StreamClient = {
-      stream: mock.fn(async (_request: MessageRequest, cb: StreamCallbacks) => {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
         cb.onTextDelta('same text')
         cb.onStopReason('end_turn', {})
       }),
@@ -108,7 +108,7 @@ describe('TurnStreamController', () => {
   it('records stream errors and estimates output usage from partial content', async () => {
     const expected = new Error('stream failed')
     const client: StreamClient = {
-      stream: mock.fn(async (_request: MessageRequest, cb: StreamCallbacks) => {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
         cb.onTextDelta('partial')
         cb.onContentBlock({ type: 'text', text: 'partial' })
         throw expected

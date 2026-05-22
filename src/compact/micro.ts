@@ -1,7 +1,7 @@
 import type { Message } from '../api/types.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import { KEEP_RECENT_MESSAGES, CACHE_ANCHOR_MESSAGES, compactThresholds } from './constants.js'
-import { groupIntoRounds } from '../context/rounds.js'
+import { groupIntoRounds, groupIntoRoundsOai } from '../context/rounds.js'
 
 const CHARS_PER_TOKEN = 4
 
@@ -246,46 +246,23 @@ export function microCompactOai(
     return { messages: shortened, truncated: compactedCount }
   }
 
-  // Tier 2: remove complete rounds from the middle
-  // For OAI format, we need to detect rounds differently
+  // Tier 2: remove complete safe rounds from the middle
   const anchorEnd = CACHE_ANCHOR_MESSAGES
   const tier2RecentStart = Math.max(0, shortened.length - KEEP_RECENT_MESSAGES)
+  const rounds = groupIntoRoundsOai(shortened)
   const removeIndexes = new Set<number>()
 
-  // Simple round detection for OAI: scan for user->assistant->tool* patterns
-  let i = anchorEnd
-  while (i < tier2RecentStart) {
-    if (shortened[i]!.role === 'user') {
-      // Find end of this round
-      let roundEnd = i + 1
-      while (roundEnd < tier2RecentStart) {
-        const r = shortened[roundEnd]!
-        if (r.role === 'user') break
-        roundEnd++
+  for (const round of rounds) {
+    // Only remove rounds that are fully in the removable middle zone
+    if (round.startMessageIndex >= anchorEnd && round.endMessageIndex <= tier2RecentStart && round.apiInvariant === 'ok') {
+      const roundTokens = round.tokenEstimate
+      if (currentTokens - roundTokens <= contextWindow * 0.7) continue // keep some headroom
+      for (let idx = round.startMessageIndex; idx < round.endMessageIndex; idx += 1) {
+        removeIndexes.add(idx)
       }
-
-      // Check if round is complete (ends with assistant or tool)
-      const lastInRound = shortened[roundEnd - 1]!
-      if (lastInRound.role === 'assistant' || lastInRound.role === 'tool') {
-        // Estimate round tokens
-        let roundTokens = 0
-        for (let idx = i; idx < roundEnd; idx++) {
-          roundTokens += estimateOaiMessageTokens(shortened[idx]!)
-        }
-
-        if (currentTokens - roundTokens > contextWindow * 0.7) {
-          for (let idx = i; idx < roundEnd; idx++) {
-            removeIndexes.add(idx)
-          }
-          currentTokens -= roundTokens
-          compactedCount += roundEnd - i
-          if (currentTokens <= contextWindow) break
-        }
-      }
-
-      i = roundEnd
-    } else {
-      i++
+      currentTokens -= roundTokens
+      compactedCount += round.endMessageIndex - round.startMessageIndex
+      if (currentTokens <= contextWindow) break
     }
   }
 

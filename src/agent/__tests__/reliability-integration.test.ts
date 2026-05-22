@@ -4,7 +4,8 @@ import { AgentLoop } from '../loop.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
-import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamClient } from '../../api/stream-client.js'
 import type { ContentBlock, ToolDefinition } from '../../api/types.js'
 import type { Tool, ToolCallParams, ToolResult } from '../../tools/types.js'
 
@@ -39,7 +40,7 @@ function makeWriteTool(execute: () => Promise<ToolResult>): Tool {
   }
 }
 
-function mockToolUseClient(block: ContentBlock): ApiClient {
+function mockToolUseClient(block: ContentBlock): StreamClient {
   let calls = 0
   return {
     stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
@@ -53,7 +54,7 @@ function mockToolUseClient(block: ContentBlock): ApiClient {
       cb.onContentBlock({ type: 'text', text: 'done' })
       cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 10 })
     }),
-  } as unknown as ApiClient
+  } as unknown as StreamClient
 }
 
 function makeCallbacks(results: string[]) {

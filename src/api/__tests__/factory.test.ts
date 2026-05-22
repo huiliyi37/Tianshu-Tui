@@ -105,7 +105,7 @@ describe('createProviderClient', () => {
     }) as unknown as typeof fetch
 
     await client.stream(
-      { model: 'test-model', messages: [{ role: 'user', content: 'x', cache_control: { type: 'ephemeral' } }], max_tokens: 100, stream: true },
+      { model: 'test-model', messages: [{ role: 'user', content: 'x' }], max_tokens: 100 },
       { onTextDelta: () => {}, onThinkingDelta: () => {}, onContentBlock: () => {}, onStopReason: () => {}, onError: error => { throw error } },
     )
 

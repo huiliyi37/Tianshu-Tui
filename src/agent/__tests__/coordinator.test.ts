@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ApiClient } from '../../api/client.js'
+import type { StreamClient } from '../../api/stream-client.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { filterToolRegistry, ToolRegistry } from '../../tools/registry.js'
 import type { Tool, ToolCallParams } from '../../tools/types.js'
@@ -91,7 +91,7 @@ describe('DelegationCoordinator', () => {
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => ({
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',
@@ -154,7 +154,7 @@ describe('DelegationCoordinator', () => {
       seenToolNames.push(workerRegistry.getDefinitions().map(t => t.name))
       return {
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({
           model: card.model,
           maxTokens: 1024,
@@ -203,7 +203,7 @@ describe('DelegationCoordinator', () => {
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => ({
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',
@@ -239,7 +239,7 @@ describe('DelegationCoordinator', () => {
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => ({
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',
@@ -288,7 +288,7 @@ describe('DelegationCoordinator', () => {
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => ({
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',
@@ -338,7 +338,7 @@ describe('DelegationCoordinator', () => {
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => ({
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',
@@ -386,7 +386,7 @@ describe('DelegationCoordinator', () => {
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => ({
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',
@@ -427,7 +427,7 @@ describe('DelegationCoordinator', () => {
       selectedModels.push(card.model)
       return {
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',
@@ -489,7 +489,7 @@ describe('DelegationCoordinator', () => {
           selectedModels.push(card.model)
           return {
             order,
-            client: {} as ApiClient,
+            client: {} as StreamClient,
             promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
             toolRegistry: workerRegistry,
             cwd: '/repo',
@@ -549,7 +549,7 @@ describe('DelegationCoordinator', () => {
         selectedModels.push(card.model)
         return {
           order,
-          client: {} as ApiClient,
+          client: {} as StreamClient,
           promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
           toolRegistry: workerRegistry,
           cwd: '/repo',
@@ -590,7 +590,7 @@ describe('DelegationCoordinator', () => {
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => ({
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',
@@ -632,7 +632,7 @@ describe('DelegationCoordinator', () => {
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => ({
         order,
-        client: {} as ApiClient,
+        client: {} as StreamClient,
         promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
         toolRegistry: workerRegistry,
         cwd: '/repo',

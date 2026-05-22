@@ -1,4 +1,5 @@
 import type { MessageRequest, ContentBlock, Usage } from './types.js'
+import type { OaiChatRequest, OaiMessage } from './oai-types.js'
 import type { StreamClient } from './stream-client.js'
 import { SSEParser } from './sse.js'
 import { withStructuredRetry } from './retry-engine.js'
@@ -156,6 +157,65 @@ export class ApiClient implements StreamClient {
     }
   }
 
+  /** Convert OaiChatRequest to legacy MessageRequest for the Anthropic Messages API. */
+  private oaiToMessageRequest(oai: OaiChatRequest): MessageRequest {
+    // Extract system messages
+    const systemText = oai.messages
+      .filter(m => m.role === 'system')
+      .map(m => (m as { role: 'system'; content: string }).content)
+      .join('\n') || undefined
+
+    // Convert OAI messages to Anthropic-style ContentBlock messages
+    const messages: MessageRequest['messages'] = []
+    for (const msg of oai.messages) {
+      if (msg.role === 'system') continue
+      if (msg.role === 'user') {
+        messages.push({ role: 'user', content: msg.content })
+      } else if (msg.role === 'assistant') {
+        // Anthropic expects tool_use blocks for tool calls
+        const content: ContentBlock[] = []
+        if (msg.content) content.push({ type: 'text', text: msg.content })
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            content.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.function.name,
+              input: JSON.parse(tc.function.arguments),
+            })
+          }
+        }
+        messages.push({ role: 'assistant', content: content.length > 0 ? content : '' })
+      } else if (msg.role === 'tool') {
+        messages.push({
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: msg.tool_call_id, content: msg.content }],
+        })
+      }
+    }
+
+    // Convert OAI tool definitions to legacy ToolDefinition format
+    const tools = oai.tools?.map(t => ({
+      name: t.function.name,
+      description: t.function.description,
+      input_schema: t.function.parameters as {
+        type: 'object'
+        properties: Record<string, unknown>
+        required?: string[]
+        additionalProperties?: boolean
+      },
+    }))
+
+    const result: MessageRequest = {
+      model: oai.model,
+      messages,
+      max_tokens: oai.max_tokens ?? this.config.maxTokens,
+    }
+    if (systemText) result.system = systemText
+    if (tools && tools.length > 0) result.tools = tools
+    return result
+  }
+
   private stripUnsupported(request: MessageRequest): MessageRequest {
     const req = { ...request }
     for (const field of this.config.unsupported) {
@@ -170,11 +230,16 @@ export class ApiClient implements StreamClient {
     return req
   }
 
+  /**
+   * @deprecated ApiClient is legacy; use OpenAIClient for new development.
+   * Accepts OaiChatRequest and converts to legacy MessageRequest internally for Anthropic Messages API.
+   */
   async stream(
-    request: MessageRequest,
+    oaiRequest: OaiChatRequest,
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
+    const request = this.oaiToMessageRequest(oaiRequest)
     const toolSchemas = new Map<string, string[]>()
     // Filter out provider-native tools (e.g. GLM web_search) — they have no
     // valid input_schema for Anthropic/OpenAI format and cause 400 errors.

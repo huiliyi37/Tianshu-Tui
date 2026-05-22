@@ -1,7 +1,7 @@
 import { mock } from 'node:test'
 import type { StreamClient } from '../../api/stream-client.js'
 import type { StreamCallbacks } from '../../api/client.js'
-import type { MessageRequest } from '../../api/types.js'
+import type { OaiChatRequest } from '../../api/oai-types.js'
 import { ContextClaimStore } from '../../context/claim-store.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto'
 
 /** Record of a single stream() invocation for test assertions */
 export interface StreamCallRecord {
-  request: MessageRequest
+  request: OaiChatRequest
   text: string
   stopped: boolean
 }
@@ -40,7 +40,7 @@ export class MockStreamClient implements StreamClient {
     this.responses = responses
   }
 
-  stream = mock.fn(async (request: MessageRequest, cb: StreamCallbacks, _signal?: AbortSignal): Promise<void> => {
+  stream = mock.fn(async (request: OaiChatRequest, cb: StreamCallbacks, _signal?: AbortSignal): Promise<void> => {
     const callSet = this.responses[Math.min(this.callIndex, this.responses.length - 1)] ?? []
     const round = callSet[Math.min(this.roundIndex, callSet.length - 1)] ?? { text: '' }
 

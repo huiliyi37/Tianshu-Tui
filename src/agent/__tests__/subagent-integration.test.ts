@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { filterToolRegistry, ToolRegistry } from '../../tools/registry.js'
 import type { Tool, ToolCallParams } from '../../tools/types.js'
 import type { StreamCallbacks } from '../../api/client.js'
-import type { MessageRequest } from '../../api/types.js'
+import type { OaiChatRequest } from '../../api/types.js'
 import {
   READ_ONLY_WORKER_TOOLS,
   PHASE1_DISALLOWED_WORKER_TOOLS,
@@ -135,7 +135,7 @@ describe('MockStreamClient', () => {
       onStopReason: () => {},
       onError: () => {},
     }
-    const req: MessageRequest = { model: 'test', messages: [], max_tokens: 1024, stream: true }
+    const req: OaiChatRequest = { model: 'test', messages: [], max_tokens: 1024  }
     await client.stream(req, cb)
     assert.equal(collected, 'hello world')
     assert.equal(client.calls.length, 1)
@@ -154,7 +154,7 @@ describe('MockStreamClient', () => {
       onStopReason: () => {},
       onError: () => {},
     }
-    const req: MessageRequest = { model: 'test', messages: [], max_tokens: 1024, stream: true }
+    const req: OaiChatRequest = { model: 'test', messages: [], max_tokens: 1024  }
 
     const texts: string[] = []
     const cb1: StreamCallbacks = {
@@ -174,7 +174,7 @@ describe('MockStreamClient', () => {
 
   it('replays multiple rounds within a single call set', async () => {
     const client = new MockStreamClient([[{ text: 'round1' }, { text: 'round2' }]])
-    const req: MessageRequest = { model: 'test', messages: [], max_tokens: 1024, stream: true }
+    const req: OaiChatRequest = { model: 'test', messages: [], max_tokens: 1024  }
     const cb: StreamCallbacks = {
       onTextDelta: () => {},
       onThinkingDelta: () => {},
@@ -204,7 +204,7 @@ describe('mockClientFromTexts', () => {
       onStopReason: () => {},
       onError: () => {},
     }
-    const req: MessageRequest = { model: 'test', messages: [], max_tokens: 1024, stream: true }
+    const req: OaiChatRequest = { model: 'test', messages: [], max_tokens: 1024  }
 
     await client.stream(req, cb)
     await client.stream(req, cb)
@@ -220,7 +220,7 @@ describe('mockClientFromTexts', () => {
       onStopReason: () => {},
       onError: () => {},
     }
-    const req: MessageRequest = { model: 'deepseek', messages: [], max_tokens: 2048, stream: true }
+    const req: OaiChatRequest = { model: 'deepseek', messages: [], max_tokens: 2048  }
     await client.stream(req, cb)
 
     assert.equal(client.calls.length, 1)

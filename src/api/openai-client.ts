@@ -1,6 +1,7 @@
 import type { StreamClient } from './stream-client.js'
 import type { MessageRequest, ToolDefinition } from './types.js'
 import type { StreamCallbacks } from './client.js'
+import type { OaiChatRequest } from './oai-types.js'
 import { stableStringify } from './stable-json.js'
 import { canonicalizeRequest } from './request-freezer.js'
 import type { ProviderProfile } from './provider-profile.js'
@@ -131,17 +132,30 @@ export class OpenAIClient implements StreamClient {
   }
 
   async stream(
-    request: MessageRequest,
+    request: OaiChatRequest,
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
-    // Canonicalize request for cache stability before building body
-    const canonicalReq = (this.config.unsupported && this.config.providerProfile)
-      ? canonicalizeRequest(request, this.config.providerProfile, this.config.unsupported)
-      : request
+    const body: Record<string, unknown> = {
+      model: request.model,
+      messages: request.messages,
+      stream: true,
+      stream_options: { include_usage: true },
+    }
+    if (request.max_tokens) body.max_tokens = request.max_tokens
+    if (request.tools && request.tools.length > 0) body.tools = request.tools
+    if (request.tool_choice) body.tool_choice = request.tool_choice
+    if (request.temperature !== undefined) body.temperature = request.temperature
+    if (request.reasoning_effort) body.reasoning_effort = request.reasoning_effort
+    await this.sendStream(body, callbacks, signal)
+  }
 
-    const body = this.buildRequestBody(canonicalReq)
-
+  /** Shared inner retry+fetch+SSE loop used by both stream and streamOai. */
+  private async sendStream(
+    body: Record<string, unknown>,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<void> {
     // Reset instance state to prevent stale data from previous calls/retries
     this.toolCallBuffer.clear()
     this.pendingStopReason = null

@@ -13,10 +13,11 @@ describe('CodexClient', () => {
 
     const body = (client as any).buildRequestBody({
       model: 'gpt-5.5',
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: 'hello' },
+      ],
       max_tokens: 64000,
-      system: 'You are a helpful assistant.',
-      stream: true,
     })
 
     assert.equal(body.model, 'gpt-5.5')
@@ -48,19 +49,14 @@ describe('CodexClient', () => {
         { role: 'user', content: 'do something' },
         {
           role: 'assistant',
-          content: [
-            { type: 'tool_use', id: 'call_123', name: 'bash', input: { command: 'ls' } },
+          content: null,
+          tool_calls: [
+            { id: 'call_123', type: 'function', function: { name: 'bash', arguments: '{"command":"ls"}' } },
           ],
         },
-        {
-          role: 'user',
-          content: [
-            { type: 'tool_result', tool_use_id: 'call_123', content: 'file.txt' },
-          ],
-        },
+        { role: 'tool', tool_call_id: 'call_123', content: 'file.txt' },
       ],
       max_tokens: 64000,
-      stream: true,
     })
 
     const input = body.input as any[]

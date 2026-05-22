@@ -1,5 +1,6 @@
 import type { StreamClient } from './stream-client.js'
-import type { MessageRequest, ContentBlock } from './types.js'
+import type { OaiChatRequest } from './oai-types.js'
+import type { ContentBlock } from './types.js'
 import type { StreamCallbacks } from './client.js'
 import { withStructuredRetry } from './retry-engine.js'
 
@@ -19,7 +20,7 @@ export class CodexClient implements StreamClient {
   setReasoningEffort(_effort: string): void {}
 
   async stream(
-    request: MessageRequest,
+    request: OaiChatRequest,
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
@@ -57,86 +58,70 @@ export class CodexClient implements StreamClient {
     }, signal)
   }
 
-  private buildRequestBody(request: MessageRequest): Record<string, unknown> {
+  private buildRequestBody(request: OaiChatRequest): Record<string, unknown> {
     const input: Record<string, unknown>[] = []
 
     // System message → top-level `instructions` (Codex Responses API requirement)
     let instructions: string | undefined
-    if (request.system) {
-      instructions = typeof request.system === 'string'
-        ? request.system
-        : request.system.map(b => b.text).join('\n')
-    }
+    // Find system messages and extract instructions
+    const nonSystemMessages = request.messages.filter(m => {
+      if (m.role === 'system') {
+        instructions = (instructions ?? '') + m.content
+        return false
+      }
+      return true
+    })
 
     // Messages — function_call and function_call_output are top-level input items
-    for (const msg of request.messages) {
+    for (const msg of nonSystemMessages) {
       if (msg.role === 'user') {
-        if (typeof msg.content === 'string') {
-          input.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: msg.content }] })
-        } else {
-          // Separate tool results from text content
-          const textParts: Record<string, unknown>[] = []
-          for (const block of msg.content) {
-            if (block.type === 'tool_result') {
-              // Top-level function_call_output
-              input.push({
-                type: 'function_call_output',
-                call_id: block.tool_use_id,
-                output: block.content,
-              })
-            } else {
-              textParts.push(this.convertInputBlock(block))
-            }
-          }
-          if (textParts.length > 0) {
-            input.push({ type: 'message', role: 'user', content: textParts })
-          }
-        }
+        input.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: msg.content }] })
       } else if (msg.role === 'assistant') {
-        if (typeof msg.content === 'string') {
-          input.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: msg.content }] })
-        } else {
-          // Separate tool calls from text content
-          const textParts: Record<string, unknown>[] = []
-          for (const block of msg.content) {
-            if (block.type === 'tool_use') {
-              // Top-level function_call
-              input.push({
-                type: 'function_call',
-                call_id: block.id,
-                name: block.name,
-                arguments: JSON.stringify(block.input),
-              })
-            } else {
-              const converted = this.convertAssistantBlock(block)
-              if (converted) textParts.push(converted)
-            }
-          }
-          if (textParts.length > 0) {
-            input.push({ type: 'message', role: 'assistant', content: textParts })
+        const textContent = msg.content ?? ''
+        if (textContent) {
+          input.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: textContent }] })
+        }
+        // Tool calls → top-level function_call items
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            input.push({
+              type: 'function_call',
+              call_id: tc.id,
+              name: tc.function.name,
+              arguments: tc.function.arguments,
+            })
           }
         }
+      } else if (msg.role === 'tool') {
+        input.push({
+          type: 'function_call_output',
+          call_id: msg.tool_call_id,
+          output: msg.content,
+        })
       }
     }
 
     // Tools
     const tools = request.tools?.map(t => {
-      const inputSchema = t.input_schema
-      const params: Record<string, unknown> = {
+      const fn = t.function
+      const params = fn.parameters as Record<string, unknown> | undefined
+      const properties = params?.properties as Record<string, unknown> | undefined
+      const required = Array.isArray(params?.required) ? params.required as string[] : undefined
+      const schema: Record<string, unknown> = {
         type: 'object',
-        properties: inputSchema?.properties ?? {},
+        properties: properties ?? {},
       }
-      if (inputSchema?.required?.length) {
-        params.required = inputSchema.required
+      if (required?.length) {
+        schema.required = required
       }
-      if (inputSchema?.additionalProperties !== undefined) {
-        params.additionalProperties = inputSchema.additionalProperties
+      if (params?.additionalProperties !== undefined) {
+        schema.additionalProperties = params.additionalProperties
       }
       return {
         type: 'function',
-        name: t.name,
-        description: t.description,
-        parameters: params,
+        name: fn.name,
+        description: fn.description,
+        parameters: schema,
         strict: false,
       }
     }) ?? []
@@ -160,39 +145,6 @@ export class CodexClient implements StreamClient {
     }
 
     return body
-  }
-
-  private convertInputBlock(block: ContentBlock): Record<string, unknown> {
-    switch (block.type) {
-      case 'text':
-        return { type: 'input_text', text: block.text }
-      case 'tool_result':
-        return {
-          type: 'function_call_output',
-          call_id: block.tool_use_id,
-          output: block.content,
-        }
-      default:
-        return { type: 'input_text', text: JSON.stringify(block) }
-    }
-  }
-
-  private convertAssistantBlock(block: ContentBlock): Record<string, unknown> {
-    switch (block.type) {
-      case 'text':
-        return { type: 'output_text', text: block.text }
-      case 'thinking':
-        return null as unknown as Record<string, unknown>
-      case 'tool_use':
-        return {
-          type: 'function_call',
-          call_id: block.id,
-          name: block.name,
-          arguments: JSON.stringify(block.input),
-        }
-      default:
-        return { type: 'output_text', text: JSON.stringify(block) }
-    }
   }
 
   private async processSSEStream(

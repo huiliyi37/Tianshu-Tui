@@ -5,7 +5,8 @@ import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
 import { READ_FILE_TOOL } from '../../tools/read-file.js'
-import type { ApiClient, StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamClient } from '../../api/stream-client.js'
 import type { ContentBlock } from '../../api/types.js'
 import type { Tool, ToolResult } from '../../tools/types.js'
 import type { EvidenceState } from '../evidence.js'
@@ -89,7 +90,7 @@ describe('AgentLoop — evidence integration', () => {
     }))
 
     let callCount = 0
-    const client: ApiClient = {
+    const client: StreamClient = {
       stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
         callCount++
         if (callCount === 1) {
@@ -100,7 +101,7 @@ describe('AgentLoop — evidence integration', () => {
           cb.onStopReason('end_turn', { input_tokens: 150, output_tokens: 30 })
         }
       }),
-    } as unknown as ApiClient
+    } as unknown as StreamClient
 
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
@@ -145,7 +146,7 @@ describe('AgentLoop — evidence integration', () => {
     }))
 
     let callCount = 0
-    const client: ApiClient = {
+    const client: StreamClient = {
       stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
         callCount++
         if (callCount === 1) {
@@ -159,7 +160,7 @@ describe('AgentLoop — evidence integration', () => {
           cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 30 })
         }
       }),
-    } as unknown as ApiClient
+    } as unknown as StreamClient
 
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
@@ -193,7 +194,7 @@ describe('AgentLoop — evidence integration', () => {
     registry.register(createMockWriteFileTool())
 
     let callCount = 0
-    const client: ApiClient = {
+    const client: StreamClient = {
       stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
         callCount++
         if (callCount === 1) {
@@ -204,7 +205,7 @@ describe('AgentLoop — evidence integration', () => {
           cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 30 })
         }
       }),
-    } as unknown as ApiClient
+    } as unknown as StreamClient
 
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
@@ -248,7 +249,7 @@ describe('AgentLoop — evidence integration', () => {
     registry.register(dangerousTool)
 
     let callCount = 0
-    const client: ApiClient = {
+    const client: StreamClient = {
       stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
         callCount++
         if (callCount === 1) {
@@ -259,7 +260,7 @@ describe('AgentLoop — evidence integration', () => {
           cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 30 })
         }
       }),
-    } as unknown as ApiClient
+    } as unknown as StreamClient
 
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' }, approvalMode: 'auto-safe' },
@@ -288,7 +289,7 @@ describe('AgentLoop — evidence integration', () => {
     registry.register(createMockWriteFileTool())
 
     let callCount = 0
-    const client: ApiClient = {
+    const client: StreamClient = {
       stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
         callCount++
         if (callCount === 1) {
@@ -299,7 +300,7 @@ describe('AgentLoop — evidence integration', () => {
           cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 30 })
         }
       }),
-    } as unknown as ApiClient
+    } as unknown as StreamClient
 
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
