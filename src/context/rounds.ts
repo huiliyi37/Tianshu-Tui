@@ -1,4 +1,5 @@
 import type { ContentBlock, Message } from '../api/types.js'
+import type { OaiMessage, OaiAssistantMessage } from '../api/oai-types.js'
 import { estimateMessageTokens } from './token-estimate.js'
 import type { ApiInvariant, ApiInvariantStatus, ApiRound } from './types.js'
 
@@ -207,4 +208,163 @@ export function getSafeCutIndices(rounds: ApiRound[]): number[] {
   }
   cuts.pop()
   return cuts
+}
+
+// ─── OAI-format round grouping ───
+
+function extractOaiToolCallIds(msg: OaiAssistantMessage): string[] {
+  if (!msg.tool_calls) return []
+  return msg.tool_calls.map(tc => tc.id)
+}
+
+function hasOaiToolCalls(msg: OaiMessage): msg is OaiAssistantMessage & { tool_calls: NonNullable<OaiAssistantMessage['tool_calls']> } {
+  return msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0
+}
+
+function estimateOaiMessageTokens(msg: OaiMessage): number {
+  const content = msg.role === 'assistant'
+    ? (msg.content ?? '') + (msg.reasoning_content ?? '') + (msg.tool_calls ? JSON.stringify(msg.tool_calls) : '')
+    : msg.content
+  let ascii = 0, cjk = 0
+  for (const ch of content) {
+    const code = ch.codePointAt(0) ?? 0
+    if ((code >= 0x4E00 && code <= 0x9FFF) || (code >= 0x3040 && code <= 0x30FF) || (code >= 0xAC00 && code <= 0xD7AF)) {
+      cjk++
+    } else {
+      ascii++
+    }
+  }
+  return Math.ceil(ascii / 4) + Math.ceil(cjk / 1.5)
+}
+
+export interface OaiRound {
+  id: string
+  startMessageIndex: number
+  endMessageIndex: number
+  turnNumber: number
+  hasToolCalls: boolean
+  hasToolResults: boolean
+  tokenEstimate: number
+  apiInvariant: ApiInvariant
+}
+
+export function groupIntoRoundsOai(messages: OaiMessage[]): OaiRound[] {
+  const rounds: OaiRound[] = []
+  let i = 0
+  let roundId = 0
+  let turnNumber = 0
+
+  while (i < messages.length) {
+    const msg = messages[i]!
+    const startIndex = i
+
+    // User text message → single-message round
+    if (msg.role === 'user') {
+      turnNumber++
+      rounds.push({
+        id: `round_${roundId++}`,
+        startMessageIndex: startIndex,
+        endMessageIndex: i + 1,
+        turnNumber,
+        hasToolCalls: false,
+        hasToolResults: false,
+        tokenEstimate: estimateOaiMessageTokens(msg),
+        apiInvariant: 'ok',
+      })
+      i++
+      continue
+    }
+
+    // Assistant without tool_calls → single-message round
+    if (msg.role === 'assistant' && !hasOaiToolCalls(msg)) {
+      rounds.push({
+        id: `round_${roundId++}`,
+        startMessageIndex: startIndex,
+        endMessageIndex: i + 1,
+        turnNumber,
+        hasToolCalls: false,
+        hasToolResults: false,
+        tokenEstimate: estimateOaiMessageTokens(msg),
+        apiInvariant: 'ok',
+      })
+      i++
+      continue
+    }
+
+    // Assistant with tool_calls → look for matching tool responses
+    if (msg.role === 'assistant' && hasOaiToolCalls(msg)) {
+      const toolCallIds = extractOaiToolCallIds(msg)
+      const resultIds: string[] = []
+      let j = i + 1
+
+      // Collect consecutive tool messages
+      while (j < messages.length && messages[j]!.role === 'tool') {
+        const toolMsg = messages[j]!
+        if (toolMsg.role === 'tool') {
+          resultIds.push(toolMsg.tool_call_id)
+        }
+        j++
+      }
+
+      const missingResults = toolCallIds.filter(id => !resultIds.includes(id))
+      const orphanResults = resultIds.filter(id => !toolCallIds.includes(id))
+
+      let invariant: ApiInvariant = 'ok'
+      if (missingResults.length > 0) {
+        invariant = 'broken'
+      } else if (orphanResults.length > 0) {
+        invariant = 'repaired'
+      }
+
+      // Estimate tokens for the whole round
+      let tokenEst = 0
+      for (let idx = startIndex; idx < j; idx++) {
+        tokenEst += estimateOaiMessageTokens(messages[idx]!)
+      }
+
+      rounds.push({
+        id: `round_${roundId++}`,
+        startMessageIndex: startIndex,
+        endMessageIndex: j,
+        turnNumber,
+        hasToolCalls: true,
+        hasToolResults: resultIds.length > 0,
+        tokenEstimate: tokenEst,
+        apiInvariant: invariant,
+      })
+      i = j
+      continue
+    }
+
+    // Orphan tool message → single-message round
+    if (msg.role === 'tool') {
+      rounds.push({
+        id: `round_${roundId++}`,
+        startMessageIndex: startIndex,
+        endMessageIndex: i + 1,
+        turnNumber,
+        hasToolCalls: false,
+        hasToolResults: true,
+        tokenEstimate: estimateOaiMessageTokens(msg),
+        apiInvariant: 'repaired',
+      })
+      i++
+      continue
+    }
+
+    // System or other → single-message round
+    rounds.push({
+      id: `round_${roundId++}`,
+      startMessageIndex: startIndex,
+      endMessageIndex: i + 1,
+      turnNumber,
+      hasToolCalls: false,
+      hasToolResults: false,
+      tokenEstimate: estimateOaiMessageTokens(msg),
+      apiInvariant: 'ok',
+    })
+    i++
+  }
+
+  return rounds
 }
