@@ -4,6 +4,8 @@ import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { Message } from '../api/types.js'
+import type { OaiMessage } from '../api/oai-types.js'
+import { legacyMessageToOaiMessages } from './context.js'
 import type { SessionMetadata } from '../context/types.js'
 import type { LedgerSessionMemoryState, ResumePreflightReport, SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
 import { runResumePreflight } from '../context/resume-preflight.js'
@@ -46,17 +48,47 @@ function capJsonValue(value: unknown, maxChars: number): unknown {
 }
 
 export function serializeSessionMessage(message: Message, maxChars = MAX_SESSION_MESSAGE_JSON_CHARS): string {
+  return serializeSessionJsonValue(message, maxChars, () => ({
+    role: message.role,
+    content: truncateString(JSON.stringify(message), maxChars),
+  }))
+}
+
+export function serializeOaiSessionMessage(message: OaiMessage, maxChars = MAX_SESSION_MESSAGE_JSON_CHARS): string {
+  return serializeSessionJsonValue(message, maxChars, () => ({
+    role: message.role,
+    content: truncateString(JSON.stringify(message), maxChars),
+    ...(message.role === 'tool' ? { tool_call_id: message.tool_call_id } : {}),
+  } as OaiMessage))
+}
+
+function serializeSessionJsonValue<T>(message: T, maxChars: number, fallback: () => T): string {
   let json = JSON.stringify(message)
   if (json.length <= maxChars) return json
 
-  const capped = capJsonValue(message, Math.max(1_000, Math.floor(maxChars * 0.8))) as Message
+  const capped = capJsonValue(message, Math.max(1_000, Math.floor(maxChars * 0.8))) as T
   json = JSON.stringify(capped)
   if (json.length <= maxChars) return json
 
-  return JSON.stringify({
-    role: message.role,
-    content: truncateString(json, maxChars),
-  })
+  return JSON.stringify(fallback())
+}
+
+function isOaiMessage(value: unknown): value is OaiMessage {
+  if (!value || typeof value !== 'object') return false
+  const msg = value as Record<string, unknown>
+  if (msg.role === 'system') return typeof msg.content === 'string'
+  if (msg.role === 'user') return typeof msg.content === 'string'
+  if (msg.role === 'assistant') return typeof msg.content === 'string' || msg.content === null
+  if (msg.role === 'tool') return typeof msg.tool_call_id === 'string' && typeof msg.content === 'string'
+  return false
+}
+
+function parseSessionLine(line: string): unknown | null {
+  const parsed = JSON.parse(line) as { type?: string }
+  if (parsed.type === 'compact_start' || parsed.type === 'compact_end') {
+    return null
+  }
+  return parsed
 }
 
 export class SessionPersist {
@@ -94,6 +126,35 @@ export class SessionPersist {
   /** Load all messages from the session file (with checksum validation) */
   load(): Message[] {
     return this.loadWithChecksum()
+  }
+
+  /** Append an OpenAI-native message with checksum. */
+  async appendOaiWithChecksum(message: OaiMessage): Promise<void> {
+    const json = serializeOaiSessionMessage(message)
+    const line = appendChecksum(json) + '\n'
+    await appendFile(this.filePath, line)
+  }
+
+  /** Load messages in OpenAI-native format, migrating legacy rows on read. */
+  loadOai(): OaiMessage[] {
+    if (!existsSync(this.filePath)) return []
+    const content = readFileSync(this.filePath, 'utf-8')
+    const lines = content.trim().split('\n').filter(Boolean)
+    const { validLines } = verifyLines(lines)
+
+    const messages: OaiMessage[] = []
+    for (const line of validLines) {
+      try {
+        const parsed = parseSessionLine(line)
+        if (!parsed) continue
+        if (isOaiMessage(parsed)) {
+          messages.push(parsed)
+        } else {
+          messages.push(...legacyMessageToOaiMessages(parsed as Message).map(message => JSON.parse(JSON.stringify(message)) as OaiMessage))
+        }
+      } catch { /* skip malformed rows */ }
+    }
+    return messages
   }
 
   /** Load messages repaired for resume, rolling back to the last safe snapshot when needed. */
@@ -169,11 +230,8 @@ export class SessionPersist {
 
     return validLines.map(line => {
       try {
-        const parsed = JSON.parse(line) as Message & { type?: string }
-        // 过滤掉 compact_start 和 compact_end 标记
-        if (parsed.type === 'compact_start' || parsed.type === 'compact_end') {
-          return null
-        }
+        const parsed = parseSessionLine(line)
+        if (!parsed) return null
         return parsed as Message
       } catch { return null }
     }).filter(Boolean) as Message[]

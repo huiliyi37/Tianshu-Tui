@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, serializeSessionMessage } from '../session-persist.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 describe('SessionPersist', () => {
   let tempDir: string
@@ -65,6 +66,66 @@ describe('SessionPersist', () => {
     const messages = persist.load()
     assert.equal(messages.length, 1)
     assert.match(String(messages[0]!.content), /session-message-truncated/)
+  })
+
+  it('appends and loads OpenAI-native messages with checksum', async () => {
+    const persist = new SessionPersist('test-session-oai')
+    const messages: OaiMessage[] = [
+      { role: 'user', content: 'Read a file' },
+      {
+        role: 'assistant',
+        content: 'Reading.',
+        reasoning_content: 'Need file context.',
+        tool_calls: [
+          {
+            id: 'call_read',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"file_path":"README.md"}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_read', content: 'contents' },
+    ]
+
+    for (const message of messages) {
+      await persist.appendOaiWithChecksum(message)
+    }
+
+    assert.deepEqual(persist.loadOai(), messages)
+  })
+
+  it('migrates legacy session messages to OAI on loadOai', async () => {
+    const persist = new SessionPersist('test-session-oai-legacy')
+    await persist.appendWithChecksum({ role: 'user', content: 'Start' } as any)
+    await persist.appendWithChecksum({
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Need context.' },
+        { type: 'text', text: 'Reading.' },
+        { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { file_path: 'README.md' } },
+      ],
+    } as any)
+    await persist.appendWithChecksum({
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'contents' }],
+    } as any)
+
+    assert.deepEqual(persist.loadOai(), [
+      { role: 'user', content: 'Start' },
+      {
+        role: 'assistant',
+        content: 'Reading.',
+        reasoning_content: 'Need context.',
+        tool_calls: [
+          {
+            id: 'tu_1',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"file_path":"README.md"}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'tu_1', content: 'contents' },
+    ])
   })
 })
 

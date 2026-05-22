@@ -318,7 +318,9 @@ function migrateMessageToOai(msg: any): OaiMessage {
 运行：`npm test`
 预期：2694/2695 通过（RSS 测试除外）
 
-**Task 2A 当前状态（2026-05-22）**：已将 `SessionContext` 改为 OAI 单一权威存储，`getMessages()` 为 on-demand legacy view，新增 `getOaiMessages()`。为避免破坏现有调用方，OAI message 内部用非枚举对外不可见的 symbol 元数据记录 legacy view 的 string/block 形状；这不是双份 message 状态，只用于过渡期 `getMessages()` 兼容。已验证：`context.test.ts`、`context-ledger-state.test.ts`、`context-injection.test.ts`、`worker-session.test.ts`、`turn-completion.test.ts`、`loop.test.ts`、`session-persist.test.ts`、`turn-stream.test.ts`、`compaction-controller.test.ts`，以及 `npx tsc --noEmit`。`session-persist.ts` 尚未切换为 OAI 持久化，留给 Task 2B。
+**Task 2A 当前状态（2026-05-22）**：已将 `SessionContext` 改为 OAI 单一权威存储，`getMessages()` 为 on-demand legacy view，新增 `getOaiMessages()`。为避免破坏现有调用方，OAI message 内部用非枚举对外不可见的 symbol 元数据记录 legacy view 的 string/block 形状；这不是双份 message 状态，只用于过渡期 `getMessages()` 兼容。已验证：`context.test.ts`、`context-ledger-state.test.ts`、`context-injection.test.ts`、`worker-session.test.ts`、`turn-completion.test.ts`、`loop.test.ts`、`session-persist.test.ts`、`turn-stream.test.ts`、`compaction-controller.test.ts`，以及 `npx tsc --noEmit`。
+
+**Task 2B 当前状态（2026-05-22）**：`session-persist.ts` 新增 `appendOaiWithChecksum()`、`loadOai()` 与 `serializeOaiSessionMessage()`；`loadOai()` 可直接读取 OAI rows，也可把 legacy rows 迁移为 OAI messages。保留既有 `load()` / `loadRecoverableMessages()` legacy 返回值，避免扩大 Phase 2 改动面。已新增 `session-persist.test.ts` 覆盖 OAI checksum append/load 与 legacy→OAI load 迁移。全量验证通过：`npx tsc --noEmit && ./node_modules/.bin/tsx --test src/**/__tests__/*.test.ts`（2487 pass）。
 
 - [ ] **步骤 4：Commit**
 
