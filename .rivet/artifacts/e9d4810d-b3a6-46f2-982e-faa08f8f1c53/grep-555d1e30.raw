@@ -1,3 +1,0 @@
-7:  OaiToolDefinition,
-59:export interface ToolDefinition {
-77:  tools?: ToolDefinition[]

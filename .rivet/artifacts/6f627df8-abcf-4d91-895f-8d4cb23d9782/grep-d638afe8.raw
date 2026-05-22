@@ -1,7 +1,0 @@
-11:    staticCtx: { tools: [{ name: 'edit_file', description: 'Edit file', input_schema: { type: 'object', properties: {} } }] },
-95:      staticCtx: { tools: [] },
-123:      staticCtx: { tools: [] },
-137:      staticCtx: { tools: [] },
-176:      staticCtx: { tools: [] },
-195:      staticCtx: { tools: [] },
-199:    engine.setActiveDomain({ name: '破军', motto: '好男儿当负三尺剑立不世之功', volatileBlock: '你当前在破军域。' })

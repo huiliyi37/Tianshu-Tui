@@ -1,8 +1,0 @@
-311:      max_tokens: this.config.maxTokens,
-312:      stream: true,
-315:    // stream_options: { include_usage: true } is an OpenAI-specific extension.
-318:    if (!this.config.unsupported?.includes('stream_options')) {
-319:      body.stream_options = { include_usage: true }
-332:        body.tool_choice = 'auto'
-415:        buffer += decoder.decode(value, { stream: true })
-571:    case 'length': return 'max_tokens'

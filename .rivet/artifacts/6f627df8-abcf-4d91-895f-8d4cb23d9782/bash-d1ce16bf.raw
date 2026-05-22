@@ -1,8 +1,0 @@
-ok 3 files changed, 252 insertions(+), 23 deletions(-)
- M .rivet/playbook.jsonl
-M  docs/superpowers/plans/2026-05-22-openai-native-format-migration.md
-M  src/agent/__tests__/context.test.ts
-M  src/agent/context.ts
-?? .rivet/artifacts/
-?? .rivet/sessions/2026-05-22.md
-?? "docs/superpowers/plans/2026-05-21-b1-\345\275\222\345\261\236\346\230\237\350\275\250-\344\273\273\345\212\241\345\275\222\345\261\236\351\252\214\350\257\201\345\275\222\345\233\240\344\272\244\344\273\230\350\264\246\346\234\254.md"

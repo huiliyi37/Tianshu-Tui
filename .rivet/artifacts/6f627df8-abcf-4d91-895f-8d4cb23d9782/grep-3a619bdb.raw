@@ -1,7 +1,0 @@
-10:import { SessionPersist } from './session-persist.js'
-222:  private persist: SessionPersist | null = null
-338:    // 初始化 SessionPersist 用于 fuzzy checkpoint
-340:      this.persist = new SessionPersist(this.config.sessionId)
-642:    new SessionPersist(this.config.sessionId).appendTurnSnapshot({
-736:          this.persist.appendCompactStart(turn, this.session.getMessages().length)
-779:          this.persist.appendCompactEnd(turn, this.session.getMessages().length)

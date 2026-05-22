@@ -1,1 +1,0 @@
-  it('buildRequestBody produces valid OpenAI request body', () => {

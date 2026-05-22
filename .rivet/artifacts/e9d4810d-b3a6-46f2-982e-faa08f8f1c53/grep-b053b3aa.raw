@@ -1,1 +1,0 @@
-927:        const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)

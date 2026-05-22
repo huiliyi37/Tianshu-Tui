@@ -1,3 +1,0 @@
-6:import type { EvidenceTracker } from './evidence.js'
-19:  evidence: EvidenceTracker
-48:      evidence: this.deps.evidence,

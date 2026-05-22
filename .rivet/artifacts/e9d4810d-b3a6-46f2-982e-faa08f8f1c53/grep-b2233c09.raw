@@ -1,5 +1,0 @@
-171:      blocks: ContentBlock[]
-185:        callbacks.onContentBlock(b)
-268:                  callbacks.onContentBlock({ type: 'tool_use', id: callId, name, input })
-293:                  const blocks: ContentBlock[] = []
-309:                        callbacks.onContentBlock({ type: 'text', text: part.text })

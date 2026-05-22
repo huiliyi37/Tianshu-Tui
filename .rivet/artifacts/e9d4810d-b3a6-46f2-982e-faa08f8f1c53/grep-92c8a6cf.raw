@@ -1,2 +1,0 @@
-37:export interface StreamCallbacks {
-175:    callbacks: StreamCallbacks,

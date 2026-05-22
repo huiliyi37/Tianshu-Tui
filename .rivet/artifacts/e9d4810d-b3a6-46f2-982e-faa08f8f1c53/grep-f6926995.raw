@@ -1,3 +1,0 @@
-187:  addAssistantBlocks(blocks: ContentBlock[]): void {
-194:  addToolResults(results: ContentBlock[]): void {
-236:  getOaiMessages(): OaiMessage[] {

@@ -1,4 +1,0 @@
-TypeScript: 1 errors in 1 files
-═══════════════════════════════════════
-src/api/client.ts (1 errors)
-  L243: TS2339 Property 'stripUnsupported' does not exist on type 'ApiClient'.

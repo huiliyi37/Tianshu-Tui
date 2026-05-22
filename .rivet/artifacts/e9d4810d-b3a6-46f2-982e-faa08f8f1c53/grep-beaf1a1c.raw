@@ -1,6 +1,0 @@
-1:import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
-4:import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
-145:  buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[]): OaiChatRequest {
-199:  buildRequest(messages: Message[], toolHistory?: ToolHistoryEntry[]): MessageRequest {
-290:  getFingerprint(): PrefixFingerprint {
-402:  getVolatilePayloadReport(toolHistory?: ToolHistoryEntry[]): VolatilePayloadReport {

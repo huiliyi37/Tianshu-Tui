@@ -1,7 +1,0 @@
-6:import type { EvidenceTrackerPublic } from './evidence.js'
-123:    sessionModifiedFiles: [...deps.evidence.getState().filesModified],
-363:          .flatMap(c => c.evidence.filter(e => e.path).map(e => e.path!)),
-430:      deps.evidence.trackFileRead(tu.input.file_path as string)
-432:      deps.evidence.trackFileModified(tu.input.file_path as string)
-444:          deps.evidence.trackImpact(hint.impactedFiles, hint.relatedTests)
-450:        deps.evidence.trackVerification(rawToolResult.verification)

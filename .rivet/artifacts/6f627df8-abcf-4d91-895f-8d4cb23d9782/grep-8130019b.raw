@@ -1,3 +1,0 @@
-720:  it('falls back to cache anchors plus resume state when compaction cannot fit the ceiling', async () => {
-727:      { role: 'assistant', content: 'anchor assistant' },
-755:    assert.equal(messages[1]?.content, 'anchor assistant')

@@ -1,3 +1,0 @@
-82:function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
-272:  buildRequestBody(request: MessageRequest): Record<string, unknown> {
-387:          .map(toOpenAITool)

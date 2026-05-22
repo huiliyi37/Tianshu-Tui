@@ -1,3 +1,0 @@
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/context/types.ts:62:export interface WorkingSetEntry {
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/context/types.ts:82:  workingSet: WorkingSetEntry[]
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/__tests__/context-ledger-state.test.ts:55:    const ws = session.getWorkingSet()

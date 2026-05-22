@@ -1,4 +1,0 @@
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/scripts/verify-task-a-multi-tool.ts:20:import { execSync } from 'node:child_process'
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/scripts/verify-task-a-multi-tool.ts:47:    return execSync(`grep -rn "${pattern}" "${absPath}" 2>/dev/null | head -30`, { encoding: 'utf-8', timeout: 5000 }) || 'No matches found.'
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/scripts/verify-task-b-session-state.ts:19:import { execSync } from 'node:child_process'
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/scripts/verify-task-b-session-state.ts:47:      const result = execSync(`grep -rn "${input.pattern}" "${absPath}" 2>/dev/null | head -20`, { encoding: 'utf-8', timeout: 5000 })

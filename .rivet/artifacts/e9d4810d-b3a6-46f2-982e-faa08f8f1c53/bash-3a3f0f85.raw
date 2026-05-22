@@ -1,7 +1,0 @@
-npm warn "src/api/__tests__/codex-client.test.ts" is being parsed as a normal command line argument.
-npm warn Unknown cli config "--test". This will stop working in the next major version of npm.
-npm error Missing script: "tsx"
-npm error
-npm error To see a list of scripts, run:
-npm error   npm run
-npm error A complete log of this run can be found in: /Users/banxia/.npm/_logs/2026-05-22T13_03_20_960Z-debug-0.log

@@ -1,5 +1,0 @@
-TypeScript: 1 errors in 1 files
-═══════════════════════════════════════
-src/compact/micro.ts (1 errors)
-  L179: TS2322 Type 'string | null' is not assignable to type 'string'.
-    Type 'null' is not assignable to type 'string'.

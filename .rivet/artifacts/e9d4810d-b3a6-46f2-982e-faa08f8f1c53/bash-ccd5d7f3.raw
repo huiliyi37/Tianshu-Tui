@@ -1,8 +1,0 @@
-243 │ 
-244 │   /** Parse SSE stream from a reader — exposed for testing */
-245 │ 
-246 │     if (request.system) {
-247 │       let text = typeof request.system === 'string'
-248 │         ? request.system
-249 │         : request.system.map(b => b.text).join('')
-250 │       if (this.config.providerName === 'mimo' && this.config.thinking === 'enabled') {

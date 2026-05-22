@@ -1,2 +1,0 @@
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/openai-client.ts:82:function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/api/openai-client.ts:387:          .map(toOpenAITool)

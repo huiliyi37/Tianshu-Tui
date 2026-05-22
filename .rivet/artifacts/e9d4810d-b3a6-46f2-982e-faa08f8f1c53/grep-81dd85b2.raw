@@ -1,3 +1,0 @@
-2:import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from '../api/oai-types.js'
-96:  buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[]): OaiChatRequest {
-128:    const tools: OaiToolDefinition[] | undefined = this.config.staticCtx.tools.length > 0

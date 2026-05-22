@@ -1,4 +1,0 @@
-src/agent/context.ts  | 184 +++++++++++---------------------------------------
- src/agent/loop.ts     |  12 ++--
- src/context/ledger.ts |  10 +--
- 3 files changed, 51 insertions(+), 155 deletions(-)

@@ -1,7 +1,0 @@
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:8:import { legacyMessageToOaiMessages } from './context.js'
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/session-persist.ts:153:          messages.push(...legacyMessageToOaiMessages(parsed as Message).map(message => JSON.parse(JSON.stringify(message)) as OaiMessage))
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:56:export function legacyMessageToOaiMessages(message: Message): OaiMessageWithLegacyShape[] {
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:175:    this.state.oaiMessages = messages.flatMap(legacyMessageToOaiMessages)
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:181:    this.state.oaiMessages = messages.flatMap(legacyMessageToOaiMessages)
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:189:    this.state.oaiMessages.push(...legacyMessageToOaiMessages(legacy))
-/Users/banxia/.config/superpowers/worktrees/opencode-tui/openai-native-format-migration/src/agent/context.ts:196:    this.state.oaiMessages.push(...legacyMessageToOaiMessages(legacy))

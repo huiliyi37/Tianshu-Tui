@@ -1,1 +1,0 @@
-245:  buildRequestBody(request: MessageRequest): Record<string, unknown> {

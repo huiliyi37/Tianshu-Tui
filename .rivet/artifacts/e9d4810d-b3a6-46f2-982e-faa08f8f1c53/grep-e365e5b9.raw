@@ -1,2 +1,0 @@
-26:    const body = this.buildRequestBody(request)
-60:  private buildRequestBody(request: MessageRequest): Record<string, unknown> {

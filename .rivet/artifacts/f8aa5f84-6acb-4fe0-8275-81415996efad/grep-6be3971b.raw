@@ -1,8 +1,0 @@
-10:function legacyMessageToOaiMessages(message: Message): OaiMessage[] {
-60:import { appendChecksum, verifyAndExtract, verifyLines } from './checksum.js'
-138:export class SessionPersist {
-170:  /** Load all messages from the session file (with checksum validation) */
-175:  /** Append an OpenAI-native message with checksum. */
-183:  loadOai(): OaiMessage[] {
-197:          messages.push(...legacyMessageToOaiMessages(parsed as Message).map(message => JSON.parse(JSON.stringify(message)) as OaiMessage))
-240:  /** Compact the session file with the given messages (with checksums) */

@@ -1,2 +1,0 @@
-226:        await this.parseStreamFromReader(reader, callbacks, signal)
-410:  async parseStreamFromReader(
