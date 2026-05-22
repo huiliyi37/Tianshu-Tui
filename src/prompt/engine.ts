@@ -187,11 +187,12 @@ export class PromptEngine {
 
     return {
       model: this.config.model,
-      messages: result,
+      messages: [{ role: 'system', content: this.systemPrompt }, ...result],
       max_tokens: this.config.maxTokens,
+      stream: true,
+      stream_options: { include_usage: true },
       tools,
       tool_choice: tools ? 'auto' : undefined,
-      stream: true,
     }
   }
 

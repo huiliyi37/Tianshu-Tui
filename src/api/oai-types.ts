@@ -75,6 +75,7 @@ export interface OaiChatRequest {
   tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } }
   max_tokens?: number
   stream?: boolean
+  stream_options?: { include_usage?: boolean }
   temperature?: number
   /** DeepSeek extension. */
   reasoning_effort?: 'low' | 'medium' | 'high' | 'max'

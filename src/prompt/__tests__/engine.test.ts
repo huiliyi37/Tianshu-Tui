@@ -21,6 +21,7 @@ function canonicalOaiBody(request: OaiChatRequest): Record<string, unknown> {
     messages: request.messages,
     max_tokens: request.max_tokens,
     stream: request.stream,
+    stream_options: request.stream_options,
     tools: request.tools,
     tool_choice: request.tool_choice,
   }
@@ -54,9 +55,10 @@ function canonicalLegacyRequestBody(request: ReturnType<PromptEngine['buildReque
 
   return {
     model: request.model,
-    messages,
+    messages: [{ role: 'system', content: typeof request.system === 'string' ? request.system : request.system?.map(block => block.text).join('') }, ...messages],
     max_tokens: request.max_tokens,
     stream: request.stream,
+    stream_options: { include_usage: true },
     tools: request.tools?.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.input_schema ?? { type: 'object', properties: {} } } })),
     tool_choice: request.tools && request.tools.length > 0 ? 'auto' : undefined,
   }
@@ -83,10 +85,11 @@ describe('PromptEngine OpenAI-native request building', () => {
     assert.equal(request.tool_choice, 'auto')
     assert.equal(request.tools?.[0]?.type, 'function')
     assert.equal(request.tools?.[0]?.function.name, 'edit_file')
-    assert.equal(request.messages.length, 4)
-    assert.equal(request.messages[0]?.role, 'user')
-    assert.match(request.messages[0]?.content ?? '', /<environment/)
-    assert.deepEqual(request.messages.slice(1), messages)
+    assert.equal(request.messages.length, 5)
+    assert.equal(request.messages[0]?.role, 'system')
+    assert.equal(request.messages[1]?.role, 'user')
+    assert.match(request.messages[1]?.content ?? '', /<environment/)
+    assert.deepEqual(request.messages.slice(2), messages)
   })
 
   it('reuses cached fresh volatile across tool-call turns for the same latest user message', () => {
@@ -94,7 +97,7 @@ describe('PromptEngine OpenAI-native request building', () => {
     engine.setSessionState('state v1')
 
     const first = engine.buildOaiRequest([{ role: 'user', content: 'inspect' }])
-    const firstVolatile = first.messages[0]
+    const firstVolatile = first.messages[1]
     assert.equal(firstVolatile?.role, 'user')
     assert.match(firstVolatile?.content ?? '', /state v1/)
 
@@ -105,8 +108,8 @@ describe('PromptEngine OpenAI-native request building', () => {
       { role: 'tool', tool_call_id: 'call_1', content: 'done' },
     ])
 
-    assert.deepEqual(second.messages[0], firstVolatile)
-    assert.doesNotMatch(second.messages[0]?.content ?? '', /state v2/)
+    assert.deepEqual(second.messages[1], firstVolatile)
+    assert.doesNotMatch(second.messages[1]?.content ?? '', /state v2/)
   })
 
   it('refreshes cached fresh volatile at a new user message boundary', () => {
@@ -121,7 +124,7 @@ describe('PromptEngine OpenAI-native request building', () => {
       { role: 'user', content: 'continue' },
     ])
 
-    const injectedBeforeLatest = request.messages[3]
+    const injectedBeforeLatest = request.messages[4]
     assert.equal(injectedBeforeLatest?.role, 'user')
     assert.match(injectedBeforeLatest?.content ?? '', /state v2/)
   })
