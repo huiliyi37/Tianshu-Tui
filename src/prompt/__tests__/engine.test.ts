@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { PromptEngine } from '../engine.js'
 import type { Message } from '../../api/types.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 import { groupIntoRounds, computeInvariantStatus } from '../../context/rounds.js'
 
 function makeEngine() {
@@ -12,6 +13,71 @@ function makeEngine() {
     volatileCtx: { cwd: '/repo' },
   })
 }
+
+describe('PromptEngine OpenAI-native request building', () => {
+  it('injects volatile user messages around OAI user messages only', () => {
+    const engine = makeEngine()
+    const messages: OaiMessage[] = [
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'edit_file', arguments: '{"file_path":"a.ts"}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'done' },
+    ]
+
+    const request = engine.buildOaiRequest(messages)
+
+    assert.equal(request.model, 'test')
+    assert.equal(request.max_tokens, 1024)
+    assert.equal(request.stream, true)
+    assert.equal(request.tool_choice, 'auto')
+    assert.equal(request.tools?.[0]?.type, 'function')
+    assert.equal(request.tools?.[0]?.function.name, 'edit_file')
+    assert.equal(request.messages.length, 4)
+    assert.equal(request.messages[0]?.role, 'user')
+    assert.match(request.messages[0]?.content ?? '', /<environment/)
+    assert.deepEqual(request.messages.slice(1), messages)
+  })
+
+  it('reuses cached fresh volatile across tool-call turns for the same latest user message', () => {
+    const engine = makeEngine()
+    engine.setSessionState('state v1')
+
+    const first = engine.buildOaiRequest([{ role: 'user', content: 'inspect' }])
+    const firstVolatile = first.messages[0]
+    assert.equal(firstVolatile?.role, 'user')
+    assert.match(firstVolatile?.content ?? '', /state v1/)
+
+    engine.setSessionState('state v2')
+    const second = engine.buildOaiRequest([
+      { role: 'user', content: 'inspect' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'edit_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'call_1', content: 'done' },
+    ])
+
+    assert.deepEqual(second.messages[0], firstVolatile)
+    assert.doesNotMatch(second.messages[0]?.content ?? '', /state v2/)
+  })
+
+  it('refreshes cached fresh volatile at a new user message boundary', () => {
+    const engine = makeEngine()
+    engine.setSessionState('state v1')
+    engine.buildOaiRequest([{ role: 'user', content: 'inspect' }])
+
+    engine.setSessionState('state v2')
+    const request = engine.buildOaiRequest([
+      { role: 'user', content: 'inspect' },
+      { role: 'assistant', content: 'done' },
+      { role: 'user', content: 'continue' },
+    ])
+
+    const injectedBeforeLatest = request.messages[3]
+    assert.equal(injectedBeforeLatest?.role, 'user')
+    assert.match(injectedBeforeLatest?.content ?? '', /state v2/)
+  })
+})
 
 describe('PromptEngine message normalization', () => {
   it('inserts a synthetic tool_result immediately after an unmatched tool_use', () => {

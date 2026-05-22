@@ -338,7 +338,7 @@ git commit -m "feat(agent): add OaiMessage dual-format support to SessionContext
 
 > 这是最复杂的任务。buildRequest 当前遍历 `Message[]`（Anthropic 格式），注入 volatile blocks，输出 `MessageRequest`。迁移后，它遍历 `OaiMessage[]`，注入 volatile blocks 为 `role: 'user'` messages，输出 `OaiChatRequest`。
 
-- [ ] **步骤 1：新增 buildOaiRequest 方法（不删旧方法）**
+- [x] **步骤 1：新增 buildOaiRequest 方法（不删旧方法）**
 
 ```typescript
 // src/prompt/engine.ts
@@ -381,7 +381,7 @@ buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[]): Oa
 }
 ```
 
-- [ ] **步骤 2：保留旧 buildRequest 作为兼容层**
+- [x] **步骤 2：保留旧 buildRequest 作为兼容层**
 
 ```typescript
 /** @deprecated Use buildOaiRequest. This method converts internally. */
@@ -391,10 +391,12 @@ buildRequest(messages: Message[], toolHistory?: ToolHistoryEntry[]): MessageRequ
 }
 ```
 
-- [ ] **步骤 3：运行测试**
+- [x] **步骤 3：运行测试（Task 3A targeted）**
 
 运行：`npm test`
 预期：全部通过（新方法是新增的，不影响旧路径）
+
+**Task 3A 当前状态（2026-05-22）**：已新增 `PromptEngine.buildOaiRequest()`，旧 `buildRequest()` 保留且 AgentLoop 尚未切换。新方法直接输出 `OaiChatRequest`，对 OAI `role: 'user'` 注入独立 volatile user message；最后一个 user message 使用 cached FRESH，历史 user message 使用 FROZEN，`role: 'tool'` 不触发 volatile 注入。已新增 `src/prompt/__tests__/engine.test.ts` 覆盖 OAI request shape、同一 user/tool-turn 复用 cached fresh、新 user boundary 刷新 fresh。已验证：`engine.test.ts`、`engine-cache-stability.test.ts`、`chat-mode-engine.test.ts`、`fingerprint.test.ts`，以及 `npx tsc --noEmit`。Patch I 双路径 request-body byte sanity 尚未实现，留给 Task 3B。
 
 - [ ] **步骤 4：Commit**
 

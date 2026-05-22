@@ -1,4 +1,5 @@
 import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
+import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from '../api/oai-types.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import { analyzeVolatilePayload, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
@@ -141,6 +142,59 @@ export class PromptEngine {
    * This ensures DeepSeek's exact-prefix cache hits on API calls 2-50 within
    * a single user message's execution, not just across user messages.
    */
+  buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[]): OaiChatRequest {
+    const result: OaiMessage[] = []
+
+    let lastUserIdx = -1
+    for (let i = oaiMessages.length - 1; i >= 0; i--) {
+      if (oaiMessages[i]!.role === 'user') {
+        lastUserIdx = i
+        break
+      }
+    }
+
+    for (let i = 0; i < oaiMessages.length; i++) {
+      const msg = oaiMessages[i]!
+      if (msg.role === 'user' && this.volatileBlock) {
+        if (i === lastUserIdx) {
+          const userContent = msg.content
+
+          if (userContent !== this.cachedFreshForUser) {
+            this.cachedFreshForUser = userContent
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText }
+            this.cachedFreshBlock = shouldInjectDynamicAppendix(this.mode)
+              ? buildLatestTurnVolatileBlock(dynamicCtx)
+              : this.frozenBase
+          }
+          result.push({ role: 'user', content: this.cachedFreshBlock })
+        } else {
+          result.push({ role: 'user', content: this.volatileBlock })
+        }
+      }
+      result.push(msg)
+    }
+
+    const tools: OaiToolDefinition[] | undefined = this.config.staticCtx.tools.length > 0
+      ? this.config.staticCtx.tools.map(tool => ({
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.input_schema ?? { type: 'object', properties: {} },
+        },
+      }))
+      : undefined
+
+    return {
+      model: this.config.model,
+      messages: result,
+      max_tokens: this.config.maxTokens,
+      tools,
+      tool_choice: tools ? 'auto' : undefined,
+      stream: true,
+    }
+  }
+
   buildRequest(messages: Message[], toolHistory?: ToolHistoryEntry[]): MessageRequest {
     const result: Message[] = []
     const normalized = normalizeToolResultPairs(messages)
