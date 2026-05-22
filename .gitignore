@@ -16,3 +16,5 @@ task_plan.md
 .rivet/sensorium.jsonl
 .rivet/pheromones.json
 .rivet/debug-400.json
+.rivet/artifacts/
+.rivet/sessions/
