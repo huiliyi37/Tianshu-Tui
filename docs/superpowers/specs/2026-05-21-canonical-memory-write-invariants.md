@@ -52,6 +52,8 @@ dream.ts 的修复（写入路径迁移到 `.rivet/sessions/`）是**单点修�
 | `.rivet/sensorium.jsonl` | 感觉皮层流 |
 | `.rivet/pheromones.json` | stigmergy 信息素（自衰减） |
 | `.rivet/benchmark/*` | 性能样本 |
+| `.rivet/artifacts/{sessionId}/*.raw` | tool output 原始全文（machine-only, session-scoped） |
+| `.rivet/artifacts/{sessionId}/_index.jsonl` | artifact metadata 持久化索引（machine-only） |
 
 ### 边界模糊带（必须在落实施前显式归类）
 
