@@ -968,6 +968,8 @@ Codex 走的是 Responses API（`output_item` / `output_text.delta`），不是�
 
 **Patch**：Phase 5 中 ctcl-sanitizer 改动**单独 commit**，commit 前三个 verify 脚本 N≥3 次 + 基线对比。
 
+**本迁移分支状态（2026-05-22）**：`src/agent/ctcl-sanitizer.ts` 在 `feat/openai-native-format-migration` 相对目标合并基线 `feat/rivet-performance-optimization` 没有 diff，迁移提交未触碰该文件。因此 H 项的独立 cache 验证门禁仅在后续实际修改 CTCL sanitizer 时触发；本次 OpenAI-native migration Phase 5 不需要为未改动文件补跑单独验证。
+
 ### I · Phase 3-4 期间双路径 A/B sanity
 
 Phase 3-4 是 `buildRequest`（旧）和 `buildOaiRequest`（新）共存窗口。利用这个窗口做字节稳定性探针：
