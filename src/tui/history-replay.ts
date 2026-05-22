@@ -1,4 +1,4 @@
-import type { Message, ContentBlock, ContentBlockToolResult } from '../api/types.js'
+import type { OaiMessage } from '../api/oai-types.js'
 import { createLogEntry, type LogEntry } from './log-state.js'
 
 export interface ReplayResult {
@@ -7,39 +7,33 @@ export interface ReplayResult {
   turnCount: number
 }
 
-export function replayMessagesToLogEntries(messages: Message[]): ReplayResult {
+export function replayMessagesToLogEntries(messages: OaiMessage[]): ReplayResult {
   const entries: LogEntry[] = []
   let toolCount = 0
   let turnCount = 0
 
+  // Build tool-name map from assistant messages' tool_calls
   const toolNameMap = new Map<string, string>()
   for (const msg of messages) {
-    if (msg.role === 'assistant' && Array.isArray(msg.content)) {
-      for (const block of msg.content as ContentBlock[]) {
-        if (block.type === 'tool_use') {
-          toolNameMap.set(block.id, block.name)
-        }
+    if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+      for (const tc of msg.tool_calls) {
+        toolNameMap.set(tc.id, tc.function.name)
       }
     }
   }
 
   for (const msg of messages) {
-    if (msg.role === 'user' && typeof msg.content === 'string') {
+    // User text message
+    if (msg.role === 'user') {
       turnCount++
       entries.push(createLogEntry({ type: 'user_message', content: msg.content, turnNumber: turnCount }))
       continue
     }
 
-    if (msg.role === 'assistant' && Array.isArray(msg.content)) {
-      let text = ''
-      let thinking = ''
-      for (const block of msg.content as ContentBlock[]) {
-        if (block.type === 'text') {
-          text += (text ? '\n' : '') + block.text
-        } else if (block.type === 'thinking') {
-          thinking += (thinking ? '\n' : '') + (block as { type: 'thinking'; thinking: string }).thinking
-        }
-      }
+    // Assistant message — text + optional thinking
+    if (msg.role === 'assistant') {
+      const text = msg.content ?? ''
+      const thinking = msg.reasoning_content ?? ''
       if (text || thinking) {
         entries.push(createLogEntry({
           type: 'assistant_message',
@@ -51,21 +45,20 @@ export function replayMessagesToLogEntries(messages: Message[]): ReplayResult {
       continue
     }
 
-    if (msg.role === 'user' && Array.isArray(msg.content)) {
-      for (const block of msg.content as ContentBlock[]) {
-        if (block.type === 'tool_result') {
-          const tb = block as ContentBlockToolResult
-          entries.push(createLogEntry({
-            type: 'tool',
-            content: tb.content,
-            isError: tb.is_error ?? false,
-            toolName: toolNameMap.get(tb.tool_use_id),
-            turnNumber: turnCount,
-          }))
-          toolCount++
-        }
-      }
+    // Tool result message
+    if (msg.role === 'tool') {
+      entries.push(createLogEntry({
+        type: 'tool',
+        content: msg.content,
+        isError: false,
+        toolName: toolNameMap.get(msg.tool_call_id),
+        turnNumber: turnCount,
+      }))
+      toolCount++
+      continue
     }
+
+    // System messages — skip gracefully
   }
 
   return { entries, toolCount, turnCount }

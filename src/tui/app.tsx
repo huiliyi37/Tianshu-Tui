@@ -478,9 +478,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const id = sessions[0]!
         const p = new SessionPersist(id)
         const recovery = p.loadRecoverableMessages()
-        const msgs = recovery.messages
-        session.loadMessages(msgs)
-        const { entries, toolCount, turnCount } = replayMessagesToLogEntries(msgs)
+        session.loadMessages(recovery.messages)
+        const { entries, toolCount, turnCount } = replayMessagesToLogEntries(session.getOaiMessages())
         for (const entry of entries) frozenBuf.push(entry)
         setFrozenItems(frozenBuf.items())
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
