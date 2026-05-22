@@ -55,6 +55,10 @@ export interface ToolExecutionDeps {
   getSensorium: () => Sensorium | null
   getReliabilityDecision: () => ReliabilityDecision | null
   getTurnBudget: () => TurnBudget
+  /** Artifact store for persisting tool output — injected via params, no global setter */
+  artifactStore?: import('../artifact/store.js').ArtifactStore
+  /** Session state for cross-turn awareness */
+  sessionState?: import('./session-state.js').SessionState
 }
 
 export interface ToolExecBatchInput {
@@ -118,6 +122,8 @@ export class ToolExecutionController {
         getSensorium: () => this.deps.getSensorium(),
         getReliabilityDecision: () => this.deps.getReliabilityDecision(),
         turnBudget: this.deps.getTurnBudget(),
+        artifactStore: this.deps.artifactStore,
+        sessionState: this.deps.sessionState,
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)

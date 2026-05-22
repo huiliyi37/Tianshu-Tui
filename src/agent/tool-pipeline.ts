@@ -84,6 +84,10 @@ export interface ToolPipelineDeps {
   getReliabilityDecision?(): ReliabilityDecision | null
   /** Turn-level token budget — degrades tool results when exhausted. */
   turnBudget: TurnBudget
+  /** Artifact store for persisting tool output — injected via params, no global setter */
+  artifactStore?: import('../artifact/store.js').ArtifactStore
+  /** Session state for cross-turn awareness */
+  sessionState?: import('./session-state.js').SessionState
 }
 
 export interface ToolExecResult {
@@ -119,6 +123,7 @@ export async function executeToolUse(
       callbacks.onToolResult(tu.id, tu.name, chunk)
     },
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
+    artifactStore: deps.artifactStore,
   }
 
   try {
