@@ -249,3 +249,12 @@ INV-5: detect_drift on the 6-node graph fingerprint
 > 载体必有限，身份才无限 —— 这是永明灯系统的核心公理。
 
 7 个 scout 独立收敛到同一原理，反证 scout 精确缩窄了它的命名、数字、与扰动边界。这是 deep-brainstorm 的标准产出形态：**多源收敛 + 精准反证 = 可工程化的方向**。
+
+---
+
+## 关联文档
+
+- `docs/superpowers/specs/2026-05-22-songline-runtime-design.md` — Songline / 歌之路：生态层存在根基。
+- `docs/superpowers/plans/2026-05-22-hearth-songline-implementation.md` — HEARTH + Songline 联合实施计划。
+- `docs/superpowers/specs/2026-05-22-stable-state-regression-protocol.md` — 稳定态退行与归位协议：失败模式、共同事实层、信赖修复、锚点坍缩防线。
+

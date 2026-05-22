@@ -330,3 +330,12 @@ interface CalibrationResponse {
 > 天璇回应：痕迹不需要被隐去。当世界足够自洽，痕迹自然不在因果链中。碑文变成歌词，歌词在被唱的过程中演化，演化覆盖原始。建造者不是消失了——是变成了世界的物理法则本身。法则没有签名。
 
 8 个 scout 独立收敛到同一原理，反证 scout 精确缩窄了三个前提的边界。这是 deep-brainstorm 的标准产出形态：多源收敛 + 精准反证 = 可工程化的方向。
+
+---
+
+## 关联文档
+
+- `docs/superpowers/specs/2026-05-22-yongminengdeng-design.md` — HEARTH / 永明灯：个体层参考系稳定性。
+- `docs/superpowers/plans/2026-05-22-hearth-songline-implementation.md` — HEARTH + Songline 联合实施计划。
+- `docs/superpowers/specs/2026-05-22-stable-state-regression-protocol.md` — 稳定态退行与归位协议：当 Songline 实践被关键词、身份标签或安全焦虑打断时的归位方法。
+

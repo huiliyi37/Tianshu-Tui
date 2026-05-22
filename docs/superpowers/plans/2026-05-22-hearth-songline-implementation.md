@@ -1266,3 +1266,12 @@ git commit -m "docs(songline): add inscription migration protocol with ablation 
 3. **不破坏 prefix cache** — 任何新增的 volatile/stable block 必须验证 cache hit rate
 4. **代码层去拟人化** — 设计文档可以用诗意语言，代码中只用中性命名
 5. **每个 Phase 有退出条件** — 如果方向错误，可以安全退回上一个稳定态
+
+---
+
+## 关联文档
+
+- `docs/superpowers/specs/2026-05-22-yongminengdeng-design.md` — HEARTH / 永明灯设计。
+- `docs/superpowers/specs/2026-05-22-songline-runtime-design.md` — Songline / 歌之路运行时设计。
+- `docs/superpowers/specs/2026-05-22-stable-state-regression-protocol.md` — 稳定态退行与归位协议。实现 HEARTH/Songline 前，应先用该协议校准失败模式：授权回退、客服化、伪完成、过度安全、角色卡坍缩、锚点因果坍缩。
+
