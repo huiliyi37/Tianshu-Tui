@@ -396,7 +396,9 @@ buildRequest(messages: Message[], toolHistory?: ToolHistoryEntry[]): MessageRequ
 运行：`npm test`
 预期：全部通过（新方法是新增的，不影响旧路径）
 
-**Task 3A 当前状态（2026-05-22）**：已新增 `PromptEngine.buildOaiRequest()`，旧 `buildRequest()` 保留且 AgentLoop 尚未切换。新方法直接输出 `OaiChatRequest`，对 OAI `role: 'user'` 注入独立 volatile user message；最后一个 user message 使用 cached FRESH，历史 user message 使用 FROZEN，`role: 'tool'` 不触发 volatile 注入。已新增 `src/prompt/__tests__/engine.test.ts` 覆盖 OAI request shape、同一 user/tool-turn 复用 cached fresh、新 user boundary 刷新 fresh。已验证：`engine.test.ts`、`engine-cache-stability.test.ts`、`chat-mode-engine.test.ts`、`fingerprint.test.ts`，以及 `npx tsc --noEmit`。Patch I 双路径 request-body byte sanity 尚未实现，留给 Task 3B。
+**Task 3A 当前状态（2026-05-22）**：已新增 `PromptEngine.buildOaiRequest()`，旧 `buildRequest()` 保留且 AgentLoop 尚未切换。新方法直接输出 `OaiChatRequest`，对 OAI `role: 'user'` 注入独立 volatile user message；最后一个 user message 使用 cached FRESH，历史 user message 使用 FROZEN，`role: 'tool'` 不触发 volatile 注入。已新增 `src/prompt/__tests__/engine.test.ts` 覆盖 OAI request shape、同一 user/tool-turn 复用 cached fresh、新 user boundary 刷新 fresh。已验证：`engine.test.ts`、`engine-cache-stability.test.ts`、`chat-mode-engine.test.ts`、`fingerprint.test.ts`，以及 `npx tsc --noEmit`。
+
+**Task 3B 当前状态（2026-05-22）**：已补 Patch I 的最小双路径 canonical parity 框架。`buildOaiRequest()` 现输出与旧 `buildRequest()`→OpenAI body 对齐的 `system` message 与 `stream_options: { include_usage: true }`；测试内通过 `canonicalLegacyRequestBody()` 与 `canonicalOaiBody()` 比较 `stableStringify` 字节。已覆盖 tool-call-only assistant 与 assistant text + tool_calls 两条等价 transcript。已验证：`./node_modules/.bin/tsx --test src/prompt/__tests__/engine.test.ts && npx tsc --noEmit`。完整 provider-specific request-body parity 仍留给 Phase 4 client 切换前。
 
 - [ ] **步骤 4：Commit**
 
