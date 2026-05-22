@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { SessionContext } from '../context.js'
+import type { Message } from '../../api/types.js'
 
 describe('SessionContext bounded collections', () => {
   it('evicts oldest filesRead when cap exceeded', () => {
@@ -46,6 +47,117 @@ describe('SessionContext bounded collections', () => {
     const history = ctx.getCacheHistory()
     assert.ok(history.length <= 500, `expected <= 500, got ${history.length}`)
     assert.equal(history[history.length - 1]!.turn, 501)
+  })
+})
+
+describe('SessionContext OpenAI-native message storage', () => {
+  it('stores user messages as OAI messages while exposing legacy view', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('Hello')
+
+    assert.deepEqual(ctx.getOaiMessages(), [
+      { role: 'user', content: 'Hello' },
+    ])
+    assert.deepEqual(ctx.getMessages(), [
+      { role: 'user', content: 'Hello' },
+    ])
+  })
+
+  it('converts assistant content blocks to a single OAI assistant message', () => {
+    const ctx = new SessionContext()
+    ctx.addAssistantBlocks([
+      { type: 'thinking', thinking: 'Need to inspect.' },
+      { type: 'text', text: 'I will inspect.' },
+      { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { file_path: 'src/main.tsx' } },
+    ])
+
+    assert.deepEqual(ctx.getOaiMessages(), [
+      {
+        role: 'assistant',
+        content: 'I will inspect.',
+        reasoning_content: 'Need to inspect.',
+        tool_calls: [
+          {
+            id: 'tu_1',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"file_path":"src/main.tsx"}' },
+          },
+        ],
+      },
+    ])
+    assert.deepEqual(ctx.getMessages(), [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Need to inspect.' },
+          { type: 'text', text: 'I will inspect.' },
+          { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { file_path: 'src/main.tsx' } },
+        ],
+      },
+    ])
+  })
+
+  it('converts legacy tool_result blocks to OAI tool messages', () => {
+    const ctx = new SessionContext()
+    ctx.addToolResults([
+      { type: 'tool_result', tool_use_id: 'tu_1', content: 'ok' },
+      { type: 'tool_result', tool_use_id: 'tu_2', content: 'failed', is_error: true },
+    ])
+
+    assert.deepEqual(ctx.getOaiMessages(), [
+      { role: 'tool', tool_call_id: 'tu_1', content: 'ok' },
+      { role: 'tool', tool_call_id: 'tu_2', content: 'failed' },
+    ])
+    assert.deepEqual(ctx.getMessages(), [
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu_1', content: 'ok' },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tu_2', content: 'failed' },
+        ],
+      },
+    ])
+  })
+
+  it('migrates loaded legacy messages to OAI canonical storage', () => {
+    const ctx = new SessionContext()
+    const messages: Message[] = [
+      { role: 'user', content: 'Start' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Reading.' },
+          { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { file_path: 'README.md' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'contents' }],
+      },
+    ]
+
+    ctx.loadMessages(messages)
+
+    assert.deepEqual(ctx.getOaiMessages(), [
+      { role: 'user', content: 'Start' },
+      {
+        role: 'assistant',
+        content: 'Reading.',
+        tool_calls: [
+          {
+            id: 'tu_1',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"file_path":"README.md"}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'tu_1', content: 'contents' },
+    ])
   })
 })
 

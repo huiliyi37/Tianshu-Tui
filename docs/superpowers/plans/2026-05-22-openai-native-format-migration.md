@@ -255,7 +255,7 @@ git commit -m "feat(api): define OpenAI-native OaiMessage type system for format
 
 > 关键设计：SessionContext 内部改为存储 `OaiMessage[]`，但保留 `getMessages(): Message[]` 方法（转换为旧格式）供未迁移的消费者使用。新增 `getOaiMessages(): OaiMessage[]` 供已迁移的消费者使用。
 
-- [ ] **步骤 1：添加 OaiMessage 存储和转换方法**
+- [x] **步骤 1：添加 OaiMessage 存储和转换方法**
 
 ```typescript
 // src/agent/context.ts — 新增 import
@@ -286,7 +286,7 @@ getOaiMessages(): OaiMessage[] {
 }
 ```
 
-- [ ] **步骤 2：添加旧格式 → OaiMessage 的加载兼容**
+- [x] **步骤 2：添加旧格式 → OaiMessage 的加载兼容（SessionContext load/replace 层）**
 
 ```typescript
 // session-persist.ts 加载旧 JSONL 时，检测格式并转换
@@ -312,11 +312,13 @@ function migrateMessageToOai(msg: any): OaiMessage {
 }
 ```
 
-- [ ] **步骤 3：运行现有测试确认不破坏**
+- [x] **步骤 3：运行现有测试确认不破坏（Task 2A targeted）**
 
 运行：`npx tsx --test src/agent/__tests__/context.test.ts`（如果存在）
 运行：`npm test`
 预期：2694/2695 通过（RSS 测试除外）
+
+**Task 2A 当前状态（2026-05-22）**：已将 `SessionContext` 改为 OAI 单一权威存储，`getMessages()` 为 on-demand legacy view，新增 `getOaiMessages()`。为避免破坏现有调用方，OAI message 内部用非枚举对外不可见的 symbol 元数据记录 legacy view 的 string/block 形状；这不是双份 message 状态，只用于过渡期 `getMessages()` 兼容。已验证：`context.test.ts`、`context-ledger-state.test.ts`、`context-injection.test.ts`、`worker-session.test.ts`、`turn-completion.test.ts`、`loop.test.ts`、`session-persist.test.ts`、`turn-stream.test.ts`、`compaction-controller.test.ts`，以及 `npx tsc --noEmit`。`session-persist.ts` 尚未切换为 OAI 持久化，留给 Task 2B。
 
 - [ ] **步骤 4：Commit**
 
