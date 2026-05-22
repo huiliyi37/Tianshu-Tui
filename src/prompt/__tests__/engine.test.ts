@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { PromptEngine } from '../engine.js'
+import { stableStringify } from '../../api/stable-json.js'
 import type { Message } from '../../api/types.js'
-import type { OaiMessage } from '../../api/oai-types.js'
+import type { OaiChatRequest, OaiMessage } from '../../api/oai-types.js'
 import { groupIntoRounds, computeInvariantStatus } from '../../context/rounds.js'
 
 function makeEngine() {
@@ -12,6 +13,53 @@ function makeEngine() {
     staticCtx: { tools: [{ name: 'edit_file', description: 'Edit file', input_schema: { type: 'object', properties: {} } }] },
     volatileCtx: { cwd: '/repo' },
   })
+}
+
+function canonicalOaiBody(request: OaiChatRequest): Record<string, unknown> {
+  return {
+    model: request.model,
+    messages: request.messages,
+    max_tokens: request.max_tokens,
+    stream: request.stream,
+    tools: request.tools,
+    tool_choice: request.tool_choice,
+  }
+}
+
+function canonicalLegacyRequestBody(request: ReturnType<PromptEngine['buildRequest']>): Record<string, unknown> {
+  const messages: Record<string, unknown>[] = []
+
+  for (const msg of request.messages) {
+    if (msg.role === 'user') {
+      const blocks = typeof msg.content === 'string'
+        ? [{ type: 'text' as const, text: msg.content }]
+        : msg.content
+      const text = blocks.filter(block => block.type === 'text').map(block => block.text).join('')
+      const toolResults = blocks.filter((block): block is { type: 'tool_result'; tool_use_id: string; content: string } => block.type === 'tool_result')
+      if (text) messages.push({ role: 'user', content: text })
+      for (const block of toolResults) {
+        messages.push({ role: 'tool', tool_call_id: block.tool_use_id, content: block.content })
+      }
+    } else {
+      const blocks = typeof msg.content === 'string'
+        ? [{ type: 'text' as const, text: msg.content }]
+        : msg.content
+      const text = blocks.filter(block => block.type === 'text').map(block => block.text).join('')
+      const toolCalls = blocks
+        .filter((block): block is { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } => block.type === 'tool_use')
+        .map(block => ({ id: block.id, type: 'function', function: { name: block.name, arguments: stableStringify(block.input) } }))
+      messages.push({ role: 'assistant', content: text || null, ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}) })
+    }
+  }
+
+  return {
+    model: request.model,
+    messages,
+    max_tokens: request.max_tokens,
+    stream: request.stream,
+    tools: request.tools?.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.input_schema ?? { type: 'object', properties: {} } } })),
+    tool_choice: request.tools && request.tools.length > 0 ? 'auto' : undefined,
+  }
 }
 
 describe('PromptEngine OpenAI-native request building', () => {
@@ -76,6 +124,80 @@ describe('PromptEngine OpenAI-native request building', () => {
     const injectedBeforeLatest = request.messages[3]
     assert.equal(injectedBeforeLatest?.role, 'user')
     assert.match(injectedBeforeLatest?.content ?? '', /state v2/)
+  })
+
+  it('produces stable canonical OAI body bytes for equivalent construction', () => {
+    const messages: OaiMessage[] = [
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'edit_file', arguments: '{"file_path":"a.ts"}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'done' },
+    ]
+
+    const requestA = makeEngine().buildOaiRequest(messages)
+    const requestB = makeEngine().buildOaiRequest(messages)
+
+    assert.equal(stableStringify(canonicalOaiBody(requestA)), stableStringify(canonicalOaiBody(requestB)))
+  })
+
+  it('matches canonical legacy bytes for equivalent tool-call transcript without changing production code', () => {
+    const legacyMessages: Message[] = [
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'call_1', name: 'edit_file', input: { file_path: 'a.ts' } }],
+      },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'done' }] },
+    ]
+    const oaiMessages: OaiMessage[] = [
+      { role: 'user', content: 'hello' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'edit_file', arguments: '{"file_path":"a.ts"}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'done' },
+    ]
+
+    const legacyBody = canonicalLegacyRequestBody(makeEngine().buildRequest(legacyMessages))
+    const oaiBody = canonicalOaiBody(makeEngine().buildOaiRequest(oaiMessages))
+
+    assert.equal(stableStringify(oaiBody), stableStringify(legacyBody))
+  })
+
+  it('matches canonical legacy bytes for assistant text plus tool-call transcript', () => {
+    const legacyMessages: Message[] = [
+      { role: 'user', content: 'please edit' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'I will edit the file.' },
+          { type: 'tool_use', id: 'call_edit', name: 'edit_file', input: { file_path: 'a.ts', old_string: 'x', new_string: 'y' } },
+        ],
+      },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_edit', content: 'edited' }] },
+    ]
+    const oaiMessages: OaiMessage[] = [
+      { role: 'user', content: 'please edit' },
+      {
+        role: 'assistant',
+        content: 'I will edit the file.',
+        tool_calls: [{
+          id: 'call_edit',
+          type: 'function',
+          function: { name: 'edit_file', arguments: '{"file_path":"a.ts","new_string":"y","old_string":"x"}' },
+        }],
+      },
+      { role: 'tool', tool_call_id: 'call_edit', content: 'edited' },
+    ]
+
+    const legacyBody = canonicalLegacyRequestBody(makeEngine().buildRequest(legacyMessages))
+    const oaiBody = canonicalOaiBody(makeEngine().buildOaiRequest(oaiMessages))
+
+    assert.equal(stableStringify(oaiBody), stableStringify(legacyBody))
   })
 })
 
