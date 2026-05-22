@@ -183,9 +183,9 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
 
   const [persist] = useState(() => {
     const p = new SessionPersist(sessionId)
-    const existingMessages = p.load()
+    const existingMessages = p.loadOai()
     if (existingMessages.length > 0) {
-      session.loadMessages(existingMessages)
+      session.replaceMessages(existingMessages)
     }
     return p
   })
@@ -432,7 +432,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       agent.abort()
       killAll()
       _mcpManager?.shutdown().catch(() => {})
-      persist.compact(session.getMessages())
+      persist.compactOai(session.getMessages())
       if (_fileHistoryRef) {
         persistFileHistory(
           join(homedir(), '.rivet', 'sessions', sessionId, 'file-history.json'),

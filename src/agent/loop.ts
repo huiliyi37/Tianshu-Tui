@@ -313,7 +313,7 @@ export class AgentLoop {
       getSessionId: () => this.config.sessionId,
       getTranscriptPath: () => this.config.transcriptPath,
       getSessionMemoryState: () => this.config.getSessionMemoryState?.(),
-      getMessages: () => this.session.getOaiMessages(),
+      getMessages: () => this.session.getMessages(),
       getRecentToolHistory: () => this.recentToolHistory,
       getRepairHintTracker: () => this.repairHintTracker,
       getContextClaimStore: () => this.config.contextClaimStore,
@@ -562,7 +562,7 @@ export class AgentLoop {
         orphanToolResultCount: 0,
         wasRepaired: false,
         syntheticResultsInserted: 0,
-        messageCount: this.session.getOaiMessages().length,
+        messageCount: this.session.getMessages().length,
       },
       resourcePressure: {
         rssBytes: this.latestResourceSnapshot.memory.rssBytes,
@@ -641,7 +641,7 @@ export class AgentLoop {
     if (!this.config.sessionId) return
     new SessionPersist(this.config.sessionId).appendTurnSnapshot({
       turn: this.session.getTurnCount(), timestamp: Date.now(),
-      messageCount: this.session.getOaiMessages().length,
+      messageCount: this.session.getMessages().length,
       estimatedTokens: this.session.getEstimatedTokens(),
     })
   }
@@ -733,7 +733,7 @@ export class AgentLoop {
         
         // Fuzzy checkpoint: 记录 compact 开始
         if (this.persist) {
-          this.persist.appendCompactStart(turn, this.session.getOaiMessages().length)
+          this.persist.appendCompactStart(turn, this.session.getMessages().length)
         }
         
         const compactResult = await this.compaction.maybeCompact({
@@ -749,10 +749,10 @@ export class AgentLoop {
 
         // Stale round compaction: proactively shrink N-2+ tool_results
         if (!compactResult.compacted) {
-          const before = this.session.getOaiMessages()
+          const before = this.session.getMessages()
           const after = compactStaleRoundsOai(before, this.config.contextWindow ?? 1_000_000)
           if (after !== before) {
-            this.session.replaceOaiMessages(after)
+            this.session.replaceMessages(after)
             if (typeof globalThis.gc === 'function') globalThis.gc()
           }
         }
@@ -763,20 +763,20 @@ export class AgentLoop {
         const heapRatio = snap
           ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
           : 0
-        if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getOaiMessages().length >= 10) {
-          const before = this.session.getOaiMessages()
+        if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
+          const before = this.session.getMessages()
           // Use microCompact with a virtual smaller window to force message dropping
           const virtualWindow = Math.floor((this.config.contextWindow ?? 1_000_000) * 0.3)
           const { messages: trimmed } = microCompactOai(before, virtualWindow, this.session.getEstimatedTokens())
           if (trimmed.length < before.length || trimmed !== before) {
-            this.session.replaceOaiMessages(trimmed)
+            this.session.replaceMessages(trimmed)
             if (typeof globalThis.gc === 'function') globalThis.gc()
           }
         }
 
         // Fuzzy checkpoint: 记录 compact 结束
         if (this.persist) {
-          this.persist.appendCompactEnd(turn, this.session.getOaiMessages().length)
+          this.persist.appendCompactEnd(turn, this.session.getMessages().length)
         }
 
         this.streamedText = ''
@@ -924,7 +924,7 @@ export class AgentLoop {
         if (this.sessionStateManager) {
           this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
         }
-        const request = this.config.promptEngine.buildOaiRequest(this.session.getOaiMessages(), this.recentToolHistory)
+        const request = this.config.promptEngine.buildOaiRequest(this.session.getMessages(), this.recentToolHistory)
         const streamResult = await this.turnStream!.streamTurn({
           request,
           turn,

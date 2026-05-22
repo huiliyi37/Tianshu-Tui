@@ -1,9 +1,9 @@
 import type { AgentLoop } from '../agent/loop.js'
 import type { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
-import { microCompact, estimateTokens } from '../compact/micro.js'
+import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
-import { runResumePreflight } from '../context/resume-preflight.js'
+import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { resolveCustomCommand } from '../commands/loader.js'
 import { getTheme, setTheme, getActiveThemeName, type ThemeName } from './theme.js'
 import { PhaseTracker } from './phase-tracker.js'
@@ -181,25 +181,25 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
 
     case '/exit':
     case '/quit':
-      ctx.persist.compact(ctx.session.getMessages())
+      ctx.persist.compactOai(ctx.session.getMessages())
       pushStatic(createLogEntry({ type: 'system', content: 'Session saved. Goodbye!' }))
       process.emit('SIGINT')
 
     case '/compact':
       pushStatic(createLogEntry({ type: 'system', content: 'Compacting conversation...' }))
       { const msgs = ctx.session.getMessages()
-        const { messages: compacted, truncated } = microCompact(msgs, ctx.maxTokens, estimateTokens(msgs))
+        const { messages: compacted, truncated } = microCompactOai(msgs, ctx.maxTokens, estimateOaiTokens(msgs))
         ctx.session.replaceMessages(compacted)
         ctx.session.recordCompactEvent({
           turn: ctx.session.getTurnCount(),
           tier: 1,
           reason: 'manual /compact command',
-          beforeTokens: estimateTokens(msgs),
-          afterTokens: estimateTokens(compacted),
+          beforeTokens: estimateOaiTokens(msgs),
+          afterTokens: estimateOaiTokens(compacted),
           createdAt: Date.now(),
         })
         pushStatic(createLogEntry({ type: 'system', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` }))
-        ctx.setSummaryState(prev => ({ ...prev, compactEvent: { beforeTokens: estimateTokens(msgs), afterTokens: estimateTokens(compacted) } }))
+        ctx.setSummaryState(prev => ({ ...prev, compactEvent: { beforeTokens: estimateOaiTokens(msgs), afterTokens: estimateOaiTokens(compacted) } }))
         setTimeout(() => ctx.setSummaryState(prev => ({ ...prev, compactEvent: null })), 5000)
       }
       setIsStreaming(false)
@@ -375,11 +375,11 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       }
       const targetId = sessions[idx]!
       const p = new SessionPersist(targetId)
-      const rawMsgs = p.load()
-      const preflight = runResumePreflight(rawMsgs)
+      const rawMsgs = p.loadOai()
+      const preflight = runResumePreflightOai(rawMsgs)
       ctx.session.replaceMessages(preflight.messages)
       if (preflight.repaired) {
-        p.compact(preflight.messages)
+        p.compactOai(preflight.messages)
       }
       pushStatic(createLogEntry({ type: 'system', content: `Restored session ${targetId.slice(0, 8)}... (${preflight.messages.length} messages, apiSafe=${preflight.safe})` }))
       if (preflight.repaired) {

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { SessionContext } from '../context.js'
-import type { Message } from '../../api/types.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 describe('SessionContext bounded collections', () => {
   it('evicts oldest filesRead when cap exceeded', () => {
@@ -55,9 +55,6 @@ describe('SessionContext OpenAI-native message storage', () => {
     const ctx = new SessionContext()
     ctx.addUserMessage('Hello')
 
-    assert.deepEqual(ctx.getOaiMessages(), [
-      { role: 'user', content: 'Hello' },
-    ])
     assert.deepEqual(ctx.getMessages(), [
       { role: 'user', content: 'Hello' },
     ])
@@ -71,7 +68,7 @@ describe('SessionContext OpenAI-native message storage', () => {
       { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { file_path: 'src/main.tsx' } },
     ])
 
-    assert.deepEqual(ctx.getOaiMessages(), [
+    assert.deepEqual(ctx.getMessages(), [
       {
         role: 'assistant',
         content: 'I will inspect.',
@@ -85,16 +82,6 @@ describe('SessionContext OpenAI-native message storage', () => {
         ],
       },
     ])
-    assert.deepEqual(ctx.getMessages(), [
-      {
-        role: 'assistant',
-        content: [
-          { type: 'thinking', thinking: 'Need to inspect.' },
-          { type: 'text', text: 'I will inspect.' },
-          { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { file_path: 'src/main.tsx' } },
-        ],
-      },
-    ])
   })
 
   it('converts legacy tool_result blocks to OAI tool messages', () => {
@@ -104,46 +91,15 @@ describe('SessionContext OpenAI-native message storage', () => {
       { type: 'tool_result', tool_use_id: 'tu_2', content: 'failed', is_error: true },
     ])
 
-    assert.deepEqual(ctx.getOaiMessages(), [
+    assert.deepEqual(ctx.getMessages(), [
       { role: 'tool', tool_call_id: 'tu_1', content: 'ok' },
       { role: 'tool', tool_call_id: 'tu_2', content: 'failed' },
     ])
-    assert.deepEqual(ctx.getMessages(), [
-      {
-        role: 'user',
-        content: [
-          { type: 'tool_result', tool_use_id: 'tu_1', content: 'ok' },
-        ],
-      },
-      {
-        role: 'user',
-        content: [
-          { type: 'tool_result', tool_use_id: 'tu_2', content: 'failed' },
-        ],
-      },
-    ])
   })
 
-  it('migrates loaded legacy messages to OAI canonical storage', () => {
+  it('stores and retrieves OAI messages directly', () => {
     const ctx = new SessionContext()
-    const messages: Message[] = [
-      { role: 'user', content: 'Start' },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'text', text: 'Reading.' },
-          { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { file_path: 'README.md' } },
-        ],
-      },
-      {
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'contents' }],
-      },
-    ]
-
-    ctx.loadMessages(messages)
-
-    assert.deepEqual(ctx.getOaiMessages(), [
+    const messages: OaiMessage[] = [
       { role: 'user', content: 'Start' },
       {
         role: 'assistant',
@@ -157,7 +113,11 @@ describe('SessionContext OpenAI-native message storage', () => {
         ],
       },
       { role: 'tool', tool_call_id: 'tu_1', content: 'contents' },
-    ])
+    ]
+
+    ctx.replaceMessages(messages)
+
+    assert.deepEqual(ctx.getMessages(), messages)
   })
 })
 

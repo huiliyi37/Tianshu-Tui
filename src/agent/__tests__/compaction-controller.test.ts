@@ -1,11 +1,9 @@
-import { describe, it, mock } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { CompactionController } from '../compaction-controller.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { PressureMonitor } from '../../context/pressure-monitor.js'
-import type { StreamCallbacks } from '../../api/stream-client.js'
-import type { StreamClient } from '../../api/stream-client.js'
 
 function makeEngine(): PromptEngine {
   return new PromptEngine({
@@ -30,10 +28,10 @@ function makeController(session: SessionContext, overrides: Partial<ConstructorP
 }
 
 describe('CompactionController', () => {
-  it('runs smart compact when pressure crosses ratio threshold', async () => {
+  it('runs micro compact when pressure crosses ratio threshold', async () => {
     const session = new SessionContext()
     const historyMessage = 'x'.repeat(12_000 * 4)
-    session.loadMessages([
+    session.replaceMessages([
       { role: 'user', content: historyMessage },
       { role: 'assistant', content: historyMessage },
       { role: 'user', content: historyMessage },
@@ -43,16 +41,8 @@ describe('CompactionController', () => {
       { role: 'user', content: historyMessage },
       { role: 'assistant', content: historyMessage },
     ])
-    const compactClient: StreamClient = {
-      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks) => {
-        cb.onContentBlock({ type: 'text', text: 'summary' })
-        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 10 })
-      }),
-    }
     let refreshed = false
     const controller = makeController(session, {
-      compactClient,
-      compactModel: 'flash',
       refreshLedger: () => { refreshed = true },
     })
 
@@ -60,16 +50,16 @@ describe('CompactionController', () => {
 
     assert.equal(result.compacted, true)
     assert.deepEqual(result.failures, { consecutiveFailures: 0 })
-    assert.equal((compactClient.stream as any).mock.callCount(), 1)
     assert.equal(refreshed, true)
     assert.equal(session.wasCompactedAt(0), true)
-    assert.equal(session.getCompactEvents().at(-1)?.tier, 2)
+    assert.equal(session.getCompactEvents().at(-1)?.tier, 1)
+    assert.ok(session.getEstimatedTokens() < 96_000 || session.getMessages().length <= 8)
   })
 
   it('falls back to cache anchors plus resume state when over the hard ceiling', () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(80_000 * 4)
-    session.loadMessages([
+    session.replaceMessages([
       { role: 'user', content: 'anchor user' },
       { role: 'assistant', content: 'anchor assistant' },
       { role: 'user', content: huge },

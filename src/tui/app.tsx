@@ -477,20 +477,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       if (_input === 'r' && sessions.length > 0) {
         const id = sessions[0]!
         const p = new SessionPersist(id)
-        const recovery = p.loadRecoverableMessages()
-        session.loadMessages(recovery.messages)
-        const { entries, toolCount, turnCount } = replayMessagesToLogEntries(session.getOaiMessages())
+        const messages = p.loadOai()
+        session.replaceMessages(messages)
+        const { entries, toolCount, turnCount } = replayMessagesToLogEntries(session.getMessages())
         for (const entry of entries) frozenBuf.push(entry)
         setFrozenItems(frozenBuf.items())
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setCacheHitRate(session.getCacheHitRate())
         setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
-        const recoveryNote = recovery.usedSnapshot
-          ? `, rolled back to turn ${recovery.snapshotTurn}`
-          : recovery.preflight.repaired
-            ? `, repaired ${recovery.preflight.syntheticResultsInserted} missing tool result(s)`
-            : ''
-        pushStatic(createLogEntry({ type: 'system', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools${recoveryNote})` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools)` }))
       }
       setSessionPrompt('done')
       return

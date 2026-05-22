@@ -3,9 +3,53 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, readdi
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'path'
 import { homedir } from 'os'
-import type { Message } from '../api/types.js'
-import type { OaiMessage } from '../api/oai-types.js'
-import { legacyMessageToOaiMessages } from './context.js'
+import type { ContentBlock, Message } from '../api/types.js'
+import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
+import { stableStringify } from '../api/stable-json.js'
+
+function legacyMessageToOaiMessages(message: Message): OaiMessage[] {
+  if (typeof message.content === 'string') {
+    return [{ role: message.role, content: message.content }]
+  }
+
+  if (message.role === 'user') {
+    const text = message.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('')
+    const toolMessages: OaiToolMessage[] = message.content
+      .filter((block): block is ContentBlock & { type: 'tool_result' } => block.type === 'tool_result')
+      .map(block => ({ role: 'tool', tool_call_id: block.tool_use_id, content: block.content }))
+    return [
+      ...(text ? [{ role: 'user' as const, content: text }] : []),
+      ...toolMessages,
+    ]
+  }
+
+  const text = message.content
+    .filter(block => block.type === 'text')
+    .map(block => block.text)
+    .join('')
+  const reasoning = message.content
+    .filter(block => block.type === 'thinking')
+    .map(block => block.thinking)
+    .join('')
+  const toolCalls: OaiToolCall[] = message.content
+    .filter((block): block is ContentBlock & { type: 'tool_use' } => block.type === 'tool_use')
+    .map(block => ({
+      id: block.id,
+      type: 'function',
+      function: { name: block.name, arguments: stableStringify(block.input) },
+    }))
+
+  const assistant: OaiAssistantMessage = {
+    role: 'assistant',
+    content: text || null,
+    ...(reasoning ? { reasoning_content: reasoning } : {}),
+    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+  }
+  return [assistant]
+}
 import type { SessionMetadata } from '../context/types.js'
 import type { LedgerSessionMemoryState, ResumePreflightReport, SessionMemoryEntry, SessionMemoryState } from '../context/types.js'
 import { runResumePreflight } from '../context/resume-preflight.js'
@@ -196,6 +240,12 @@ export class SessionPersist {
   /** Compact the session file with the given messages (with checksums) */
   compact(messages: Message[]): void {
     const content = messages.map(m => appendChecksum(serializeSessionMessage(m))).join('\n') + '\n'
+    writeFileAtomicSync(this.filePath, content)
+  }
+
+  /** Compact the session file with OAI-format messages */
+  compactOai(messages: OaiMessage[]): void {
+    const content = messages.map(m => appendChecksum(serializeOaiSessionMessage(m))).join('\n') + '\n'
     writeFileAtomicSync(this.filePath, content)
   }
 

@@ -1,16 +1,12 @@
-import type { ContentBlock, Message, Usage } from '../api/types.js'
-import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
+import type { ContentBlock, Usage } from '../api/types.js'
+import type { OaiMessage, OaiToolCall } from '../api/oai-types.js'
 import type { CompactEvent, ContextLedger } from '../context/types.js'
-import { estimateMessageTokens, estimateTokens, estimateOaiTokens } from '../compact/micro.js'
+import { estimateOaiMessageTokens, estimateOaiTokens } from '../compact/micro.js'
 import { stableStringify } from '../api/stable-json.js'
 
 const MAX_TRACKED_FILES = 500
 const MAX_TEST_RESULTS = 500
 const MAX_CACHE_HISTORY = 500
-const LEGACY_CONTENT_SHAPE = Symbol('legacyContentShape')
-
-type LegacyContentShape = 'string' | 'blocks'
-type OaiMessageWithLegacyShape = OaiMessage & { [LEGACY_CONTENT_SHAPE]?: LegacyContentShape }
 
 export const EMPTY_USAGE: Usage = {
   input_tokens: 0,
@@ -28,7 +24,7 @@ export interface TurnCacheSnapshot {
 }
 
 export interface SessionState {
-  oaiMessages: OaiMessageWithLegacyShape[]
+  oaiMessages: OaiMessage[]
   totalUsage: Usage
   turnCount: number
   startTime: number
@@ -40,108 +36,6 @@ export interface SessionState {
   compactedAtTurns: Set<number>
   contextLedger?: ContextLedger
   compactEvents: CompactEvent[]
-}
-
-function parseToolArguments(args: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(args) as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {}
-  } catch {
-    return {}
-  }
-}
-
-export function legacyMessageToOaiMessages(message: Message): OaiMessageWithLegacyShape[] {
-  if (typeof message.content === 'string') {
-    return [{ role: message.role, content: message.content, [LEGACY_CONTENT_SHAPE]: 'string' } as OaiMessageWithLegacyShape]
-  }
-
-  if (message.role === 'user') {
-    const text = message.content
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
-      .join('')
-    const toolMessages: OaiToolMessage[] = message.content
-      .filter((block): block is ContentBlock & { type: 'tool_result' } => block.type === 'tool_result')
-      .map(block => ({ role: 'tool', tool_call_id: block.tool_use_id, content: block.content }))
-
-    return [
-      ...(text ? [{ role: 'user' as const, content: text, [LEGACY_CONTENT_SHAPE]: 'blocks' as const } as OaiMessageWithLegacyShape] : []),
-      ...toolMessages,
-    ]
-  }
-
-  const text = message.content
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
-    .join('')
-  const reasoning = message.content
-    .filter(block => block.type === 'thinking')
-    .map(block => block.thinking)
-    .join('')
-  const toolCalls: OaiToolCall[] = message.content
-    .filter((block): block is ContentBlock & { type: 'tool_use' } => block.type === 'tool_use')
-    .map(block => ({
-      id: block.id,
-      type: 'function',
-      function: {
-        name: block.name,
-        arguments: stableStringify(block.input),
-      },
-    }))
-
-  const assistant: OaiAssistantMessage & { [LEGACY_CONTENT_SHAPE]: LegacyContentShape } = {
-    role: 'assistant',
-    content: text || null,
-    ...(reasoning ? { reasoning_content: reasoning } : {}),
-    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-    [LEGACY_CONTENT_SHAPE]: 'blocks',
-  }
-  return [assistant]
-}
-
-export function oaiMessageToLegacyMessage(message: OaiMessageWithLegacyShape): Message {
-  if (message.role === 'system') {
-    return { role: 'user', content: message.content }
-  }
-
-  if (message.role === 'user') {
-    if (message[LEGACY_CONTENT_SHAPE] === 'blocks') {
-      return { role: 'user', content: [{ type: 'text', text: message.content }] }
-    }
-    return { role: 'user', content: message.content }
-  }
-
-  if (message.role === 'tool') {
-    return {
-      role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: message.tool_call_id, content: message.content }],
-    }
-  }
-
-  if (!message.reasoning_content && !message.tool_calls && message[LEGACY_CONTENT_SHAPE] !== 'blocks') {
-    return { role: 'assistant', content: message.content ?? '' }
-  }
-
-  const blocks: ContentBlock[] = []
-  if (message.reasoning_content) {
-    blocks.push({ type: 'thinking', thinking: message.reasoning_content })
-  }
-  if (message.content) {
-    blocks.push({ type: 'text', text: message.content })
-  }
-  for (const call of message.tool_calls ?? []) {
-    blocks.push({
-      type: 'tool_use',
-      id: call.id,
-      name: call.function.name,
-      input: parseToolArguments(call.function.arguments),
-    })
-  }
-
-  return { role: 'assistant', content: blocks }
 }
 
 export class SessionContext {
@@ -164,43 +58,41 @@ export class SessionContext {
   }
 
   addUserMessage(content: string): void {
-    const message: OaiMessageWithLegacyShape = { role: 'user', content, [LEGACY_CONTENT_SHAPE]: 'string' }
-    this.state.oaiMessages.push(message)
-    this.state.estimatedTokens += estimateMessageTokens(oaiMessageToLegacyMessage(message))
+    this.state.oaiMessages.push({ role: 'user', content })
+    this.state.estimatedTokens += estimateOaiMessageTokens({ role: 'user', content })
     this.state.turnCount++
   }
 
-  /** Replace all messages (used after compaction) */
-  replaceMessages(messages: Message[]): void {
-    this.state.oaiMessages = messages.flatMap(legacyMessageToOaiMessages)
-    this.state.estimatedTokens = estimateTokens(messages)
-  }
-
-  /** Replace messages using OAI format directly (avoids legacy round-trip) */
-  replaceOaiMessages(messages: OaiMessage[]): void {
+  replaceMessages(messages: OaiMessage[]): void {
     this.state.oaiMessages = messages
     this.state.estimatedTokens = estimateOaiTokens(messages)
   }
 
-  /** Load messages from a persisted session (used on startup recovery) */
-  loadMessages(messages: Message[]): void {
-    this.state.oaiMessages = messages.flatMap(legacyMessageToOaiMessages)
-    this.state.turnCount = messages.filter(m => m.role === 'user' && typeof m.content === 'string').length
-    this.state.estimatedTokens = estimateTokens(messages)
-  }
-
-  /** Add an assistant message with structured content blocks */
   addAssistantBlocks(blocks: ContentBlock[]): void {
-    const legacy: Message = { role: 'assistant', content: blocks }
-    this.state.oaiMessages.push(...legacyMessageToOaiMessages(legacy))
-    this.state.estimatedTokens += estimateMessageTokens(legacy)
+    const text = blocks.filter(b => b.type === 'text').map(b => b.text).join('')
+    const reasoning = blocks.filter(b => b.type === 'thinking').map(b => b.thinking).join('')
+    const toolCalls: OaiToolCall[] = blocks
+      .filter((b): b is ContentBlock & { type: 'tool_use' } => b.type === 'tool_use')
+      .map(b => ({ id: b.id, type: 'function' as const, function: { name: b.name, arguments: stableStringify(b.input) } }))
+
+    const msg: OaiMessage = {
+      role: 'assistant',
+      content: text || null,
+      ...(reasoning ? { reasoning_content: reasoning } : {}),
+      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+    }
+    this.state.oaiMessages.push(msg)
+    this.state.estimatedTokens += estimateOaiMessageTokens(msg)
   }
 
-  /** Add a user message with tool_result blocks (used for tool_use loopback) */
   addToolResults(results: ContentBlock[]): void {
-    const legacy: Message = { role: 'user', content: results }
-    this.state.oaiMessages.push(...legacyMessageToOaiMessages(legacy))
-    this.state.estimatedTokens += estimateMessageTokens(legacy)
+    for (const block of results) {
+      if (block.type === 'tool_result') {
+        const msg: OaiMessage = { role: 'tool', tool_call_id: block.tool_use_id, content: block.content }
+        this.state.oaiMessages.push(msg)
+        this.state.estimatedTokens += estimateOaiMessageTokens(msg)
+      }
+    }
   }
 
   addUsage(usage: Partial<Usage>): void {
@@ -235,15 +127,8 @@ export class SessionContext {
     return totalCache > 0 ? totalRead / totalCache : null
   }
 
-  getMessages(): Message[] {
-    return this.state.oaiMessages.map(oaiMessageToLegacyMessage)
-  }
-
-  getOaiMessages(): OaiMessage[] {
-    return this.state.oaiMessages.map(message => {
-      const { [LEGACY_CONTENT_SHAPE]: _legacyContentShape, ...publicMessage } = message
-      return publicMessage as OaiMessage
-    })
+  getMessages(): OaiMessage[] {
+    return this.state.oaiMessages
   }
 
   getTurnCount(): number {
