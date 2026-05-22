@@ -1,9 +1,7 @@
 import type { StreamClient } from './stream-client.js'
-import type { MessageRequest, ToolDefinition } from './types.js'
 import type { StreamCallbacks } from './client.js'
 import type { OaiChatRequest } from './oai-types.js'
 import { stableStringify } from './stable-json.js'
-import { canonicalizeRequest } from './request-freezer.js'
 import type { ProviderProfile } from './provider-profile.js'
 
 export interface OpenAIClientConfig {
@@ -28,12 +26,6 @@ export interface OpenAIClientConfig {
   providerName?: string
 }
 
-interface OpenAIToolCall {
-  id: string
-  type: 'function'
-  function: { name: string; arguments: string }
-}
-
 interface ToolCallChunk {
   index?: number
   id?: string
@@ -44,67 +36,6 @@ interface ToolCallChunk {
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
 const READ_TIMEOUT_MS = 120_000
-
-/** JSON Schema types accepted by OpenAI function-calling APIs */
-const VALID_SCHEMA_TYPES = new Set([
-  'string', 'number', 'integer', 'boolean', 'object', 'array', 'null',
-])
-
-/**
- * Sanitize a JSON Schema object for OpenAI-compatible APIs.
- * Strips properties with null/undefined/invalid type values and
- * removes unsupported JSON Schema keywords (anyOf, oneOf, allOf, $ref, etc.)
- * that cause 400 errors from strict OpenAI-compatible providers like Mimo.
- */
-function sanitizeSchemaProperties(properties: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  if (!properties) return undefined
-  const cleaned: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(properties)) {
-    if (value === null || value === undefined || typeof value !== 'object') continue
-    const prop = value as Record<string, unknown>
-    // Drop properties with null/undefined type (invalid for OpenAI function calling)
-    if (prop.type === null || prop.type === undefined) {
-      // If the property has an enum, it's still usable without an explicit type
-      if (!prop.enum && !prop.const) continue
-    }
-    if (typeof prop.type === 'string' && !VALID_SCHEMA_TYPES.has(prop.type)) continue
-    // Strip unsupported JSON Schema combinators
-    const sanitized: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(prop)) {
-      if (k === 'anyOf' || k === 'oneOf' || k === 'allOf' || k === '$ref' || k === 'not' || k === 'if' || k === 'then' || k === 'else') continue
-      sanitized[k] = v
-    }
-    cleaned[key] = sanitized
-  }
-  return Object.keys(cleaned).length > 0 ? cleaned : undefined
-}
-
-function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
-  // Provider-native tool format (e.g. GLM web_search) — pass through as-is
-  if (tool.providerFormat) return tool.providerFormat
-
-  const inputSchema = tool.input_schema
-  const params: Record<string, unknown> = {
-    type: 'object',
-    properties: inputSchema ? sanitizeSchemaProperties(inputSchema.properties) : undefined,
-  }
-  if (inputSchema?.required?.length) {
-    params.required = inputSchema.required
-  }
-  // Preserve additionalProperties for empty-object schemas (allows any params)
-  if (inputSchema?.additionalProperties !== undefined) {
-    params.additionalProperties = inputSchema.additionalProperties
-  }
-  // Ensure properties is never undefined — empty object is valid
-  if (params.properties === undefined) {
-    params.properties = {}
-  }
-
-  return {
-    type: 'function',
-    function: { name: tool.name, description: tool.description, parameters: params },
-  }
-}
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -139,14 +70,63 @@ export class OpenAIClient implements StreamClient {
     const body: Record<string, unknown> = {
       model: request.model,
       messages: request.messages,
+      max_tokens: request.max_tokens ?? this.config.maxTokens,
       stream: true,
-      stream_options: { include_usage: true },
     }
-    if (request.max_tokens) body.max_tokens = request.max_tokens
-    if (request.tools && request.tools.length > 0) body.tools = request.tools
-    if (request.tool_choice) body.tool_choice = request.tool_choice
+
+    // stream_options: { include_usage: true } is an OpenAI extension.
+    // Some providers return 400 if unsupported.
+    if (!this.config.unsupported?.includes('stream_options')) {
+      body.stream_options = { include_usage: true }
+    }
+
+    if (request.tools && request.tools.length > 0) {
+      body.tools = request.tools
+      if (request.tool_choice) body.tool_choice = request.tool_choice
+    }
+
     if (request.temperature !== undefined) body.temperature = request.temperature
-    if (request.reasoning_effort) body.reasoning_effort = request.reasoning_effort
+
+    // Thinking / reasoning dispatch.
+    // Providers that accept {thinking: {type: 'enabled'}} (DeepSeek, GLM, etc.):
+    // send the thinking block. Pure OpenAI providers use reasoning_effort.
+    const usesThinkingBlock = this.config.thinkingFormat === 'anthropic'
+      || this.config.providerName === 'glm'
+      || this.config.providerName === 'claude'
+      || this.config.providerName === 'mimo'
+
+    if (this.config.thinking === 'enabled') {
+      if (usesThinkingBlock) {
+        body.thinking = { type: this.config.thinking }
+        if (this.config.providerName === 'glm') {
+          (body.thinking as Record<string, unknown>)['clear_thinking'] = true
+        }
+        if (this.config.providerName === 'claude' && this.config.reasoningEffort) {
+          const budgetMap: Record<string, number> = {
+            max: this.config.maxTokens,
+            high: Math.floor(this.config.maxTokens * 0.6),
+            medium: Math.floor(this.config.maxTokens * 0.3),
+            low: 8192,
+            off: 0,
+          }
+          const budget = budgetMap[this.config.reasoningEffort ?? 'high'] ?? Math.floor(this.config.maxTokens * 0.6)
+          ;(body.thinking as Record<string, unknown>)['budget_tokens'] = budget
+        }
+      } else if (this.config.effortFormat !== 'none') {
+        body.reasoning_effort = this.config.reasoningEffort ?? 'medium'
+      }
+    }
+    if (request.reasoning_effort && this.config.effortFormat !== 'none') {
+      body.reasoning_effort = request.reasoning_effort
+    }
+
+    if (this.config.providerName === 'mimo' && this.config.thinking === 'enabled') {
+      const sysMsg = (body.messages as Record<string, unknown>[]).find(m => m.role === 'system')
+      if (sysMsg && typeof sysMsg.content === 'string') {
+        sysMsg.content += '\n\nPlease think and reason in Chinese (中文) during your internal chain of thought.'
+      }
+    }
+
     await this.sendStream(body, callbacks, signal)
   }
 
@@ -226,170 +206,7 @@ export class OpenAIClient implements StreamClient {
     }
   }
 
-  /** Convert Anthropic MessageRequest to OpenAI chat completions body */
-  buildRequestBody(request: MessageRequest): Record<string, unknown> {
-    const messages: Record<string, unknown>[] = []
-
-    if (request.system) {
-      let text = typeof request.system === 'string'
-        ? request.system
-        : request.system.map(b => b.text).join('')
-      if (this.config.providerName === 'mimo' && this.config.thinking === 'enabled') {
-        text += '\n\nPlease think and reason in Chinese (中文) during your internal chain of thought.'
-      }
-      messages.push({ role: 'system', content: text })
-    }
-
-    for (const msg of request.messages) {
-      if (msg.role === 'user') {
-        const textParts: string[] = []
-        const toolResults: Array<{ toolCallId: string; content: string }> = []
-
-        const blocks = typeof msg.content === 'string'
-          ? [{ type: 'text' as const, text: msg.content }]
-          : msg.content
-
-        for (const block of blocks) {
-          if (block.type === 'text') {
-            textParts.push(block.text)
-          } else if (block.type === 'tool_result') {
-            toolResults.push({
-              toolCallId: block.tool_use_id,
-              content: block.content,
-            })
-          }
-        }
-
-        if (textParts.length > 0) {
-          messages.push({ role: 'user', content: textParts.join('') })
-        }
-        for (const tr of toolResults) {
-          messages.push({
-            role: 'tool',
-            tool_call_id: tr.toolCallId,
-            content: tr.content,
-          })
-        }
-      } else if (msg.role === 'assistant') {
-        const textParts: string[] = []
-        const thinkingParts: string[] = []
-        const toolCalls: OpenAIToolCall[] = []
-
-        const blocks = typeof msg.content === 'string'
-          ? [{ type: 'text' as const, text: msg.content }]
-          : msg.content
-
-        for (const block of blocks) {
-          if (block.type === 'text') {
-            textParts.push(block.text)
-          } else if (block.type === 'thinking') {
-            thinkingParts.push(block.thinking)
-          } else if (block.type === 'tool_use') {
-            toolCalls.push({
-              id: block.id,
-              type: 'function',
-              function: {
-                name: block.name,
-                arguments: stableStringify(block.input),
-              },
-            })
-          }
-        }
-
-        const assistant: Record<string, unknown> = { role: 'assistant' }
-        if (textParts.length > 0) {
-          assistant.content = textParts.join('')
-        }
-        // DeepSeek requires reasoning_content to be passed back in tool-call rounds.
-        // GLM with clear_thinking=true (default): API ignores reasoning_content in
-        // history anyway, so skip it to save context window space (200K).
-        if (thinkingParts.length > 0 && this.config.providerName !== 'glm') {
-          assistant.reasoning_content = thinkingParts.join('')
-        }
-        if (toolCalls.length > 0) {
-          assistant.tool_calls = toolCalls
-        }
-        // OpenAI API requires content or tool_calls on every assistant message.
-        // If only thinking arrived (no text, no tool calls), set content to a
-        // placeholder so the API doesn't reject the request with 400.
-        if (!assistant.content && !assistant.tool_calls) {
-          assistant.content = ''
-        }
-        messages.push(assistant)
-      }
-    }
-
-    const body: Record<string, unknown> = {
-      model: this.config.model,
-      messages,
-      max_tokens: this.config.maxTokens,
-      stream: true,
-    }
-
-    // stream_options: { include_usage: true } is an OpenAI-specific extension.
-    // Most OpenAI-compatible providers (GLM, MiniMax, Mimo) don't support it
-    // and will return 400. Only include when the provider hasn't marked it as unsupported.
-    if (!this.config.unsupported?.includes('stream_options')) {
-      body.stream_options = { include_usage: true }
-    }
-
-    if (request.tools && request.tools.length > 0) {
-      // Filter: only include provider-native tools (web_search) for GLM.
-      // Non-GLM providers ignore unknown tool types or may error.
-      const applicableTools = this.config.providerName === 'glm'
-        ? request.tools
-        : request.tools.filter(t => !t.providerFormat)
-      if (applicableTools.length > 0) {
-        body.tools = [...applicableTools]
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(toOpenAITool)
-        body.tool_choice = 'auto'
-      }
-    }
-
-    // Thinking / reasoning dispatch.
-    // Providers that accept {thinking: {type: 'enabled'}} (DeepSeek, GLM, Claude
-    // via proxy, Kimi, MiMo): send the thinking block.
-    // Pure OpenAI-compatible providers (MiniMax, OpenCode Go): the thinking
-    // block is unrecognized and returns 400. Use reasoning_effort instead, or
-    // nothing if the provider doesn't support effort control either.
-    // GLM is a hybrid: thinkingFormat='openai' for response parsing but it
-    // accepts the thinking block for requests.
-    const usesThinkingBlock = this.config.thinkingFormat === 'anthropic'
-      || this.config.providerName === 'glm'
-      || this.config.providerName === 'claude'
-      || this.config.providerName === 'mimo'
-
-    if (this.config.thinking === 'enabled') {
-      if (usesThinkingBlock) {
-        body.thinking = { type: this.config.thinking }
-        if (this.config.providerName === 'glm') {
-          ;(body.thinking as Record<string, unknown>)['clear_thinking'] = true
-        }
-        if (this.config.providerName === 'claude') {
-          const budgetMap: Record<string, number> = {
-            max: this.config.maxTokens,
-            high: Math.floor(this.config.maxTokens * 0.6),
-            medium: Math.floor(this.config.maxTokens * 0.3),
-            low: 8192,
-            off: 0,
-          }
-          const budget = budgetMap[this.config.reasoningEffort ?? 'high'] ?? Math.floor(this.config.maxTokens * 0.6)
-          ;(body.thinking as Record<string, unknown>)['budget_tokens'] = budget
-        }
-      } else if (this.config.effortFormat !== 'none') {
-        // OpenAI-format: use reasoning_effort if the provider supports it
-        body.reasoning_effort = this.config.reasoningEffort ?? 'medium'
-      }
-      // If effortFormat is 'none' and thinking block is unsupported,
-      // provider controls thinking via its own defaults — send nothing.
-    }
-    if (this.config.reasoningEffort && this.config.effortFormat !== 'none') {
-      body.reasoning_effort = this.config.reasoningEffort
-    }
-
-    return body
-  }
+  /** Parse SSE stream from a reader — exposed for testing */
 
   /** Parse SSE stream from a reader — exposed for testing */
   async parseStreamFromReader(

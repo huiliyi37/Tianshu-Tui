@@ -206,8 +206,8 @@ describe('PromptEngine fingerprint integration', () => {
     })
 
     const fpBefore = engine.getFingerprint()
-    engine.buildRequest([{ role: 'user', content: 'hello' }])
-    engine.buildRequest([{ role: 'user', content: 'another message' }])
+    engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+    engine.buildOaiRequest([{ role: 'user', content: 'another message' }])
     const fpAfter = engine.getFingerprint()
 
     assert.equal(fpBefore.combinedSha256, fpAfter.combinedSha256)

@@ -1,4 +1,3 @@
-import type { ContentBlock, Message, MessageRequest } from '../api/types.js'
 import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from '../api/oai-types.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
@@ -24,59 +23,6 @@ export interface PromptEngineConfig {
   staticCtx: StaticPromptContext
   volatileCtx: VolatileContext
   habituationThreshold?: number
-}
-
-function isToolUseBlock(block: ContentBlock): block is ContentBlock & { type: 'tool_use'; id: string } {
-  return block.type === 'tool_use'
-}
-
-function isToolResultBlock(block: ContentBlock): block is ContentBlock & { type: 'tool_result'; tool_use_id: string } {
-  return block.type === 'tool_result'
-}
-
-function toolUseIds(message: Message): string[] {
-  if (message.role !== 'assistant' || !Array.isArray(message.content)) return []
-  return message.content.filter(isToolUseBlock).map(block => block.id)
-}
-
-function toolResultIds(message: Message | undefined): string[] {
-  if (!message || message.role !== 'user' || !Array.isArray(message.content)) return []
-  return message.content.filter(isToolResultBlock).map(block => block.tool_use_id)
-}
-
-function makeSyntheticToolResult(id: string): ContentBlock {
-  return {
-    type: 'tool_result',
-    tool_use_id: id,
-    content: 'Tool result unavailable: recovered from interrupted tool execution.',
-    is_error: true,
-  }
-}
-
-function normalizeToolResultPairs(messages: Message[]): Message[] {
-  const normalized: Message[] = []
-
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]!
-    if (msg.role === 'user' && Array.isArray(msg.content) && msg.content.some(isToolResultBlock)) {
-      const previous = normalized[normalized.length - 1]
-      if (!previous || toolUseIds(previous).length === 0) continue
-    }
-
-    normalized.push(msg)
-
-    const ids = toolUseIds(msg)
-    if (ids.length === 0) continue
-
-    const next = messages[i + 1]
-    const results = toolResultIds(next)
-    const missing = ids.filter(id => !results.includes(id))
-    if (missing.length > 0) {
-      normalized.push({ role: 'user', content: missing.map(makeSyntheticToolResult) })
-    }
-  }
-
-  return normalized
 }
 
 export class PromptEngine {
@@ -162,63 +108,6 @@ export class PromptEngine {
           if (userContent !== this.cachedFreshForUser) {
             this.cachedFreshForUser = userContent
             const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText }
-            this.cachedFreshBlock = shouldInjectDynamicAppendix(this.mode)
-              ? buildLatestTurnVolatileBlock(dynamicCtx)
-              : this.frozenBase
-          }
-          result.push({ role: 'user', content: this.cachedFreshBlock })
-        } else {
-          result.push({ role: 'user', content: this.volatileBlock })
-        }
-      }
-      result.push(msg)
-    }
-
-    const tools: OaiToolDefinition[] | undefined = this.config.staticCtx.tools.length > 0
-      ? this.config.staticCtx.tools.map(tool => ({
-        type: 'function' as const,
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.input_schema ?? { type: 'object', properties: {} },
-        },
-      }))
-      : undefined
-
-    return {
-      model: this.config.model,
-      messages: [{ role: 'system', content: this.systemPrompt }, ...result],
-      max_tokens: this.config.maxTokens,
-      stream: true,
-      stream_options: { include_usage: true },
-      tools,
-      tool_choice: tools ? 'auto' : undefined,
-    }
-  }
-
-  buildRequest(messages: Message[], toolHistory?: ToolHistoryEntry[]): MessageRequest {
-    const result: Message[] = []
-    const normalized = normalizeToolResultPairs(messages)
-
-    let lastUserTextIdx = -1
-    for (let i = normalized.length - 1; i >= 0; i--) {
-      if (normalized[i]!.role === 'user' && typeof normalized[i]!.content === 'string') {
-        lastUserTextIdx = i
-        break
-      }
-    }
-
-    for (let i = 0; i < normalized.length; i++) {
-      const msg = normalized[i]!
-      if (msg.role === 'user' && typeof msg.content === 'string' && this.volatileBlock) {
-        if (i === lastUserTextIdx) {
-          const userContent = msg.content
-
-          // Only regenerate FRESH when a NEW user message arrives.
-          // Tool-call turns (same user message, more tool results) reuse the cache.
-          if (userContent !== this.cachedFreshForUser) {
-            this.cachedFreshForUser = userContent
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain, activeClaims: this.activeClaims ?? this.config.volatileCtx.activeClaims, playbookLessons: this.playbookLessons ?? this.config.volatileCtx.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -259,11 +148,11 @@ export class PromptEngine {
                 ? this.volatileBlock + '\n' + fullAppendix
                 : this.volatileBlock
             } else {
-              const latest = buildLatestTurnVolatileBlock(dynamicCtx)
+              const base = shouldInjectDynamicAppendix(this.mode)
+                ? buildLatestTurnVolatileBlock(dynamicCtx)
+                : this.frozenBase
               const projection = shouldInjectCvm(this.mode) ? this.cognitiveProjection : null
-              this.cachedFreshBlock = projection
-                ? latest + '\n' + projection
-                : latest
+              this.cachedFreshBlock = projection ? base + '\n' + projection : base
             }
           }
           result.push({ role: 'user', content: this.cachedFreshBlock })
@@ -274,16 +163,25 @@ export class PromptEngine {
       result.push(msg)
     }
 
+    const tools: OaiToolDefinition[] | undefined = this.config.staticCtx.tools.length > 0
+      ? this.config.staticCtx.tools.map(tool => ({
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.input_schema ?? { type: 'object', properties: {} },
+        },
+      }))
+      : undefined
+
     return {
       model: this.config.model,
-      messages: result,
+      messages: [{ role: 'system', content: this.systemPrompt }, ...result],
       max_tokens: this.config.maxTokens,
-      system: this.systemPrompt,  // plain string, DeepSeek-compatible
-      tools: this.config.staticCtx.tools.length > 0
-        ? [...this.config.staticCtx.tools].sort((a, b) => a.name.localeCompare(b.name))
-        : undefined,
-      tool_choice: this.config.staticCtx.tools.length > 0 ? { type: 'auto' } : undefined,
       stream: true,
+      stream_options: { include_usage: true },
+      tools,
+      tool_choice: tools ? 'auto' : undefined,
     }
   }
 

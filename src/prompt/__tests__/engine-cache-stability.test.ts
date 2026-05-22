@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix } from '../volatile.js'
 import { PromptEngine } from '../engine.js'
-import type { Message } from '../../api/types.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 describe('ice-mirror: cache stability', () => {
   const baseCtx = {
@@ -87,21 +87,19 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
   it('volatile block before "hello" is identical in Turn 1 and Turn 2 requests', () => {
     const engine = createEngine()
 
-    // Turn 1: just user says "hello"
-    const req1 = engine.buildRequest([
+    const req1 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
     ])
 
-    // Turn 2: history + new message
-    const req2 = engine.buildRequest([
+    const req2 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'hi there' },
       { role: 'user', content: 'read file' },
     ], [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' }])
 
-    // messages[0] is the volatile block before "hello"
-    const vol1 = (req1.messages[0] as { content: string }).content
-    const vol2 = (req2.messages[0] as { content: string }).content
+    // messages[0] = system, messages[1] = volatile block before first user msg
+    const vol1 = (req1.messages[1] as { content: string }).content
+    const vol2 = (req2.messages[1] as { content: string }).content
     assert.equal(vol1, vol2, 'Volatile block for "hello" must be byte-identical across turns')
   })
 
@@ -110,7 +108,7 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
     const volatileBlocks: string[] = []
 
     for (let turn = 1; turn <= 5; turn++) {
-      const messages: Message[] = []
+      const messages: OaiMessage[] = []
       for (let t = 1; t <= turn; t++) {
         messages.push({ role: 'user', content: `message ${t}` })
         if (t < turn) {
@@ -122,14 +120,13 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
         ? [{ tool: 'read_file', target: `file${turn}.ts`, status: 'success' as const }]
         : undefined
 
-      const req = engine.buildRequest(messages, toolHistory)
+      const req = engine.buildOaiRequest(messages, toolHistory)
 
-      // The volatile block before the FIRST user message (messages[0])
-      const firstVol = (req.messages[0] as { content: string }).content
+      // messages[0] = system, messages[1] = volatile block before first user msg
+      const firstVol = (req.messages[1] as { content: string }).content
       volatileBlocks.push(firstVol)
     }
 
-    // ALL volatile blocks for the first user message must be identical
     for (let i = 1; i < volatileBlocks.length; i++) {
       assert.equal(volatileBlocks[i], volatileBlocks[0],
         `Turn ${i + 1}: volatile block for first message must match Turn 1`)
@@ -139,14 +136,14 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
   it('FRESH volatile for latest turn starts with FROZEN content', () => {
     const engine = createEngine()
 
-    const req = engine.buildRequest([
+    const req = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'hi' },
       { role: 'user', content: 'read file' },
     ], [{ tool: 'read_file', target: 'x', status: 'success' }])
 
-    // messages[0] = FROZEN volatile for "hello"
-    const frozenVol = (req.messages[0] as { content: string }).content
+    // messages[1] = FROZEN volatile for "hello"
+    const frozenVol = (req.messages[1] as { content: string }).content
 
     // Find the FRESH volatile - it's the message before the last user text
     let freshVol = ''
@@ -165,16 +162,17 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
   it('system prompt is identical across turns', () => {
     const engine = createEngine()
 
-    const req1 = engine.buildRequest([
+    const req1 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
     ])
-    const req2 = engine.buildRequest([
+    const req2 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'hi' },
       { role: 'user', content: 'read' },
     ])
 
-    assert.equal(req1.system, req2.system, 'System prompt must be identical across turns')
+    // System is messages[0] in OAI format
+    assert.deepEqual(req1.messages[0], req2.messages[0], 'System prompt must be identical across turns')
   })
 })
 
@@ -195,106 +193,96 @@ describe('habituation: three-zone consolidation', () => {
 
   it('no consolidated block before reaching threshold', () => {
     const engine = createEngineH(5)
-    engine.setPhaseHint('explore') // alpha=0.1 → 4 turns ≈ 0.34, well below 0.8
+    engine.setPhaseHint('explore')
 
-    // 3 turns + 1 check = 4 recordTurn calls, below threshold of 5
     for (let t = 0; t < 3; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
-      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+      engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
     engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
-    const req = engine.buildRequest([{ role: 'user', content: 'check' }])
-    const vol = (req.messages[0] as { content: string }).content
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'check' }])
+    const vol = (req.messages[1] as { content: string }).content
     assert.ok(!vol.includes('<consolidated>'), 'No consolidated block before threshold')
   })
 
   it('consolidated block appears after threshold turns with stable domain', () => {
     const engine = createEngineH(3)
-    engine.setPhaseHint('execute') // alpha=0.35 → 5 turns crosses 0.8
+    engine.setPhaseHint('execute')
 
     for (let t = 0; t < 5; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
-      const messages: Message[] = []
+      const messages: OaiMessage[] = []
       for (let m = 0; m <= t; m++) {
         messages.push({ role: 'user', content: `msg ${m}` })
         if (m < t) messages.push({ role: 'assistant', content: `resp ${m}` })
       }
-      engine.buildRequest(messages)
+      engine.buildOaiRequest(messages)
     }
 
-    const messages: Message[] = [{ role: 'user', content: 'final' }]
-    const req = engine.buildRequest(messages)
-    const vol = (req.messages[0] as { content: string }).content
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'final' }])
+    const vol = (req.messages[1] as { content: string }).content
     assert.ok(vol.includes('<consolidated>'), 'Consolidated block should appear after threshold')
     assert.ok(vol.includes('tianshu'), 'Consolidated should contain domain name')
   })
 
   it('historical volatile includes consolidated block after promotion', () => {
     const engine = createEngineH(3)
-    engine.setPhaseHint('execute') // alpha=0.35 → 5 turns crosses 0.8
+    engine.setPhaseHint('execute')
 
-    // Promote domain over 5 turns
     for (let t = 0; t < 5; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
-      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+      engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
-    // Now build a multi-turn request — historical volatile should include consolidated
     engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
-    const req = engine.buildRequest([
+    const req = engine.buildOaiRequest([
       { role: 'user', content: 'msg 0' },
       { role: 'assistant', content: 'resp 0' },
       { role: 'user', content: 'msg 1' },
     ])
 
-    const histVol = (req.messages[0] as { content: string }).content
+    const histVol = (req.messages[1] as { content: string }).content
     assert.ok(histVol.includes('<consolidated>'), 'Historical volatile must include consolidated')
   })
 
   it('dehabituation removes field from consolidated block', () => {
     const engine = createEngineH(3)
-    engine.setPhaseHint('execute') // alpha=0.35 → 5 turns crosses 0.8
+    engine.setPhaseHint('execute')
 
-    // Promote
     for (let t = 0; t < 5; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
-      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+      engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
-    // Verify promoted
-    let req = engine.buildRequest([{ role: 'user', content: 'check' }])
-    let vol = (req.messages[0] as { content: string }).content
+    let req = engine.buildOaiRequest([{ role: 'user', content: 'check' }])
+    let vol = (req.messages[1] as { content: string }).content
     assert.ok(vol.includes('<consolidated>'))
 
-    // Change domain → dehabituation
     engine.setActiveDomain({ name: 'tianji', volatileBlock: 'other', motto: 'other-motto' })
-    req = engine.buildRequest([{ role: 'user', content: 'after change' }])
-    vol = (req.messages[0] as { content: string }).content
+    req = engine.buildOaiRequest([{ role: 'user', content: 'after change' }])
+    vol = (req.messages[1] as { content: string }).content
     assert.ok(!vol.includes('<consolidated>'), 'Consolidated should disappear after dehabituation')
   })
 
   it('FROZEN+CONSOLIDATED is byte prefix of FRESH with active appendix', () => {
     const engine = createEngineH(3)
-    engine.setPhaseHint('execute') // alpha=0.35 → 5 turns crosses 0.8
+    engine.setPhaseHint('execute')
 
-    // Promote domain
     for (let t = 0; t < 5; t++) {
       engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
-      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+      engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
-    // Build with active dynamic fields
     engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
-    const req = engine.buildRequest([
+    const req = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'hi' },
       { role: 'user', content: 'read' },
     ], [{ tool: 'read_file', target: 'x', status: 'success' }])
 
-    const histVol = (req.messages[0] as { content: string }).content  // FROZEN+CONSOLIDATED
+    const histVol = (req.messages[1] as { content: string }).content
 
-    // Find FRESH volatile (before last user text "read")
     let freshVol = ''
     for (let i = req.messages.length - 1; i >= 0; i--) {
       const m = req.messages[i] as { role: string; content: string }
@@ -319,11 +307,11 @@ describe('habituation: three-zone consolidation', () => {
 
     engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
     for (let t = 0; t < 10; t++) {
-      engine.buildRequest([{ role: 'user', content: `msg ${t}` }])
+      engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
-    const req = engine.buildRequest([{ role: 'user', content: 'test' }])
-    const vol = (req.messages[0] as { content: string }).content
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'test' }])
+    const vol = (req.messages[1] as { content: string }).content
     assert.ok(!vol.includes('<consolidated>'), 'No consolidated when habituation disabled')
   })
 })
@@ -346,27 +334,23 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     const engine = createEngine()
     const volatileBlocks: string[] = []
 
-    // Simulate agent loop: 1 user message, 5 tool-call turns
     for (let turn = 0; turn < 5; turn++) {
-      const messages: Message[] = [
+      const messages: OaiMessage[] = [
         { role: 'user', content: 'refactor the auth module' },
       ]
-      // Add accumulated tool_use/tool_result pairs
       for (let t = 0; t < turn; t++) {
-        messages.push({ role: 'assistant', content: [{ type: 'tool_use', id: `call_${t}`, name: 'read_file', input: { path: `file${t}.ts` } }] as any })
-        messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: `call_${t}`, content: `content of file${t}` }] as any })
+        messages.push({ role: 'assistant', content: null, tool_calls: [{ id: `call_${t}`, type: 'function' as const, function: { name: 'read_file', arguments: `{"path":"file${t}.ts"}` } }] })
+        messages.push({ role: 'tool', tool_call_id: `call_${t}`, content: `content of file${t}` })
       }
 
       const toolHistory = turn > 0
         ? [{ tool: 'read_file', target: `file${turn - 1}.ts`, status: 'success' as const }]
         : undefined
 
-      const req = engine.buildRequest(messages, toolHistory)
-      // First message is always the volatile block
-      volatileBlocks.push((req.messages[0] as { content: string }).content)
+      const req = engine.buildOaiRequest(messages, toolHistory)
+      volatileBlocks.push((req.messages[1] as { content: string }).content)
     }
 
-    // ALL volatile blocks must be byte-identical (cached from first call)
     for (let i = 1; i < volatileBlocks.length; i++) {
       assert.equal(volatileBlocks[i], volatileBlocks[0],
         `Turn ${i}: volatile block must be identical to Turn 0 (same user message → cached)`)
@@ -376,29 +360,25 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
   it('volatile block regenerates when a NEW user message arrives', () => {
     const engine = createEngine()
 
-    // Turn 1: user message "hello"
-    const req1 = engine.buildRequest([
+    const req1 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
     ])
-    const vol1 = (req1.messages[0] as { content: string }).content
+    const vol1 = (req1.messages[1] as { content: string }).content
 
-    // Turn 2: same user message + tool result → cached, same volatile
-    const req2 = engine.buildRequest([
+    const req2 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'bash', input: { command: 'ls' } }] as any },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'file1\nfile2' }] as any },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'bash', arguments: '{"command":"ls"}' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: 'file1\nfile2' },
     ])
-    const vol2 = (req2.messages[0] as { content: string }).content
+    const vol2 = (req2.messages[1] as { content: string }).content
     assert.equal(vol1, vol2, 'Same user message → cached volatile')
 
-    // Turn 3: NEW user message "read file" → volatile regenerated
     engine.setRepairHint('fix the path')
-    const req3 = engine.buildRequest([
+    const req3 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'done' },
       { role: 'user', content: 'read file' },
     ])
-    // "read file" gets new FRESH (with repairHint)
     let freshVol = ''
     for (let i = req3.messages.length - 1; i >= 0; i--) {
       const m = req3.messages[i] as { role: string; content: string }
@@ -416,18 +396,18 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
 
     let firstVol = ''
     for (let turn = 0; turn < 10; turn++) {
-      const messages: Message[] = [
+      const messages: OaiMessage[] = [
         { role: 'user', content: 'implement feature X' },
       ]
       for (let t = 0; t < turn; t++) {
-        messages.push({ role: 'assistant', content: [{ type: 'tool_use', id: `c_${t}`, name: 'edit_file', input: {} }] as any })
-        messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: `c_${t}`, content: 'ok' }] as any })
+        messages.push({ role: 'assistant', content: null, tool_calls: [{ id: `c_${t}`, type: 'function' as const, function: { name: 'edit_file', arguments: '{}' } }] })
+        messages.push({ role: 'tool', tool_call_id: `c_${t}`, content: 'ok' })
       }
 
-      const req = engine.buildRequest(messages, [
+      const req = engine.buildOaiRequest(messages, [
         { tool: 'edit_file', target: `file${turn}.ts`, status: 'success' },
       ])
-      const vol = (req.messages[0] as { content: string }).content
+      const vol = (req.messages[1] as { content: string }).content
 
       if (turn === 0) firstVol = vol
       else assert.equal(vol, firstVol, `Turn ${turn}: volatile must match Turn 0`)
@@ -436,18 +416,18 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
 
   it('cognitive projection updates invalidate same-user fresh cache without changing fingerprint', () => {
     const engine = createEngine()
-    const messages: Message[] = [
+    const messages: OaiMessage[] = [
       { role: 'user', content: 'implement feature X' },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 'c_1', name: 'read_file', input: {} }] as any },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c_1', content: 'ok' }] as any },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'c_1', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'c_1', content: 'ok' },
     ]
 
-    const before = engine.buildRequest(messages)
-    assert.doesNotMatch(before.messages[0]!.content as string, /task-contract/)
+    const before = engine.buildOaiRequest(messages)
+    assert.doesNotMatch(before.messages[1]!.content as string, /task-contract/)
 
     engine.setCognitiveProjection('<task-contract status="executing"><objective>implement feature X</objective></task-contract>')
-    const after = engine.buildRequest(messages)
-    const context = after.messages[0]!.content as string
+    const after = engine.buildOaiRequest(messages)
+    const context = after.messages[1]!.content as string
 
     assert.match(context, /<task-contract status="executing">/)
     assert.equal(engine.checkDrift(), null)
@@ -466,21 +446,21 @@ describe('sessionState injection — cache safety + path coverage', () => {
   }
 
   it('sessionState reaches fresh volatile block under tracker-enabled (default) path', () => {
-    const engine = makeEngine(5) // default — tracker enabled
+    const engine = makeEngine(5)
     engine.setSessionState('<session-state>\nTask: alpha [executing]\n</session-state>')
 
-    const req = engine.buildRequest([{ role: 'user', content: 'hello' }])
-    const first = (req.messages[0] as { content: string }).content
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+    const first = (req.messages[1] as { content: string }).content
     assert.match(first, /<session-state>/, 'sessionState must appear when tracker enabled')
     assert.match(first, /Task: alpha/)
   })
 
   it('sessionState reaches fresh volatile block under tracker-disabled (fallback) path', () => {
-    const engine = makeEngine(0) // tracker disabled
+    const engine = makeEngine(0)
     engine.setSessionState('<session-state>\nTask: beta [verifying]\n</session-state>')
 
-    const req = engine.buildRequest([{ role: 'user', content: 'hello' }])
-    const first = (req.messages[0] as { content: string }).content
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+    const first = (req.messages[1] as { content: string }).content
     assert.match(first, /<session-state>/, 'sessionState must appear when tracker disabled')
     assert.match(first, /Task: beta/)
   })
@@ -490,17 +470,16 @@ describe('sessionState injection — cache safety + path coverage', () => {
 
     let firstVol = ''
     for (let turn = 0; turn < 5; turn++) {
-      // Simulate loop.ts:924 — every turn re-pushes the latest snapshot
       engine.setSessionState(`<session-state>\nFiles tracked: ${turn}\n</session-state>`)
 
-      const messages: Message[] = [{ role: 'user', content: 'refactor the auth module' }]
+      const messages: OaiMessage[] = [{ role: 'user', content: 'refactor the auth module' }]
       for (let t = 0; t < turn; t++) {
-        messages.push({ role: 'assistant', content: [{ type: 'tool_use', id: `c_${t}`, name: 'read_file', input: {} }] as any })
-        messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: `c_${t}`, content: 'ok' }] as any })
+        messages.push({ role: 'assistant', content: null, tool_calls: [{ id: `c_${t}`, type: 'function' as const, function: { name: 'read_file', arguments: '{}' } }] })
+        messages.push({ role: 'tool', tool_call_id: `c_${t}`, content: 'ok' })
       }
 
-      const req = engine.buildRequest(messages)
-      const vol = (req.messages[0] as { content: string }).content
+      const req = engine.buildOaiRequest(messages)
+      const vol = (req.messages[1] as { content: string }).content
 
       if (turn === 0) firstVol = vol
       else assert.equal(vol, firstVol,
@@ -512,20 +491,17 @@ describe('sessionState injection — cache safety + path coverage', () => {
     const engine = makeEngine(5)
     engine.setSessionState('<session-state>\nState: A\n</session-state>')
 
-    const req1 = engine.buildRequest([{ role: 'user', content: 'first task' }])
-    const m1 = (req1.messages[0] as { content: string }).content
+    const req1 = engine.buildOaiRequest([{ role: 'user', content: 'first task' }])
+    const m1 = (req1.messages[1] as { content: string }).content
     assert.match(m1, /State: A/)
 
-    // Update sessionState during the user-msg-1 lifecycle
     engine.setSessionState('<session-state>\nState: B\n</session-state>')
 
-    // New user message arrives — fresh cache MUST refresh to current sessionState
-    const req2 = engine.buildRequest([
+    const req2 = engine.buildOaiRequest([
       { role: 'user', content: 'first task' },
       { role: 'assistant', content: 'done' },
       { role: 'user', content: 'second task' },
     ])
-    // Find the volatile block injected before "second task"
     const msgs = req2.messages
     let secondTaskFresh = ''
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -542,13 +518,13 @@ describe('sessionState injection — cache safety + path coverage', () => {
     const engine = makeEngine(5)
     engine.setSessionState('<session-state>\nState: live\n</session-state>')
 
-    const req = engine.buildRequest([
+    const req = engine.buildOaiRequest([
       { role: 'user', content: 'first' },
       { role: 'assistant', content: 'reply' },
       { role: 'user', content: 'second' },
     ])
     const msgs = req.messages
-    const firstVol = (msgs[0] as { content: string }).content
+    const firstVol = (msgs[1] as { content: string }).content
     assert.doesNotMatch(firstVol, /<session-state>/, 'Historical user-msg volatile block must NOT contain sessionState (frozen prefix)')
   })
 })

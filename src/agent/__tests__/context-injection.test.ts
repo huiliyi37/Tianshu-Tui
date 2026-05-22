@@ -78,11 +78,9 @@ describe('ContextInjectionController', () => {
       })
 
       controller.refreshActiveClaims()
-      const request = engine.buildRequest([{ role: 'user', content: 'next' }])
+      const request = engine.buildOaiRequest([{ role: 'user', content: 'next' }])
       const joined = request.messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n')
-      // Harness-only: activeClaims are no longer rendered into the LLM prompt (direction A)
       assert.doesNotMatch(joined, /<active-claims/)
-      // Consumers are still recorded on the claim object regardless of prompt rendering
       assert.ok(claimStore.listClaims().some(c => c.consumers.some(consumer => consumer.kind === 'prompt')))
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -96,11 +94,9 @@ describe('ContextInjectionController', () => {
     controller.refreshRepairHint()
     controller.setCerebellarHint('hint')
 
-    const request = engine.buildRequest([{ role: 'user', content: 'next' }])
+    const request = engine.buildOaiRequest([{ role: 'user', content: 'next' }])
     const joined = request.messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n')
-    // repairHint IS still rendered in the LLM prompt
     assert.match(joined, /&lt;repair-hint tool=&quot;read_file&quot;&gt;check path&lt;\/repair-hint&gt;/)
-    // cerebellarHint is harness-only — NOT rendered in the LLM prompt (direction A)
     assert.doesNotMatch(joined, /Prediction error rate elevated/)
   })
 })
