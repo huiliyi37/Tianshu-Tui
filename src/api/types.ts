@@ -1,3 +1,19 @@
+export type {
+  OaiAssistantMessage,
+  OaiChatRequest,
+  OaiMessage,
+  OaiSystemMessage,
+  OaiToolCall,
+  OaiToolDefinition,
+  OaiToolMessage,
+  OaiUsage,
+  OaiUserMessage,
+} from './oai-types.js'
+
+/**
+ * @deprecated Migration in progress — new code should use OaiMessage from src/api/oai-types.ts.
+ * The legacy ContentBlock-based Message format will be removed in Phase 5.
+ */
 export interface ContentBlockText {
   type: 'text'
   text: string

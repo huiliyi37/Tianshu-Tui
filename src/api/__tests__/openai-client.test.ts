@@ -21,6 +21,16 @@ function makeRequest(text: string): MessageRequest {
   }
 }
 
+function assistantRequest(content: MessageRequest['messages'][number]['content']): MessageRequest {
+  return {
+    model: 'gpt-4o',
+    messages: [
+      { role: 'assistant', content },
+    ],
+    max_tokens: 4096,
+  }
+}
+
 describe('OpenAIClient', () => {
   it('implements StreamClient interface', () => {
     const client = new OpenAIClient(TEST_CONFIG)
@@ -109,22 +119,98 @@ describe('OpenAIClient', () => {
 
   it('handles assistant message with only tool_use (no text)', () => {
     const client = new OpenAIClient(TEST_CONFIG)
-    const request: MessageRequest = {
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'assistant',
-          content: [
-            { type: 'tool_use', id: 'tu_1', name: 'run_bash', input: { command: 'ls' } },
-          ],
-        },
-      ],
-      max_tokens: 4096,
-    }
-    const body = (client as any).buildRequestBody(request)
+    const body = (client as any).buildRequestBody(assistantRequest([
+      { type: 'tool_use', id: 'tu_1', name: 'run_bash', input: { command: 'ls' } },
+    ]))
     const assistantMsg = body.messages.find((m: any) => m.role === 'assistant')
     assert.ok(assistantMsg)
     assert.equal(assistantMsg.content, undefined)
+    assert.equal(assistantMsg.tool_calls.length, 1)
+  })
+
+  it('preserves DeepSeek reasoning_content with text and tool_calls', () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek' })
+    const body = (client as any).buildRequestBody(assistantRequest([
+      { type: 'thinking', thinking: 'Need to inspect the file.' },
+      { type: 'text', text: 'I will inspect it.' },
+      { type: 'tool_use', id: 'tu_read', name: 'read_file', input: { file_path: 'src/main.tsx' } },
+    ]))
+
+    const assistantMsg = body.messages.find((m: any) => m.role === 'assistant')
+    assert.ok(assistantMsg)
+    assert.equal(assistantMsg.content, 'I will inspect it.')
+    assert.equal(assistantMsg.reasoning_content, 'Need to inspect the file.')
+    assert.equal(assistantMsg.tool_calls.length, 1)
+    assert.equal(assistantMsg.tool_calls[0].function.name, 'read_file')
+  })
+
+  it('preserves DeepSeek reasoning_content with tool_calls and no text', () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek' })
+    const body = (client as any).buildRequestBody(assistantRequest([
+      { type: 'thinking', thinking: 'Need command output.' },
+      { type: 'tool_use', id: 'tu_bash', name: 'bash', input: { command: 'pwd' } },
+    ]))
+
+    const assistantMsg = body.messages.find((m: any) => m.role === 'assistant')
+    assert.ok(assistantMsg)
+    assert.equal(assistantMsg.content, undefined)
+    assert.equal(assistantMsg.reasoning_content, 'Need command output.')
+    assert.equal(assistantMsg.tool_calls.length, 1)
+  })
+
+  it('adds placeholder content for DeepSeek thinking-only assistant messages', () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek' })
+    const body = (client as any).buildRequestBody(assistantRequest([
+      { type: 'thinking', thinking: 'No visible text yet.' },
+    ]))
+
+    const assistantMsg = body.messages.find((m: any) => m.role === 'assistant')
+    assert.ok(assistantMsg)
+    assert.equal(assistantMsg.content, '')
+    assert.equal(assistantMsg.reasoning_content, 'No visible text yet.')
+    assert.equal(assistantMsg.tool_calls, undefined)
+  })
+
+  it('omits GLM reasoning_content while keeping text and tool_calls', () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'glm' })
+    const body = (client as any).buildRequestBody(assistantRequest([
+      { type: 'thinking', thinking: 'GLM thinking should be cleared.' },
+      { type: 'text', text: 'Visible GLM text.' },
+      { type: 'tool_use', id: 'tu_glm', name: 'grep', input: { pattern: 'TODO' } },
+    ]))
+
+    const assistantMsg = body.messages.find((m: any) => m.role === 'assistant')
+    assert.ok(assistantMsg)
+    assert.equal(assistantMsg.content, 'Visible GLM text.')
+    assert.equal(assistantMsg.reasoning_content, undefined)
+    assert.equal(assistantMsg.tool_calls.length, 1)
+  })
+
+  it('omits GLM reasoning_content with tool_calls and no text', () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'glm' })
+    const body = (client as any).buildRequestBody(assistantRequest([
+      { type: 'thinking', thinking: 'GLM thinking should be cleared.' },
+      { type: 'tool_use', id: 'tu_glm', name: 'grep', input: { pattern: 'TODO' } },
+    ]))
+
+    const assistantMsg = body.messages.find((m: any) => m.role === 'assistant')
+    assert.ok(assistantMsg)
+    assert.equal(assistantMsg.content, undefined)
+    assert.equal(assistantMsg.reasoning_content, undefined)
+    assert.equal(assistantMsg.tool_calls.length, 1)
+  })
+
+  it('keeps standard OpenAI-compatible text and tool_calls without reasoning_content', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    const body = (client as any).buildRequestBody(assistantRequest([
+      { type: 'text', text: 'Calling a tool.' },
+      { type: 'tool_use', id: 'tu_standard', name: 'get_time', input: { tz: 'UTC' } },
+    ]))
+
+    const assistantMsg = body.messages.find((m: any) => m.role === 'assistant')
+    assert.ok(assistantMsg)
+    assert.equal(assistantMsg.content, 'Calling a tool.')
+    assert.equal(assistantMsg.reasoning_content, undefined)
     assert.equal(assistantMsg.tool_calls.length, 1)
   })
 
