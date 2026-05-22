@@ -39,7 +39,13 @@ export interface VolatileContext {
   cerebellarHint?: string | null
   /** Cross-session events formatted for injection (cache-safe: only in dynamic appendix) */
   crossSessionEvents?: string
-  /** Session-state snapshot from SessionStateManager.renderForVolatile(). Injected into FROZEN block. */
+  /**
+   * Session-state snapshot from SessionStateManager.renderForVolatile().
+   * Cache-safe: rendered ONLY into the dynamic appendix of the latest user message.
+   * MUST stay out of buildVolatileBlockInternal so historical user messages keep their
+   * frozen prefix byte-stable across tool-call turns. setSessionState() must not invalidate
+   * the fresh cache — updates land at user-message boundaries, not per-turn.
+   */
   sessionState?: string | null
 }
 
@@ -204,6 +210,10 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     parts.push(ctx.crossSessionEvents)
   }
 
+  if (ctx.sessionState) {
+    parts.push(ctx.sessionState)
+  }
+
   return parts.length > 0 ? `<context-update>\n${parts.join('\n\n')}\n</context-update>` : ''
 }
 
@@ -306,10 +316,6 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   if (ctx.sessionMemoryBlock) {
     parts.push(`<session-memory>\n${escapeXml(ctx.sessionMemoryBlock)}\n</session-memory>`)
-  }
-
-  if (ctx.sessionState) {
-    parts.push(ctx.sessionState)
   }
 
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {

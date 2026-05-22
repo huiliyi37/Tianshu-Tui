@@ -453,3 +453,102 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     assert.equal(engine.checkDrift(), null)
   })
 })
+
+describe('sessionState injection — cache safety + path coverage', () => {
+  function makeEngine(habituationThreshold: number) {
+    return new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test/project', gitStatus: 'Current branch: main', rivetMd: '# Test' },
+      habituationThreshold,
+    })
+  }
+
+  it('sessionState reaches fresh volatile block under tracker-enabled (default) path', () => {
+    const engine = makeEngine(5) // default — tracker enabled
+    engine.setSessionState('<session-state>\nTask: alpha [executing]\n</session-state>')
+
+    const req = engine.buildRequest([{ role: 'user', content: 'hello' }])
+    const first = (req.messages[0] as { content: string }).content
+    assert.match(first, /<session-state>/, 'sessionState must appear when tracker enabled')
+    assert.match(first, /Task: alpha/)
+  })
+
+  it('sessionState reaches fresh volatile block under tracker-disabled (fallback) path', () => {
+    const engine = makeEngine(0) // tracker disabled
+    engine.setSessionState('<session-state>\nTask: beta [verifying]\n</session-state>')
+
+    const req = engine.buildRequest([{ role: 'user', content: 'hello' }])
+    const first = (req.messages[0] as { content: string }).content
+    assert.match(first, /<session-state>/, 'sessionState must appear when tracker disabled')
+    assert.match(first, /Task: beta/)
+  })
+
+  it('volatile block stays byte-identical across 5 tool-call turns even when setSessionState is called per turn', () => {
+    const engine = makeEngine(5)
+
+    let firstVol = ''
+    for (let turn = 0; turn < 5; turn++) {
+      // Simulate loop.ts:924 — every turn re-pushes the latest snapshot
+      engine.setSessionState(`<session-state>\nFiles tracked: ${turn}\n</session-state>`)
+
+      const messages: Message[] = [{ role: 'user', content: 'refactor the auth module' }]
+      for (let t = 0; t < turn; t++) {
+        messages.push({ role: 'assistant', content: [{ type: 'tool_use', id: `c_${t}`, name: 'read_file', input: {} }] as any })
+        messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: `c_${t}`, content: 'ok' }] as any })
+      }
+
+      const req = engine.buildRequest(messages)
+      const vol = (req.messages[0] as { content: string }).content
+
+      if (turn === 0) firstVol = vol
+      else assert.equal(vol, firstVol,
+        `Turn ${turn}: volatile block must stay byte-identical to turn 0 — setSessionState in mid-conversation must NOT invalidate prefix cache`)
+    }
+  })
+
+  it('sessionState refreshes when a NEW user message arrives', () => {
+    const engine = makeEngine(5)
+    engine.setSessionState('<session-state>\nState: A\n</session-state>')
+
+    const req1 = engine.buildRequest([{ role: 'user', content: 'first task' }])
+    const m1 = (req1.messages[0] as { content: string }).content
+    assert.match(m1, /State: A/)
+
+    // Update sessionState during the user-msg-1 lifecycle
+    engine.setSessionState('<session-state>\nState: B\n</session-state>')
+
+    // New user message arrives — fresh cache MUST refresh to current sessionState
+    const req2 = engine.buildRequest([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'done' },
+      { role: 'user', content: 'second task' },
+    ])
+    // Find the volatile block injected before "second task"
+    const msgs = req2.messages
+    let secondTaskFresh = ''
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i] as { role: string; content: string }
+      if (m.role === 'user' && m.content === 'second task') {
+        secondTaskFresh = (msgs[i - 1] as { content: string }).content
+        break
+      }
+    }
+    assert.match(secondTaskFresh, /State: B/, 'New user message must see latest sessionState snapshot')
+  })
+
+  it('historical user messages do NOT carry sessionState — protects prefix cache of older turns', () => {
+    const engine = makeEngine(5)
+    engine.setSessionState('<session-state>\nState: live\n</session-state>')
+
+    const req = engine.buildRequest([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'reply' },
+      { role: 'user', content: 'second' },
+    ])
+    const msgs = req.messages
+    const firstVol = (msgs[0] as { content: string }).content
+    assert.doesNotMatch(firstVol, /<session-state>/, 'Historical user-msg volatile block must NOT contain sessionState (frozen prefix)')
+  })
+})

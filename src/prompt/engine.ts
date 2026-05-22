@@ -313,9 +313,15 @@ export class PromptEngine {
     this.crossSessionEvents = events ?? undefined
   }
 
+  /**
+   * Update session-state snapshot. Does NOT invalidate the fresh cache:
+   * within the same user message, all tool-call turns reuse the cached fresh
+   * volatile block — sessionState refreshes only at user-message boundaries.
+   * This is required to preserve DeepSeek prefix cache across tool turns.
+   * See: prompt/volatile.ts VolatileContext.sessionState comment.
+   */
   setSessionState(text: string | null): void {
     this.sessionStateText = text ?? undefined
-    this.invalidateFreshCache()
   }
 
   setPhaseHint(hint: string): void {
