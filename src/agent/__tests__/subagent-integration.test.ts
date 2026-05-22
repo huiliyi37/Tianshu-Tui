@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { filterToolRegistry, ToolRegistry } from '../../tools/registry.js'
 import type { Tool, ToolCallParams } from '../../tools/types.js'
-import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/stream-client.js'
 import type { OaiChatRequest } from '../../api/types.js'
 import {
   READ_ONLY_WORKER_TOOLS,

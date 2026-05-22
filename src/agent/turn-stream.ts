@@ -1,4 +1,4 @@
-import type { StreamCallbacks } from '../api/client.js'
+import type { StreamCallbacks } from '../api/stream-client.js'
 import type { StreamClient } from '../api/stream-client.js'
 import type { OaiChatRequest } from '../api/oai-types.js'
 import type { ContentBlock, Usage } from '../api/types.js'

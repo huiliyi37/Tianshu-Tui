@@ -32,7 +32,7 @@ export const providerSchema = z.object({
   apiKey: z.string().optional(),
   apiKeyEnv: z.string().optional(),
   baseUrl: z.string().url(),
-  protocol: z.enum(['anthropic', 'openai']).default('anthropic'),
+  protocol: z.enum(['openai']).default('openai'),
   auth: authConfigSchema.optional(),
   capabilities: providerCapabilitiesSchema,
   fallback: z.array(z.string()).optional(),

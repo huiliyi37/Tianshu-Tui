@@ -1,4 +1,3 @@
-import { ApiClient, type ClientConfig } from './client.js'
 import { OpenAIClient } from './openai-client.js'
 import { CodexClient } from './codex-client.js'
 import type { StreamClient } from './stream-client.js'
@@ -37,8 +36,8 @@ export function resolveApiKey(provider: ProviderConfig): string {
 /**
  * Create a streaming API client for the given provider.
  *
- * Delegates to the canonical StreamClient interface — all consumers
- * (TUI, agent loop, tool pipeline) are unaffected.
+ * All providers use OpenAI Chat Completions format.
+ * Codex OAuth is the sole exception (uses the Responses API).
  */
 export function createProviderClient(
   provider: ProviderConfig,
@@ -55,48 +54,23 @@ export function createProviderClient(
     })
   }
 
-  if (provider.protocol === 'openai') {
-    return new OpenAIClient({
-      baseUrl: provider.baseUrl,
-      apiKey: params.apiKey,
-      model: params.model,
-      maxTokens: params.maxTokens,
-      auth: params.auth,
-      thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
-      thinkingFormat: capabilities.thinkingFormat,
-      effortFormat: capabilities.effortFormat,
-      reasoningEffort: params.reasoningEffort,
-      sessionId: params.sessionId,
-      providerName: provider.name,
-      providerProfile: getProviderProfile(provider.name, modelContextWindow(provider, params.model)),
-      unsupported: provider.unsupported.length > 0
-        ? provider.unsupported
-        : capabilities.stripParams,
-    })
-  }
-
-  const clientConfig: ClientConfig = {
+  return new OpenAIClient({
     baseUrl: provider.baseUrl,
     apiKey: params.apiKey,
     model: params.model,
     maxTokens: params.maxTokens,
-    thinking: provider.thinking,
-    thinkingBudget: params.thinkingBudget,
-    reasoningEffort: capabilities.effortFormat === 'none'
-      ? undefined
-      : (params.reasoningEffort ?? 'high'),
-    // Empty default [] is truthy, so ?? would never fallback.  Use explicit
-    // length check: only trust provider.unsupported when the user actually
-    // set it; otherwise defer to the well-known defaults.
+    auth: params.auth,
+    thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
+    thinkingFormat: capabilities.thinkingFormat,
+    effortFormat: capabilities.effortFormat,
+    reasoningEffort: params.reasoningEffort,
+    sessionId: params.sessionId,
+    providerName: provider.name,
+    providerProfile: getProviderProfile(provider.name, modelContextWindow(provider, params.model)),
     unsupported: provider.unsupported.length > 0
       ? provider.unsupported
       : capabilities.stripParams,
-    hasToolJsonInContentBug: capabilities.hasToolJsonInContentBug,
-    mapUsage: capabilities.mapUsage,
-    providerProfile: getProviderProfile(provider.name, modelContextWindow(provider, params.model)),
-  }
-
-  return new ApiClient(clientConfig)
+  })
 }
 
 function modelContextWindow(provider: ProviderConfig, modelId: string): number | undefined {

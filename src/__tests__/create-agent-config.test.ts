@@ -5,8 +5,8 @@ import type { ProviderConfig } from '../config/schema.js'
 
 const testProvider: ProviderConfig = {
   name: 'deepseek',
-  baseUrl: 'https://api.deepseek.com/anthropic',
-  protocol: 'anthropic',
+  baseUrl: 'https://api.deepseek.com/v1',
+  protocol: 'openai',
   capabilities: {
     cacheControl: false,
     stripParams: [],

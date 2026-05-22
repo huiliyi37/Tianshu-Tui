@@ -36,7 +36,7 @@ export interface ClassifiedError {
 /** Extract HTTP status code from various error shapes. */
 function extractStatus(error: unknown): number | null {
   if (error != null && typeof error === 'object') {
-    // ApiError from client.ts exposes .status directly
+    // ApiError exposes .status directly
     const obj = error as Record<string, unknown>
     if (typeof obj.status === 'number') return obj.status
 
@@ -241,7 +241,7 @@ function classifyByPattern(error: unknown): ClassifiedError {
   }
 }
 
-/** Read retryAfterMs from the error object (set by ApiError). */
+/** Read retryAfterMs from the error object (set by ApiError (legacy)). */
 function extractRetryAfter(error: unknown): number | undefined {
   if (error != null && typeof error === 'object') {
     const obj = error as Record<string, unknown>

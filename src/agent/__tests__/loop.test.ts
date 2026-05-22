@@ -11,7 +11,7 @@ import { ToolRegistry } from '../../tools/registry.js'
 import { READ_FILE_TOOL } from '../../tools/read-file.js'
 import { ContextClaimStore } from '../../context/claim-store.js'
 import { PlaybookStore } from '../playbook-store.js'
-import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/stream-client.js'
 import type { StreamClient } from '../../api/stream-client.js'
 import type { ContentBlock, Message } from '../../api/types.js'
 

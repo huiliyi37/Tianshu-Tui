@@ -57,3 +57,12 @@ export class RepairPipeline {
     return { output: current, telemetry }
   }
 }
+
+/** Validate required fields are present in tool input */
+export function validateRequiredFields(
+  input: Record<string, unknown>,
+  required: string[],
+): string[] {
+  if (required.length === 0) return []
+  return required.filter(f => input[f] === undefined || input[f] === null)
+}

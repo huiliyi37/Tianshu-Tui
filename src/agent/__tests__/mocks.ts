@@ -1,6 +1,6 @@
 import { mock } from 'node:test'
 import type { StreamClient } from '../../api/stream-client.js'
-import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/stream-client.js'
 import type { OaiChatRequest } from '../../api/oai-types.js'
 import { ContextClaimStore } from '../../context/claim-store.js'
 import { tmpdir } from 'node:os'

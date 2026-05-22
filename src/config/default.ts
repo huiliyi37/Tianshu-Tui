@@ -40,7 +40,7 @@ export const DEFAULT_CONFIG: Config = {
         name: 'kimi',
         apiKeyEnv: 'KIMI_API_KEY',
         baseUrl: 'https://api.kimi.com/coding/v1',
-        protocol: 'anthropic' as const,
+        protocol: 'openai' as const,
         capabilities: {
           cacheControl: false,
           stripParams: [],
@@ -88,7 +88,7 @@ export const DEFAULT_CONFIG: Config = {
         name: 'claude',
         apiKeyEnv: 'CLAUDE_API_KEY',
         baseUrl: 'http://85.137.242.133:8080/v1',
-        protocol: 'anthropic' as const,
+        protocol: 'openai' as const,
         capabilities: {
           cacheControl: false,
           stripParams: [],

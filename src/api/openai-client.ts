@@ -1,5 +1,5 @@
 import type { StreamClient } from './stream-client.js'
-import type { StreamCallbacks } from './client.js'
+import type { StreamCallbacks } from './stream-client.js'
 import type { OaiChatRequest } from './oai-types.js'
 import { stableStringify } from './stable-json.js'
 import type { ProviderProfile } from './provider-profile.js'

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { RepairPipeline } from '../agent/repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from '../agent/repair-passes.js'
 import { RepairHintTracker } from '../agent/repair-hint.js'
-import { validateRequiredFields } from '../api/client.js'
+import { validateRequiredFields } from '../agent/repair-pipeline.js'
 
 describe('repair pipeline integration', () => {
   const pipeline = new RepairPipeline([fourHorsemenPass, semanticRepairPass])

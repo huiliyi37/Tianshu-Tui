@@ -1,6 +1,6 @@
 import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
-import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/stream-client.js'
 import type { StreamClient } from '../../api/stream-client.js'
 import type { ContentBlock } from '../../api/types.js'
 import { PromptEngine } from '../../prompt/engine.js'

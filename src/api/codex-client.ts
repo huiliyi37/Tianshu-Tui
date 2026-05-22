@@ -1,7 +1,7 @@
 import type { StreamClient } from './stream-client.js'
 import type { OaiChatRequest } from './oai-types.js'
 import type { ContentBlock } from './types.js'
-import type { StreamCallbacks } from './client.js'
+import type { StreamCallbacks } from './stream-client.js'
 import { withStructuredRetry } from './retry-engine.js'
 
 export interface CodexClientConfig {

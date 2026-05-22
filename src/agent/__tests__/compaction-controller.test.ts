@@ -4,7 +4,7 @@ import { CompactionController } from '../compaction-controller.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { PressureMonitor } from '../../context/pressure-monitor.js'
-import type { StreamCallbacks } from '../../api/client.js'
+import type { StreamCallbacks } from '../../api/stream-client.js'
 import type { StreamClient } from '../../api/stream-client.js'
 
 function makeEngine(): PromptEngine {

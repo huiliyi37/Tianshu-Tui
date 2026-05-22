@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { RepairPipeline } from '../repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from '../repair-passes.js'
-import { validateRequiredFields } from '../../api/client.js'
+import { validateRequiredFields } from '../repair-pipeline.js'
 
 describe('CTCL parity — full pipeline', () => {
   const pipeline = new RepairPipeline([fourHorsemenPass, semanticRepairPass])

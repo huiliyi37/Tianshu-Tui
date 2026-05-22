@@ -9,8 +9,8 @@ import type { ProviderConfig } from '../../config/schema.js'
 
 const deepseekProvider: ProviderConfig = {
   name: 'deepseek',
-  baseUrl: 'https://api.deepseek.com/anthropic',
-  protocol: 'anthropic',
+  baseUrl: 'https://api.deepseek.com/v1',
+  protocol: 'openai',
   capabilities: {
     cacheControl: false,
     stripParams: [],
@@ -26,7 +26,7 @@ const deepseekProvider: ProviderConfig = {
 const kimiProvider: ProviderConfig = {
   name: 'kimi',
   baseUrl: 'https://api.kimi.com/coding',
-  protocol: 'anthropic',
+  protocol: 'openai',
   capabilities: {
     cacheControl: false,
     stripParams: [],
@@ -74,7 +74,7 @@ describe('createProviderClient', () => {
     // Provider with empty unsupported → should use capabilities.stripParams
     const caps = resolveCapabilities('deepseek')
     const client = createProviderClient(deepseekProvider, caps, runtimeParams)
-    // ApiClient doesn't expose config, but construction succeeds
+    // OpenAIClient doesn't expose config, but construction succeeds
     assert.ok(client)
   })
 
@@ -88,7 +88,7 @@ describe('createProviderClient', () => {
     assert.ok(client)
   })
 
-  it('passes providerProfile into deepseek anthropic client for canonical cache strategy', async () => {
+  it('passes providerProfile into OpenAIClient for cache strategy', async () => {
     const capabilities = resolveCapabilities('deepseek')
     const client = createProviderClient(deepseekProvider, capabilities, runtimeParams)
     const originalFetch = globalThis.fetch
