@@ -1,5 +1,6 @@
 import type { Message } from '../api/types.js'
-import { groupIntoRounds, computeInvariantStatus } from './rounds.js'
+import type { OaiMessage } from '../api/oai-types.js'
+import { groupIntoRounds, computeInvariantStatus, groupIntoRoundsOai, computeOaiInvariantStatus } from './rounds.js'
 import type { CompactedSpan, ContextLedger, MicrocompactOptions, MicrocompactResult } from './types.js'
 
 export function microcompactToolResults(
@@ -53,21 +54,49 @@ export function microcompactToolResults(
 
 export function applyMicrocompact(
   ledger: ContextLedger,
-  messages: Message[],
+  messages: OaiMessage[],
   options?: MicrocompactOptions,
-): { ledger: ContextLedger; messages: Message[] } {
-  const result = microcompactToolResults(messages, options)
-  if (result.compactedCount === 0) return { ledger, messages }
+): { ledger: ContextLedger; messages: OaiMessage[] } {
+  const keepRecent = options?.keepRecentRounds ?? 4
+  const rounds = groupIntoRoundsOai(messages)
+  if (rounds.length <= keepRecent) return { ledger, messages }
+
+  const compactableRounds = rounds.slice(0, -keepRecent)
+  let compactedCount = 0
+  let tokensSaved = 0
+
+  const newMessages = messages.map((msg, msgIdx) => {
+    if (msg.role !== 'tool') return msg
+    const round = rounds.find(r => r.startMessageIndex <= msgIdx && msgIdx < r.endMessageIndex)
+    if (!round || !compactableRounds.includes(round)) return msg
+    if (!round.hasToolResults) return msg
+
+    const content = typeof msg.content === 'string' ? msg.content : ''
+    if (content.length < (options?.minContentLength ?? 500)) return msg
+
+    const lines = content.split('\n')
+    const headLine = lines[0] ?? ''
+    const tailLine = lines[lines.length - 1] ?? ''
+    const stub = [headLine, `[compacted: ${lines.length} lines of tool output]`,
+      tailLine !== headLine ? tailLine : ''].filter(Boolean).join('\n')
+
+    tokensSaved += Math.ceil((content.length - stub.length) / 4)
+    compactedCount++
+
+    return { ...msg, content: stub }
+  })
+
+  if (compactedCount === 0) return { ledger, messages }
 
   const span: CompactedSpan = {
     id: `micro_${Date.now()}`, strategy: 'micro', startRoundIndex: 0,
-    endRoundIndex: ledger.rounds.length - (options?.keepRecentRounds ?? 4),
+    endRoundIndex: ledger.rounds.length - keepRecent,
     tokenBefore: ledger.tokenBudget.estimatedTokens,
-    tokenAfter: ledger.tokenBudget.estimatedTokens - result.tokensSaved,
+    tokenAfter: ledger.tokenBudget.estimatedTokens - tokensSaved,
     rawTranscriptPath: ledger.transcriptPath, createdAt: Date.now(),
   }
 
-  const newRounds = groupIntoRounds(result.messages)
+  const newRounds = groupIntoRoundsOai(newMessages)
   const estimatedTokens = newRounds.reduce((sum, r) => sum + r.tokenEstimate, 0)
 
   return {
@@ -77,8 +106,8 @@ export function applyMicrocompact(
       compactedSpans: [...ledger.compactedSpans, span],
       tokenBudget: { ...ledger.tokenBudget, estimatedTokens,
         compactionState: estimatedTokens > ledger.tokenBudget.maxTokens * 0.8 ? 'compacting' : 'warning' },
-      apiInvariantStatus: computeInvariantStatus(newRounds),
+      apiInvariantStatus: computeOaiInvariantStatus(newRounds),
     },
-    messages: result.messages,
+    messages: newMessages,
   }
 }

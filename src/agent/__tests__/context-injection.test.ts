@@ -37,7 +37,7 @@ function makeController(input: {
     getSessionId: () => 'session-1',
     getTranscriptPath: () => '/tmp/transcript.jsonl',
     getSessionMemoryState: () => undefined,
-    getMessages: () => session.getMessages(),
+    getMessages: () => session.getOaiMessages(),
     getRecentToolHistory: () => input.toolHistory ?? [],
     getRepairHintTracker: () => repairHintTracker,
     getContextClaimStore: () => input.claimStore,

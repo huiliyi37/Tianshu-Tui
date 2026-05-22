@@ -313,7 +313,7 @@ export class AgentLoop {
       getSessionId: () => this.config.sessionId,
       getTranscriptPath: () => this.config.transcriptPath,
       getSessionMemoryState: () => this.config.getSessionMemoryState?.(),
-      getMessages: () => this.session.getMessages(),
+      getMessages: () => this.session.getOaiMessages(),
       getRecentToolHistory: () => this.recentToolHistory,
       getRepairHintTracker: () => this.repairHintTracker,
       getContextClaimStore: () => this.config.contextClaimStore,
@@ -562,7 +562,7 @@ export class AgentLoop {
         orphanToolResultCount: 0,
         wasRepaired: false,
         syntheticResultsInserted: 0,
-        messageCount: this.session.getMessages().length,
+        messageCount: this.session.getOaiMessages().length,
       },
       resourcePressure: {
         rssBytes: this.latestResourceSnapshot.memory.rssBytes,
@@ -641,7 +641,7 @@ export class AgentLoop {
     if (!this.config.sessionId) return
     new SessionPersist(this.config.sessionId).appendTurnSnapshot({
       turn: this.session.getTurnCount(), timestamp: Date.now(),
-      messageCount: this.session.getMessages().length,
+      messageCount: this.session.getOaiMessages().length,
       estimatedTokens: this.session.getEstimatedTokens(),
     })
   }
@@ -733,7 +733,7 @@ export class AgentLoop {
         
         // Fuzzy checkpoint: 记录 compact 开始
         if (this.persist) {
-          this.persist.appendCompactStart(turn, this.session.getMessages().length)
+          this.persist.appendCompactStart(turn, this.session.getOaiMessages().length)
         }
         
         const compactResult = await this.compaction.maybeCompact({
@@ -776,7 +776,7 @@ export class AgentLoop {
 
         // Fuzzy checkpoint: 记录 compact 结束
         if (this.persist) {
-          this.persist.appendCompactEnd(turn, this.session.getMessages().length)
+          this.persist.appendCompactEnd(turn, this.session.getOaiMessages().length)
         }
 
         this.streamedText = ''

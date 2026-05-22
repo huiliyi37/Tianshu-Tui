@@ -1,19 +1,19 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createContextLedger } from '../ledger.js'
-import type { Message } from '../../api/types.js'
+import type { OaiUserMessage, OaiAssistantMessage } from '../../api/oai-types.js'
 
-function userText(content: string): Message {
+function userText(content: string): OaiUserMessage {
   return { role: 'user', content }
 }
 
-function assistantText(content: string): Message {
+function assistantText(content: string): OaiAssistantMessage {
   return { role: 'assistant', content }
 }
 
 describe('createContextLedger', () => {
   it('creates a ledger with round data and token budget', () => {
-    const messages: Message[] = [
+    const messages = [
       userText('Hello'),
       assistantText('Hi!'),
     ]
@@ -27,7 +27,7 @@ describe('createContextLedger', () => {
   })
 
   it('reports healthy for small sessions', () => {
-    const messages: Message[] = [
+    const messages = [
       userText('Hi'),
       assistantText('Hello'),
     ]
@@ -38,7 +38,7 @@ describe('createContextLedger', () => {
 
   it('reports critical when near context limit', () => {
     const bigText = 'x'.repeat(400_000)
-    const messages: Message[] = [
+    const messages = [
       userText(bigText),
       assistantText(bigText),
     ]

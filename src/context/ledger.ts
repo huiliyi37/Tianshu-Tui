@@ -1,18 +1,18 @@
-import type { Message } from '../api/types.js'
-import { groupIntoRounds, computeInvariantStatus } from './rounds.js'
+import type { OaiMessage } from '../api/oai-types.js'
+import { groupIntoRoundsOai, computeOaiInvariantStatus } from './rounds.js'
 import type { CompactionState, ContextAnchor, ContextLedger, LedgerSessionMemoryState } from './types.js'
 
 export function createContextLedger(
   sessionId: string,
   transcriptPath: string,
-  messages: Message[],
+  messages: OaiMessage[],
   contextWindow: number,
   sessionMemory?: LedgerSessionMemoryState,
   extraAnchors?: ContextAnchor[],
 ): ContextLedger {
-  const rounds = groupIntoRounds(messages)
+  const rounds = groupIntoRoundsOai(messages)
   const estimatedTokens = rounds.reduce((sum, r) => sum + r.tokenEstimate, 0)
-  const invariantStatus = computeInvariantStatus(rounds)
+  const invariantStatus = computeOaiInvariantStatus(rounds)
 
   let compactionState: CompactionState = 'healthy'
   if (estimatedTokens > contextWindow * 0.95) compactionState = 'critical'

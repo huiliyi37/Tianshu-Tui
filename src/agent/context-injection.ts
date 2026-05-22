@@ -1,4 +1,5 @@
-import type { Message } from '../api/types.js'
+
+import type { OaiMessage } from '../api/oai-types.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import type { ContextAnchor } from '../context/types.js'
 import { createContextLedger } from '../context/ledger.js'
@@ -19,7 +20,7 @@ export interface ContextInjectionDeps {
   getSessionId: () => string | undefined
   getTranscriptPath: () => string | undefined
   getSessionMemoryState: () => import('../context/types.js').LedgerSessionMemoryState | undefined
-  getMessages: () => Message[]
+  getMessages: () => OaiMessage[]
   getRecentToolHistory: () => ToolHistoryEntry[]
   getRepairHintTracker: () => RepairHintTracker
   getContextClaimStore: () => ContextClaimStore | undefined

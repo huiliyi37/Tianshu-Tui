@@ -1,4 +1,6 @@
 import type { Message } from '../api/types.js'
+import type { OaiMessage } from '../api/oai-types.js'
+import type { OaiRound } from './rounds.js'
 
 // ─── Health & Budget ──────────────────────────────────────────
 
@@ -77,7 +79,7 @@ export interface LedgerSessionMemoryState {
 export interface ContextLedger {
   sessionId: string
   transcriptPath: string
-  rounds: ApiRound[]
+  rounds: OaiRound[]
   anchors: ContextAnchor[]
   workingSet: WorkingSetEntry[]
   compactedSpans: CompactedSpan[]

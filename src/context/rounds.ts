@@ -368,3 +368,36 @@ export function groupIntoRoundsOai(messages: OaiMessage[]): OaiRound[] {
 
   return rounds
 }
+
+export function computeOaiInvariantStatus(rounds: OaiRound[]): ApiInvariantStatus {
+  const status: ApiInvariantStatus = {
+    totalRounds: rounds.length,
+    okRounds: 0,
+    repairedRounds: 0,
+    brokenRounds: 0,
+    orphanToolUse: [],
+    orphanToolResult: [],
+  }
+
+  for (const round of rounds) {
+    switch (round.apiInvariant) {
+      case 'ok':
+        status.okRounds++
+        break
+      case 'repaired':
+        status.repairedRounds++
+        if (round.hasToolResults && !round.hasToolCalls) {
+          status.orphanToolResult.push(round.id)
+        }
+        break
+      case 'broken':
+        status.brokenRounds++
+        if (round.hasToolCalls && !round.hasToolResults) {
+          status.orphanToolUse.push(round.id)
+        }
+        break
+    }
+  }
+
+  return status
+}
