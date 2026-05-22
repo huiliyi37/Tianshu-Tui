@@ -86,8 +86,6 @@ export interface ToolPipelineDeps {
   turnBudget: TurnBudget
   /** Artifact store for persisting tool output — injected via params, no global setter */
   artifactStore?: import('../artifact/store.js').ArtifactStore
-  /** Session state for cross-turn awareness */
-  sessionState?: import('./session-state.js').SessionState
 }
 
 export interface ToolExecResult {

@@ -1,7 +1,5 @@
-import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import type { ArtifactStore } from '../artifact/store.js'
+import { ArtifactCorruptionError } from '../artifact/store.js'
 
 const MAX_SECTION_CHARS = 8000
 
@@ -35,7 +33,6 @@ function parseCharRange(range: string): { start: number; end: number } | null {
  * Extract a section from raw content by line range or char range.
  */
 function extractSection(rawContent: string, sectionId: string): string {
-  // Try line range first
   const lineRange = parseLineRange(sectionId)
   if (lineRange) {
     const lines = rawContent.split('\n')
@@ -47,7 +44,6 @@ function extractSection(rawContent: string, sectionId: string): string {
     return lines.slice(startIdx, endIdx).join('\n')
   }
 
-  // Try char range
   const charRange = parseCharRange(sectionId)
   if (charRange) {
     const start = Math.min(charRange.start, rawContent.length)
@@ -56,25 +52,6 @@ function extractSection(rawContent: string, sectionId: string): string {
   }
 
   return `[Invalid section format: ${sectionId}. Use "L100-L200" for line range or "c0-c5000" for char range]`
-}
-
-/**
- * Resolve artifact rawPath from artifactId.
- * Returns null if artifact not found or file missing.
- */
-async function resolveArtifactPath(
-  artifactStore: ArtifactStore | undefined,
-  artifactId: string
-): Promise<string | null> {
-  if (!artifactStore) return null
-  try {
-    const artifact = await artifactStore.get(artifactId)
-    if (!artifact) return null
-    if (!existsSync(artifact.rawPath)) return null
-    return artifact.rawPath
-  } catch {
-    return null
-  }
 }
 
 export const READ_SECTION_TOOL: Tool = {
@@ -121,15 +98,22 @@ Good: read_section(artifactId="abc123", section="L100-L200")`,
       }
     }
 
-    const rawPath = await resolveArtifactPath(params.artifactStore, artifactId)
-    if (!rawPath) {
+    const artifactStore = params.artifactStore
+    if (!artifactStore) {
       return {
-        content: `Error: Artifact ${artifactId} not found or raw file missing. Re-read the source.`,
+        content: 'Error: artifactStore is not configured for this session',
         isError: true,
       }
     }
 
-    // Validate section format before reading
+    const artifact = artifactStore.get(artifactId)
+    if (!artifact) {
+      return {
+        content: `Error: Artifact ${artifactId} not found. Re-read the source.`,
+        isError: true,
+      }
+    }
+
     const lineRange = parseLineRange(section)
     const charRange = parseCharRange(section)
     if (!lineRange && !charRange) {
@@ -140,19 +124,30 @@ Good: read_section(artifactId="abc123", section="L100-L200")`,
     }
 
     try {
-      const rawContent = await readFile(rawPath, 'utf-8')
+      const rawContent = await artifactStore.readRaw(artifactId)
+      if (rawContent === null) {
+        return {
+          content: `Error: Artifact ${artifactId} raw file missing on disk. Re-read the source.`,
+          isError: true,
+        }
+      }
       const sectionContent = extractSection(rawContent, section)
 
-      // Truncate if too large for model
       const truncated = sectionContent.length > MAX_SECTION_CHARS
         ? sectionContent.slice(0, MAX_SECTION_CHARS) + `\n... [truncated at ${MAX_SECTION_CHARS} chars]`
         : sectionContent
 
       return {
         content: truncated,
-        rawPath, // Allow model to read full section from disk if needed
+        rawPath: artifact.rawPath,
       }
     } catch (err) {
+      if (err instanceof ArtifactCorruptionError) {
+        return {
+          content: `Error: Artifact ${artifactId} is corrupted on disk (SHA-256 mismatch). Re-read the source.`,
+          isError: true,
+        }
+      }
       const message = err instanceof Error ? err.message : String(err)
       return {
         content: `Error reading artifact ${artifactId}: ${message}`,

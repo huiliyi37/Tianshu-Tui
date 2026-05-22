@@ -123,7 +123,6 @@ export class ToolExecutionController {
         getReliabilityDecision: () => this.deps.getReliabilityDecision(),
         turnBudget: this.deps.getTurnBudget(),
         artifactStore: this.deps.artifactStore,
-        sessionState: this.deps.sessionStateManager?.getSnapshot(),
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)

@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { READ_SECTION_TOOL } from '../read-section.js'
 import { ArtifactStore } from '../../artifact/store.js'
-import type { ToolCallParams } from '../types.js'
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'read-section-test-'))
@@ -148,7 +147,7 @@ describe('read_section tool', () => {
     const tempDir = makeTempDir()
     try {
       const artifactStore = new ArtifactStore(tempDir, 'test-session')
-      
+
       const artifactId = await artifactStore.save({
         tool: 'test',
         target: '/test/file.txt',
@@ -166,6 +165,52 @@ describe('read_section tool', () => {
 
       assert.ok(!result.isError)
       assert.ok(result.content.includes('out of range'))
+    } finally {
+      cleanup(tempDir)
+    }
+  })
+
+  it('detects raw artifact corruption (SHA-256 mismatch)', async () => {
+    const tempDir = makeTempDir()
+    try {
+      const artifactStore = new ArtifactStore(tempDir, 'test-session')
+      const artifactId = await artifactStore.save({
+        tool: 'test',
+        target: '/test/file.txt',
+        rawContent: 'original content\nline 2',
+        summary: 'Test file, 2 lines.',
+        sections: [],
+      })
+
+      // Tamper with the raw file directly
+      const artifact = artifactStore.get(artifactId)!
+      writeFileSync(artifact.rawPath, 'tampered content', 'utf-8')
+
+      const result = await READ_SECTION_TOOL.execute({
+        input: { artifactId, section: 'L1-L10' },
+        toolUseId: 'test-7',
+        cwd: tempDir,
+        artifactStore,
+      })
+
+      assert.ok(result.isError, 'corruption must surface as isError')
+      assert.match(result.content, /corrupted|SHA-256/i, 'error must mention corruption')
+    } finally {
+      cleanup(tempDir)
+    }
+  })
+
+  it('errors when artifactStore is not configured', async () => {
+    const tempDir = makeTempDir()
+    try {
+      const result = await READ_SECTION_TOOL.execute({
+        input: { artifactId: 'whatever', section: 'L1-L10' },
+        toolUseId: 'test-8',
+        cwd: tempDir,
+      })
+
+      assert.ok(result.isError)
+      assert.match(result.content, /not configured/i)
     } finally {
       cleanup(tempDir)
     }

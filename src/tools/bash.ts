@@ -96,9 +96,10 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
         const meta = { command: rawCommand, exitCode, durationMs }
-        const rawPath = await persistRawOutput(params.toolUseId, raw)
 
-        // Use ArtifactStore if available, otherwise fallback to output-store
+        // Use ArtifactStore if available (preferred); otherwise fall back to output-store.
+        // Skip persistRawOutput in artifact mode — ArtifactStore owns raw persistence,
+        // so we don't double-write to output-store/.
         if (params.artifactStore) {
           const { summary, sections } = summarizeBashOutput(raw, rawCommand, exitCode)
           const artifactId = await params.artifactStore.save({
@@ -108,14 +109,16 @@ Bad: \`echo "content" > file.ts\` (use write_file instead)`,
             summary,
             sections,
           })
+          const artifact = params.artifactStore.get(artifactId)
           return {
             content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to load details.`,
             uiContent: buildUiOutput(raw, meta),
-            rawPath,
+            rawPath: artifact?.rawPath,
             isError: exitCode !== 0,
           }
         }
 
+        const rawPath = await persistRawOutput(params.toolUseId, raw)
         return {
           content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
           uiContent: buildUiOutput(raw, meta),
