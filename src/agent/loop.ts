@@ -49,7 +49,7 @@ import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
 import { ArtifactStore } from '../artifact/store.js'
-import { SessionStateManager, type SessionState } from './session-state.js'
+import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import { TurnStreamController } from './turn-stream.js'
 import { classifySeason, type CognitiveSeason } from './cognitive-season.js'
@@ -209,7 +209,7 @@ export class AgentLoop {
   }
   private thetaState: ThetaState = createThetaState(7)
   private artifactStore: import('../artifact/store.js').ArtifactStore | undefined
-  private sessionState: SessionState | undefined
+  private sessionStateManager: SessionStateManager | undefined
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
   private lastSeenEventId = 0
@@ -252,7 +252,7 @@ export class AgentLoop {
       const artifactDir = join(this.cwd, '.rivet', 'artifacts')
       this.artifactStore = new ArtifactStore(artifactDir, this.config.sessionId)
       const stateManager = new SessionStateManager(this.config.sessionId)
-      this.sessionState = stateManager.getSnapshot()
+      this.sessionStateManager = stateManager
     }
 
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
@@ -409,7 +409,7 @@ export class AgentLoop {
       getReliabilityDecision: () => this.latestReliabilityDecision,
       getTurnBudget: () => this.turnBudget,
       artifactStore: this.artifactStore,
-      sessionState: this.sessionState,
+      sessionStateManager: this.sessionStateManager,
     })
   }
 
@@ -919,6 +919,10 @@ export class AgentLoop {
           } else {
             this.config.promptEngine.setCrossSessionEvents(null)
           }
+        }
+        // Inject session state snapshot into volatile block before building request
+        if (this.sessionStateManager) {
+          this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
         }
         const request = this.config.promptEngine.buildRequest(this.session.getMessages(), this.recentToolHistory)
         const streamResult = await this.turnStream!.streamTurn({

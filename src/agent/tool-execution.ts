@@ -57,8 +57,8 @@ export interface ToolExecutionDeps {
   getTurnBudget: () => TurnBudget
   /** Artifact store for persisting tool output — injected via params, no global setter */
   artifactStore?: import('../artifact/store.js').ArtifactStore
-  /** Session state for cross-turn awareness */
-  sessionState?: import('./session-state.js').SessionState
+  /** Session state manager for cross-turn awareness */
+  sessionStateManager?: import('./session-state.js').SessionStateManager
 }
 
 export interface ToolExecBatchInput {
@@ -123,7 +123,7 @@ export class ToolExecutionController {
         getReliabilityDecision: () => this.deps.getReliabilityDecision(),
         turnBudget: this.deps.getTurnBudget(),
         artifactStore: this.deps.artifactStore,
-        sessionState: this.deps.sessionState,
+        sessionState: this.deps.sessionStateManager?.getSnapshot(),
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)
@@ -181,6 +181,27 @@ export class ToolExecutionController {
           target,
         },
       )
+    }
+
+    // Update session state based on tool results
+    const mgr = this.deps.sessionStateManager
+    if (mgr) {
+      for (const tu of input.toolUses) {
+        const result = toolResults.find(r => r.type === 'tool_result' && r.tool_use_id === tu.id)
+        const isError = result && 'is_error' in result ? result.is_error === true : false
+        if (!isError) {
+          if (tu.name === 'read_file' && typeof tu.input?.file_path === 'string') {
+            mgr.trackFileRead(tu.input.file_path, `read:${tu.id}`)
+          }
+          if ((tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input?.file_path === 'string') {
+            mgr.trackFileModified(tu.input.file_path)
+          }
+        }
+        if (tu.name === 'run_tests') {
+          const target = typeof tu.input?.filter === 'string' ? tu.input.filter : 'tests'
+          mgr.recordVerification(target, isError ? 'failed' : 'passed')
+        }
+      }
     }
 
     if (shouldTippingPointReset(this.deps.getPredictionAccumulator())) {

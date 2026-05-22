@@ -39,6 +39,8 @@ export interface VolatileContext {
   cerebellarHint?: string | null
   /** Cross-session events formatted for injection (cache-safe: only in dynamic appendix) */
   crossSessionEvents?: string
+  /** Session-state snapshot from SessionStateManager.renderForVolatile(). Injected into FROZEN block. */
+  sessionState?: string | null
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -304,6 +306,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   if (ctx.sessionMemoryBlock) {
     parts.push(`<session-memory>\n${escapeXml(ctx.sessionMemoryBlock)}\n</session-memory>`)
+  }
+
+  if (ctx.sessionState) {
+    parts.push(ctx.sessionState)
   }
 
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
