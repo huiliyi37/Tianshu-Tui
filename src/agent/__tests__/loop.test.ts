@@ -181,7 +181,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
 
     const client: ApiClient = {
       stream: mock.fn(async (req: { messages: Message[] }, cb: StreamCallbacks, _sig?: AbortSignal) => {
-        const contexts = req.messages.filter(message => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<context>'))
+        const contexts = req.messages.filter(message => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<star-domain'))
         const context = contexts.at(-1)
         if (context && typeof context.content === 'string') seenContexts.push(context.content)
         cb.onTextDelta('done')
@@ -192,7 +192,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
 
     const agent = new AgentLoop({ client, promptEngine: engine, toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
 
-    await agent.run('探索一个新的缓存方案', makeCallbacks())
+    await agent.run('探索一个新的实验性 POC', makeCallbacks())
     await agent.run('修复内存泄漏', makeCallbacks())
 
     assert.equal(seenContexts.length, 2)
