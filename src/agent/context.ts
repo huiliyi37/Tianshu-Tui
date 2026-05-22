@@ -1,7 +1,7 @@
 import type { ContentBlock, Message, Usage } from '../api/types.js'
 import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
 import type { CompactEvent, ContextLedger } from '../context/types.js'
-import { estimateMessageTokens, estimateTokens } from '../compact/micro.js'
+import { estimateMessageTokens, estimateTokens, estimateOaiTokens } from '../compact/micro.js'
 import { stableStringify } from '../api/stable-json.js'
 
 const MAX_TRACKED_FILES = 500
@@ -174,6 +174,12 @@ export class SessionContext {
   replaceMessages(messages: Message[]): void {
     this.state.oaiMessages = messages.flatMap(legacyMessageToOaiMessages)
     this.state.estimatedTokens = estimateTokens(messages)
+  }
+
+  /** Replace messages using OAI format directly (avoids legacy round-trip) */
+  replaceOaiMessages(messages: OaiMessage[]): void {
+    this.state.oaiMessages = messages
+    this.state.estimatedTokens = estimateOaiTokens(messages)
   }
 
   /** Load messages from a persisted session (used on startup recovery) */

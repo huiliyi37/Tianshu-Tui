@@ -61,8 +61,8 @@ import { PressureMonitor } from '../context/pressure-monitor.js'
 import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
-import { compactStaleRounds } from '../compact/stale-round.js'
-import { microCompact } from '../compact/micro.js'
+import { compactStaleRoundsOai } from '../compact/stale-round.js'
+import { microCompactOai } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
@@ -749,10 +749,10 @@ export class AgentLoop {
 
         // Stale round compaction: proactively shrink N-2+ tool_results
         if (!compactResult.compacted) {
-          const before = this.session.getMessages()
-          const after = compactStaleRounds(before, this.config.contextWindow ?? 1_000_000)
+          const before = this.session.getOaiMessages()
+          const after = compactStaleRoundsOai(before, this.config.contextWindow ?? 1_000_000)
           if (after !== before) {
-            this.session.replaceMessages(after)
+            this.session.replaceOaiMessages(after)
             if (typeof globalThis.gc === 'function') globalThis.gc()
           }
         }
@@ -763,13 +763,13 @@ export class AgentLoop {
         const heapRatio = snap
           ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
           : 0
-        if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
-          const before = this.session.getMessages()
+        if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getOaiMessages().length >= 10) {
+          const before = this.session.getOaiMessages()
           // Use microCompact with a virtual smaller window to force message dropping
           const virtualWindow = Math.floor((this.config.contextWindow ?? 1_000_000) * 0.3)
-          const { messages: trimmed } = microCompact(before, virtualWindow, this.session.getEstimatedTokens())
+          const { messages: trimmed } = microCompactOai(before, virtualWindow, this.session.getEstimatedTokens())
           if (trimmed.length < before.length || trimmed !== before) {
-            this.session.replaceMessages(trimmed)
+            this.session.replaceOaiMessages(trimmed)
             if (typeof globalThis.gc === 'function') globalThis.gc()
           }
         }
