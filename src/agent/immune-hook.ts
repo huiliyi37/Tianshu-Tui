@@ -51,6 +51,8 @@ export class ImmuneHook {
 
   constructor(private deps: ImmuneHookDeps) {}
 
+  getPhysarum(): PhysarumEngine { return this.deps.physarum }
+
   /** Main entry point — called after each tool execution */
   run(ctx: ImmuneHookContext): ImmuneHookResult {
     // 0. Feed Physarum flow data

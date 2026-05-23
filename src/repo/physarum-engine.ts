@@ -283,4 +283,19 @@ export class PhysarumEngine {
   }
 
   edgeCount(): number { return this.edges.size }
+
+  /** Persist all edges to MeridianDb */
+  save(): void {
+    if (!this.db?.savePhysarumEdges) return
+    this.db.savePhysarumEdges([...this.edges.values()])
+  }
+
+  /** Load edges from MeridianDb (call once at startup) */
+  loadFromDb(): void {
+    if (!this.db?.loadPhysarumEdges) return
+    const edges = this.db.loadPhysarumEdges()
+    for (const e of edges) {
+      this.edges.set(this.edgeKey(e.fileA, e.fileB), e)
+    }
+  }
 }

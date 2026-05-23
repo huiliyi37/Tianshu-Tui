@@ -27,6 +27,8 @@ export class MeridianIndexer {
     this.behavior = new MeridianBehavior(this.db, stigmergy)
   }
 
+  getDb(): MeridianDb { return this.db }
+
   private async ensureInit(): Promise<void> {
     if (!this.initialized) {
       await initParser()

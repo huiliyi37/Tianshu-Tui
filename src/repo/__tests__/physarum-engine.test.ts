@@ -89,4 +89,26 @@ describe('PhysarumEngine', () => {
     const stats = engine.getStats()
     assert.equal(stats.prunedThisTurn, 0)
   })
+
+  it('save + loadFromDb round-trips edges through MeridianDb stub', () => {
+    let stored: any[] = []
+    const mockDb = {
+      savePhysarumEdges: (edges: any[]) => { stored = edges },
+      loadPhysarumEdges: () => stored,
+    } as any
+
+    const engine1 = new PhysarumEngine(mockDb)
+    engine1.recordFlow('x.ts', 'y.ts', 1)
+    engine1.recordFlow('x.ts', 'y.ts', 2)
+    engine1.recordFlow('x.ts', 'y.ts', 3)
+    engine1.save()
+    assert.equal(stored.length, 1)
+
+    const engine2 = new PhysarumEngine(mockDb)
+    engine2.loadFromDb()
+    const edge = engine2.getEdge('x.ts', 'y.ts')
+    assert.ok(edge)
+    assert.equal(edge.activationCount, 3)
+    assert.ok(edge.weight > 1.0)
+  })
 })

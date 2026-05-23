@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
+import type { PhysarumEdgeState } from './physarum-types.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -47,6 +48,18 @@ CREATE TABLE IF NOT EXISTS co_edits (
 );
 CREATE INDEX IF NOT EXISTS idx_co_edits_a ON co_edits(file_a);
 CREATE INDEX IF NOT EXISTS idx_co_edits_b ON co_edits(file_b);
+
+CREATE TABLE IF NOT EXISTS physarum_edges (
+  file_a TEXT NOT NULL,
+  file_b TEXT NOT NULL,
+  weight REAL NOT NULL,
+  flow REAL NOT NULL DEFAULT 0,
+  consolidated INTEGER NOT NULL DEFAULT 0,
+  activation_count INTEGER NOT NULL DEFAULT 0,
+  last_activated_turn INTEGER NOT NULL DEFAULT 0,
+  direction REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY(file_a, file_b)
+);
 `
 
 export class MeridianDb {
@@ -224,6 +237,35 @@ export class MeridianDb {
     this.db.prepare(
       'INSERT OR REPLACE INTO edges (source_id, target_id, kind, weight, confidence) VALUES (?, ?, ?, ?, ?)'
     ).run(sourceId, targetId, kind, weight, confidence)
+  }
+
+  // ─── Physarum persistence ───────────────────────────────────────────
+
+  savePhysarumEdges(edges: PhysarumEdgeState[]): void {
+    const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM physarum_edges').run()
+      const stmt = this.db.prepare(
+        'INSERT INTO physarum_edges (file_a, file_b, weight, flow, consolidated, activation_count, last_activated_turn, direction) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      )
+      for (const e of edges) {
+        stmt.run(e.fileA, e.fileB, e.weight, e.flow, e.consolidated ? 1 : 0, e.activationCount, e.lastActivatedTurn, e.direction)
+      }
+    })
+    tx()
+  }
+
+  loadPhysarumEdges(): PhysarumEdgeState[] {
+    const rows = this.db.prepare('SELECT * FROM physarum_edges').all() as Array<Record<string, unknown>>
+    return rows.map(r => ({
+      fileA: r.file_a as string,
+      fileB: r.file_b as string,
+      weight: r.weight as number,
+      flow: r.flow as number,
+      consolidated: (r.consolidated as number) === 1,
+      activationCount: r.activation_count as number,
+      lastActivatedTurn: r.last_activated_turn as number,
+      direction: r.direction as number,
+    }))
   }
 
   close(): void {

@@ -91,4 +91,30 @@ describe('meridian db', () => {
     assert.equal(stats.symbols, 1)
     assert.equal(stats.edges, 1)
   })
+
+  it('saves and loads physarum edges', () => {
+    db.savePhysarumEdges([
+      { fileA: 'a.ts', fileB: 'b.ts', weight: 2.5, flow: 3, consolidated: true, activationCount: 7, lastActivatedTurn: 12, direction: 0.4 },
+      { fileA: 'c.ts', fileB: 'd.ts', weight: 1.0, flow: 0, consolidated: false, activationCount: 1, lastActivatedTurn: 1, direction: 0 },
+    ])
+    const loaded = db.loadPhysarumEdges()
+    assert.equal(loaded.length, 2)
+    const first = loaded.find(e => e.fileA === 'a.ts')!
+    assert.equal(first.weight, 2.5)
+    assert.equal(first.consolidated, true)
+    assert.equal(first.activationCount, 7)
+    assert.equal(first.direction, 0.4)
+  })
+
+  it('savePhysarumEdges replaces previous state', () => {
+    db.savePhysarumEdges([
+      { fileA: 'x.ts', fileB: 'y.ts', weight: 1.0, flow: 1, consolidated: false, activationCount: 1, lastActivatedTurn: 1, direction: 0 },
+    ])
+    db.savePhysarumEdges([
+      { fileA: 'p.ts', fileB: 'q.ts', weight: 3.0, flow: 5, consolidated: true, activationCount: 10, lastActivatedTurn: 20, direction: -0.2 },
+    ])
+    const loaded = db.loadPhysarumEdges()
+    assert.equal(loaded.length, 1)
+    assert.equal(loaded[0]!.fileA, 'p.ts')
+  })
 })
