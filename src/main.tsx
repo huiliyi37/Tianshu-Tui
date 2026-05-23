@@ -25,6 +25,12 @@ import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
+import { createDeliverTaskTool } from './agent/deliver-task.js'
+import { createTaskLedger } from './agent/task-ledger.js'
+import { createOwnershipLedger } from './agent/ownership-ledger.js'
+import { createVerificationAttribution } from './agent/verification-attribution.js'
+import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
+import { createWorktreeBaseline } from './agent/worktree-baseline.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { createAuthProvider } from './auth/registry.js'
 import type { AuthProvider } from './auth/types.js'
@@ -122,6 +128,36 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       () => _sessionIdRef ?? undefined,
     ))
     reg.register(ASK_USER_QUESTION_TOOL)
+
+    // B1 归属星轨：deliver_task 交付门工具
+    // TaskLedger、OwnershipLedger、DeliveryGateV2 在此初始化，
+    // 通过闭包提供给 deliver_task 工具。
+    const _b1TaskLedger = createTaskLedger({ taskId: _sessionIdRef ?? `task-${Date.now()}` })
+    const _b1Baseline = createWorktreeBaseline({
+      branch: '',
+      head: '',
+      preExistingDirty: [],
+      preExistingUntracked: [],
+      capturedAt: Date.now(),
+    })
+    const _b1Ownership = createOwnershipLedger({
+      baseline: _b1Baseline,
+      taskLedger: _b1TaskLedger,
+    })
+    const _b1Attribution = createVerificationAttribution({
+      ownership: _b1Ownership,
+    })
+    const _b1Gate = createDeliveryGateV2({
+      taskLedger: _b1TaskLedger,
+      ownership: _b1Ownership,
+      attribution: _b1Attribution,
+    })
+    reg.register(createDeliverTaskTool(() => ({
+      taskLedger: _b1TaskLedger,
+      ownership: _b1Ownership,
+      gate: _b1Gate,
+    })))
+
     return reg
   })
 
