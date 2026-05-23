@@ -30,6 +30,16 @@ Layer 4  retrospective   追溯事实和更新 brief 时读
 
 不要用于：普通代码任务的默认上下文。
 
+### `2026-05-22-T1-public-internal-boundary.md`
+
+读取时机：
+
+- 任务涉及公开发布、开源边界、内部文档是否可公开。
+- 需要判断哪些是 Public Runtime，哪些是 Internal Canon / Private Archive。
+- 需要把内部稳定态经验蒸馏成公开机制。
+
+不要用于：普通实现任务的默认上下文。
+
 ### `2026-05-22-T1-stable-state-runtime-brief.md`
 
 读取时机：
