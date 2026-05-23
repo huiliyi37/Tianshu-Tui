@@ -20,4 +20,5 @@ task_plan.md
 .rivet/sessions/
 .rivet/cache-log.jsonl
 .rivet/meridian.db*
+.rivet/playbook.jsonl
 .gitlog_temp.txt
