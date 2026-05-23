@@ -47,9 +47,9 @@ describe('isToolAllowedInReliabilityMode', () => {
     assert.equal(isToolAllowedInReliabilityMode('full', 'write_file', { file_path: 'x' }), true)
   })
 
-  it('blocks direct writes and bash writes in degraded mode', () => {
+  it('blocks write_file and bash writes in degraded mode, but allows edit_file for debug', () => {
     assert.equal(isToolAllowedInReliabilityMode('degraded', 'write_file', { file_path: 'x' }), false)
-    assert.equal(isToolAllowedInReliabilityMode('degraded', 'edit_file', { file_path: 'x' }), false)
+    assert.equal(isToolAllowedInReliabilityMode('degraded', 'edit_file', { file_path: 'x' }), true)
     assert.equal(isToolAllowedInReliabilityMode('degraded', 'bash', { command: 'echo hi > out.txt' }), false)
   })
 

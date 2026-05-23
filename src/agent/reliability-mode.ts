@@ -70,8 +70,10 @@ export function isToolAllowedInReliabilityMode(
     return READ_ONLY_MINIMAL_TOOLS.has(toolName)
   }
 
-  // degraded: keep normal tools available, but block shell writes and direct file writes.
-  if (toolName === 'write_file' || toolName === 'edit_file') return false
+  // degraded: block new file creation and shell writes, but allow edit_file
+  // so debug workflows (fix → verify) can continue under resource pressure.
+  // edit_file is low-risk: it modifies existing files with small diffs, no new processes.
+  if (toolName === 'write_file') return false
   if (requiresBashWriteApproval(toolName, input)) return false
   return true
 }
@@ -89,7 +91,7 @@ export function reliabilityBlockMessage(
       : []),
     decision.mode === 'minimal'
       ? 'Allowed tools: read_file, grep, glob, diff, inspect_project, repo_map, related_tests, recall, ask_user_question.'
-      : 'Degraded mode blocks write_file, edit_file, and bash commands with write side effects.',
+      : 'Degraded mode blocks write_file and bash commands with write side effects. edit_file is still allowed for debug fixes.',
     'Suggested recovery: compact, reduce task scope, or start a fresh session if pressure persists.',
   ].join('\n')
 }

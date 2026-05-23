@@ -93,6 +93,24 @@
 
 ---
 
+### 5. Degraded 模式允许 edit_file（本会话未提交 → 已实现）
+
+**痛点**：debug 到第 4 轮时系统触发 degraded mode，`edit_file` 被无条件阻止，无法修改代码验证假设，被迫纯靠推理修 bug。
+
+**根因分析**：
+- `degraded` 模式的目的是降低资源消耗（防止 OOM、磁盘爆满）
+- `write_file` 有风险：可能创建大文件
+- `bash` write 有风险：可能 fork 进程链
+- 但 `edit_file` 是低风险的：修改已有文件的小 diff，不创建新进程，不增加磁盘占用
+
+**方案**：`degraded` 模式下允许 `edit_file`，仅阻止 `write_file` 和 bash write。
+
+**关键文件**：`src/agent/reliability-mode.ts` L73-76
+
+**效果**：debug 场景下 agent 仍然可以"改代码 → 跑测试"循环，不会被降级保护卡死。`write_file` 仍然被阻止（防止创建大文件），bash read 命令（git log/diff/status）本来就允许。
+
+---
+
 ## 迭代方向（下一步）
 
 | 优先级 | 方向 | 依赖 |
