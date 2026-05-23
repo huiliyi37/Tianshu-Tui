@@ -335,3 +335,138 @@ describe('active claims volatile context', () => {
     assert.doesNotMatch(latest, /active-claims/)
   })
 })
+
+describe('worktree-warning dynamic appendix', () => {
+  const base: VolatileContext = { cwd: '/project' }
+
+  it('omits worktree-warning when severity is green', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      worktreeReality: {
+        cwd: '/project',
+        isGitRepo: true,
+        repoRoot: '/project',
+        branch: 'main',
+        head: 'abc123',
+        statusAvailable: true,
+        injectedContextMatchesReality: true,
+        mismatchReasons: [],
+        severity: 'green',
+      },
+    }
+    const block = buildLatestTurnVolatileBlock(ctx)
+    assert.ok(!block.includes('<worktree-warning>'))
+  })
+
+  it('renders worktree-warning when severity is yellow', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      worktreeReality: {
+        cwd: '/project',
+        isGitRepo: true,
+        repoRoot: '/project',
+        branch: 'main',
+        head: 'abc123',
+        statusAvailable: true,
+        injectedContextMatchesReality: false,
+        mismatchReasons: ['branch mismatch: injected=dev, actual=main'],
+        severity: 'yellow',
+      },
+    }
+    const block = buildLatestTurnVolatileBlock(ctx)
+    assert.ok(block.includes('<worktree-warning severity="yellow">'))
+    assert.ok(block.includes('branch mismatch: injected=dev, actual=main'))
+    assert.ok(block.includes('</worktree-warning>'))
+  })
+
+  it('renders worktree-warning when severity is red', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      worktreeReality: {
+        cwd: '/project',
+        isGitRepo: true,
+        repoRoot: '/project',
+        branch: 'main',
+        head: 'abc123',
+        statusAvailable: true,
+        injectedContextMatchesReality: false,
+        mismatchReasons: ['HEAD mismatch: injected=0000000, actual=abc123'],
+        severity: 'red',
+      },
+    }
+    const block = buildLatestTurnVolatileBlock(ctx)
+    assert.ok(block.includes('<worktree-warning severity="red">'))
+    assert.ok(block.includes('HEAD mismatch: injected=0000000, actual=abc123'))
+  })
+
+  it('renders multiple mismatch reasons', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      worktreeReality: {
+        cwd: '/project',
+        isGitRepo: true,
+        repoRoot: '/project',
+        branch: 'main',
+        head: 'abc123',
+        statusAvailable: true,
+        injectedContextMatchesReality: false,
+        mismatchReasons: [
+          'HEAD mismatch: injected=0000000, actual=abc123',
+          'branch mismatch: injected=dev, actual=main',
+        ],
+        severity: 'red',
+      },
+    }
+    const block = buildLatestTurnVolatileBlock(ctx)
+    assert.ok(block.includes('HEAD mismatch: injected=0000000, actual=abc123'))
+    assert.ok(block.includes('branch mismatch: injected=dev, actual=main'))
+  })
+
+  it('escapes XML in mismatch reasons', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      worktreeReality: {
+        cwd: '/project',
+        isGitRepo: true,
+        repoRoot: '/project',
+        branch: 'main',
+        head: 'abc123',
+        statusAvailable: true,
+        injectedContextMatchesReality: false,
+        mismatchReasons: ['branch mismatch: injected=<dev>, actual=main'],
+        severity: 'yellow',
+      },
+    }
+    const block = buildLatestTurnVolatileBlock(ctx)
+    assert.ok(block.includes('&lt;dev&gt;'))
+    assert.ok(!block.includes('<dev>'))
+  })
+
+  it('excludes worktree-warning from stable block', () => {
+    const ctx: VolatileContext = {
+      ...base,
+      worktreeReality: {
+        cwd: '/project',
+        isGitRepo: true,
+        repoRoot: '/project',
+        branch: 'main',
+        head: 'abc123',
+        statusAvailable: true,
+        injectedContextMatchesReality: false,
+        mismatchReasons: ['HEAD mismatch: injected=0000000, actual=abc123'],
+        severity: 'red',
+      },
+    }
+    const stable = buildStableVolatileBlock(ctx)
+    const latest = buildLatestTurnVolatileBlock(ctx)
+
+    // worktree-warning should only appear in dynamic appendix (latest block)
+    assert.ok(!stable.includes('<worktree-warning>'))
+    assert.ok(latest.includes('<worktree-warning severity="red">'))
+  })
+
+  it('omits worktree-warning when worktreeReality is undefined', () => {
+    const block = buildLatestTurnVolatileBlock(base)
+    assert.ok(!block.includes('<worktree-warning>'))
+  })
+})

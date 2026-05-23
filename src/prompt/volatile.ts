@@ -9,6 +9,7 @@ import { selectRelevantClaims, type ClaimRelevanceInput } from '../context/claim
 import { summarizeGitStatus } from './git-status-summary.js'
 import { scoreLessons } from '../context/lesson-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
+import type { WorktreeReality } from '../agent/worktree-reality.js'
 
 export interface ToolHistoryEntry {
   tool: string
@@ -47,6 +48,12 @@ export interface VolatileContext {
    * the fresh cache — updates land at user-message boundaries, not per-turn.
    */
   sessionState?: string | null
+  /**
+   * Worktree reality check result: compares injected git context with actual worktree state.
+   * Cache-safe: rendered ONLY into the dynamic appendix when severity !== 'green'.
+   * MUST stay out of buildVolatileBlockInternal to preserve prefix cache stability.
+   */
+  worktreeReality?: WorktreeReality
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -269,8 +276,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<project-memory>\n${escapeXml(knowledge)}\n</project-memory>`)
   }
 
-  const rawGit = ctx.gitStatus ?? gitStatusCache.get(ctx.cwd)
-  const git = rawGit ? summarizeGitStatus(rawGit) : undefined
+  // Only render git status if explicitly provided — no cache fallback here.
+  // buildStableVolatileBlock passes gitStatus: undefined to keep FROZEN prefix stable;
+  // buildDynamicAppendix has its own cache fallback for the fresh git status.
+  const git = ctx.gitStatus ? summarizeGitStatus(ctx.gitStatus) : undefined
   if (git) {
     const lines = git.split('\n')
     const commitIdx = lines.findIndex(l => l.startsWith('Recent commits:'))
@@ -349,6 +358,13 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
       })
       .join('\n')
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+  }
+
+  if (ctx.worktreeReality && ctx.worktreeReality.severity !== 'green') {
+    const reasons = ctx.worktreeReality.mismatchReasons
+      .map(r => `  ${escapeXml(r)}`)
+      .join('\n')
+    parts.push(`<worktree-warning severity="${escapeXml(ctx.worktreeReality.severity)}">\n${reasons}\n</worktree-warning>`)
   }
 
   return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''
