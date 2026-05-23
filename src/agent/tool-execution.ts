@@ -63,6 +63,8 @@ export interface ToolExecutionDeps {
   sessionStateManager?: import('./session-state.js').SessionStateManager
   /** Cache advisor for adaptive thresholds */
   cacheAdvisor?: CacheAdvisor
+  /** P3 integration facade */
+  p3?: import('./p3-integration.js').P3Integration
 }
 
 export interface ToolExecBatchInput {
@@ -146,6 +148,7 @@ export class ToolExecutionController {
           artifactStore: this.deps.artifactStore,
           cacheAdvisor: this.deps.cacheAdvisor,
           taskLedger: this.deps.config.taskLedger,
+          p3: this.deps.p3,
           artifactIdsEvicted,
           artifactIdsAccessed,
         })
@@ -196,6 +199,7 @@ export class ToolExecutionController {
           artifactStore: this.deps.artifactStore,
           cacheAdvisor: this.deps.cacheAdvisor,
           taskLedger: this.deps.config.taskLedger,
+          p3: this.deps.p3,
           artifactIdsEvicted,
           artifactIdsAccessed,
         }

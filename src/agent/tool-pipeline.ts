@@ -32,6 +32,7 @@ import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type Reliabili
 import type { ArtifactStore } from '../artifact/store.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import type { TaskLedger } from './task-ledger.js'
+import type { P3Integration } from './p3-integration.js'
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -101,6 +102,8 @@ export interface ToolPipelineDeps {
   phaseHint?: string
   /** Optional TaskLedger for B1 ownership tracking */
   taskLedger?: TaskLedger
+  /** P3 integration facade for speculative execution + mistake hints */
+  p3?: P3Integration
   /** Turn-scoped accumulator: artifact IDs evicted (created by artifactIntercept) */
   artifactIdsEvicted?: string[]
   /** Turn-scoped accumulator: artifact IDs accessed (read_section calls) */
@@ -447,6 +450,13 @@ export async function executeToolUse(
     }
 
     // Execute via TurnHarness
+    // P3-C: trigger speculative pre-execution for next likely tool
+    const toolTarget = (tu.input.file_path ?? tu.input.path ?? tu.input.command ?? '') as string
+    deps.p3?.onToolStart(tu.name)
+
+    // P3-C: check if we already have a speculative result for this tool call
+    const speculativeHit = deps.p3?.checkSpeculativeCache(tu.name, toolTarget)
+
     const traceId = tu.id
     traceStore = startTraceEvent(traceStore, {
       id: traceId,
@@ -464,6 +474,11 @@ export async function executeToolUse(
       input: tu.input,
       turn,
       execute: async () => {
+        // P3-C: use speculative cache hit if available (read-only tools only)
+        if (speculativeHit && (tu.name === 'read_file' || tu.name === 'grep' || tu.name === 'glob')) {
+          rawToolResult = { content: speculativeHit }
+          return { content: speculativeHit }
+        }
         if (tu.name === 'read_file' && canUsePrewarmForRead(tu.input)) {
           try {
             const canonicalPath = validatePath(deps.cwd, tu.input.file_path as string)
@@ -537,6 +552,12 @@ ${check.formatted}`
       // Track eviction for GhostRegistry (error artifacts too)
       const evictedErrId = extractArtifactId(finalContent)
       if (evictedErrId) deps.artifactIdsEvicted?.push(evictedErrId)
+
+      // P3-A: inject mistake hints for known error patterns
+      if (deps.p3) {
+        const hints = deps.p3.getMistakeHints(finalContent.slice(0, 300), `${tu.name} ${toolTarget}`)
+        if (hints) finalContent = finalContent + '\n' + hints
+      }
     }
 
     // Trace recording

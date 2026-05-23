@@ -67,6 +67,7 @@ import { compactStaleRoundsOai } from '../compact/stale-round.js'
 import { CacheAdvisor } from '../cache/advisor.js'
 import { microCompactOai } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
+import { createP3Integration, type P3Integration } from './p3-integration.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
@@ -235,6 +236,7 @@ export class AgentLoop {
   private currentSeason: CognitiveSeason | null = null
   private lastCompactTurn: number | null = null
   private cacheAdvisor: CacheAdvisor
+  private p3: P3Integration
 
   constructor(
     private config: AgentConfig,
@@ -266,6 +268,7 @@ export class AgentLoop {
     this.cacheAdvisor = new CacheAdvisor({
       providerProfile: this.config.providerProfile ?? { cacheType: 'none', persistent: false },
     })
+    this.p3 = createP3Integration()
 
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
@@ -441,6 +444,7 @@ export class AgentLoop {
       artifactStore: this.artifactStore,
       sessionStateManager: this.sessionStateManager,
       cacheAdvisor: this.cacheAdvisor,
+      p3: this.p3,
     })
   }
 
@@ -474,6 +478,9 @@ export class AgentLoop {
       error: isError ? result.slice(0, 50) : undefined,
     })
     if (this.recentToolHistory.length > 5) this.recentToolHistory.shift()
+
+    // P3 integration: pattern mining + speculative pre-execution
+    this.p3.onToolComplete(name, target, isError, isError ? result.slice(0, 200) : undefined)
   }
 
   private bindSessionDomain(taskDescription: string): void {
@@ -794,6 +801,13 @@ export class AgentLoop {
 
         // Stale round compaction: proactively shrink N-2+ tool_results
         if (!compactResult.compacted) {
+          // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
+          const dietBefore = this.session.getMessages()
+          const dietResult = this.p3.dietMessages(dietBefore as any)
+          if (dietResult.removedCount > 0) {
+            this.session.replaceMessages(dietResult.messages as any)
+          }
+
           const before = this.session.getMessages()
           const previewChars = this.cacheAdvisor.getStalePreviewChars()
           const after = compactStaleRoundsOai(before, this.config.contextWindow ?? 1_000_000, previewChars)
