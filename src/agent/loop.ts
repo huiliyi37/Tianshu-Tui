@@ -957,7 +957,11 @@ export class AgentLoop {
             turn,
             cacheRead: latestTurnCache.cacheRead,
             cacheCreation: latestTurnCache.cacheCreation,
-            prefixChanged: latestTurnCache.cacheCreation > 0,
+            // Non-first turn with zero cacheRead = prefix was invalidated
+            // (first turn naturally has cacheCreation > 0, that's not a prefix break)
+            prefixChanged: latestTurnCache.cacheRead === 0 && turn > 1,
+            // TODO(b3): wire eviction events from artifact store & read_section calls
+            // so GhostRegistry actually records entries for ghost-hit feedback.
             artifactIdsEvicted: [],
             artifactIdsAccessed: [],
           })
