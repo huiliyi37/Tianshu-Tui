@@ -13,6 +13,7 @@ import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
 import { batchPrewarm, buildPrewarmValue } from './prewarm-file.js'
 import { type CompactionConfig } from '../compact/constants.js'
+import { generateHandoff } from '../compact/pre-compact-handoff.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import { EvidenceTracker } from './evidence.js'
@@ -868,6 +869,19 @@ export class AgentLoop {
           this.persist.appendCompactStart(turn, this.session.getMessages().length)
         }
         
+        // P3: Pre-compact handoff — preserve session context across compaction
+        // Generated *before* compaction so the summary reflects the trajectory
+        // about to be compressed. Injected via setSessionState which refreshes
+        // at user-message boundary (next turn after compaction).
+        try {
+          const handoff = generateHandoff(this.session.getMessages() as any)
+          if (handoff.summary && (handoff.filesModified.length > 0 || handoff.hadFailures)) {
+            this.config.promptEngine.setSessionState(
+              `<pre-compact-handoff>\n${handoff.summary}\n</pre-compact-handoff>`,
+            )
+          }
+        } catch { /* non-critical: handoff is best-effort */ }
+
         const compactResult = await this.compaction.maybeCompact({
           loopTurn: turn,
           failures: this.compactFailures,
