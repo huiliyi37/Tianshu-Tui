@@ -12,7 +12,7 @@
 import { InnateLayer } from './immune-innate.js'
 import { ApcAggregator } from './immune-apc.js'
 import { ImmuneAdaptiveLayer } from './immune-adaptive.js'
-import type { DangerSignal, ImmuneMemory, ImmuneResponse, ImmuneResponseType } from './immune-types.js'
+import type { DangerSignal, ImmuneMemory, ImmuneResponse } from './immune-types.js'
 import type { PhysarumEngine } from '../repo/physarum-engine.js'
 import type { StigmergyStore } from '../context/stigmergy.js'
 import type { DoomLoopLevel } from './trace-store.js'
@@ -144,9 +144,8 @@ export class ImmuneHook {
   }
 
   /** Record successful repair (called externally after repair pipeline succeeds) */
-  recordRepairSuccess(fingerprint: string, strategy: string, turn: number): void {
-    const responseObj: ImmuneResponse = { type: strategy as ImmuneResponseType }
-    this.adaptive.recordSuccess(fingerprint, responseObj, turn)
+  recordRepairSuccess(fingerprint: string, response: ImmuneResponse, turn: number): void {
+    this.adaptive.recordSuccess(fingerprint, response, turn)
   }
 
   /** Record failed repair */

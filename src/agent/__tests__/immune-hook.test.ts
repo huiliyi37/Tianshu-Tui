@@ -63,8 +63,8 @@ describe('ImmuneHook', () => {
 
   it('records and uses immune memory for fast secondary response', () => {
     const hook = createHook()
-    // Record a successful repair (strategy string is wrapped into ImmuneResponse.type)
-    hook.recordRepairSuccess('doom:grep:pattern', 'quarantine', 10)
+    // Record a successful repair (structured ImmuneResponse object)
+    hook.recordRepairSuccess('doom:grep:pattern', { type: 'quarantine' }, 10)
 
     // Build danger + doom
     hook.run({ toolName: 'grep', fingerprint: 'x', turn: 11, doomLevel: 'none', targetFile: 'a.ts', tokenUsage: 100 })
