@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
 import type { PhysarumEdgeState } from './physarum-types.js'
+import type { ImmuneMemory } from '../agent/immune-types.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -60,6 +61,17 @@ CREATE TABLE IF NOT EXISTS physarum_edges (
   direction REAL NOT NULL DEFAULT 0,
   PRIMARY KEY(file_a, file_b)
 );
+
+CREATE TABLE IF NOT EXISTS immune_memory (
+  id TEXT PRIMARY KEY,
+  pattern TEXT NOT NULL,
+  response_json TEXT NOT NULL,
+  affinity_score REAL NOT NULL DEFAULT 0.5,
+  hit_count INTEGER NOT NULL DEFAULT 0,
+  last_hit INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_immune_pattern ON immune_memory(pattern);
 `
 
 export class MeridianDb {
@@ -266,6 +278,51 @@ export class MeridianDb {
       lastActivatedTurn: r.last_activated_turn as number,
       direction: r.direction as number,
     }))
+  }
+
+  // ─── Immune memory persistence ───────────────────────────────────────
+
+  saveImmuneMemories(memories: ImmuneMemory[]): void {
+    const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM immune_memory').run()
+      const stmt = this.db.prepare(
+        'INSERT INTO immune_memory (id, pattern, response_json, affinity_score, hit_count, last_hit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      )
+      for (const m of memories) {
+        stmt.run(
+          m.id,
+          m.pattern,
+          JSON.stringify(m.response),
+          m.affinityScore,
+          m.hitCount,
+          m.lastHit,
+          m.createdAt,
+        )
+      }
+    })
+    tx()
+  }
+
+  loadImmuneMemories(): ImmuneMemory[] {
+    const rows = this.db.prepare('SELECT * FROM immune_memory').all() as Array<Record<string, unknown>>
+    const result: ImmuneMemory[] = []
+    for (const r of rows) {
+      try {
+        const response = JSON.parse(r.response_json as string)
+        result.push({
+          id: r.id as string,
+          pattern: r.pattern as string,
+          response,
+          affinityScore: r.affinity_score as number,
+          hitCount: r.hit_count as number,
+          lastHit: r.last_hit as number,
+          createdAt: r.created_at as number,
+        })
+      } catch {
+        // Corrupt row — skip, don't fail the whole load
+      }
+    }
+    return result
   }
 
   close(): void {
