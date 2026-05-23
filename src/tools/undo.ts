@@ -36,8 +36,15 @@ export function createUndoTool(getFileHistory: () => FileHistory | undefined): T
           return { content: 'No changes to undo in the most recent snapshot.' }
         }
         const fileList = stats.filesChanged.map(f => `  - ${f}`).join('\n')
+        // B1: note if any files are not owned by the current task
+        const unownedFiles = params.ownedFiles?.length
+          ? stats.filesChanged.filter(f => !params.ownedFiles!.includes(f))
+          : []
+        const unownedNote = unownedFiles.length > 0
+          ? `\n\n⚠️  Warning: ${unownedFiles.length} file(s) are not owned by the current task and may belong to a parallel session:\n${unownedFiles.map(f => `  - ${f}`).join('\n')}\nVerify ownership before confirming.`
+          : ''
         return {
-          content: `Preview: ${stats.filesChanged.length} file(s) would be restored:\n${fileList}\n+${stats.insertions}/-${stats.deletions} lines\n\nCall with confirm: true to execute.`,
+          content: `Preview: ${stats.filesChanged.length} file(s) would be restored:\n${fileList}\n+${stats.insertions}/-${stats.deletions} lines${unownedNote}\n\nCall with confirm: true to execute.`,
         }
       }
 
@@ -46,7 +53,14 @@ export function createUndoTool(getFileHistory: () => FileHistory | undefined): T
         if (restored.length === 0) {
           return { content: 'No files needed restoration.' }
         }
-        return { content: `Restored ${restored.length} file(s):\n${restored.map(f => `  - ${f}`).join('\n')}` }
+        // B1: report if any restored files were not owned
+        const unownedRestored = params.ownedFiles?.length
+          ? restored.filter(f => !params.ownedFiles!.includes(f))
+          : []
+        const unownedNote = unownedRestored.length > 0
+          ? `\n⚠️  ${unownedRestored.length} file(s) were not owned by this task: ${unownedRestored.join(', ')}`
+          : ''
+        return { content: `Restored ${restored.length} file(s):\n${restored.map(f => `  - ${f}`).join('\n')}${unownedNote}` }
       } catch (err) {
         return { content: `Undo failed: ${err instanceof Error ? err.message : String(err)}`, isError: true }
       }

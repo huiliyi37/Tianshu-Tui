@@ -26,9 +26,11 @@ function normalizeProjectRelativePath(cwd: string, filePath: string): string | n
   return rel
 }
 
-function getScopedCommitFiles(cwd: string, sessionModifiedFiles: string[] | undefined): string[] {
-  if (!sessionModifiedFiles?.length) return []
-  const files = sessionModifiedFiles
+function getScopedCommitFiles(cwd: string, ownedFiles: string[] | undefined, sessionModifiedFiles: string[] | undefined): string[] {
+  // B1: prefer ownedFiles (post-baseline) over sessionModifiedFiles (pre-baseline)
+  const source = (ownedFiles?.length ? ownedFiles : sessionModifiedFiles) ?? []
+  if (!source.length) return []
+  const files = source
     .map(filePath => normalizeProjectRelativePath(cwd, filePath))
     .filter((filePath): filePath is string => filePath !== null)
   return [...new Set(files)].sort((a, b) => a.localeCompare(b))
@@ -117,7 +119,7 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
             return { content: 'Commit requires a "message" parameter.', isError: true }
           }
 
-          const scopedFiles = getScopedCommitFiles(cwd, params.sessionModifiedFiles)
+          const scopedFiles = getScopedCommitFiles(cwd, params.ownedFiles, params.sessionModifiedFiles)
           const commitArgs = ['commit', '-m', message]
           if (scopedFiles.length > 0) {
             runGit(['add', '--', ...scopedFiles], cwd)
@@ -151,6 +153,20 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           if (!stashStatus) {
             return { content: 'No changes to stash.' }
           }
+
+          // B1: scope stash to owned files when available
+          if (params.ownedFiles?.length) {
+            const scoped = getScopedCommitFiles(cwd, params.ownedFiles, params.sessionModifiedFiles)
+            if (scoped.length === 0) {
+              return {
+                content: 'No owned files to stash. External dirty files are present but excluded from stash scope.',
+                isError: true,
+              }
+            }
+            runGit(['stash', 'push', '--', ...scoped], cwd)
+            return { content: `Stashed ${scoped.length} owned file(s): ${scoped.join(', ')}` }
+          }
+
           runGit(['stash'], cwd)
           return { content: 'Saved working directory and index state.' }
         }

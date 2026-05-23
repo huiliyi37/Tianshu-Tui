@@ -10,6 +10,12 @@ export interface ToolCallParams {
   sessionModifiedFiles?: string[]
   /** Artifact store for persisting tool output — no global setter, always inject via params */
   artifactStore?: ArtifactStore
+  /** B1: Task identifier for ownership attribution */
+  taskId?: string
+  /** B1: Files owned by the current task (subset of sessionModifiedFiles, excluding externals) */
+  ownedFiles?: string[]
+  /** B1: Worktree baseline hash for integrity verification */
+  baselineHash?: string
 }
 
 export interface VerificationMetadata {

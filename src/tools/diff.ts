@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { relative } from 'path'
+import { relative, resolve } from 'path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { validatePathSafe } from './path-validate.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
@@ -28,6 +28,7 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
         staged: { type: 'boolean', description: 'Show staged changes (--cached)' },
         path: { type: 'string', description: 'Filter to specific file or directory' },
         context_lines: { type: 'integer', description: 'Lines of context (default: 3)' },
+        current_task_only: { type: 'boolean', description: 'Show diff only for files owned by the current task (B1 ownership scope)' },
       },
     },
   },
@@ -37,11 +38,22 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
     const path = params.input.path as string | undefined
     const contextLines = (params.input.context_lines as number) ?? 3
     const startTime = Date.now()
+    const currentTaskOnly = params.input.current_task_only === true
 
     const args = ['diff']
     if (staged) args.push('--cached')
     args.push(`-U${contextLines}`)
-    if (path) {
+
+    // B1: current_task_only restricts diff to owned files
+    if (currentTaskOnly && params.ownedFiles?.length) {
+      const ownedPaths = params.ownedFiles
+        .map(f => relative(params.cwd, resolve(params.cwd, f)))
+        .filter(f => !f.startsWith('..'))
+      if (ownedPaths.length === 0) {
+        return { content: 'No owned files to diff.' }
+      }
+      args.push('--', ...ownedPaths)
+    } else if (path) {
       const validated = validatePathSafe(params.cwd, path)
       if (!validated.ok) {
         return { content: `Error: ${validated.error}`, isError: true }

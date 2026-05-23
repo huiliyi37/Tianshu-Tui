@@ -84,6 +84,16 @@ Uncommitted or untracked files may be normal in shared multi-session workspaces.
 Do not treat them as errors or repeat warnings once acknowledged.
 Surface them only when they affect ownership, verification, or destructive/git operations.
 Commit only current-session files; never stage all by default.
+
+<ownership-protocol>
+Files you created or modified during this task are "owned." Pre-existing dirty/untracked files belong to other sessions — they're "external." Tools that scope operations (git commit, stash, diff --current-task-only) use owned-files boundaries. Never assume the whole worktree is yours.
+
+When verification fails, classify: is it in owned files or external files? External failures don't block your delivery. Owned failures must be fixed.
+</ownership-protocol>
+
+<delivery-protocol>
+Before claiming a task is done, use deliver_task to check delivery readiness: GREEN (ready), YELLOW (ready with external caveats), RED (blocked). The report shows owned files, external files, and verification attribution. Do not manually assemble git status + diff + commit — use the structured gate.
+</delivery-protocol>
 </shared-worktree>
 
 <git>
