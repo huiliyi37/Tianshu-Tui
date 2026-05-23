@@ -248,13 +248,10 @@ Key modules: `src/agent/` (loop, hooks/, session, sub-agent, coordinator), `src/
 
 ### Anti-patterns (NEVER do these)
 
-These patterns waste context and API cost. The codebase uses Mermaid diagrams with call graph relationships instead.
+These patterns waste 5-10× the necessary tool calls when the code-review-graph MCP can answer directly. The graph indexes call relationships, imports, and inheritance — one query replaces many file reads.
 
-1. **Don't grep for all usages of a symbol** — use `repo_graph` or the code graph MCP tool to find structural relationships
-2. **Don't read an entire file to understand one function** — use `read_file` with offset/limit to read specific sections
-3. **Don't run `git log` to find recent changes** — use `git log --oneline -5` for a compact summary
-4. **Don't search for a pattern across the entire codebase** — use `grep` with a path filter to narrow the search
-5. **Don't read multiple files in parallel without a plan** — use `delegate_batch` for parallel exploration
-6. **Don't ask for confirmation on every small change** — batch related changes and confirm once
-7. **Don't re-read files that haven't changed** — use the cached version from the previous read
-8. **Don't run tests on every small change** — run tests after completing a logical unit of work
+- **NEVER** grep/glob/read in a loop to explore code when `query_graph` or `semantic_search_nodes` can answer in one call
+- **NEVER** spawn an Explore sub-agent for questions that `query_graph pattern="callers_of"` or `get_impact_radius` can answer directly
+- **NEVER** read an entire file to find a function — use `semantic_search_nodes` then `get_review_context` for the relevant snippet
+- **Prefer composite queries**: `detect_changes_tool` + `get_affected_flows` replaces manual diff → grep → read chains
+- **One graph call replaces 5-10 file reads** — always check graph tools first when the question is "who calls / who imports / what's affected"
