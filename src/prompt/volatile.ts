@@ -54,6 +54,8 @@ export interface VolatileContext {
    * MUST stay out of buildVolatileBlockInternal to preserve prefix cache stability.
    */
   worktreeReality?: WorktreeReality
+  /** Cross-session heuristic rules formatted for injection (cache-safe: dynamic appendix only) */
+  heuristicRules?: string
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -217,6 +219,10 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
 
   if (ctx.crossSessionEvents) {
     parts.push(ctx.crossSessionEvents)
+  }
+
+  if (ctx.heuristicRules) {
+    parts.push(ctx.heuristicRules)
   }
 
   if (ctx.sessionState) {

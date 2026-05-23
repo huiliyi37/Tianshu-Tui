@@ -1,4 +1,7 @@
 import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from '../api/oai-types.js'
+import { semanticPruneLayer1 } from '../compact/semantic-prune.js'
+import { detectStaleness } from '../compact/staleness-detect.js'
+import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import { analyzeVolatilePayload, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
@@ -62,6 +65,7 @@ export class PromptEngine {
   private cognitiveProjection?: string
   private crossSessionEvents?: string
   private sessionStateText?: string
+  private heuristicRulesText?: string
   private worktreeReality?: WorktreeReality
   private mode: PromptMode = DEFAULT_MODE
 
@@ -118,7 +122,7 @@ export class PromptEngine {
 
           if (userContent !== this.cachedFreshForUser) {
             this.cachedFreshForUser = userContent
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, heuristicRules: this.heuristicRulesText, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -186,6 +190,18 @@ export class PromptEngine {
         },
       }))
       : undefined
+
+    // Layer 1: Semantic rule-based pruning (junk dirs, test pass lists, grep dedup)
+    const { messages: semanticPruned } = semanticPruneLayer1(result, CACHE_ANCHOR_MESSAGES)
+    if (semanticPruned !== result) {
+      for (let i = 0; i < result.length; i++) result[i] = semanticPruned[i]!
+    }
+
+    // Layer 2: Staleness detection (superseded file reads, unreferenced results)
+    const { messages: stalenessPruned } = detectStaleness(result, CACHE_ANCHOR_MESSAGES)
+    if (stalenessPruned !== result) {
+      for (let i = 0; i < result.length; i++) result[i] = stalenessPruned[i]!
+    }
 
     // Observation masking: replace tool result content older than 10 user turns with compact placeholder
     const MASK_WINDOW = 10
@@ -324,6 +340,11 @@ export class PromptEngine {
 
   setCrossSessionEvents(events: string | null): void {
     this.crossSessionEvents = events ?? undefined
+  }
+
+  /** Inject cross-session heuristic rules into dynamic appendix. Cache-safe. */
+  setHeuristicRules(rules: string | null): void {
+    this.heuristicRulesText = rules ?? undefined
   }
 
   /**

@@ -11,15 +11,40 @@ interface BigramEntry {
 
 export class ToolPatternMiner {
   private bigrams = new Map<string, BigramEntry[]>()
+  private trigrams = new Map<string, BigramEntry[]>()
+  private prev: string | null = null
 
   record(fromTool: string, toTool: string, meta?: { targetPath?: string }): void {
-    const entries = this.bigrams.get(fromTool) ?? []
-    entries.push({ tool: toTool, targetPath: meta?.targetPath })
-    this.bigrams.set(fromTool, entries.slice(-200))
+    const entry: BigramEntry = { tool: toTool, targetPath: meta?.targetPath }
+    // Bigram: A → B
+    const biEntries = this.bigrams.get(fromTool) ?? []
+    biEntries.push(entry)
+    this.bigrams.set(fromTool, biEntries.slice(-200))
+    // Trigram: (prev, A) → B
+    if (this.prev) {
+      const triKey = `${this.prev}|${fromTool}`
+      const triEntries = this.trigrams.get(triKey) ?? []
+      triEntries.push(entry)
+      this.trigrams.set(triKey, triEntries.slice(-100))
+    }
+    this.prev = fromTool
   }
 
   predict(fromTool: string, threshold = 0.3): ToolPrediction[] {
-    const entries = this.bigrams.get(fromTool)
+    // Try trigram first (higher confidence), only if enough data and different context
+    if (this.prev && this.prev !== fromTool) {
+      const triKey = `${this.prev}|${fromTool}`
+      const triEntries = this.trigrams.get(triKey)
+      if (triEntries && triEntries.length >= 3) {
+        const triPreds = this.predictFrom(triEntries, threshold)
+        if (triPreds.length > 0) return triPreds
+      }
+    }
+    // Fall back to bigram
+    return this.predictFrom(this.bigrams.get(fromTool), threshold)
+  }
+
+  private predictFrom(entries: BigramEntry[] | undefined, threshold: number): ToolPrediction[] {
     if (!entries || entries.length === 0) return []
 
     const counts = new Map<string, { count: number; targets: string[] }>()
