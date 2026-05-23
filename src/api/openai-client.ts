@@ -67,11 +67,9 @@ export class OpenAIClient implements StreamClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
-    // DeepSeek returns 400 if reasoning_content appears in input messages.
-    // Only providers that explicitly require echo (mimo, minimax, glm) keep it.
-    const echoReasoning = this.config.providerName === 'mimo'
-      || this.config.providerName === 'minimax'
-      || this.config.providerName === 'glm'
+    // DeepSeek thinking mode: reasoning_content MUST be echoed when thinking is enabled,
+    // MUST NOT be present when thinking is disabled.
+    const echoReasoning = this.config.thinking === 'enabled'
     const messages = echoReasoning
       ? request.messages
       : request.messages.map(m => {
