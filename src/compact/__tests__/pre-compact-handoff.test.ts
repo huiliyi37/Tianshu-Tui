@@ -39,4 +39,28 @@ describe('generateHandoff', () => {
     // ~4 chars per token estimate
     assert.ok(handoff.summary.length < 1600)
   })
+
+  describe('generateHandoff integration shape', () => {
+    it('produces a string suitable for setSessionState', () => {
+      const entries = [
+        { role: 'tool', tool_call_id: '1', name: 'edit_file', content: 'ok', input: { file_path: 'src/foo.ts' } },
+        { role: 'tool', tool_call_id: '2', name: 'bash', content: 'PASS', input: { command: 'npm test' } },
+      ]
+      const handoff = generateHandoff(entries as any)
+
+      // Must be wrappable as a single string injection
+      const wrapped = `<pre-compact-handoff>\n${handoff.summary}\n</pre-compact-handoff>`
+      assert.ok(wrapped.startsWith('<pre-compact-handoff>'))
+      assert.ok(wrapped.endsWith('</pre-compact-handoff>'))
+      assert.ok(wrapped.includes('files_modified'))
+      assert.ok(wrapped.includes('total_tool_calls: 2'))
+    })
+
+    it('handles empty trajectory without crashing', () => {
+      const handoff = generateHandoff([])
+      assert.equal(handoff.filesModified.length, 0)
+      assert.equal(handoff.hadFailures, false)
+      assert.match(handoff.summary, /total_tool_calls: 0/)
+    })
+  })
 })
