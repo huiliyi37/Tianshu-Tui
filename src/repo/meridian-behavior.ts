@@ -1,5 +1,5 @@
 import type { MeridianDb } from './meridian-db.js'
-import type { StigmergyStore, PheromoneQueryResult } from '../context/stigmergy.js'
+import type { StigmergyStore } from '../context/stigmergy.js'
 
 const CO_EDIT_BLACKLIST = [
   'package.json', 'package-lock.json', 'tsconfig.json',

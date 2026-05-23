@@ -177,13 +177,13 @@ export class MeridianDb {
     `).all(filePath, filePath) as Array<{ file: string; weight: number }>
   }
 
-  getAccessHeat(filePath: string, decayHalfLifeTurns = 10): number {
+  getAccessHeat(filePath: string, decayHalfLifeN = 10): number {
     const rows = this.db.prepare(
       'SELECT accessed_at FROM access_log WHERE file_path = ? ORDER BY rowid DESC LIMIT 20'
     ).all(filePath) as Array<{ accessed_at: string }>
     let heat = 0
     for (let i = 0; i < rows.length; i++) {
-      heat += Math.pow(0.5, i / decayHalfLifeTurns)
+      heat += Math.pow(0.5, i / decayHalfLifeN)
     }
     return heat
   }

@@ -1056,6 +1056,7 @@ export class AgentLoop {
           continue
         }
 
+        this.config.meridianIndexer?.flushTurn()
         await this.turnCompletion.complete({
           turn,
           isFinal: true,
