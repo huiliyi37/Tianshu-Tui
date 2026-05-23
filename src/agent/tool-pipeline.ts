@@ -28,6 +28,7 @@ import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.j
 import { PrewarmCache } from './prewarm.js'
 import { compactThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
+import { detectMistakeResolution } from './mistake-detector.js'
 import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
 import type { ArtifactStore } from '../artifact/store.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
@@ -569,6 +570,24 @@ ${check.formatted}`
     deps.recordPrediction?.(!harnessResult.isError)
     const fp = fingerprintToolCall(tu.name, tu.input, harnessResult.isError ? 'error' : 'success')
     traceStore = recordToolFingerprint(traceStore, fp)
+
+    // P3-A: write path — when a tool resolves a prior failure of itself,
+    // record the mistake into MistakeNotebook so getMistakeHints can find
+    // it next time. Read path is already wired above (line ~558).
+    if (!harnessResult.isError && deps.p3) {
+      const resolution = detectMistakeResolution(traceStore, traceId, tu.name)
+      if (resolution) {
+        try {
+          const inputDigest = JSON.stringify(tu.input).slice(0, 200)
+          deps.p3.recordMistake(
+            resolution.error,
+            resolution.context,
+            inputDigest,
+            [tu.name],
+          )
+        } catch { /* non-critical: notebook learning is best-effort */ }
+      }
+    }
 
     callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError, rawToolResult?.rawPath, rawToolResult?.uiContent)
 
