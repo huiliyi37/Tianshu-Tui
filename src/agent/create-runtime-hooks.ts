@@ -11,6 +11,7 @@ import { createDreamHook } from './hooks/dream-hook.js'
 import { createCourageHook } from './hooks/courage-hook.js'
 import { createRadioHook, type RadioHookDeps } from './hooks/radio-hook.js'
 import { createConsistencyCheckHook } from './hooks/consistency-check-hook.js'
+import { createMeridianHook, type MeridianHookDeps } from './hooks/meridian-hook.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput } from './retrospect.js'
@@ -20,6 +21,7 @@ import type { EvidenceState } from './evidence.js'
 import type { TrajectoryEntry } from './trajectory.js'
 import type { DomainVoiceId } from './domain-voice.js'
 import type { ContextClaim } from '../context/claims.js'
+import type { MeridianIndexer } from '../repo/meridian-indexer.js'
 
 export interface RuntimeHookDeps {
   stigmergyDeposit: (deposit: any) => Promise<void>
@@ -48,6 +50,8 @@ export interface RuntimeHookDeps {
   getDomainId?: () => DomainVoiceId
   /** File observation claims for cross-store consistency checks. */
   getFileObservations?: () => Array<Pick<ContextClaim, 'id' | 'text' | 'evidence'>>
+  /** Meridian code graph indexer (optional). */
+  meridianIndexer?: MeridianIndexer | null
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -98,6 +102,11 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
 
   if (deps.telemetryWriter) {
     hooks.push(createTelemetryFlushHook(deps.telemetryWriter))
+  }
+
+  if (deps.meridianIndexer !== undefined) {
+    const indexerRef = deps.meridianIndexer
+    hooks.push(createMeridianHook({ getIndexer: () => indexerRef }))
   }
 
   return hooks

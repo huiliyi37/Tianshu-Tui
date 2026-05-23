@@ -49,8 +49,10 @@
     "gradient-string": "^2.0.2",
     "ink": "^6.8.0",
     "react": "^19.2.6",
+    "tree-sitter-wasms": "^0.1.13",
     "turndown": "^7.2.4",
     "undici": "^8.3.0",
+    "web-tree-sitter": "^0.24.7",
     "zod": "^3.24.0"
   },
   "devDependencies": {
