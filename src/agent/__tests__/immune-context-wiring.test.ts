@@ -54,3 +54,35 @@ describe('ImmuneHook context wiring', () => {
     assert.ok(spikes.length >= 1, `expected token_spike signal, got: ${JSON.stringify(result.signals)}`)
   })
 })
+
+describe('ImmuneHook injectSignal', () => {
+  it('accepts external compaction_fail signal and surfaces it via apc', () => {
+    const hook = new ImmuneHook({ physarum: new PhysarumEngine(null as any) })
+    hook.injectSignal({
+      kind: 'compaction_fail',
+      severity: 0.6,
+      turn: 10,
+      source: 'compaction-controller',
+    })
+    // Trigger evaluation by running with doom pattern matching window
+    // (apc.evaluate filters signals by SIGNAL_WINDOW; injecting at turn 10 then running at turn 11 must keep it)
+    const result = hook.run({
+      toolName: 'bash', fingerprint: 'fp_xx', turn: 11,
+      doomLevel: 'warn',
+    })
+    // Both pattern (doom warn) and danger signal present → activated
+    assert.equal(result.activated, true, `expected activation, got signals: ${JSON.stringify(result.signals)}`)
+  })
+
+  it('injectSignal does not crash when called many times', () => {
+    const hook = new ImmuneHook({ physarum: new PhysarumEngine(null as any) })
+    for (let i = 0; i < 200; i++) {
+      hook.injectSignal({
+        kind: 'compaction_fail', severity: 0.5,
+        turn: i, source: 'test',
+      })
+    }
+    // Should not throw — apc has internal cap (MAX_SIGNALS)
+    assert.ok(true)
+  })
+})
