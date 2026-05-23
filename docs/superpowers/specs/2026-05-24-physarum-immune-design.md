@@ -503,6 +503,43 @@ export function createImmuneHook(deps: ImmuneDeps): RuntimeHook {
 
 ---
 
+## 8.5 与已有 P3 模块的集成
+
+以下已落地模块直接复用为 Physarum+Immune 的组件：
+
+| 已有模块 | 角色 | 集成方式 |
+|----------|------|---------|
+| `MistakeNotebook` | 免疫记忆的初始形态 | ImmuneMemoryStore 继承其 record/query 模式，增加 affinity + decay |
+| `TrajectoryHealth` | 先天免疫 danger signal 源 | `'degrading'` → severity 0.5, `'escalate'` → severity 0.9 |
+| `AgentDiet` | Physarum 冷路径萎缩的协同 | diet 标记的 redundant/expired 文件路径 → 降低对应边的 flow |
+| `IdleSpec` | Physarum 热路径预测的消费者 | STDP 有向边的 top-K 预测喂给 IdleSpec.onToolStart() |
+| `RepairHintTracker` | APC 层 danger signal | hint exhaustion → `repair_exhaustion` signal |
+
+关键集成代码：
+
+```typescript
+// 在 immune-hook.ts 中
+if (trajectoryHealth === 'escalate') {
+  apc.collect({ kind: 'prediction_error', severity: 0.9, turn, source: 'atropos' })
+}
+if (trajectoryHealth === 'degrading') {
+  apc.collect({ kind: 'prediction_error', severity: 0.5, turn, source: 'atropos' })
+}
+
+// 免疫记忆成功记录同步到 MistakeNotebook
+if (repairSuccess) {
+  mistakeNotebook.record({
+    timestamp: new Date().toISOString(),
+    error: pattern,
+    context: toolName,
+    resolution: strategy,
+    tags: ['immune-adaptive'],
+  })
+}
+```
+
+---
+
 ## 9. 演化时机
 
 Physarum 边权演化不是每 turn 都对所有边执行（太昂贵），而是：
