@@ -188,6 +188,41 @@ export class MeridianDb {
     return heat
   }
 
+  /** Get files that depend on the given file (reverse edges: who imports/calls into this file) */
+  getReverseDependents(filePath: string): Array<{ file: string; kind: string; weight: number }> {
+    return this.db.prepare(`
+      SELECT DISTINCT
+        substr(e.source_id, 1, instr(e.source_id, ':') - 1) as file,
+        e.kind,
+        e.weight
+      FROM edges e
+      WHERE e.target_id LIKE ? || ':%'
+        AND substr(e.source_id, 1, instr(e.source_id, ':') - 1) != ?
+    `).all(filePath, filePath) as Array<{ file: string; kind: string; weight: number }>
+  }
+
+  /** Get test files associated with a source file via tested_by edges */
+  getTestsFor(filePath: string): string[] {
+    const rows = this.db.prepare(`
+      SELECT DISTINCT substr(e.source_id, 1, instr(e.source_id, ':') - 1) as file
+      FROM edges e
+      WHERE e.target_id LIKE ? || ':%' AND e.kind = 'tested_by'
+    `).all(filePath) as Array<{ file: string }>
+    return rows.map(r => r.file)
+  }
+
+  /** Get all indexed file paths */
+  getAllFiles(): string[] {
+    return (this.db.prepare('SELECT path FROM files').all() as Array<{ path: string }>).map(r => r.path)
+  }
+
+  /** Insert or update a single edge */
+  upsertEdge(sourceId: string, targetId: string, kind: string, weight: number): void {
+    this.db.prepare(
+      'INSERT OR REPLACE INTO edges (source_id, target_id, kind, weight) VALUES (?, ?, ?, ?)'
+    ).run(sourceId, targetId, kind, weight)
+  }
+
   close(): void {
     this.db.close()
   }

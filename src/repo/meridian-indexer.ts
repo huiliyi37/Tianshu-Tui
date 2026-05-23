@@ -5,8 +5,10 @@ import { MeridianDb } from './meridian-db.js'
 import { MeridianBehavior } from './meridian-behavior.js'
 import { parseTypeScriptFile, initParser } from './meridian-parser.js'
 import { buildRepoMap } from './meridian-graph.js'
+import { analyzeImpact, inferTestedByTargets } from './meridian-impact.js'
 import type { RepoMapResult } from './meridian-types.js'
 import type { RepoMapOptions } from './meridian-graph.js'
+import type { ImpactResult } from './meridian-impact.js'
 import type { StigmergyStore } from '../context/stigmergy.js'
 
 const TS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx']
@@ -54,6 +56,11 @@ export class MeridianIndexer {
       this.db.upsertFile(result)
       this.db.recordAccess(filePath)
 
+      // Build tested_by edges if this is a test file
+      if (this.isTestFile(filePath)) {
+        this.buildTestEdges(filePath)
+      }
+
       // 1-hop expand: parse direct imports
       for (const imp of result.imports) {
         const resolved = this.resolveImport(filePath, imp)
@@ -95,6 +102,23 @@ export class MeridianIndexer {
     this.behavior.flushCoEdits()
   }
 
+  /** Analyze impact radius for changed files */
+  impact(changedFiles: string[], opts?: { maxHops?: number }): ImpactResult {
+    return analyzeImpact(this.db, changedFiles, opts)
+  }
+
+  /** Build tested_by edges for a test file based on naming + imports */
+  buildTestEdges(testFilePath: string): void {
+    const allFiles = this.db.getAllFiles()
+    const targets = inferTestedByTargets(testFilePath, allFiles)
+    for (const target of targets) {
+      // Use file-level pseudo-symbol for tested_by edge
+      const sourceId = `${testFilePath}:*:0`
+      const targetId = `${target}:*:0`
+      this.db.upsertEdge(sourceId, targetId, 'tested_by', 0.7)
+    }
+  }
+
   getStats() {
     return this.db.getStats()
   }
@@ -106,6 +130,11 @@ export class MeridianIndexer {
   private isIndexable(filePath: string): boolean {
     if (IGNORE_PATTERNS.some(p => filePath.includes(p))) return false
     return TS_EXTENSIONS.some(ext => filePath.endsWith(ext))
+  }
+
+  private isTestFile(filePath: string): boolean {
+    return filePath.includes('.test.') || filePath.includes('.spec.') ||
+      filePath.includes('__tests__/') || filePath.includes('test/')
   }
 
   private resolveImport(fromFile: string, importPath: string): string | null {
