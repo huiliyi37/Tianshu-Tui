@@ -3,7 +3,7 @@ import { KEEP_RECENT_MESSAGES, CACHE_ANCHOR_MESSAGES, compactThresholds } from '
 import { groupIntoRoundsOai } from '../context/rounds.js'
 
 const CHARS_PER_TOKEN = 4
-const THINKING_TRUNCATE_CHARS = 500
+const THINKING_TRUNCATE_CHARS = 200
 
 function compactToolMessage(msg: OaiMessage, contextWindow: number): { msg: OaiMessage; changed: boolean } {
   if (msg.role !== 'tool') return { msg, changed: false }

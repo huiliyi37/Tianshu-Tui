@@ -131,7 +131,7 @@ export class OpenAIClient implements StreamClient {
       body.reasoning_effort = request.reasoning_effort
     }
 
-    if (this.config.providerName === 'mimo' && this.config.thinking === 'enabled') {
+    if ((this.config.providerName === 'mimo' || this.config.providerName === 'deepseek') && this.config.thinking === 'enabled') {
       const sysMsg = (body.messages as Record<string, unknown>[]).find(m => m.role === 'system')
       if (sysMsg && typeof sysMsg.content === 'string') {
         sysMsg.content += '\n\nPlease think and reason in Chinese (中文) during your internal chain of thought.'
