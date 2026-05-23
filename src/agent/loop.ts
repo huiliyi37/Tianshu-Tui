@@ -69,6 +69,7 @@ import { CacheAdvisor } from '../cache/advisor.js'
 import { microCompactOai } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, type P3Integration } from './p3-integration.js'
+import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
@@ -521,6 +522,7 @@ export class AgentLoop {
     }
 
     // P3-D Atropos: assess trajectory health → auto-escalate Flash→Pro on repeated failures
+    let trajectoryHealth: HealthSignal = 'healthy'
     if (this.config.onModelSwitch && this.config.getCurrentModel) {
       const currentModelId = this.config.getCurrentModel()
       const tier: 'flash' | 'pro' = currentModelId.includes('pro') ? 'pro' : 'flash'
@@ -529,8 +531,8 @@ export class AgentLoop {
           status: (e.status === 'passed' ? 'passed' : 'failed') as 'passed' | 'failed',
           turn: e.turn,
         }))
-        const signal = this.p3.assessHealth(recentEvents, this.session.getTurnCount(), tier)
-        if (signal === 'escalate') {
+        trajectoryHealth = this.p3.assessHealth(recentEvents, this.session.getTurnCount(), tier)
+        if (trajectoryHealth === 'escalate') {
           const proModel = currentModelId.replace('flash', 'pro')
           try { this.config.onModelSwitch(proModel) } catch { /* non-fatal */ }
         }
@@ -545,6 +547,8 @@ export class AgentLoop {
       turn: this.session.getTurnCount(),
       doomLevel: this.getDoomLoopLevel(),
       targetFile: target,
+      tokenUsage: this.session.getEstimatedTokens(),
+      trajectoryHealth,
     })
   }
 
