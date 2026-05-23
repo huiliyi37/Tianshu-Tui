@@ -135,6 +135,9 @@ export class OpenAIClient implements StreamClient {
       const sysMsg = (body.messages as Record<string, unknown>[]).find(m => m.role === 'system')
       if (sysMsg && typeof sysMsg.content === 'string') {
         sysMsg.content += '\n\nPlease think and reason in Chinese (中文) during your internal chain of thought.'
+      } else {
+        // eslint-disable-next-line no-console
+        console.error('[rivet-debug] Chinese thinking injection SKIPPED: sysMsg=%o, content type=%s', !!sysMsg, sysMsg ? typeof sysMsg.content : 'N/A')
       }
     }
 
