@@ -75,7 +75,9 @@ function loadConfig(cwd?: string): Config {
   return loadLayeredConfig({ cwd })
 }
 
+let _cachedSessionId: string | null = null
 function getOrCreateSessionId(): string {
+  if (_cachedSessionId) return _cachedSessionId
   const dir = join(homedir(), '.rivet')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
@@ -83,6 +85,7 @@ function getOrCreateSessionId(): string {
   const id = randomUUID()
   const idFile = join(dir, 'session-id.txt')
   writeFileSync(idFile, id)
+  _cachedSessionId = id
   return id
 }
 
@@ -160,7 +163,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     // B1 归属星轨：deliver_task 交付门工具
     // TaskLedger、OwnershipLedger、DeliveryGateV2 在此初始化，
     // 通过闭包提供给 deliver_task 工具。
-    const _b1TaskLedger = createTaskLedger({ taskId: _sessionIdRef ?? `task-${Date.now()}` })
+    const _b1TaskLedger = createTaskLedger({ taskId: getOrCreateSessionId() })
     _taskLedgerRef = _b1TaskLedger
     const _b1Baseline = createWorktreeBaseline(captureGitBaseline(cwd))
     const _b1Ownership = createOwnershipLedger({

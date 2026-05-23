@@ -147,7 +147,12 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
     const ignoredButPresent: string[] = []
 
     // Get all tracked files from git
-    const trackedLines = await gitLines(['ls-files', '--cached'], absCwd)
+    let trackedLines: string[]
+    try {
+      trackedLines = await gitLines(['ls-files', '--cached'], absCwd)
+    } catch {
+      return { tracked: [], ignoredButPresent: [], blocked: true, reasons: ['BLOCKED: git ls-files failed — cannot verify runtime artifacts.'] }
+    }
 
     // Check each runtime directory
     for (const dir of RUNTIME_DIRS) {
@@ -164,12 +169,16 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
       // Check: is the dir present on disk but gitignored?
       const dirAbs = resolve(absCwd, dir)
       if (existsSync(dirAbs)) {
-        const ignoredFiles = await gitLines(
-          ['ls-files', '--others', '--ignored', '--exclude-standard', dir],
-          absCwd,
-        )
-        if (ignoredFiles.length > 0) {
-          ignoredButPresent.push(...ignoredFiles)
+        try {
+          const ignoredFiles = await gitLines(
+            ['ls-files', '--others', '--ignored', '--exclude-standard', dir],
+            absCwd,
+          )
+          if (ignoredFiles.length > 0) {
+            ignoredButPresent.push(...ignoredFiles)
+          }
+        } catch {
+          // git failure here is non-critical — skip ignored-file detection
         }
       }
     }
@@ -316,10 +325,20 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
     const targetChangedSet = new Set(targetChangedFiles)
 
     // 2. Check untracked files that would be overwritten
-    const untracked = await gitLines(
-      ['ls-files', '--others', '--exclude-standard'],
-      absCwd,
-    )
+    let untracked: string[]
+    try {
+      untracked = await gitLines(
+        ['ls-files', '--others', '--exclude-standard'],
+        absCwd,
+      )
+    } catch {
+      return {
+        wouldOverwriteUntracked: [],
+        wouldOverwriteModified: [],
+        blocked: true,
+        reasons: [`BLOCKED: cannot list untracked files — git error.`],
+      }
+    }
     for (const file of untracked) {
       if (targetChangedSet.has(file)) {
         wouldOverwriteUntracked.push(file)
@@ -328,8 +347,19 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
 
     // 3. Check tracked files with local modifications that would be overwritten
     // Use git diff instead of status --porcelain to avoid fragile XY parsing
-    const unstagedModified = await gitLines(['diff', '--name-only'], absCwd)
-    const stagedModified = await gitLines(['diff', '--cached', '--name-only'], absCwd)
+    let unstagedModified: string[]
+    let stagedModified: string[]
+    try {
+      unstagedModified = await gitLines(['diff', '--name-only'], absCwd)
+      stagedModified = await gitLines(['diff', '--cached', '--name-only'], absCwd)
+    } catch {
+      return {
+        wouldOverwriteUntracked,
+        wouldOverwriteModified: [],
+        blocked: true,
+        reasons: [`BLOCKED: cannot determine local modifications — git error.`],
+      }
+    }
     const locallyModifiedSet = new Set([...unstagedModified, ...stagedModified])
 
     for (const file of locallyModifiedSet) {
