@@ -28,6 +28,7 @@ import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.j
 import { PrewarmCache } from './prewarm.js'
 import { compactThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
+import type { ImmuneHook } from './immune-hook.js'
 import { detectMistakeResolution } from './mistake-detector.js'
 import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
 import type { ArtifactStore } from '../artifact/store.js'
@@ -97,6 +98,8 @@ export interface ToolPipelineDeps {
   turnBudget: TurnBudget
   /** Artifact store for persisting tool output — injected via params, no global setter */
   artifactStore?: import('../artifact/store.js').ArtifactStore
+  /** Immune system hook for recording repair success (failed→passed transitions) */
+  immuneHook?: ImmuneHook
   /** Optional cache advisor for adaptive artifact thresholds */
   cacheAdvisor?: CacheAdvisor
   /** Phase hint passed to cache advisor (e.g. 'explore', 'execute', 'verify'). Defaults to 'execute'. */
@@ -586,6 +589,18 @@ ${check.formatted}`
             [tu.name],
           )
         } catch { /* non-critical: notebook learning is best-effort */ }
+
+        // Immune adaptive learning: record successful repair fingerprint
+        if (deps.immuneHook) {
+          try {
+            const fingerprint = `${tu.name}:${JSON.stringify(tu.input).slice(0, 100)}`
+            deps.immuneHook.recordRepairSuccess(
+              fingerprint,
+              { type: 'quarantine', targetFile: undefined },
+              turn,
+            )
+          } catch { /* non-critical: immune learning is best-effort */ }
+        }
       }
     }
 

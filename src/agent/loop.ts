@@ -462,6 +462,7 @@ export class AgentLoop {
       evidence: this.evidence,
       repairHintTracker: this.repairHintTracker,
       repairPipeline: this.repairPipeline,
+      immuneHook: this.immuneHook,
       runtimeHooks: this.runtimeHooks,
       contextInjection: this.contextInjection,
       trajectory: this.trajectory,

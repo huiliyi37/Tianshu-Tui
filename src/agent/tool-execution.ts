@@ -20,6 +20,7 @@ import { PrewarmCache } from './prewarm.js'
 import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import type { P3Integration } from './p3-integration.js'
+import type { ImmuneHook } from './immune-hook.js'
 import {
   getInterventionLevel,
   recordPrediction,
@@ -66,6 +67,8 @@ export interface ToolExecutionDeps {
   cacheAdvisor?: CacheAdvisor
   /** P3 integration facade */
   p3?: P3Integration
+  /** Immune system hook (forwarded to tool-pipeline for adaptive learning) */
+  immuneHook?: ImmuneHook
 }
 
 export interface ToolExecBatchInput {
@@ -150,6 +153,7 @@ export class ToolExecutionController {
           cacheAdvisor: this.deps.cacheAdvisor,
           taskLedger: this.deps.config.taskLedger,
           p3: this.deps.p3,
+          immuneHook: this.deps.immuneHook,
           artifactIdsEvicted,
           artifactIdsAccessed,
         })
@@ -201,6 +205,7 @@ export class ToolExecutionController {
           cacheAdvisor: this.deps.cacheAdvisor,
           taskLedger: this.deps.config.taskLedger,
           p3: this.deps.p3,
+          immuneHook: this.deps.immuneHook,
           artifactIdsEvicted,
           artifactIdsAccessed,
         }
