@@ -10,6 +10,7 @@ import { READ_SECTION_TOOL } from './read-section.js'
 import { RELATED_TESTS_TOOL } from './related-tests.js'
 import { REPO_MAP_TOOL } from './repo-map.js'
 import { RUN_TESTS_TOOL } from './run-tests.js'
+import { SANDBOX_EXEC_TOOL } from './sandbox-exec-tool.js'
 import { TODO_TOOL } from './todo.js'
 import { ToolRegistry } from './registry.js'
 import type { Tool } from './types.js'
@@ -35,6 +36,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(RELATED_TESTS_TOOL)
   registry.register(WEB_SEARCH_TOOL)
   registry.register(READ_SECTION_TOOL)
+  registry.register(SANDBOX_EXEC_TOOL)
   for (const tool of extraTools) registry.register(tool)
   return registry
 }
