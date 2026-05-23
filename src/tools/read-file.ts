@@ -4,6 +4,7 @@ import { truncateContent } from './truncation.js'
 import { validatePath } from './path-validate.js'
 import { GitignoreFilter } from './gitignore.js'
 import { persistRawOutput } from './output-store.js'
+import { summarizeFileContent } from '../artifact/summarize.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
@@ -154,6 +155,23 @@ Bad: re-reading the same file multiple times in one session without it being mod
     }
 
     const rawPath = await persistRawOutput(params.toolUseId, payload.rawContent)
+
+    if (params.artifactStore) {
+      const { summary, sections } = summarizeFileContent(payload.rawContent, payload.canonicalPath)
+      const artifactId = await params.artifactStore.save({
+        tool: 'read_file',
+        target: payload.canonicalPath,
+        rawContent: payload.rawContent,
+        summary,
+        sections,
+      })
+      return {
+        content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", startLine=N, endLine=M) to expand.`,
+        rawContent: payload.modelContent,
+        uiContent: payload.uiContent,
+        rawPath,
+      }
+    }
 
     return {
       content: payload.modelContent,
