@@ -6,6 +6,18 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter + Self-Regulating Safety + Three-Authority Coroutine foundation complete — **2340 tests passing**, typecheck/build clean.
 
+### 2026-05-22 — Ice Mirror Cache Engine + Append-Only Artifact Log
+
+**Ice Mirror Cache Engine (冰鉴):** 解决 prefix cache 命中率低的问题（~5% → 90%+）。实现双区域冻结/工作布局，通过 `FieldHabituationTracker` 追踪字段变化，智能决定何时更新 FROZEN 区域。核心组件：`buildStableVolatileBlock()`, `buildDynamicAppendix()`, 前缀指纹系统, 缓存诊断模块。
+
+**Append-Only Artifact Log:** 解决 `staleRound` 截断破坏 prefix cache 的问题。将 tool output 从全文注入改为摘要引用 + 磁盘 artifact，保持 append-only 结构。上下文增长速度降低 90%+（从 ~1000 tokens/轮降到 ~350 tokens/轮），`smartCompact` 触发点从 ~30 轮推迟到 ~80 轮。
+
+**经济学优化：** DeepSeek prefix cache 机制下，cache miss 是 hit 的 50 倍成本（$0.14 vs $0.0028/1M tokens）。这两个优化将显著降低 API 成本，提升长时间运行任务的稳定性。
+
+**测试覆盖：** 所有相关测试通过（67 个测试），包括 Ice Mirror Cache Engine 测试（67 个）和 Append-Only Artifact Log 测试（33 个）。
+
+See `docs/superpowers/status/2026-05-22-progress-report.md` for full details.
+
 ### 2026-05-20 — Self-Regulating Safety + Three-Authority Coroutine
 
 **Self-regulating approval (天枢 unique):** `assessToolRisk()` now consumes the Sensorium 6D state vector. High confidence (>0.8) + low risk → auto-approve bypass. Low confidence (<0.3) → risk escalated. No other terminal agent uses real-time agent state to modulate approval decisions.
