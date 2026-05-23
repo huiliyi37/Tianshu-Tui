@@ -29,6 +29,7 @@ import { PrewarmCache } from './prewarm.js'
 import { compactThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
+import type { ArtifactStore } from '../artifact/store.js'
 
 /** Failure classes that trigger onPhaseChange('blocked') — user-visible state. */
 const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
@@ -102,6 +103,116 @@ function truncateSuccessfulToolResult(content: string, config: AgentConfig): str
     contextWindow: config.contextWindow ?? 1_000_000,
     providerProfile: config.providerProfile,
   }).toolResultMaxTokens)
+}
+
+/**
+ * Artifact intercept: if content exceeds threshold and artifactStore is available,
+ * persist to disk and replace with a compact reference. This keeps message history
+ * append-only (no future truncation) → maximizes DeepSeek prefix cache hit rate.
+ *
+ * Tools that already return artifact refs (read_file, grep, bash) are detected by
+ * the `[artifact:` prefix and skipped.
+ */
+const ARTIFACT_INTERCEPT_THRESHOLD = 800 // chars — success results
+const ARTIFACT_ERROR_THRESHOLD = 1600 // chars — error results need more inline context for debugging
+
+async function artifactIntercept(
+  content: string,
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  artifactStore: ArtifactStore | undefined,
+  isError = false,
+): Promise<string> {
+  if (!artifactStore) return content
+  const threshold = isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD
+  if (content.length <= threshold) return content
+  if (content.startsWith('[artifact:')) return content // already an artifact ref
+
+  // Determine target label for the artifact
+  const target = typeof toolInput.file_path === 'string'
+    ? toolInput.file_path
+    : typeof toolInput.path === 'string'
+      ? toolInput.path
+      : typeof toolInput.command === 'string'
+        ? (toolInput.command as string).slice(0, 80)
+        : typeof toolInput.pattern === 'string'
+          ? toolInput.pattern
+          : typeof toolInput.url === 'string'
+            ? toolInput.url
+            : toolName
+
+  // Generate a simple summary based on tool type
+  const summary = generateToolSummary(content, toolName, toolInput)
+
+  const artifactId = await artifactStore.save({
+    tool: toolName,
+    target: target as string,
+    rawContent: content,
+    summary,
+    sections: [],
+  })
+
+  // For errors, include a head excerpt so the model can debug without read_section
+  const headExcerpt = isError ? `\n${extractErrorHead(content)}` : ''
+  return `[artifact:${artifactId}] ${summary}${headExcerpt}\nUse read_section(artifactId="${artifactId}", startLine=N, endLine=M) to expand.`
+}
+
+/** Extract the most diagnostic lines from error output (max ~600 chars). */
+function extractErrorHead(content: string): string {
+  const lines = content.split('\n')
+  // Prioritize lines with error/fail keywords
+  const errorLines = lines.filter(l => /error|Error|FAIL|AssertionError|TypeError|ReferenceError|expect\(/.test(l))
+  if (errorLines.length > 0) {
+    return errorLines.slice(0, 8).map(l => l.trim().slice(0, 120)).join('\n')
+  }
+  // Fallback: last 8 lines (often contain the summary)
+  return lines.slice(-8).map(l => l.trim().slice(0, 120)).join('\n')
+}
+
+function generateToolSummary(content: string, toolName: string, input: Record<string, unknown>): string {
+  const lines = content.split('\n')
+  const lineCount = lines.length
+  const charCount = content.length
+
+  switch (toolName) {
+    case 'run_tests': {
+      // Extract test summary from content
+      const testLine = lines.find(l => /tests?\s*(?:pass|passed|fail|failed)|total/i.test(l))
+        ?? lines.find(l => /\d+\s+pass/i.test(l))
+      const errorLines = lines.filter(l => /error|Error|FAIL/i.test(l)).slice(0, 2)
+      const parts = [`[run_tests] ${lineCount} lines.`]
+      if (testLine) parts.push(testLine.trim())
+      if (errorLines.length > 0) parts.push(`Errors: ${errorLines.map(l => l.trim().slice(0, 60)).join('; ')}`)
+      return parts.join(' ')
+    }
+    case 'diff': {
+      const files = lines.filter(l => l.startsWith('diff --git')).map(l => {
+        const m = l.match(/b\/(.+)$/)
+        return m ? m[1] : ''
+      }).filter(Boolean)
+      return `[diff] ${files.length} files changed, ${lineCount} lines. Files: ${files.slice(0, 5).join(', ')}${files.length > 5 ? ` (+${files.length - 5})` : ''}`
+    }
+    case 'glob': {
+      const matches = lines.filter(l => l.trim())
+      const pattern = typeof input.pattern === 'string' ? input.pattern : '?'
+      return `[glob "${pattern}"] ${matches.length} files found. First: ${matches.slice(0, 3).join(', ')}${matches.length > 3 ? ` (+${matches.length - 3})` : ''}`
+    }
+    case 'web_fetch': {
+      const url = typeof input.url === 'string' ? input.url : '?'
+      return `[web_fetch ${url}] ${charCount} chars, ${lineCount} lines fetched.`
+    }
+    case 'repo_map': {
+      return `[repo_map] ${lineCount} lines. ${lines.find(l => /\d+ files/.test(l))?.trim() ?? `${lineCount} entries`}`
+    }
+    case 'inspect_project': {
+      return `[inspect_project] ${lineCount} lines of project analysis.`
+    }
+    default: {
+      // Generic: first meaningful line + stats
+      const firstLine = lines.find(l => l.trim().length > 10)?.trim().slice(0, 80) ?? ''
+      return `[${toolName}] ${charCount} chars, ${lineCount} lines. ${firstLine}`
+    }
+  }
 }
 
 export async function executeToolUse(
@@ -331,6 +442,9 @@ ${check.formatted}`
     }
 
     if (!harnessResult.isError) {
+      // Artifact intercept: persist long output to disk, replace with compact ref.
+      // This must run BEFORE truncation — if we store an artifact, truncation is unnecessary.
+      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore)
       finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
       const contentChars = finalContent.length
       const tokenEstimate = Math.ceil(contentChars / 4)
@@ -340,6 +454,10 @@ ${check.formatted}`
         const refPath = rawToolResult?.rawPath ?? 'unknown'
         finalContent = `<stored ref="${refPath}" chars=${contentChars} tool="${tu.name}">\n${preview}\n...(turn budget exceeded — use read_file with offset/limit for full content)</stored>`
       }
+    } else {
+      // Error results can also be very long (e.g. failed test output).
+      // Artifact-intercept them too to keep message history append-only.
+      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, true)
     }
 
     // Trace recording
@@ -458,6 +576,7 @@ ${check.formatted}`
           if (!harnessResult.isError) {
             diagnosedContent = truncateSuccessfulToolResult(diagnosedContent, deps.config)
           }
+          diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError)
           return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
         }
       }
