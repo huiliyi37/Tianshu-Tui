@@ -114,6 +114,7 @@ export class CompactionController {
       `Current: ${taskState.current}`,
       ...taskState.completed.map(item => `Completed: ${item}`),
       ...taskState.remaining.map(item => `Remaining: ${item}`),
+      ...taskState.decisions.map(item => `Decision: ${item}`),
     ]
     const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
     let resumeContent = `<checkpoint-resume>\n${stateLines.join('\n')}\n</checkpoint-resume>`

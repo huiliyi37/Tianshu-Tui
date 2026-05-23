@@ -271,7 +271,7 @@ describe('stable/latest volatile split', () => {
       cwd: '/repo',
       sessionMemoryBlock: '<session-memory><entry>remember</entry></session-memory>',
       toolHistory: [{ tool: 'read_file', target: 'src/a.ts', status: 'success' }],
-      taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'] },
+      taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'], decisions: [] },
       behaviorMirror: 'repeated edits',
       decisions: ['use middleware'],
     })
@@ -286,7 +286,7 @@ describe('stable/latest volatile split', () => {
     const latest = buildLatestTurnVolatileBlock({
       cwd: '/repo',
       toolHistory: [{ tool: 'read_file', target: 'src/a.ts', status: 'success' }],
-      taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'] },
+      taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'], decisions: [] },
       decisions: ['use middleware'],
     })
     assert.ok(latest.includes('<tool-history'))

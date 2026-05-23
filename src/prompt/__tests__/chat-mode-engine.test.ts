@@ -65,7 +65,7 @@ describe('Chat Mode PromptEngine', () => {
 
   it('injects dynamic appendix in task mode', () => {
     const engine = makeEngine('task')
-    engine.setTaskProgress({ completed: ['step1'], current: 'step2', remaining: ['step3'] })
+    engine.setTaskProgress({ completed: ['step1'], current: 'step2', remaining: ['step3'], decisions: [] })
     engine.setDecisions(['decision1', 'decision2'])
     engine.setRepairHint('test repair')
 

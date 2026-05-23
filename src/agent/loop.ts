@@ -841,7 +841,7 @@ export class AgentLoop {
         const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
         if (isChatMode) {
           this.config.promptEngine.setCognitiveProjection(null)
-          this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [] })
+          this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
         }
         const perceptionResult = await this.perception.perceive({
           turn: this.session.getTurnCount(),
