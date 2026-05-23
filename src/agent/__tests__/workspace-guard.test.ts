@@ -1,37 +1,50 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import {
   createWorkspaceGuard,
   type WorkspaceGuard,
   type WorkspaceGuardReport,
 } from '../workspace-guard.js'
 
+const execFileP = promisify(execFile)
+
 const TMP = join(import.meta.dirname, '.workspace-guard-test-tmp')
 
-function setupGitRepo(cwd: string): void {
-  execSync('git init -b main', { cwd })
-  execSync('git config user.email "test@test.com"', { cwd })
-  execSync('git config user.name "Test"', { cwd })
-  // Suppress init.defaultBranch warning
-  execSync('git config init.defaultBranch main', { cwd })
+// ── Async git helpers ───────────────────────────────────────────────
+
+async function git(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileP('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
+  return stdout
+}
+
+async function gitLines(cwd: string, args: string[]): Promise<string[]> {
+  const out = await git(cwd, args)
+  return out.trim().split('\n').filter(Boolean)
+}
+
+// ── Test helpers ────────────────────────────────────────────────────
+
+async function setupGitRepo(cwd: string): Promise<void> {
+  await git(cwd, ['init', '-b', 'main'])
+  await git(cwd, ['config', 'user.email', 'test@test.com'])
+  await git(cwd, ['config', 'user.name', 'Test'])
 }
 
 function makeGitignore(cwd: string, patterns: string[]): void {
   writeFileSync(join(cwd, '.gitignore'), patterns.join('\n') + '\n')
 }
 
-function gitAdd(cwd: string, files: string[], force = false): void {
-  const flag = force ? ' -f' : ''
-  for (const f of files) {
-    execSync(`git add${flag} "${f}"`, { cwd })
-  }
+async function gitAdd(cwd: string, files: string[], force = false): Promise<void> {
+  const args = force ? ['add', '-f', ...files] : ['add', ...files]
+  await git(cwd, args)
 }
 
-function gitCommit(cwd: string, msg: string): void {
-  execSync(`git commit -m "${msg}"`, { cwd })
+async function gitCommit(cwd: string, msg: string): Promise<void> {
+  await git(cwd, ['commit', '-m', msg])
 }
 
 function makeDir(cwd: string, dir: string): void {
@@ -48,10 +61,10 @@ function makeFile(cwd: string, path: string, content: string): void {
 describe('workspace-guard — stash / runtime artifact guard', () => {
   let guard: WorkspaceGuard
 
-  beforeEach(() => {
+  beforeEach(async () => {
     rmSync(TMP, { recursive: true, force: true })
     mkdirSync(TMP, { recursive: true })
-    setupGitRepo(TMP)
+    await setupGitRepo(TMP)
     makeGitignore(TMP, ['.rivet/artifacts/', '.rivet/sessions/'])
     guard = createWorkspaceGuard(TMP)
   })
@@ -63,11 +76,10 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
   // ── Spec scenario 1: tracked runtime artifacts → blocked ──────
 
   it('tracked runtime artifacts → blocked', async () => {
-    // Create runtime artifacts and track them in git
     makeDir(TMP, '.rivet/artifacts')
     makeFile(TMP, '.rivet/artifacts/verification.json', '{"score": 0.95}')
     makeFile(TMP, '.rivet/artifacts/log.txt', 'session log')
-    gitAdd(TMP, ['.rivet/artifacts/verification.json', '.rivet/artifacts/log.txt'], true)
+    await gitAdd(TMP, ['.rivet/artifacts/verification.json', '.rivet/artifacts/log.txt'], true)
 
     const result = await guard.checkRuntimeArtifacts()
 
@@ -82,7 +94,6 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
       'log.txt should be listed as tracked',
     )
 
-    // At least one reason starts with BLOCKED
     const blockedReasons = result.reasons.filter(r => r.startsWith('BLOCKED:'))
     assert.ok(blockedReasons.length > 0, `Expected BLOCKED reason, got: ${result.reasons.join(' | ')}`)
     assert.ok(
@@ -94,18 +105,14 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
   // ── Spec scenario 2: ignored runtime artifacts → warning, not blocked ──
 
   it('ignored runtime artifacts → warning, not blocked', async () => {
-    // Create runtime artifacts on disk (gitignored by .gitignore)
     makeDir(TMP, '.rivet/artifacts')
     makeFile(TMP, '.rivet/artifacts/verification.json', '{"score": 0.95}')
     makeDir(TMP, '.rivet/sessions')
     makeFile(TMP, '.rivet/sessions/session-1.jsonl', '{"turn": 1}')
 
     // Ensure gitignore covers them
-    const ignored = execSync('git ls-files --others --ignored --exclude-standard', {
-      cwd: TMP,
-      encoding: 'utf-8',
-    })
-    assert.ok(ignored.trim().length > 0, 'files should be gitignored')
+    const ignored = await gitLines(TMP, ['ls-files', '--others', '--ignored', '--exclude-standard'])
+    assert.ok(ignored.length > 0, 'files should be gitignored')
 
     const result = await guard.checkRuntimeArtifacts()
 
@@ -116,69 +123,72 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
       `Expected ignored-but-present files, got: ${result.ignoredButPresent}`,
     )
 
-    // Warning reason must exist
+    // Warning must mention do not delete + promotion (memory retention policy alignment)
     const warningReasons = result.reasons.filter(r => r.startsWith('WARNING:'))
     assert.ok(warningReasons.length > 0, `Expected WARNING reason, got: ${result.reasons.join(' | ')}`)
+    const warningText = warningReasons[0]!
     assert.ok(
-      warningReasons[0]!.includes('NOT safe to delete'),
-      `Warning should mention NOT safe to delete: ${warningReasons[0]}`,
+      warningText.includes('do not delete'),
+      `Warning should include 'do not delete': ${warningText}`,
+    )
+    assert.ok(
+      warningText.includes('promotion'),
+      `Warning should include 'promotion': ${warningText}`,
     )
   })
 
-  // ── Spec scenario 3: stash old file vs current file → blocked from auto-apply ──
+  // ── Spec scenario 3: stash different content → blocked from auto-apply ──
 
-  it('stash old file vs current file → blocked from auto-apply', async () => {
-    // Setup: create a file, commit it
+  it('stash different content vs current file → blocked from auto-apply', async () => {
     makeFile(TMP, 'src/app.ts', 'const x = 1')
-    gitAdd(TMP, ['src/app.ts'])
-    gitCommit(TMP, 'initial commit')
+    await gitAdd(TMP, ['src/app.ts'])
+    await gitCommit(TMP, 'initial commit')
 
     // Modify the file
     makeFile(TMP, 'src/app.ts', 'const x = 2')
     // Stash it
-    execSync('git stash', { cwd: TMP })
+    await git(TMP, ['stash'])
 
-    // Now modify the file again — current version is newer than stash
+    // Now modify the file again — current version differs from stash
     makeFile(TMP, 'src/app.ts', 'const x = 3')
 
     const result = await guard.checkStashSafety('stash@{0}')
 
-    assert.equal(result.blocked, true, 'stash with older content should block auto-apply')
+    assert.equal(result.blocked, true, 'stash with different content should block auto-apply')
     assert.ok(result.conflicts.length > 0, 'should have at least one conflict')
 
-    const newerConflicts = result.conflicts.filter(c => c.status === 'newer')
-    assert.ok(newerConflicts.length > 0, 'should detect newer working-tree file')
+    const differentConflicts = result.conflicts.filter(c => c.status === 'different')
+    assert.ok(differentConflicts.length > 0, 'should detect different working-tree file')
     assert.ok(
-      newerConflicts.some(c => c.path === 'src/app.ts'),
-      'src/app.ts should be listed as newer',
+      differentConflicts.some(c => c.path === 'src/app.ts'),
+      'src/app.ts should be listed as different',
     )
 
     const blockedReasons = result.reasons.filter(r => r.startsWith('BLOCKED:'))
     assert.ok(blockedReasons.length > 0, `Expected BLOCKED reason, got: ${result.reasons.join(' | ')}`)
     assert.ok(
-      blockedReasons[0]!.includes('newer'),
-      `Reason should mention newer content: ${blockedReasons[0]}`,
+      blockedReasons[0]!.includes('different content'),
+      `Reason should mention different content: ${blockedReasons[0]}`,
     )
   })
 
   // ── Spec scenario 4: untracked file would be overwritten → blocked ──
 
-  it('untracked file would be overwritten → blocked', async () => {
-    // Setup: create a branch with a committed file
+  it('untracked file would be overwritten by merge → blocked', async () => {
     makeFile(TMP, 'docs/readme.md', 'initial readme')
-    gitAdd(TMP, ['docs/readme.md'])
-    gitCommit(TMP, 'initial commit')
+    await gitAdd(TMP, ['docs/readme.md'])
+    await gitCommit(TMP, 'initial commit')
 
     // Create a branch with another file
-    execSync('git checkout -b feature/docs', { cwd: TMP })
+    await git(TMP, ['checkout', '-b', 'feature/docs'])
     makeFile(TMP, 'docs/notes.md', '# Notes from feature branch')
-    gitAdd(TMP, ['docs/notes.md'])
-    gitCommit(TMP, 'add notes on feature branch')
+    await gitAdd(TMP, ['docs/notes.md'])
+    await gitCommit(TMP, 'add notes on feature branch')
 
     // Switch back to main
-    execSync('git checkout main', { cwd: TMP })
+    await git(TMP, ['checkout', 'main'])
 
-    // Create an untracked file with the same name as the one on the feature branch
+    // Create an untracked file with the same name
     makeFile(TMP, 'docs/notes.md', '# Local untracked notes — must not be overwritten')
 
     const result = await guard.checkMergeSafety('feature/docs')
@@ -197,16 +207,117 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
     )
   })
 
-  // ── Edge case: promoted .rivet files should not trigger false positive ──
+  // ── Step 2 new: modified tracked file would be overwritten → blocked ──
+
+  it('modified tracked file would be overwritten by merge → blocked', async () => {
+    // Main: committed file
+    makeFile(TMP, 'src/lib.ts', 'export const version = 1')
+    await gitAdd(TMP, ['src/lib.ts'])
+    await gitCommit(TMP, 'initial commit')
+
+    // Branch: modify the same file
+    await git(TMP, ['checkout', '-b', 'feature/v2'])
+    makeFile(TMP, 'src/lib.ts', 'export const version = 2')
+    await gitAdd(TMP, ['src/lib.ts'])
+    await gitCommit(TMP, 'bump version on feature branch')
+
+    // Switch back to main
+    await git(TMP, ['checkout', 'main'])
+
+    // Modify the file locally (unstaged) — merge would overwrite this
+    makeFile(TMP, 'src/lib.ts', 'export const version = 1; // local WIP changes')
+
+    const result = await guard.checkMergeSafety('feature/v2')
+
+    assert.equal(result.blocked, true, 'merge overwriting locally-modified file should block')
+    assert.ok(
+      result.wouldOverwriteModified.includes('src/lib.ts'),
+      `src/lib.ts should be flagged as wouldOverwriteModified, got: ${result.wouldOverwriteModified}`,
+    )
+
+    const blockedReasons = result.reasons.filter(r => r.startsWith('BLOCKED:'))
+    assert.ok(
+      blockedReasons.some(r => r.includes('locally-modified')),
+      `Reason should mention locally-modified: ${blockedReasons.join(' | ')}`,
+    )
+  })
+
+  // ── Step 2 new: modified file NOT touched by target → not blocked ──
+
+  it('modified tracked file not touched by target → not blocked by merge', async () => {
+    makeFile(TMP, 'src/lib.ts', 'export const version = 1')
+    makeFile(TMP, 'src/other.ts', 'export const x = 1')
+    await gitAdd(TMP, ['src/lib.ts', 'src/other.ts'])
+    await gitCommit(TMP, 'initial commit')
+
+    // Branch: only changes src/lib.ts
+    await git(TMP, ['checkout', '-b', 'feature/v2'])
+    makeFile(TMP, 'src/lib.ts', 'export const version = 2')
+    await gitAdd(TMP, ['src/lib.ts'])
+    await gitCommit(TMP, 'bump on feature branch')
+
+    // Switch back
+    await git(TMP, ['checkout', 'main'])
+
+    // Modify src/other.ts locally — this file is NOT touched by target branch
+    makeFile(TMP, 'src/other.ts', 'export const x = 999')
+
+    const result = await guard.checkMergeSafety('feature/v2')
+
+    // src/other.ts should NOT be in wouldOverwriteModified
+    assert.ok(
+      !result.wouldOverwriteModified.includes('src/other.ts'),
+      `src/other.ts should NOT be flagged, got: ${result.wouldOverwriteModified}`,
+    )
+
+    // src/lib.ts IS touched by target but we didn't modify it locally → not flagged
+    assert.ok(
+      !result.wouldOverwriteModified.includes('src/lib.ts'),
+      `src/lib.ts should NOT be flagged (not modified locally), got: ${result.wouldOverwriteModified}`,
+    )
+
+    // No local modifications overlap with target → not blocked
+    assert.equal(result.blocked, false, 'merge with no local overlap should not block')
+  })
+
+  // ── Step 2 new: staged tracked file touched by target → blocked ──
+
+  it('staged tracked file touched by target → blocked', async () => {
+    makeFile(TMP, 'src/lib.ts', 'export const version = 1')
+    await gitAdd(TMP, ['src/lib.ts'])
+    await gitCommit(TMP, 'initial commit')
+
+    // Branch: modify the same file
+    await git(TMP, ['checkout', '-b', 'feature/v2'])
+    makeFile(TMP, 'src/lib.ts', 'export const version = 2')
+    await gitAdd(TMP, ['src/lib.ts'])
+    await gitCommit(TMP, 'bump version on feature branch')
+
+    // Switch back to main
+    await git(TMP, ['checkout', 'main'])
+
+    // Modify and stage the file (staged change)
+    makeFile(TMP, 'src/lib.ts', 'export const version = 1; // staged improvement')
+    await gitAdd(TMP, ['src/lib.ts'])
+
+    const result = await guard.checkMergeSafety('feature/v2')
+
+    assert.equal(result.blocked, true, 'merge overwriting staged file should block')
+    assert.ok(
+      result.wouldOverwriteModified.includes('src/lib.ts'),
+      `src/lib.ts should be flagged, got: ${result.wouldOverwriteModified}`,
+    )
+  })
+
+  // ── Edge case: promoted .rivet/playbook.jsonl does not trigger false positive ──
 
   it('promoted .rivet/playbook.jsonl does not block when tracked', async () => {
     makeDir(TMP, '.rivet')
     makeFile(TMP, '.rivet/playbook.jsonl', '{}')
-    gitAdd(TMP, ['.rivet/playbook.jsonl'])
+    await gitAdd(TMP, ['.rivet/playbook.jsonl'])
 
     const result = await guard.checkRuntimeArtifacts()
 
-    // .rivet/playbook.jsonl is explicitly promoted → should not appear in tracked
     const hasPlaybook = result.tracked.some(f => f.includes('playbook.jsonl'))
     assert.equal(hasPlaybook, false, 'promoted .rivet/playbook.jsonl should not be flagged')
     assert.equal(result.blocked, false, 'promoted file alone should not block')
@@ -216,31 +327,54 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
 
   it('same stash content vs current file → not blocked', async () => {
     makeFile(TMP, 'src/lib.ts', 'export const version = 1')
-    gitAdd(TMP, ['src/lib.ts'])
-    gitCommit(TMP, 'initial')
+    await gitAdd(TMP, ['src/lib.ts'])
+    await gitCommit(TMP, 'initial')
 
     // Modify and stash
     makeFile(TMP, 'src/lib.ts', 'export const version = 2')
-    execSync('git stash', { cwd: TMP })
+    await git(TMP, ['stash'])
 
     // Apply the stash back
-    execSync('git stash apply', { cwd: TMP })
+    await git(TMP, ['stash', 'apply'])
 
     const result = await guard.checkStashSafety('stash@{0}')
 
-    // File should now be same as stash content
     const sameConflicts = result.conflicts.filter(c => c.status === 'same')
     assert.ok(sameConflicts.length > 0, 'should detect same content')
     assert.equal(result.blocked, false, 'same content should not block')
   })
 
+  // ── Edge case: stash file missing from working tree (missing_current) ──
+
+  it('stash file missing from working tree → warning not blocked', async () => {
+    makeFile(TMP, 'src/temp.ts', 'temporary file')
+    await gitAdd(TMP, ['src/temp.ts'])
+    await gitCommit(TMP, 'initial')
+
+    // Need uncommitted changes for stash to create an entry
+    makeFile(TMP, 'src/temp.ts', 'modified temporary file')
+    await git(TMP, ['stash'])
+
+    // Now delete the file from working tree — stash still has it
+    rmSync(join(TMP, 'src/temp.ts'))
+
+    const result = await guard.checkStashSafety('stash@{0}')
+
+    // File exists in stash but missing from working tree
+    const missing = result.conflicts.filter(c => c.status === 'missing_current')
+    assert.ok(missing.length > 0,
+      `Expected missing_current, got: ${JSON.stringify(result.conflicts)}`)
+
+    // missing_current is not a blocking condition (file can be restored)
+    assert.equal(result.blocked, false, 'missing_current alone should not block')
+  })
+
   // ── fullReport integration test ──
 
   it('fullReport returns safeToMerge=true for clean workspace', async () => {
-    // Start clean
     makeFile(TMP, 'src/clean.ts', 'clean file')
-    gitAdd(TMP, ['src/clean.ts'])
-    gitCommit(TMP, 'clean commit')
+    await gitAdd(TMP, ['src/clean.ts'])
+    await gitCommit(TMP, 'clean commit')
 
     const report: WorkspaceGuardReport = await guard.fullReport()
 
@@ -257,13 +391,16 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
   it('fullReport sets safeToMerge=false when runtime artifacts are tracked', async () => {
     makeDir(TMP, '.rivet/artifacts')
     makeFile(TMP, '.rivet/artifacts/data.json', '{}')
-    gitAdd(TMP, ['.rivet/artifacts/data.json'], true)
+    await gitAdd(TMP, ['.rivet/artifacts/data.json'], true)
 
     const report: WorkspaceGuardReport = await guard.fullReport()
 
     assert.equal(report.safeToMerge, false, 'tracked runtime artifacts should make safeToMerge=false')
     assert.ok(report.trackedRuntimeArtifacts.length > 0)
-    assert.ok(report.reasons.some(r => r.startsWith('BLOCKED:')))
+    assert.ok(
+      report.reasons.some(r => r.startsWith('BLOCKED:')),
+      `Expected BLOCKED reason in fullReport, got: ${report.reasons.join(' | ')}`,
+    )
   })
 
   // ── WorkspaceGuard is not a class ──
@@ -275,7 +412,6 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
     assert.equal(typeof g.checkStashSafety, 'function')
     assert.equal(typeof g.checkMergeSafety, 'function')
     assert.equal(typeof g.fullReport, 'function')
-    // No prototype chain inspection — just verifying it's a plain object with methods
     assert.ok(!(g instanceof (class {})), 'should not be a class instance')
   })
 })

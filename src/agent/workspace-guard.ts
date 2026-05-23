@@ -4,16 +4,26 @@
  * 防止以下事故：
  * - .rivet/artifacts 被提交到 git
  * - .rivet/sessions 被误删
- * - stash 内容旧版本覆盖新版本
+ * - stash 内容覆盖当前工作区（内容不同时阻断）
  * - 评分/验证文件被 merge 覆盖
  * - agent 直接 apply stash 导致回退
+ * - tracked local changes 被 merge 静默覆盖
  *
  * 关键规则：
  * 1. .rivet/artifacts/ 不应 tracked
  * 2. .rivet/sessions/ 不应 tracked，除非明确提升
  * 3. stash apply 前应逐文件比较 hash
- * 4. merge 前检查 untracked overwrite
+ * 4. merge 前检查 untracked overwrite + tracked local modifications
  * 5. runtime artifacts 被 ignore 不是可删除许可
+ *
+ * StarSpine relation:
+ * - Task Contract scope/ownership knownRisks（架构 spec 3.2）
+ * - Pure Delivery delivery gate（纯净交付路线图）
+ * - Memory retention policy（T2 记忆文件保全策略）
+ *
+ * This module is pure diagnostic. It does not mutate workspace.
+ * WorkspaceGuard 不执行 stash apply，不执行 merge，不删除 artifacts。
+ * 只报告。
  *
  * HEARTH 兼容：safeToMerge 可作为 delivery gate 的一部分。
  * Songline 兼容：reasons 字符串列表可被 obligation engine 读取。
@@ -25,7 +35,7 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { resolve, relative } from 'node:path'
+import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 
 const execFileP = promisify(execFile)
@@ -38,7 +48,10 @@ export interface WorkspaceGuardReport {
   stashConflicts: Array<{
     stashRef: string
     path: string
-    status: 'same' | 'older' | 'newer' | 'conflict' | 'unknown'
+    /** same=content identical; different=content differs (ordering not trusted);
+     *  missing_current=file not in working tree; missing_stash=file not in stash;
+     *  unknown=could not determine */
+    status: 'same' | 'different' | 'missing_current' | 'missing_stash' | 'unknown'
   }>
   wouldOverwriteUntracked: string[]
   safeToMerge: boolean
@@ -60,6 +73,8 @@ export interface StashSafetyCheck {
 
 export interface MergeSafetyCheck {
   wouldOverwriteUntracked: string[]
+  /** Tracked files with local modifications that the target branch would overwrite */
+  wouldOverwriteModified: string[]
   blocked: boolean
   reasons: string[]
 }
@@ -68,10 +83,10 @@ export interface WorkspaceGuard {
   /** Check if runtime artifacts (.rivet/artifacts, .rivet/sessions) are tracked or ignorantly present. */
   checkRuntimeArtifacts(): Promise<RuntimeArtifactCheck>
 
-  /** Check if applying a stash would overwrite newer working-tree content. */
+  /** Check if applying a stash would overwrite different working-tree content. */
   checkStashSafety(stashRef: string): Promise<StashSafetyCheck>
 
-  /** Check if merging a branch would overwrite untracked files. */
+  /** Check if merging a branch would overwrite untracked or locally-modified tracked files. */
   checkMergeSafety(targetBranch: string): Promise<MergeSafetyCheck>
 
   /** Full diagnostic report. */
@@ -167,9 +182,10 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
 
     if (ignoredButPresent.length > 0) {
       reasons.push(
-        `WARNING: ${ignoredButPresent.length} runtime artifact(s) are gitignored but present on disk. ` +
-        `They are NOT safe to delete — they may contain un-promoted verification evidence, ` +
-        `failure records, or session handoff data.`,
+        `WARNING: ignored runtime artifacts present. ` +
+        `Do not commit automatically; do not delete before promotion review. ` +
+        `(${ignoredButPresent.length} file(s): ${ignoredButPresent.slice(0, 5).join(', ')}` +
+        `${ignoredButPresent.length > 5 ? '...' : ''})`,
       )
     }
 
@@ -199,68 +215,53 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
 
     for (const file of stashFiles) {
       const absPath = resolve(absCwd, file)
+
+      // Get stash version content
+      const stashContent = await gitString(['show', `${stashRef}:${file}`], absCwd)
+      if (stashContent === '' && !(await gitString(['ls-tree', stashRef, '--', file], absCwd)).trim()) {
+        // Could not retrieve stash content (file not in stash or git error)
+        conflicts.push({ stashRef, path: file, status: 'missing_stash' })
+        continue
+      }
+
       if (!fileExists(absPath)) {
-        conflicts.push({ stashRef, path: file, status: 'unknown' })
+        conflicts.push({ stashRef, path: file, status: 'missing_current' })
         continue
       }
 
       // Get current working-tree hash
       const currentContent = readFileSync(absPath, 'utf-8')
       const currentHash = sha256(currentContent)
-
-      // Get stash version hash
-      const stashContent = await gitString(['show', `${stashRef}:${file}`], absCwd)
-      if (!stashContent) {
-        conflicts.push({ stashRef, path: file, status: 'unknown' })
-        continue
-      }
       const stashHash = sha256(stashContent)
 
       if (currentHash === stashHash) {
         conflicts.push({ stashRef, path: file, status: 'same' })
-        continue
-      }
-
-      // Compare modification times to determine older/newer
-      // We use git log to get stash timestamp
-      const stashTime = await gitString(
-        ['log', '-1', '--format=%ct', stashRef],
-        absCwd,
-      )
-      const stashTimestamp = stashTime ? parseInt(stashTime.trim(), 10) * 1000 : 0
-      const currentMtime = statSync(absPath).mtimeMs
-
-      if (currentMtime > stashTimestamp) {
-        conflicts.push({ stashRef, path: file, status: 'newer' })
-      } else if (currentMtime < stashTimestamp) {
-        conflicts.push({ stashRef, path: file, status: 'older' })
       } else {
-        // Same mtime but different content — potential conflict
-        conflicts.push({ stashRef, path: file, status: 'conflict' })
+        conflicts.push({ stashRef, path: file, status: 'different' })
       }
     }
 
-    const newerFiles = conflicts.filter(c => c.status === 'newer')
-    const conflictFiles = conflicts.filter(c => c.status === 'conflict')
+    const differentFiles = conflicts.filter(c => c.status === 'different')
+    const missingCurrent = conflicts.filter(c => c.status === 'missing_current')
 
-    if (newerFiles.length > 0) {
+    if (differentFiles.length > 0) {
       reasons.push(
-        `BLOCKED: ${newerFiles.length} file(s) in working tree are newer than stash ${stashRef}: ` +
-        `${newerFiles.map(f => f.path).join(', ')}. ` +
-        `Applying stash would overwrite newer content.`,
+        `BLOCKED: ${differentFiles.length} file(s) in working tree have different content from stash ${stashRef}: ` +
+        `${differentFiles.map(f => f.path).join(', ')}. ` +
+        `Applying stash would overwrite current content. Compare manually before proceeding.`,
       )
     }
 
-    if (conflictFiles.length > 0) {
+    if (missingCurrent.length > 0) {
       reasons.push(
-        `WARNING: ${conflictFiles.length} file(s) have same timestamp but different content vs stash: ` +
-        `${conflictFiles.map(f => f.path).join(', ')}.`,
+        `WARNING: ${missingCurrent.length} file(s) exist in stash but missing from working tree: ` +
+        `${missingCurrent.map(f => f.path).join(', ')}.`,
       )
     }
 
     return {
       conflicts,
-      blocked: newerFiles.length > 0 || conflictFiles.length > 0,
+      blocked: differentFiles.length > 0,
       reasons,
     }
   }
@@ -270,24 +271,35 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
   async function checkMergeSafety(targetBranch: string): Promise<MergeSafetyCheck> {
     const reasons: string[] = []
     const wouldOverwriteUntracked: string[] = []
+    const wouldOverwriteModified: string[] = []
 
-    // Get files in target branch that aren't in current HEAD
-    const targetFiles = await gitLines(
-      ['ls-tree', '-r', '--name-only', targetBranch],
+    // 1. Get files changed in target branch relative to HEAD
+    const targetChangedFiles = await gitLines(
+      ['diff', '--name-only', `HEAD..${targetBranch}`],
       absCwd,
     )
+    const targetChangedSet = new Set(targetChangedFiles)
 
-    // Get current untracked files
+    // 2. Check untracked files that would be overwritten
     const untracked = await gitLines(
       ['ls-files', '--others', '--exclude-standard'],
       absCwd,
     )
-    const untrackedSet = new Set(untracked)
-
-    // Check overlap
-    for (const file of targetFiles) {
-      if (untrackedSet.has(file)) {
+    for (const file of untracked) {
+      if (targetChangedSet.has(file)) {
         wouldOverwriteUntracked.push(file)
+      }
+    }
+
+    // 3. Check tracked files with local modifications that would be overwritten
+    // Use git diff instead of status --porcelain to avoid fragile XY parsing
+    const unstagedModified = await gitLines(['diff', '--name-only'], absCwd)
+    const stagedModified = await gitLines(['diff', '--cached', '--name-only'], absCwd)
+    const locallyModifiedSet = new Set([...unstagedModified, ...stagedModified])
+
+    for (const file of locallyModifiedSet) {
+      if (targetChangedSet.has(file)) {
+        wouldOverwriteModified.push(file)
       }
     }
 
@@ -305,9 +317,21 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
       )
     }
 
+    if (wouldOverwriteModified.length > 0) {
+      reasons.push(
+        `BLOCKED: merge from ${targetBranch} would overwrite ${wouldOverwriteModified.length} locally-modified tracked file(s): ` +
+        `${wouldOverwriteModified.join(', ')}. ` +
+        `Commit or stash these changes first.`,
+      )
+    }
+
     return {
       wouldOverwriteUntracked,
-      blocked: wouldOverwriteUntracked.length > 0 || runtimeCheck.blocked,
+      wouldOverwriteModified,
+      blocked:
+        wouldOverwriteUntracked.length > 0 ||
+        wouldOverwriteModified.length > 0 ||
+        runtimeCheck.blocked,
       reasons,
     }
   }
@@ -323,20 +347,27 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
 
     let stashConflicts: WorkspaceGuardReport['stashConflicts'] = []
     let wouldOverwriteUntracked: string[] = []
+    let stashBlocked = false
+    let mergeBlocked = false
 
     if (stashRef) {
       const stashCheck = await checkStashSafety(stashRef)
       stashConflicts = stashCheck.conflicts
+      stashBlocked = stashCheck.blocked
       reasons.push(...stashCheck.reasons)
     }
 
     if (targetBranch) {
       const mergeCheck = await checkMergeSafety(targetBranch)
       wouldOverwriteUntracked = mergeCheck.wouldOverwriteUntracked
+      mergeBlocked = mergeCheck.blocked
       reasons.push(...mergeCheck.reasons)
     }
 
-    const safeToMerge = !reasons.some(r => r.startsWith('BLOCKED:'))
+    const safeToMerge =
+      !runtimeCheck.blocked &&
+      !stashBlocked &&
+      !mergeBlocked
 
     return {
       trackedRuntimeArtifacts: runtimeCheck.tracked,
