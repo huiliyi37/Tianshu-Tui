@@ -58,6 +58,20 @@ export class MistakeNotebook {
     return this.entries.size
   }
 
+  /** Export all entries for persistence */
+  getAllEntries(): MistakeEntry[] {
+    return [...this.entries.values()]
+  }
+
+  /** Import entries from external source (e.g., SQLite). Skips duplicates by id. */
+  importEntries(entries: MistakeEntry[]): void {
+    for (const entry of entries) {
+      if (!this.entries.has(entry.id)) {
+        this.entries.set(entry.id, entry)
+      }
+    }
+  }
+
   static formatHints(entries: MistakeEntry[]): string {
     if (entries.length === 0) return ''
     const lines = ['<mistake-hints>']
