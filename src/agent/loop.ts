@@ -68,6 +68,8 @@ import { CacheAdvisor } from '../cache/advisor.js'
 import { microCompactOai } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, type P3Integration } from './p3-integration.js'
+import { ImmuneHook } from './immune-hook.js'
+import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
@@ -82,6 +84,8 @@ import type { PlaybookStore } from './playbook-store.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
+import { HeuristicStore } from '../compact/heuristic-store.js'
+import { formatHeuristicsForInjection } from '../compact/heuristic-injector.js'
 
 /** Map StarPhase values to PromptEngine phaseClass strings. */
 const PHASE_CLASS_MAP: Record<string, string> = {
@@ -237,6 +241,8 @@ export class AgentLoop {
   private lastCompactTurn: number | null = null
   private cacheAdvisor: CacheAdvisor
   private p3: P3Integration
+  private heuristicStore: HeuristicStore
+  private immuneHook: ImmuneHook
 
   constructor(
     private config: AgentConfig,
@@ -279,6 +285,12 @@ export class AgentLoop {
         } catch { return '' }
       },
     })
+
+    this.heuristicStore = new HeuristicStore(join(this.cwd, '.rivet', 'heuristics.jsonl'))
+
+    // Physarum + Immune system
+    const physarum = new PhysarumEngine({} as any) // in-memory only, no DB persistence yet
+    this.immuneHook = new ImmuneHook({ physarum, stigmergy: this.stigmergyStore })
 
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
@@ -514,6 +526,16 @@ export class AgentLoop {
         }
       }
     }
+
+    // Physarum + Immune: postTool danger signal collection + adaptive response
+    const fp = this.traceStore.toolFingerprints[this.traceStore.toolFingerprints.length - 1] ?? name
+    this.immuneHook.run({
+      toolName: name,
+      fingerprint: fp,
+      turn: this.session.getTurnCount(),
+      doomLevel: this.getDoomLoopLevel(),
+      targetFile: target,
+    })
   }
 
   private bindSessionDomain(taskDescription: string): void {
@@ -725,6 +747,17 @@ export class AgentLoop {
     if (this.config.sessionRegistry) {
       try { this.config.sessionRegistry.cleanupOldEvents(2 * 60 * 60 * 1000) } catch { /* ignore */ }
     }
+    // Heuristic validation: update confidence based on session outcome
+    try {
+      const hadErrors = this.trajectory.getEntries().some(e => e.status === 'failed')
+      const topRules = this.heuristicStore.getTopK(5)
+      for (const rule of topRules) {
+        this.heuristicStore.recordHit(rule.id)
+        this.heuristicStore.updateConfidence(rule.id, !hadErrors)
+      }
+      this.heuristicStore.prune()
+      await this.heuristicStore.save()
+    } catch { /* non-critical */ }
   }
 
   private async startFsWatcher(): Promise<void> {
@@ -785,6 +818,15 @@ export class AgentLoop {
     } catch {
       // Detection failure must not crash AgentLoop — clear stale warning
       this.config.promptEngine.setWorktreeReality(null)
+    }
+
+    // Load cross-session heuristic rules for injection
+    try {
+      await this.heuristicStore.load()
+      const topRules = this.heuristicStore.getTopK(5)
+      this.config.promptEngine.setHeuristicRules(formatHeuristicsForInjection(topRules) || null)
+    } catch {
+      this.config.promptEngine.setHeuristicRules(null)
     }
 
     this.bindSessionDomain(userInput)
