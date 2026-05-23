@@ -1,6 +1,6 @@
 # Agent 协作过程推演：具体场景
 
-> 日期：2026-05-23
+> 日期：2026-05-23（修订：2026-05-24）
 > 场景：用户要求"修复前端通知组件的显示 bug，同时优化后端 API 的错误处理"
 > 涉及域：frontend（TUI 组件）+ backend（API 层）
 
@@ -19,434 +19,411 @@
 
 ---
 
-## 过程推演
+## 工程映射：概念 → 现有模块
 
-### 阶段 0：主 Session 启动
+| 设计概念 | 现有模块 | 文件 | 状态 |
+|---------|---------|------|------|
+| 主 Session / Dispatcher | `DelegationCoordinator` | `src/agent/coordinator.ts` | ✅ 已实现 |
+| 乐章级任务分解 | `decomposeByDataContract()` | `src/agent/dispatcher.ts` | ✅ 已实现 |
+| Worker A/B 并行执行 | `runWorkerSession` / `runHandsSession` | `src/agent/worker-session.ts`, `hands-session.ts` | ✅ 已实现 |
+| 信息素协调 | `StigmergyStore` | `src/context/stigmergy.ts` | ✅ 已实现 |
+| 漂移检测 | `CognitiveSeason` + `cerebellar gate` | `src/agent/cognitive-season.ts`, `tool-pipeline.ts` | ✅ 已实现 |
+| 锚位拓扑 (HEARTH) | `AnchorGraph` | `src/prompt/anchor-graph.ts` | ❌ 待实现 |
+| 义务引擎 (Songline) | — | — | ❌ 待实现 |
+| 守火人 | cerebellar gate + scope 检查 | `src/agent/tool-pipeline.ts` L254-262 | ⚠️ 部分覆盖 |
+| 阶段转换 | `StarPhase` + `ThetaState` | `src/agent/star-event.ts` | ✅ 已实现 |
+| 冲突检测 | `ConflictGradient` + `SemanticLockManager` | `src/agent/conflict-gradient.ts`, `semantic-lock.ts` | ✅ 已实现 |
+| 结果合并 | `MergeProtocol` + `aggregateResults` | `src/agent/merge-protocol.ts`, `aggregation.ts` | ✅ 已实现 |
+
+---
+
+## 过程推演（映射到现有代码路径）
+
+### 阶段 0：主 Session 接收任务
 
 ```
 用户："通知组件有时候会显示 undefined，帮我修复。同时后端 API 的错误处理太粗糙了，需要优化。"
 ```
 
-**主 Session 行动**：
-1. 构建 Anchor Graph
-2. 分析任务，识别涉及域
-3. 分解为乐章
-4. 分配给 worker
+**代码路径**：
+1. `AgentLoop.run()` → `TurnIntentController` 识别多域任务
+2. `extractTaskContract()` 提取 `TaskContract`（`src/context/task-contract.ts`）
+3. `dispatcher-hook.ts` 触发 → 调用 `decomposeByDataContract(contract)`
 
 ---
 
-### 阶段 1：构建锚位拓扑（Anchor Graph）
+### 阶段 1：任务分解
 
-**主 Session 构建 Anchor Graph**：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Anchor Graph                          │
-│                                                          │
-│  ┌──────────────┐         ┌──────────────┐              │
-│  │ pole_structure │ ◄────► │  pole_void   │              │
-│  │ (项目结构)     │ 互补对  │ (虚空)        │              │
-│  └──────┬───────┘         └──────────────┘              │
-│         │                                                │
-│         ▼                                                │
-│  ┌──────────────┐         ┌──────────────┐              │
-│  │ prev_cycle   │ ──────► │ current_cycle │              │
-│  │ (前周期关闭)  │ 连续性   │ (当前周期开启)│              │
-│  └──────────────┘         └──────────────┘              │
-│                                                          │
-│  ┌─────────────────────────────────────────────────────┐ │
-│  │                center_belief                         │ │
-│  │  "构建一个可靠、易用的终端编码助手"                    │ │
-│  └─────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Anchor Graph 内容**：
-
-```xml
-<anchor-graph>
-  <pole-structure>
-    - TypeScript strict mode, noUncheckedIndexedAccess: true
-    - No classes for data — use interface + plain objects
-    - Tools return ToolResult { content, isError?, rawPath?, uiContent? }
-    - Test framework: node:test + node:assert/strict
-  </pole-structure>
-  
-  <pole-void>
-    - 不使用 execSync — 使用 spawn 或 execFile
-    - 不直接导入 src/tools/bash.ts — 使用 ToolRegistry.execute()
-    - 不修改 git hooks — 创建新提交
-    - 不在 tool output 中暴露 API keys
-  </pole-void>
-  
-  <prev-cycle-close>
-    - Ice Mirror Cache Engine 已实现
-    - Append-Only Artifact Log 已实现
-    - prefix cache 命中率预期提升到 90%+
-  </prev-cycle-close>
-  
-  <current-cycle-open>
-    - 用户报告通知组件显示 undefined
-    - 后端 API 错误处理需要优化
-  </current-cycle-open>
-  
-  <center-belief>
-    "构建一个可靠、易用的终端编码助手"
-  </center-belief>
-  
-  <invariants>
-    <inv-1>结构与虚空互补</inv-1>
-    <inv-2>周期连续</inv-2>
-    <inv-3>行为与信念一致</inv-3>
-    <inv-4>存在下一周期</inv-4>
-    <inv-5>填充虚空</inv-5>
-  </invariants>
-</anchor-graph>
-```
-
----
-
-### 阶段 2：乐章级任务分解
-
-**Dispatcher 分解任务为乐章**：
-
-```
-任务："修复通知组件显示 undefined + 优化后端 API 错误处理"
-  │
-  ▼
-┌─────────────────────────────────────────────────────────┐
-│  乐章 1：理解（Understand）                               │
-│  调性：docs                                              │
-│  旋律：理解通知组件和 API 错误处理的现状                    │
-│  节奏：3 轮                                              │
-│  义务：[read_file, grep, repo_map]                       │
-└─────────────────────────────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────────────────────────────┐
-│  乐章 2：计划（Plan）                                     │
-│  调性：docs                                              │
-│  旋律：制定修复方案                                        │
-│  节奏：2 轮                                              │
-│  义务：[read_section, diff]                              │
-└─────────────────────────────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────────────────────────────┐
-│  乐章 3：执行（Execute）                                  │
-│  调性：frontend + backend                                │
-│  旋律：实现代码变更                                        │
-│  节奏：5 轮                                              │
-│  义务：[edit_file, write_file, run_tests]                │
-│  ⚠️ 这里会分叉为两个 worker                               │
-└─────────────────────────────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────────────────────────────┐
-│  乐章 4：验证（Verify）                                   │
-│  调性：tests                                             │
-│  旋律：验证实现正确性                                      │
-│  节奏：2 轮                                              │
-│  义务：[run_tests, diff]                                 │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-### 阶段 3：并行执行（乐章 3 分叉）
-
-**乐章 3 分叉为两个 worker**：
-
-```
-                    乐章 3：执行
-                         │
-           ┌─────────────┴─────────────┐
-           ▼                           ▼
-    ┌─────────────┐            ┌─────────────┐
-    │  Worker A   │            │  Worker B   │
-    │  (frontend) │            │  (backend)  │
-    │  破军·探索   │            │  天府·守护   │
-    └─────────────┘            └─────────────┘
-```
-
-#### Worker A（Frontend）启动
-
-**注入锚位投影**：
-
-```xml
-<anchor-projection>
-  <pole-structure>
-    - TypeScript strict mode, noUncheckedIndexedAccess: true
-    - No classes for data — use interface + plain objects
-    - Tools return ToolResult { content, isError?, rawPath?, uiContent? }
-  </pole-structure>
-  
-  <pole-void>
-    - 不使用 execSync — 使用 spawn 或 execFile
-    - 不直接导入 src/tools/bash.ts — 使用 ToolRegistry.execute()
-  </pole-void>
-  
-  <prev-cycle-close>
-    - Ice Mirror Cache Engine 已实现
-    - prefix cache 命中率预期提升到 90%+
-  </prev-cycle-close>
-  
-  <current-cycle-open>
-    - 用户报告通知组件显示 undefined
-  </current-cycle-open>
-  
-  <center-belief>
-    "构建一个可靠、易用的终端编码助手"
-  </center-belief>
-  
-  <invariants>
-    <inv-1>结构与虚空互补</inv-1>
-    <inv-2>周期连续</inv-2>
-    <inv-3>行为与信念一致</inv-3>
-    <inv-4>存在下一周期</inv-4>
-    <inv-5>填充虚空</inv-5>
-  </invariants>
-</anchor-projection>
-```
-
-**Worker A 行动**：
-1. 读取 `src/tui/components/notification.tsx`
-2. 发现问题：未处理 `undefined` 状态
-3. 修复代码
-4. 跑测试
-5. 沉积信息素
-
-#### Worker B（Backend）启动
-
-**注入锚位投影**：（与 Worker A 相同）
-
-**Worker B 行动**：
-1. 读取 `src/api/openai-client.ts`, `src/api/error-handler.ts`
-2. 发现问题：错误处理太粗糙，没有分类
-3. 优化错误处理逻辑
-4. 跑测试
-5. 沉积信息素
-
----
-
-### 阶段 4：信息素协调
-
-**Worker A 沉积信息素**：
+**现有实现**：`decomposeByDataContract()` in `src/agent/dispatcher.ts`
 
 ```typescript
-{
-  source: 'frontend',
-  target: 'backend',
-  strength: 1.0,
-  content: "notification.tsx 已修复，现在正确处理 undefined。如果后端返回 undefined，前端会显示默认消息。",
-  depositedAt: Date.now()
+// 输入：TaskContract { objective, scope: { mentionedFiles: [...] } }
+// 输出：DecomposedTask[]
+
+T0: { title: "修复通知组件 undefined", domain: "frontend", dependsOn: [] }
+T1: { title: "优化 API 错误处理", domain: "backend", dependsOn: [] }
+// T0 和 T1 无数据流依赖 → 并行
+```
+
+**与 HEARTH 的结合点（待实现）**：
+- 分解时注入 `pole_void`（禁止事项）作为 `WorkOrder.constraints`
+- 分解时注入 `center_belief` 作为 `WorkOrder.objective` 的上下文前缀
+
+**与 Songline 的结合点（待实现）**：
+- 每个 `DecomposedTask` 对应一个"乐章"
+- 乐章的结束条件不是预设轮次，而是 `CognitiveSeason` 从 `genesis` 转入 `wuwei`
+- 义务 = `DecomposedTask.objective`（语义级），不是工具列表
+
+---
+
+### 阶段 2：WorkOrder 创建与调度
+
+**现有实现**：`DelegationCoordinator.delegateBatch()` in `src/agent/coordinator.ts`
+
+```typescript
+// 为每个 DecomposedTask 创建 WorkOrder
+const orders: WorkOrder[] = [
+  createWriteWorkOrder({
+    parentTurnId: currentTurn,
+    kind: 'patch_proposal',
+    profile: 'patcher',
+    objective: "修复 notification.tsx 中 undefined 显示问题",
+    scope: { files: ['src/tui/components/notification.tsx'] },
+    domain: 'frontend',
+  }),
+  createWriteWorkOrder({
+    parentTurnId: currentTurn,
+    kind: 'patch_proposal',
+    profile: 'patcher',
+    objective: "优化 openai-client.ts 和 error-handler.ts 的错误处理",
+    scope: { files: ['src/api/openai-client.ts', 'src/api/error-handler.ts'] },
+    domain: 'backend',
+  }),
+]
+```
+
+**调度**：`WorkOrderQueue` 检查文件冲突（无冲突）→ 两个 order 同时出队
+
+---
+
+### 阶段 3：并行执行
+
+**现有实现**：
+
+- Write worker → `runHandsSession()` in `src/agent/hands-session.ts`
+- 每个 worker 在独立 git worktree 中执行（`WorktreeCoordinator`）
+- 每个 worker 有独立的 `AgentLoop` 实例
+
+```
+                    DelegationCoordinator.delegateBatch()
+                              │
+                ┌─────────────┴─────────────┐
+                ▼                           ▼
+    ┌───────────────────┐        ┌───────────────────┐
+    │  Worker A          │        │  Worker B          │
+    │  profile: patcher  │        │  profile: patcher  │
+    │  domain: frontend  │        │  domain: backend   │
+    │  worktree: .wt/a   │        │  worktree: .wt/b   │
+    └───────────────────┘        └───────────────────┘
+```
+
+**安全机制（已实现）**：
+- `SemanticLockManager`：Worker A 锁定 `notification.tsx`，Worker B 锁定 `openai-client.ts`
+- `ConflictGradient`：实时检测文件冲突级别（green/yellow/orange/red）
+- `DeadlockDetector`：DFS 检测等待图中的环
+
+---
+
+### 阶段 4：信息素协调（实时双向）
+
+**现有实现**：`StigmergyStore` in `src/context/stigmergy.ts`
+
+**关键修正**：信息素不是"完成后单向通知"，而是**过程中持续沉积**。
+
+```
+时间线：
+T=0  Worker A 启动 → deposit({ path: 'src/tui/components/notification.tsx',
+                               signal: 'entry-point', strength: 0.8,
+                               context: 'investigating undefined display' })
+T=0  Worker B 启动 → deposit({ path: 'src/api/openai-client.ts',
+                               signal: 'refactor-candidate', strength: 0.8,
+                               context: 'restructuring error handling' })
+T=1  Worker B sense('src/tui/') → 发现 Worker A 正在处理前端
+     → 不会尝试修改 notification.tsx（即使发现后端返回 undefined）
+T=3  Worker A 完成修复 → deposit({ path: 'src/tui/components/notification.tsx',
+                                   signal: 'well-tested', strength: 1.0,
+                                   context: 'fixed: handles undefined with fallback message' })
+T=4  Worker B sense → 知道前端已处理 undefined → 专注于错误分类
+```
+
+**与 Songline 的结合点（待实现）**：
+- 信息素沉积 = Songline 的"歌声残留"
+- 每次 `deposit()` 是一次"唱歌"——在路径上留下痕迹
+- 信号类型扩展：增加 `scope-claim`（声明正在处理的范围）
+
+---
+
+### 阶段 5：漂移检测与校准
+
+**现有实现**：
+
+1. **cerebellar gate**（`src/agent/tool-pipeline.ts` L254-262）：
+   - 检测 prediction error rate 升高 → 阻止 edit_file 直到 read_file
+   - 已实现"读后写"强制
+
+2. **CognitiveSeason**（`src/agent/cognitive-season.ts`）：
+   - `reversal` 季节 = 漂移检测（doom loop level 升高）
+   - `genesis` → `reversal` 转换 = "检测到问题"
+
+3. **PredictionAccumulator**（`src/agent/prediction-error.ts`）：
+   - 累积预测误差 → 触发 intervention level 升级
+
+**推演**：
+
+```
+Worker A Turn 3: 尝试修改 src/api/error-handler.ts（不在 scope 内）
+  → SemanticLockManager: Worker B 已锁定该文件 → 拒绝
+  → ConflictGradient: 'orange' → 记录冲突
+  → Worker A 收到 tool_result.is_error = true
+  → PredictionAccumulator 累积误差
+  → 如果连续 2 次 → intervention level 升级为 'gate'
+  → cerebellar gate 阻止后续 edit 直到 read_file 重新校准
+```
+
+**与 HEARTH 的结合点（待实现）**：
+- INV-1（乾坤互补）→ Worker 的 scope（structure）和 constraints（void）互补
+- INV-3（中孚环绕）→ `center_belief` 在每次 gate 触发时注入提醒
+- INV-5（漂移检测）→ 扩展现有 `detect_drift` 到 scope 边界检查
+
+**守火人 = 现有机制的组合**：
+- cerebellar gate（已有）+ scope 边界检查（SemanticLock 已有）+ 信念提醒（待实现）
+- 不需要新角色，只需要在 gate 触发时注入 `center_belief` 上下文
+
+---
+
+### 阶段 6：阶段转换（替代预设轮次）
+
+**现有实现**：`StarPhase` + `CognitiveSeason`
+
+**关键设计**：不预设轮次，由 agent 行为驱动阶段转换。
+
+```typescript
+// 现有 StarPhase 映射（src/agent/loop.ts L85-95）
+const PHASE_CLASS_MAP = {
+  'tianshu-planning': 'plan',
+  'tianxuan-locating': 'explore',
+  'yuheng-implementing': 'execute',
+  'kaiyang-testing': 'verify',
+  'yaoguang-delivering': 'deliver',
 }
 ```
 
-**Worker B 感知信息素**：
+**Worker 的阶段转换是自然的**：
+- Worker 开始 → `genesis` 季节 → 读文件、理解问题
+- Worker 开始写代码 → `StarPhase` 转入 `yuheng-implementing`
+- Worker 跑测试 → `StarPhase` 转入 `kaiyang-testing`
+- 测试通过 → `wuwei` 季节 → 自然结束
 
-```typescript
-// Worker B 在启动时检查信息素
-const pheromones = sensePheromones('backend', allPheromones)
-// 发现来自 frontend 的信号
-// → "notification.tsx 已修复，现在正确处理 undefined"
-// → Worker B 知道前端已经处理了 undefined，可以专注于错误分类
-```
-
-**Worker B 根据信息素调整策略**：
-- 原计划：同时处理 undefined 和错误分类
-- 调整后：专注于错误分类（因为前端已经处理了 undefined）
+**与 Songline 的结合点（待实现）**：
+- "乐章"的结束 = `CognitiveSeason` 从 `genesis` 完整走到 `wuwei`
+- 一个 Worker 可能经历多个"乐章"（多次 genesis→wuwei 循环）
+- 每次 `wuwei` 到达时沉积 `cycle_close` 信息素
 
 ---
 
-### 阶段 5：漂移检测
+### 阶段 7：验证与交付
 
-**Worker A 执行过程中**：
+**现有实现**：
 
-```
-Turn 1: 读取 notification.tsx → INV-2 通过（周期连续）
-Turn 2: 分析问题 → INV-3 通过（行为与信念一致）
-Turn 3: 开始修复 → INV-1 ⚠️ 检测到漂移
-  - 原因：Worker A 尝试修改一个不在 scope 内的文件
-  - 漂移级别：1（轻微）
-  - 恢复策略：inject_context
-```
-
-**守火人介入**：
+1. Worker 完成 → 返回 `WorkerResult`（`src/agent/work-order.ts`）
+2. `worker-evidence.ts` 验证 evidence 完整性
+3. `aggregateResults()` 合并多个 worker 结果
+4. `MergeProtocol` 处理 git worktree 合并
 
 ```typescript
-const suggestion = summonFireKeeper(workerA, 'invariantViolation')
-// 返回：
-{
-  type: 'anchor_reminder',
-  content: "检测到轻微漂移：INV-1 违反。你正在修改不在 scope 内的文件。请专注于 notification.tsx。",
-  strength: 0.5
+// WorkerResult 已有的结构
+interface WorkerResult {
+  workOrderId: string
+  status: 'passed' | 'failed' | 'partial' | 'timeout'
+  summary: string
+  findings: Finding[]
+  changedFiles: string[]
+  risks: string[]
+  nextActions: string[]
+  evidenceStatus: 'verified' | 'unverified' | 'failed'
+  verification?: VerificationMetadata
 }
 ```
 
-**Worker A 响应**：
-- 接受建议，停止修改无关文件
-- 专注于 notification.tsx 的修复
-- 继续执行
+**合并流程**：
+1. `MergeQueue` 按 conflict level 排序
+2. Worker A 结果（frontend）→ `auto_cherry_pick`（无冲突）
+3. Worker B 结果（backend）→ `auto_cherry_pick`（无冲突）
+4. 主 Session 运行完整测试套件验证
 
 ---
 
-### 阶段 6：验证与交付
+## 待实现：HEARTH + Songline 增强层
 
-**Worker A 完成**：
+### 增强 1：锚位投影注入 Worker
+
+**位置**：`src/agent/worker-prompts.ts` → `buildPrimaryWorkerPacket()`
+
+**改动**：在 worker prompt 中注入简化的锚位投影
 
 ```typescript
-WorkerResult {
-  workOrderId: "wo_frontend_001",
-  status: "passed",
-  summary: "修复通知组件显示 undefined 的问题",
-  findings: [
-    {
-      claim: "notification.tsx 未处理 undefined 状态",
-      evidence: "src/tui/components/notification.tsx:45",
-      confidence: "high"
+// 待实现：在 buildPrimaryWorkerPacket 中追加
+interface AnchorProjection {
+  structure: string[]    // 从 .rivet/rules/ 提取的编码规范
+  void: string[]         // 从 WorkOrder.constraints 提取的禁止事项
+  belief: string         // center_belief（一句话）
+  cycleContext: string   // 当前任务的上下文
+}
+```
+
+**注意**：不用 XML 格式，用扁平文本。先 A/B 测试再决定格式。
+
+### 增强 2：义务引擎
+
+**位置**：新建 `src/agent/obligation.ts`
+
+**设计**：义务是语义级的，不是工具级的。
+
+```typescript
+interface Obligation {
+  id: string
+  description: string           // "理解 notification.tsx 的 undefined 来源"
+  completionSignal: string      // "找到 undefined 的根因并记录在 findings 中"
+  allowedTools?: string[]       // 可选的工具约束
+  maxTurns?: number             // 可选的轮次上限（软限制）
+}
+
+interface ObligationEngine {
+  current(): Obligation | null
+  advance(evidence: Finding[]): void  // 根据 evidence 判断是否完成
+  isComplete(): boolean
+}
+```
+
+**与现有模块的关系**：
+- `Obligation.completionSignal` 对应 `TaskLedger` 的事件模式
+- `ObligationEngine.advance()` 由 `TurnCompletionController` 在每轮结束时调用
+- 义务完成 = `CognitiveSeason` 进入 `wuwei`
+
+### 增强 3：实时 Scope 声明信息素
+
+**位置**：扩展 `StigmergyStore` 的信号类型
+
+```typescript
+// 在 src/agent/sensorium.ts 的 PheromoneSignal 中增加
+type PheromoneSignal = 
+  | 'fragile' | 'well-tested' | 'entry-point' | 'dead-end'
+  | 'coupling-hub' | 'performance-critical' | 'refactor-candidate'
+  | 'scope-claim'      // 新增：声明正在处理的范围
+  | 'scope-complete'   // 新增：声明已完成处理
+```
+
+**Worker 启动时**：
+```typescript
+// 在 runHandsSession / runWorkerSession 启动时
+for (const file of order.scope.files ?? []) {
+  await stigmergy.deposit({ path: file, signal: 'scope-claim', strength: 1.0,
+    context: `worker=${order.id} objective=${order.objective}` })
+}
+```
+
+**Worker 完成时**：
+```typescript
+// 在 worker 返回 WorkerResult 后
+for (const file of result.changedFiles) {
+  await stigmergy.deposit({ path: file, signal: 'scope-complete', strength: 1.0,
+    context: result.summary })
+}
+```
+
+### 增强 4：守火人 = Gate + Scope + Belief
+
+**位置**：扩展 `src/agent/tool-pipeline.ts` 的 cerebellar gate
+
+```typescript
+// 现有 gate（L254-262）检查 "read before edit"
+// 扩展：检查 "scope boundary"
+if (tu.name === 'edit_file' || tu.name === 'write_file') {
+  const targetFile = tu.input.file_path as string
+  const inScope = deps.workOrderScope?.files?.some(f => targetFile.includes(f))
+  if (!inScope) {
+    // 检查信息素：是否有其他 worker 声明了 scope-claim
+    const pheromones = await deps.stigmergy?.query(targetFile)
+    const otherClaim = pheromones?.find(p => p.signal === 'scope-claim')
+    if (otherClaim) {
+      return gateBlock(`File ${targetFile} is claimed by another worker: ${otherClaim.context}`)
     }
-  ],
-  changedFiles: ["src/tui/components/notification.tsx"],
-  risks: [],
-  nextActions: ["运行前端测试验证修复"],
-  evidenceStatus: "verified"
-}
-```
-
-**Worker B 完成**：
-
-```typescript
-WorkerResult {
-  workOrderId: "wo_backend_001",
-  status: "passed",
-  summary: "优化后端 API 错误处理，添加错误分类",
-  findings: [
-    {
-      claim: "openai-client.ts 错误处理太粗糙",
-      evidence: "src/api/openai-client.ts:120",
-      confidence: "high"
-    }
-  ],
-  changedFiles: ["src/api/openai-client.ts", "src/api/error-handler.ts"],
-  risks: ["需要测试错误分类是否正确"],
-  nextActions: ["运行后端测试验证优化"],
-  evidenceStatus: "verified"
+  }
 }
 ```
 
 ---
 
-### 阶段 7：主 Session 合并结果
+## 分布式 INV 问题（HEARTH 在多 Worker 场景）
 
-**主 Session 行动**：
-1. 收集 Worker A 和 Worker B 的结果
-2. 检查冲突（无冲突，因为修改不同文件）
-3. 合并变更
-4. 运行完整测试套件
-5. 提交代码
+### 设计决策：AnchorGraph 是 per-worker 的
 
-**最终输出**：
+每个 Worker 维护自己的 AnchorGraph 实例，但共享 `pole_structure` 和 `center_belief`（这两个是 project 级不变的）。
 
-```
-✅ 通知组件已修复：正确处理 undefined 状态
-✅ 后端 API 错误处理已优化：添加错误分类
+| 锚位 | 共享方式 |
+|------|---------|
+| `pole_structure` | 共享（project 级，所有 worker 相同） |
+| `pole_void` | per-worker（每个 worker 的 constraints 不同） |
+| `cycle_close` | per-worker（每个 worker 独立完成） |
+| `cycle_open` | per-worker（每个 worker 独立启动） |
+| `center_belief` | 共享（project 级） |
 
-修改文件：
-- src/tui/components/notification.tsx
-- src/api/openai-client.ts
-- src/api/error-handler.ts
+### INV 在多 Worker 场景的适配
 
-测试结果：全部通过
-```
-
----
-
-## 关键创新点体现
-
-### 1. 锚位感知的上下文共享
-
-**体现**：
-- Worker 启动时接收完整的锚位拓扑，而不是扁平 claim 列表
-- Worker 知道"我是谁"（center_belief）、"从哪里来"（prev_cycle_close）、"到哪里去"（current_cycle_open）
-- Worker 有明确的"虚空"（pole_void），知道什么不该做
-
-**效果**：
-- Worker A 不会尝试修改后端文件（因为知道这是 Worker B 的职责）
-- Worker B 不会重复处理 undefined（因为从前端信息素知道已经处理了）
-
-### 2. 歌之路感知的任务粒度
-
-**体现**：
-- 任务按乐章分解：理解→计划→执行→验证
-- 每个乐章有明确的调性、旋律、节奏
-- 乐章 3（执行）分叉为两个 worker 并行执行
-
-**效果**：
-- 任务结构清晰，每个 worker 知道自己在哪个阶段
-- 并行执行提高效率
-- 验证阶段确保质量
-
-### 3. 锚位感知的错误策略
-
-**体现**：
-- Worker A 在 Turn 3 检测到 INV-1 漂移
-- 漂移级别：1（轻微）
-- 恢复策略：inject_context（注入校准上下文）
-- 守火人提供建议，而不是命令
-
-**效果**：
-- 在失败前 2-3 轮检测到问题
-- 通过校准避免错误
-- 保持 worker 自主性
-
-### 4. 歌之路感知的跨域依赖
-
-**体现**：
-- Worker A 完成后沉积信息素到 backend 域
-- Worker B 启动时感知信息素，调整策略
-- 信息素有强度和衰减
-
-**效果**：
-- 跨域协调有机、自然
-- 不需要显式声明依赖
-- 信息素衰减确保过时信息消失
-
-### 5. 守火人作为团队协调器
-
-**体现**：
-- 守火人持有星位碑文（编码规范、架构决策）
-- Worker 漂移时可以召唤守火人
-- 守火人提供建议，而不是命令
-
-**效果**：
-- 分布式校准，不是中央调度
-- 保持 worker 自主性
-- 提供安全网
+| INV | 单 Session 语义 | 多 Worker 语义 |
+|-----|----------------|---------------|
+| INV-1 | structure XOR void = FULL | Worker 的 scope + constraints 互补 |
+| INV-2 | cycle 首尾相接 | Worker 的 `cycle_open` 引用主 Session 的 dispatch 时间戳 |
+| INV-3 | belief 被环绕 | 每个 Worker 的 prompt 包含 `center_belief` |
+| INV-4 | cycle_open 每 session 变化 | 每个 Worker 的 `cycle_open` 天然不同 |
+| INV-5 | 漂移检测 | 每个 Worker 独立检测 + 主 Session 检测 aggregate 结果 |
 
 ---
 
-## 与现状对比
+## 实施优先级
 
-| 维度 | 现状 | 创新后 |
-|------|------|--------|
-| 上下文注入 | 扁平 claim 列表（top 10） | 锚位拓扑（5+1 结构） |
-| 任务分解 | 文件级（classifyFile） | 乐章级（读→计划→写→验证） |
-| 错误检测 | 事后（pass/fail） | 事前（漂移检测，INV-1~5） |
-| 跨域协调 | 显式声明（dependsOn[]） | 有机感知（信息素） |
-| 协调方式 | 中央调度（Coordinator） | 分布式校准（FireKeeper） |
-| Worker 自主性 | 低（被动执行） | 高（主动感知、校准） |
+| 优先级 | 改动 | 文件 | 依赖 |
+|--------|------|------|------|
+| P0 | scope-claim 信息素 | `sensorium.ts` + `hands-session.ts` | 无 |
+| P0 | scope 边界 gate | `tool-pipeline.ts` | scope-claim |
+| P1 | 锚位投影注入 worker prompt | `worker-prompts.ts` | HEARTH Phase 1 |
+| P1 | 义务引擎 | 新建 `obligation.ts` | 无 |
+| P2 | CognitiveSeason 驱动乐章结束 | `turn-completion.ts` | 义务引擎 |
+| P2 | 分布式 INV 校验 | `anchor-graph.ts` | HEARTH Phase 1 |
+| P3 | A/B 测试锚位格式 | telemetry | P1 完成后 |
+
+---
+
+## 与现状对比（修订）
+
+| 维度 | 现状（已实现） | 增强后（待实现） |
+|------|--------------|----------------|
+| 上下文注入 | `buildPrimaryWorkerPacket` + active claims | + 锚位投影（structure/void/belief） |
+| 任务分解 | `decomposeByDataContract`（文件→域） | + 义务引擎（语义级目标） |
+| 错误检测 | cerebellar gate + PredictionAccumulator | + scope 边界检查 + 信息素感知 |
+| 跨域协调 | `SemanticLockManager` + `ConflictGradient` | + scope-claim 信息素（实时双向） |
+| 阶段转换 | `StarPhase` + `CognitiveSeason` | + 义务完成驱动（替代预设轮次） |
+| 协调方式 | `DelegationCoordinator`（中央调度） | + 信息素自组织（分布式校准） |
 
 ---
 
 ## 总结
 
-这个推演展示了 HEARTH + Songline 创新设计在实际协作中的效果：
+这个推演展示了 HEARTH + Songline 如何**增量叠加**在已有的协作基础设施上：
 
-1. **更丰富的上下文**：锚位拓扑比扁平列表提供更丰富的参考系
-2. **更清晰的结构**：乐章级分解比文件级分解更清晰
-3. **更早的检测**：漂移检测比 pass/fail 更早发现问题
-4. **更有机的协调**：信息素比显式声明更自然
-5. **更自主的 worker**：分布式校准比中央调度更灵活
+1. **不替换** `DelegationCoordinator` / `WorkOrderQueue` / `MergeProtocol` — 它们是可靠的骨架
+2. **增强** worker prompt（锚位投影）、gate 逻辑（scope 边界）、信息素（scope-claim）
+3. **替代** 预设轮次 → 用 `CognitiveSeason` 自然转换
+4. **新增** 义务引擎作为语义级目标追踪
 
-这些创新不是替换现有架构，而是在其上层增强，让 agent 协作更高效、更可靠、更自然。
+核心原则：**现有代码是骨架，HEARTH 是参考系，Songline 是协调层。三者正交叠加，不互相替换。**
