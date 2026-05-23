@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
-import type { ParseResult, MeridianSymbol, MeridianEdge } from './meridian-types.js'
+import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS edges (
   target_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   weight REAL NOT NULL DEFAULT 1.0,
+  confidence TEXT NOT NULL DEFAULT 'extracted',
   PRIMARY KEY(source_id, target_id, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
@@ -76,15 +77,15 @@ export class MeridianDb {
         insertSym.run(s.id, s.name, s.kind, s.filePath, s.line, s.exported ? 1 : 0, s.contentHash)
       }
 
-      const insertEdge = this.db.prepare('INSERT OR REPLACE INTO edges (source_id, target_id, kind, weight) VALUES (?, ?, ?, ?)')
+      const insertEdge = this.db.prepare('INSERT OR REPLACE INTO edges (source_id, target_id, kind, weight, confidence) VALUES (?, ?, ?, ?, ?)')
       for (const e of result.edges) {
-        insertEdge.run(e.sourceId, e.targetId, e.kind, e.weight)
+        insertEdge.run(e.sourceId, e.targetId, e.kind, e.weight, e.confidence ?? 'extracted')
       }
 
       for (const imp of result.imports) {
         const firstSymbol = result.symbols[0]
         if (firstSymbol) {
-          insertEdge.run(firstSymbol.id, `${imp}:*:0`, 'imports', 1.0)
+          insertEdge.run(firstSymbol.id, `${imp}:*:0`, 'imports', 1.0, 'extracted')
         }
       }
     })
@@ -109,6 +110,7 @@ export class MeridianDb {
       targetId: row.target_id as string,
       kind: row.kind as MeridianEdge['kind'],
       weight: row.weight as number,
+      confidence: (row.confidence as EdgeConfidence) ?? 'extracted',
     }))
   }
 
@@ -118,6 +120,7 @@ export class MeridianDb {
       targetId: row.target_id as string,
       kind: row.kind as MeridianEdge['kind'],
       weight: row.weight as number,
+      confidence: (row.confidence as EdgeConfidence) ?? 'extracted',
     }))
   }
 
@@ -217,10 +220,10 @@ export class MeridianDb {
   }
 
   /** Insert or update a single edge */
-  upsertEdge(sourceId: string, targetId: string, kind: string, weight: number): void {
+  upsertEdge(sourceId: string, targetId: string, kind: string, weight: number, confidence: EdgeConfidence = 'extracted'): void {
     this.db.prepare(
-      'INSERT OR REPLACE INTO edges (source_id, target_id, kind, weight) VALUES (?, ?, ?, ?)'
-    ).run(sourceId, targetId, kind, weight)
+      'INSERT OR REPLACE INTO edges (source_id, target_id, kind, weight, confidence) VALUES (?, ?, ?, ?, ?)'
+    ).run(sourceId, targetId, kind, weight, confidence)
   }
 
   close(): void {

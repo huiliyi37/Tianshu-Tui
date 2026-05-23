@@ -1,5 +1,6 @@
 import type { MeridianDb } from './meridian-db.js'
 import type { RepoMapEntry, RepoMapResult } from './meridian-types.js'
+import { CONFIDENCE_MULTIPLIER } from './meridian-types.js'
 import type { MeridianBehavior } from './meridian-behavior.js'
 
 export interface ActivationOptions {
@@ -32,7 +33,8 @@ export function spreadingActivation(
       for (const edge of edges) {
         const targetFile = edge.targetId.split(':')[0]!
         if (targetFile && !targetFile.includes('*')) {
-          const addition = decayFactor * edge.weight
+          const confMult = CONFIDENCE_MULTIPLIER[edge.confidence ?? 'extracted']
+          const addition = decayFactor * edge.weight * confMult
           const existing = scores.get(targetFile) ?? 0
           scores.set(targetFile, Math.max(existing, addition))
           nextFrontier.push(edge.targetId)
@@ -43,7 +45,8 @@ export function spreadingActivation(
       for (const edge of reverseEdges) {
         const sourceFile = edge.sourceId.split(':')[0]!
         if (sourceFile && !sourceFile.includes('*')) {
-          const addition = decayFactor * edge.weight * 0.7 // reverse edges slightly weaker
+          const confMult = CONFIDENCE_MULTIPLIER[edge.confidence ?? 'extracted']
+          const addition = decayFactor * edge.weight * 0.7 * confMult // reverse edges slightly weaker
           const existing = scores.get(sourceFile) ?? 0
           scores.set(sourceFile, Math.max(existing, addition))
           nextFrontier.push(edge.sourceId)

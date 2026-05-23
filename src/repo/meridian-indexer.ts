@@ -3,7 +3,7 @@ import { resolve, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { MeridianDb } from './meridian-db.js'
 import { MeridianBehavior } from './meridian-behavior.js'
-import { parseTypeScriptFile, initParser } from './meridian-parser.js'
+import { parseFile, parseTypeScriptFile, initParser, detectLang } from './meridian-parser.js'
 import { buildRepoMap } from './meridian-graph.js'
 import { analyzeImpact, inferTestedByTargets } from './meridian-impact.js'
 import type { RepoMapResult } from './meridian-types.js'
@@ -12,6 +12,7 @@ import type { ImpactResult } from './meridian-impact.js'
 import type { StigmergyStore } from '../context/stigmergy.js'
 
 const TS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx']
+const ALL_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go']
 const IGNORE_PATTERNS = ['node_modules', 'dist', '.git', '.rivet']
 
 export class MeridianIndexer {
@@ -52,7 +53,7 @@ export class MeridianIndexer {
     this.indexing.add(filePath)
 
     try {
-      const result = await parseTypeScriptFile(filePath, source)
+      const result = await parseFile(filePath, source)
       this.db.upsertFile(result)
       this.db.recordAccess(filePath)
 
@@ -80,7 +81,7 @@ export class MeridianIndexer {
 
     await this.ensureInit()
     const source = readFileSync(absPath, 'utf-8')
-    const result = await parseTypeScriptFile(filePath, source)
+    const result = await parseFile(filePath, source)
     this.db.upsertFile(result)
   }
 
@@ -112,10 +113,9 @@ export class MeridianIndexer {
     const allFiles = this.db.getAllFiles()
     const targets = inferTestedByTargets(testFilePath, allFiles)
     for (const target of targets) {
-      // Use file-level pseudo-symbol for tested_by edge
       const sourceId = `${testFilePath}:*:0`
       const targetId = `${target}:*:0`
-      this.db.upsertEdge(sourceId, targetId, 'tested_by', 0.7)
+      this.db.upsertEdge(sourceId, targetId, 'tested_by', 0.7, 'inferred')
     }
   }
 
@@ -129,7 +129,7 @@ export class MeridianIndexer {
 
   private isIndexable(filePath: string): boolean {
     if (IGNORE_PATTERNS.some(p => filePath.includes(p))) return false
-    return TS_EXTENSIONS.some(ext => filePath.endsWith(ext))
+    return ALL_EXTENSIONS.some(ext => filePath.endsWith(ext))
   }
 
   private isTestFile(filePath: string): boolean {

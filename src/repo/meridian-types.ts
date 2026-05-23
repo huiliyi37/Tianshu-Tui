@@ -2,6 +2,14 @@ export type MeridianSymbolKind = 'function' | 'class' | 'interface' | 'type' | '
 
 export type MeridianEdgeKind = 'imports' | 'calls' | 'contains' | 'type_of' | 'co_edit' | 'tested_by'
 
+export type EdgeConfidence = 'extracted' | 'inferred' | 'ambiguous'
+
+export const CONFIDENCE_MULTIPLIER: Record<EdgeConfidence, number> = {
+  extracted: 1.0,
+  inferred: 0.7,
+  ambiguous: 0.4,
+}
+
 export interface MeridianSymbol {
   id: string
   name: string
@@ -17,6 +25,7 @@ export interface MeridianEdge {
   targetId: string
   kind: MeridianEdgeKind
   weight: number
+  confidence?: EdgeConfidence
 }
 
 export interface ParseResult {
