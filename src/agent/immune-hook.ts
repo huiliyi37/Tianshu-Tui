@@ -1,0 +1,211 @@
+/**
+ * Immune Hook — wires Physarum + Immune layers into the agent loop.
+ *
+ * Runs as a postTool hook:
+ * 1. Feeds flow data to Physarum engine
+ * 2. Collects danger signals from innate layer + Physarum anomaly detection
+ * 3. APC dual-signal gating
+ * 4. Adaptive immune response (memory lookup or new learning)
+ * 5. Feedback to Physarum (quarantine, prune, boost)
+ */
+
+import { InnateLayer } from './immune-innate.js'
+import { ApcAggregator } from './immune-apc.js'
+import { ImmuneAdaptiveLayer } from './immune-adaptive.js'
+import type { DangerSignal, ImmuneResponse } from './immune-types.js'
+import type { PhysarumEngine } from '../repo/physarum-engine.js'
+import type { StigmergyStore } from '../context/stigmergy.js'
+import type { DoomLoopLevel } from './trace-store.js'
+import type { HealthSignal } from './trajectory-health.js'
+
+export interface ImmuneHookDeps {
+  physarum: PhysarumEngine
+  stigmergy?: StigmergyStore
+}
+
+export interface ImmuneHookContext {
+  toolName: string
+  fingerprint: string
+  turn: number
+  doomLevel: DoomLoopLevel
+  targetFile?: string
+  tokenUsage?: number
+  trajectoryHealth?: HealthSignal
+}
+
+export interface ImmuneHookResult {
+  activated: boolean
+  response?: ImmuneResponse
+  signals: DangerSignal[]
+}
+
+const BATCH_EVOLVE_INTERVAL = 10
+const UBIQUITY_INTERVAL = 50
+
+export class ImmuneHook {
+  readonly innate = new InnateLayer()
+  readonly apc = new ApcAggregator()
+  readonly adaptive = new ImmuneAdaptiveLayer()
+  private lastBatchTurn = 0
+  private lastUbiquityTurn = 0
+
+  constructor(private deps: ImmuneHookDeps) {}
+
+  /** Main entry point — called after each tool execution */
+  run(ctx: ImmuneHookContext): ImmuneHookResult {
+    // 0. Feed Physarum flow data
+    if (ctx.targetFile) {
+      this.deps.physarum.recordFlow(ctx.toolName, ctx.targetFile, ctx.turn)
+      // Register as normal behavior for negative selection
+      this.adaptive.registerNormal(ctx.fingerprint)
+    }
+
+    // 1. Innate layer check
+    const innateSignals = this.innate.check({
+      toolName: ctx.toolName,
+      fingerprint: ctx.fingerprint,
+      turn: ctx.turn,
+      tokenUsage: ctx.tokenUsage,
+    })
+
+    // 2. Trajectory health as danger signal
+    if (ctx.trajectoryHealth === 'escalate') {
+      innateSignals.push({
+        kind: 'prediction_error', severity: 0.9,
+        turn: ctx.turn, source: 'atropos',
+      })
+    } else if (ctx.trajectoryHealth === 'degrading') {
+      innateSignals.push({
+        kind: 'prediction_error', severity: 0.5,
+        turn: ctx.turn, source: 'atropos',
+      })
+    }
+
+    // 3. Physarum anomaly detection
+    const graphSignal = this.deps.physarum.detectAnomaly()
+    if (graphSignal) {
+      innateSignals.push({
+        kind: 'graph_anomaly',
+        severity: graphSignal.severity,
+        turn: ctx.turn,
+        source: graphSignal.source,
+      })
+    }
+
+    // 4. Collect all signals into APC
+    for (const signal of innateSignals) {
+      this.apc.collect(signal)
+    }
+
+    // 5. APC dual-signal gating
+    const patternMatch = ctx.doomLevel !== 'none'
+    const activation = this.apc.evaluate(patternMatch, ctx.turn)
+
+    if (!activation.shouldActivate) {
+      this.maybeRunMaintenance(ctx.turn)
+      return { activated: false, signals: innateSignals }
+    }
+
+    // 6. Adaptive immune response
+    const memory = this.adaptive.lookup(ctx.fingerprint)
+    let response: ImmuneResponse
+
+    if (memory) {
+      // Secondary response: fast repair from memory
+      response = this.adaptive.fastRepair(memory)
+      memory.hitCount++
+      memory.lastHit = ctx.turn
+    } else {
+      // Primary response: deposit warning + learn
+      response = {
+        type: 'deposit_warning',
+        targetFile: ctx.targetFile,
+      }
+    }
+
+    // 7. Apply response to Physarum
+    this.applyResponse(response)
+
+    // 8. Deposit pheromone warning if stigmergy available
+    if (this.deps.stigmergy && ctx.targetFile) {
+      this.deps.stigmergy.deposit({
+        path: ctx.targetFile,
+        signal: 'fragile',
+        strength: 0.8,
+        halfLifeMs: 3600_000,
+        context: 'immune-response',
+      })
+    }
+
+    this.maybeRunMaintenance(ctx.turn)
+    return { activated: true, response, signals: innateSignals }
+  }
+
+  /** Record successful repair (called externally after repair pipeline succeeds) */
+  recordRepairSuccess(fingerprint: string, strategy: string, turn: number): void {
+    this.adaptive.recordSuccess(fingerprint, strategy, turn)
+  }
+
+  /** Record failed repair */
+  recordRepairFailure(fingerprint: string): void {
+    this.adaptive.recordFailure(fingerprint)
+  }
+
+  private applyResponse(response: ImmuneResponse): void {
+    switch (response.type) {
+      case 'quarantine':
+        if (response.targetFile) {
+          this.deps.physarum.freezeNode(response.targetFile, response.duration ?? 20)
+        }
+        break
+      case 'prune_toxic':
+        if (response.toxicEdges) {
+          this.deps.physarum.forcePrune(response.toxicEdges)
+        }
+        break
+      case 'boost_healthy':
+        if (response.healthyEdges) {
+          const files = response.healthyEdges.flatMap(e => [e.fileA, e.fileB])
+          this.deps.physarum.boostEdges(files, 0.5)
+        }
+        break
+      case 'deposit_warning':
+        // Already handled via stigmergy above
+        break
+    }
+  }
+
+  private maybeRunMaintenance(turn: number): void {
+    // Batch evolve (cold path decay + prune)
+    if (turn - this.lastBatchTurn >= BATCH_EVOLVE_INTERVAL) {
+      this.deps.physarum.batchEvolve(turn)
+      this.lastBatchTurn = turn
+    }
+
+    // Ubiquity penalty (less frequent)
+    if (turn - this.lastUbiquityTurn >= UBIQUITY_INTERVAL) {
+      this.deps.physarum.applyUbiquityPenalty()
+      this.lastUbiquityTurn = turn
+    }
+
+    // Adaptive memory decay
+    this.adaptive.decay(turn)
+  }
+
+  /** Get current danger level for monitoring */
+  getDangerLevel(turn: number): number {
+    return this.apc.getDangerLevel(turn)
+  }
+
+  /** Export immune memories for persistence */
+  exportMemories() { return this.adaptive.export() }
+
+  /** Import immune memories from persistence */
+  importMemories(memories: Parameters<ImmuneAdaptiveLayer['import']>[0]) {
+    this.adaptive.import(memories)
+  }
+}
+
+export function createImmuneHook(deps: ImmuneHookDeps): ImmuneHook {
+  return new ImmuneHook(deps)
+}

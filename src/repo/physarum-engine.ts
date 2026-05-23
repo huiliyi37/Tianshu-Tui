@@ -207,6 +207,28 @@ export class PhysarumEngine {
     }
   }
 
+  /** Detect graph anomaly (produces danger signal for immune system) */
+  detectAnomaly(): { severity: number; source: string } | null {
+    const stats = this.getStats()
+
+    // Anomaly 1: sudden mass pruning
+    if (stats.avgPruneRate > 0 && stats.prunedThisTurn > stats.avgPruneRate * 3) {
+      return { severity: 0.7, source: 'mass_prune' }
+    }
+
+    // Anomaly 2: single node growth spike
+    if (stats.avgGrowth > 0 && stats.maxNodeGrowth > stats.avgGrowth * 5) {
+      return { severity: 0.8, source: 'growth_spike' }
+    }
+
+    // Anomaly 3: supercritical state
+    if (stats.criticality === 'supercritical') {
+      return { severity: 0.5, source: 'supercritical' }
+    }
+
+    return null
+  }
+
   /** Freeze a node (quarantine — immune response) */
   freezeNode(file: string, _durationTurns: number): void {
     this.frozen.add(file)
