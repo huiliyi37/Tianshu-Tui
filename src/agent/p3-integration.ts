@@ -6,12 +6,16 @@ import { assessTrajectoryHealth, type HealthSignal } from './trajectory-health.j
 import { applyAgentDiet, type DietResult, type OaiMessage } from '../compact/agent-diet.js'
 import { PlanCache, type PlanStep } from './plan-cache.js'
 import { Nightcrawler, type BackgroundTask } from './nightcrawler.js'
+import { LinUCBBandit } from './linucb-bandit.js'
+import { AgentJIT } from './agent-jit.js'
 
 export interface P3Config {
   execute?: (tool: string, target: string) => Promise<string>
   speculativeEnabled?: boolean
   /** Background agent task executor */
   backgroundExecute?: (task: BackgroundTask) => Promise<string>
+  /** JIT tool executor */
+  jitExecute?: (tool: string, args: Record<string, unknown>) => Promise<{ result: string; isError: boolean }>
 }
 
 export class P3Integration {
@@ -21,7 +25,10 @@ export class P3Integration {
   readonly notebook: MistakeNotebook
   readonly planCache: PlanCache
   readonly nightcrawler: Nightcrawler
+  readonly bandit: LinUCBBandit
+  readonly jit: AgentJIT
   private lastTool: string | null = null
+  private lastTarget: string | null = null
 
   constructor(config: P3Config = {}) {
     this.miner = new ToolPatternMiner()
@@ -35,11 +42,21 @@ export class P3Integration {
     this.nightcrawler = new Nightcrawler({
       execute: config.backgroundExecute ?? (async () => ''),
     })
+    // P3-G: 6-dim context: [taskComplexity, errorRate, turnDepth, fileCount, isRepeat, timeOfDay]
+    this.bandit = new LinUCBBandit({ dimension: 6 })
+    this.bandit.addArm('flash')
+    this.bandit.addArm('pro')
+    this.bandit.addArm('concise')
+    this.bandit.addArm('verbose')
+    // P3-H: Agent JIT
+    this.jit = new AgentJIT({
+      executeTool: config.jitExecute ?? (async () => ({ result: '', isError: false })),
+    })
   }
 
   onToolStart(toolName: string): void {
     if (this.lastTool) {
-      this.miner.record(this.lastTool, toolName)
+      this.miner.record(this.lastTool, toolName, { targetPath: this.lastTarget ?? undefined })
     }
     this.idleSpec.onToolStart(toolName)
   }
@@ -50,7 +67,7 @@ export class P3Integration {
 
   onToolComplete(toolName: string, target: string, _isError: boolean, _errorMsg?: string): void {
     this.lastTool = toolName
-    this.miner.record(toolName, toolName, { targetPath: target })
+    this.lastTarget = target
   }
 
   recordMistake(error: string, context: string, resolution: string, tags: string[] = []): void {
@@ -99,6 +116,27 @@ export class P3Integration {
     return this.nightcrawler.getTask(id)
   }
 
+  // P3-G: Online RL (LinUCB)
+  recommendAction(context: number[]) {
+    return this.bandit.shouldSuggest(context)
+  }
+
+  rewardAction(armId: string, context: number[], accepted: boolean) {
+    if (accepted) this.bandit.accept(armId, context)
+    else this.bandit.reject(armId, context)
+  }
+
+  // P3-H: Agent JIT
+  async tryJIT(taskDescription: string) {
+    const template = this.planCache.lookup(taskDescription)
+    if (!template) return null
+    return this.jit.tryJIT(template)
+  }
+
+  invalidateJIT(filePath: string) {
+    return this.jit.invalidateByPath(filePath)
+  }
+
   assessHealth(
     recentEvents: Array<{ status: 'passed' | 'failed' | 'blocked'; turn: number }>,
     currentTurn: number,
@@ -113,6 +151,8 @@ export class P3Integration {
       mistakeCount: this.notebook.size(),
       planCacheSize: this.planCache.size(),
       backgroundTasks: this.nightcrawler.stats(),
+      bandit: this.bandit.getStats(),
+      jitCompiled: this.jit.size(),
     }
   }
 }

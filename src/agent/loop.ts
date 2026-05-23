@@ -268,7 +268,17 @@ export class AgentLoop {
     this.cacheAdvisor = new CacheAdvisor({
       providerProfile: this.config.providerProfile ?? { cacheType: 'none', persistent: false },
     })
-    this.p3 = createP3Integration()
+    this.p3 = createP3Integration({
+      execute: async (tool, target) => {
+        const SAFE_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_dir'])
+        if (!SAFE_TOOLS.has(tool)) return ''
+        try {
+          const params = { input: { file_path: target, path: target }, cwd: this.cwd, toolUseId: `spec_${Date.now()}` }
+          const result = await this.config.toolRegistry.execute(tool, params)
+          return result.content
+        } catch { return '' }
+      },
+    })
 
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
@@ -482,9 +492,10 @@ export class AgentLoop {
     // P3 integration: pattern mining + speculative pre-execution
     this.p3.onToolComplete(name, target, isError, isError ? result.slice(0, 200) : undefined)
 
-    // P3-E: invalidate plan cache on file mutations
+    // P3-E/H: invalidate plan cache + JIT on file mutations
     if (!isError && (name === 'edit_file' || name === 'write_file')) {
       this.p3.invalidatePlanCache(target)
+      this.p3.invalidateJIT(target)
     }
 
     // P3-D Atropos: assess trajectory health → auto-escalate Flash→Pro on repeated failures
