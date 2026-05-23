@@ -18,3 +18,4 @@ task_plan.md
 .rivet/debug-400.json
 .rivet/artifacts/
 .rivet/sessions/
+.rivet/meridian.db*
