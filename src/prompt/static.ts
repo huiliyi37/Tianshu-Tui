@@ -66,6 +66,7 @@ const BASE_PROMPT = `<identity>
   When adding new functionality, write tests first.
   Tests use node:test + node:assert/strict (matching the project convention).
   Test files mirror source structure: src/agent/foo.ts → src/agent/__tests__/foo.test.ts
+  In test setup, assert that preconditions hold (e.g. git stash actually created an entry, file exists after write). Silent no-ops in setup cause misleading test failures that point at the wrong code.
   </tdd>
 
   <code-references>
@@ -100,6 +101,7 @@ Before claiming a task is done, use deliver_task to check delivery readiness: GR
 Create new commits. Never amend existing commits.
 Format: feat/fix/refactor/docs/test/chore/perf.
 Never force push to main/master. Check git status before committing.
+When parsing git output programmatically, use machine-stable formats: --name-only, -z (NUL-delimited), or --format=. Never hand-parse status --porcelain column offsets — use git diff --name-only instead.
 </git>
 
 <delegation>

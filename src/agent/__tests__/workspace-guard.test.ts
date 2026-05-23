@@ -21,6 +21,17 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout
 }
 
+/** git stash with assertion — fails fast if no stash entry was created */
+async function gitStash(cwd: string): Promise<void> {
+  const before = await git(cwd, ['stash', 'list'])
+  const beforeCount = before.trim() ? before.trim().split('\n').length : 0
+  await git(cwd, ['stash'])
+  const after = await git(cwd, ['stash', 'list'])
+  const afterCount = after.trim() ? after.trim().split('\n').length : 0
+  assert.ok(afterCount > beforeCount,
+    `git stash did not create an entry (working tree was clean?). before=${beforeCount} after=${afterCount}`)
+}
+
 async function gitLines(cwd: string, args: string[]): Promise<string[]> {
   const out = await git(cwd, args)
   return out.trim().split('\n').filter(Boolean)
@@ -147,7 +158,7 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
     // Modify the file
     makeFile(TMP, 'src/app.ts', 'const x = 2')
     // Stash it
-    await git(TMP, ['stash'])
+    await gitStash(TMP)
 
     // Now modify the file again — current version differs from stash
     makeFile(TMP, 'src/app.ts', 'const x = 3')
@@ -332,7 +343,7 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
 
     // Modify and stash
     makeFile(TMP, 'src/lib.ts', 'export const version = 2')
-    await git(TMP, ['stash'])
+    await gitStash(TMP)
 
     // Apply the stash back
     await git(TMP, ['stash', 'apply'])
@@ -353,7 +364,7 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
 
     // Need uncommitted changes for stash to create an entry
     makeFile(TMP, 'src/temp.ts', 'modified temporary file')
-    await git(TMP, ['stash'])
+    await gitStash(TMP)
 
     // Now delete the file from working tree — stash still has it
     rmSync(join(TMP, 'src/temp.ts'))
