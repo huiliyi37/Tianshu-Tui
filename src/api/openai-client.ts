@@ -98,6 +98,12 @@ export class OpenAIClient implements StreamClient {
 
     if (request.temperature !== undefined) body.temperature = request.temperature
 
+    // MiniMax: reasoning_split separates thinking into reasoning_content field
+    // (DeepSeek-compatible), otherwise thinking is embedded in <think> tags inside content
+    if (this.config.providerName === 'minimax') {
+      body.reasoning_split = true
+    }
+
     // Thinking / reasoning dispatch.
     // Providers that accept {thinking: {type: 'enabled'}} (DeepSeek, GLM, etc.):
     // send the thinking block. Pure OpenAI providers use reasoning_effort.

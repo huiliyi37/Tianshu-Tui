@@ -151,6 +151,29 @@ export const DEFAULT_CONFIG: Config = {
         ],
         unsupported: ['stream_options'],
       },
+      minimax: {
+        name: 'minimax',
+        apiKeyEnv: 'MINIMAX_API_KEY',
+        baseUrl: 'https://api.minimaxi.com/v1',
+        protocol: 'openai' as const,
+        capabilities: {
+          cacheControl: false,
+          stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+          toolJsonBug: false,
+          prefixCache: 'none' as const,
+        },
+        thinking: 'enabled',
+        maxTokens: 64000,
+        models: [
+          {
+            id: 'MiniMax-M2.7',
+            alias: 'minimax',
+            contextWindow: 204_800,
+            maxTokens: 64000,
+          },
+        ],
+        unsupported: [],
+      },
     },
   },
   agent: {
