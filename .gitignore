@@ -18,4 +18,5 @@ task_plan.md
 .rivet/debug-400.json
 .rivet/artifacts/
 .rivet/sessions/
+.rivet/cache-log.jsonl
 .rivet/meridian.db*
