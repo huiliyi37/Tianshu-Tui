@@ -55,6 +55,7 @@
 - `src/tools/bash.ts` — 集成 ArtifactStore，持久化 bash 输出
 - `src/tools/grep.ts` — 集成 ArtifactStore，持久化 grep 结果
 - `src/tools/read-file.ts` — 集成 ArtifactStore，持久化文件内容
+- `src/agent/tool-pipeline.ts` — 通用 artifact 拦截层，覆盖所有工具（fa4c1d0）
 
 **Session State 集成：**
 - `src/agent/session-state.ts` — SessionStateManager 实现
@@ -92,6 +93,7 @@
 - **摘要引用：** message history 中只保留 ~50 tokens 的摘要引用
 - **按需加载：** 模型需要细节时通过 `read_section` tool 按需加载
 - **staleRound 退化：** artifact 引用 ~50 tokens < STALE_PREVIEW_CHARS（1200 chars），staleRound 变成 no-op
+- **通用拦截层：** tool-pipeline 中的通用 artifact 拦截层（fa4c1d0），覆盖所有工具
 
 **效果：** 
 - 上下文增长速度降低 90%+（从 ~1000 tokens/轮降到 ~350 tokens/轮）
@@ -160,3 +162,40 @@
 2. **Append-Only Artifact Log** 解决了 staleRound 截断破坏 prefix cache 的问题，将上下文增长速度降低 90%+。
 
 这两个优化将显著降低 API 成本，提升长时间运行任务的稳定性，为项目的可持续发展奠定基础。
+
+---
+
+## 其他会话的贡献
+
+### 2026-05-23 — 通用 Artifact 拦截层（fa4c1d0）
+
+**perf(cache): universal artifact intercept for all tool results**
+
+在 tool-pipeline 中添加了通用的 artifact 拦截层，覆盖所有工具输出：
+- 任何超过 800 chars（错误 1600 chars）的工具输出都会被持久化到磁盘
+- 替换为紧凑的摘要引用
+- 确保 message history 保持 append-only
+- 消除了 stale-round 截断破坏 DeepSeek prefix cache 的问题
+- 覆盖了：run_tests, diff, glob, web_fetch, repo_map, inspect_project 和任何未来的工具
+- 已经返回 artifact refs 的工具（read_file, grep, bash）会被检测并跳过
+
+### 2026-05-23 — WorkspaceGuard 重构（03d0aa2）
+
+**refactor(agent): harden WorkspaceGuard to delivery-safe organ**
+
+7 步收束从"模块已提交"到"可作为交付门安全器官"：
+1. 测试辅助函数从 execSync 改为 async execFile（符合项目规范）
+2. 添加 wouldOverwriteModified 到 MergeSafetyCheck — 检测未暂存和已暂存的本地修改
+3. Stash 安全语义收紧 — older/newer 启发式替换为诚实的 'different' 状态
+4. 内存保留策略对齐 — 警告文本明确说明"在提升审查前不要删除"
+5. fullReport safeToMerge 使用结构化布尔标志而不是脆弱的字符串前缀匹配
+6. 文档化 StarSpine 关系和纯诊断契约
+7. 13/13 测试通过，typecheck 干净
+
+### 2026-05-23 — 归属星轨文档更新（e44fd20）
+
+**docs(b1): mark completed checklist items in 归属星轨 plan**
+
+Phase 1 (B1-0 到 B1-9) 已完全实现在提交 bf31059 中。
+更新所有检查项为 [x] 以反映实际完成状态。
+只有 B1-9 TUI 显示仍为 [ ]（推迟到集成阶段）。
