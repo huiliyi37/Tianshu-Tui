@@ -60,7 +60,7 @@ describe('ImmuneHook injectSignal', () => {
     const hook = new ImmuneHook({ physarum: new PhysarumEngine(null as any) })
     hook.injectSignal({
       kind: 'compaction_fail',
-      severity: 0.6,
+      severity: 1.5,
       turn: 10,
       source: 'compaction-controller',
     })

@@ -904,6 +904,17 @@ export class AgentLoop {
           failures: this.compactFailures,
         })
         this.compactFailures = compactResult.failures
+        // Immune signal: surface compaction failures as danger signal for dual-signal gating
+        if (this.compactFailures.consecutiveFailures > 0) {
+          try {
+            this.immuneHook.injectSignal({
+              kind: 'compaction_fail',
+              severity: Math.min(1.0, this.compactFailures.consecutiveFailures * 0.3),
+              turn,
+              source: 'compaction-controller',
+            })
+          } catch { /* non-critical */ }
+        }
         if (compactResult.compacted) {
           this.lastCompactTurn = turn
           // Hint V8 to release freed message objects sooner

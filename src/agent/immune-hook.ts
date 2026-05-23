@@ -154,6 +154,11 @@ export class ImmuneHook {
     this.adaptive.recordFailure(fingerprint)
   }
 
+  /** Inject external danger signal (e.g., from compaction failure, sycophancy trap, prompt injection detection) */
+  injectSignal(signal: DangerSignal): void {
+    this.apc.collect(signal)
+  }
+
   private applyResponse(response: ImmuneResponse): void {
     switch (response.type) {
       case 'quarantine':
