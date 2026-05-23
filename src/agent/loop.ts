@@ -980,22 +980,10 @@ export class AgentLoop {
         this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
 
         // Feed CacheAdvisor with turn metrics after API call completes
+        // Cache read/creation metrics are captured here; artifact eviction/access
+        // metrics are added after tool execution (see below).
         const cacheHistory = this.session.getCacheHistory()
         const latestTurnCache = cacheHistory.length > 0 ? cacheHistory[cacheHistory.length - 1] : null
-        if (latestTurnCache && latestTurnCache.turn === turn) {
-          this.cacheAdvisor.onTurnEnd({
-            turn,
-            cacheRead: latestTurnCache.cacheRead,
-            cacheCreation: latestTurnCache.cacheCreation,
-            // Non-first turn with zero cacheRead = prefix was invalidated
-            // (first turn naturally has cacheCreation > 0, that's not a prefix break)
-            prefixChanged: latestTurnCache.cacheRead === 0 && turn > 1,
-            // TODO(b3): wire eviction events from artifact store & read_section calls
-            // so GhostRegistry actually records entries for ghost-hit feedback.
-            artifactIdsEvicted: [],
-            artifactIdsAccessed: [],
-          })
-        }
 
         if (this.abortController.signal.aborted) {
           if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
@@ -1028,11 +1016,33 @@ export class AgentLoop {
           ;({ traceStore: this.traceStore, importGraph: this.importGraph,
              lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk } = r)
           if (r.checkpointCreated) checkpointCreatedThisTurn = true
+          // Feed CacheAdvisor with cache metrics + artifact eviction/access data
+          if (latestTurnCache && latestTurnCache.turn === turn) {
+            this.cacheAdvisor.onTurnEnd({
+              turn,
+              cacheRead: latestTurnCache.cacheRead,
+              cacheCreation: latestTurnCache.cacheCreation,
+              prefixChanged: latestTurnCache.cacheRead === 0 && turn > 1,
+              artifactIdsEvicted: r.artifactIdsEvicted,
+              artifactIdsAccessed: r.artifactIdsAccessed,
+            })
+          }
           await this.turnCompletion.complete({ turn, isFinal: false, callbacks })
           continue
         }
 
         // Thinking-only turn detection: retry if model produced reasoning but no text/tools
+        // Feed CacheAdvisor for non-tool turns (no evictions/accesses)
+        if (latestTurnCache && latestTurnCache.turn === turn) {
+          this.cacheAdvisor.onTurnEnd({
+            turn,
+            cacheRead: latestTurnCache.cacheRead,
+            cacheCreation: latestTurnCache.cacheCreation,
+            prefixChanged: latestTurnCache.cacheRead === 0 && turn > 1,
+            artifactIdsEvicted: [],
+            artifactIdsAccessed: [],
+          })
+        }
         const thinkingResult = evaluateThinkingRetry({
           streamedText: this.streamedText, collectedBlockCount: collectedBlocks.length,
           thinkingAccum, thinkingOnlyRetries: this.thinkingOnlyRetries,

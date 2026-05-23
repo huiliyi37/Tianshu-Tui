@@ -33,6 +33,12 @@ import type { ArtifactStore } from '../artifact/store.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import type { TaskLedger } from './task-ledger.js'
 
+/** Extract artifact ID from content if it starts with [artifact:ID] */
+function extractArtifactId(content: string): string | undefined {
+  const m = content.match(/^\[artifact:([^\]]+)\]/)
+  return m?.[1]
+}
+
 /** Failure classes that trigger onPhaseChange('blocked') — user-visible state. */
 const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
   'context_window_exceeded',
@@ -95,6 +101,10 @@ export interface ToolPipelineDeps {
   phaseHint?: string
   /** Optional TaskLedger for B1 ownership tracking */
   taskLedger?: TaskLedger
+  /** Turn-scoped accumulator: artifact IDs evicted (created by artifactIntercept) */
+  artifactIdsEvicted?: string[]
+  /** Turn-scoped accumulator: artifact IDs accessed (read_section calls) */
+  artifactIdsAccessed?: string[]
 }
 
 export interface ToolExecResult {
@@ -508,6 +518,9 @@ ${check.formatted}`
         ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
         : 1
       finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, false, successThreshold, budgetFraction)
+      // Track eviction for GhostRegistry
+      const evictedId = extractArtifactId(finalContent)
+      if (evictedId) deps.artifactIdsEvicted?.push(evictedId)
       finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
       const contentChars = finalContent.length
       const tokenEstimate = Math.ceil(contentChars / 4)
@@ -525,6 +538,9 @@ ${check.formatted}`
         ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
         : 1
       finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, true, errorThreshold, budgetFraction)
+      // Track eviction for GhostRegistry (error artifacts too)
+      const evictedErrId = extractArtifactId(finalContent)
+      if (evictedErrId) deps.artifactIdsEvicted?.push(evictedErrId)
     }
 
     // Trace recording
@@ -560,6 +576,12 @@ ${check.formatted}`
       } else {
         deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
       }
+    }
+
+    // GhostRegistry: track read_section as artifact access
+    if (tu.name === 'read_section' && !harnessResult.isError) {
+      const accessedId = tu.input.artifactId as string | undefined
+      if (accessedId) deps.artifactIdsAccessed?.push(accessedId)
     }
 
     // Claim extraction + conflict detection
@@ -669,6 +691,8 @@ ${check.formatted}`
             ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
             : 1
           diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError, diagThreshold, diagBudgetFrac)
+          const diagEvictedId = extractArtifactId(diagnosedContent)
+          if (diagEvictedId) deps.artifactIdsEvicted?.push(diagEvictedId)
           return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
         }
       }

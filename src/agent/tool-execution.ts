@@ -82,6 +82,10 @@ export interface ToolExecBatchResult {
   importGraph: ImportGraph | null
   lastConflictCheckCount: number
   latestRisk: RiskAssessment
+  /** Artifact IDs created (evicted) this batch — for GhostRegistry */
+  artifactIdsEvicted: string[]
+  /** Artifact IDs accessed (read_section) this batch — for GhostRegistry */
+  artifactIdsAccessed: string[]
 }
 
 export class ToolExecutionController {
@@ -94,6 +98,8 @@ export class ToolExecutionController {
     let importGraph = input.importGraph
     let lastConflictCheckCount = input.lastConflictCheckCount
     let latestRisk = input.latestRisk
+    const artifactIdsEvicted: string[] = []
+    const artifactIdsAccessed: string[] = []
 
     for (const tu of input.toolUses) {
       if (input.abortSignal.aborted) break
@@ -128,6 +134,8 @@ export class ToolExecutionController {
         artifactStore: this.deps.artifactStore,
         cacheAdvisor: this.deps.cacheAdvisor,
         taskLedger: this.deps.config.taskLedger,
+        artifactIdsEvicted,
+        artifactIdsAccessed,
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)
@@ -217,6 +225,6 @@ export class ToolExecutionController {
       this.deps.setClientReasoningEffort(newEffort)
     }
 
-    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk }
+    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed }
   }
 }
