@@ -360,7 +360,17 @@ export class AgentLoop {
       setLastPrewarmAt: position => { this.lastPrewarmAt = position },
       maybePrewarm: text => { this.maybePrewarm(text) },
       addUsage: usage => { this.session.addUsage(usage) },
-      recordTurnCache: (turn, usage) => { this.session.recordTurnCache(turn, usage) },
+      recordTurnCache: (turn, usage) => {
+        this.session.recordTurnCache(turn, usage)
+        const hitRate = usage.input_tokens > 0
+          ? ((usage.cache_read_input_tokens ?? 0) / usage.input_tokens * 100).toFixed(1)
+          : '0.0'
+        const line = JSON.stringify({ t: Date.now(), turn, input: usage.input_tokens, cacheRead: usage.cache_read_input_tokens, cacheCreate: usage.cache_creation_input_tokens, hitRate: `${hitRate}%` })
+        import('node:fs/promises').then(fs =>
+          fs.mkdir(join(this.cwd, '.rivet'), { recursive: true })
+            .then(() => fs.appendFile(join(this.cwd, '.rivet', 'cache-log.jsonl'), line + '\n'))
+        ).catch(() => {})
+      },
     })
   }
 

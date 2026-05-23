@@ -166,7 +166,7 @@ Bad: re-reading the same file multiple times in one session without it being mod
         sections,
       })
       return {
-        content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", startLine=N, endLine=M) to expand.`,
+        content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to expand.`,
         rawContent: payload.modelContent,
         uiContent: payload.uiContent,
         rawPath,
