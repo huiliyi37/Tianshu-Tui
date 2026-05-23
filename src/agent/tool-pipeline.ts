@@ -87,7 +87,7 @@ export interface ToolPipelineDeps {
   sessionId: string | undefined
   abortSignal?: AbortSignal
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
-  getInterventionLevel?(): import('./prediction-error.js').InterventionLevel
+  getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
   /** Current sensorium snapshot — enables confidence-driven adaptive approval. */
   getSensorium?(): Sensorium | null

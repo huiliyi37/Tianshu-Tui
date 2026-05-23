@@ -19,6 +19,7 @@ import type { ReliabilityDecision } from './reliability-mode.js'
 import { PrewarmCache } from './prewarm.js'
 import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
+import type { P3Integration } from './p3-integration.js'
 import {
   getInterventionLevel,
   recordPrediction,
@@ -64,7 +65,7 @@ export interface ToolExecutionDeps {
   /** Cache advisor for adaptive thresholds */
   cacheAdvisor?: CacheAdvisor
   /** P3 integration facade */
-  p3?: import('./p3-integration.js').P3Integration
+  p3?: P3Integration
 }
 
 export interface ToolExecBatchInput {
