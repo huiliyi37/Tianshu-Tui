@@ -201,6 +201,7 @@ export class AgentLoop {
   private static readonly MAX_OUTPUT_ESCALATION = 3
   private pressureMonitor: PressureMonitor
   private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
+  private sycophancyWasActive = false
   private turnBudget: TurnBudget = createTurnBudget(0)
   private sensorium: Sensorium | null = null
   private strategy: StrategyProfile | null = null
@@ -1064,6 +1065,20 @@ export class AgentLoop {
             confidence: this.sensorium?.confidence ?? 0.5,
           })
         }
+
+        // Immune signal: surface new sycophancy detection as danger signal (rising edge only)
+        const sycActive = this.sycophancyTrap.shouldInjectChallenge()
+        if (sycActive && !this.sycophancyWasActive) {
+          try {
+            this.immuneHook.injectSignal({
+              kind: 'sycophancy_detected',
+              severity: 0.7,
+              turn: this.session.getTurnCount(),
+              source: 'sycophancy-trap',
+            })
+          } catch { /* non-critical */ }
+        }
+        this.sycophancyWasActive = sycActive
 
         const cognitiveLedger = createCognitiveLedger({
           contract: this.taskContract,
