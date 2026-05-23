@@ -77,7 +77,7 @@ export class SessionContext {
 
     const msg: OaiMessage = {
       role: 'assistant',
-      content: text || null,
+      content: text || (toolCalls.length === 0 ? '' : null),
       ...(reasoning ? { reasoning_content: reasoning } : {}),
       ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     }

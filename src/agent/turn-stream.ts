@@ -109,7 +109,10 @@ export class TurnStreamController {
 
     const dedupedBuffer = stripIntraTurnRepetition(turnDisplayBuffer)
     const nextFingerprint = displayTextFingerprint(dedupedBuffer)
-    if (dedupedBuffer && nextFingerprint !== input.lastTurnTextFingerprint) {
+    // Skip dedup for promoted reasoning text — each turn's thinking is a fresh response
+    // even if fingerprint matches (GLM can produce similar short reasoning across retries)
+    const isPromotedReasoning = thinkingAccum && turnDisplayBuffer === thinkingAccum
+    if (dedupedBuffer && (isPromotedReasoning || nextFingerprint !== input.lastTurnTextFingerprint)) {
       input.callbacks.onTextDelta(dedupedBuffer)
     }
 

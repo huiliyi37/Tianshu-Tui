@@ -67,9 +67,22 @@ export class OpenAIClient implements StreamClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
+    // DeepSeek returns 400 if reasoning_content appears in input messages.
+    // Only providers that explicitly require echo (mimo, minimax, glm) keep it.
+    const echoReasoning = this.config.providerName === 'mimo'
+      || this.config.providerName === 'minimax'
+      || this.config.providerName === 'glm'
+    const messages = echoReasoning
+      ? request.messages
+      : request.messages.map(m => {
+        if (m.role !== 'assistant' || !('reasoning_content' in m)) return m
+        const { reasoning_content: _, ...rest } = m
+        return rest
+      })
+
     const body: Record<string, unknown> = {
       model: request.model,
-      messages: request.messages,
+      messages,
       max_tokens: request.max_tokens ?? this.config.maxTokens,
       stream: true,
     }
@@ -222,6 +235,7 @@ export class OpenAIClient implements StreamClient {
     // with no content field. Accumulate reasoning to promote if no content arrives.
     let reasoningAccum = ''
     let textReceived = false
+    let promotionFired = false
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
@@ -299,6 +313,7 @@ export class OpenAIClient implements StreamClient {
       // promote reasoning to visible text so the TUI shows a reply.
       if (!textReceived && reasoningAccum) {
         callbacks.onTextDelta?.(reasoningAccum)
+        promotionFired = true
       }
 
       // If no usage chunk arrived, emit stop reason now
@@ -308,6 +323,12 @@ export class OpenAIClient implements StreamClient {
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
+
+      // Promote reasoning to text even on stream error — prevents GLM "stuck" when
+      // stream breaks after receiving reasoning_content but before normal completion.
+      if (!textReceived && reasoningAccum && !promotionFired) {
+        callbacks.onTextDelta?.(reasoningAccum)
+      }
     }
   }
 

@@ -26,7 +26,7 @@ export interface OaiAssistantMessage {
   role: 'assistant'
   content: string | null
   tool_calls?: OaiToolCall[]
-  /** DeepSeek thinking/reasoning content. GLM clear_thinking=true should omit this. */
+  /** Provider reasoning content. Stored locally; stripped before sending to DeepSeek (400 if present). */
   reasoning_content?: string
 }
 
