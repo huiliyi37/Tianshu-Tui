@@ -12,10 +12,15 @@ describe('ice-mirror: cache stability', () => {
     workingSet: ['src/foo.ts'],
   }
 
-  it('FROZEN includes git-status section', () => {
+  it('FROZEN does NOT include git-status (moved to dynamic appendix)', () => {
     const frozen = buildStableVolatileBlock(baseCtx)
-    assert.ok(frozen.includes('<git-status>'), 'FROZEN must contain <git-status>')
-    assert.ok(frozen.includes('M src/foo.ts'))
+    assert.ok(!frozen.includes('<git-status>'), 'FROZEN must NOT contain <git-status>')
+  })
+
+  it('dynamic appendix includes git-status', () => {
+    const appendix = buildDynamicAppendix(baseCtx)
+    assert.ok(appendix.includes('<git-status>'), 'dynamic appendix must contain <git-status>')
+    assert.ok(appendix.includes('M src/foo.ts'))
   })
 
   it('FROZEN does NOT include dynamic sections', () => {
@@ -30,9 +35,10 @@ describe('ice-mirror: cache stability', () => {
     assert.ok(!frozen.includes('<decisions'))
   })
 
-  it('FRESH equals FROZEN when dynamic fields are empty', () => {
-    const frozen = buildStableVolatileBlock(baseCtx)
-    const fresh = buildLatestTurnVolatileBlock(baseCtx)
+  it('FRESH equals FROZEN when no dynamic fields and no git-status', () => {
+    const ctx = { cwd: '/test', rivetMd: '# Test' }
+    const frozen = buildStableVolatileBlock(ctx)
+    const fresh = buildLatestTurnVolatileBlock(ctx)
     assert.equal(frozen, fresh, 'FRESH must equal FROZEN byte-for-byte when no dynamic fields')
   })
 
@@ -56,8 +62,8 @@ describe('ice-mirror: cache stability', () => {
     assert.ok(appendix.includes('read_file'))
   })
 
-  it('dynamic appendix is empty string when no dynamic fields', () => {
-    const appendix = buildDynamicAppendix(baseCtx)
+  it('dynamic appendix is empty when no dynamic fields AND no git-status', () => {
+    const appendix = buildDynamicAppendix({ cwd: '/test' })
     assert.equal(appendix, '')
   })
 
@@ -84,7 +90,7 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
     })
   }
 
-  it('volatile block before "hello" is identical in Turn 1 and Turn 2 requests', () => {
+  it('frozen base is a prefix of the latest volatile block', () => {
     const engine = createEngine()
 
     const req1 = engine.buildOaiRequest([
@@ -97,17 +103,22 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
       { role: 'user', content: 'read file' },
     ], [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' }])
 
-    // messages[0] = system, messages[1] = volatile block before first user msg
+    // req1: "hello" is the latest message → gets frozen + dynamic (with git-status)
     const vol1 = (req1.messages[1] as { content: string }).content
+    // req2: "hello" is a historical message → gets frozen base only (no git-status)
     const vol2 = (req2.messages[1] as { content: string }).content
-    assert.equal(vol1, vol2, 'Volatile block for "hello" must be byte-identical across turns')
+
+    // Frozen base is a prefix of the full volatile block
+    assert.ok(vol1.startsWith(vol2), 'Frozen base must be a prefix of latest volatile block')
+    assert.ok(!vol2.includes('<git-status>'), 'Historical volatile must not contain git-status')
+    assert.ok(vol1.includes('<git-status>'), 'Latest volatile must contain git-status')
   })
 
-  it('volatile block for historical turns stays frozen across 5 turns', () => {
+  it('frozen base for historical turns is stable across 5 turns', () => {
     const engine = createEngine()
-    const volatileBlocks: string[] = []
+    const frozenBlocks: string[] = []
 
-    for (let turn = 1; turn <= 5; turn++) {
+    for (let turn = 2; turn <= 5; turn++) {
       const messages: OaiMessage[] = []
       for (let t = 1; t <= turn; t++) {
         messages.push({ role: 'user', content: `message ${t}` })
@@ -122,14 +133,20 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
 
       const req = engine.buildOaiRequest(messages, toolHistory)
 
-      // messages[0] = system, messages[1] = volatile block before first user msg
+      // messages[0] = system, messages[1] = FROZEN volatile block before first user msg
+      // Historical turns get frozen base only (no git-status, no dynamic appendix)
       const firstVol = (req.messages[1] as { content: string }).content
-      volatileBlocks.push(firstVol)
+      assert.ok(!firstVol.includes('<git-status>'),
+        `Turn ${turn}: frozen base must not contain <git-status>`)
+      assert.ok(!firstVol.includes('<context-update>'),
+        `Turn ${turn}: frozen base must not contain <context-update>`)
+      frozenBlocks.push(firstVol)
     }
 
-    for (let i = 1; i < volatileBlocks.length; i++) {
-      assert.equal(volatileBlocks[i], volatileBlocks[0],
-        `Turn ${i + 1}: volatile block for first message must match Turn 1`)
+    // All historical frozen blocks must be byte-identical
+    for (let i = 1; i < frozenBlocks.length; i++) {
+      assert.equal(frozenBlocks[i], frozenBlocks[0],
+        `Turn ${i + 2}: frozen base must match Turn 2`)
     }
   })
 
