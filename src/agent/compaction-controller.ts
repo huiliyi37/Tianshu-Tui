@@ -2,6 +2,7 @@ import type { StreamClient } from '../api/stream-client.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
+import { pruneStaleToolResults } from '../compact/prune.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
@@ -42,6 +43,14 @@ export class CompactionController {
 
   async maybeCompact(input: MaybeCompactInput): Promise<MaybeCompactResult> {
     const messages = this.deps.session.getMessages()
+
+    // Lightweight prune: clear stale tool results before checking compact thresholds.
+    // Free (no LLM call) and stabilizes the prefix for cache hits.
+    const pruneResult = pruneStaleToolResults(messages)
+    if (pruneResult.prunedCount > 0) {
+      this.deps.session.replaceMessages(pruneResult.messages)
+    }
+
     const estimatedTokens = this.deps.session.getEstimatedTokens()
     const compactDecision = decideCompactTier({
       estimatedTokens,

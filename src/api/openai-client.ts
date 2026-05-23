@@ -1,8 +1,8 @@
 import type { StreamClient } from './stream-client.js'
 import type { StreamCallbacks } from './stream-client.js'
 import type { OaiChatRequest } from './oai-types.js'
-import { stableStringify } from './stable-json.js'
 import type { ProviderProfile } from './provider-profile.js'
+import { shouldInjectPrefix, buildPrefixMessage } from './prefix-completion.js'
 
 export interface OpenAIClientConfig {
   baseUrl: string
@@ -24,6 +24,8 @@ export interface OpenAIClientConfig {
   providerProfile?: ProviderProfile
   /** Provider name for feature gating (e.g. 'glm' for web_search) */
   providerName?: string
+  /** Enable DeepSeek Beta prefix completion (skip preamble) */
+  prefixCompletion?: boolean
 }
 
 interface ToolCallChunk {
@@ -53,9 +55,16 @@ function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
 
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
+  private toolCallHintFired = new Set<number>()
   private pendingStopReason: string | null = null
+  /** Stable suffix appended to system message for Chinese thinking (computed once, cache-safe). */
+  private readonly systemSuffix: string
 
-  constructor(private config: OpenAIClientConfig) {}
+  constructor(private config: OpenAIClientConfig) {
+    this.systemSuffix = (config.providerName === 'mimo' || config.providerName === 'deepseek') && config.thinking === 'enabled'
+      ? '\n\nPlease think and reason in Chinese (中文) during your internal chain of thought.'
+      : ''
+  }
 
   setReasoningEffort(effort: string): void {
     // OpenAI uses reasoning_effort in request body — store for next request
@@ -137,14 +146,21 @@ export class OpenAIClient implements StreamClient {
       body.reasoning_effort = request.reasoning_effort
     }
 
-    if ((this.config.providerName === 'mimo' || this.config.providerName === 'deepseek') && this.config.thinking === 'enabled') {
+    // Apply stable system suffix (Chinese thinking instruction) — computed once at construction.
+    if (this.systemSuffix) {
       const sysMsg = (body.messages as Record<string, unknown>[]).find(m => m.role === 'system')
       if (sysMsg && typeof sysMsg.content === 'string') {
-        sysMsg.content += '\n\nPlease think and reason in Chinese (中文) during your internal chain of thought.'
-      } else {
-        // eslint-disable-next-line no-console
-        console.error('[rivet-debug] Chinese thinking injection SKIPPED: sysMsg=%o, content type=%s', !!sysMsg, sysMsg ? typeof sysMsg.content : 'N/A')
+        sysMsg.content += this.systemSuffix
       }
+    }
+
+    // DeepSeek Beta prefix completion: inject assistant prefix to skip preamble.
+    if (shouldInjectPrefix({
+      provider: this.config.providerName ?? '',
+      hasToolChoice: !!body.tool_choice,
+      enabled: this.config.prefixCompletion ?? false,
+    })) {
+      ;(body.messages as unknown[]).push(buildPrefixMessage())
     }
 
     await this.sendStream(body, callbacks, signal)
@@ -158,12 +174,14 @@ export class OpenAIClient implements StreamClient {
   ): Promise<void> {
     // Reset instance state to prevent stale data from previous calls/retries
     this.toolCallBuffer.clear()
+    this.toolCallHintFired.clear()
     this.pendingStopReason = null
 
     let lastError: Error | null = null
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       // Clear per-attempt state on retry
       this.toolCallBuffer.clear()
+      this.toolCallHintFired.clear()
       this.pendingStopReason = null
       try {
         // Resolve auth headers: AuthProvider takes precedence over static apiKey
@@ -179,7 +197,7 @@ export class OpenAIClient implements StreamClient {
             ...authHeaders,
             ...(this.config.sessionId ? { 'X-Request-Session': this.config.sessionId } : {}),
           },
-          body: stableStringify(body),
+          body: JSON.stringify(body),
           signal,
         })
 
@@ -348,7 +366,7 @@ export class OpenAIClient implements StreamClient {
       }>
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } }
     },
-    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onThinkingDelta' | 'onContentBlock' | 'onStopReason'>>,
+    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onThinkingDelta' | 'onContentBlock' | 'onStopReason' | 'onToolCallHint'>>,
   ): void {
     const choice = chunk.choices?.[0]
 
@@ -393,6 +411,15 @@ export class OpenAIClient implements StreamClient {
           buf.function.arguments += tc.function.arguments
         }
         this.toolCallBuffer.set(idx, buf)
+
+        // Speculative prewarm: emit hint once when tool name + args are parseable
+        if (callbacks.onToolCallHint && buf.function.name && !this.toolCallHintFired.has(idx)) {
+          try {
+            const partial = JSON.parse(buf.function.arguments)
+            this.toolCallHintFired.add(idx)
+            callbacks.onToolCallHint(buf.function.name, partial)
+          } catch { /* args not yet complete JSON — wait for more chunks */ }
+        }
       }
     }
 

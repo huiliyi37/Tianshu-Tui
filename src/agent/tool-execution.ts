@@ -1,5 +1,6 @@
 import type { ContentBlock } from '../api/types.js'
 import type { TurnBudget } from './turn-budget.js'
+import { enforcePerMessageBudget } from './per-message-budget.js'
 import type { AgentConfig, AgentCallbacks } from './loop.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTracker } from './evidence.js'
@@ -101,50 +102,112 @@ export class ToolExecutionController {
     const artifactIdsEvicted: string[] = []
     const artifactIdsAccessed: string[] = []
 
-    for (const tu of input.toolUses) {
+    // Partition tools into concurrency-safe (parallelizable) and sequential groups.
+    // Run contiguous blocks of safe tools in parallel for latency savings.
+    const indexed = input.toolUses.map((tu, i) => ({ tu, i, safe: this.deps.config.toolRegistry.get(tu.name)?.isConcurrencySafe() ?? false }))
+
+    let cursor = 0
+    while (cursor < indexed.length) {
       if (input.abortSignal.aborted) break
 
-      const pipelineDeps: ToolPipelineDeps = {
-        config: this.deps.config,
-        cwd: this.deps.cwd,
-        harness: this.deps.harness,
-        prewarm: this.deps.prewarm,
-        evidence: this.deps.evidence,
-        traceStore,
-        repairHintTracker: this.deps.repairHintTracker,
-        repairPipeline: this.deps.repairPipeline,
-        importGraph,
-        lastConflictCheckCount,
-        trajectory: this.deps.trajectory,
-        getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
-        latestRisk,
-        sessionTurnCount: this.deps.getSessionTurnCount(),
-        sessionId: this.deps.getSessionId(),
-        recordToolHistory: (name, input_, isError, content) =>
-          this.deps.recordToolHistory(name, input_, isError, content),
-        getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
-        recordPrediction: (correct) => {
-          this.deps.setPredictionAccumulator(
-            recordPrediction(this.deps.getPredictionAccumulator(), correct),
-          )
-        },
-        getSensorium: () => this.deps.getSensorium(),
-        getReliabilityDecision: () => this.deps.getReliabilityDecision(),
-        turnBudget: this.deps.getTurnBudget(),
-        artifactStore: this.deps.artifactStore,
-        cacheAdvisor: this.deps.cacheAdvisor,
-        taskLedger: this.deps.config.taskLedger,
-        artifactIdsEvicted,
-        artifactIdsAccessed,
-      }
+      // Collect contiguous safe tools for parallel execution
+      if (indexed[cursor]!.safe) {
+        const batchStart = cursor
+        while (cursor < indexed.length && indexed[cursor]!.safe) cursor++
+        const batch = indexed.slice(batchStart, cursor)
 
-      const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)
-      traceStore = result.traceStore
-      importGraph = result.importGraph
-      lastConflictCheckCount = result.lastConflictCheckCount
-      latestRisk = result.latestRisk
-      if (result.checkpointCreated) checkpointCreatedThisTurn = true
-      toolResults.push(result.toolResult)
+        const makeDeps = (): ToolPipelineDeps => ({
+          config: this.deps.config,
+          cwd: this.deps.cwd,
+          harness: this.deps.harness,
+          prewarm: this.deps.prewarm,
+          evidence: this.deps.evidence,
+          traceStore,
+          repairHintTracker: this.deps.repairHintTracker,
+          repairPipeline: this.deps.repairPipeline,
+          importGraph,
+          lastConflictCheckCount,
+          trajectory: this.deps.trajectory,
+          getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
+          latestRisk,
+          sessionTurnCount: this.deps.getSessionTurnCount(),
+          sessionId: this.deps.getSessionId(),
+          recordToolHistory: (name, input_, isError, content) =>
+            this.deps.recordToolHistory(name, input_, isError, content),
+          getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
+          recordPrediction: (correct) => {
+            this.deps.setPredictionAccumulator(
+              recordPrediction(this.deps.getPredictionAccumulator(), correct),
+            )
+          },
+          getSensorium: () => this.deps.getSensorium(),
+          getReliabilityDecision: () => this.deps.getReliabilityDecision(),
+          turnBudget: this.deps.getTurnBudget(),
+          artifactStore: this.deps.artifactStore,
+          cacheAdvisor: this.deps.cacheAdvisor,
+          taskLedger: this.deps.config.taskLedger,
+          artifactIdsEvicted,
+          artifactIdsAccessed,
+        })
+
+        const results = await Promise.all(
+          batch.map(({ tu }) => executeToolUse(tu, makeDeps(), input.callbacks, input.turn, checkpointCreatedThisTurn)),
+        )
+        for (const result of results) {
+          traceStore = result.traceStore
+          importGraph = result.importGraph
+          lastConflictCheckCount = result.lastConflictCheckCount
+          latestRisk = result.latestRisk
+          if (result.checkpointCreated) checkpointCreatedThisTurn = true
+          toolResults.push(result.toolResult)
+        }
+      } else {
+        // Sequential execution for non-safe tools
+        const { tu } = indexed[cursor]!
+        cursor++
+
+        const pipelineDeps: ToolPipelineDeps = {
+          config: this.deps.config,
+          cwd: this.deps.cwd,
+          harness: this.deps.harness,
+          prewarm: this.deps.prewarm,
+          evidence: this.deps.evidence,
+          traceStore,
+          repairHintTracker: this.deps.repairHintTracker,
+          repairPipeline: this.deps.repairPipeline,
+          importGraph,
+          lastConflictCheckCount,
+          trajectory: this.deps.trajectory,
+          getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
+          latestRisk,
+          sessionTurnCount: this.deps.getSessionTurnCount(),
+          sessionId: this.deps.getSessionId(),
+          recordToolHistory: (name, input_, isError, content) =>
+            this.deps.recordToolHistory(name, input_, isError, content),
+          getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
+          recordPrediction: (correct) => {
+            this.deps.setPredictionAccumulator(
+              recordPrediction(this.deps.getPredictionAccumulator(), correct),
+            )
+          },
+          getSensorium: () => this.deps.getSensorium(),
+          getReliabilityDecision: () => this.deps.getReliabilityDecision(),
+          turnBudget: this.deps.getTurnBudget(),
+          artifactStore: this.deps.artifactStore,
+          cacheAdvisor: this.deps.cacheAdvisor,
+          taskLedger: this.deps.config.taskLedger,
+          artifactIdsEvicted,
+          artifactIdsAccessed,
+        }
+
+        const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)
+        traceStore = result.traceStore
+        importGraph = result.importGraph
+        lastConflictCheckCount = result.lastConflictCheckCount
+        latestRisk = result.latestRisk
+        if (result.checkpointCreated) checkpointCreatedThisTurn = true
+        toolResults.push(result.toolResult)
+      }
     }
 
     const steerText = input.callbacks.onSteerDrain?.()
@@ -153,6 +216,23 @@ export class ToolExecutionController {
       if (lastResult.type === 'tool_result') {
         const existing = typeof lastResult.content === 'string' ? lastResult.content : ''
         toolResults[toolResults.length - 1] = { ...lastResult, content: existing + '\n\n' + steerText }
+      }
+    }
+
+    // Enforce per-message aggregate budget before adding to conversation.
+    const budgetEntries = toolResults
+      .map((r, i) => r.type === 'tool_result'
+        ? { toolUseId: r.tool_use_id, content: typeof r.content === 'string' ? r.content : '', toolName: input.toolUses[i]?.name ?? '' }
+        : null)
+      .filter((e): e is NonNullable<typeof e> => e !== null)
+    const enforced = enforcePerMessageBudget(budgetEntries)
+    for (const entry of enforced) {
+      const idx = toolResults.findIndex(r => r.type === 'tool_result' && r.tool_use_id === entry.toolUseId)
+      if (idx >= 0) {
+        const orig = toolResults[idx]!
+        if (orig.type === 'tool_result' && entry.content !== (typeof orig.content === 'string' ? orig.content : '')) {
+          toolResults[idx] = { ...orig, content: entry.content }
+        }
       }
     }
 

@@ -181,6 +181,8 @@ export async function initParser(): Promise<void> {
   await TreeSitter.init()
   Parser = TreeSitter
   parser = new TreeSitter()
+  const { createRequire } = await import('node:module')
+  const require = createRequire(import.meta.url)
   const langPath = require.resolve('tree-sitter-wasms/out/tree-sitter-typescript.wasm')
   const lang = await TreeSitter.Language.load(langPath)
   parser.setLanguage(lang)
@@ -683,7 +685,6 @@ export function spreadingActivation(
     for (const symbolId of frontier) {
       const edges = db.getEdgesFrom(symbolId)
       for (const edge of edges) {
-        const targetSymbols = db.getSymbolById?.(edge.targetId)
         const targetFile = edge.targetId.split(':')[0]!
         if (targetFile && !targetFile.includes('*')) {
           const existing = scores.get(targetFile) ?? 0

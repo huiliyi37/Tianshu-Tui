@@ -12,6 +12,7 @@ const testProvider: ProviderConfig = {
     stripParams: [],
     toolJsonBug: true,
     prefixCache: 'deepseek-native',
+    prefixCompletion: true,
   },
   thinking: 'enabled',
   maxTokens: 64000,

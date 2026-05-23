@@ -11,6 +11,8 @@ export interface StreamCallbacks {
   /** Called when message_delta arrives with stop_reason + usage */
   onStopReason: (stopReason: string, usage: Partial<Usage>) => void
   onError: (error: Error) => void
+  /** Hint: a tool call's name and partial args are parseable (for speculative prewarm). Optional. */
+  onToolCallHint?: (toolName: string, partialArgs: Record<string, unknown>) => void
 }
 
 /** Canonical streaming interface shared by all provider clients */

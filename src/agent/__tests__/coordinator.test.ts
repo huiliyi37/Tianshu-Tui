@@ -505,7 +505,7 @@ describe('DelegationCoordinator', () => {
               apiKeyEnv: 'MISSING_WORKER_KEY',
               baseUrl: 'https://example.com/v1',
               protocol: 'openai',
-              capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none' },
+              capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none', prefixCompletion: false },
               thinking: 'enabled',
               maxTokens: 4096,
               models: [{ id: 'unavailable-routed', contextWindow: 128_000, maxTokens: 4096 }],

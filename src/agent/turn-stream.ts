@@ -19,6 +19,8 @@ export interface TurnStreamDeps {
   getLastPrewarmAt: () => number
   setLastPrewarmAt: (position: number) => void
   maybePrewarm: (text: string) => void
+  /** Direct file prewarm for speculative tool call hints */
+  prewarmFile?: (filePath: string) => void
   addUsage: (usage: Partial<Usage>) => void
   recordTurnCache: (turn: number, usage: Usage) => void
 }
@@ -91,6 +93,11 @@ export class TurnStreamController {
       },
       onError: (error) => {
         input.callbacks.onError(error)
+      },
+      onToolCallHint: (toolName, partialArgs) => {
+        if (toolName === 'read_file' && typeof partialArgs.file_path === 'string') {
+          this.deps.prewarmFile?.(partialArgs.file_path)
+        }
       },
     }
 

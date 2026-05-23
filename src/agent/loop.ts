@@ -364,6 +364,12 @@ export class AgentLoop {
       getLastPrewarmAt: () => this.lastPrewarmAt,
       setLastPrewarmAt: position => { this.lastPrewarmAt = position },
       maybePrewarm: text => { this.maybePrewarm(text) },
+      prewarmFile: filePath => {
+        const value = buildPrewarmValue(this.cwd, filePath)
+        if (value && !this.prewarm.has(value.canonicalPath)) {
+          this.prewarm.set(value.canonicalPath, value)
+        }
+      },
       addUsage: usage => { this.session.addUsage(usage) },
       recordTurnCache: (turn, usage) => {
         this.session.recordTurnCache(turn, usage)

@@ -149,3 +149,12 @@ export function adaptiveCompactPolicyRatios(
   }
   return base
 }
+
+/** Prune: number of recent messages to protect from clearing */
+export const PRUNE_PROTECT_RECENT_MESSAGES = 8
+
+/** Prune: minimum content length to bother clearing (shorter results cost little) */
+export const PRUNE_MIN_CONTENT_CHARS = 1_200
+
+/** Per-message aggregate budget: max total chars across all tool results in one turn */
+export const PER_MESSAGE_TOOL_RESULT_BUDGET_CHARS = 120_000

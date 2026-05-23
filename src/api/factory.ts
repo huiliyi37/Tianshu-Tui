@@ -70,6 +70,7 @@ export function createProviderClient(
     unsupported: provider.unsupported.length > 0
       ? provider.unsupported
       : capabilities.stripParams,
+    prefixCompletion: provider.capabilities.prefixCompletion,
   })
 }
 

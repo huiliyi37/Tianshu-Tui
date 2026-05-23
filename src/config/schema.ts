@@ -25,6 +25,7 @@ export const providerCapabilitiesSchema = z.object({
   stripParams: z.array(z.string()).default([]),
   toolJsonBug: z.boolean().default(false),
   prefixCache: z.enum(['deepseek-native', 'anthropic-cache-control', 'none']).default('none'),
+  prefixCompletion: z.boolean().default(false),
 }).default({})
 
 export const providerSchema = z.object({

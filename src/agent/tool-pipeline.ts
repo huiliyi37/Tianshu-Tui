@@ -138,7 +138,6 @@ const ARTIFACT_ERROR_THRESHOLD = 1600 // chars — error results need more inlin
 const READ_TOOLS: ReadonlySet<string> = new Set([
   'read_file', 'grep', 'glob', 'find_files', 'search', 'repo_map', 'inspect_project',
 ])
-const READ_TOOL_THRESHOLD = 8000 // chars — read tools need inline content to avoid matryoshka
 
 /** Heuristic: is this bash command read-only (cat, grep, find, git log/diff/status, ls, etc.)? */
 function isBashReadOnly(input: Record<string, unknown>): boolean {
@@ -156,14 +155,11 @@ async function artifactIntercept(
   remainingBudgetFraction?: number,
 ): Promise<string> {
   if (!artifactStore) return content
-  // Read-class tools get a much higher threshold to avoid read→read_section matryoshka
+  // Read-class tools bypass artifact intercept entirely — rely on per-message budget + hard truncation.
   const isReadTool = READ_TOOLS.has(toolName) || (toolName === 'bash' && isBashReadOnly(toolInput))
-  const effectiveOverride = thresholdOverride != null
-    ? thresholdOverride
-    : isReadTool
-      ? READ_TOOL_THRESHOLD
-      : undefined
-  let threshold = effectiveOverride ?? (isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD)
+  if (isReadTool) return content
+
+  let threshold = thresholdOverride ?? (isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD)
 
   // Budget-aware scaling: when context budget is ample, inline more aggressively
   if (remainingBudgetFraction != null) {

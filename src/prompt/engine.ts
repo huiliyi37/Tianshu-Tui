@@ -18,6 +18,14 @@ import { DEFAULT_MODE, shouldInjectCvm, shouldInjectDynamicAppendix, type Prompt
 
 export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
 
+/** Fast non-crypto hash for content dedup (djb2 on first 2000 chars + length). */
+function simpleHash(s: string): string {
+  let h = 5381
+  const len = Math.min(s.length, 2000)
+  for (let i = 0; i < len; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return `${h}:${s.length}`
+}
+
 export interface PromptEngineConfig {
   model: string
   maxTokens: number
@@ -93,11 +101,12 @@ export class PromptEngine {
   buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[]): OaiChatRequest {
     const result: OaiMessage[] = []
 
+    let firstUserIdx = -1
     let lastUserIdx = -1
-    for (let i = oaiMessages.length - 1; i >= 0; i--) {
+    for (let i = 0; i < oaiMessages.length; i++) {
       if (oaiMessages[i]!.role === 'user') {
+        if (firstUserIdx === -1) firstUserIdx = i
         lastUserIdx = i
-        break
       }
     }
 
@@ -158,7 +167,9 @@ export class PromptEngine {
             }
           }
           result.push({ role: 'user', content: this.cachedFreshBlock })
-        } else {
+        } else if (i === firstUserIdx) {
+          // Only inject frozen volatile block before the FIRST user message.
+          // Historical user messages in between don't need it — saves 1000+ tokens each.
           result.push({ role: 'user', content: this.volatileBlock })
         }
       }
@@ -175,6 +186,53 @@ export class PromptEngine {
         },
       }))
       : undefined
+
+    // Observation masking: replace tool result content older than 10 user turns with compact placeholder
+    const MASK_WINDOW = 10
+    let userCount = 0
+    const userTurnIndices: number[] = []
+    for (let i = result.length - 1; i >= 0; i--) {
+      if (result[i]!.role === 'user') {
+        userCount++
+        userTurnIndices.push(i)
+      }
+    }
+    if (userCount > MASK_WINDOW) {
+      const cutoff = userTurnIndices[MASK_WINDOW - 1]!
+      for (let i = 0; i < cutoff; i++) {
+        const msg = result[i]!
+        if (msg.role === 'tool' && msg.content.length > 200) {
+          const preview = msg.content.slice(0, 100)
+          result[i] = { ...msg, content: `[observation masked, ${msg.content.length} chars]\n${preview}…` }
+        }
+      }
+    }
+
+    // File content dedup: if same large tool result appears multiple times, keep only the latest
+    const seenContent = new Map<string, number>() // content hash → latest index
+    for (let i = result.length - 1; i >= 0; i--) {
+      const msg = result[i]!
+      if (msg.role === 'tool' && msg.content.length > 500 && !msg.content.startsWith('[observation masked')) {
+        const hash = simpleHash(msg.content)
+        if (!seenContent.has(hash)) {
+          seenContent.set(hash, i)
+        } else {
+          // This is an older duplicate — replace with placeholder
+          result[i] = { ...msg, content: `[duplicate content, see later tool result]` }
+        }
+      }
+    }
+
+    // Disk budget: truncate any remaining tool result >50K chars to a 2KB preview
+    const DISK_BUDGET_CHARS = 50_000
+    const PREVIEW_CHARS = 2000
+    for (let i = 0; i < result.length; i++) {
+      const msg = result[i]!
+      if (msg.role === 'tool' && msg.content.length > DISK_BUDGET_CHARS) {
+        const preview = msg.content.slice(0, PREVIEW_CHARS)
+        result[i] = { ...msg, content: `${preview}\n\n[output truncated: ${msg.content.length} chars total, showing first ${PREVIEW_CHARS}]` }
+      }
+    }
 
     return {
       model: this.config.model,
