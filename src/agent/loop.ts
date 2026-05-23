@@ -482,6 +482,11 @@ export class AgentLoop {
     // P3 integration: pattern mining + speculative pre-execution
     this.p3.onToolComplete(name, target, isError, isError ? result.slice(0, 200) : undefined)
 
+    // P3-E: invalidate plan cache on file mutations
+    if (!isError && (name === 'edit_file' || name === 'write_file')) {
+      this.p3.invalidatePlanCache(target)
+    }
+
     // P3-D Atropos: assess trajectory health → auto-escalate Flash→Pro on repeated failures
     if (this.config.onModelSwitch && this.config.getCurrentModel) {
       const currentModelId = this.config.getCurrentModel()

@@ -4,10 +4,14 @@ import { IdleSpec } from './idle-spec.js'
 import { MistakeNotebook } from './mistake-notebook.js'
 import { assessTrajectoryHealth, type HealthSignal } from './trajectory-health.js'
 import { applyAgentDiet, type DietResult, type OaiMessage } from '../compact/agent-diet.js'
+import { PlanCache, type PlanStep } from './plan-cache.js'
+import { Nightcrawler, type BackgroundTask } from './nightcrawler.js'
 
 export interface P3Config {
   execute?: (tool: string, target: string) => Promise<string>
   speculativeEnabled?: boolean
+  /** Background agent task executor */
+  backgroundExecute?: (task: BackgroundTask) => Promise<string>
 }
 
 export class P3Integration {
@@ -15,6 +19,8 @@ export class P3Integration {
   readonly queue: ShadowQueue
   readonly idleSpec: IdleSpec
   readonly notebook: MistakeNotebook
+  readonly planCache: PlanCache
+  readonly nightcrawler: Nightcrawler
   private lastTool: string | null = null
 
   constructor(config: P3Config = {}) {
@@ -25,6 +31,10 @@ export class P3Integration {
     })
     this.idleSpec = new IdleSpec({ miner: this.miner, queue: this.queue })
     this.notebook = new MistakeNotebook()
+    this.planCache = new PlanCache()
+    this.nightcrawler = new Nightcrawler({
+      execute: config.backgroundExecute ?? (async () => ''),
+    })
   }
 
   onToolStart(toolName: string): void {
@@ -63,6 +73,32 @@ export class P3Integration {
     return applyAgentDiet(messages)
   }
 
+  // P3-E: Plan Cache
+  recordPlan(taskDescription: string, steps: PlanStep[]) {
+    return this.planCache.record(taskDescription, steps)
+  }
+
+  lookupPlan(taskDescription: string) {
+    return this.planCache.lookup(taskDescription)
+  }
+
+  invalidatePlanCache(filePath: string) {
+    return this.planCache.invalidate(filePath)
+  }
+
+  // P3-F: Background Agent
+  submitBackground(description: string, prompt: string, opts?: { timeoutMs?: number; maxTurns?: number }) {
+    return this.nightcrawler.submit(description, prompt, opts)
+  }
+
+  cancelBackground(id: string) {
+    return this.nightcrawler.cancel(id)
+  }
+
+  getBackgroundTask(id: string) {
+    return this.nightcrawler.getTask(id)
+  }
+
   assessHealth(
     recentEvents: Array<{ status: 'passed' | 'failed' | 'blocked'; turn: number }>,
     currentTurn: number,
@@ -75,6 +111,8 @@ export class P3Integration {
     return {
       speculation: this.idleSpec.stats(),
       mistakeCount: this.notebook.size(),
+      planCacheSize: this.planCache.size(),
+      backgroundTasks: this.nightcrawler.stats(),
     }
   }
 }
