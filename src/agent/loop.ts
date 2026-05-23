@@ -4,7 +4,7 @@ import type { ProviderProfile } from '../api/provider-profile.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { PromptMode } from '../prompt/mode.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
-import { gitStatusCache } from '../prompt/volatile-git.js'
+import { getGitInjectedContext } from '../prompt/volatile-git.js'
 import { ToolRegistry } from '../tools/registry.js'
 import { killAll } from '../tools/process-tracker.js'
 import { SessionContext } from './context.js'
@@ -730,13 +730,15 @@ export class AgentLoop {
 
     // Detect worktree reality: compare injected git context with actual worktree state
     try {
-      const rawGit = gitStatusCache.get(this.cwd)
-      const branch = rawGit?.match(/Current branch: (.+)/)?.[1]?.trim()
-      const injected: InjectedWorktreeContext | undefined = branch ? { branch } : undefined
+      const ctx = await getGitInjectedContext(this.cwd)
+      const injected: InjectedWorktreeContext | undefined = ctx
+        ? { branch: ctx.branch, head: ctx.head }
+        : undefined
       const reality = await detectWorktreeReality(this.cwd, injected)
       this.config.promptEngine.setWorktreeReality(reality)
     } catch {
-      // Detection failure must not crash AgentLoop — degrade gracefully
+      // Detection failure must not crash AgentLoop — clear stale warning
+      this.config.promptEngine.setWorktreeReality(null)
     }
 
     this.bindSessionDomain(userInput)

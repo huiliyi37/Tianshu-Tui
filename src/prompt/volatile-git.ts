@@ -87,3 +87,24 @@ export const gitStatusCache = createGitStatusCache({
   now: () => Date.now(),
   load: loadGitStatus,
 })
+
+/** Structured git context for worktree-reality detection (avoids regex on display strings). */
+export interface GitInjectedContext {
+  branch?: string
+  head?: string
+}
+
+export async function getGitInjectedContext(cwd: string): Promise<GitInjectedContext | undefined> {
+  try {
+    const [branchResult, headResult] = await Promise.all([
+      execFileP('git', ['branch', '--show-current'], { cwd, timeout: 5000 }),
+      execFileP('git', ['rev-parse', 'HEAD'], { cwd, timeout: 5000 }),
+    ])
+    const branch = branchResult.stdout.trim() || undefined
+    const head = headResult.stdout.trim() || undefined
+    if (!branch && !head) return undefined
+    return { branch, head }
+  } catch {
+    return undefined
+  }
+}
