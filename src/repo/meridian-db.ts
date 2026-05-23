@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
 import type { PhysarumEdgeState } from './physarum-types.js'
 import type { ImmuneMemory } from '../agent/immune-types.js'
+import type { MistakeEntry } from '../agent/mistake-notebook.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -72,6 +73,16 @@ CREATE TABLE IF NOT EXISTS immune_memory (
   created_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_immune_pattern ON immune_memory(pattern);
+
+CREATE TABLE IF NOT EXISTS mistake_entries (
+  id TEXT PRIMARY KEY,
+  timestamp TEXT NOT NULL,
+  error TEXT NOT NULL,
+  context TEXT NOT NULL,
+  resolution TEXT NOT NULL,
+  tags_json TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_mistake_error ON mistake_entries(error);
 `
 
 export class MeridianDb {
@@ -317,6 +328,48 @@ export class MeridianDb {
           hitCount: r.hit_count as number,
           lastHit: r.last_hit as number,
           createdAt: r.created_at as number,
+        })
+      } catch {
+        // Corrupt row — skip, don't fail the whole load
+      }
+    }
+    return result
+  }
+
+  // ─── Mistake notebook persistence ────────────────────────────────────
+
+  saveMistakeEntries(entries: MistakeEntry[]): void {
+    const insert = this.db.prepare(
+      'INSERT INTO mistake_entries (id, timestamp, error, context, resolution, tags_json) VALUES (?, ?, ?, ?, ?, ?)'
+    )
+    const tx = this.db.transaction((items: MistakeEntry[]) => {
+      this.db.prepare('DELETE FROM mistake_entries').run()
+      for (const e of items) {
+        insert.run(e.id, e.timestamp, e.error, e.context, e.resolution, JSON.stringify(e.tags))
+      }
+    })
+    tx(entries)
+  }
+
+  loadMistakeEntries(): MistakeEntry[] {
+    const rows = this.db.prepare('SELECT * FROM mistake_entries').all() as Array<{
+      id: string
+      timestamp: string
+      error: string
+      context: string
+      resolution: string
+      tags_json: string
+    }>
+    const result: MistakeEntry[] = []
+    for (const r of rows) {
+      try {
+        result.push({
+          id: r.id,
+          timestamp: r.timestamp,
+          error: r.error,
+          context: r.context,
+          resolution: r.resolution,
+          tags: JSON.parse(r.tags_json),
         })
       } catch {
         // Corrupt row — skip, don't fail the whole load
