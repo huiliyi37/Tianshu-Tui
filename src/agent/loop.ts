@@ -304,6 +304,13 @@ export class AgentLoop {
       } catch { /* non-critical: missing table or corrupt data */ }
     }
 
+    // Load persisted mistake entries from previous sessions
+    if (meridianDb) {
+      try {
+        this.p3.notebook.importEntries(meridianDb.loadMistakeEntries())
+      } catch { /* non-critical: missing table or corrupt data */ }
+    }
+
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
       stigmergyQuery: () => this.stigmergyStore.query(),
@@ -781,6 +788,12 @@ export class AgentLoop {
     try {
       const db = this.config.meridianIndexer?.getDb()
       if (db) db.saveImmuneMemories(this.immuneHook.exportMemories())
+    } catch { /* non-critical */ }
+
+    // Persist mistake notebook for cross-session learning
+    try {
+      const db = this.config.meridianIndexer?.getDb()
+      if (db) db.saveMistakeEntries(this.p3.notebook.getAllEntries())
     } catch { /* non-critical */ }
   }
 
