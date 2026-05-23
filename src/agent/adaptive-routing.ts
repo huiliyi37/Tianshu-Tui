@@ -1,4 +1,5 @@
 import type { WorkerProfile } from './work-order.js'
+import type { ComplexityLevel } from './task-complexity.js'
 
 const MAX_HISTORY = 100
 /** 1 second of avgLatencyMs penalizes 0.1 points of passRate in the composite score */
@@ -62,4 +63,13 @@ export class AdaptiveRouter {
   clear(): void {
     this.history.clear()
   }
+}
+
+export interface ModelTier {
+  flash: string
+  pro: string
+}
+
+export function selectModelForComplexity(complexity: ComplexityLevel, tier: ModelTier): string {
+  return complexity === 'high' ? tier.pro : tier.flash
 }
