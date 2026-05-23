@@ -36,7 +36,7 @@ describe('AdaptiveThresholdController', () => {
     const ctrl = new AdaptiveThresholdController({ ghostRegistry: ghost })
     for (let i = 0; i < 20; i++) ctrl.adjust(0.95, i)
     const state = ctrl.adjust(0.95, 20)
-    assert.ok(state.artifactThreshold <= 2000)
+    assert.ok(state.artifactThreshold <= 4000)
     assert.ok(state.stalePreviewChars <= 2400)
   })
 

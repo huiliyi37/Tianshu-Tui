@@ -143,6 +143,10 @@ export interface AgentConfig {
   resourceSensorOptions?: ResourceSensorOptions
   /** Disable fs watcher in tests or constrained environments. Enabled by default. */
   fsWatcherEnabled?: boolean
+  /** Optional TaskLedger for B1 ownership tracking — records file_read/file_write/tool_exec events. */
+  taskLedger?: import('./task-ledger.js').TaskLedger
+  /** Optional Meridian code graph indexer for structural context. */
+  meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
 }
 
 export interface AgentCallbacks {
@@ -297,6 +301,7 @@ export class AgentLoop {
           getTrajectory: () => this.trajectory.getEntries(),
         },
       } : {}),
+      meridianIndexer: this.config.meridianIndexer,
     }))
     this.perception = new TurnPerceptionController({
       cwd: this.cwd,

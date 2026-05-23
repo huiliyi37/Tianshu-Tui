@@ -44,10 +44,32 @@ import { runConfigCLI, loadConfig as loadLayeredConfig } from './config/manager.
 import { McpManager } from './mcp/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
+import { createRepoGraphTool } from './tools/repo-graph.js'
+import { MeridianIndexer } from './repo/meridian-indexer.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { PlaybookStore } from './agent/playbook-store.js'
 import type { Config, ProviderConfig } from './config/schema.js'
 import { SessionRegistry } from './agent/session-registry.js'
+import { spawnSync } from 'node:child_process'
+import type { BaselineSnapshot } from './agent/worktree-baseline.js'
+
+function captureGitBaseline(cwd: string): BaselineSnapshot {
+  try {
+    const branch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const dirty = spawnSync('git', ['diff', '--name-only'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const untracked = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    return {
+      branch,
+      head,
+      preExistingDirty: dirty ? dirty.split('\n') : [],
+      preExistingUntracked: untracked ? untracked.split('\n') : [],
+      capturedAt: Date.now(),
+    }
+  } catch {
+    return { branch: '', head: '', preExistingDirty: [], preExistingUntracked: [], capturedAt: Date.now() }
+  }
+}
 
 function loadConfig(cwd?: string): Config {
   return loadLayeredConfig({ cwd })
@@ -80,6 +102,11 @@ let _fileHistoryRef: FileHistory | null = null
 // Module-level claim store reference — created in Root, read by delegate_task tool
 let _claimStoreRef: import('./context/claim-store.js').ContextClaimStore | null = null
 let _sessionIdRef: string | null = null
+// Module-level TaskLedger reference — created in tool registry, read by AgentLoop config
+let _taskLedgerRef: import('./agent/task-ledger.js').TaskLedger | null = null
+
+// Module-level Meridian indexer reference — created lazily, read by repo_graph tool
+let _meridianIndexerRef: import('./repo/meridian-indexer.js').MeridianIndexer | null = null
 
 // Module-level MCP manager reference — initialized in Root, shut down on exit
 let _mcpManager: McpManager | null = null
@@ -128,18 +155,14 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       () => _sessionIdRef ?? undefined,
     ))
     reg.register(ASK_USER_QUESTION_TOOL)
+    reg.register(createRepoGraphTool(() => _meridianIndexerRef))
 
     // B1 归属星轨：deliver_task 交付门工具
     // TaskLedger、OwnershipLedger、DeliveryGateV2 在此初始化，
     // 通过闭包提供给 deliver_task 工具。
     const _b1TaskLedger = createTaskLedger({ taskId: _sessionIdRef ?? `task-${Date.now()}` })
-    const _b1Baseline = createWorktreeBaseline({
-      branch: '',
-      head: '',
-      preExistingDirty: [],
-      preExistingUntracked: [],
-      capturedAt: Date.now(),
-    })
+    _taskLedgerRef = _b1TaskLedger
+    const _b1Baseline = createWorktreeBaseline(captureGitBaseline(cwd))
     const _b1Ownership = createOwnershipLedger({
       baseline: _b1Baseline,
       taskLedger: _b1TaskLedger,
@@ -243,6 +266,11 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
 
   _claimStoreRef = claimStore
   _sessionIdRef = sessionId
+
+  // Initialize Meridian code graph indexer
+  if (!_meridianIndexerRef) {
+    _meridianIndexerRef = new MeridianIndexer(cwd)
+  }
 
   // Register recall tool once (depends on claimStore existing)
   const recallRef = useRef(false)
@@ -418,6 +446,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         fileHistory,
         contextClaimStore: claimStore,
         playbookStore,
+        taskLedger: _taskLedgerRef ?? undefined,
+        meridianIndexer: _meridianIndexerRef,
       },
       session,
       cwd,
@@ -468,6 +498,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       agent.abort()
       killAll()
       _mcpManager?.shutdown().catch(() => {})
+      _meridianIndexerRef?.close()
       persist.compactOai(session.getMessages())
       if (_fileHistoryRef) {
         persistFileHistory(

@@ -31,6 +31,7 @@ import { truncateToolResult } from './tool-result-truncate.js'
 import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
 import type { ArtifactStore } from '../artifact/store.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
+import type { TaskLedger } from './task-ledger.js'
 
 /** Failure classes that trigger onPhaseChange('blocked') — user-visible state. */
 const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
@@ -92,6 +93,8 @@ export interface ToolPipelineDeps {
   cacheAdvisor?: CacheAdvisor
   /** Phase hint passed to cache advisor (e.g. 'explore', 'execute', 'verify'). Defaults to 'execute'. */
   phaseHint?: string
+  /** Optional TaskLedger for B1 ownership tracking */
+  taskLedger?: TaskLedger
 }
 
 export interface ToolExecResult {
@@ -118,8 +121,20 @@ function truncateSuccessfulToolResult(content: string, config: AgentConfig): str
  * Tools that already return artifact refs (read_file, grep, bash) are detected by
  * the `[artifact:` prefix and skipped.
  */
-const ARTIFACT_INTERCEPT_THRESHOLD = 800 // chars — success results
+const ARTIFACT_INTERCEPT_THRESHOLD = 2500 // chars — success results (raised from 800; review workflows need more inline content)
 const ARTIFACT_ERROR_THRESHOLD = 1600 // chars — error results need more inline context for debugging
+
+/** Tools whose output is the agent's "eyes" — intercept only at very high thresholds. */
+const READ_TOOLS: ReadonlySet<string> = new Set([
+  'read_file', 'grep', 'glob', 'find_files', 'search', 'repo_map', 'inspect_project',
+])
+const READ_TOOL_THRESHOLD = 8000 // chars — read tools need inline content to avoid matryoshka
+
+/** Heuristic: is this bash command read-only (cat, grep, find, git log/diff/status, ls, etc.)? */
+function isBashReadOnly(input: Record<string, unknown>): boolean {
+  const cmd = typeof input.command === 'string' ? input.command.trimStart() : ''
+  return /^(cat|head|tail|grep|rg|find|ls|tree|wc|git\s+(log|diff|status|show|blame|rev-parse|branch)|echo|printf|type|which|file)\b/.test(cmd)
+}
 
 async function artifactIntercept(
   content: string,
@@ -128,9 +143,28 @@ async function artifactIntercept(
   artifactStore: ArtifactStore | undefined,
   isError = false,
   thresholdOverride?: number,
+  remainingBudgetFraction?: number,
 ): Promise<string> {
   if (!artifactStore) return content
-  const threshold = thresholdOverride ?? (isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD)
+  // Read-class tools get a much higher threshold to avoid read→read_section matryoshka
+  const isReadTool = READ_TOOLS.has(toolName) || (toolName === 'bash' && isBashReadOnly(toolInput))
+  const effectiveOverride = thresholdOverride != null
+    ? thresholdOverride
+    : isReadTool
+      ? READ_TOOL_THRESHOLD
+      : undefined
+  let threshold = effectiveOverride ?? (isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD)
+
+  // Budget-aware scaling: when context budget is ample, inline more aggressively
+  if (remainingBudgetFraction != null) {
+    if (remainingBudgetFraction > 0.5) {
+      threshold = Math.max(threshold, threshold * 3) // plenty of room → 3x threshold
+    } else if (remainingBudgetFraction > 0.3) {
+      threshold = Math.max(threshold, threshold * 1.5) // moderate room → 1.5x
+    }
+    // < 0.3 → use base threshold (context is getting tight)
+  }
+
   if (content.length <= threshold) return content
   if (content.startsWith('[artifact:')) return content // already an artifact ref
 
@@ -172,8 +206,8 @@ async function artifactIntercept(
 /** Extract the most diagnostic lines from error output (max ~600 chars). */
 function extractErrorHead(content: string): string {
   const lines = content.split('\n')
-  // Prioritize lines with error/fail keywords
-  const errorLines = lines.filter(l => /error|Error|FAIL|AssertionError|TypeError|ReferenceError|expect\(/.test(l))
+  // Prioritize lines with error/fail keywords — use word boundaries to avoid matching identifiers like errorHandler
+  const errorLines = lines.filter(l => /\b(?:error|Error|FAIL|AssertionError|TypeError|ReferenceError)\b|expect\(/.test(l))
   if (errorLines.length > 0) {
     return errorLines.slice(0, 8).map(l => l.trim().slice(0, 120)).join('\n')
   }
@@ -218,6 +252,19 @@ function generateToolSummary(content: string, toolName: string, input: Record<st
     }
     case 'inspect_project': {
       return `[inspect_project] ${lineCount} lines of project analysis.`
+    }
+    case 'bash': {
+      const cmd = typeof input.command === 'string' ? input.command.slice(0, 80) : '?'
+      // Detect test/typecheck output
+      if (/\b(tsc|typecheck|type-check)\b/.test(cmd)) {
+        const errorCount = lines.filter(l => /error TS\d+/.test(l)).length
+        return `[bash typecheck] ${errorCount} errors, ${lineCount} lines. cmd: ${cmd}`
+      }
+      if (/\b(test|jest|vitest|mocha|pytest)\b/.test(cmd)) {
+        const passLine = lines.find(l => /pass|fail|tests?\s+\d+/i.test(l))?.trim().slice(0, 80) ?? ''
+        return `[bash test] ${lineCount} lines. ${passLine} cmd: ${cmd}`
+      }
+      return `[bash] ${charCount} chars, ${lineCount} lines. cmd: ${cmd}`
     }
     default: {
       // Generic: first meaningful line + stats
@@ -457,7 +504,10 @@ ${check.formatted}`
       // Artifact intercept: persist long output to disk, replace with compact ref.
       // This must run BEFORE truncation — if we store an artifact, truncation is unnecessary.
       const successThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', false)
-      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, false, successThreshold)
+      const budgetFraction = deps.turnBudget.maxTokensPerTurn > 0
+        ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
+        : 1
+      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, false, successThreshold, budgetFraction)
       finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
       const contentChars = finalContent.length
       const tokenEstimate = Math.ceil(contentChars / 4)
@@ -471,7 +521,10 @@ ${check.formatted}`
       // Error results can also be very long (e.g. failed test output).
       // Artifact-intercept them too to keep message history append-only.
       const errorThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', true)
-      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, true, errorThreshold)
+      const budgetFraction = deps.turnBudget.maxTokensPerTurn > 0
+        ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
+        : 1
+      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, true, errorThreshold, budgetFraction)
     }
 
     // Trace recording
@@ -487,6 +540,27 @@ ${check.formatted}`
     callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError, rawToolResult?.rawPath, rawToolResult?.uiContent)
 
     deps.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content)
+
+    // B1 归属星轨：record tool events into TaskLedger
+    if (deps.taskLedger) {
+      const filePath = (tu.input.file_path ?? tu.input.path) as string | undefined
+      if (tu.name === 'read_file' && filePath) {
+        deps.taskLedger.record({ type: 'file_read', path: filePath })
+      } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && filePath) {
+        deps.taskLedger.record({ type: 'file_write', path: filePath })
+      } else if (tu.name === 'bash' && !harnessResult.isError) {
+        const cmd = (tu.input.command as string | undefined) ?? ''
+        if (cmd.startsWith('git ')) {
+          deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
+        } else if (/\b(test|jest|vitest|mocha|pytest)\b/.test(cmd)) {
+          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: harnessResult.isError ? 'failed' : 'passed' })
+        } else {
+          deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
+        }
+      } else {
+        deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
+      }
+    }
 
     // Claim extraction + conflict detection
     if (deps.config.contextClaimStore && deps.sessionId) {
@@ -591,7 +665,10 @@ ${check.formatted}`
             diagnosedContent = truncateSuccessfulToolResult(diagnosedContent, deps.config)
           }
           const diagThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', harnessResult.isError)
-          diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError, diagThreshold)
+          const diagBudgetFrac = deps.turnBudget.maxTokensPerTurn > 0
+            ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
+            : 1
+          diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError, diagThreshold, diagBudgetFrac)
           return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
         }
       }

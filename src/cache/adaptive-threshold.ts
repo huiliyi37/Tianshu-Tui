@@ -13,7 +13,7 @@ const DEFAULTS: ThresholdState = {
 }
 
 const MIN_ARTIFACT = 400
-const MAX_ARTIFACT = 2000
+const MAX_ARTIFACT = 4000
 const MIN_STALE = 600
 const MAX_STALE = 2400
 

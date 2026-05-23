@@ -127,6 +127,7 @@ export class ToolExecutionController {
         turnBudget: this.deps.getTurnBudget(),
         artifactStore: this.deps.artifactStore,
         cacheAdvisor: this.deps.cacheAdvisor,
+        taskLedger: this.deps.config.taskLedger,
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)

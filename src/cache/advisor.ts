@@ -14,7 +14,7 @@ export interface CacheAdvisorConfig {
 }
 
 const PHASE_MULTIPLIERS: Record<string, number> = {
-  explore: 0.5,
+  explore: 1.0,
   plan: 1.5,
   execute: 1.0,
   verify: 2.0,
