@@ -4,6 +4,7 @@ import type { ProviderProfile } from '../api/provider-profile.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { PromptMode } from '../prompt/mode.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
+import { gitStatusCache } from '../prompt/volatile-git.js'
 import { ToolRegistry } from '../tools/registry.js'
 import { killAll } from '../tools/process-tracker.js'
 import { SessionContext } from './context.js'
@@ -28,6 +29,7 @@ import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
 import { ctclSanitizerPass } from './ctcl-sanitizer.js'
 import { RepairHintTracker } from './repair-hint.js'
 import type { PermissionConfig } from './permissions.js'
+import { detectWorktreeReality, type InjectedWorktreeContext } from './worktree-reality.js'
 import { type ApprovalResult } from './approval-edit.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
 import { TurnCompletionController } from './turn-completion.js'
@@ -710,6 +712,17 @@ export class AgentLoop {
     // Use query() so Sensorium sees decayed currentStrength, and prune stale entries opportunistically.
     this.stigmergyStore.prune().catch(() => {})
     this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
+
+    // Detect worktree reality: compare injected git context with actual worktree state
+    try {
+      const rawGit = gitStatusCache.get(this.cwd)
+      const branch = rawGit?.match(/Current branch: (.+)/)?.[1]?.trim()
+      const injected: InjectedWorktreeContext | undefined = branch ? { branch } : undefined
+      const reality = await detectWorktreeReality(this.cwd, injected)
+      this.config.promptEngine.setWorktreeReality(reality)
+    } catch {
+      // Detection failure must not crash AgentLoop — degrade gracefully
+    }
 
     this.bindSessionDomain(userInput)
     this.contextInjection.recordUserInputClaims(userInput)

@@ -5,6 +5,7 @@ import { analyzeVolatilePayload, type VolatilePayloadReport } from '../context/p
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
+import type { WorktreeReality } from '../agent/worktree-reality.js'
 import {
   computeFingerprint,
   detectDrift,
@@ -53,6 +54,7 @@ export class PromptEngine {
   private cognitiveProjection?: string
   private crossSessionEvents?: string
   private sessionStateText?: string
+  private worktreeReality?: WorktreeReality
   private mode: PromptMode = DEFAULT_MODE
 
   constructor(config: PromptEngineConfig) {
@@ -107,7 +109,7 @@ export class PromptEngine {
 
           if (userContent !== this.cachedFreshForUser) {
             this.cachedFreshForUser = userContent
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -277,6 +279,15 @@ export class PromptEngine {
     this.sessionStateText = text ?? undefined
   }
 
+  /**
+   * Update worktree reality check result. Does NOT invalidate the fresh cache:
+   * rendered ONLY into the dynamic appendix when severity !== 'green'.
+   * This is required to preserve DeepSeek prefix cache across tool turns.
+   */
+  setWorktreeReality(reality: WorktreeReality | null): void {
+    this.worktreeReality = reality ?? undefined
+  }
+
   setPhaseHint(hint: string): void {
     this.phaseHint = hint
   }
@@ -314,6 +325,7 @@ export class PromptEngine {
       playbookLessons: this.playbookLessons ?? this.config.volatileCtx.playbookLessons,
       sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock,
       sessionState: this.sessionStateText,
+      worktreeReality: this.worktreeReality,
     })
     return analyzeVolatilePayload(latest)
   }

@@ -1101,3 +1101,47 @@ describe('AgentLoop — output token escalation', () => {
     assert.ok(texts.join('').includes('chunk 4.'))
   })
 })
+
+describe('AgentLoop — worktree reality detection', () => {
+  it('calls detectWorktreeReality and sets result on promptEngine', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    const engine = makeEngine()
+    let worktreeRealitySet = false
+
+    // Mock setWorktreeReality to track calls
+    const originalSetWorktreeReality = engine.setWorktreeReality.bind(engine)
+    engine.setWorktreeReality = (reality) => {
+      worktreeRealitySet = true
+      originalSetWorktreeReality(reality)
+    }
+
+    const client = mockClient([makeTextBlock('Done.')])
+    const agent = new AgentLoop(
+      {
+        client,
+        promptEngine: engine,
+        toolRegistry: registry,
+        maxTurns: 1,
+        contextWindow: 1_000_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      },
+      session,
+      '/test', // Non-existent path will trigger worktree reality check
+    )
+
+    await agent.run('test', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    // setWorktreeReality should have been called during run()
+    assert.ok(worktreeRealitySet, 'setWorktreeReality should be called')
+  })
+})
