@@ -12,7 +12,7 @@
 import { InnateLayer } from './immune-innate.js'
 import { ApcAggregator } from './immune-apc.js'
 import { ImmuneAdaptiveLayer } from './immune-adaptive.js'
-import type { DangerSignal, ImmuneResponse, ImmuneResponseType } from './immune-types.js'
+import type { DangerSignal, ImmuneMemory, ImmuneResponse, ImmuneResponseType } from './immune-types.js'
 import type { PhysarumEngine } from '../repo/physarum-engine.js'
 import type { StigmergyStore } from '../context/stigmergy.js'
 import type { DoomLoopLevel } from './trace-store.js'
@@ -203,8 +203,8 @@ export class ImmuneHook {
   /** Export immune memories for persistence */
   exportMemories() { return this.adaptive.export() }
 
-  /** Import immune memories from persistence */
-  importMemories(memories: Parameters<ImmuneAdaptiveLayer['import']>[0]) {
+  /** Import immune memories from persistence (cross-session secondary response) */
+  importMemories(memories: ImmuneMemory[]): void {
     this.adaptive.import(memories)
   }
 }

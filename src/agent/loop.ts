@@ -295,6 +295,13 @@ export class AgentLoop {
     if (meridianDb) physarum.loadFromDb()
     this.immuneHook = new ImmuneHook({ physarum, stigmergy: this.stigmergyStore })
 
+    // Load persisted immune memories from previous sessions (cross-session secondary response)
+    if (meridianDb) {
+      try {
+        this.immuneHook.importMemories(meridianDb.loadImmuneMemories())
+      } catch { /* non-critical: missing table or corrupt data */ }
+    }
+
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
       stigmergyQuery: () => this.stigmergyStore.query(),
@@ -764,6 +771,12 @@ export class AgentLoop {
 
     // Persist Physarum edge state to MeridianDb
     try { this.immuneHook.getPhysarum().save() } catch { /* non-critical */ }
+
+    // Persist immune memories for cross-session secondary response
+    try {
+      const db = this.config.meridianIndexer?.getDb()
+      if (db) db.saveImmuneMemories(this.immuneHook.exportMemories())
+    } catch { /* non-critical */ }
   }
 
   private async startFsWatcher(): Promise<void> {
