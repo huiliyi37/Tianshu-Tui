@@ -86,3 +86,23 @@ describe('ImmuneHook injectSignal', () => {
     assert.ok(true)
   })
 })
+
+describe('ImmuneHook sycophancy_detected signal', () => {
+  it('accepts injected sycophancy_detected signal', () => {
+    const hook = new ImmuneHook({ physarum: new PhysarumEngine(null as any) })
+    // Severity above APC activation threshold (1.2) so the test can verify
+    // the signal is not rejected by kind. Real severity in loop.ts is 0.7.
+    hook.injectSignal({
+      kind: 'sycophancy_detected',
+      severity: 1.5,
+      turn: 5,
+      source: 'sycophancy-trap',
+    })
+    const result = hook.run({
+      toolName: 'bash', fingerprint: 'fp_syc', turn: 6,
+      doomLevel: 'warn',
+    })
+    assert.equal(result.activated, true)
+    // Signal should be in the activation evidence (apc returns recent signals)
+  })
+})
