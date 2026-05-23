@@ -118,3 +118,34 @@ export interface CompactionConfig {
   autoFloor: number
   model: string
 }
+
+/**
+ * Adaptive compact ratios: shift base strategy thresholds based on observed cache hit rate.
+ * - High hit rate → delay compaction (protect valuable prefix cache)
+ * - Low hit rate → compact freely (cache already broken, nothing to protect)
+ */
+export function adaptiveCompactPolicyRatios(
+  providerProfile: Pick<ProviderProfile, 'cacheType' | 'persistent'> | undefined,
+  recentHitRate: number | null,
+): CompactPolicyRatios {
+  const base = compactPolicyRatios(providerProfile)
+  if (recentHitRate === null) return base
+
+  if (recentHitRate >= 0.85) {
+    return {
+      watch: Math.min(base.watch + 0.05, 0.90),
+      compact: Math.min(base.compact + 0.03, 0.93),
+      reactive: Math.min(base.reactive + 0.02, 0.95),
+      ceiling: base.ceiling,
+    }
+  }
+  if (recentHitRate < 0.3) {
+    return {
+      watch: Math.max(base.watch - 0.10, 0.40),
+      compact: Math.max(base.compact - 0.08, 0.60),
+      reactive: Math.max(base.reactive - 0.05, 0.75),
+      ceiling: base.ceiling,
+    }
+  }
+  return base
+}

@@ -17,6 +17,7 @@ import type { TrajectoryRecorder } from './trajectory.js'
 import type { ReliabilityDecision } from './reliability-mode.js'
 import { PrewarmCache } from './prewarm.js'
 import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
+import type { CacheAdvisor } from '../cache/advisor.js'
 import {
   getInterventionLevel,
   recordPrediction,
@@ -59,6 +60,8 @@ export interface ToolExecutionDeps {
   artifactStore?: import('../artifact/store.js').ArtifactStore
   /** Session state manager for cross-turn awareness */
   sessionStateManager?: import('./session-state.js').SessionStateManager
+  /** Cache advisor for adaptive thresholds */
+  cacheAdvisor?: CacheAdvisor
 }
 
 export interface ToolExecBatchInput {
@@ -123,6 +126,7 @@ export class ToolExecutionController {
         getReliabilityDecision: () => this.deps.getReliabilityDecision(),
         turnBudget: this.deps.getTurnBudget(),
         artifactStore: this.deps.artifactStore,
+        cacheAdvisor: this.deps.cacheAdvisor,
       }
 
       const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)

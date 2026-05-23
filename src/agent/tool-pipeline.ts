@@ -30,6 +30,7 @@ import { compactThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
 import type { ArtifactStore } from '../artifact/store.js'
+import type { CacheAdvisor } from '../cache/advisor.js'
 
 /** Failure classes that trigger onPhaseChange('blocked') — user-visible state. */
 const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
@@ -87,6 +88,10 @@ export interface ToolPipelineDeps {
   turnBudget: TurnBudget
   /** Artifact store for persisting tool output — injected via params, no global setter */
   artifactStore?: import('../artifact/store.js').ArtifactStore
+  /** Optional cache advisor for adaptive artifact thresholds */
+  cacheAdvisor?: CacheAdvisor
+  /** Phase hint passed to cache advisor (e.g. 'explore', 'execute', 'verify'). Defaults to 'execute'. */
+  phaseHint?: string
 }
 
 export interface ToolExecResult {
@@ -122,9 +127,10 @@ async function artifactIntercept(
   toolInput: Record<string, unknown>,
   artifactStore: ArtifactStore | undefined,
   isError = false,
+  thresholdOverride?: number,
 ): Promise<string> {
   if (!artifactStore) return content
-  const threshold = isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD
+  const threshold = thresholdOverride ?? (isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD)
   if (content.length <= threshold) return content
   if (content.startsWith('[artifact:')) return content // already an artifact ref
 
@@ -144,17 +150,23 @@ async function artifactIntercept(
   // Generate a simple summary based on tool type
   const summary = generateToolSummary(content, toolName, toolInput)
 
-  const artifactId = await artifactStore.save({
-    tool: toolName,
-    target: target as string,
-    rawContent: content,
-    summary,
-    sections: [],
-  })
+  try {
+    const artifactId = await artifactStore.save({
+      tool: toolName,
+      target: target as string,
+      rawContent: content,
+      summary,
+      sections: [],
+    })
 
-  // For errors, include a head excerpt so the model can debug without read_section
-  const headExcerpt = isError ? `\n${extractErrorHead(content)}` : ''
-  return `[artifact:${artifactId}] ${summary}${headExcerpt}\nUse read_section(artifactId="${artifactId}", startLine=N, endLine=M) to expand.`
+    // For errors, include a head excerpt so the model can debug without read_section
+    const headExcerpt = isError ? `\n${extractErrorHead(content)}` : ''
+    return `[artifact:${artifactId}] ${summary}${headExcerpt}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to expand.`
+  } catch {
+    // Graceful degradation: if disk write fails, return original content
+    // and let downstream truncation handle it
+    return content
+  }
 }
 
 /** Extract the most diagnostic lines from error output (max ~600 chars). */
@@ -444,7 +456,8 @@ ${check.formatted}`
     if (!harnessResult.isError) {
       // Artifact intercept: persist long output to disk, replace with compact ref.
       // This must run BEFORE truncation — if we store an artifact, truncation is unnecessary.
-      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore)
+      const successThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', false)
+      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, false, successThreshold)
       finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
       const contentChars = finalContent.length
       const tokenEstimate = Math.ceil(contentChars / 4)
@@ -457,7 +470,8 @@ ${check.formatted}`
     } else {
       // Error results can also be very long (e.g. failed test output).
       // Artifact-intercept them too to keep message history append-only.
-      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, true)
+      const errorThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', true)
+      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, true, errorThreshold)
     }
 
     // Trace recording
@@ -576,7 +590,8 @@ ${check.formatted}`
           if (!harnessResult.isError) {
             diagnosedContent = truncateSuccessfulToolResult(diagnosedContent, deps.config)
           }
-          diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError)
+          const diagThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', harnessResult.isError)
+          diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError, diagThreshold)
           return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
         }
       }

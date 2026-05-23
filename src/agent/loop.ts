@@ -62,6 +62,7 @@ import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { compactStaleRoundsOai } from '../compact/stale-round.js'
+import { CacheAdvisor } from '../cache/advisor.js'
 import { microCompactOai } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
@@ -227,6 +228,7 @@ export class AgentLoop {
   private latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   private currentSeason: CognitiveSeason | null = null
   private lastCompactTurn: number | null = null
+  private cacheAdvisor: CacheAdvisor
 
   constructor(
     private config: AgentConfig,
@@ -254,6 +256,10 @@ export class AgentLoop {
       const stateManager = new SessionStateManager(this.config.sessionId)
       this.sessionStateManager = stateManager
     }
+
+    this.cacheAdvisor = new CacheAdvisor({
+      providerProfile: this.config.providerProfile ?? { cacheType: 'none', persistent: false },
+    })
 
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
@@ -330,6 +336,7 @@ export class AgentLoop {
       getTrajectoryEntries: () => this.trajectory.getEntries(),
       getStreamedText: () => this.streamedText,
       refreshLedger: () => { this.contextInjection.refreshLedger() },
+      cacheAdvisor: this.cacheAdvisor,
     })
     this.turnStream = this.createTurnStreamController()
     this.turnCompletion = this.createTurnCompletionController()
@@ -410,6 +417,7 @@ export class AgentLoop {
       getTurnBudget: () => this.turnBudget,
       artifactStore: this.artifactStore,
       sessionStateManager: this.sessionStateManager,
+      cacheAdvisor: this.cacheAdvisor,
     })
   }
 
@@ -634,7 +642,8 @@ export class AgentLoop {
       systemPromptPreview: sysPrompt.slice(0, 200) + (sysPrompt.length > 200 ? '...' : ''),
       toolCount: this.config.toolRegistry.getDefinitions().length,
       toolNames: this.config.toolRegistry.getDefinitions().map(t => t.name),
-      volatilePayloadReport: this.config.promptEngine.getVolatilePayloadReport(this.recentToolHistory) }
+      volatilePayloadReport: this.config.promptEngine.getVolatilePayloadReport(this.recentToolHistory),
+      cacheAdvisor: this.cacheAdvisor.getDiagnostic() }
   }
 
   private recordTurnSnapshot(): void {
@@ -750,7 +759,8 @@ export class AgentLoop {
         // Stale round compaction: proactively shrink N-2+ tool_results
         if (!compactResult.compacted) {
           const before = this.session.getMessages()
-          const after = compactStaleRoundsOai(before, this.config.contextWindow ?? 1_000_000)
+          const previewChars = this.cacheAdvisor.getStalePreviewChars()
+          const after = compactStaleRoundsOai(before, this.config.contextWindow ?? 1_000_000, previewChars)
           if (after !== before) {
             this.session.replaceMessages(after)
             if (typeof globalThis.gc === 'function') globalThis.gc()
@@ -938,6 +948,20 @@ export class AgentLoop {
         })
         const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
         this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
+
+        // Feed CacheAdvisor with turn metrics after API call completes
+        const cacheHistory = this.session.getCacheHistory()
+        const latestTurnCache = cacheHistory.length > 0 ? cacheHistory[cacheHistory.length - 1] : null
+        if (latestTurnCache && latestTurnCache.turn === turn) {
+          this.cacheAdvisor.onTurnEnd({
+            turn,
+            cacheRead: latestTurnCache.cacheRead,
+            cacheCreation: latestTurnCache.cacheCreation,
+            prefixChanged: latestTurnCache.cacheCreation > 0,
+            artifactIdsEvicted: [],
+            artifactIdsAccessed: [],
+          })
+        }
 
         if (this.abortController.signal.aborted) {
           if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })

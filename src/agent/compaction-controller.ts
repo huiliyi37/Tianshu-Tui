@@ -11,6 +11,7 @@ import type { PressureMonitor } from '../context/pressure-monitor.js'
 import type { SessionContext } from './context.js'
 import { extractTaskState } from './task-state.js'
 import type { TrajectoryEntry } from './trajectory.js'
+import type { CacheAdvisor } from '../cache/advisor.js'
 
 export interface CompactionControllerDeps {
   session: SessionContext
@@ -23,6 +24,7 @@ export interface CompactionControllerDeps {
   getTrajectoryEntries: () => TrajectoryEntry[]
   getStreamedText: () => string
   refreshLedger: () => void
+  cacheAdvisor?: CacheAdvisor
 }
 
 export interface MaybeCompactInput {
@@ -50,6 +52,10 @@ export class CompactionController {
     })
 
     if (!compactDecision.shouldCompact) {
+      return { failures: input.failures, compacted: false }
+    }
+
+    if (this.deps.cacheAdvisor?.shouldDelayCompact(compactDecision.tier)) {
       return { failures: input.failures, compacted: false }
     }
 
