@@ -75,4 +75,23 @@ describe('P3Integration', () => {
     const result = p3.dietMessages(messages)
     assert.ok(result.removedCount >= 0)
   })
+
+  it('escalate signal triggers when flash has 3+ consecutive failures', () => {
+    const p3 = new P3Integration()
+    // Healthy on pro regardless
+    assert.equal(p3.assessHealth(
+      [{ status: 'failed', turn: 1 }, { status: 'failed', turn: 2 }, { status: 'failed', turn: 3 }],
+      4, 'pro',
+    ), 'healthy')
+    // Escalate on flash with 3 consecutive failures
+    assert.equal(p3.assessHealth(
+      [{ status: 'passed', turn: 1 }, { status: 'failed', turn: 2 }, { status: 'failed', turn: 3 }, { status: 'failed', turn: 4 }],
+      5, 'flash',
+    ), 'escalate')
+    // Healthy on flash with mixed results
+    assert.equal(p3.assessHealth(
+      [{ status: 'passed', turn: 1 }, { status: 'failed', turn: 2 }, { status: 'passed', turn: 3 }],
+      4, 'flash',
+    ), 'healthy')
+  })
 })

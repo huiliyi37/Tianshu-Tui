@@ -481,6 +481,23 @@ export class AgentLoop {
 
     // P3 integration: pattern mining + speculative pre-execution
     this.p3.onToolComplete(name, target, isError, isError ? result.slice(0, 200) : undefined)
+
+    // P3-D Atropos: assess trajectory health → auto-escalate Flash→Pro on repeated failures
+    if (this.config.onModelSwitch && this.config.getCurrentModel) {
+      const currentModelId = this.config.getCurrentModel()
+      const tier: 'flash' | 'pro' = currentModelId.includes('pro') ? 'pro' : 'flash'
+      if (tier === 'flash') {
+        const recentEvents = this.traceStore.events.slice(-10).map(e => ({
+          status: (e.status === 'passed' ? 'passed' : 'failed') as 'passed' | 'failed',
+          turn: e.turn,
+        }))
+        const signal = this.p3.assessHealth(recentEvents, this.session.getTurnCount(), tier)
+        if (signal === 'escalate') {
+          const proModel = currentModelId.replace('flash', 'pro')
+          try { this.config.onModelSwitch(proModel) } catch { /* non-fatal */ }
+        }
+      }
+    }
   }
 
   private bindSessionDomain(taskDescription: string): void {
