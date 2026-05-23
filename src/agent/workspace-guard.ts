@@ -102,22 +102,23 @@ const PROMOTED_RIVET_FILES = new Set(['.rivet/playbook.jsonl'])
 
 // ── Git helpers ─────────────────────────────────────────────────────
 
+/**
+ * Run git and return stdout split into lines.
+ * Throws on git failure — callers decide whether to degrade or report.
+ * Empty output (git succeeds but no results) returns [].
+ */
 async function gitLines(args: string[], cwd: string): Promise<string[]> {
-  try {
-    const { stdout } = await execFileP('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
-    return stdout.trim().split('\n').filter(Boolean)
-  } catch {
-    return []
-  }
+  const { stdout } = await execFileP('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
+  return stdout.trim().split('\n').filter(Boolean)
 }
 
+/**
+ * Run git and return raw stdout string.
+ * Throws on git failure — callers decide whether to degrade or report.
+ */
 async function gitString(args: string[], cwd: string): Promise<string> {
-  try {
-    const { stdout } = await execFileP('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
-    return stdout
-  } catch {
-    return ''
-  }
+  const { stdout } = await execFileP('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
+  return stdout
 }
 
 /** Returns true if the path exists and is a regular file in the working tree. */
@@ -203,11 +204,20 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
     const reasons: string[] = []
     const conflicts: WorkspaceGuardReport['stashConflicts'] = []
 
-    // Get list of files in stash
-    const stashFiles = await gitLines(
-      ['stash', 'show', '--name-only', stashRef],
-      absCwd,
-    )
+    // Get list of files in stash — may fail if stashRef doesn't exist
+    let stashFiles: string[]
+    try {
+      stashFiles = await gitLines(
+        ['stash', 'show', '--name-only', stashRef],
+        absCwd,
+      )
+    } catch {
+      return {
+        conflicts: [],
+        blocked: true,
+        reasons: [`BLOCKED: stash ref ${stashRef} does not exist or git error.`],
+      }
+    }
 
     if (stashFiles.length === 0) {
       return { conflicts: [], blocked: false, reasons: ['Stash has no files to compare.'] }
@@ -217,11 +227,26 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
       const absPath = resolve(absCwd, file)
 
       // Get stash version content
-      const stashContent = await gitString(['show', `${stashRef}:${file}`], absCwd)
-      if (stashContent === '' && !(await gitString(['ls-tree', stashRef, '--', file], absCwd)).trim()) {
-        // Could not retrieve stash content (file not in stash or git error)
+      let stashContent: string
+      try {
+        stashContent = await gitString(['show', `${stashRef}:${file}`], absCwd)
+      } catch {
+        // File not in stash tree
         conflicts.push({ stashRef, path: file, status: 'missing_stash' })
         continue
+      }
+      // Empty content is valid (empty file), but check if file actually exists in stash tree
+      if (stashContent === '') {
+        try {
+          const lsResult = await gitString(['ls-tree', stashRef, '--', file], absCwd)
+          if (!lsResult.trim()) {
+            conflicts.push({ stashRef, path: file, status: 'missing_stash' })
+            continue
+          }
+        } catch {
+          conflicts.push({ stashRef, path: file, status: 'missing_stash' })
+          continue
+        }
       }
 
       if (!fileExists(absPath)) {
@@ -274,10 +299,20 @@ export function createWorkspaceGuard(cwd: string): WorkspaceGuard {
     const wouldOverwriteModified: string[] = []
 
     // 1. Get files changed in target branch relative to HEAD
-    const targetChangedFiles = await gitLines(
-      ['diff', '--name-only', `HEAD..${targetBranch}`],
-      absCwd,
-    )
+    let targetChangedFiles: string[]
+    try {
+      targetChangedFiles = await gitLines(
+        ['diff', '--name-only', `HEAD..${targetBranch}`],
+        absCwd,
+      )
+    } catch {
+      return {
+        wouldOverwriteUntracked: [],
+        wouldOverwriteModified: [],
+        blocked: true,
+        reasons: [`BLOCKED: cannot diff HEAD..${targetBranch} — branch may not exist.`],
+      }
+    }
     const targetChangedSet = new Set(targetChangedFiles)
 
     // 2. Check untracked files that would be overwritten
