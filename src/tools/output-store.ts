@@ -2,6 +2,7 @@ import { writeFile, mkdir, readdir, unlink, stat } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { applyCommandFilter } from './command-filters.js'
 
 const RAW_DIR = join(tmpdir(), 'rivet-raw')
 const STALE_TTL_MS = 3_600_000 // 1 hour
@@ -65,12 +66,16 @@ function countLines(raw: string): number {
 }
 
 export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
-  const lines = raw.split('\n')
-  const lineCount = countLines(raw)
+  // Apply command-aware filter first (P1: Command-Aware filtering)
+  // Only apply filter when exitCode !== 0 (failure) to avoid hiding useful info
+  const filtered = meta.exitCode !== 0 ? applyCommandFilter(meta.command, raw, meta.exitCode) : null
+  const effectiveRaw = filtered ?? raw
+  const lines = effectiveRaw.split('\n')
+  const lineCount = countLines(effectiveRaw)
   const header = `[${meta.command}] exit=${meta.exitCode} time=${(meta.durationMs / 1000).toFixed(1)}s lines=${lineCount}`
 
   if (lines.length <= MODEL_MAX_LINES) {
-    return `${header}\n${raw}`
+    return `${header}\n${effectiveRaw}`
   }
 
   const head = lines.slice(0, MODEL_HEAD_LINES)
