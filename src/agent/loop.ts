@@ -289,7 +289,9 @@ export class AgentLoop {
     this.heuristicStore = new HeuristicStore(join(this.cwd, '.rivet', 'heuristics.jsonl'))
 
     // Physarum + Immune system
-    const physarum = new PhysarumEngine({} as any) // in-memory only, no DB persistence yet
+    const meridianDb = this.config.meridianIndexer?.getDb()
+    const physarum = new PhysarumEngine(meridianDb as any)
+    if (meridianDb) physarum.loadFromDb()
     this.immuneHook = new ImmuneHook({ physarum, stigmergy: this.stigmergyStore })
 
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
@@ -758,6 +760,9 @@ export class AgentLoop {
       this.heuristicStore.prune()
       await this.heuristicStore.save()
     } catch { /* non-critical */ }
+
+    // Persist Physarum edge state to MeridianDb
+    try { this.immuneHook.getPhysarum().save() } catch { /* non-critical */ }
   }
 
   private async startFsWatcher(): Promise<void> {

@@ -14,13 +14,14 @@
 
 ## 文件结构
 
-| 文件 | 职责 |
-|------|------|
-| `src/agent/tool-pattern-miner.ts` | 从 trace events 提取工具调用 bigram 转移概率 |
-| `src/agent/__tests__/tool-pattern-miner.test.ts` | miner 测试 |
-| `src/agent/shadow-queue.ts` | 预测 + 预执行 + 缓存命中检查 |
-| `src/agent/__tests__/shadow-queue.test.ts` | shadow queue 测试 |
-| `src/agent/tool-pipeline.ts` | 集成：tool 执行前检查 shadow cache |
+| 文件 | 职责 | 状态 |
+|------|------|------|
+| `src/agent/tool-pattern-miner.ts` | 从 trace events 提取工具调用 bigram + trigram 转移概率 | ✅ 已实现 |
+| `src/agent/__tests__/tool-pattern-miner.test.ts` | miner bigram 测试 | ✅ 已实现 |
+| `src/agent/__tests__/tool-pattern-miner-trigram.test.ts` | miner trigram 测试 | ✅ 已实现 |
+| `src/agent/shadow-queue.ts` | 预测 + 预执行 + 缓存命中检查 | 待实现 |
+| `src/agent/__tests__/shadow-queue.test.ts` | shadow queue 测试 | 待实现 |
+| `src/agent/tool-pipeline.ts` | 集成：tool 执行前检查 shadow cache | 待实现 |
 
 ---
 

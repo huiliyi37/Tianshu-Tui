@@ -106,10 +106,10 @@ Layer 3: Flash 反射（可选，高压力时启用）
 Tier 0: 当前（已有）
 └── 流式检测 read_file → 预热文件缓存
 
-Tier 1: Pattern-based 单路推测（MVP）
-├── 记录 tool call n-gram：(tool_A, args_hash) → (tool_B, args_template, probability)
-├── 存储：SQLite 或内存 Map（session 级）
-├── 工具执行完成后，查表预测下一个工具
+Tier 1: Pattern-based 单路推测（MVP）✅ 已实现
+├── 记录 tool call bigram + trigram：(prev, tool_A) → (tool_B, args_template, probability)
+├── 存储：内存 Map（session 级），bigram 200 条 + trigram 100 条上限
+├── 工具执行完成后，查表预测下一个工具（trigram 优先，≥3 数据点时使用）
 ├── 只对只读工具推测执行：read_file, grep, glob, list_dir
 ├── LLM 实际输出匹配 → 直接注入结果（跳过执行）
 ├── 不匹配 → 丢弃（零回滚成本）
@@ -155,13 +155,13 @@ Tier 3: COW overlay + 写推测
 
 ### 实现文件
 
-| 文件 | 改动 |
-|------|------|
-| `src/agent/speculation-store.ts` | 新建：n-gram pattern 存储和查询 |
-| `src/agent/speculation-engine.ts` | 新建：推测调度器（Tier 1-3） |
-| `src/agent/speculation-overlay.ts` | 新建：COW 文件系统 overlay（Tier 3） |
-| `src/agent/turn-stream.ts` | 修改：扩展 onToolCallHint 到多工具 |
-| `src/agent/tool-execution.ts` | 修改：推测结果注入 |
+| 文件 | 改动 | 状态 |
+|------|------|------|
+| `src/agent/tool-pattern-miner.ts` | 新建：bigram + trigram pattern 存储和查询 | ✅ 已实现 |
+| `src/agent/speculation-engine.ts` | 新建：推测调度器（Tier 1-3） | 待实现 |
+| `src/agent/speculation-overlay.ts` | 新建：COW 文件系统 overlay（Tier 3） | 待实现 |
+| `src/agent/turn-stream.ts` | 修改：扩展 onToolCallHint 到多工具 | 待实现 |
+| `src/agent/tool-execution.ts` | 修改：推测结果注入 | 待实现 |
 
 ### 预估
 
@@ -204,22 +204,31 @@ Tier 3: COW overlay + 写推测
 回退：Flash 失败时用现有 regex 提取
 ```
 
-#### Phase 2: 规则注入 + 验证循环
+#### Phase 2: 规则注入 + 验证循环 ✅ IMPLEMENTED
 
 ```
 Session 开始：
-├── 加载 heuristic store
-├── 按 hitCount × recency 排序
-└── 注入 top-10 到 volatile context block
+├── 加载 heuristic store (.rivet/heuristics.jsonl)
+├── 按 hitCount × recency 排序 (getTopK)
+└── 注入 top-5 到 volatile context dynamic appendix (setHeuristicRules)
 
 Session 中：
-├── 追踪规则是否被遵循
-└── 追踪任务是否成功
+├── 规则以 <learned-heuristics> 标签渲染在 dynamic appendix
+└── 缓存安全：不影响 frozen prefix（仅在 buildDynamicAppendix 中渲染）
 
-Session 结束：
+Session 结束（runPostSession）：
+├── 记录 hit（所有注入的规则）
 ├── 更新 confidence（成功 +0.1，失败 -0.2）
-└── confidence < 0.2 且 uses > 5 → 归档
+├── prune 冷规则
+└── 持久化到磁盘
 ```
+
+实现文件：
+- `src/compact/heuristic-store.ts` — JSONL 读写/衰减/去重/prune
+- `src/compact/heuristic-injector.ts` — formatHeuristicsForInjection(rules)
+- `src/prompt/volatile.ts` — VolatileContext.heuristicRules 字段 + dynamic appendix 渲染
+- `src/prompt/engine.ts` — setHeuristicRules() setter + dynamicCtx 传递
+- `src/agent/loop.ts` — 初始化 HeuristicStore, run() 中加载注入, runPostSession() 中验证
 
 #### 规则格式
 
@@ -267,14 +276,16 @@ Cold（>30天，无 hit）→ 归档不删除，可搜索
 
 ### 实现文件
 
-| 文件 | 改动 |
-|------|------|
-| `src/compact/heuristic-extractor.ts` | 新建：Flash 反思提取（替代 regex） |
-| `src/compact/heuristic-store.ts` | 新建：JSONL 读写/衰减/去重 |
-| `src/compact/heuristic-injector.ts` | 新建：top-K 选择和注入 |
-| `src/agent/compaction-controller.ts` | 修改：集成 heuristic-extractor |
-| `src/prompt/engine.ts` | 修改：volatile block 注入规则 |
-| `.rivet/knowledge/heuristics.jsonl` | 新建：规则存储 |
+| 文件 | 改动 | 状态 |
+|------|------|------|
+| `src/compact/heuristic-extractor.ts` | 新建：Flash 反思提取（替代 regex） | 待实现 |
+| `src/compact/heuristic-store.ts` | 新建：JSONL 读写/衰减/去重 | ✅ 已实现 |
+| `src/compact/heuristic-injector.ts` | 新建：top-K 选择和注入 | ✅ 已实现 |
+| `src/agent/compaction-controller.ts` | 修改：集成 heuristic-extractor | 待实现 |
+| `src/prompt/engine.ts` | 修改：volatile block 注入规则 | ✅ 已实现 |
+| `src/prompt/volatile.ts` | 修改：dynamic appendix 渲染 heuristicRules | ✅ 已实现 |
+| `src/agent/loop.ts` | 修改：session 开始加载 + 结束验证 | ✅ 已实现 |
+| `.rivet/knowledge/heuristics.jsonl` | 新建：规则存储 | ✅ 运行时自动创建 |
 
 ### 预估
 
@@ -304,12 +315,12 @@ C 生成的规则让 agent 犯更少错误 → 更短的轨迹 → A 需要精�
 
 ### 实施优先级
 
-| 阶段 | 内容 | 预估 | 依赖 |
-|------|------|------|------|
-| Sprint 1 | A-Layer1 + A-Layer2 + C-Phase1 | 4-5 天 | 无 |
-| Sprint 2 | B-Tier1 + C-Phase2 | 1 周 | Sprint 1 |
-| Sprint 3 | A-Layer3 + B-Tier2 | 1-2 周 | Sprint 2 |
-| Sprint 4 | B-Tier3 (COW overlay) | 2 周 | Sprint 3 |
+| 阶段 | 内容 | 预估 | 依赖 | 状态 |
+|------|------|------|------|------|
+| Sprint 1 | A-Layer1 + A-Layer2 + C-Phase1 | 4-5 天 | 无 | 进行中 |
+| Sprint 2 | B-Tier1 + C-Phase2 | 1 周 | Sprint 1 | ✅ 已完成 |
+| Sprint 3 | A-Layer3 + B-Tier2 | 1-2 周 | Sprint 2 | 待开始 |
+| Sprint 4 | B-Tier3 (COW overlay) | 2 周 | Sprint 3 | 待开始 |
 
 ---
 
