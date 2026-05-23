@@ -1,9 +1,11 @@
 import type { MeridianDb } from './meridian-db.js'
 import type { RepoMapEntry, RepoMapResult } from './meridian-types.js'
+import type { MeridianBehavior } from './meridian-behavior.js'
 
 export interface ActivationOptions {
   maxHops: number
   decay: number
+  behavior?: MeridianBehavior
 }
 
 export interface RepoMapOptions extends ActivationOptions {
@@ -51,6 +53,15 @@ export function spreadingActivation(
     frontier = nextFrontier
   }
 
+  // P2: inject co-edit behavioral edges
+  if (opts.behavior) {
+    const coEdges = opts.behavior.getCoEditEdges(seedFile)
+    for (const { targetFile, weight } of coEdges) {
+      const existing = scores.get(targetFile) ?? 0
+      scores.set(targetFile, Math.max(existing, weight))
+    }
+  }
+
   return scores
 }
 
@@ -67,10 +78,11 @@ export function buildRepoMap(
   const entries: RepoMapEntry[] = []
   for (const [filePath, score] of scores) {
     const symbols = db.getSymbolsForFile(filePath)
+    const boost = opts.behavior ? opts.behavior.getFileBoost(filePath) : 0
     entries.push({
       filePath,
       symbols: symbols.map(s => ({ name: s.name, kind: s.kind, line: s.line })),
-      score,
+      score: score + boost,
     })
   }
 

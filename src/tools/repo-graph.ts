@@ -38,7 +38,7 @@ export function createRepoGraphTool(getIndexer: () => MeridianIndexer | null): T
       }
 
       const input = params.input as unknown as RepoGraphInput
-      const result = indexer.query(input.from_file, { maxTokens: input.max_tokens ?? 2000 })
+      const result = await indexer.query(input.from_file, { maxTokens: input.max_tokens ?? 2000 })
 
       if (result.entries.length === 0) {
         return { content: `No graph data for \`${input.from_file}\`. Read the file first to index it.` }

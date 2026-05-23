@@ -1027,6 +1027,7 @@ export class AgentLoop {
               artifactIdsAccessed: r.artifactIdsAccessed,
             })
           }
+          this.config.meridianIndexer?.flushTurn()
           await this.turnCompletion.complete({ turn, isFinal: false, callbacks })
           continue
         }

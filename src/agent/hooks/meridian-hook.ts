@@ -9,7 +9,7 @@ export function createMeridianHook(deps: MeridianHookDeps): PostToolRuntimeHook 
   return {
     phase: 'postTool',
     name: 'meridian-index',
-    async run(_ctx, tool) {
+    async run(ctx, tool) {
       const indexer = deps.getIndexer()
       if (!indexer) return
 
@@ -19,6 +19,7 @@ export function createMeridianHook(deps: MeridianHookDeps): PostToolRuntimeHook 
 
       if ((tool.name === 'write_file' || tool.name === 'edit_file') && tool.target && tool.success) {
         await indexer.invalidateFile(tool.target)
+        indexer.recordEdit(tool.target, ctx.snapshot.turn)
       }
     },
   }

@@ -2,22 +2,26 @@ import { readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { MeridianDb } from './meridian-db.js'
+import { MeridianBehavior } from './meridian-behavior.js'
 import { parseTypeScriptFile, initParser } from './meridian-parser.js'
 import { buildRepoMap } from './meridian-graph.js'
 import type { RepoMapResult } from './meridian-types.js'
 import type { RepoMapOptions } from './meridian-graph.js'
+import type { StigmergyStore } from '../context/stigmergy.js'
 
 const TS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx']
 const IGNORE_PATTERNS = ['node_modules', 'dist', '.git', '.rivet']
 
 export class MeridianIndexer {
   private db: MeridianDb
+  private behavior: MeridianBehavior
   private initialized = false
   private indexing = new Set<string>()
 
-  constructor(private cwd: string, stateDir?: string) {
+  constructor(private cwd: string, stateDir?: string, stigmergy?: StigmergyStore) {
     const dir = stateDir ?? resolve(cwd, '.rivet')
     this.db = new MeridianDb(dir)
+    this.behavior = new MeridianBehavior(this.db, stigmergy)
   }
 
   private async ensureInit(): Promise<void> {
@@ -73,12 +77,22 @@ export class MeridianIndexer {
     this.db.upsertFile(result)
   }
 
-  query(seedFile: string, opts?: Partial<RepoMapOptions>): RepoMapResult {
+  async query(seedFile: string, opts?: Partial<RepoMapOptions>): Promise<RepoMapResult> {
+    await this.behavior.refreshPheromoneCache()
     return buildRepoMap(this.db, seedFile, {
       maxHops: opts?.maxHops ?? 3,
       decay: opts?.decay ?? 0.5,
       maxTokens: opts?.maxTokens ?? 2000,
+      behavior: this.behavior,
     })
+  }
+
+  recordEdit(filePath: string, turn: number): void {
+    this.behavior.recordEdit(filePath, turn)
+  }
+
+  flushTurn(): void {
+    this.behavior.flushCoEdits()
   }
 
   getStats() {

@@ -36,6 +36,16 @@ CREATE TABLE IF NOT EXISTS access_log (
   accessed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_access_file ON access_log(file_path);
+
+CREATE TABLE IF NOT EXISTS co_edits (
+  file_a TEXT NOT NULL,
+  file_b TEXT NOT NULL,
+  weight REAL NOT NULL DEFAULT 1.0,
+  last_turn INTEGER NOT NULL,
+  PRIMARY KEY(file_a, file_b)
+);
+CREATE INDEX IF NOT EXISTS idx_co_edits_a ON co_edits(file_a);
+CREATE INDEX IF NOT EXISTS idx_co_edits_b ON co_edits(file_b);
 `
 
 export class MeridianDb {
@@ -146,6 +156,36 @@ export class MeridianDb {
     const symbols = (this.db.prepare('SELECT COUNT(*) as cnt FROM symbols').get() as { cnt: number }).cnt
     const edges = (this.db.prepare('SELECT COUNT(*) as cnt FROM edges').get() as { cnt: number }).cnt
     return { files, symbols, edges }
+  }
+
+  recordCoEdit(fileA: string, fileB: string, turn: number): void {
+    const [a, b] = fileA < fileB ? [fileA, fileB] : [fileB, fileA]
+    this.db.prepare(`
+      INSERT INTO co_edits (file_a, file_b, weight, last_turn)
+      VALUES (?, ?, 1.0, ?)
+      ON CONFLICT(file_a, file_b) DO UPDATE SET
+        weight = MIN(weight + 0.5, 5.0),
+        last_turn = excluded.last_turn
+    `).run(a, b, turn)
+  }
+
+  getCoEditNeighbors(filePath: string): Array<{ file: string; weight: number }> {
+    return this.db.prepare(`
+      SELECT file_b as file, weight FROM co_edits WHERE file_a = ?
+      UNION ALL
+      SELECT file_a as file, weight FROM co_edits WHERE file_b = ?
+    `).all(filePath, filePath) as Array<{ file: string; weight: number }>
+  }
+
+  getAccessHeat(filePath: string, decayHalfLifeTurns = 10): number {
+    const rows = this.db.prepare(
+      'SELECT accessed_at FROM access_log WHERE file_path = ? ORDER BY rowid DESC LIMIT 20'
+    ).all(filePath) as Array<{ accessed_at: string }>
+    let heat = 0
+    for (let i = 0; i < rows.length; i++) {
+      heat += Math.pow(0.5, i / decayHalfLifeTurns)
+    }
+    return heat
   }
 
   close(): void {

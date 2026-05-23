@@ -1,6 +1,6 @@
 export type MeridianSymbolKind = 'function' | 'class' | 'interface' | 'type' | 'variable' | 'method' | 'enum'
 
-export type MeridianEdgeKind = 'imports' | 'calls' | 'contains' | 'type_of'
+export type MeridianEdgeKind = 'imports' | 'calls' | 'contains' | 'type_of' | 'co_edit'
 
 export interface MeridianSymbol {
   id: string
