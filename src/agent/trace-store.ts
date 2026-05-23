@@ -85,11 +85,41 @@ export function recordToolFingerprint(store: TraceStore, fingerprint: string): T
   return { ...store, toolFingerprints: [...store.toolFingerprints, fingerprint].slice(-20) }
 }
 
+/**
+ * Detects doom loops using a dual-strategy approach:
+ * 1. Consecutive repeats: tight-loop pattern where the same tool is called back-to-back.
+ *    Threshold: 3 consecutive (4th identical call) → blocked, 1 consecutive → warn.
+ * 2. Sliding-window frequency: oscillation pattern (A→B→A→B→A) where a tool
+ *    dominates the recent window even if not consecutive.
+ *    Threshold: 6/8 → blocked, 4/8 → warn.
+ *
+ * This is less sensitive than the old global-count approach which flagged
+ * normal iteration (typecheck→edit→typecheck→edit→typecheck) as blocked at 3 occurrences.
+ */
 export function getDoomLoopLevel(fingerprints: string[]): DoomLoopLevel {
+  const WINDOW = 8
+  const recent = fingerprints.slice(-WINDOW)
+
+  // Strategy 1: consecutive repeats
+  let maxConsecutive = 0
+  let currentConsecutive = 0
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i] === recent[i! - 1]) {
+      currentConsecutive++
+    } else {
+      currentConsecutive = 0
+    }
+    maxConsecutive = Math.max(maxConsecutive, currentConsecutive)
+  }
+
+  // Strategy 2: sliding-window frequency
   const counts = new Map<string, number>()
-  for (const fp of fingerprints) counts.set(fp, (counts.get(fp) ?? 0) + 1)
-  const max = Math.max(0, ...counts.values())
-  if (max >= 3) return 'blocked'
-  if (max >= 2) return 'warn'
+  for (const fp of recent) counts.set(fp, (counts.get(fp) ?? 0) + 1)
+  const maxCount = Math.max(0, ...counts.values())
+
+  // Blocked: 3+ consecutive identical (4th same call) OR 6+ out of 8 window
+  if (maxConsecutive >= 3 || maxCount >= 6) return 'blocked'
+  // Warn: 1+ consecutive identical (2nd same call) OR 4+ out of 8 window
+  if (maxConsecutive >= 1 || maxCount >= 4) return 'warn'
   return 'none'
 }

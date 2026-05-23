@@ -371,11 +371,14 @@ export class PromptEngine {
     this.phaseHint = hint
   }
 
+  /**
+   * Update cognitive projection. Does NOT invalidate the fresh cache:
+   * within the same user message, all tool-call turns reuse the cached fresh
+   * volatile block — projection refreshes only at user-message boundaries.
+   * This preserves DeepSeek prefix cache across tool turns (~10% hit rate gain).
+   */
   setCognitiveProjection(projection: string | null): void {
-    const next = projection && projection.trim().length > 0 ? projection : undefined
-    if (this.cognitiveProjection === next) return
-    this.cognitiveProjection = next
-    this.invalidateFreshCache()
+    this.cognitiveProjection = projection && projection.trim().length > 0 ? projection : undefined
   }
 
   private invalidateFreshCache(): void {

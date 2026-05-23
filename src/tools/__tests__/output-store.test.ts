@@ -95,5 +95,29 @@ describe('output-store', () => {
       const result = buildUiOutput('', { command: 'echo hi', exitCode: 0, durationMs: 2345 })
       assert.ok(result.includes('2.3s'))
     })
+
+    it('error-aware: prioritizes error lines over pure tail for failed commands', () => {
+      const lines: string[] = []
+      for (let i = 1; i <= 40; i++) lines.push(`info: line ${i}`)
+      lines.push('error TS2345: type mismatch at src/foo.ts:42')
+      lines.push('  expected string, got number')
+      for (let i = 41; i <= 60; i++) lines.push(`info: line ${i}`)
+      const raw = lines.join('\n')
+      const result = buildUiOutput(raw, { ...meta, exitCode: 1 }, 20)
+      // Should include the error lines, not just tail
+      assert.ok(result.includes('error TS2345') || result.includes('expected string'),
+        'error-aware output should include diagnostic lines')
+      assert.ok(result.includes('non-error lines skipped') || result.includes('lines skipped'),
+        'should indicate omitted non-error content')
+    })
+
+    it('error-aware: falls back to head+tail when no error markers found', () => {
+      const lines = Array.from({ length: 50 }, (_, i) => `info: line ${i}`)
+      const raw = lines.join('\n')
+      const result = buildUiOutput(raw, { ...meta, exitCode: 1 }, 20)
+      // Should still truncate (no error markers → fallback)
+      assert.ok(result.includes('no error markers detected') || result.includes('line 0'),
+        'should fall back to head+tail when no error patterns match')
+    })
   })
 })

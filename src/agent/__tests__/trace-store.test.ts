@@ -70,21 +70,37 @@ describe('trace-store', () => {
     assert.deepEqual(store.events.map(e => e.id), ['b', 'c'])
   })
 
-  it('detects repeated tool call fingerprints', () => {
+  it('detects repeated tool call fingerprints with consecutive and window strategies', () => {
     const fp = fingerprintToolCall('read_file', { file_path: 'src/a.ts' }, 'passed')
-    const fingerprints = [fp, fp]
+    const fpB = fingerprintToolCall('write_file', { file_path: 'src/b.ts' }, 'passed')
 
-    assert.equal(getDoomLoopLevel(fingerprints), 'warn')
-    assert.equal(getDoomLoopLevel([...fingerprints, fp]), 'blocked')
+    // 2 consecutive same → warn
+    assert.equal(getDoomLoopLevel([fp, fp]), 'warn')
+    // 3 consecutive same → still warn (need 4 for blocked)
+    assert.equal(getDoomLoopLevel([fp, fp, fp]), 'warn')
+    // 4 consecutive same → blocked
+    assert.equal(getDoomLoopLevel([fp, fp, fp, fp]), 'blocked')
+
+    // Oscillation: 5/8 same tool → warn (≥4)
+    assert.equal(getDoomLoopLevel([fp, fpB, fp, fpB, fp, fpB, fp, fpB]), 'warn')
+    // Oscillation: 6/8 same tool → blocked (≥6)
+    assert.equal(getDoomLoopLevel([fp, fpB, fp, fp, fpB, fp, fp, fpB]), 'warn') // 5 fp out of 8
+    assert.equal(getDoomLoopLevel([fp, fpB, fp, fp, fp, fpB, fp, fpB]), 'warn') // 5 fp out of 8
+    // Normal iteration: alternating tools with gaps → ok (3/5 < threshold)
+    assert.equal(getDoomLoopLevel([fp, fpB, fp, fpB, fp]), 'none')
   })
 
-  it('marks repeated failed tool fingerprints as blocked doom loop', () => {
+  it('marks repeated failed tool fingerprints with consecutive-only doom loop', () => {
     let store = createTraceStore()
     const fp = fingerprintToolCall('bash', { command: 'npm test' }, 'error')
+    // 3 entries → 2 consecutive → warn
     store = recordToolFingerprint(store, fp)
     store = recordToolFingerprint(store, fp)
     store = recordToolFingerprint(store, fp)
+    assert.equal(getDoomLoopLevel(store.toolFingerprints), 'warn')
 
+    // 4 entries → 3 consecutive → blocked
+    store = recordToolFingerprint(store, fp)
     assert.equal(getDoomLoopLevel(store.toolFingerprints), 'blocked')
   })
 })

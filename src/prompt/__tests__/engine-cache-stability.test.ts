@@ -431,7 +431,7 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     }
   })
 
-  it('cognitive projection updates invalidate same-user fresh cache without changing fingerprint', () => {
+  it('cognitive projection does NOT invalidate same-user fresh cache (cache-safe)', () => {
     const engine = createEngine()
     const messages: OaiMessage[] = [
       { role: 'user', content: 'implement feature X' },
@@ -443,10 +443,22 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     assert.doesNotMatch(before.messages[1]!.content as string, /task-contract/)
 
     engine.setCognitiveProjection('<task-contract status="executing"><objective>implement feature X</objective></task-contract>')
+    // Same user message → cached fresh block reused (prefix cache preserved)
     const after = engine.buildOaiRequest(messages)
     const context = after.messages[1]!.content as string
+    assert.doesNotMatch(context, /<task-contract status="executing">/)
 
-    assert.match(context, /<task-contract status="executing">/)
+    // Projection appears when a NEW user message arrives (different content triggers rebuild)
+    const messages2: OaiMessage[] = [
+      ...messages,
+      { role: 'user', content: 'now do Y' },
+    ]
+    const withNewUser = engine.buildOaiRequest(messages2)
+    // Fresh volatile is injected as user message right before the last user message
+    // Structure: [system, frozen-vol, user1, assistant, tool, fresh-vol, user2]
+    const freshIdx = withNewUser.messages.length - 2
+    const freshContext = withNewUser.messages[freshIdx]!.content as string
+    assert.match(freshContext, /<task-contract status="executing">/)
     assert.equal(engine.checkDrift(), null)
   })
 })
