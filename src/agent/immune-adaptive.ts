@@ -42,7 +42,7 @@ export class ImmuneAdaptiveLayer {
   }
 
   /** Record a successful repair strategy */
-  recordSuccess(pattern: string, response: string, turn: number): void {
+  recordSuccess(pattern: string, response: ImmuneResponse, turn: number): void {
     const id = this.patternId(pattern)
     const existing = this.memories.get(id)
 
@@ -83,8 +83,7 @@ export class ImmuneAdaptiveLayer {
 
   /** Generate a fast repair response from memory */
   fastRepair(memory: ImmuneMemory): ImmuneResponse {
-    // Default: deposit warning pheromone at the source
-    return { type: 'deposit_warning', targetFile: memory.pattern }
+    return memory.response
   }
 
   /** Periodic decay of unused memories */

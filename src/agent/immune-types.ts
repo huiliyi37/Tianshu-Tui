@@ -25,7 +25,7 @@ export interface DangerSignal {
 export interface ImmuneMemory {
   id: string
   pattern: string
-  response: string
+  response: ImmuneResponse
   affinityScore: number
   hitCount: number
   lastHit: number

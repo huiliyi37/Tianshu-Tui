@@ -65,25 +65,26 @@ describe('ApcAggregator', () => {
 describe('ImmuneAdaptiveLayer', () => {
   it('records and looks up memory', () => {
     const layer = new ImmuneAdaptiveLayer()
-    layer.recordSuccess('doom:grep:abc', 'switch to find_files', 10)
+    layer.recordSuccess('doom:grep:abc', { type: 'quarantine', targetFile: 'src/foo.ts' }, 10)
     const memory = layer.lookup('doom:grep:abc')
     assert.ok(memory)
-    assert.equal(memory.response, 'switch to find_files')
+    assert.equal(memory.response.type, 'quarantine')
+    assert.equal(memory.response.targetFile, 'src/foo.ts')
     assert.equal(memory.hitCount, 1)
   })
 
   it('increases affinity on repeated success', () => {
     const layer = new ImmuneAdaptiveLayer()
-    layer.recordSuccess('pattern1', 'fix1', 10)
+    layer.recordSuccess('pattern1', { type: 'quarantine' }, 10)
     const score1 = layer.lookup('pattern1')!.affinityScore
-    layer.recordSuccess('pattern1', 'fix1', 20)
+    layer.recordSuccess('pattern1', { type: 'quarantine' }, 20)
     const score2 = layer.lookup('pattern1')!.affinityScore
     assert.ok(score2 > score1)
   })
 
   it('decreases affinity on failure', () => {
     const layer = new ImmuneAdaptiveLayer()
-    layer.recordSuccess('pattern1', 'fix1', 10)
+    layer.recordSuccess('pattern1', { type: 'quarantine' }, 10)
     const score1 = layer.lookup('pattern1')!.affinityScore
     layer.recordFailure('pattern1')
     const score2 = layer.lookup('pattern1')!.affinityScore
@@ -93,13 +94,13 @@ describe('ImmuneAdaptiveLayer', () => {
   it('negative selection rejects patterns matching normal behavior', () => {
     const layer = new ImmuneAdaptiveLayer()
     layer.registerNormal('normal-fingerprint')
-    layer.recordSuccess('normal-fingerprint', 'should-not-store', 10)
+    layer.recordSuccess('normal-fingerprint', { type: 'deposit_warning' }, 10)
     assert.equal(layer.lookup('normal-fingerprint'), null)
   })
 
   it('decay removes old low-affinity memories', () => {
     const layer = new ImmuneAdaptiveLayer()
-    layer.recordSuccess('old-pattern', 'old-fix', 1)
+    layer.recordSuccess('old-pattern', { type: 'deposit_warning' }, 1)
     // Manually lower affinity
     const mem = layer.lookup('old-pattern')!
     mem.affinityScore = 0.1
@@ -110,8 +111,8 @@ describe('ImmuneAdaptiveLayer', () => {
 
   it('export and import round-trips', () => {
     const layer = new ImmuneAdaptiveLayer()
-    layer.recordSuccess('p1', 'r1', 10)
-    layer.recordSuccess('p2', 'r2', 20)
+    layer.recordSuccess('p1', { type: 'quarantine' }, 10)
+    layer.recordSuccess('p2', { type: 'boost_healthy' }, 20)
     const exported = layer.export()
     const layer2 = new ImmuneAdaptiveLayer()
     layer2.import(exported)

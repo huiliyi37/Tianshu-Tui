@@ -63,18 +63,18 @@ describe('ImmuneHook', () => {
 
   it('records and uses immune memory for fast secondary response', () => {
     const hook = createHook()
-    // Record a successful repair
-    hook.recordRepairSuccess('doom:grep:pattern', 'use find_files instead', 10)
+    // Record a successful repair (strategy string is wrapped into ImmuneResponse.type)
+    hook.recordRepairSuccess('doom:grep:pattern', 'quarantine', 10)
 
     // Build danger + doom
     hook.run({ toolName: 'grep', fingerprint: 'x', turn: 11, doomLevel: 'none', targetFile: 'a.ts', tokenUsage: 100 })
     hook.run({ toolName: 'grep', fingerprint: 'x', turn: 12, doomLevel: 'none', targetFile: 'a.ts', tokenUsage: 100 })
     hook.run({ toolName: 'grep', fingerprint: 'x', turn: 13, doomLevel: 'none', targetFile: 'a.ts', tokenUsage: 100 })
 
-    // Now lookup should find memory
+    // Now lookup should find memory with structured response
     const memory = hook.adaptive.lookup('doom:grep:pattern')
     assert.ok(memory)
-    assert.equal(memory.response, 'use find_files instead')
+    assert.equal(memory.response.type, 'quarantine')
   })
 
   it('feeds flow data to Physarum engine', () => {
