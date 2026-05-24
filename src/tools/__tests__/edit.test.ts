@@ -133,4 +133,36 @@ describe('edit_file tool', () => {
     // Should not pretend to find a "closest match" when nothing is close.
     assert.ok(result.content.includes('not found'))
   })
+
+  it('warns when replace_all count mismatches expected_count', async () => {
+    const filePath = join(TEST_DIR, 'mismatch.ts')
+    // "foo" appears once (lowercase). "Foo" (capitalized) does not match.
+    writeFileSync(filePath, 'foo\nFoo\n', 'utf-8')
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'foo',
+      new_string: 'bar',
+      replace_all: true,
+      expected_count: 2,
+    }))
+    assert.ok(!result.isError, 'should not be an error — file was modified')
+    assert.ok(result.content.includes('Warning'), `expected Warning, got: ${result.content}`)
+    assert.ok(result.content.includes('expected 2'), `expected mention of expected count, got: ${result.content}`)
+    assert.ok(result.content.includes('replaced 1'), `expected mention of actual count, got: ${result.content}`)
+  })
+
+  it('no warning when replace_all count matches expected_count', async () => {
+    const filePath = join(TEST_DIR, 'match.ts')
+    writeFileSync(filePath, 'foo\nfoo\nfoo\n', 'utf-8')
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'foo',
+      new_string: 'bar',
+      replace_all: true,
+      expected_count: 3,
+    }))
+    assert.ok(!result.isError)
+    assert.ok(!result.content.includes('Warning'), `unexpected Warning: ${result.content}`)
+    assert.ok(result.content.includes('Replaced all 3'), `expected success, got: ${result.content}`)
+  })
 })

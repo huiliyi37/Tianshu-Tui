@@ -25,6 +25,10 @@ Bad: using a too-short old_string that matches multiple locations`,
         old_string: { type: 'string', description: 'The exact text to replace (must be unique in the file)' },
         new_string: { type: 'string', description: 'The replacement text' },
         replace_all: { type: 'boolean', description: 'Replace all occurrences of old_string (default: false)' },
+        expected_count: {
+          type: 'number',
+          description: 'Expected number of replacements when replace_all is true. If actual count differs, a warning is returned so you can grep to verify no instances were missed (e.g. due to indentation differences).'
+        },
       },
       required: ['file_path', 'old_string', 'new_string'],
     },
@@ -56,6 +60,10 @@ Bad: using a too-short old_string that matches multiple locations`,
       const newContent = content.replaceAll(oldString, newString)
       writeFileSync(filePath, newContent, 'utf-8')
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
+      const expectedCount = params.input.expected_count as number | undefined
+      if (expectedCount !== undefined && occurrences !== expectedCount) {
+        return { content: `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.` }
+      }
       return { content: `Replaced all ${occurrences} occurrences in ${filePath}` }
     }
 
