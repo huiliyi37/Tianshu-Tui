@@ -210,28 +210,27 @@ export class PromptEngine {
       for (let i = 0; i < result.length; i++) result[i] = stalenessPruned[i]!
     }
 
-    // Observation masking: replace tool result content older than 10 user turns
-    // with compact placeholder. Phase 2.2: On 1M+ context windows, skip masking
-    // entirely — the window has enough headroom and masking's sliding cutoff
-    // causes ~0.5% prefix cache miss from byte-level instability.
-    const MASK_WINDOW = 10
-    if (!contextWindow || contextWindow < 1_000_000) {
-      let userCount = 0
-      const userTurnIndices: number[] = []
-      for (let i = result.length - 1; i >= 0; i--) {
-        if (result[i]!.role === 'user') {
-          userCount++
-          userTurnIndices.push(i)
-        }
+    // Observation masking: replace tool result content older than N user turns
+    // with compact placeholder. On 1M+ context windows, use a much larger mask
+    // window (80 turns instead of 10). Below the threshold: skip mask to
+    // preserve exact prefix cache. Above threshold: apply mask to reclaim
+    // space on very long sessions, accepting ~0.5% cache hit loss.
+    const MASK_WINDOW = (!contextWindow || contextWindow < 1_000_000) ? 10 : 80
+    let userCount = 0
+    const userTurnIndices: number[] = []
+    for (let i = result.length - 1; i >= 0; i--) {
+      if (result[i]!.role === 'user') {
+        userCount++
+        userTurnIndices.push(i)
       }
-      if (userCount > MASK_WINDOW) {
-        const cutoff = userTurnIndices[MASK_WINDOW - 1]!
-        for (let i = 0; i < cutoff; i++) {
-          const msg = result[i]!
-          if (msg.role === 'tool' && msg.content.length > 200) {
-            const preview = msg.content.slice(0, 100)
-            result[i] = { ...msg, content: `[observation masked, ${msg.content.length} chars]\n${preview}…` }
-          }
+    }
+    if (userCount > MASK_WINDOW) {
+      const cutoff = userTurnIndices[MASK_WINDOW - 1]!
+      for (let i = 0; i < cutoff; i++) {
+        const msg = result[i]!
+        if (msg.role === 'tool' && msg.content.length > 200) {
+          const preview = msg.content.slice(0, 100)
+          result[i] = { ...msg, content: `[observation masked, ${msg.content.length} chars]\n${preview}…` }
         }
       }
     }
