@@ -5,6 +5,7 @@ import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { summarizeBashOutput } from '../artifact/summarize.js'
+import { pruneThresholds } from '../compact/constants.js'
 
 function rtkRewrite(command: string): string {
   try {
@@ -79,6 +80,29 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         // Skip persistRawOutput in artifact mode — ArtifactStore owns raw persistence,
         // so we don't double-write to output-store/.
         if (params.artifactStore) {
+          // Skip artifact wrapping for output small enough that prune won't touch it.
+          // Critical for bash: a `cat file.ts` or `sed -n '1,200p'` returns a few KB,
+          // and wrapping that in [artifact:X] makes the model think the output was
+          // truncated even though it has the whole thing in modelOutput. Tianshu's
+          // post-mortem: every bash result became "[artifact:X] ... use read_section"
+          // → the model started writing /tmp files just to escape the artifact loop.
+          const { minChars: artifactThreshold } = pruneThresholds(params.contextWindow ?? 0)
+          const wrapInArtifact = raw.length >= artifactThreshold
+
+          if (!wrapInArtifact) {
+            // eslint-disable-next-line no-console
+            console.warn(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
+            const rawPath = await persistRawOutput(params.toolUseId, raw)
+            return {
+              content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
+              uiContent: buildUiOutput(raw, meta),
+              rawPath,
+              isError: exitCode !== 0,
+            }
+          }
+
+          // eslint-disable-next-line no-console
+          console.warn(`[artifact-wrap] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
           const { summary, sections } = summarizeBashOutput(raw, rawCommand, exitCode)
           const artifactId = await params.artifactStore.save({
             tool: 'bash',
@@ -88,8 +112,12 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
             sections,
           })
           const artifact = params.artifactStore.get(artifactId)
+          // Even when wrapping, prepend the model-formatted output so the model
+          // sees the head/tail directly — the [artifact:X] marker is a back-up
+          // recovery path, not the only way to access content.
+          const modelOutput = buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
           return {
-            content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to load details.`,
+            content: `${modelOutput}\n[artifact:${artifactId}] use read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.`,
             uiContent: buildUiOutput(raw, meta),
             rawPath: artifact?.rawPath,
             isError: exitCode !== 0,

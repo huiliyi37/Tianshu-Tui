@@ -6,6 +6,7 @@ import { GitignoreFilter } from './gitignore.js'
 import { persistRawOutput } from './output-store.js'
 import { summarizeFileContent } from '../artifact/summarize.js'
 import { computeModelReadCap, DEFAULT_MODEL_READ_CAP, type ModelReadCap } from './model-read-cap.js'
+import { pruneThresholds } from '../compact/constants.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
@@ -252,6 +253,30 @@ Bad:  re-reading the same file you already read this session  → look at your p
     }
 
     if (params.artifactStore) {
+      // Skip artifact wrapping for content small enough that prune won't touch it.
+      // Why: every [artifact:X] reference is a "your content might be hidden"
+      // signal that the model treats as truncation. If the raw content is below
+      // pruneThresholds.minChars, prune will never replace it with a placeholder,
+      // so the artifact backup serves no purpose — and its presence makes the
+      // model second-guess what it can see. Tianshu's post-mortem showed this
+      // exact pattern: any [artifact:X] marker triggered "let me try a different
+      // approach" workarounds even when the content was right there.
+      const { minChars: artifactThreshold } = pruneThresholds(params.contextWindow ?? 0)
+      const wrapInArtifact = payload.rawContent.length >= artifactThreshold
+
+      if (!wrapInArtifact) {
+        // eslint-disable-next-line no-console
+        console.warn(`[artifact-skip] tool=read_file file=${payload.canonicalPath} raw=${payload.rawContent.length} threshold=${artifactThreshold}`)
+        recordDedup()
+        return {
+          content: payload.modelContent,
+          uiContent: payload.uiContent,
+          rawPath,
+        }
+      }
+
+      // eslint-disable-next-line no-console
+      console.warn(`[artifact-wrap] tool=read_file file=${payload.canonicalPath} raw=${payload.rawContent.length} threshold=${artifactThreshold}`)
       const { summary, sections } = summarizeFileContent(payload.rawContent, payload.canonicalPath)
       const artifactId = await params.artifactStore.save({
         tool: 'read_file',
