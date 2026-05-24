@@ -924,6 +924,12 @@ export class AgentLoop {
     this.bindSessionDomain(userInput)
     this.contextInjection.recordUserInputClaims(userInput)
     this.contextInjection.refreshPlaybookLessons(userInput)
+
+    // Phase 2.3: Proactive session split at 86% context — MUST run BEFORE
+    // addUserMessage, otherwise the split replaces the just-added user message
+    // and the model never sees the new user input.
+    this.compaction.trySessionSplit()
+
     this.session.addUserMessage(userInput)
     const isChatMode = this.config.promptEngine.getMode() === 'chat'
     this.taskContract = isChatMode ? undefined : extractTaskContract(userInput, this.session.getTurnCount())
