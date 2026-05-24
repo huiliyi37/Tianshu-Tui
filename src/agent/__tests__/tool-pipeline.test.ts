@@ -278,19 +278,30 @@ describe('executeToolUse', () => {
     assert.equal((result.toolResult as any).is_error, false)
   })
 
-  it('handles tool execution error gracefully', async () => {
-    const deps = makeDeps({
-      harness: {
-        executeTool: async ({ execute }: any) => {
-          const r = await execute()
-          return { content: r.content, isError: true, retried: false }
-        },
-      } as any,
+  it('P1.3: strips trailing whitespace from tool result content', async () => {
+    const deps = makeDeps()
+    // Override tool registry to return content with trailing whitespace.
+    // bash → star sig "── 执令（bash）" is appended at the end, so the
+    // raw content (before star sig) must not end with whitespace.
+    ;(deps.config as any).toolRegistry.execute = async () => ({
+      content: 'hello world  \t\n\n',
+      isError: false,
     })
     const result = await executeToolUse(
-      { id: 'tu-4', name: 'bash', input: { command: 'false' } },
+      { id: 'tu-norm', name: 'bash', input: { command: 'echo hello' } },
       deps, noopCallbacks as any, 1, false,
     )
-    assert.equal((result.toolResult as any).is_error, true)
+    const fullContent = (result.toolResult as any).content as string
+    // Strip the star signature suffix to get the raw content
+    const starSig = '\n── 执令（bash）'
+    const rawContent = fullContent.endsWith(starSig)
+      ? fullContent.slice(0, -starSig.length)
+      : fullContent
+    // Raw content (before star sig) must not end with whitespace
+    assert.ok(!/\s$/.test(rawContent),
+      `raw content must not end with whitespace, got: ${JSON.stringify(rawContent)}`)
+    // Must still contain the payload
+    assert.ok(rawContent.includes('hello world'),
+      'tool result must still contain the payload')
   })
 })

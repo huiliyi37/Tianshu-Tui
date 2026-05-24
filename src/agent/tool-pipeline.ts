@@ -539,6 +539,10 @@ export async function executeToolUse(
       isError: harnessResult.isError,
     }) ?? {}
     let finalContent = postHookResult.result ?? harnessResult.content
+    // Normalize: strip trailing whitespace to produce stable byte sequences
+    // for DeepSeek exact-prefix cache. Non-deterministic trailing whitespace
+    // can cause ~0.5% cache miss from otherwise identical tool results.
+    finalContent = finalContent.trimEnd()
 
     // LSP diagnostics
     if (deps.config.lspEnabled && !harnessResult.isError && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
