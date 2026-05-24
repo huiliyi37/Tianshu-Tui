@@ -48,7 +48,10 @@ Bad: using a too-short old_string that matches multiple locations`,
 
     if (replaceAll) {
       if (!content.includes(oldString)) {
-        return { content: `Error: old_string not found in file: ${filePath}`, isError: true }
+        return {
+          content: buildNotFoundError(filePath, oldString, content),
+          isError: true,
+        }
       }
       const newContent = content.replaceAll(oldString, newString)
       writeFileSync(filePath, newContent, 'utf-8')
@@ -58,12 +61,15 @@ Bad: using a too-short old_string that matches multiple locations`,
 
     const firstIndex = content.indexOf(oldString)
     if (firstIndex === -1) {
-      return { content: `Error: old_string not found in file: ${filePath}`, isError: true }
+      return {
+        content: buildNotFoundError(filePath, oldString, content),
+        isError: true,
+      }
     }
     const secondIndex = content.indexOf(oldString, firstIndex + 1)
     if (secondIndex !== -1) {
       return {
-        content: `Error: old_string matches multiple locations in ${filePath}. Use replace_all=true or include more surrounding context to make old_string unique.`,
+        content: buildMultipleMatchError(filePath, oldString, content),
         isError: true,
       }
     }
@@ -80,4 +86,123 @@ Bad: using a too-short old_string that matches multiple locations`,
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * When old_string is not found, locate the closest substring in the file
+ * and emit a unified-style diff so the model can see what its old_string
+ * "looked like" in reality. Common failure modes this catches:
+ *   - whitespace mismatch (tabs vs spaces, trailing spaces, CRLF vs LF)
+ *   - off-by-one characters from manual transcription
+ *   - line that "looks" the same but has subtle Unicode differences
+ */
+function buildNotFoundError(filePath: string, oldString: string, fileContent: string): string {
+  const oldLines = oldString.split('\n')
+  const firstLine = oldLines[0] ?? ''
+  const lastLine = oldLines[oldLines.length - 1] ?? ''
+
+  // Strategy: find the file line whose trimmed content most closely matches
+  // the trimmed first line of old_string. Then extract a window of size
+  // matching old_string's line count. This handles indentation drift well.
+  const fileLines = fileContent.split('\n')
+  const trimmedFirst = firstLine.trim()
+  const trimmedLast = lastLine.trim()
+
+  let bestIdx = -1
+  let bestScore = 0
+  for (let i = 0; i < fileLines.length; i++) {
+    const trimmed = fileLines[i]!.trim()
+    if (trimmed.length === 0) continue
+    const score = sharedPrefixLength(trimmed, trimmedFirst)
+    if (score > bestScore) {
+      bestScore = score
+      bestIdx = i
+    }
+  }
+
+  // Require a meaningful match: at least 8 chars or 30% of the first line.
+  const minScore = Math.max(8, Math.floor(trimmedFirst.length * 0.3))
+  if (bestIdx === -1 || bestScore < minScore) {
+    return `Error: old_string not found in ${filePath}. The file does not contain anything closely resembling the first line of old_string. Re-read the file to see its current contents.`
+  }
+
+  // Extract a window of the same line count as old_string from the file.
+  const windowSize = oldLines.length
+  const start = bestIdx
+  const end = Math.min(fileLines.length, start + windowSize)
+  const actualWindow = fileLines.slice(start, end).join('\n')
+
+  // If the trimmed last line also matches better with a longer window, expand.
+  // (Rare, but helps when the model's old_string skipped middle lines.)
+  if (trimmedLast.length > 0 && windowSize > 1) {
+    for (let extend = end; extend < Math.min(fileLines.length, start + windowSize + 5); extend++) {
+      if (fileLines[extend]!.trim() === trimmedLast) {
+        const expanded = fileLines.slice(start, extend + 1).join('\n')
+        return formatDiffError(filePath, oldString, expanded, start + 1)
+      }
+    }
+  }
+
+  return formatDiffError(filePath, oldString, actualWindow, start + 1)
+}
+
+/**
+ * When old_string matches multiple locations, show the line number and
+ * surrounding context for each match so the model can pick the right one
+ * and add disambiguating context.
+ */
+function buildMultipleMatchError(filePath: string, oldString: string, fileContent: string): string {
+  const matches: Array<{ lineNumber: number; context: string }> = []
+  let searchFrom = 0
+  while (matches.length < 5) {
+    const idx = fileContent.indexOf(oldString, searchFrom)
+    if (idx === -1) break
+    const lineNumber = fileContent.slice(0, idx).split('\n').length
+    // Show the line containing the match plus 1 line above and below.
+    const lines = fileContent.split('\n')
+    const ctxStart = Math.max(0, lineNumber - 2)
+    const ctxEnd = Math.min(lines.length, lineNumber + 1)
+    const context = lines.slice(ctxStart, ctxEnd)
+      .map((l, i) => `${ctxStart + i + 1}: ${l}`)
+      .join('\n')
+    matches.push({ lineNumber, context })
+    searchFrom = idx + oldString.length
+  }
+
+  const matchSummary = matches
+    .map((m, i) => `Match ${i + 1} at line ${m.lineNumber}:\n${m.context}`)
+    .join('\n\n')
+
+  return `Error: old_string matches multiple locations in ${filePath}. Use replace_all=true to replace every occurrence, or extend old_string with surrounding context to make it unique.\n\nMatches found:\n\n${matchSummary}`
+}
+
+function formatDiffError(filePath: string, oldString: string, actualWindow: string, startLine: number): string {
+  const oldLines = oldString.split('\n')
+  const actualLines = actualWindow.split('\n')
+
+  const diffLines: string[] = []
+  diffLines.push(`--- expected (your old_string)`)
+  diffLines.push(`+++ actual (file at line ${startLine})`)
+
+  const maxLen = Math.max(oldLines.length, actualLines.length)
+  for (let i = 0; i < maxLen; i++) {
+    const exp = oldLines[i]
+    const act = actualLines[i]
+    if (exp === act) {
+      diffLines.push(`  ${exp ?? ''}`)
+    } else {
+      if (exp !== undefined) diffLines.push(`- ${exp}`)
+      if (act !== undefined) diffLines.push(`+ ${act}`)
+    }
+  }
+
+  return `Error: old_string not found in ${filePath}. Closest match found at line ${startLine}:\n\n${diffLines.join('\n')}\n\nFix old_string to match the actual file content (check whitespace, indentation, and line endings) and retry.`
+}
+
+/** Length of common prefix between two strings. Used as a cheap similarity score. */
+function sharedPrefixLength(a: string, b: string): number {
+  const limit = Math.min(a.length, b.length)
+  let i = 0
+  while (i < limit && a[i] === b[i]) i++
+  return i
 }
