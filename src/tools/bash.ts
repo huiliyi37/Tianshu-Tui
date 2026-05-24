@@ -117,7 +117,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           // recovery path, not the only way to access content.
           const modelOutput = buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
           return {
-            content: `${modelOutput}\n[artifact:${artifactId}] use read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.`,
+            content: `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`,
             uiContent: buildUiOutput(raw, meta),
             rawPath: artifact?.rawPath,
             isError: exitCode !== 0,

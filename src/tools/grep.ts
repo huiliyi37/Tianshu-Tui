@@ -104,7 +104,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
         // model sees real hits up front, artifact is only the recovery path.
         const truncated = truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars)
         return {
-          content: `${truncated}\n[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L500") for the full match list.`,
+          content: `${truncated}\n\n${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L500") for the full match list.\n[artifact:${artifactId}]`,
         }
       }
 
@@ -227,7 +227,7 @@ async function tryRipgrep(
         }).then(artifactId => {
           const truncated = truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars)
           resolve({
-            content: `${truncated}\n[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L500") for the full match list.`,
+            content: `${truncated}\n\n${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L500") for the full match list.\n[artifact:${artifactId}]`,
           })
         }).catch(() => {
           // Fallback to truncation if artifact save fails
