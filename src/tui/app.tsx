@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo, type RefObject } from 'react'
 import { Box, Text, useInput, Static } from 'ink'
-import gradient from 'gradient-string'
+import { WelcomeScreen } from './onboarding.js'
 import { StatusBar } from './status-bar.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
 import { StarmapView } from './starmap-view.js'
@@ -94,28 +94,8 @@ const TOOL_FLUSH_MS = 120
 const ACTIVE_THRESHOLD = 20
 const LIVE_STREAM_MAX_CHARS = 50_000
 
-// --- Static entry renderer ---
-
-function renderStaticEntry(entry: LogEntry, verbose: boolean) {
-  switch (entry.type) {
-    case 'user_message':
-      return <UserMessage key={entry.id} content={entry.content} />
-    case 'assistant_message':
-      return <AssistantMessage key={entry.id} content={entry.content} thinking={entry.thinking} />
-    case 'tool':
-      return <ToolCard key={entry.id} name={entry.toolName ?? ''} result={entry.content} isError={entry.isError} verbose={verbose} rawPath={entry.rawPath} />
-    case 'tool_group':
-      return <ToolGroup key={entry.id} tools={entry.children ?? []} verbose={verbose} />
-    case 'checkpoint':
-      return <Box key={entry.id} paddingX={2}><Text dimColor color="yellow">⚑ {entry.content}</Text></Box>
-    case 'evidence':
-      return <Box key={entry.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{entry.content}</Text></Box>
-    case 'system':
-      return <SystemMessage key={entry.id} content={entry.content} isError={entry.isError} />
-    default:
-      return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
-  }
-}
+// --- Static entry renderer (imported from render-entry.tsx) ---
+import { renderStaticEntry } from './render-entry.js'
 
 // --- Cockpit panel view ---
 
@@ -359,9 +339,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, [currentSessionId])
 
   useEffect(() => {
-    const t = getTheme()
-    const banner = gradient([t.primary, t.secondary])('◆ R I V E T')
-    pushStatic(createLogEntry({ type: 'system', content: banner }))
+    // Welcome screen is rendered inline, no banner needed
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1155,6 +1133,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   return (
     <>
+      {frozenItems.length === 0 && activeItems.length === 0 && !isStreaming && (
+        <WelcomeScreen model={model} cwd={process.cwd()} />
+      )}
       <Static items={frozenItems}>
         {(item) => renderStaticEntry(item, verbose)}
       </Static>
@@ -1210,7 +1191,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             <Text dimColor color="yellow">⚠ {fluencyStale}</Text>
           </Box>
         )}
-        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking} completedDurationMs={completedThinkingDurationMs} />
+        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         <AgentStatus
           isStreaming={isStreaming}
           startMs={streamStartRef.current || Date.now()}

@@ -117,8 +117,12 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
     if (!isStreaming) {
       startRef.current = 0
       setStale(false)
+      setExpanded(false)
     }
-  }, [isStreaming, thinking])
+    if (!focused && expanded) {
+      setExpanded(false)
+    }
+  }, [isStreaming, thinking, focused])
 
   // Track if thinking content stops arriving while streaming is active
   useEffect(() => {
@@ -155,6 +159,11 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
 
   const spinner = isStreaming ? (elapsed % 2000 < 1000 ? '⠋' : '⠙') : ''
   const statusLabel = thinkingStatusLabel({ isStreaming, elapsedMs: elapsed, completedDurationMs, stale })
+  const MAX_VISIBLE_LINES = 8
+  const thinkingLines = truncateThinking(thinking).split('\n')
+  const visibleThinking = thinkingLines.length > MAX_VISIBLE_LINES
+    ? [...thinkingLines.slice(-MAX_VISIBLE_LINES), `... ${thinkingLines.length - MAX_VISIBLE_LINES} earlier lines`].join('\n')
+    : thinkingLines.join('\n')
 
   return (
     <Box flexDirection="column" paddingX={2}>
@@ -165,7 +174,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
       </Text>
       {expanded && (
         <Box paddingLeft={2} borderStyle="single" borderColor="gray">
-          <Text dimColor>{truncateThinking(thinking)}</Text>
+          <Text dimColor>{visibleThinking}</Text>
         </Box>
       )}
     </Box>

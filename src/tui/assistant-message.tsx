@@ -15,7 +15,7 @@ export const AssistantMessage = memo(function AssistantMessage({ content, thinki
   if (!content && thinking) {
     const lines = thinking.split('\n')
     return (
-      <Box flexDirection="column" paddingX={1}>
+      <Box flexDirection="column" paddingX={1} marginBottom={1}>
         <Box flexDirection="row">
           <Text color={theme.assistantColor} bold>{'●'} </Text>
           <Text color={theme.assistantColor} italic>(thinking only)</Text>
@@ -37,7 +37,7 @@ export const AssistantMessage = memo(function AssistantMessage({ content, thinki
   const lines = content.split('\n')
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="column" paddingX={1} marginBottom={1}>
       <Box flexDirection="row">
         <Text color={theme.assistantColor} bold>{'●'} </Text>
         <Text>{lines[0]}</Text>
