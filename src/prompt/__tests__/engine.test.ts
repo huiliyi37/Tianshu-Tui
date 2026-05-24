@@ -299,4 +299,61 @@ describe('PromptEngine active claims projection', () => {
     assert.ok(!(engine as any).frozenBase.includes('star-data'),
       'Frozen base should NOT contain habituated content')
   })
+
+  // Phase 2.2: On 1M+ context windows, skip observation masking.
+  // The mask's sliding cutoff (MASK_WINDOW=10 counting from the latest turn)
+  // causes byte-level instability in the OAI request — previously masked
+  // tool results shift into and out of the mask window as turns accumulate.
+  // With 1M context, there's enough headroom to keep all results.
+  it('P2.2: skips observation mask on 1M+ context window', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 8000,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/tmp' },
+    })
+
+    // Build 12 turns (exceeds MASK_WINDOW=10) — without contextWindow,
+    // old tool results should be masked.
+    const messages: OaiMessage[] = []
+    for (let i = 0; i < 12; i++) {
+      messages.push({ role: 'user', content: `question ${i}` })
+      messages.push({ role: 'assistant', content: `answer ${i}` })
+      messages.push({
+        role: 'tool' as const,
+        tool_call_id: `call_${i}`,
+        content: 'x'.repeat(3000), // > 200 chars, triggers mask
+      })
+    }
+
+    // Without contextWindow: old tool results should be masked
+    const reqWithoutCW = engine.buildOaiRequest(messages)
+    const toolMsgsWithoutCW = reqWithoutCW.messages.filter(
+      (m: any) => m.role === 'tool'
+    )
+    const maskedCountWithoutCW = toolMsgsWithoutCW.filter(
+      (m: any) => m.content.startsWith('[observation masked')
+    ).length
+    assert.ok(maskedCountWithoutCW > 0,
+      'old tool results should be masked without contextWindow')
+
+    // With contextWindow >= 1M: no masking
+    const reqWith1M = engine.buildOaiRequest(messages, undefined, 1_000_000)
+    const toolMsgsWith1M = reqWith1M.messages.filter(
+      (m: any) => m.role === 'tool'
+    )
+    const maskedCountWith1M = toolMsgsWith1M.filter(
+      (m: any) => m.content.startsWith('[observation masked')
+    ).length
+    assert.equal(maskedCountWith1M, 0,
+      'no tool results should be masked on 1M+ context window')
+
+    // Byte stability: calling twice with same args should produce identical messages
+    const req2 = engine.buildOaiRequest(messages, undefined, 1_000_000)
+    assert.deepStrictEqual(
+      req2.messages.map(m => m.content),
+      reqWith1M.messages.map(m => m.content),
+      'repeated calls should produce identical content for cache stability'
+    )
+  })
 })
