@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { SessionContext } from '../context.js'
 import type { OaiMessage } from '../../api/oai-types.js'
+import { isToolMessage } from '../../api/oai-types.js'
 
 describe('SessionContext bounded collections', () => {
   it('evicts oldest filesRead when cap exceeded', () => {
@@ -265,9 +266,13 @@ describe('SessionContext mutation listener', () => {
       { type: 'tool_result', tool_use_id: 'call_2', content: 'b-content' },
     ])
     assert.equal(seen.length, 2)
-    assert.equal(seen[0]!.tool_call_id, 'call_1')
-    assert.equal(seen[1]!.tool_call_id, 'call_2')
-    assert.equal(seen[0]!.content, 'a-content')
+    const first = seen[0]!
+    const second = seen[1]!
+    assert.ok(isToolMessage(first), 'first should be tool message')
+    assert.ok(isToolMessage(second), 'second should be tool message')
+    assert.equal(first.tool_call_id, 'call_1')
+    assert.equal(second.tool_call_id, 'call_2')
+    assert.equal(first.content, 'a-content')
   })
 
   it('emits replace on replaceMessages', () => {
@@ -300,9 +305,14 @@ describe('SessionContext mutation listener', () => {
     // After replace, push something else; the captured array must not grow.
     ctx.addAssistantBlocks([{ type: 'text', text: 'next' }])
 
-    assert.ok(captured)
-    assert.equal(captured!.length, 1)
-    assert.equal(captured![0]!.content, 'compacted')
+    if (!captured) {
+      assert.fail('replace event should have fired')
+    }
+    const cap: OaiMessage[] = captured
+    assert.equal(cap.length, 1)
+    const first = cap[0]!
+    assert.equal(first.role, 'user')
+    assert.equal(first.content, 'compacted')
   })
 
   it('does not invoke listener before subscription', () => {

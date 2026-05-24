@@ -5,6 +5,7 @@ import { validatePath } from './path-validate.js'
 import { GitignoreFilter } from './gitignore.js'
 import { persistRawOutput } from './output-store.js'
 import { summarizeFileContent } from '../artifact/summarize.js'
+import { computeModelReadCap, DEFAULT_MODEL_READ_CAP, type ModelReadCap } from './model-read-cap.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
@@ -34,9 +35,6 @@ function getGitignoreFilter(cwd: string): GitignoreFilter {
   return filter
 }
 
-const MODEL_MAX_CHARS = 8000
-const MODEL_HEAD_CHARS = 4000
-const MODEL_TAIL_CHARS = 2000
 const MAX_TOOL_INPUT_BYTES = 100 * 1024
 
 /** TUI display: head + tail with line numbers, compact for large files. */
@@ -64,6 +62,8 @@ export interface ReadFilePayloadOptions {
   filePath: string
   offset?: number
   limit?: number
+  /** Per-call model read cap. Defaults to {@link DEFAULT_MODEL_READ_CAP}. */
+  modelCap?: ModelReadCap
 }
 
 export interface ReadFilePayload {
@@ -105,10 +105,11 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
     content = lines.slice(startIdx, endIdx).join('\n')
   }
 
+  const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
   return {
     canonicalPath: filePath,
     rawContent: content,
-    modelContent: truncateContent(content, MODEL_MAX_CHARS, MODEL_HEAD_CHARS, MODEL_TAIL_CHARS),
+    modelContent: truncateContent(content, cap.maxChars, cap.headChars, cap.tailChars),
     uiContent: buildFileUiOutput(content, 50),
   }
 }
@@ -121,7 +122,7 @@ export const READ_FILE_TOOL: Tool = {
 ### Usage
 - Always provide absolute file paths
 - Use offset and limit to read specific ranges instead of reading entire large files
-- Results are truncated at 8000 characters — use offset/limit for large files
+- Long files are truncated head+tail; the cap scales with the active context window — use offset/limit to read specific sections of large files
 - This tool can read text files, images (PNG/JPG), and PDF files
 - Do NOT re-read files already read in this session unless they were modified
 
@@ -148,6 +149,10 @@ Bad: re-reading the same file multiple times in one session without it being mod
         filePath: params.input.file_path as string,
         offset: (params.input.offset as number) ?? 1,
         limit: params.input.limit as number | undefined,
+        modelCap: computeModelReadCap({
+          contextWindow: params.contextWindow,
+          providerProfile: params.providerProfile,
+        }),
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

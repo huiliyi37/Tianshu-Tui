@@ -9,6 +9,7 @@ import { GitignoreFilter } from './gitignore.js'
 import { validatePathSafe } from './path-validate.js'
 import { summarizeGrepResult } from '../artifact/summarize.js'
 import type { ArtifactStore } from '../artifact/store.js'
+import { computeModelReadCap, type ModelReadCap } from './model-read-cap.js'
 
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
@@ -47,6 +48,10 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const glob = params.input.glob as string | undefined
     const maxResults = (params.input.max_results as number) ?? MAX_RESULTS_DEFAULT
     const literal = (params.input.literal as boolean) ?? false
+    const modelCap = computeModelReadCap({
+      contextWindow: params.contextWindow,
+      providerProfile: params.providerProfile,
+    })
 
     const validated = validatePathSafe(params.cwd, searchPath)
     if (!validated.ok) {
@@ -55,7 +60,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const absPath = validated.path
 
     // Try ripgrep first, fall back to native search
-    const rgResult = await tryRipgrep(pattern, absPath, glob, maxResults, params.cwd, literal, params.artifactStore)
+    const rgResult = await tryRipgrep(pattern, absPath, glob, maxResults, params.cwd, literal, modelCap, params.artifactStore)
     if (rgResult !== null) return rgResult
 
     // Native fallback
@@ -88,7 +93,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
         }
       }
 
-      return { content: truncateContent(text, 8000, 4000, 2000) }
+      return { content: truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       return { content: `Error: ${message}`, isError: true }
@@ -116,6 +121,7 @@ async function tryRipgrep(
   maxResults: number,
   cwd: string,
   literal: boolean,
+  modelCap: ModelReadCap,
   artifactStore?: ArtifactStore,
 ): Promise<ToolResult | null> {
   return new Promise((resolve) => {
@@ -199,12 +205,12 @@ async function tryRipgrep(
           })
         }).catch(() => {
           // Fallback to truncation if artifact save fails
-          resolve({ content: truncateContent(text, 8000, 4000, 2000) })
+          resolve({ content: truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
         })
         return
       }
 
-      resolve({ content: truncateContent(text, 8000, 4000, 2000) })
+      resolve({ content: truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
     })
   })
 }

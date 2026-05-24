@@ -306,6 +306,8 @@ export async function executeToolUse(
     },
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     artifactStore: deps.artifactStore,
+    contextWindow: deps.config.contextWindow,
+    providerProfile: deps.config.providerProfile,
   }
 
   // Star signature: counter training-mode regression at token level (思路 E)

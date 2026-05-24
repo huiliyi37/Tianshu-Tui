@@ -125,4 +125,55 @@ describe('GREP_TOOL', () => {
     assert.equal(GREP_TOOL.requiresApproval(makeParams({ pattern: 'test' })), false)
     assert.equal(GREP_TOOL.isConcurrencySafe(), true)
   })
+
+  it('truncates large output to ~8000 chars by default', async () => {
+    // Generate enough matches to exceed the default 8000-char model cap.
+    const bigDir = mkdtempSync(join(tmpdir(), 'grep-bigout-'))
+    try {
+      mkdirSync(join(bigDir, 'src'), { recursive: true })
+      // 500 lines × ~50 chars/line ≈ 25 000 chars — well above the 8 000 default.
+      const lines = Array.from({ length: 500 }, (_, i) => `MATCH_TOKEN line ${i} payload-payload-payload`)
+      writeFileSync(join(bigDir, 'src', 'big.ts'), lines.join('\n'))
+
+      const result = await GREP_TOOL.execute({
+        input: { pattern: 'MATCH_TOKEN', path: 'src', max_results: 1000, literal: true },
+        toolUseId: 'test',
+        cwd: bigDir,
+      })
+      assert.equal(result.isError, undefined)
+      // Default cap = 8000 chars; allow a bit for the truncation marker.
+      assert.ok(result.content.length <= 8200,
+        `default cap should keep output ≤ ~8000 chars, got ${result.content.length}`)
+    } finally {
+      rmSync(bigDir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns more content when a larger contextWindow is plumbed through', async () => {
+    const bigDir = mkdtempSync(join(tmpdir(), 'grep-bigwindow-'))
+    try {
+      mkdirSync(join(bigDir, 'src'), { recursive: true })
+      const lines = Array.from({ length: 500 }, (_, i) => `MATCH_TOKEN line ${i} payload-payload-payload`)
+      writeFileSync(join(bigDir, 'src', 'big.ts'), lines.join('\n'))
+
+      const baseline = await GREP_TOOL.execute({
+        input: { pattern: 'MATCH_TOKEN', path: 'src', max_results: 1000, literal: true },
+        toolUseId: 'test',
+        cwd: bigDir,
+      })
+
+      // 200k window, balanced strategy → ~40 000 chars cap, well above raw size.
+      const wide = await GREP_TOOL.execute({
+        input: { pattern: 'MATCH_TOKEN', path: 'src', max_results: 1000, literal: true },
+        toolUseId: 'test',
+        cwd: bigDir,
+        contextWindow: 200_000,
+      })
+
+      assert.ok(wide.content.length > baseline.content.length * 2,
+        `wider window should give materially more content: baseline=${baseline.content.length}, wide=${wide.content.length}`)
+    } finally {
+      rmSync(bigDir, { recursive: true, force: true })
+    }
+  })
 })

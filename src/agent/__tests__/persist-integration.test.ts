@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { SessionContext } from '../context.js'
 import { SessionPersist } from '../session-persist.js'
 import type { OaiMessage } from '../../api/oai-types.js'
+import { isToolMessage } from '../../api/oai-types.js'
 
 /** Reproduces the AgentLoop constructor wiring in a self-contained helper. */
 function wirePersistence(session: SessionContext, persist: SessionPersist): { drain: () => Promise<void> } {
@@ -65,12 +66,16 @@ describe('SessionContext → SessionPersist integration', () => {
 
     const onDisk = persist.loadOai()
     assert.equal(onDisk.length, 3, 'should have user + assistant + tool')
-    assert.equal(onDisk[0]!.role, 'user')
-    assert.equal(onDisk[0]!.content, 'hello')
-    assert.equal(onDisk[1]!.role, 'assistant')
-    assert.equal(onDisk[1]!.tool_calls?.[0]?.id, 'call_1')
-    assert.equal(onDisk[2]!.role, 'tool')
-    assert.equal(onDisk[2]!.content, 'file contents')
+    const userMsg = onDisk[0]!
+    const assistantMsg = onDisk[1]!
+    const toolMsg = onDisk[2]!
+    assert.equal(userMsg.role, 'user')
+    assert.equal(userMsg.content, 'hello')
+    assert.equal(assistantMsg.role, 'assistant')
+    assert.ok(assistantMsg.role === 'assistant')
+    assert.equal(assistantMsg.tool_calls?.[0]?.id, 'call_1')
+    assert.ok(isToolMessage(toolMsg))
+    assert.equal(toolMsg.content, 'file contents')
   })
 
   it('preserves order across rapid consecutive tool_results', async () => {
@@ -90,8 +95,10 @@ describe('SessionContext → SessionPersist integration', () => {
     const onDisk = persist.loadOai()
     assert.equal(onDisk.length, 50)
     for (let i = 0; i < 50; i++) {
-      assert.equal(onDisk[i]!.tool_call_id, `call_${i}`, `index ${i} out of order`)
-      assert.equal(onDisk[i]!.content, `payload-${i}`)
+      const msg = onDisk[i]!
+      assert.ok(isToolMessage(msg), `index ${i} should be a tool message`)
+      assert.equal(msg.tool_call_id, `call_${i}`, `index ${i} out of order`)
+      assert.equal(msg.content, `payload-${i}`)
     }
   })
 

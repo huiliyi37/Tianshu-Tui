@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '../api/types.js'
 import type { ArtifactStore } from '../artifact/store.js'
+import type { ProviderProfile } from '../api/provider-profile.js'
 
 export interface ToolCallParams {
   input: Record<string, unknown>
@@ -16,6 +17,10 @@ export interface ToolCallParams {
   ownedFiles?: string[]
   /** B1: Worktree baseline hash for integrity verification */
   baselineHash?: string
+  /** P0-2: Active context window — drives per-call read caps for read_file/grep. */
+  contextWindow?: number
+  /** P0-2: Provider profile — read caps relax for cache-preserving providers. */
+  providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
 }
 
 export interface VerificationMetadata {
