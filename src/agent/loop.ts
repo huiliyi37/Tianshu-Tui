@@ -66,7 +66,7 @@ import type { FsWatcherState } from '../context/fs-watcher.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { compactStaleRoundsOai } from '../compact/stale-round.js'
 import { CacheAdvisor } from '../cache/advisor.js'
-import { microCompactOai } from '../compact/micro.js'
+import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, type P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
@@ -974,19 +974,24 @@ export class AgentLoop {
 
         // Stale round compaction: proactively shrink N-2+ tool_results
         if (!compactResult.compacted) {
-          // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
-          const dietBefore = this.session.getMessages()
-          const dietResult = this.p3.dietMessages(dietBefore as any)
-          if (dietResult.removedCount > 0) {
-            this.session.replaceMessages(dietResult.messages as any)
-          }
+          // Token gate: skip stale-round + diet when under 50% context capacity
+          const contextWindow = this.config.contextWindow ?? 1_000_000
+          const tokenBudget = estimateOaiTokens(this.session.getMessages() as any)
+          if (tokenBudget / contextWindow >= 0.5) {
+            // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
+            const dietBefore = this.session.getMessages()
+            const dietResult = this.p3.dietMessages(dietBefore as any)
+            if (dietResult.removedCount > 0) {
+              this.session.replaceMessages(dietResult.messages as any)
+            }
 
-          const before = this.session.getMessages()
-          const previewChars = this.cacheAdvisor.getStalePreviewChars()
-          const after = compactStaleRoundsOai(before, this.config.contextWindow ?? 1_000_000, previewChars)
-          if (after !== before) {
-            this.session.replaceMessages(after)
-            if (typeof globalThis.gc === 'function') globalThis.gc()
+            const before = this.session.getMessages()
+            const previewChars = this.cacheAdvisor.getStalePreviewChars()
+            const after = compactStaleRoundsOai(before, contextWindow, previewChars)
+            if (after !== before) {
+              this.session.replaceMessages(after)
+              if (typeof globalThis.gc === 'function') globalThis.gc()
+            }
           }
         }
 
