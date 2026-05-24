@@ -13,7 +13,6 @@ import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
 import { batchPrewarm, buildPrewarmValue } from './prewarm-file.js'
 import { type CompactionConfig, staleRoundThresholds } from '../compact/constants.js'
-import { generateHandoff } from '../compact/pre-compact-handoff.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import { EvidenceTracker } from './evidence.js'
@@ -952,22 +951,6 @@ export class AgentLoop {
         this.turnBudget = createTurnBudget(rssRatio)
         
         
-        // P3: Pre-compact handoff — preserve session context across compaction
-        // Generated *before* compaction so the summary reflects the trajectory
-        // about to be compressed. Injected via setSessionState which refreshes
-        // at user-message boundary (next turn after compaction).
-        try {
-          const handoff = generateHandoff(this.session.getMessages() as any)
-          // P4 trace: verify handoff summary includes Recent reasoning section
-          // eslint-disable-next-line no-console
-          console.warn(`[handoff] summary chars=${handoff.summary.length} has_reasoning=${handoff.summary.includes('Recent reasoning')} files=${handoff.filesModified.length} hadFailures=${handoff.hadFailures}`)
-          if (handoff.summary && (handoff.filesModified.length > 0 || handoff.hadFailures)) {
-            this.config.promptEngine.setSessionState(
-              `<pre-compact-handoff>\n${handoff.summary}\n</pre-compact-handoff>`,
-            )
-          }
-        } catch { /* non-critical: handoff is best-effort */ }
-
         // Phase 2.3: Proactive session split at 86% context.
         // Replaces message history with cache anchors + handoff,
         // preserving exact prefix for DeepSeek disk cache hits.
