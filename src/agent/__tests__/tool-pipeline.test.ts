@@ -82,7 +82,7 @@ describe('executeToolUse', () => {
       deps, noopCallbacks as any, 1, false,
     )
     assert.equal((result.toolResult as any).tool_use_id, 'tu-1')
-    assert.equal((result.toolResult as any).content, 'ok')
+    assert.equal((result.toolResult as any).content, 'ok\n── 观象（read_file）')
     assert.equal((result.toolResult as any).is_error, false)
     assert.equal(result.checkpointCreated, false)
   })
@@ -132,7 +132,8 @@ describe('executeToolUse', () => {
     const content = (result.toolResult as any).content as string
     assert.ok(content.length < hugeContent.length)
     assert.ok(content.startsWith('HEAD_MARKER'))
-    assert.ok(content.endsWith('TAIL_MARKER'))
+    assert.ok(content.endsWith('── 观象（read_file）'))
+    assert.match(content, /TAIL_MARKER/)
     assert.match(content, /\.\.\.\[truncated \d+ chars\]\.\.\./)
   })
 
