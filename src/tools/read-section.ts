@@ -1,7 +1,21 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { ArtifactCorruptionError } from '../artifact/store.js'
+import { computeModelReadCap } from './model-read-cap.js'
 
-const MAX_SECTION_CHARS = 8000
+/**
+ * Hard floor on read_section output. Matches the legacy default before
+ * window-aware sizing — small (<200K) windows still get this.
+ *
+ * Background: read_section was written when read_file capped at 8 K, so 8 K
+ * here was symmetric. Now read_file scales to ~200 K on a 1 M window, but
+ * read_section was still hardcoded to 8 K — so when prune redirected the
+ * model to "use read_section to recover", it could only recover 8 K of a 60 K
+ * file, leaving the model visibly stuck (model self-reported "results are
+ * being truncated to 8030 chars max").
+ *
+ * read_section now uses the same window-aware budget as read_file/grep.
+ */
+const LEGACY_MAX_SECTION_CHARS = 8000
 
 /**
  * Parse section ID like "L100-L200" or "100-200" into [start, end] line numbers.
@@ -66,8 +80,8 @@ export const READ_SECTION_TOOL: Tool = {
 - Use when the model needs to drill into specific parts of large output
 
 ### Examples
-Good: read_section(artifactId="abc123", section="L1-L50")
-Good: read_section(artifactId="abc123", section="c0-c8000")
+Good: read_section(artifactId="abc123", section="L1-L500")
+Good: read_section(artifactId="abc123", section="c0-c50000")
 Good: read_section(artifactId="abc123", section="L100-L200")`,
     input_schema: {
       type: 'object',
@@ -133,8 +147,17 @@ Good: read_section(artifactId="abc123", section="L100-L200")`,
       }
       const sectionContent = extractSection(rawContent, section)
 
-      const truncated = sectionContent.length > MAX_SECTION_CHARS
-        ? sectionContent.slice(0, MAX_SECTION_CHARS) + `\n... [truncated at ${MAX_SECTION_CHARS} chars]`
+      // Window-aware cap: 1M window allows ~200K, 64K window stays at 8K.
+      // Without this, prune-then-recover paths gave the model only 8K back —
+      // see LEGACY_MAX_SECTION_CHARS comment.
+      const cap = computeModelReadCap({
+        contextWindow: params.contextWindow,
+        providerProfile: params.providerProfile,
+      })
+      const maxChars = Math.max(cap.maxChars, LEGACY_MAX_SECTION_CHARS)
+
+      const truncated = sectionContent.length > maxChars
+        ? sectionContent.slice(0, maxChars) + `\n... [truncated at ${maxChars} chars]`
         : sectionContent
 
       return {
