@@ -968,6 +968,13 @@ export class AgentLoop {
           }
         } catch { /* non-critical: handoff is best-effort */ }
 
+        // Phase 2.3: Proactive session split at 86% context.
+        // Replaces message history with cache anchors + handoff,
+        // preserving exact prefix for DeepSeek disk cache hits.
+        // When split succeeds, the session is already pruned to
+        // ~3 messages → all subsequent compaction is a no-op.
+        this.compaction.trySessionSplit()
+
         const compactResult = await this.compaction.maybeCompact({
           loopTurn: turn,
           failures: this.compactFailures,
@@ -1000,7 +1007,7 @@ export class AgentLoop {
           const tokenRatio = tokenBudget / contextWindow
           const skipGate = tokenRatio < 0.5
           console.warn(`[token-gate] tokens=${tokenBudget} window=${contextWindow} ratio=${tokenRatio.toFixed(2)} skip=${skipGate}`)
-          if (tokenRatio >= 0.5) {
+          if (tokenRatio >= 0.5 && contextWindow < 1_000_000) {
             // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
             const dietBefore = this.session.getMessages()
             const dietResult = this.p3.dietMessages(dietBefore as any)
@@ -1036,10 +1043,15 @@ export class AgentLoop {
           // Pass full contextWindow so phase 2 (round removal) never triggers.
           // Phase 1 (tool_result + reasoning_content truncation) still applies.
           const contextWindow = this.config.contextWindow ?? 1_000_000
-          const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
-          if (trimmed.length < before.length || trimmed !== before) {
-            this.session.replaceMessages(trimmed)
-            if (typeof globalThis.gc === 'function') globalThis.gc()
+          // Phase 2.1: On 1M+ windows, skip heap-driven micro compact to
+          // preserve exact prefix cache. Memory pressure is resolved via
+          // enforceContextCeiling (95% ceiling) as emergency last resort.
+          if (contextWindow < 1_000_000) {
+            const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
+            if (trimmed.length < before.length || trimmed !== before) {
+              this.session.replaceMessages(trimmed)
+              if (typeof globalThis.gc === 'function') globalThis.gc()
+            }
           }
         }
 
@@ -1216,7 +1228,11 @@ export class AgentLoop {
         if (this.sessionStateManager) {
           this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
         }
-        const request = this.config.promptEngine.buildOaiRequest(this.session.getMessages(), this.recentToolHistory)
+        const request = this.config.promptEngine.buildOaiRequest(
+          this.session.getMessages(),
+          this.recentToolHistory,
+          this.config.contextWindow,
+        )
         const streamResult = await this.turnStream!.streamTurn({
           request,
           turn,

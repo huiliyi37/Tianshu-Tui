@@ -51,10 +51,22 @@ export class CompactionController {
     const beforePruneTokens = this.deps.session.getEstimatedTokens()
     const pruneResult = pruneStaleToolResults(messages, { contextWindow: this.deps.contextWindow })
     if (pruneResult.prunedCount > 0) {
-      this.deps.session.replaceMessages(pruneResult.messages)
+      // Prune is now a request-time mask (applied in PromptEngine.buildOaiRequest).
+      // We compute prune stats here for logging but do NOT mutate storage via
+      // replaceMessages. Immutable history = stable byte prefix = higher cache hit.
       const afterPruneTokens = this.deps.session.getEstimatedTokens()
       // eslint-disable-next-line no-console
-      console.warn(`[prune] pruned=${pruneResult.prunedCount} freedChars=${pruneResult.freedChars} ctxWindow=${this.deps.contextWindow} tokens=${beforePruneTokens}->${afterPruneTokens}`)
+      console.warn(`[prune] (request-time mask) would-prune=${pruneResult.prunedCount} freedChars=${pruneResult.freedChars} ctxWindow=${this.deps.contextWindow} tokens=${beforePruneTokens}->${afterPruneTokens}`)
+    }
+
+    // Phase 2: On 1M+ context windows, skip micro compact entirely.
+    // The 1M window has enough headroom for typical coding sessions
+    // (30-100 turns). Disabling compaction preserves the exact byte
+    // prefix for DeepSeek's persistent cache, eliminating the 3-4%
+    // compaction-induced miss rate. enforceContextCeiling (95%) remains
+    // as the emergency last resort.
+    if (this.deps.contextWindow >= 1_000_000) {
+      return { failures: input.failures, compacted: false }
     }
 
     const estimatedTokens = this.deps.session.getEstimatedTokens()
@@ -142,6 +154,110 @@ export class CompactionController {
       createdAt: Date.now(),
     })
     this.deps.refreshLedger()
+  }
+
+  /**
+   * Phase 2.3: Proactive session split at 86% context threshold.
+   *
+   * Unlike compaction (which mutates message history and breaks the prefix
+   * cache), session split replaces ALL messages with just the cache anchors +
+   * a rich handoff summary. The system prompt + tools + first 2 messages
+   * remain byte-identical, so DeepSeek's disk cache hits immediately on
+   * the next API call.
+   *
+   * enforceContextCeiling (95%) remains as the emergency last resort, but
+   * in a healthy 1M window session, trySessionSplit should fire first.
+   *
+   * @returns true if a split occurred, false if below threshold or ineligible.
+   */
+  trySessionSplit(): boolean {
+    // Only for large windows (500K+) where we have enough headroom for
+    // the split to meaningfully reduce context. Small windows need
+    // compaction, not split.
+    if (this.deps.contextWindow < 500_000) return false
+
+    const ratio = this.deps.session.getEstimatedTokens() / this.deps.contextWindow
+    if (ratio < 0.86) return false
+
+    const messages = this.deps.session.getMessages()
+    const taskState = extractTaskState(this.deps.getTrajectoryEntries(), this.deps.getStreamedText())
+
+    // Extract up to 2KB of the most recent assistant reasoning
+    const MAX_REASONING_CHARS = 2000
+    const reasoningParts: string[] = []
+    for (let i = messages.length - 1; i >= 0 && reasoningParts.join('\n').length < MAX_REASONING_CHARS; i--) {
+      const m = messages[i]!
+      if (m.role === 'assistant' && m.content && m.content.length > 0) {
+        reasoningParts.unshift(m.content)
+      }
+    }
+
+    // Extract file paths from tool result content
+    const filePattern = /(?:\/[^\s\n"'`{}()[\]]+\.[a-z]{1,6})\b/g
+    const filesSeen = new Set<string>()
+    for (const m of messages) {
+      if (m.role !== 'tool') continue
+      for (const match of m.content.matchAll(filePattern)) {
+        filesSeen.add(match[0])
+      }
+    }
+
+    const handoffLines: string[] = [
+      `Session split at ${(ratio * 100).toFixed(0)}% context (turn ${this.deps.session.getTurnCount()})`,
+      `Current: ${taskState.current}`,
+    ]
+    for (const item of taskState.completed.slice(-5)) {
+      handoffLines.push(`Completed: ${item}`)
+    }
+    for (const item of taskState.remaining.slice(0, 3)) {
+      handoffLines.push(`Remaining: ${item}`)
+    }
+    for (const item of taskState.decisions.slice(-3)) {
+      handoffLines.push(`Decision: ${item}`)
+    }
+    if (filesSeen.size > 0) {
+      const files = [...filesSeen].slice(0, 10)
+      handoffLines.push(`Files: ${files.join(', ')}`)
+    }
+
+    let handoffContent = `<session-handoff>\n${handoffLines.join('\n')}\n</session-handoff>`
+    if (reasoningParts.length > 0) {
+      const reasoning = reasoningParts.join('\n\n---\n\n')
+      handoffContent += `\n\n## Recent reasoning:\n${reasoning.slice(-MAX_REASONING_CHARS)}`
+    }
+
+    const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
+    let candidate: OaiMessage[] = [
+      ...anchorMessages,
+      { role: 'user', content: handoffContent },
+    ]
+
+    // Safety: if the handoff itself is too large, use a minimal fallback
+    if (estimateOaiTokens(candidate) > this.deps.contextWindow * 0.3) {
+      const fallback = `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context. ${taskState.current}</session-handoff>`
+      candidate = [...anchorMessages, { role: 'user', content: fallback }]
+    }
+
+    const beforeTokens = this.deps.session.getEstimatedTokens()
+    this.deps.session.replaceMessages(candidate)
+    this.deps.session.recordCompactEvent({
+      turn: this.deps.session.getTurnCount(),
+      tier: 3,
+      reason: `session split at ${(ratio * 100).toFixed(0)}% context`,
+      beforeTokens,
+      afterTokens: this.deps.session.getEstimatedTokens(),
+      createdAt: Date.now(),
+    })
+    this.deps.refreshLedger()
+
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[session-split] ratio=${ratio.toFixed(2)} files=${filesSeen.size} ` +
+      `reasoning_chars=${reasoningParts.join('').length} ` +
+      `tokens=${beforeTokens}->${this.deps.session.getEstimatedTokens()}`
+    )
+
+    return true
   }
 
   refreshCacheDiagnostic(loopTurn: number): string | null {
