@@ -117,4 +117,49 @@ describe('CompactionController', () => {
 
     assert.equal(controller.refreshCacheDiagnostic(2), null)
   })
+
+  // P1.2: prune should NOT mutate session storage
+  it('P1.2: prune does NOT modify session message storage', async () => {
+    const session = new SessionContext()
+    // Build messages with several large-enough tool results to trigger prune.
+    // On 128K contextWindow, prune.minChars=40_000. Each tool result is 50K →
+    // exceeds minChars. With protectRecent=8 and CACHE_ANCHOR_MESSAGES=2,
+    // tool results at indices 2-7 (before recent 8) should be pruned.
+    const messages: Array<{ role: 'user' | 'assistant' | 'tool'; content: string; tool_call_id?: string }> = [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' },
+    ]
+    // Add tool results that trigger prune
+    for (let i = 0; i < 12; i++) {
+      messages.push({
+        role: 'tool',
+        content: 'x'.repeat(50_000),
+        tool_call_id: `tc_${i}`,
+      })
+    }
+    // Add recent messages (within protectRecent) — won't be pruned
+    messages.push({ role: 'user', content: 'recent query' })
+    messages.push({ role: 'assistant', content: 'recent answer' })
+
+    session.replaceMessages(messages as any)
+    const messagesBefore = session.getMessages()
+    const contentsBefore = messagesBefore.map(m => m.content)
+
+    const controller = makeController(session, { contextWindow: 128_000 })
+
+    const result = await controller.maybeCompact({
+      loopTurn: 1,
+      failures: { consecutiveFailures: 0 },
+    })
+
+    const messagesAfter = session.getMessages()
+    const contentsAfter = messagesAfter.map(m => m.content)
+
+    // Messages in storage must be unchanged — prune is now request-time mask
+    assert.deepStrictEqual(
+      contentsAfter,
+      contentsBefore,
+      'prune must not mutate session message storage'
+    )
+  })
 })
