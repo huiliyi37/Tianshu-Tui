@@ -86,4 +86,23 @@ describe('pruneStaleToolResults', () => {
     assert.equal(result.prunedCount, 3)
     assert.equal(result.freedChars, 30_000)
   })
+
+  it('preserves trailing [artifact:X] marker so read_section can recover content', () => {
+    const longContent = 'a'.repeat(10_000)
+    const withMarker = `${longContent}\n[artifact:abc123]`
+    const messages: OaiMessage[] = [
+      userMsg('system'), assistantMsg('anchor'),
+      userMsg('q1'), assistantMsg('a1'), toolMsg(withMarker),
+      userMsg('r1'), assistantMsg('r1a'), toolMsg('x'),
+      userMsg('r2'), assistantMsg('r2a'), toolMsg('x'),
+      userMsg('r3'), assistantMsg('r3a'), toolMsg('x'),
+    ]
+    const result = pruneStaleToolResults(messages, { protectRecentMessages: 8 })
+    assert.equal(result.prunedCount, 1)
+    const pruned = result.messages[4]!
+    assert.ok(pruned.role === 'tool')
+    assert.match(pruned.content, /\[artifact:abc123\]\s*$/, 'marker must survive prune at the tail')
+    assert.ok(pruned.content.includes('use read_section'), 'should hint at read_section recovery')
+    assert.ok(pruned.content.startsWith('[pruned:'), 'still starts with [pruned: idempotency marker')
+  })
 })
