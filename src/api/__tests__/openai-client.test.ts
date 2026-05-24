@@ -312,6 +312,36 @@ describe('DeepSeek-specific features', () => {
     assert.equal(stopUsage.output_tokens, 20)
   })
 
+  it('5a: extracts DeepSeek cache stats from COMBINED chunk (finish_reason + usage in one frame)', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+
+    let stopReason: string | undefined
+    let stopUsage: any = null
+
+    const callbacks = {
+      onTextDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: (reason: string, usage: any) => { stopReason = reason; stopUsage = usage },
+    }
+
+    // Single combined chunk: finish_reason AND usage in the same SSE frame.
+    // This is the DeepSeek behavior — unlike OpenAI which sends usage as a
+    // separate trailing chunk.
+    client.processDelta(
+      {
+        choices: [{ delta: { content: 'final text' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 100, completion_tokens: 20, prompt_cache_hit_tokens: 60, prompt_cache_miss_tokens: 40 },
+      },
+      callbacks,
+    )
+
+    assert.equal(stopReason, 'end_turn')
+    assert.equal(stopUsage.cache_read_input_tokens, 60)
+    assert.equal(stopUsage.cache_creation_input_tokens, 40)
+    assert.equal(stopUsage.input_tokens, 100)
+    assert.equal(stopUsage.output_tokens, 20)
+  })
+
   it('6: maps insufficient_system_resource finish_reason to end_turn', () => {
     const client = new OpenAIClient(TEST_CONFIG)
 

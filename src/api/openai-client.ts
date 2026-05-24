@@ -428,6 +428,25 @@ export class OpenAIClient implements StreamClient {
       // Buffer the stop reason — will be emitted when usage chunk arrives
       this.pendingStopReason = choice.finish_reason
     }
+
+    // If usage arrived together with finish_reason in the same SSE chunk,
+    // emit onStopReason immediately with usage data. This handles providers
+    // (DeepSeek) that combine finish_reason + usage into one chunk, unlike
+    // OpenAI which sends usage as a separate trailing chunk.
+    // Must run AFTER flushToolCalls (tool_use content blocks emitted first)
+    // and AFTER pendingStopReason is set (so we can read it here).
+    if (chunk.usage && this.pendingStopReason !== null) {
+      const usage = chunk.usage
+      const stopReason = this.pendingStopReason
+      this.pendingStopReason = null
+      const cacheRead = usage.prompt_cache_hit_tokens ?? 0
+      callbacks.onStopReason?.(mapFinishReason(stopReason), {
+        input_tokens: usage.prompt_tokens ?? 0,
+        output_tokens: usage.completion_tokens ?? 0,
+        cache_read_input_tokens: cacheRead,
+        cache_creation_input_tokens: usage.prompt_cache_miss_tokens ?? 0,
+      })
+    }
   }
 
   private flushToolCalls(callbacks: Partial<Pick<StreamCallbacks, 'onContentBlock' | 'onStopReason'>>): void {
