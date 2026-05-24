@@ -1237,6 +1237,7 @@ export class AgentLoop {
         const latestTurnCache = cacheHistory.length > 0 ? cacheHistory[cacheHistory.length - 1] : null
 
         if (this.abortController.signal.aborted) {
+          if (collectedBlocks.length > 0) this.session.addAssistantBlocks(collectedBlocks)
           if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
           await this.runPostSession(callbacks)
           callbacks.onAbort()
