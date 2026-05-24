@@ -46,11 +46,13 @@ describe('PromptEngine OpenAI-native request building', () => {
     assert.equal(request.tool_choice, 'auto')
     assert.equal(request.tools?.[0]?.type, 'function')
     assert.equal(request.tools?.[0]?.function.name, 'edit_file')
-    assert.equal(request.messages.length, 5)
+    assert.equal(request.messages.length, 4)
     assert.equal(request.messages[0]?.role, 'system')
+    // Trailer mode: when firstUserIdx===lastUserIdx, cachedFreshBlock (which
+    // includes frozenBase) is merged into the user message — no separate frozenBase msg.
     assert.equal(request.messages[1]?.role, 'user')
     assert.match(request.messages[1]?.content ?? '', /<environment/)
-    assert.deepEqual(request.messages.slice(2), messages)
+    assert.ok((request.messages[1]?.content ?? '').includes('hello'))
   })
 
   it('reuses cached fresh volatile across tool-call turns for the same latest user message', () => {
@@ -287,13 +289,12 @@ describe('PromptEngine active claims projection', () => {
     const req = engine.buildOaiRequest([{ role: 'user', content: 'final' }])
 
     const allUsers = req.messages.filter(m => m.role === 'user')
-    // The injected cached fresh volatile block is pushed BEFORE the original
-    // user message, so the second-to-last user message contains the volatile.
-    const injectedBlock = allUsers[allUsers.length - 2]?.content ?? ''
+    // Trailer mode: cachedFreshBlock is merged into the LAST user message
+    const injectedBlock = allUsers[allUsers.length - 1]?.content ?? ''
 
-    // consolidatedBlock with habituated domain should appear in injected block
+    // consolidatedBlock with habituated domain should appear in merged message
     assert.ok(injectedBlock.includes('star-data'),
-      'Habituated domain content should appear in injected fresh volatile block')
+      'Habituated domain content should appear in last user message (trailer mode)')
 
     // frozenBase should NOT contain the habituated domain
     assert.ok(!(engine as any).frozenBase.includes('star-data'),

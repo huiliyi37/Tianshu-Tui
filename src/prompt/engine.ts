@@ -171,14 +171,20 @@ export class PromptEngine {
               this.cachedFreshBlock = projection ? base + '\n' + projection : base
             }
           }
-          result.push({ role: 'user', content: this.cachedFreshBlock })
+          // Trailer mode: merge cachedFreshBlock into last user message content
+          // instead of pushing as separate message. Keeps message array append-only,
+          // preserving DeepSeek exact-prefix cache across user-message boundaries.
+          const merged = this.cachedFreshBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
+          result.push({ role: 'user', content: merged })
         } else if (i === firstUserIdx) {
-          // Only inject frozen volatile block before the FIRST user message.
-          // Historical user messages in between don't need it — saves 1000+ tokens each.
           result.push({ role: 'user', content: this.volatileBlock })
+          result.push(msg)
+        } else {
+          result.push(msg)
         }
+      } else {
+        result.push(msg)
       }
-      result.push(msg)
     }
 
     const tools: OaiToolDefinition[] | undefined = this.config.staticCtx.tools.length > 0
