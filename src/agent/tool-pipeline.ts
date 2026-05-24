@@ -765,6 +765,14 @@ ${check.formatted}`
         }
       }
     } else if (tu.name === 'run_tests' && rawToolResult) {
+      // Reconnect EvidenceTracker verification pipeline.
+      // run_tests returns VerificationMetadata, but this was never fed into
+      // EvidenceTracker — leaving deliveryStatus stuck at 'unverified',
+      // buildBadge showing "Unverified changes", and
+      // buildDeliveryGate.canClaimComplete always false.
+      if (rawToolResult.verification) {
+        deps.evidence.trackVerification(rawToolResult.verification)
+      }
 
       if (rawToolResult.verification && rawToolResult.verification.status !== 'passed') {
         const failures = classifyTestRun(harnessResult.content)
