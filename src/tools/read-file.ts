@@ -165,8 +165,13 @@ Bad: re-reading the same file multiple times in one session without it being mod
         summary,
         sections,
       })
+      // MODEL SEES FULL CODE — not just structural summary
+      // Agent needs actual source to construct edit_file old_string
+      const summaryBlock = summary.trim()
+        ? `\n\n── Structural outline ──\n${summary.trim()}`
+        : ''
       return {
-        content: `[artifact:${artifactId}] ${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to expand.`,
+        content: payload.modelContent + summaryBlock + `\n[artifact:${artifactId}]`,
         rawContent: payload.modelContent,
         uiContent: payload.uiContent,
         rawPath,
