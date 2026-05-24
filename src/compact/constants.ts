@@ -218,5 +218,39 @@ export function staleRoundThresholds(contextWindow: number): StaleRoundThreshold
   return { recentToKeep: 4, previewChars: 1_200 }
 }
 
-/** Per-message aggregate budget: max total chars across all tool results in one turn */
+/** Per-message aggregate budget: max total chars across all tool results in one turn.
+ *
+ * Legacy static value kept for back-compat. New callers should prefer
+ * {@link perMessageToolResultBudget} which scales with contextWindow. */
 export const PER_MESSAGE_TOOL_RESULT_BUDGET_CHARS = 120_000
+
+/**
+ * Window-aware per-message tool result budget.
+ *
+ * Formula: `min(pruneThresholds(contextWindow).minChars × 2, 300_000)`
+ *
+ * Why ×2? A single turn may contain multiple tool results. If the L0/L1
+ * artifact threshold (minChars) says "content under X stays inline," then
+ * the per-message budget for ALL inline tool results in one turn should be
+ * at least 2× that — allowing one large + several small results.
+ *
+ * Why cap at 300_000? The absolute max for a single tool result is
+ * ABSOLUTE_MAX_CHARS (200_000) from model-read-cap. Doubling that (400_000)
+ * risks filling ~40% of a 1M window with tool results alone. 300_000 is a
+ * safer ceiling.
+ *
+ * Why floor at legacy 120_000? For small windows where ×2 minChars would
+ * actually be lower (e.g. 64K window → minChars=1200 → ×2=2400), we keep
+ * the legacy constant which was already conservative at ~50% of a 64K window.
+ */
+export function perMessageToolResultBudget(contextWindow: number): number {
+  if (!contextWindow || contextWindow <= 0) {
+    return PER_MESSAGE_TOOL_RESULT_BUDGET_CHARS
+  }
+  const { minChars } = pruneThresholds(contextWindow)
+  const scaled = minChars * 2
+  if (scaled < PER_MESSAGE_TOOL_RESULT_BUDGET_CHARS) {
+    return PER_MESSAGE_TOOL_RESULT_BUDGET_CHARS
+  }
+  return Math.min(scaled, 300_000)
+}

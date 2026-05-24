@@ -1,6 +1,7 @@
 import type { ContentBlock } from '../api/types.js'
 import type { TurnBudget } from './turn-budget.js'
 import { enforcePerMessageBudget } from './per-message-budget.js'
+import { perMessageToolResultBudget } from '../compact/constants.js'
 import type { AgentConfig, AgentCallbacks } from './loop.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTracker } from './evidence.js'
@@ -235,7 +236,7 @@ export class ToolExecutionController {
         ? { toolUseId: r.tool_use_id, content: typeof r.content === 'string' ? r.content : '', toolName: input.toolUses[i]?.name ?? '' }
         : null)
       .filter((e): e is NonNullable<typeof e> => e !== null)
-    const enforced = enforcePerMessageBudget(budgetEntries)
+    const enforced = enforcePerMessageBudget(budgetEntries, perMessageToolResultBudget(this.deps.config.contextWindow))
     for (const entry of enforced) {
       const idx = toolResults.findIndex(r => r.type === 'tool_result' && r.tool_use_id === entry.toolUseId)
       if (idx >= 0) {

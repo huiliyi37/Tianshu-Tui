@@ -1,4 +1,4 @@
-import { PER_MESSAGE_TOOL_RESULT_BUDGET_CHARS } from '../compact/constants.js'
+import { perMessageToolResultBudget } from '../compact/constants.js'
 
 const PROTECTED_TOOLS = new Set(['read_file'])
 
@@ -10,7 +10,7 @@ export interface BudgetEntry {
 
 export function enforcePerMessageBudget(
   results: BudgetEntry[],
-  budget: number = PER_MESSAGE_TOOL_RESULT_BUDGET_CHARS,
+  budget: number = perMessageToolResultBudget(0),
 ): BudgetEntry[] {
   const total = results.reduce((sum, r) => sum + r.content.length, 0)
   if (total <= budget) return results
