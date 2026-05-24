@@ -178,12 +178,17 @@ export interface PruneThresholds {
  */
 export function pruneThresholds(contextWindow: number): PruneThresholds {
   if (contextWindow >= 500_000) {
-    // 500K–1M+: protect ~30 turns worth of messages and only clear truly
-    // large tool_results. A 1M window can hold this comfortably.
-    return { protectRecent: 60, minChars: 30_000 }
+    // 500K–1M+: protect ~30 turns and only clear genuinely huge tool_results.
+    // 150K = ~4% of a 1M window in chars; below that prune is a net loss
+    // (we delete the model's working memory to save context it isn't using).
+    // A typical large source file (loop.ts ~62K, README ~30K) stays untouched
+    // for the entire session. Same threshold gates artifact wrapping in
+    // read_file/bash/grep — content under this size is returned as plain text,
+    // no artifact reference.
+    return { protectRecent: 60, minChars: 150_000 }
   }
   if (contextWindow >= 200_000) {
-    return { protectRecent: 30, minChars: 10_000 }
+    return { protectRecent: 30, minChars: 40_000 }
   }
   // <200K: keep the legacy aggressive behaviour — small windows really do
   // need prune to fire early.
@@ -201,10 +206,14 @@ export interface StaleRoundThresholds {
 
 export function staleRoundThresholds(contextWindow: number): StaleRoundThresholds {
   if (contextWindow >= 500_000) {
-    return { recentToKeep: 30, previewChars: 30_000 }
+    // Match pruneThresholds.minChars at 1M — stale-round runs after prune
+    // so we want them coherent. 150K preview means a 200K read_file gets
+    // truncated to its leading 150K (still 75% of original), not chopped to
+    // 30K head + tail.
+    return { recentToKeep: 30, previewChars: 150_000 }
   }
   if (contextWindow >= 200_000) {
-    return { recentToKeep: 12, previewChars: 8_000 }
+    return { recentToKeep: 12, previewChars: 40_000 }
   }
   return { recentToKeep: 4, previewChars: 1_200 }
 }

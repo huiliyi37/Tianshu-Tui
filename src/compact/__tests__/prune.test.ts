@@ -131,16 +131,18 @@ describe('pruneStaleToolResults', () => {
 
   it('1M context window: still prunes when truly stale (66+ messages)', () => {
     // If we *do* exceed 60 protected + 2 anchor = 62, the oldest tool_results
-    // beyond protection should still be pruned, but only when above 30K.
-    const content40K = 'a'.repeat(40_000)
+    // beyond protection should still be pruned, but only when above 150K
+    // (artifact wrap threshold — content below this size is never wrapped, so
+    // there's no artifact backup to recover it from, so prune leaves it alone).
+    const content200K = 'a'.repeat(200_000)
     const messages: OaiMessage[] = [
       userMsg('system'), assistantMsg('anchor'),
-      assistantMsg('old'), toolMsg(content40K),  // idx 3 — should be pruned
+      assistantMsg('old'), toolMsg(content200K),  // idx 3 — should be pruned
       // 70 padding messages to push idx 3 into the stale region
       ...Array.from({ length: 70 }, () => assistantMsg('pad')),
     ]
     const result = pruneStaleToolResults(messages, { contextWindow: 1_000_000 })
-    assert.equal(result.prunedCount, 1, 'truly stale 40K tool_result should be pruned even on 1M')
+    assert.equal(result.prunedCount, 1, 'truly stale 200K tool_result should be pruned even on 1M')
   })
 
   it('legacy small window (<200K) keeps the original 8-message / 1200-char behavior', () => {

@@ -7,6 +7,12 @@ import type { OaiMessage } from '../../api/oai-types.js'
 
 describe('memory safety integration', () => {
   it('messages array stays bounded after 10 simulated turns', () => {
+    // 1M window policy: stale-round preview is 150K chars, so individual
+    // tool_results below that pass through untouched. We still want a sane
+    // upper bound — at ~4K/result × 50 results, ~200K chars / 4 = ~50K tokens
+    // is the realistic ceiling. The point of this test is "growth is not
+    // unbounded," not "every old result gets crushed." See pruneThresholds /
+    // staleRoundThresholds rationale comments.
     const messages: OaiMessage[] = [
       { role: 'user', content: 'initial request' },
       { role: 'assistant', content: 'I will help' },
@@ -37,7 +43,9 @@ describe('memory safety integration', () => {
     }
 
     const totalTokens = estimateOaiTokens(messages)
-    assert.ok(totalTokens < 30_000, `Expected <30K tokens, got ${totalTokens}`)
+    // 60K is well above the realistic ~50K ceiling but well below an
+    // unbounded-growth scenario (which would be 200K+ over 10 turns).
+    assert.ok(totalTokens < 60_000, `Expected <60K tokens, got ${totalTokens}`)
     assert.ok(messages.length > 4, 'Should still have meaningful messages')
   })
 
@@ -52,13 +60,16 @@ describe('memory safety integration', () => {
   })
 
   it('stale compaction preserves recent content while shrinking old', () => {
+    // 1M window: previewChars=150K, recentToKeep=30. Need >30 messages so
+    // older rounds become "stale", and content >150K so they actually get
+    // truncated rather than passed through.
     const messages: OaiMessage[] = [
       { role: 'user', content: 'anchor' },
       { role: 'assistant', content: 'anchor' },
     ]
 
-    for (let i = 0; i < 6; i++) {
-      messages.push({ role: 'tool', tool_call_id: `tu_${i}`, content: 'data-'.repeat(1000) })
+    for (let i = 0; i < 20; i++) {
+      messages.push({ role: 'tool', tool_call_id: `tu_${i}`, content: 'data-'.repeat(40_000) })
       messages.push({ role: 'assistant', content: `round ${i}` })
     }
 
