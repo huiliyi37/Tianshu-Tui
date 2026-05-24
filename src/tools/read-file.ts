@@ -159,6 +159,10 @@ Bad: re-reading the same file multiple times in one session without it being mod
       return { content: `Error: ${message}`, isError: true }
     }
 
+    // P0-2 trace: verify read_file returns full content, not truncated
+    // eslint-disable-next-line no-console
+    console.warn(`[read-cap] file=${payload.canonicalPath} raw=${payload.rawContent.length} model=${payload.modelContent.length} truncated=${payload.rawContent.length !== payload.modelContent.length}`)
+
     const rawPath = await persistRawOutput(params.toolUseId, payload.rawContent)
 
     if (params.artifactStore) {

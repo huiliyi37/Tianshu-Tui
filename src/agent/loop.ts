@@ -412,6 +412,11 @@ export class AgentLoop {
           const msg = m.message
           writeChain = writeChain
             .then(() => persist.appendOaiWithChecksum(msg))
+            .then(() => {
+              // P0-1 trace: verify every message triggers persistence
+              // eslint-disable-next-line no-console
+              console.warn(`[persist] append message role=${msg.role}`)
+            })
             .catch(err => {
               // Persistence failures must not crash the agent loop.
               // Surface to stderr; the in-memory state is still authoritative.
@@ -945,6 +950,9 @@ export class AgentLoop {
         // at user-message boundary (next turn after compaction).
         try {
           const handoff = generateHandoff(this.session.getMessages() as any)
+          // P4 trace: verify handoff summary includes Recent reasoning section
+          // eslint-disable-next-line no-console
+          console.warn(`[handoff] summary chars=${handoff.summary.length} has_reasoning=${handoff.summary.includes('Recent reasoning')} files=${handoff.filesModified.length} hadFailures=${handoff.hadFailures}`)
           if (handoff.summary && (handoff.filesModified.length > 0 || handoff.hadFailures)) {
             this.config.promptEngine.setSessionState(
               `<pre-compact-handoff>\n${handoff.summary}\n</pre-compact-handoff>`,
@@ -979,7 +987,12 @@ export class AgentLoop {
           // Token gate: skip stale-round + diet when under 50% context capacity
           const contextWindow = this.config.contextWindow ?? 1_000_000
           const tokenBudget = estimateOaiTokens(this.session.getMessages() as any)
-          if (tokenBudget / contextWindow >= 0.5) {
+          // P1+P2 trace: verify token gate skips diet/stale below 50% capacity
+          // eslint-disable-next-line no-console
+          const tokenRatio = tokenBudget / contextWindow
+          const skipGate = tokenRatio < 0.5
+          console.warn(`[token-gate] tokens=${tokenBudget} window=${contextWindow} ratio=${tokenRatio.toFixed(2)} skip=${skipGate}`)
+          if (tokenRatio >= 0.5) {
             // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
             const dietBefore = this.session.getMessages()
             const dietResult = this.p3.dietMessages(dietBefore as any)
@@ -1004,7 +1017,9 @@ export class AgentLoop {
           ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
           : 0
         if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
-          console.warn('[memory-pressure] heap usage high, consider /compact')
+          // P3 trace: verify phase 2 (round deletion) is blocked, phase 1 only
+          // eslint-disable-next-line no-console
+          console.warn(`[memory-pressure] heap=${heapRatio.toFixed(2)} phase2-blocked=true msgCount=${this.session.getMessages().length}`)
           const before = this.session.getMessages()
           // Pass full contextWindow so phase 2 (round removal) never triggers.
           // Phase 1 (tool_result + reasoning_content truncation) still applies.
