@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import { Box, Text } from 'ink'
 import { BaseTextInput } from './base-text-input.js'
 import { loadHistory, appendHistory, nextHistoryAfterSubmit } from './history.js'
@@ -11,12 +11,23 @@ interface InputBarProps {
   onSubmit: (value: string) => void
   disabled?: boolean
   vimEnabled?: boolean
+  steerMode?: boolean
+  inputRef?: React.MutableRefObject<{ clear: () => void; hasContent: () => boolean }>
 }
 
-export function InputBar({ onSubmit, disabled, vimEnabled }: InputBarProps) {
+export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }: InputBarProps) {
   const [value, setValue] = useState('')
   const [history, setHistory] = useState(() => loadHistory())
   const [slashIdx, setSlashIdx] = useState(0)
+
+  React.useEffect(() => {
+    if (inputRef) {
+      inputRef.current = {
+        clear: () => setValue(''),
+        hasContent: () => value.length > 0,
+      }
+    }
+  })
 
   const isSlash = value.startsWith('/') && !value.includes('\n')
   const filtered = isSlash ? filterCommands(COMMANDS, value.slice(1)) : []
@@ -42,7 +53,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled }: InputBarProps) {
         <SlashHint input={value} selectedIdx={Math.min(slashIdx, filtered.length - 1)} commands={COMMANDS} />
       )}
       <Box flexDirection="row" paddingX={1} paddingY={0}>
-        <Text bold color={isSlash ? 'cyan' : 'green'}>❯ </Text>
+        <Text bold color={isSlash ? 'cyan' : steerMode ? 'yellow' : 'green'}>{steerMode ? '⚡' : '❯'} </Text>
         <BaseTextInput
           value={value}
           onChange={handleChange}
@@ -58,7 +69,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled }: InputBarProps) {
             }
           }}
           disabled={disabled}
-          placeholder="Type a message... (↑↓ history)"
+          placeholder={steerMode ? "Steering — injected at next turn" : "Type a message... (↑↓ history)"}
           history={history}
           onTabComplete={handleTabComplete}
           isSlashMode={isSlash}

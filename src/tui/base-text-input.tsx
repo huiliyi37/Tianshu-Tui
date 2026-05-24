@@ -139,8 +139,9 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         const { line, col } = getLineCol(value, cursorPos)
         if (line > 0) {
           setCursorPos(posFromLineCol(lines, line - 1, col))
+          return
         }
-        return
+        // At first line — fall through to history
       }
       if (history && history.length > 0) {
         if (historyIndexRef.current < history.length - 1) {
@@ -164,8 +165,9 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         const { line, col } = getLineCol(value, cursorPos)
         if (line < lines.length - 1) {
           setCursorPos(posFromLineCol(lines, line + 1, col))
+          return
         }
-        return
+        // At last line — fall through to history
       }
       if (historyIndexRef.current >= 0) {
         historyIndexRef.current--

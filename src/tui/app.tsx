@@ -306,6 +306,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const promptQueueRef = useRef({ running: false })
   const steerBuffer = useRef(new SteerBuffer())
   const [steerPending, setSteerPending] = useState(false)
+  const inputBarRef = useRef<{ clear: () => void; hasContent: () => boolean }>({ clear() {}, hasContent() { return false } })
 
   const flushThink = useCallback(() => {
     thinkTimer.current = null
@@ -414,7 +415,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, [isStreaming])
 
   useInput((_input, _key) => {
-    // Ctrl+C — soft interrupt or exit
+    // Ctrl+C — clear input, soft interrupt, or exit
     if (_input === 'c' && _key.ctrl) {
       if (pendingApproval) {
         pendingApproval.resolve(false)
@@ -429,6 +430,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setIsStreaming(false)
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
         lastCtrlCRef.current = Date.now()
+        return
+      }
+      // Clear input first if it has content
+      if (inputBarRef.current.hasContent()) {
+        inputBarRef.current.clear()
         return
       }
       if (lastCtrlCRef.current && Date.now() - lastCtrlCRef.current < 2000) {
@@ -1238,12 +1244,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         <InputBar onSubmit={isStreaming ? (text: string) => {
           steerBuffer.current.push(text)
           pushStatic(createLogEntry({ type: 'system', content: `Guidance queued: "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}" — will be injected at next opportunity` }))
-        } : handleSubmit} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} />
+        } : handleSubmit} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} steerMode={isStreaming} inputRef={inputBarRef} />
         {steerPending && isStreaming && (
-          <Box paddingX={2}>
-            <Text dimColor color="cyan">Pending guidance queued for injection</Text>
+          <Box paddingX={2} borderStyle="round" borderColor="yellow">
+            <Text color="yellow">📨 Queued ({steerBuffer.current.getPending().length}): </Text>
+            <Text>{steerBuffer.current.getPending().slice(-1)[0]?.slice(0, 60)}{(steerBuffer.current.getPending().slice(-1)[0]?.length ?? 0) > 60 ? '...' : ''}</Text>
           </Box>
         )}
+        <Box paddingX={2}>
+          <Text dimColor>Ctrl+C clear · ↑↓ history · Alt+Enter newline · /help commands</Text>
+        </Box>
       </Box>
     </>
   )

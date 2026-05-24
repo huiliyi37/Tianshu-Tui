@@ -19,6 +19,11 @@ export class SteerBuffer {
     return this.pending.length > 0
   }
 
+  /** Get pending messages for display */
+  getPending(): readonly string[] {
+    return this.pending
+  }
+
   /** Drain all pending messages and format them for injection */
   drain(): string | null {
     if (this.pending.length === 0) return null
