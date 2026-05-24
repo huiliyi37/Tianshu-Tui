@@ -995,17 +995,19 @@ export class AgentLoop {
           }
         }
 
-        // Heap-driven forced compaction: when memory pressure is high but token
-        // threshold hasn't been reached (100万 window is too large to fill),
-        // force compaction by pretending contextWindow is smaller.
+        // Heap-driven forced compaction: when memory pressure is high,
+        // run phase 1 only (tool content + reasoning truncation).
+        // Never delete entire rounds — assistant reasoning is a scarce asset.
         const heapRatio = snap
           ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
           : 0
         if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
+          console.warn('[memory-pressure] heap usage high, consider /compact')
           const before = this.session.getMessages()
-          // Use microCompact with a virtual smaller window to force message dropping
-          const virtualWindow = Math.floor((this.config.contextWindow ?? 1_000_000) * 0.3)
-          const { messages: trimmed } = microCompactOai(before, virtualWindow, this.session.getEstimatedTokens())
+          // Pass full contextWindow so phase 2 (round removal) never triggers.
+          // Phase 1 (tool_result + reasoning_content truncation) still applies.
+          const contextWindow = this.config.contextWindow ?? 1_000_000
+          const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
           if (trimmed.length < before.length || trimmed !== before) {
             this.session.replaceMessages(trimmed)
             if (typeof globalThis.gc === 'function') globalThis.gc()

@@ -56,6 +56,21 @@ export function generateHandoff(messages: OaiMessage[]): HandoffResult {
   parts.push(`had_failures: ${hadFailures}`)
   parts.push(`total_tool_calls: ${toolCalls.length}`)
 
+  // Extract recent assistant reasoning (non-tool-call text fragments).
+  // Assistant reasoning is a scarce asset — preserve it across compaction.
+  const MAX_REASONING_CHARS = 2000
+  const assistantTexts: string[] = []
+  for (let i = messages.length - 1; i >= 0 && assistantTexts.join('\n').length < MAX_REASONING_CHARS; i--) {
+    const m = messages[i]!
+    if (m.role === 'assistant' && typeof (m as any).content === 'string' && (m as any).content.length > 0) {
+      assistantTexts.unshift((m as any).content)
+    }
+  }
+  if (assistantTexts.length > 0) {
+    const reasoning = assistantTexts.join('\n\n---\n\n')
+    parts.push(`\n## Recent reasoning:\n${reasoning.slice(-MAX_REASONING_CHARS)}`)
+  }
+
   const summary = parts.join('\n')
   return { summary, filesModified: [...filesModified], hadFailures }
 }
