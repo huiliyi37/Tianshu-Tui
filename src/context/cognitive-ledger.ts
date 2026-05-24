@@ -141,6 +141,7 @@ export function buildCognitivePromptProjection(
   ledger: CognitiveLedger,
   opts?: {
     sycophancyHint?: string | null
+    immuneHint?: string | null
   },
 ): string {
   return [
@@ -149,6 +150,7 @@ export function buildCognitivePromptProjection(
     buildCognitiveMirror(ledger),
     buildUncertaintyProjection(ledger),
     opts?.sycophancyHint ?? '',
+    opts?.immuneHint ?? '',
   ].filter(Boolean).join('\n')
 }
 

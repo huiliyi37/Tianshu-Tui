@@ -17,10 +17,13 @@ import type { PhysarumEngine } from '../repo/physarum-engine.js'
 import type { StigmergyStore } from '../context/stigmergy.js'
 import type { DoomLoopLevel } from './trace-store.js'
 import type { HealthSignal } from './trajectory-health.js'
+import type { MistakeNotebook } from './mistake-notebook.js'
+import { generateImmuneContext, type ImmuneContextHint } from './immune-context.js'
 
 export interface ImmuneHookDeps {
   physarum: PhysarumEngine
   stigmergy?: StigmergyStore
+  notebook?: MistakeNotebook
 }
 
 export interface ImmuneHookContext {
@@ -37,6 +40,7 @@ export interface ImmuneHookResult {
   activated: boolean
   response?: ImmuneResponse
   signals: DangerSignal[]
+  contextHint?: ImmuneContextHint
 }
 
 const BATCH_EVOLVE_INTERVAL = 10
@@ -112,6 +116,13 @@ export class ImmuneHook {
     const memory = this.adaptive.lookup(ctx.fingerprint)
     let response: ImmuneResponse
 
+    // ── Immune → Context: generate hint for model ──
+    let contextHint: ImmuneContextHint | undefined
+    if (this.deps.notebook) {
+      const hint = generateImmuneContext(activation, this.deps.notebook, ctx.turn)
+      if (hint) contextHint = hint
+    }
+
     if (memory) {
       // Secondary response: fast repair from memory
       response = this.adaptive.fastRepair(memory)
@@ -140,7 +151,7 @@ export class ImmuneHook {
     }
 
     this.maybeRunMaintenance(ctx.turn)
-    return { activated: true, response, signals: innateSignals }
+    return { activated: true, response, signals: innateSignals, contextHint }
   }
 
   /** Record successful repair (called externally after repair pipeline succeeds) */

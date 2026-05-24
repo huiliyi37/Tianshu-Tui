@@ -71,6 +71,7 @@ import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, type P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
+import { formatImmuneContext } from './immune-context.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
@@ -246,6 +247,7 @@ export class AgentLoop {
   private p3: P3Integration
   private heuristicStore: HeuristicStore
   private immuneHook: ImmuneHook
+  private _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
 
   constructor(
     private config: AgentConfig,
@@ -295,7 +297,7 @@ export class AgentLoop {
     const meridianDb = this.config.meridianIndexer?.getDb()
     const physarum = new PhysarumEngine(meridianDb as any)
     if (meridianDb) physarum.loadFromDb()
-    this.immuneHook = new ImmuneHook({ physarum, stigmergy: this.stigmergyStore })
+    this.immuneHook = new ImmuneHook({ physarum, stigmergy: this.stigmergyStore, notebook: this.p3?.notebook })
 
     // Load persisted immune memories from previous sessions (cross-session secondary response)
     if (meridianDb) {
@@ -550,7 +552,7 @@ export class AgentLoop {
 
     // Physarum + Immune: postTool danger signal collection + adaptive response
     const fp = this.traceStore.toolFingerprints[this.traceStore.toolFingerprints.length - 1] ?? name
-    this.immuneHook.run({
+    const immuneResult = this.immuneHook.run({
       toolName: name,
       fingerprint: fp,
       turn: this.session.getTurnCount(),
@@ -559,6 +561,10 @@ export class AgentLoop {
       tokenUsage: this.session.getEstimatedTokens(),
       trajectoryHealth,
     })
+    // Store immune context hint for injection into next agent turn
+    if (immuneResult.contextHint) {
+      this._lastImmuneHint = immuneResult.contextHint
+    }
   }
 
   private bindSessionDomain(taskDescription: string): void {
@@ -1109,7 +1115,9 @@ export class AgentLoop {
         })
         this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
         const sycophancyHint = isChatMode ? undefined : this.sycophancyTrap.getHint()
-        const projection = isChatMode ? '' : buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint })
+        const immuneHint = this._lastImmuneHint ? formatImmuneContext(this._lastImmuneHint) : undefined
+        this._lastImmuneHint = undefined // consume once
+        const projection = isChatMode ? '' : buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint })
         this.config.promptEngine.setCognitiveProjection(projection)
 
         // ── CVM overhead tracking ──
