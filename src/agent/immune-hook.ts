@@ -142,13 +142,17 @@ export class ImmuneHook {
 
     // 8. Deposit pheromone warning if stigmergy available
     if (this.deps.stigmergy && ctx.targetFile) {
+      // Fire-and-forget: pheromone persistence failures (e.g. unwritable cwd
+      // in tests) must not break immune response. Without .catch this becomes
+      // an unhandled rejection that surfaces unpredictably depending on
+      // event-loop timing.
       this.deps.stigmergy.deposit({
         path: ctx.targetFile,
         signal: 'fragile',
         strength: 0.8,
         halfLifeMs: 3600_000,
         context: 'immune-response',
-      })
+      }).catch(() => { /* deposit is best-effort */ })
     }
 
     this.maybeRunMaintenance(ctx.turn)

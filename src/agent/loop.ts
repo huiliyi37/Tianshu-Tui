@@ -68,6 +68,7 @@ import { compactStaleRoundsOai } from '../compact/stale-round.js'
 import { CacheAdvisor } from '../cache/advisor.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
+import { TurnHeartbeat } from './turn-heartbeat.js'
 import { createP3Integration, type P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
@@ -840,6 +841,21 @@ export class AgentLoop {
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     await this.startFsWatcher()
+    // P7: heartbeat watchdog — surfaces "still working" signal during long
+    // silent operations so the UI doesn't appear frozen and users don't
+    // interrupt the agent mid-task.
+    const heartbeat = new TurnHeartbeat({
+      silentMs: 20_000,
+      repeatMs: 15_000,
+      onHeartbeat: (elapsed, lastActivity) => {
+        const seconds = Math.round(elapsed / 1000)
+        callbacks.onPhaseChange?.('heartbeat', {
+          reason: `still working — last activity: ${lastActivity} (${seconds}s ago)`,
+        })
+      },
+    })
+    callbacks = this.wrapCallbacksWithHeartbeat(callbacks, heartbeat)
+    heartbeat.start()
     this.turnStream = this.createTurnStreamController()
     this.turnCompletion = this.createTurnCompletionController(callbacks)
     this.trajectory.reset()
@@ -1272,7 +1288,35 @@ export class AgentLoop {
         callbacks.onError(err as Error)
       }
     } finally {
+      heartbeat.stop()
       this.stopFsWatcher()
+    }
+  }
+
+  /**
+   * P7: wrap AgentCallbacks so every UI-visible event resets the heartbeat
+   * silence clock. Heartbeat fires only during true silent gaps (no text
+   * delta, no tool result, no phase change for `silentMs`).
+   */
+  private wrapCallbacksWithHeartbeat(cb: AgentCallbacks, hb: TurnHeartbeat): AgentCallbacks {
+    return {
+      ...cb,
+      onTextDelta: (text) => { hb.tick('streaming text'); cb.onTextDelta(text) },
+      onThinkingDelta: (thinking) => { hb.tick('thinking'); cb.onThinkingDelta(thinking) },
+      onToolUse: (id, name, input) => { hb.tick(`calling ${name}`); cb.onToolUse(id, name, input) },
+      onToolResult: (id, name, result, isError, rawPath, uiContent) => {
+        hb.tick(`${name} returned`)
+        cb.onToolResult(id, name, result, isError, rawPath, uiContent)
+      },
+      onTurnComplete: (usage, turnNumber, isFinal) => {
+        hb.tick(`turn ${turnNumber} complete`)
+        cb.onTurnComplete(usage, turnNumber, isFinal)
+      },
+      onPhaseChange: (phase, detail) => {
+        // Heartbeat-emitted phases must NOT recursively reset the clock.
+        if (phase !== 'heartbeat') hb.tick(`phase: ${phase}`)
+        cb.onPhaseChange?.(phase, detail)
+      },
     }
   }
 }
