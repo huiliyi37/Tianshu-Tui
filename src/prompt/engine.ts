@@ -146,9 +146,10 @@ export class PromptEngine {
               const newConsolidated = buildConsolidatedBlock(renderedHabituated)
               if (newConsolidated !== this.consolidatedBlock) {
                 this.consolidatedBlock = newConsolidated
-                this.volatileBlock = newConsolidated
-                  ? this.frozenBase + '\n' + newConsolidated
-                  : this.frozenBase
+                // volatileBlock stays at frozenBase — consolidatedBlock goes
+                // into dynamic appendix (injected after message history).
+                // Mutating volatileBlock here would break exact-prefix cache
+                // for all subsequent turns (5-20% hit rate drop per event).
               }
 
               const activeCtx = { ...dynamicCtx }
@@ -158,7 +159,7 @@ export class PromptEngine {
 
               const activeAppendix = shouldInjectDynamicAppendix(this.mode) ? buildDynamicAppendix(activeCtx) : ''
               const projection = shouldInjectCvm(this.mode) ? this.cognitiveProjection : null
-              const fullAppendix = [projection, activeAppendix].filter(Boolean).join('\n')
+              const fullAppendix = [projection, this.consolidatedBlock, activeAppendix].filter(Boolean).join('\n')
               this.cachedFreshBlock = fullAppendix
                 ? this.volatileBlock + '\n' + fullAppendix
                 : this.volatileBlock
@@ -283,9 +284,7 @@ export class PromptEngine {
   private rebuildFrozenBase(): void {
     const ctx = { ...this.config.volatileCtx, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock }
     this.frozenBase = buildStableVolatileBlock(ctx)
-    this.volatileBlock = this.consolidatedBlock
-      ? this.frozenBase + '\n' + this.consolidatedBlock
-      : this.frozenBase
+    this.volatileBlock = this.frozenBase
   }
 
   setMode(mode: PromptMode): void {

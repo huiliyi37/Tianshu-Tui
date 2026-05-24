@@ -235,4 +235,68 @@ describe('PromptEngine active claims projection', () => {
     assert.match(contextMessages[1]!.content as string, /<star-domain name="破军"/)
     assert.equal(engine.checkDrift(), null)
   })
+
+  // P1.1: consolidatedBlock must NOT mutate volatileBlock
+  it('P1.1a: volatileBlock unchanged after habituation promotion', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 8000,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/tmp' },
+      habituationThreshold: 1, // tracker enabled
+    })
+
+    const frozenBase = (engine as any).frozenBase as string
+    assert.equal((engine as any).volatileBlock, frozenBase, 'volatileBlock should equal frozenBase at startup')
+
+    // Set execute phase (alpha=0.35, fastest habituation) and feed same domain
+    // 5 times. At turn 4+: confidence exceeds 0.8 → promotion fires.
+    engine.setPhaseHint('execute')
+    for (let i = 0; i < 5; i++) {
+      engine.setActiveDomain({ name: 'test', volatileBlock: 'block', motto: 'motto' })
+      engine.buildOaiRequest([{ role: 'user', content: `turn${i}` }])
+    }
+
+    // volatileBlock MUST NOT change after habituation promotion
+    assert.equal((engine as any).volatileBlock, frozenBase,
+      'volatileBlock should remain at frozenBase after habituation promotion')
+  })
+
+  it('P1.1b: consolidatedBlock injected into dynamic appendix, not frozen prefix', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 8000,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/tmp' },
+      habituationThreshold: 1, // tracker enabled
+    })
+
+    engine.setPhaseHint('execute')
+
+    // Feed same star-domain across 5 turns (each calls buildOaiRequest so
+    // tracker records the turn). Execute phase alpha=0.35 → 4 turns to
+    // exceed 0.8 confidence → habituation fires on turn 5.
+    for (let i = 1; i <= 5; i++) {
+      engine.setActiveDomain({ name: 'orion', volatileBlock: 'star-data', motto: 'guide' })
+      engine.buildOaiRequest([{ role: 'user', content: `turn${i}` }])
+    }
+
+    // Build request for turn 6 — consolidatedBlock (with habituated domain)
+    // should be in the LAST injected user message (cachedFreshBlock), which is
+    // the second-to-last user message (original msg is appended after it)
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'final' }])
+
+    const allUsers = req.messages.filter(m => m.role === 'user')
+    // The injected cached fresh volatile block is pushed BEFORE the original
+    // user message, so the second-to-last user message contains the volatile.
+    const injectedBlock = allUsers[allUsers.length - 2]?.content ?? ''
+
+    // consolidatedBlock with habituated domain should appear in injected block
+    assert.ok(injectedBlock.includes('star-data'),
+      'Habituated domain content should appear in injected fresh volatile block')
+
+    // frozenBase should NOT contain the habituated domain
+    assert.ok(!(engine as any).frozenBase.includes('star-data'),
+      'Frozen base should NOT contain habituated content')
+  })
 })
