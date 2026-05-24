@@ -1,23 +1,30 @@
 import type { OaiMessage } from '../api/oai-types.js'
-import { CACHE_ANCHOR_MESSAGES } from './constants.js'
-
-const DEFAULT_STALE_PREVIEW_CHARS = 1_200
-const RECENT_MESSAGES_TO_KEEP = 4
+import { CACHE_ANCHOR_MESSAGES, staleRoundThresholds } from './constants.js'
 
 // Match a trailing artifact marker like "[artifact:abc123]" optionally followed
 // by whitespace. We preserve this when truncating so the model can still call
 // read_section(artifactId=...) to retrieve the original content.
 const ARTIFACT_MARKER_REGEX = /\[artifact:([A-Za-z0-9_-]+)\]\s*$/
 
-/** OAI-format: truncate tool message content in stale rounds (N-2+). */
+/** OAI-format: truncate tool message content in stale rounds (N-2+).
+ *
+ * `recentToKeep` and `previewChars` scale with `contextWindow` via
+ * `staleRoundThresholds` — a 1M window keeps 30 recent messages and a 30K
+ * preview, while a 64K window keeps the legacy 4 / 1.2K. Callers may still
+ * pass `previewChars` explicitly to override.
+ */
 export function compactStaleRoundsOai(
   messages: OaiMessage[],
-  _contextWindow: number,
-  previewChars: number = DEFAULT_STALE_PREVIEW_CHARS,
+  contextWindow: number,
+  previewCharsOverride?: number,
 ): OaiMessage[] {
-  if (messages.length <= CACHE_ANCHOR_MESSAGES + RECENT_MESSAGES_TO_KEEP) return messages
+  const thresholds = staleRoundThresholds(contextWindow)
+  const recentToKeep = thresholds.recentToKeep
+  const previewChars = previewCharsOverride ?? thresholds.previewChars
 
-  const recentStart = Math.max(CACHE_ANCHOR_MESSAGES, messages.length - RECENT_MESSAGES_TO_KEEP)
+  if (messages.length <= CACHE_ANCHOR_MESSAGES + recentToKeep) return messages
+
+  const recentStart = Math.max(CACHE_ANCHOR_MESSAGES, messages.length - recentToKeep)
   let changed = false
 
   const result = messages.map((msg, idx) => {
@@ -46,3 +53,4 @@ export function compactStaleRoundsOai(
 
   return changed ? result : messages
 }
+

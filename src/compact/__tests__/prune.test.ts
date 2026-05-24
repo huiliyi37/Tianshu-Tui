@@ -105,4 +105,51 @@ describe('pruneStaleToolResults', () => {
     assert.ok(pruned.content.includes('use read_section'), 'should hint at read_section recovery')
     assert.ok(pruned.content.startsWith('[pruned:'), 'still starts with [pruned: idempotency marker')
   })
+
+  it('1M context window: protects 60 recent messages and skips content under 30K', () => {
+    // Regression: before window-aware thresholds, a 1M context with 12+ messages
+    // pruned all stale tool_results to ~50-char placeholders, deleting up to
+    // 60K of read_file content per call and triggering "split temp files"
+    // workarounds in the model.
+    const content60K = 'a'.repeat(60_000)
+    const messages: OaiMessage[] = [
+      userMsg('system'), assistantMsg('anchor'),
+      // 4 turns of read_file results, each 60K — would be pruned with legacy 8/1200
+      assistantMsg('a1'), toolMsg(content60K),
+      assistantMsg('a2'), toolMsg(content60K),
+      assistantMsg('a3'), toolMsg(content60K),
+      assistantMsg('a4'), toolMsg(content60K),
+      // 8 more turns, all small tool_results
+      ...Array.from({ length: 8 }, (_, i) => [
+        assistantMsg(`a${i}`), toolMsg('r'),
+      ]).flat(),
+    ]
+    // 26 messages total — under window-aware protectRecent=60, so nothing prunes.
+    const result = pruneStaleToolResults(messages, { contextWindow: 1_000_000 })
+    assert.equal(result.prunedCount, 0, '1M window must not prune within 60 recent messages')
+  })
+
+  it('1M context window: still prunes when truly stale (66+ messages)', () => {
+    // If we *do* exceed 60 protected + 2 anchor = 62, the oldest tool_results
+    // beyond protection should still be pruned, but only when above 30K.
+    const content40K = 'a'.repeat(40_000)
+    const messages: OaiMessage[] = [
+      userMsg('system'), assistantMsg('anchor'),
+      assistantMsg('old'), toolMsg(content40K),  // idx 3 — should be pruned
+      // 70 padding messages to push idx 3 into the stale region
+      ...Array.from({ length: 70 }, () => assistantMsg('pad')),
+    ]
+    const result = pruneStaleToolResults(messages, { contextWindow: 1_000_000 })
+    assert.equal(result.prunedCount, 1, 'truly stale 40K tool_result should be pruned even on 1M')
+  })
+
+  it('legacy small window (<200K) keeps the original 8-message / 1200-char behavior', () => {
+    const messages: OaiMessage[] = [
+      userMsg('system'), assistantMsg('anchor'),
+      assistantMsg('a1'), toolMsg('x'.repeat(2000)),  // pruneable: > 1200
+      ...Array.from({ length: 10 }, () => assistantMsg('pad')),
+    ]
+    const result = pruneStaleToolResults(messages, { contextWindow: 64_000 })
+    assert.equal(result.prunedCount, 1, 'legacy window must still prune > 1200 char content')
+  })
 })

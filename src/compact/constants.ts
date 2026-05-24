@@ -150,11 +150,64 @@ export function adaptiveCompactPolicyRatios(
   return base
 }
 
-/** Prune: number of recent messages to protect from clearing */
+/** Prune: number of recent messages to protect from clearing.
+ * Legacy default for small (<200K) windows. Use `pruneThresholds(contextWindow)`
+ * for window-aware values; this constant is retained as the fallback. */
 export const PRUNE_PROTECT_RECENT_MESSAGES = 8
 
-/** Prune: minimum content length to bother clearing (shorter results cost little) */
+/** Prune: minimum content length to bother clearing (shorter results cost little).
+ * Legacy default for small windows; see `pruneThresholds`. */
 export const PRUNE_MIN_CONTENT_CHARS = 1_200
+
+export interface PruneThresholds {
+  protectRecent: number
+  minChars: number
+}
+
+/**
+ * Window-aware prune thresholds.
+ *
+ * The legacy 8-message / 1.2KB defaults date back to the 64K-window era. On a
+ * 1M window they fire after only 4–5 turns and replace ~60KB tool_results
+ * (e.g. a single read_file) with `[pruned: …]` placeholders. The model loses
+ * the content it just read and falls back to "split into temp files" workarounds
+ * trained for truncated contexts.
+ *
+ * We scale up so prune only kicks in when there is real pressure, not after
+ * every 4 turns.
+ */
+export function pruneThresholds(contextWindow: number): PruneThresholds {
+  if (contextWindow >= 500_000) {
+    // 500K–1M+: protect ~30 turns worth of messages and only clear truly
+    // large tool_results. A 1M window can hold this comfortably.
+    return { protectRecent: 60, minChars: 30_000 }
+  }
+  if (contextWindow >= 200_000) {
+    return { protectRecent: 30, minChars: 10_000 }
+  }
+  // <200K: keep the legacy aggressive behaviour — small windows really do
+  // need prune to fire early.
+  return { protectRecent: PRUNE_PROTECT_RECENT_MESSAGES, minChars: PRUNE_MIN_CONTENT_CHARS }
+}
+
+/** Stale-round compaction (truncate tool messages in N-2+ rounds): same scaling
+ * as prune so the two layers stay coherent. Stale-round runs *after* prune and
+ * truncates rather than fully replacing, so it tolerates more aggressive
+ * settings than prune. */
+export interface StaleRoundThresholds {
+  recentToKeep: number
+  previewChars: number
+}
+
+export function staleRoundThresholds(contextWindow: number): StaleRoundThresholds {
+  if (contextWindow >= 500_000) {
+    return { recentToKeep: 30, previewChars: 30_000 }
+  }
+  if (contextWindow >= 200_000) {
+    return { recentToKeep: 12, previewChars: 8_000 }
+  }
+  return { recentToKeep: 4, previewChars: 1_200 }
+}
 
 /** Per-message aggregate budget: max total chars across all tool results in one turn */
 export const PER_MESSAGE_TOOL_RESULT_BUDGET_CHARS = 120_000

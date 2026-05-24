@@ -21,7 +21,7 @@ describe('compactStaleRoundsOai', () => {
       toolMsg('tu_2', 'y'.repeat(5000)),
       assistantMsg('final'),
     ]
-    const result = compactStaleRoundsOai(messages, 1_000_000)
+    const result = compactStaleRoundsOai(messages, 64_000)
     assert.strictEqual(result[0], messages[0])
     assert.strictEqual(result[1], messages[1])
   })
@@ -37,7 +37,7 @@ describe('compactStaleRoundsOai', () => {
       toolMsg('tu_3', 'C'.repeat(5000)),
       assistantMsg('round3'),
     ]
-    const result = compactStaleRoundsOai(messages, 1_000_000)
+    const result = compactStaleRoundsOai(messages, 64_000)
     assert.ok(result[2]!.content!.length <= 1400, `Expected <=1400, got ${result[2]!.content!.length}`)
     assert.strictEqual(result[4]!.content!.length, 5000)
     assert.strictEqual(result[6]!.content!.length, 5000)
@@ -50,7 +50,7 @@ describe('compactStaleRoundsOai', () => {
       toolMsg('tu_1', 'short'),
       assistantMsg('done'),
     ]
-    const result = compactStaleRoundsOai(messages, 1_000_000)
+    const result = compactStaleRoundsOai(messages, 64_000)
     assert.strictEqual(result, messages)
   })
 
@@ -63,7 +63,7 @@ describe('compactStaleRoundsOai', () => {
       toolMsg('tu_1', 'C'.repeat(5000)),
       assistantMsg('current'),
     ]
-    const result = compactStaleRoundsOai(messages, 1_000_000)
+    const result = compactStaleRoundsOai(messages, 64_000)
     assert.ok(result.length === messages.length)
   })
 })

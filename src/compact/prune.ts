@@ -1,5 +1,10 @@
 import type { OaiMessage } from '../api/oai-types.js'
-import { CACHE_ANCHOR_MESSAGES, PRUNE_PROTECT_RECENT_MESSAGES, PRUNE_MIN_CONTENT_CHARS } from './constants.js'
+import {
+  CACHE_ANCHOR_MESSAGES,
+  PRUNE_PROTECT_RECENT_MESSAGES,
+  PRUNE_MIN_CONTENT_CHARS,
+  pruneThresholds,
+} from './constants.js'
 
 // Match a trailing artifact marker like "[artifact:abc123]". When prune fires
 // on a tool_result whose content carries this marker (e.g. read_file output),
@@ -11,6 +16,10 @@ const ARTIFACT_MARKER_REGEX = /\[artifact:([A-Za-z0-9_-]+)\]\s*$/
 export interface PruneOptions {
   protectRecentMessages?: number
   minContentChars?: number
+  /** When set, derive protectRecentMessages and minContentChars via
+   * `pruneThresholds(contextWindow)`. Explicit `protectRecentMessages` /
+   * `minContentChars` still override. */
+  contextWindow?: number
 }
 
 export interface PruneResult {
@@ -23,8 +32,12 @@ export function pruneStaleToolResults(
   messages: OaiMessage[],
   options: PruneOptions = {},
 ): PruneResult {
-  const protectRecent = options.protectRecentMessages ?? PRUNE_PROTECT_RECENT_MESSAGES
-  const minChars = options.minContentChars ?? PRUNE_MIN_CONTENT_CHARS
+  const windowDefaults = options.contextWindow !== undefined
+    ? pruneThresholds(options.contextWindow)
+    : { protectRecent: PRUNE_PROTECT_RECENT_MESSAGES, minChars: PRUNE_MIN_CONTENT_CHARS }
+
+  const protectRecent = options.protectRecentMessages ?? windowDefaults.protectRecent
+  const minChars = options.minContentChars ?? windowDefaults.minChars
 
   if (messages.length <= CACHE_ANCHOR_MESSAGES + protectRecent) {
     return { messages, prunedCount: 0, freedChars: 0 }

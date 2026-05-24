@@ -46,9 +46,15 @@ export class CompactionController {
 
     // Lightweight prune: clear stale tool results before checking compact thresholds.
     // Free (no LLM call) and stabilizes the prefix for cache hits.
-    const pruneResult = pruneStaleToolResults(messages)
+    // Pass contextWindow so prune scales its protectRecent/minChars to the
+    // window — prevents the 1M-window-but-still-pruning-after-4-turns regression.
+    const beforePruneTokens = this.deps.session.getEstimatedTokens()
+    const pruneResult = pruneStaleToolResults(messages, { contextWindow: this.deps.contextWindow })
     if (pruneResult.prunedCount > 0) {
       this.deps.session.replaceMessages(pruneResult.messages)
+      const afterPruneTokens = this.deps.session.getEstimatedTokens()
+      // eslint-disable-next-line no-console
+      console.warn(`[prune] pruned=${pruneResult.prunedCount} freedChars=${pruneResult.freedChars} ctxWindow=${this.deps.contextWindow} tokens=${beforePruneTokens}->${afterPruneTokens}`)
     }
 
     const estimatedTokens = this.deps.session.getEstimatedTokens()

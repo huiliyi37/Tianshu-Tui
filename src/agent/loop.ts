@@ -12,7 +12,7 @@ import { SessionPersist } from './session-persist.js'
 import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
 import { batchPrewarm, buildPrewarmValue } from './prewarm-file.js'
-import { type CompactionConfig } from '../compact/constants.js'
+import { type CompactionConfig, staleRoundThresholds } from '../compact/constants.js'
 import { generateHandoff } from '../compact/pre-compact-handoff.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
@@ -1007,8 +1007,12 @@ export class AgentLoop {
             }
 
             const before = this.session.getMessages()
-            const previewChars = this.cacheAdvisor.getStalePreviewChars()
-            const after = compactStaleRoundsOai(before, contextWindow, previewChars)
+            // Take max of cacheAdvisor's adaptive value and the window-aware
+            // default. cacheAdvisor is bounded to 600–2400 (legacy small-window
+            // tuning); on a 1M window staleRoundThresholds gives 30K, which we
+            // want to win unless cacheAdvisor has actually escalated.
+            const advisorPreview = this.cacheAdvisor.getStalePreviewChars()
+            const after = compactStaleRoundsOai(before, contextWindow, Math.max(advisorPreview, staleRoundThresholds(contextWindow).previewChars))
             if (after !== before) {
               this.session.replaceMessages(after)
               if (typeof globalThis.gc === 'function') globalThis.gc()
