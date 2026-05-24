@@ -4,7 +4,7 @@ import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { pruneStaleToolResults } from '../compact/prune.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
-import type { CompactCircuitBreakerState } from '../context/types.js'
+import type { CompactCircuitBreakerState, CompactTier } from '../context/types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import type { PromptEngine } from '../prompt/engine.js'
@@ -127,33 +127,38 @@ export class CompactionController {
     const ceiling = this.deps.contextWindow * 0.95
     if (this.deps.session.getEstimatedTokens() <= ceiling) return
 
-    const messages = this.deps.session.getMessages()
     const taskState = extractTaskState(this.deps.getTrajectoryEntries(), this.deps.getStreamedText())
+    const trajectory = this.deps.getTrajectoryEntries()
+
     const stateLines = [
       `Current: ${taskState.current}`,
       ...taskState.completed.map(item => `Completed: ${item}`),
       ...taskState.remaining.map(item => `Remaining: ${item}`),
       ...taskState.decisions.map(item => `Decision: ${item}`),
     ]
-    const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
-    let resumeContent = `<checkpoint-resume>\n${stateLines.join('\n')}\n</checkpoint-resume>`
-    let candidate: OaiMessage[] = [...anchorMessages, { role: 'user', content: resumeContent }]
 
-    if (estimateOaiTokens(candidate) > ceiling) {
-      resumeContent = '<checkpoint-resume>Context ceiling exceeded. Continue from preserved cache anchors and ask for missing details if needed.</checkpoint-resume>'
-      candidate = [...anchorMessages, { role: 'user', content: resumeContent }]
+    // Tool call mappings from trajectory (more reliable than regex from content)
+    const recentTools = trajectory.slice(-10)
+    for (const t of recentTools) {
+      const status = t.status === 'failed' ? 'FAIL' : t.status === 'retried-success' ? 'ok*' : 'ok'
+      stateLines.push(`Tool: ${t.tool} ${t.target} [${status}]`)
     }
 
-    this.deps.session.replaceMessages(candidate)
-    this.deps.session.recordCompactEvent({
-      turn: this.deps.session.getTurnCount(),
+    // Failure patterns with error classes
+    const failures = trajectory.filter(t => t.status === 'failed' || t.status === 'retried-failed')
+    for (const f of failures.slice(0, 5)) {
+      stateLines.push(`Failed: ${f.tool} in ${f.target} (${f.errorClass ?? 'unknown'})`)
+    }
+
+    const resumeContent = `<checkpoint-resume>\n${stateLines.join('\n')}\n</checkpoint-resume>`
+
+    this.replaceWithCheckpoint({
       tier: 4,
       reason: 'context ceiling exceeded; checkpoint-resume required',
-      beforeTokens: estimateOaiTokens(messages),
-      afterTokens: this.deps.session.getEstimatedTokens(),
-      createdAt: Date.now(),
+      summary: resumeContent,
+      maxFallback: ceiling,
+      fallbackText: '<checkpoint-resume>Context ceiling exceeded. Continue from preserved cache anchors and ask for missing details if needed.</checkpoint-resume>',
     })
-    this.deps.refreshLedger()
   }
 
   /**
@@ -220,41 +225,39 @@ export class CompactionController {
       handoffLines.push(`Files: ${files.join(', ')}`)
     }
 
+    // Tool call mappings from trajectory (more reliable than regex from content)
+    const trajectory = this.deps.getTrajectoryEntries()
+    const recentTools = trajectory.slice(-10)
+    for (const t of recentTools) {
+      const status = t.status === 'failed' ? 'FAIL' : t.status === 'retried-success' ? 'ok*' : 'ok'
+      handoffLines.push(`Tool: ${t.tool} ${t.target} [${status}]`)
+    }
+
+    // Failure patterns with error classes (preserve across session split)
+    const failures = trajectory.filter(t => t.status === 'failed' || t.status === 'retried-failed')
+    for (const f of failures.slice(0, 5)) {
+      handoffLines.push(`Failed: ${f.tool} in ${f.target} (${f.errorClass ?? 'unknown'})`)
+    }
+
     let handoffContent = `<session-handoff>\n${handoffLines.join('\n')}\n</session-handoff>`
     if (reasoningParts.length > 0) {
       const reasoning = reasoningParts.join('\n\n---\n\n')
       handoffContent += `\n\n## Recent reasoning:\n${reasoning.slice(-MAX_REASONING_CHARS)}`
     }
 
-    const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
-    let candidate: OaiMessage[] = [
-      ...anchorMessages,
-      { role: 'user', content: handoffContent },
-    ]
-
-    // Safety: if the handoff itself is too large, use a minimal fallback
-    if (estimateOaiTokens(candidate) > this.deps.contextWindow * 0.3) {
-      const fallback = `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context. ${taskState.current}</session-handoff>`
-      candidate = [...anchorMessages, { role: 'user', content: fallback }]
-    }
-
-    const beforeTokens = this.deps.session.getEstimatedTokens()
-    this.deps.session.replaceMessages(candidate)
-    this.deps.session.recordCompactEvent({
-      turn: this.deps.session.getTurnCount(),
+    this.replaceWithCheckpoint({
       tier: 3,
       reason: `session split at ${(ratio * 100).toFixed(0)}% context`,
-      beforeTokens,
-      afterTokens: this.deps.session.getEstimatedTokens(),
-      createdAt: Date.now(),
+      summary: handoffContent,
+      maxFallback: this.deps.contextWindow * 0.3,
+      fallbackText: `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context. ${taskState.current}</session-handoff>`,
     })
-    this.deps.refreshLedger()
 
     // eslint-disable-next-line no-console
     console.warn(
       `[session-split] ratio=${ratio.toFixed(2)} files=${filesSeen.size} ` +
       `reasoning_chars=${reasoningParts.join('').length} ` +
-      `tokens=${beforeTokens}->${this.deps.session.getEstimatedTokens()}`
+      `tokens=${this.deps.session.getEstimatedTokens()}`
     )
 
     return true
@@ -279,5 +282,38 @@ export class CompactionController {
     tokenCount: number,
   ): { messages: OaiMessage[] } {
     return microCompactOai(messages, this.deps.contextWindow, tokenCount)
+  }
+
+  /**
+   * Replace message history with cache anchors + checkpoint summary.
+   * Called by both trySessionSplit (86% threshold, richer handoff) and
+   * enforceContextCeiling (95% threshold, emergency fallback).
+   */
+  private replaceWithCheckpoint(params: {
+    tier: CompactTier
+    reason: string
+    summary: string
+    maxFallback: number
+    fallbackText: string
+  }): void {
+    const messages = this.deps.session.getMessages()
+    const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
+    let candidate: OaiMessage[] = [...anchorMessages, { role: 'user', content: params.summary }]
+
+    if (estimateOaiTokens(candidate) > params.maxFallback) {
+      candidate = [...anchorMessages, { role: 'user', content: params.fallbackText }]
+    }
+
+    const beforeTokens = estimateOaiTokens(messages)
+    this.deps.session.replaceMessages(candidate)
+    this.deps.session.recordCompactEvent({
+      turn: this.deps.session.getTurnCount(),
+      tier: params.tier,
+      reason: params.reason,
+      beforeTokens,
+      afterTokens: this.deps.session.getEstimatedTokens(),
+      createdAt: Date.now(),
+    })
+    this.deps.refreshLedger()
   }
 }

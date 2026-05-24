@@ -4,6 +4,7 @@ import { CompactionController } from '../compaction-controller.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { PressureMonitor } from '../../context/pressure-monitor.js'
+import type { TrajectoryEntry } from '../trajectory.js'
 
 function makeEngine(): PromptEngine {
   return new PromptEngine({
@@ -338,5 +339,156 @@ describe('CompactionController', () => {
     assert.equal(didSplit, false, 'should not split on small windows')
     // Messages should be unchanged
     assert.equal(session.getMessages().length, tokensBefore)
+  })
+
+  // P3: trySessionSplit and enforceContextCeiling share the same structural
+  // pattern: preserve CACHE_ANCHOR_MESSAGES + inject a handoff user message.
+  // The unified replaceWithCheckpoint method powers both.
+  it('P3: trySessionSplit and enforceContextCeiling produce structurally equivalent output', () => {
+    // === trySessionSplit path ===
+    const session1 = new SessionContext()
+    const huge = 'x'.repeat(220_000 * 4)
+    session1.replaceMessages([
+      { role: 'user', content: 'anchor user 1' },
+      { role: 'assistant', content: 'anchor assistant 1' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+    ])
+    let refreshed1 = false
+    const ctrl1 = makeController(session1, {
+      contextWindow: 1_000_000,
+      refreshLedger: () => { refreshed1 = true },
+    })
+    const didSplit = ctrl1.trySessionSplit()
+    assert.equal(didSplit, true)
+    const msgs1 = session1.getMessages()
+    // Structural invariant: anchors + 1 handoff
+    assert.equal(msgs1.length, 3)
+    assert.equal(msgs1[0]?.role, 'user')
+    assert.equal(msgs1[1]?.role, 'assistant')
+    assert.equal(msgs1[2]?.role, 'user')
+    assert.match(String(msgs1[2]?.content), /<session-handoff>/)
+    assert.equal(refreshed1, true)
+
+    // === enforceContextCeiling path ===
+    const session2 = new SessionContext()
+    const huge2 = 'x'.repeat(200_000 * 4)
+    session2.replaceMessages([
+      { role: 'user', content: 'anchor user 2' },
+      { role: 'assistant', content: 'anchor assistant 2' },
+      { role: 'user', content: huge2 },
+      { role: 'assistant', content: huge2 },
+      { role: 'user', content: huge2 },
+      { role: 'assistant', content: huge2 },
+      { role: 'user', content: huge2 },
+    ])
+    let refreshed2 = false
+    const ctrl2 = makeController(session2, {
+      contextWindow: 1_000_000,
+      refreshLedger: () => { refreshed2 = true },
+    })
+    ctrl2.enforceContextCeiling()
+    const msgs2 = session2.getMessages()
+    // Same structural invariant: anchors + 1 handoff
+    assert.equal(msgs2.length, 3)
+    assert.equal(msgs2[0]?.role, 'user')
+    assert.equal(msgs2[1]?.role, 'assistant')
+    assert.equal(msgs2[2]?.role, 'user')
+    assert.match(String(msgs2[2]?.content), /<checkpoint-resume>/)
+    assert.equal(refreshed2, true)
+  })
+
+  // P4: Session split handoff should include tool call mappings from
+  // trajectory (tool → target, status) and failure patterns with error classes.
+  it('P4: session split handoff includes tool call mappings from trajectory', () => {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(220_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'initial request' },
+      { role: 'assistant', content: 'I will refactor the codebase' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+    ])
+
+    const trajectory: TrajectoryEntry[] = [
+      { turn: 1, tool: 'read_file', target: 'src/loop.ts', durationMs: 50, status: 'success', inputSummary: 'read', resultSummary: 'ok' },
+      { turn: 2, tool: 'edit_file', target: 'src/loop.ts', durationMs: 100, status: 'success', inputSummary: 'edit', resultSummary: 'ok' },
+      { turn: 3, tool: 'bash', target: 'npx tsc --noEmit', durationMs: 3000, status: 'failed', errorClass: 'TS2322', inputSummary: 'typecheck', resultSummary: 'error' },
+      { turn: 4, tool: 'edit_file', target: 'src/loop.ts', durationMs: 80, status: 'retried-success', inputSummary: 'fix', resultSummary: 'ok' },
+      { turn: 5, tool: 'bash', target: 'npx tsc --noEmit', durationMs: 2000, status: 'success', inputSummary: 'typecheck', resultSummary: 'PASS' },
+    ]
+
+    let refreshed = false
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      getTrajectoryEntries: () => trajectory,
+      refreshLedger: () => { refreshed = true },
+    })
+
+    const didSplit = controller.trySessionSplit()
+    assert.equal(didSplit, true)
+
+    const msgs = session.getMessages()
+    const handoff = String(msgs[2]?.content ?? '')
+
+    // Should include tool call mappings with status
+    assert.match(handoff, /edit_file/)
+    assert.match(handoff, /read_file/)
+    assert.match(handoff, /bash/)
+
+    // Should include failure patterns with error class
+    assert.match(handoff, /failed/i)
+    assert.match(handoff, /TS2322/, 'handoff must include error class from failed tool calls')
+
+    // Should indicate retries via ok* notation
+    assert.match(handoff, /ok\*/, 'handoff must indicate retried-success with ok* notation')
+
+    assert.equal(refreshed, true)
+  })
+
+  it('P4: enforceContextCeiling handoff also benefits from trajectory data', () => {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(200_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+    ])
+
+    const trajectory: TrajectoryEntry[] = [
+      { turn: 1, tool: 'read_file', target: 'src/foo.ts', durationMs: 30, status: 'success', inputSummary: 'read', resultSummary: 'ok' },
+      { turn: 2, tool: 'write_file', target: 'src/bar.ts', durationMs: 40, status: 'failed', errorClass: 'ENOENT', inputSummary: 'write', resultSummary: 'error' },
+    ]
+
+    let refreshed = false
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      getTrajectoryEntries: () => trajectory,
+      getStreamedText: () => 'I need to fix the ENOENT error and implement the feature',
+      refreshLedger: () => { refreshed = true },
+    })
+
+    controller.enforceContextCeiling()
+
+    const msgs = session.getMessages()
+    const handoff = String(msgs[2]?.content ?? '')
+
+    // Should include tool names from trajectory (more reliable than regex from content)
+    assert.match(handoff, /read_file/)
+    assert.match(handoff, /write_file/)
+
+    // Should include failure context
+    assert.match(handoff, /failed/i)
+    assert.match(handoff, /ENOENT/, 'ceiling handoff must include error class')
+
+    assert.equal(refreshed, true)
   })
 })
