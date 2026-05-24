@@ -28,6 +28,7 @@ import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.j
 import { PrewarmCache } from './prewarm.js'
 import { compactThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
+import { getStarSignature } from './star-signature.js'
 import type { ImmuneHook } from './immune-hook.js'
 import { detectMistakeResolution } from './mistake-detector.js'
 import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
@@ -307,6 +308,9 @@ export async function executeToolUse(
     artifactStore: deps.artifactStore,
   }
 
+  // Star signature: counter training-mode regression at token level (思路 E)
+  const starSig = getStarSignature(tu.name)
+
   try {
     // Cerebellar Loop: read-before-edit gate
     const intervention = deps.getInterventionLevel?.() ?? 'none'
@@ -364,7 +368,7 @@ export async function executeToolUse(
     if (reliabilityDecision && !isToolAllowedInReliabilityMode(reliabilityDecision.mode, tu.name, tu.input)) {
       const msg = reliabilityBlockMessage(reliabilityDecision, tu.name)
       callbacks.onToolResult(tu.id, tu.name, msg, true)
-      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
     }
 
     // Strategy shift + doom loop check
@@ -389,7 +393,7 @@ export async function executeToolUse(
         'Recovery: try a different tool (e.g. read_file, todo), change the input, or modify the target path.',
       ].join('\n')
       callbacks.onToolResult(tu.id, tu.name, msg, true)
-      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
     }
 
     // Approval gate — with sensorium-driven adaptive confidence
@@ -725,9 +729,7 @@ ${check.formatted}`
         }
       }
     } else if (tu.name === 'run_tests' && rawToolResult) {
-      if (rawToolResult.verification) {
-        deps.evidence.trackVerification(rawToolResult.verification)
-      }
+
       if (rawToolResult.verification && rawToolResult.verification.status !== 'passed') {
         const failures = classifyTestRun(harnessResult.content)
         if (failures.length > 0 && failures[0]!.confidence >= 0.7) {
@@ -744,16 +746,16 @@ ${check.formatted}`
           diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError, diagThreshold, diagBudgetFrac)
           const diagEvictedId = extractArtifactId(diagnosedContent)
           if (diagEvictedId) deps.artifactIdsEvicted?.push(diagEvictedId)
-          return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+          return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? diagnosedContent + starSig : diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
         }
       }
     }
 
-    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
     callbacks.onToolResult(tu.id, tu.name, msg, true)
-    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
   }
 }
