@@ -105,7 +105,8 @@ export class ImmuneHook {
 
     // 5. APC dual-signal gating
     const patternMatch = ctx.doomLevel !== 'none'
-    const activation = this.apc.evaluate(patternMatch, ctx.turn)
+    const mistakeCount = Array.from(this.repairFailCounts.values()).reduce((s, c) => s + c, 0)
+    const activation = this.apc.evaluate(patternMatch, ctx.turn, mistakeCount)
 
     if (!activation.shouldActivate) {
       this.maybeRunMaintenance(ctx.turn)
@@ -157,11 +158,27 @@ export class ImmuneHook {
   /** Record successful repair (called externally after repair pipeline succeeds) */
   recordRepairSuccess(fingerprint: string, response: ImmuneResponse, turn: number): void {
     this.adaptive.recordSuccess(fingerprint, response, turn)
+    this.repairFailCounts.delete(fingerprint)
   }
 
-  /** Record failed repair */
-  recordRepairFailure(fingerprint: string): void {
+  /** Track consecutive failures per fingerprint */
+  private repairFailCounts = new Map<string, number>()
+
+  /** Record failed repair — injects repair_exhaustion signal after 3 consecutive failures */
+  recordRepairFailure(fingerprint: string, turn: number): void {
     this.adaptive.recordFailure(fingerprint)
+    const count = (this.repairFailCounts.get(fingerprint) ?? 0) + 1
+    this.repairFailCounts.set(fingerprint, count)
+    if (count >= 3) {
+      this.injectSignal({
+        kind: 'repair_exhaustion',
+        severity: 0.8,
+        turn,
+        source: 'immune-adaptive',
+        context: `fingerprint ${fingerprint} failed ${count} consecutive repairs`,
+      })
+      this.repairFailCounts.delete(fingerprint)
+    }
   }
 
   /** Inject external danger signal (e.g., from compaction failure, sycophancy trap, prompt injection detection) */

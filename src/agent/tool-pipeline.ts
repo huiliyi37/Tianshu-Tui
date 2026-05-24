@@ -713,6 +713,20 @@ ${check.formatted}`
     // Evidence tracking + import graph
     if (tu.name === 'read_file' && !harnessResult.isError) {
       deps.evidence.trackFileRead(tu.input.file_path as string)
+
+      // compaction_fail signal: read_file returns pruned/diet content
+      const hasPruned = finalContent.includes('[pruned]') || finalContent.includes('[diet:redundant]')
+      if (hasPruned) {
+        try {
+          deps.immuneHook?.injectSignal({
+            kind: 'compaction_fail',
+            severity: 0.6,
+            turn,
+            source: 'tool-pipeline',
+            context: `read_file returned pruned content for ${tu.input.file_path}`,
+          })
+        } catch { /* non-critical: signal injection is best-effort */ }
+      }
     } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
       deps.evidence.trackFileModified(tu.input.file_path as string)
       deps.config.contextClaimStore?.markClaimsStaleForFile(

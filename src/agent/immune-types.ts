@@ -46,4 +46,5 @@ export interface ActivationDecision {
   shouldActivate: boolean
   confidence: number
   signals: DangerSignal[]
+  responseType?: ImmuneResponseType
 }
