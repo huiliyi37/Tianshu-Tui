@@ -25,7 +25,7 @@ import { isToolAllowed } from './permissions.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
 import { PrewarmCache } from './prewarm.js'
-import { compactThresholds } from '../compact/constants.js'
+import { compactThresholds, pruneThresholds } from '../compact/constants.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 import { getStarSignature } from './star-signature.js'
 import type { ImmuneHook } from './immune-hook.js'
@@ -144,6 +144,13 @@ const ARTIFACT_ERROR_THRESHOLD = 1600 // chars — error results need more inlin
 /** Tools whose output is the agent's "eyes" — intercept only at very high thresholds. */
 const READ_TOOLS: ReadonlySet<string> = new Set([
   'read_file', 'grep', 'glob', 'find_files', 'search', 'repo_map', 'inspect_project',
+  // read_section is the model's escape hatch from artifact references. Its output
+  // is content the model explicitly asked for (artifactId + section), already
+  // capped by computeModelReadCap inside the tool. Wrapping it again here turned
+  // every recovery attempt into [artifact:NEW_ID] -> read_section(NEW_ID) -> ...
+  // an infinite nesting loop the model could only escape by requesting tiny
+  // L1-L10 slices. (Diagnosed by tianshu v4 pro post-mortem 2026-05-25.)
+  'read_section',
 ])
 
 /** Heuristic: is this bash command read-only (cat, grep, find, git log/diff/status, ls, etc.)? */
@@ -160,6 +167,7 @@ async function artifactIntercept(
   isError = false,
   thresholdOverride?: number,
   remainingBudgetFraction?: number,
+  contextWindow?: number,
 ): Promise<string> {
   if (!artifactStore) return content
   // Read-class tools bypass artifact intercept entirely — rely on per-message budget + hard truncation.
@@ -167,6 +175,20 @@ async function artifactIntercept(
   if (isReadTool) return content
 
   let threshold = thresholdOverride ?? (isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD)
+
+  // Context-window-aware floor for SUCCESS results: align with L0 (per-tool)
+  // artifact wrapping in read-file/bash/grep, which uses pruneThresholds.minChars.
+  // Without this floor, cacheAdvisor.getArtifactThreshold (capped at MAX_ARTIFACT=4000)
+  // and the static 2500-char fallback both wrap medium-sized outputs (delegate_batch
+  // 14K, sandbox_exec 5K, bash sed 8K) even on a 1M window. Tianshu v4 pro's
+  // post-mortem identified this as the L1 layer of the four-layer compression
+  // architecture — small enough to misfire on every interesting tool result.
+  // Errors keep the original behavior: stack traces below ~30K are useful inline,
+  // and we want larger error blobs (e.g. 200K test output) to still be intercepted.
+  if (!isError && contextWindow != null) {
+    const floor = pruneThresholds(contextWindow).minChars
+    threshold = Math.max(threshold, floor)
+  }
 
   // Budget-aware scaling: when context budget is ample, inline more aggressively
   if (remainingBudgetFraction != null) {
@@ -178,7 +200,11 @@ async function artifactIntercept(
     // < 0.3 → use base threshold (context is getting tight)
   }
 
-  if (content.length <= threshold) return content
+  if (content.length <= threshold) {
+    // eslint-disable-next-line no-console
+    console.warn(`[artifact-intercept-skip] tool=${toolName} len=${content.length} threshold=${threshold} isError=${isError}`)
+    return content
+  }
   if (content.startsWith('[artifact:')) return content // already an artifact ref
 
   // Determine target label for the artifact
@@ -532,7 +558,7 @@ ${check.formatted}`
       const budgetFraction = deps.turnBudget.maxTokensPerTurn > 0
         ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
         : 1
-      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, false, successThreshold, budgetFraction)
+      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, false, successThreshold, budgetFraction, deps.config.contextWindow)
       // Track eviction for GhostRegistry
       const evictedId = extractArtifactId(finalContent)
       if (evictedId) deps.artifactIdsEvicted?.push(evictedId)
@@ -552,7 +578,7 @@ ${check.formatted}`
       const budgetFraction = deps.turnBudget.maxTokensPerTurn > 0
         ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
         : 1
-      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, true, errorThreshold, budgetFraction)
+      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, true, errorThreshold, budgetFraction, deps.config.contextWindow)
       // Track eviction for GhostRegistry (error artifacts too)
       const evictedErrId = extractArtifactId(finalContent)
       if (evictedErrId) deps.artifactIdsEvicted?.push(evictedErrId)
@@ -753,7 +779,7 @@ ${check.formatted}`
           const diagBudgetFrac = deps.turnBudget.maxTokensPerTurn > 0
             ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
             : 1
-          diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError, diagThreshold, diagBudgetFrac)
+          diagnosedContent = await artifactIntercept(diagnosedContent, tu.name, tu.input, deps.artifactStore, harnessResult.isError, diagThreshold, diagBudgetFrac, deps.config.contextWindow)
           const diagEvictedId = extractArtifactId(diagnosedContent)
           if (diagEvictedId) deps.artifactIdsEvicted?.push(diagEvictedId)
           return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? diagnosedContent + starSig : diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
