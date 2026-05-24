@@ -398,6 +398,36 @@ export class AgentLoop {
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
       this.persist = new SessionPersist(this.config.sessionId)
+
+      // P0-1: Mirror every in-memory message change to disk so non-/exit
+      // shutdowns (Ctrl+C, crash, network drop) don't lose the session.
+      // - append: serialize via a single promise chain to keep file order
+      //   stable even when consecutive tool_results fire fast.
+      // - replace: full atomic rewrite via compactOai (compaction/reset).
+      const persist = this.persist
+      let writeChain: Promise<void> = Promise.resolve()
+      this.session.setMutationListener((m) => {
+        if (m.type === 'append') {
+          const msg = m.message
+          writeChain = writeChain
+            .then(() => persist.appendOaiWithChecksum(msg))
+            .catch(err => {
+              // Persistence failures must not crash the agent loop.
+              // Surface to stderr; the in-memory state is still authoritative.
+              // eslint-disable-next-line no-console
+              console.error('[session-persist] append failed:', err)
+            })
+        } else {
+          // replace is rare (compaction/reset); do it synchronously after the
+          // current append queue drains so the rewrite reflects the latest state.
+          writeChain = writeChain
+            .then(() => { persist.compactOai(m.messages) })
+            .catch(err => {
+              // eslint-disable-next-line no-console
+              console.error('[session-persist] compact failed:', err)
+            })
+        }
+      })
     }
   }
 

@@ -38,8 +38,21 @@ export interface SessionState {
   compactEvents: CompactEvent[]
 }
 
+/**
+ * Notification emitted whenever the in-memory message list changes. A listener
+ * can subscribe via {@link SessionContext.setMutationListener} to mirror the
+ * change to durable storage.
+ *
+ * - `append`: a single message was just pushed onto `oaiMessages`.
+ * - `replace`: the message array was wholesale replaced (compaction / reset).
+ */
+export type MessageMutation =
+  | { type: 'append'; message: OaiMessage }
+  | { type: 'replace'; messages: OaiMessage[] }
+
 export class SessionContext {
   private state: SessionState
+  private onMutation: ((m: MessageMutation) => void) | null = null
 
   constructor() {
     this.state = {
@@ -57,15 +70,29 @@ export class SessionContext {
     }
   }
 
+  /**
+   * Subscribe to message-list mutations. The listener is invoked synchronously
+   * after each `addUserMessage` / `addAssistantBlocks` / `addToolResults` /
+   * `replaceMessages` call. Used by AgentLoop to mirror messages to disk.
+   */
+  setMutationListener(fn: (m: MessageMutation) => void): void {
+    this.onMutation = fn
+  }
+
   addUserMessage(content: string): void {
-    this.state.oaiMessages.push({ role: 'user', content })
-    this.state.estimatedTokens += estimateOaiMessageTokens({ role: 'user', content })
+    const msg: OaiMessage = { role: 'user', content }
+    this.state.oaiMessages.push(msg)
+    this.state.estimatedTokens += estimateOaiMessageTokens(msg)
     this.state.turnCount++
+    this.onMutation?.({ type: 'append', message: msg })
   }
 
   replaceMessages(messages: OaiMessage[]): void {
     this.state.oaiMessages = messages
     this.state.estimatedTokens = estimateOaiTokens(messages)
+    // Snapshot the array so subsequent mutations to state.oaiMessages don't
+    // bleed into a listener's deferred work (e.g. async disk write).
+    this.onMutation?.({ type: 'replace', messages: messages.slice() })
   }
 
   addAssistantBlocks(blocks: ContentBlock[]): void {
@@ -83,6 +110,7 @@ export class SessionContext {
     }
     this.state.oaiMessages.push(msg)
     this.state.estimatedTokens += estimateOaiMessageTokens(msg)
+    this.onMutation?.({ type: 'append', message: msg })
   }
 
   addToolResults(results: ContentBlock[]): void {
@@ -91,6 +119,7 @@ export class SessionContext {
         const msg: OaiMessage = { role: 'tool', tool_call_id: block.tool_use_id, content: block.content }
         this.state.oaiMessages.push(msg)
         this.state.estimatedTokens += estimateOaiMessageTokens(msg)
+        this.onMutation?.({ type: 'append', message: msg })
       }
     }
   }

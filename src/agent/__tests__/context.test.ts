@@ -209,3 +209,129 @@ describe('getRecentTurnHitRate', () => {
     assert.equal(ctx.getRecentTurnHitRate(3), null)
   })
 })
+
+describe('SessionContext mutation listener', () => {
+  it('emits append on addUserMessage', () => {
+    const ctx = new SessionContext()
+    const events: Array<{ type: string; role?: string; len?: number }> = []
+    ctx.setMutationListener(m => {
+      if (m.type === 'append') events.push({ type: 'append', role: m.message.role })
+      else events.push({ type: 'replace', len: m.messages.length })
+    })
+
+    ctx.addUserMessage('hello')
+    assert.deepEqual(events, [{ type: 'append', role: 'user' }])
+  })
+
+  it('emits append on addAssistantBlocks (text only)', () => {
+    const ctx = new SessionContext()
+    const seen: OaiMessage[] = []
+    ctx.setMutationListener(m => {
+      if (m.type === 'append') seen.push(m.message)
+    })
+
+    ctx.addAssistantBlocks([{ type: 'text', text: 'hi there' }])
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0]!.role, 'assistant')
+    assert.equal(seen[0]!.content, 'hi there')
+  })
+
+  it('emits append on addAssistantBlocks (tool_use)', () => {
+    const ctx = new SessionContext()
+    const seen: OaiMessage[] = []
+    ctx.setMutationListener(m => {
+      if (m.type === 'append') seen.push(m.message)
+    })
+
+    ctx.addAssistantBlocks([
+      { type: 'tool_use', id: 'call_1', name: 'read_file', input: { path: 'a.ts' } },
+    ])
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0]!.role, 'assistant')
+    assert.ok(seen[0]!.tool_calls)
+    assert.equal(seen[0]!.tool_calls!.length, 1)
+    assert.equal(seen[0]!.tool_calls![0]!.id, 'call_1')
+  })
+
+  it('emits one append per tool_result in addToolResults', () => {
+    const ctx = new SessionContext()
+    const seen: OaiMessage[] = []
+    ctx.setMutationListener(m => {
+      if (m.type === 'append') seen.push(m.message)
+    })
+
+    ctx.addToolResults([
+      { type: 'tool_result', tool_use_id: 'call_1', content: 'a-content' },
+      { type: 'tool_result', tool_use_id: 'call_2', content: 'b-content' },
+    ])
+    assert.equal(seen.length, 2)
+    assert.equal(seen[0]!.tool_call_id, 'call_1')
+    assert.equal(seen[1]!.tool_call_id, 'call_2')
+    assert.equal(seen[0]!.content, 'a-content')
+  })
+
+  it('emits replace on replaceMessages', () => {
+    const ctx = new SessionContext()
+    const events: Array<{ type: string; len?: number }> = []
+    ctx.setMutationListener(m => {
+      if (m.type === 'replace') events.push({ type: 'replace', len: m.messages.length })
+      else events.push({ type: 'append' })
+    })
+
+    const msgs: OaiMessage[] = [
+      { role: 'user', content: 'a' },
+      { role: 'assistant', content: 'b' },
+    ]
+    ctx.replaceMessages(msgs)
+    assert.deepEqual(events, [{ type: 'replace', len: 2 }])
+  })
+
+  it('replace event snapshots the array (no aliasing with future mutations)', () => {
+    // Regression guard: a listener that defers work (e.g. async disk write)
+    // must see the messages as-they-were when replace fired, not include
+    // anything pushed afterward.
+    const ctx = new SessionContext()
+    let captured: OaiMessage[] | null = null
+    ctx.setMutationListener(m => {
+      if (m.type === 'replace') captured = m.messages
+    })
+
+    ctx.replaceMessages([{ role: 'user', content: 'compacted' }])
+    // After replace, push something else; the captured array must not grow.
+    ctx.addAssistantBlocks([{ type: 'text', text: 'next' }])
+
+    assert.ok(captured)
+    assert.equal(captured!.length, 1)
+    assert.equal(captured![0]!.content, 'compacted')
+  })
+
+  it('does not invoke listener before subscription', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('before-subscribe') // should not throw, no listener yet
+
+    let called = false
+    ctx.setMutationListener(() => { called = true })
+    assert.equal(called, false)
+
+    ctx.addUserMessage('after-subscribe')
+    assert.equal(called, true)
+  })
+
+  it('listener exception in one event does not block subsequent events', () => {
+    // The listener is sync so a thrown exception will propagate. The contract:
+    // once a listener throws, the caller (AgentLoop) is responsible for catching.
+    // This test documents the synchronous behavior so callers know to wrap.
+    const ctx = new SessionContext()
+    let throws = true
+    ctx.setMutationListener(() => {
+      if (throws) {
+        throws = false
+        throw new Error('listener error')
+      }
+    })
+
+    assert.throws(() => ctx.addUserMessage('first'), /listener error/)
+    // Second call: listener no longer throws.
+    assert.doesNotThrow(() => ctx.addUserMessage('second'))
+  })
+})
