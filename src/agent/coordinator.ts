@@ -246,6 +246,13 @@ export class DelegationCoordinator {
 
       const activeClaims = this.config.activeClaims?.() ?? workerConfig.activeClaims ?? []
       const cwd = this.config.cwd ?? workerConfig.cwd
+      // Write workers (patcher/verifier) execute in an isolated git worktree.
+      // Worktree lifecycle is managed by runHands → runHandsSession: create
+      // before agent runs, collect diff after, cleanup on exit.
+      // NOTE: The host agent framework (Claude Code etc.) may still sandbox
+      // subagent write operations (edit_file/write_file/bash) even when Rivet
+      // correctly provisions write tools and worktree isolation. This is a
+      // host-layer constraint, not a Rivet work-order or worktree bug.
       const handsRun = await this.runHands({
         order,
         wtCoordinator: new WorktreeCoordinator(cwd),

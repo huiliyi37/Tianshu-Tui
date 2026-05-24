@@ -4,6 +4,16 @@ import type { CapabilityTask } from '../model/capability.js'
 import type { VerificationMetadata } from '../tools/types.js'
 
 export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests'] as const
+
+/**
+ * Write-capable worker tools. Patcher/verifier profiles are classified as
+ * 'hands' role (see coordination-policy.ts:classifyProfile) and dispatched
+ * through runHands → runHandsSession, which creates an isolated git worktree
+ * before the worker executes. The worktree isolation ensures writes are
+ * scoped and mergeable, but write operations may still be blocked by the
+ * host agent framework's subagent sandbox — that is a host-layer constraint,
+ * not a Rivet permission issue.
+ */
 export const WRITE_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
 export const PHASE1_DISALLOWED_WORKER_TOOLS = ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'] as const
 
