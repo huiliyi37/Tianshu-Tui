@@ -1,5 +1,5 @@
 import type { CompactCircuitBreakerState, CompactDecision, CompactTier } from './types.js'
-import { compactPolicyRatios } from '../compact/constants.js'
+import { adaptiveCompactPolicyRatios, compactPolicyRatios } from '../compact/constants.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 
 export interface CompactPolicyInput {
@@ -8,10 +8,20 @@ export interface CompactPolicyInput {
   turn: number
   failures: CompactCircuitBreakerState
   providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
+  /** Recent cache hit rate (0-1).  When ≥0.85, thresholds are shifted higher
+   *  via adaptiveCompactPolicyRatios to delay compaction and protect the
+   *  valuable prefix cache.  When null, falls back to base ratios. */
+  recentHitRate?: number | null
 }
 
-export function tierForRatio(ratio: number, providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>): CompactTier {
-  const ratios = compactPolicyRatios(providerProfile)
+export function tierForRatio(
+  ratio: number,
+  providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>,
+  recentHitRate?: number | null,
+): CompactTier {
+  const ratios = recentHitRate != null
+    ? adaptiveCompactPolicyRatios(providerProfile, recentHitRate)
+    : compactPolicyRatios(providerProfile)
   if (ratio >= ratios.ceiling) return 4
   if (ratio >= ratios.reactive) return 3
   if (ratio >= ratios.compact) return 2
@@ -32,7 +42,7 @@ export function decideCompactTier(input: CompactPolicyInput): CompactDecision {
     return { tier: 0, reason: 'automatic compact circuit breaker is open', shouldCompact: false }
   }
   const ratio = input.maxTokens > 0 ? input.estimatedTokens / input.maxTokens : 1
-  const tier = tierForRatio(ratio, input.providerProfile)
+  const tier = tierForRatio(ratio, input.providerProfile, input.recentHitRate)
   return { tier, reason: reasonForTier(tier), shouldCompact: tier > 0 }
 }
 

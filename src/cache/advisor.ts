@@ -11,6 +11,9 @@ export interface CacheAdvisorConfig {
   providerProfile: Pick<ProviderProfile, 'cacheType' | 'persistent'>
   ttlMs?: number
   now?: () => number
+  /** Active context window — forwarded to AdaptiveThresholdController so
+   *  its bounds scale with the window instead of capping at 4 000 chars. */
+  contextWindow?: number
 }
 
 const PHASE_MULTIPLIERS: Record<string, number> = {
@@ -34,7 +37,7 @@ export class CacheAdvisor {
     this.staticProfile = config.providerProfile
     this.ghostRegistry = new GhostRegistry()
     this.behaviorLearner = new CacheBehaviorLearner()
-    this.thresholdController = new AdaptiveThresholdController({ ghostRegistry: this.ghostRegistry })
+    this.thresholdController = new AdaptiveThresholdController({ ghostRegistry: this.ghostRegistry, contextWindow: config.contextWindow })
     this.warmthTracker = new SessionWarmthTracker({ ttlMs: config.ttlMs, now: config.now })
   }
 

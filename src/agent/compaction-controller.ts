@@ -64,6 +64,7 @@ export class CompactionController {
       turn: this.deps.session.getTurnCount(),
       failures: input.failures,
       providerProfile: this.deps.providerProfile,
+      recentHitRate: this.deps.cacheAdvisor?.getRecentHitRate() ?? null,
     })
 
     if (!compactDecision.shouldCompact) {

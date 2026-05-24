@@ -279,6 +279,7 @@ export class AgentLoop {
 
     this.cacheAdvisor = new CacheAdvisor({
       providerProfile: this.config.providerProfile ?? { cacheType: 'none', persistent: false },
+      contextWindow: this.config.contextWindow,
     })
     this.p3 = createP3Integration({
       execute: async (tool, target) => {
