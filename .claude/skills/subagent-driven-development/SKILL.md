@@ -27,6 +27,40 @@ Use subagents when **any** of these are true:
 - Reading one specific file at a known path (use Read directly)
 - Tasks that depend on conversation history the subagent won't have
 
+### Scout vs Worker 决策
+
+Subagents 分两种模式，按需升级：
+
+| 场景 | 模式 | 工具集 | 文件权限 | profile |
+|------|------|--------|----------|---------|
+| 定位代码、grep、全局搜索、理解结构 | Scout（侦察） | read_file, glob, grep, diff, inspect_project, repo_map, related_tests | 只读 | `code_scout`, `doc_scout`, `planner` |
+| 需要编辑文件、执行 patch、运行测试 | Worker（执行） | + edit_file, write_file, bash, run_tests | worktree 隔离读写 | `patcher`, `verifier` |
+
+**升级流程：**
+1. Scout 返回精确 patch 方案后，如果发现需要执行写操作 →
+2. 用 `delegate_task(kind="patch_proposal", profile="patcher")` 升级为 worker
+3. Worker 在 git worktree 中执行（隔离于主 session），完成后 diff 合并回主分支
+
+**沙箱限制（根因分析）：**
+Worker 的 `edit_file`/`write_file`/`bash` 可能在 host agent framework 的 subagent sandbox 中被拦截，返回 "requires user approval"。
+这不是 Rivet work-order 权限问题 — `coordinator.ts` 已正确分类 `patcher`/`verifier` 为 `'hands'` 角色，通过 `runHandsSession` 创建隔离 worktree 并授权写工具。
+沙箱拦截是 host 层安全策略。当前应对：worktree 隔离确保 worker 操作限制在独立分支，降低风险；若沙箱仍然拦截，需在 host 层配置豁免。
+
+### 代理模式与写权限（快速参考）
+
+调用 `delegate_task` / `delegate_batch` 时：
+
+| kind | profile | 是否有写权限 | worktree 隔离 |
+|------|---------|-------------|--------------|
+| code_search | code_scout | ❌ 只读 | ❌ |
+| doc_research | doc_scout | ❌ 只读 | ❌ |
+| plan | planner | ❌ 只读 | ❌ |
+| review | reviewer | ❌ 只读 | ❌ |
+| verify | verifier | ✅ 读写 | ✅ worktree |
+| patch_proposal | patcher | ✅ 读写 | ✅ worktree |
+
+
+
 ---
 
 ## The Six-Stage Workflow
