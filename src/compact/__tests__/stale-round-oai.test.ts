@@ -114,6 +114,34 @@ describe('compactStaleRoundsOai', () => {
     assert.ok(staleMsg.content.includes('use_read_section_to_retrieve_full_content'), 'compacted hint should reference read_section')
   })
 
+  it('preserves [artifact:X] marker in bash/grep-style output (instructions before marker)', () => {
+    // Simulates the new bash/grep output format: content + instructions + [artifact:X] at end.
+    // After the format fix, bash and grep place use_read_section text BEFORE the marker.
+    const longContent = 'a'.repeat(5000)
+    // Bash-style: modelOutput, then instructions, then [artifact:X] at end
+    const withMarker = `${longContent}\n\nUse read_section(artifactId="bash123", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:bash123]`
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'anchor1' },
+      assistantMsg('anchor2'),
+      toolMsg(withMarker), // stale — should be compacted
+      assistantMsg('done'),
+      toolMsg('y'.repeat(5000)),
+      assistantMsg('final'),
+      toolMsg('z'.repeat(300)),
+      assistantMsg('end'),
+    ]
+    const result = compactStaleRoundsOai(messages, 64_000)
+    const staleMsg = result[3]!
+    assert.ok(staleMsg.role === 'tool')
+    assert.ok(staleMsg.content.length < withMarker.length, 'should be truncated')
+    assert.match(staleMsg.content, /\[artifact:bash123\]\s*$/, 'marker must be preserved at the tail even with instructions before it')
+    // The original instructions may or may not survive truncation — they are
+    // after the long content body. The stale-compacted tag provides the
+    // read_section recovery path.
+    assert.ok(staleMsg.content.includes('use_read_section_to_retrieve_full_content'), 'stale-compacted tag must provide read_section path')
+  })
+
   it('uses default compaction (no marker recovery) when no [artifact:X] is present', () => {
     const longContent = 'a'.repeat(5000)
     const messages: OaiMessage[] = [
