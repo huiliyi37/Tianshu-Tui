@@ -336,11 +336,11 @@ describe('PromptEngine active claims projection', () => {
       'last user msg must contain cachedFreshBlock (volatile context)')
   })
 
-  // Phase 2.2 (middle strategy): On 1M+ context windows, use a much larger
-  // mask window (80 turns instead of 10). Below 80 turns: skip mask to
-  // preserve exact prefix cache. Above 80 turns: apply mask to reclaim
-  // space on very long sessions, accepting ~0.5% cache hit loss.
-  it('P2.2: skips observation mask on 1M+ context window when turns < 80', () => {
+  // Phase 2.2: On 1M+ context windows, skip observation masking entirely.
+  // The 1M window has enough headroom. trySessionSplit (86%) is the primary
+  // defense against context overflow. Masking mutates message content which
+  // breaks exact prefix cache — skipping it maximizes cache stability.
+  it('P2.2: skips observation mask on 1M+ context window regardless of turn count', () => {
     const engine = new PromptEngine({
       model: 'test',
       maxTokens: 8000,
@@ -348,61 +348,7 @@ describe('PromptEngine active claims projection', () => {
       volatileCtx: { cwd: '/tmp' },
     })
 
-    // Build 12 turns — below the 80-turn threshold for 1M windows
-    const messages: OaiMessage[] = []
-    for (let i = 0; i < 12; i++) {
-      messages.push({ role: 'user', content: `question ${i}` })
-      messages.push({ role: 'assistant', content: `answer ${i}` })
-      messages.push({
-        role: 'tool' as const,
-        tool_call_id: `call_${i}`,
-        content: 'x'.repeat(3000), // > 200 chars, triggers mask
-      })
-    }
-
-    // Without contextWindow: old tool results should be masked (MASK_WINDOW=10)
-    const reqWithoutCW = engine.buildOaiRequest(messages)
-    const toolMsgsWithoutCW = reqWithoutCW.messages.filter(
-      (m: any) => m.role === 'tool'
-    )
-    const maskedCountWithoutCW = toolMsgsWithoutCW.filter(
-      (m: any) => m.content.startsWith('[observation masked')
-    ).length
-    assert.ok(maskedCountWithoutCW > 0,
-      'old tool results should be masked without contextWindow')
-
-    // With contextWindow >= 1M and 12 turns: no masking (12 < 80)
-    const reqWith1M = engine.buildOaiRequest(messages, undefined, 1_000_000)
-    const toolMsgsWith1M = reqWith1M.messages.filter(
-      (m: any) => m.role === 'tool'
-    )
-    const maskedCountWith1M = toolMsgsWith1M.filter(
-      (m: any) => m.content.startsWith('[observation masked')
-    ).length
-    assert.equal(maskedCountWith1M, 0,
-      'no tool results should be masked on 1M window when turns < 80')
-
-    // Byte stability: calling twice with same args should produce identical messages
-    const req2 = engine.buildOaiRequest(messages, undefined, 1_000_000)
-    assert.deepStrictEqual(
-      req2.messages.map(m => m.content),
-      reqWith1M.messages.map(m => m.content),
-      'repeated calls should produce identical content for cache stability'
-    )
-  })
-
-  // Phase 2.2b: On 1M+ window with >80 turns, apply observation mask
-  // to reclaim space on very long sessions. Accepts ~0.5% cache hit loss
-  // in exchange for preventing unbounded context growth.
-  it('P2.2b: applies observation mask on 1M+ window when turns exceed 80', () => {
-    const engine = new PromptEngine({
-      model: 'test',
-      maxTokens: 8000,
-      staticCtx: { tools: [] },
-      volatileCtx: { cwd: '/tmp' },
-    })
-
-    // Build 85 turns — exceeds the 80-turn threshold for 1M windows
+    // Build 85 turns — well over the 10-turn mask window for small windows
     const messages: OaiMessage[] = []
     for (let i = 0; i < 85; i++) {
       messages.push({ role: 'user', content: `q${i}` })
@@ -414,22 +360,28 @@ describe('PromptEngine active claims projection', () => {
       })
     }
 
-    const req = engine.buildOaiRequest(messages, undefined, 1_000_000)
-    const toolMsgs = req.messages.filter((m: any) => m.role === 'tool')
-
-    // Verify: the first few tool results (beyond 80 user turns ago) are masked
-    const maskedCount = toolMsgs.filter(
-      (m: any) => m.content.startsWith('[observation masked')
+    // Without contextWindow: old tool results should be masked (MASK_WINDOW=10)
+    const reqWithoutCW = engine.buildOaiRequest(messages)
+    const maskedCountWithoutCW = reqWithoutCW.messages.filter(
+      (m: any) => m.role === 'tool' && m.content.startsWith('[observation masked')
     ).length
-    assert.ok(maskedCount > 0,
-      'very old tool results should be masked on 1M window when turns > 80')
+    assert.ok(maskedCountWithoutCW > 0,
+      'old tool results should be masked without contextWindow')
 
-    // Verify: recent tool results (within last 80 turns) are NOT masked
-    const recentToolMsgs = toolMsgs.slice(-5)
-    const recentMaskedCount = recentToolMsgs.filter(
-      (m: any) => m.content.startsWith('[observation masked')
+    // With contextWindow >= 1M: NO masking even at 85 turns (>> MASK_WINDOW=10)
+    const reqWith1M = engine.buildOaiRequest(messages, undefined, 1_000_000)
+    const maskedCountWith1M = reqWith1M.messages.filter(
+      (m: any) => m.role === 'tool' && m.content.startsWith('[observation masked')
     ).length
-    assert.equal(recentMaskedCount, 0,
-      'recent tool results should NOT be masked even when turns > 80')
+    assert.equal(maskedCountWith1M, 0,
+      'no tool results should be masked on 1M window — skip entirely')
+
+    // Byte stability: calling twice with same args should produce identical messages
+    const req2 = engine.buildOaiRequest(messages, undefined, 1_000_000)
+    assert.deepStrictEqual(
+      req2.messages.map(m => m.content),
+      reqWith1M.messages.map(m => m.content),
+      'repeated calls should produce identical content for cache stability'
+    )
   })
 })
