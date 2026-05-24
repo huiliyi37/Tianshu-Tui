@@ -473,7 +473,6 @@ export class AgentLoop {
       setDecisions: decisions => { this.decisions = decisions },
       refreshLedger: () => { this.contextInjection.refreshLedger() },
       refreshCacheDiagnostic: turn => { this.refreshCacheDiagnostic(turn) },
-      recordTurnSnapshot: () => { this.recordTurnSnapshot() },
       runPostTurn: async () => {
         await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
           emitPhaseChange: (phase, detail) => { callbacks?.onPhaseChange?.(phase, detail) },
@@ -790,15 +789,6 @@ export class AgentLoop {
       cacheAdvisor: this.cacheAdvisor.getDiagnostic() }
   }
 
-  private recordTurnSnapshot(): void {
-    if (!this.config.sessionId) return
-    new SessionPersist(this.config.sessionId).appendTurnSnapshot({
-      turn: this.session.getTurnCount(), timestamp: Date.now(),
-      messageCount: this.session.getMessages().length,
-      estimatedTokens: this.session.getEstimatedTokens(),
-    })
-  }
-
   private async runPostSession(callbacks: AgentCallbacks): Promise<void> {
     await this.runtimeHooks.runPostSession(createRuntimeHookContext(this.buildRuntimeSnapshot(),
       { emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) } }))
@@ -932,10 +922,6 @@ export class AgentLoop {
           : 0
         this.turnBudget = createTurnBudget(rssRatio)
         
-        // Fuzzy checkpoint: 记录 compact 开始
-        if (this.persist) {
-          this.persist.appendCompactStart(turn, this.session.getMessages().length)
-        }
         
         // P3: Pre-compact handoff — preserve session context across compaction
         // Generated *before* compaction so the summary reflects the trajectory
@@ -1012,11 +998,6 @@ export class AgentLoop {
             this.session.replaceMessages(trimmed)
             if (typeof globalThis.gc === 'function') globalThis.gc()
           }
-        }
-
-        // Fuzzy checkpoint: 记录 compact 结束
-        if (this.persist) {
-          this.persist.appendCompactEnd(turn, this.session.getMessages().length)
         }
 
         this.streamedText = ''
@@ -1209,7 +1190,7 @@ export class AgentLoop {
         }
 
         if (streamError) {
-          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); this.recordTurnSnapshot() }
+          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks) }
           callbacks.onError(streamError)
           return
         }

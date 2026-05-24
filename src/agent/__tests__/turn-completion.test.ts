@@ -30,7 +30,6 @@ describe('TurnCompletionController', () => {
     const decisions: string[][] = []
     let ledgerRefreshed = 0
     let diagnosticTurn = -1
-    let snapshots = 0
     let postTurn = 0
     let beforeComplete = 0
     const completions: Array<{ turn: number; isFinal?: boolean }> = []
@@ -47,7 +46,6 @@ describe('TurnCompletionController', () => {
       setDecisions: next => { decisions.push(next) },
       refreshLedger: () => { ledgerRefreshed++ },
       refreshCacheDiagnostic: turn => { diagnosticTurn = turn },
-      recordTurnSnapshot: () => { snapshots++ },
       runPostTurn: async () => { postTurn++ },
       runBeforeComplete: async () => { beforeComplete++ },
     })
@@ -65,7 +63,6 @@ describe('TurnCompletionController', () => {
     assert.deepEqual(decisions.at(-1), ['keep implementation simple and verify incrementally'])
     assert.equal(ledgerRefreshed, 1)
     assert.equal(diagnosticTurn, 7)
-    assert.equal(snapshots, 1)
     assert.equal(postTurn, 1)
     assert.equal(beforeComplete, 1)
     assert.deepEqual(completions, [{ turn: 1, isFinal: true }])

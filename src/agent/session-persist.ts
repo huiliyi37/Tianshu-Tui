@@ -138,7 +138,6 @@ function parseSessionLine(line: string): unknown | null {
 export class SessionPersist {
   private filePath: string
   private metadataPath: string
-  private snapshotPath: string
   private sessionId: string
 
   /** Public getter for testing file-path-dependent integrations. */
@@ -152,7 +151,6 @@ export class SessionPersist {
     this.sessionId = sessionId
     this.filePath = join(getSessionDir(), `${sessionId}.jsonl`)
     this.metadataPath = join(getSessionDir(), `${sessionId}.meta.json`)
-    this.snapshotPath = join(getSessionDir(), `${sessionId}.snapshots.jsonl`)
   }
 
   getBackupDir(): string {
@@ -202,40 +200,6 @@ export class SessionPersist {
   }
 
   /** Load messages repaired for resume, rolling back to the last safe snapshot when needed. */
-  loadRecoverableMessages(): {
-    messages: Message[]
-    preflight: ResumePreflightReport
-    usedSnapshot: boolean
-    snapshotTurn?: number
-    hadIncompleteCompact: boolean
-  } {
-    // 检测 incomplete compact
-    const hadIncompleteCompact = this.detectIncompleteCompact()
-    
-    // 使用带校验和的 load
-    const loaded = this.loadWithChecksum()
-    const preflight = runResumePreflight(loaded)
-
-    if (preflight.safe && !hadIncompleteCompact) {
-      return { messages: preflight.messages, preflight, usedSnapshot: false, hadIncompleteCompact: false }
-    }
-
-    const snapshot = this.loadLastSnapshot()
-    if (!snapshot) {
-      return { messages: preflight.messages, preflight, usedSnapshot: false, hadIncompleteCompact }
-    }
-
-    const snapshotMessages = this.loadUpToTurn(snapshot.turn)
-    const snapshotPreflight = runResumePreflight(snapshotMessages)
-
-    return {
-      messages: snapshotPreflight.messages,
-      preflight: snapshotPreflight,
-      usedSnapshot: true,
-      snapshotTurn: snapshot.turn,
-      hadIncompleteCompact,
-    }
-  }
 
   /** Compact the session file with the given messages (with checksums) */
   compact(messages: Message[]): void {
@@ -290,97 +254,18 @@ export class SessionPersist {
   /**
    * 写入 compact 开始标记
    */
-  appendCompactStart(turn: number, messageCount: number): void {
-    const marker = {
-      type: 'compact_start',
-      turn,
-      messageCount,
-      timestamp: Date.now(),
-    }
-    appendFileSync(this.filePath, appendChecksum(JSON.stringify(marker)) + '\n')
-  }
 
   /**
    * 写入 compact 结束标记
    */
-  appendCompactEnd(turn: number, messageCount: number): void {
-    const marker = {
-      type: 'compact_end',
-      turn,
-      messageCount,
-      timestamp: Date.now(),
-    }
-    appendFileSync(this.filePath, appendChecksum(JSON.stringify(marker)) + '\n')
-  }
 
   /**
    * 检测 incomplete compact
    * @returns 是否检测到 incomplete compact
    */
-  detectIncompleteCompact(): boolean {
-    if (!existsSync(this.filePath)) return false
-    
-    const content = readFileSync(this.filePath, 'utf-8')
-    const lines = content.trim().split('\n').filter(Boolean)
-    
-    let hasCompactStart = false
-    let hasCompactEnd = false
-    
-    // 从后向前扫描，找到最近的 compact 标记
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const result = verifyAndExtract(lines[i] ?? '')
-      if (!result.valid) continue
-      
-      try {
-        const data = JSON.parse(result.json)
-        if (data.type === 'compact_end') {
-          hasCompactEnd = true
-          break
-        }
-        if (data.type === 'compact_start') {
-          hasCompactStart = true
-          break
-        }
-      } catch {
-        // ignore parse errors
-      }
-    }
-    
-    // 有 start 但没有 end = incomplete compact
-    return hasCompactStart && !hasCompactEnd
-  }
 
-  appendTurnSnapshot(snapshot: { turn: number; timestamp: number; messageCount: number; estimatedTokens: number }): void {
-    const line = JSON.stringify(snapshot) + '\n'
-    try {
-      appendFileSync(this.snapshotPath, line)
-    } catch {
-      // Ignore write failures — snapshots are best-effort
-    }
-  }
 
-  loadLastSnapshot(): { turn: number; timestamp: number; messageCount: number; estimatedTokens: number } | null {
-    if (!existsSync(this.snapshotPath)) return null
-    try {
-      const lines = readFileSync(this.snapshotPath, 'utf-8').trim().split('\n')
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try { return JSON.parse(lines[i]!) } catch { continue }
-      }
-    } catch { /* ignore */ }
-    return null
-  }
 
-  loadUpToTurn(turn: number): Message[] {
-    const messages = this.load()
-    let currentTurn = 0
-    for (let i = 0; i < messages.length; i++) {
-      if (messages[i]!.role === 'user' && typeof messages[i]!.content === 'string') {
-        currentTurn++
-        if (currentTurn === turn) return messages.slice(0, i + 1)
-      }
-    }
-    return messages
-  }
 
   /** Get the session file path */
   getPath(): string {
@@ -509,7 +394,6 @@ export function evictOldSessionsInternal(dir: string, keepSessionId: string, lim
   for (const id of toEvict) {
     try { unlinkSync(join(dir, `${id}.jsonl`)) } catch { /* ignore */ }
     try { unlinkSync(join(dir, `${id}.meta.json`)) } catch { /* ignore */ }
-    try { unlinkSync(join(dir, `${id}.snapshots.jsonl`)) } catch { /* ignore */ }
     try { unlinkSync(join(dir, `${id}.memory.json`)) } catch { /* ignore */ }
     try { unlinkSync(join(dir, `${id}.claims.jsonl`)) } catch { /* ignore */ }
   }

@@ -764,15 +764,7 @@ async function main() {
   if (lastCrashed) {
     try {
       const persist = new SessionPersist(lastCrashed.id)
-      const { messages, usedSnapshot, snapshotTurn, hadIncompleteCompact } = persist.loadRecoverableMessages()
-
-      if (hadIncompleteCompact) {
-        console.log('   ⚠️  检测到 incomplete compact，已从快照恢复')
-      }
-
-      if (usedSnapshot && snapshotTurn !== undefined) {
-        console.log(`   📸 使用快照恢复到 turn ${snapshotTurn}`)
-      }
+      const messages = persist.loadOai()
 
       console.log(`   ✅ 恢复完成：${messages.length} 条消息\n`)
     } catch (err) {

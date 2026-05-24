@@ -22,7 +22,6 @@ export interface TurnCompletionDeps {
   setDecisions: (decisions: string[]) => void
   refreshLedger: () => void
   refreshCacheDiagnostic: (turn: number) => void
-  recordTurnSnapshot: () => void
   runPostTurn: () => Promise<void>
   runBeforeComplete?: () => Promise<void>
 }
@@ -51,7 +50,6 @@ export class TurnCompletionController {
     if (input.emitBadge && result.badge) input.callbacks.onTextDelta('\n' + result.badge)
     this.deps.refreshLedger()
     this.deps.refreshCacheDiagnostic(input.turn)
-    this.deps.recordTurnSnapshot()
     await this.deps.runPostTurn()
     if (input.isFinal) await this.deps.runBeforeComplete?.()
     input.callbacks.onTurnComplete(
