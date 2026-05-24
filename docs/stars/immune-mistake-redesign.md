@@ -319,16 +319,142 @@ interface ImmuneEffectRecord {
 6. **修改 `src/agent/immune-hook.ts`**
    - 检测 repair 连续失败 → inject repair_exhaustion signal
 
-### Phase 3: Mistake 前置 + 效果度量（3 文件）
+### Phase 3: Mistake 前置 + 效果度量 + TDD Gate（5 子任务，4 文件）
 
-7. **修改 `src/agent/tool-pipeline.ts`**
-   - 工具执行前查询 mistake hints
+> **进度标注（2026-05-25）：**
+> - 7a ✅ 已实现 | 7b 🔲 待实现 | 8 🔲 待实现 | 9 ✅ 已实现 | 10 🔲 待实现
 
-8. **修改 `src/agent/immune-hook.ts`**
-   - 添加 `ImmuneEffectRecord` 跟踪
+#### 7a. [已完成] 后置 Mistake 注入（错误路径）
 
-9. **修改 `src/agent/loop.ts`**
-   - sycophancy 密度检测 → inject sycophancy_detected signal
+- 位置：`src/agent/tool-pipeline.ts:586-591`
+- 触发：工具执行失败后，在错误输出末尾追加 `<mistake-hints>`
+- 查询输入：`finalContent.slice(0, 300)` + 工具名+目标
+- 适用场景：同一工具重复犯同一个错（如 read_file offset 过大返回 `[pruned]`）
+- 无需修改。
+
+#### 7b. [新增] 前置 Mistake 注入（写操作预防）
+
+**为什么需要前置**：后置只能在错误发生后补救。对于写操作（edit_file, write_file），错误成本更高（已经写入了错误内容，需要回滚）。前置可以在 agent 动手前就提醒已知陷阱。
+
+**触发条件**：
+- `tu.name ∈ {edit_file, write_file}`
+- 目标文件在 MistakeNotebook 中有相关记录
+- read_file / bash / grep 不触发（读操作失败成本低）
+
+**注入方式**：不修改工具参数，而是通过 `immuneHook.injectSignal` 注入低严重度信号：
+
+```typescript
+// tool-pipeline.ts，工具执行前（约 line 488，Execute via TurnHarness 之前）
+if (deps.p3 && (tu.name === 'edit_file' || tu.name === 'write_file')) {
+  const preHints = deps.p3.getMistakeHints('', `${tu.name} ${toolTarget}`)
+  if (preHints && deps.immuneHook) {
+    deps.immuneHook.injectSignal({
+      kind: 'prediction_error',  // 复用已有信号类型
+      severity: 0.3,             // 低严重度，不单独触发激活
+      turn,
+      source: 'mistake-preempt',
+      context: preHints.slice(0, 200),
+    })
+  }
+}
+```
+
+**severity 0.3 的理由**：前置是预防性的，不应单独触发免疫激活。它的价值是：当 agent 真的犯错时，0.3 + 后续 tool_repeat/token_spike 会更快达到 APC 门槛（0.6 最低档）。
+
+#### 8. [新增] ImmuneEffectRecord 跟踪
+
+**目标**：度量免疫响应的实际有效性，为后续自动调参提供数据。
+
+**数据结构**：
+
+```typescript
+// immune-hook.ts 新增
+interface ImmuneEffectRecord {
+  turn: number
+  fingerprint: string
+  responseType: ImmuneResponseType
+  outcome: 'success' | 'failure'
+  turnsToResolve: number  // 从激活到解决的轮数
+}
+```
+
+**记录时机**：
+- `recordRepairSuccess` 时：outcome='success'，turnsToResolve = currentTurn - activationTurn
+- `recordRepairFailure` 且连续 ≥ 3 次时：outcome='failure'
+
+**状态追踪**：
+- 新增 `activationTurns: Map<string, number>`（fingerprint → 激活时的 turn）
+- 免疫激活时写入：`this.activationTurns.set(fingerprint, currentTurn)`
+- 记录 effect 后删除：`this.activationTurns.delete(fingerprint)`
+
+**汇总逻辑**（在 `maybeRunMaintenance` 中，每 30 turns）：
+
+```typescript
+summarizeEffectiveness(): { highSuccess: ImmuneResponseType[]; neverWorked: ImmuneResponseType[] } {
+  const byType = new Map<ImmuneResponseType, { success: number; total: number }>()
+  for (const r of this.effectLog) {
+    const entry = byType.get(r.responseType) ?? { success: 0, total: 0 }
+    entry.total++
+    if (r.outcome === 'success') entry.success++
+    byType.set(r.responseType, entry)
+  }
+  const highSuccess: ImmuneResponseType[] = []
+  const neverWorked: ImmuneResponseType[] = []
+  for (const [type, stats] of byType) {
+    if (stats.total >= 3 && stats.success / stats.total > 0.8) highSuccess.push(type)
+    if (stats.total >= 3 && stats.success === 0) neverWorked.push(type)
+  }
+  return { highSuccess, neverWorked }
+}
+```
+
+**汇总结果的消费**：
+- `highSuccess` 类型 → 提升对应 adaptive memory 的亲和分（+0.1）
+- `neverWorked` 类型 → 降级（亲和分 × 0.5），连续两次汇总都 neverWorked → 从 adaptive 中移除
+
+#### 9. [已完成] sycophancy_detected 信号
+
+- 位置：`src/agent/loop.ts:1149-1161`
+- 实现：SycophancyTrap rising-edge 触发 → `immuneHook.injectSignal`
+- 只在状态从 inactive→active 时注入一次（`sycActive && !this.sycophancyWasActive`）
+- 无需修改。
+
+#### 10. [新增] TDD Gate
+
+**问题**：agent 从 planning 进入 executing 时，如果没有先接触测试文件，会追求速度跳过 TDD。当前系统只有 prompt 层面的建议（`static.ts <tdd>` 标签），无 harness 强制。
+
+**触发点**：`advanceContractStatus` 的 `planning→executing` 状态跃迁（one-shot，不重复）
+
+```typescript
+// loop.ts:1105 附近
+if (this.taskContract && contractStatus) {
+  const prevStatus = this.taskContract.status
+  this.taskContract = advanceContractStatus(this.taskContract, contractStatus, this.session.getTurnCount())
+  // TDD Gate: one-shot check on planning→executing transition
+  if (prevStatus === 'planning' && this.taskContract.status === 'executing') {
+    const tddHint = checkTddGate({
+      filesRead: this.evidence.getState().filesRead,
+      filesModified: this.evidence.getState().filesModified,
+      isActionable: this.taskContract.isActionable,
+    })
+    if (tddHint) this._lastImmuneHint = tddHint
+  }
+}
+```
+
+**检查逻辑**（`src/agent/tdd-gate.ts`）：
+- `filesModified` 或 `filesRead` 中有 `__tests__`/`.test.`/`.spec.`/`test/` 路径 → 通过
+- 否则：`filesModified` 有新非测试 `.ts` 文件 → level='danger'（hard gate）
+- 否则：level='warning'（soft gate）
+
+**注入方式**：赋值 `_lastImmuneHint`，走 cognitive projection 管线，consume-once。不用 intent-veto，不阻断执行。
+
+**不触发的场景**：
+- chat mode（`taskContract` 为 undefined）
+- 非 actionable 任务（问候、确认等）
+- 已经接触过测试文件的正常 TDD 流程
+
+**详细实现计划**：见 `docs/superpowers/plans/2026-05-24-tdd-gate.md`
 
 ---
 
@@ -340,7 +466,9 @@ interface ImmuneEffectRecord {
 |-------|----------|
 | Phase 1 | `immune-context.test.ts` (新), 更新 `immune-hook.test.ts` |
 | Phase 2 | 更新 `immune-apc.test.ts` 或已有测试, `tool-pipeline.test.ts` |
-| Phase 3 | 更新 `immune-hook.test.ts`, `loop.test.ts` |
+| Phase 3-7b | 更新 `tool-pipeline.test.ts`（前置注入场景） |
+| Phase 3-8 | 更新 `immune-hook.test.ts`（effect record + summarize） |
+| Phase 3-10 | `tdd-gate.test.ts` (新), 更新 `loop.test.ts`（集成） |
 
 ---
 
@@ -352,3 +480,6 @@ interface ImmuneEffectRecord {
 | Mistake 前置查询增加延迟 | 查询是纯内存操作，< 1ms |
 | Sycophancy 检测误报 | 使用 agreement phrase 密度 + 阈值可调 |
 | 门控降低导致过度激活 | 三档设计，最低档只 deposit_warning |
+| 前置 hint 被 agent 忽略 | severity 0.3 不单独触发，但与后续信号叠加加速激活 |
+| TDD Gate 误杀 hotfix | 只对 actionable 任务触发；soft gate 不阻断；read 过测试文件即通过 |
+| EffectRecord 内存增长 | effectLog 在 summarize 后清空已消费的记录；上限 200 条 |

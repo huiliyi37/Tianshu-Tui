@@ -198,7 +198,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
         currentMtimeMs = statSync(canonical).mtimeMs
         dedupKey = readHistoryKey(params.cwd, canonical, offset, limit)
         const prior = readHistory.get(dedupKey)
-        if (prior && prior.mtimeMs === currentMtimeMs) {
+        if (prior && prior.mtimeMs === currentMtimeMs && prior.artifactId) {
           // Already read this exact slice; file hasn't changed since.
           // eslint-disable-next-line no-console
           console.warn(`[read-dedup] skip file=${canonical} offset=${offset} limit=${limit ?? 'all'} prior_age_ms=${Date.now() - prior.recordedAt}`)
@@ -291,6 +291,9 @@ Bad:  re-reading the same file you already read this session  → look at your p
       const summaryBlock = summary.trim()
         ? `\n\n── Structural outline ──\n${summary.trim()}`
         : ''
+      // Convention: [artifact:X] is always the LAST token in the content string.
+      // prune.ts and stale-round.ts regex `/\[artifact:([A-Za-z0-9_-]+)]\s*$/`
+      // depend on this position; any suffix (instructions, summary) goes BEFORE it.
       return {
         content: payload.modelContent + summaryBlock + `\n[artifact:${artifactId}]`,
         rawContent: payload.modelContent,
