@@ -21,7 +21,7 @@ describe('checkTddGate', () => {
     assert.equal(checkTddGate(input), null)
   })
 
-  it('returns hint when no test file touched and has new source files', () => {
+  it('returns warning hint when no test file touched and has source files modified', () => {
     const input: TddGateInput = {
       filesRead: new Set(['src/agent/foo.ts', 'docs/design.md']),
       filesModified: new Set(['src/agent/bar.ts']),
@@ -29,7 +29,7 @@ describe('checkTddGate', () => {
     }
     const result = checkTddGate(input)
     assert.ok(result)
-    assert.equal(result.level, 'danger')
+    assert.equal(result.level, 'warning')
     assert.deepEqual(result.signalKinds, ['tdd_violation'])
     assert.ok(result.suggestion.includes('test'))
   })

@@ -30,14 +30,8 @@ export function checkTddGate(input: TddGateInput): ImmuneContextHint | null {
   if (!input.isActionable) return null
   if (hasTestFile(input.filesRead) || hasTestFile(input.filesModified)) return null
 
-  const hasNewSourceFiles = [...input.filesModified].some(f =>
-    /\.tsx?$/.test(f) && !TEST_PATH_PATTERN.test(f)
-  )
-
-  const level = hasNewSourceFiles ? 'danger' : 'warning'
-
   return {
-    level,
+    level: 'warning',
     signalKinds: ['tdd_violation' as DangerSignalKind],
     matchedMistakes: [],
     suggestion: `No test file touched yet. Write tests before implementation. Expected test path: src/**/__tests__/*.test.ts`,

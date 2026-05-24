@@ -23,7 +23,7 @@ describe('TDD Gate integration with TaskContract', () => {
     if (prev === 'planning' && contract.status === 'executing') {
       const hint = checkTddGate(evidence)
       assert.ok(hint, 'TDD gate should fire when no test file touched')
-      assert.equal(hint.level, 'danger')
+      assert.equal(hint.level, 'warning')
     }
   })
 
