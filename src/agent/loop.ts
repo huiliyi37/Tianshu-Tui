@@ -285,7 +285,13 @@ export class AgentLoop {
         const SAFE_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_dir'])
         if (!SAFE_TOOLS.has(tool)) return ''
         try {
-          const params = { input: { file_path: target, path: target }, cwd: this.cwd, toolUseId: `spec_${Date.now()}` }
+          const params = {
+            input: { file_path: target, path: target },
+            cwd: this.cwd,
+            toolUseId: `spec_${Date.now()}`,
+            contextWindow: this.config.contextWindow,
+            providerProfile: this.config.providerProfile,
+          }
           const result = await this.config.toolRegistry.execute(tool, params)
           return result.content
         } catch { return '' }

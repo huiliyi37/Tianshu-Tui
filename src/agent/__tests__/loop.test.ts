@@ -282,7 +282,12 @@ describe('AgentLoop — multi-turn tool_use', () => {
   })
 
 
-  it('prewarms recent successful read_file history at turn start', async () => {
+  // P5+P6 follow-up: the read_file prewarm cache hit was disabled because it
+  // shared state with P3 speculative reads under a smaller cap, leaking
+  // truncated content into real read_file results. Real read_file now always
+  // goes through execute. Repeat reads of the same unchanged file are
+  // suppressed by an in-tool dedup table (see read-file.ts).
+  it('does NOT serve read_file from the prewarm cache (was: prewarms recent successful read_file history)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-loop-prewarm-'))
     const filePath = join(dir, 'cached.txt')
     writeFileSync(filePath, 'cached content', 'utf-8')
@@ -321,7 +326,10 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.equal(agent.getPrewarmStats().hits, 0)
 
     await agent.run('read again', callbacks)
-    assert.equal(agent.getPrewarmStats().hits, 1)
+    // Was: hits === 1 (read_file used prewarm cache).
+    // Now: hits === 0 — read_file always goes through execute. Dedup of
+    // repeat reads is handled inside read-file.ts via mtime-keyed history.
+    assert.equal(agent.getPrewarmStats().hits, 0)
 
     rmSync(dir, { recursive: true, force: true })
   })

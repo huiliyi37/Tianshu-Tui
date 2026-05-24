@@ -4,6 +4,11 @@ import { CACHE_ANCHOR_MESSAGES } from './constants.js'
 const DEFAULT_STALE_PREVIEW_CHARS = 1_200
 const RECENT_MESSAGES_TO_KEEP = 4
 
+// Match a trailing artifact marker like "[artifact:abc123]" optionally followed
+// by whitespace. We preserve this when truncating so the model can still call
+// read_section(artifactId=...) to retrieve the original content.
+const ARTIFACT_MARKER_REGEX = /\[artifact:([A-Za-z0-9_-]+)\]\s*$/
+
 /** OAI-format: truncate tool message content in stale rounds (N-2+). */
 export function compactStaleRoundsOai(
   messages: OaiMessage[],
@@ -21,6 +26,20 @@ export function compactStaleRoundsOai(
     if (msg.content.length <= previewChars) return msg
 
     changed = true
+    const artifactMatch = msg.content.match(ARTIFACT_MARKER_REGEX)
+
+    if (artifactMatch) {
+      // Preserve the artifact marker at the tail so the model can recover the
+      // full content via read_section. Trim preview to leave room for marker.
+      const marker = artifactMatch[0]
+      const removed = msg.content.length - previewChars
+      const preview = msg.content.slice(0, previewChars)
+      return {
+        ...msg,
+        content: `${preview}\n<stale-compacted removed_chars="${removed}" use_read_section_to_retrieve_full_content />\n${marker}`,
+      }
+    }
+
     const preview = msg.content.slice(0, previewChars)
     return { ...msg, content: `${preview}\n<stale-compacted removed_chars="${msg.content.length - previewChars}" />` }
   })

@@ -9,7 +9,6 @@ import type { RepairHintTracker } from './repair-hint.js'
 import type { ImportGraph } from './import-graph.js'
 import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { validatePath } from '../tools/path-validate.js'
-import { canUsePrewarmForRead } from './prewarm-file.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
 import { detectConflicts } from '../context/conflict-detect.js'
@@ -489,16 +488,11 @@ export async function executeToolUse(
           rawToolResult = { content: speculativeHit }
           return { content: speculativeHit }
         }
-        if (tu.name === 'read_file' && canUsePrewarmForRead(tu.input)) {
-          try {
-            const canonicalPath = validatePath(deps.cwd, tu.input.file_path as string)
-            const cached = deps.prewarm.get(canonicalPath)
-            if (cached) {
-              rawToolResult = { content: cached.content, uiContent: cached.uiContent }
-              return { content: cached.content }
-            }
-          } catch { /* fall through */ }
-        }
+        // P5+P6: read_file must always go through real execute to honor the
+        // active contextWindow's read cap. The prewarm cache is shared with
+        // P3 speculative reads which may have been populated under a different
+        // (smaller) cap; serving cached content here would re-introduce the
+        // truncation regression. fs.readFile + OS page cache is fast enough.
         const r = await withToolTimeout(
           deps.config.toolRegistry.execute(tu.name, params),
           tu.name,

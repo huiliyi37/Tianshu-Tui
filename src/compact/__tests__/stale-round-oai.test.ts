@@ -88,4 +88,50 @@ describe('compactStaleRoundsOai', () => {
     assert.strictEqual(result[3]!.role, 'user')
     assert.strictEqual(result[4]!.role, 'assistant')
   })
+
+  it('preserves trailing [artifact:X] marker when truncating stale tool messages', () => {
+    // Simulates a read_file result: long content followed by an artifact marker.
+    // The marker must survive stale-round compaction so the model can call
+    // read_section(artifactId=X) to recover the full content.
+    const longContent = 'a'.repeat(5000)
+    const withMarker = `${longContent}\n[artifact:abc123]`
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'anchor1' },
+      assistantMsg('anchor2'),
+      toolMsg(withMarker), // stale — should be compacted
+      assistantMsg('done'),
+      toolMsg('y'.repeat(5000)),
+      assistantMsg('final'),
+      toolMsg('z'.repeat(300)),
+      assistantMsg('end'),
+    ]
+    const result = compactStaleRoundsOai(messages, 1_000_000)
+    const staleMsg = result[3]!
+    assert.ok(staleMsg.role === 'tool')
+    assert.ok(staleMsg.content.length < withMarker.length, 'should be truncated')
+    assert.match(staleMsg.content, /\[artifact:abc123\]\s*$/, 'marker must be preserved at the tail')
+    assert.ok(staleMsg.content.includes('use_read_section_to_retrieve_full_content'), 'compacted hint should reference read_section')
+  })
+
+  it('uses default compaction (no marker recovery) when no [artifact:X] is present', () => {
+    const longContent = 'a'.repeat(5000)
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'anchor1' },
+      assistantMsg('anchor2'),
+      toolMsg(longContent),
+      assistantMsg('done'),
+      toolMsg('y'.repeat(5000)),
+      assistantMsg('final'),
+      toolMsg('z'.repeat(300)),
+      assistantMsg('end'),
+    ]
+    const result = compactStaleRoundsOai(messages, 1_000_000)
+    const staleMsg = result[3]!
+    assert.ok(staleMsg.role === 'tool')
+    assert.ok(staleMsg.content.includes('stale-compacted'))
+    assert.ok(!staleMsg.content.includes('[artifact:'), 'no spurious marker should appear')
+    assert.ok(!staleMsg.content.includes('use_read_section_to_retrieve_full_content'))
+  })
 })
