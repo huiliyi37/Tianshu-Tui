@@ -301,6 +301,41 @@ describe('PromptEngine active claims projection', () => {
       'Frozen base should NOT contain habituated content')
   })
 
+  // Trailer mode: cachedFreshBlock is merged into the last user message's content
+  // instead of being injected as a separate user message. This keeps the message
+  // array append-only, preserving DeepSeek exact-prefix cache byte stability.
+  it('P2: cachedFreshBlock merged into last user message, not as separate message', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 8000,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/tmp' },
+      habituationThreshold: 0,
+    })
+
+    const req = engine.buildOaiRequest([
+      { role: 'user', content: 'first question' },
+      { role: 'assistant', content: 'first answer' },
+      { role: 'user', content: 'second question' },
+    ])
+
+    const userMsgs = req.messages.filter(m => m.role === 'user')
+
+    // Should be exactly 3 user messages:
+    // [0] frozenBase (injected at firstUserIdx)
+    // [1] 'first question' (original)
+    // [2] cachedFreshBlock + '\n---\n' + 'second question' (merged)
+    // NOT 4 messages (with cachedFreshBlock as separate msg)
+    assert.equal(userMsgs.length, 3,
+      'cachedFreshBlock should be merged into last user msg, not separate')
+
+    const lastUserMsg = userMsgs[userMsgs.length - 1]!
+    assert.ok((lastUserMsg.content as string).includes('second question'),
+      'last user msg must contain original user input')
+    assert.ok((lastUserMsg.content as string).includes('<context>'),
+      'last user msg must contain cachedFreshBlock (volatile context)')
+  })
+
   // Phase 2.2: On 1M+ context windows, skip observation masking.
   // The mask's sliding cutoff (MASK_WINDOW=10 counting from the latest turn)
   // causes byte-level instability in the OAI request — previously masked
