@@ -27,6 +27,7 @@ const SUGGESTIONS: Record<DangerSignalKind, string> = {
   graph_anomaly: 'The code graph is behaving unusually — verify file structure.',
   repair_exhaustion: 'Multiple repair attempts failed — try a different approach.',
   sycophancy_detected: 'You may be in sycophancy mode — challenge assumptions.',
+  tdd_violation: 'No test file touched yet. Write tests before implementation.',
 }
 
 function severityToLevel(dangerScore: number): 'warning' | 'danger' | 'ban' {

@@ -73,6 +73,7 @@ import { createP3Integration, type P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
 import { formatImmuneContext } from './immune-context.js'
+import { checkTddGate } from './tdd-gate.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
@@ -1103,7 +1104,19 @@ export class AgentLoop {
         this.config.promptEngine.setPhaseHint(phaseClass)
         const contractStatus = contractStatusFromPhaseClass(phaseClass)
         if (this.taskContract && contractStatus) {
+          const prevStatus = this.taskContract.status
           this.taskContract = advanceContractStatus(this.taskContract, contractStatus, this.session.getTurnCount())
+
+          // TDD Gate: one-shot check on planning→executing transition
+          if (prevStatus === 'planning' && this.taskContract.status === 'executing' && !this._lastImmuneHint) {
+            const es = this.evidence.getState()
+            const tddHint = checkTddGate({
+              filesRead: es.filesRead,
+              filesModified: es.filesModified,
+              isActionable: this.taskContract.isActionable,
+            })
+            if (tddHint) this._lastImmuneHint = tddHint
+          }
         }
 
         const intentResult = await this.intent.evaluate({

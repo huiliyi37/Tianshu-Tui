@@ -13,6 +13,7 @@ export type DangerSignalKind =
   | 'graph_anomaly'
   | 'repair_exhaustion'
   | 'sycophancy_detected'
+  | 'tdd_violation'
 
 export interface DangerSignal {
   kind: DangerSignalKind
