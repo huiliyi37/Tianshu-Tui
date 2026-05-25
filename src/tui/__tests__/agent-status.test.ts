@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { toolLabel, statusPhaseText } from '../agent-status.js'
+import { toolLabel, statusPhaseText } from '../tool-status.js'
 
 describe('toolLabel', () => {
   it('keeps plain read_file labels concise', () => {

@@ -1,7 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { getTheme } from './theme.js'
-import { formatElapsed } from './summary-bar.js'
+import { formatElapsed } from './format-utils.js'
 import { PHASE_LABELS, PHASE_GLYPHS } from '../agent/star-event.js'
 import type { PhaseSegment } from '../agent/chronicle.js'
 

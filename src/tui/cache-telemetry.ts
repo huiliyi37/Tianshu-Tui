@@ -1,5 +1,5 @@
 import type { TurnCacheSnapshot } from '../agent/context.js'
-import type { CacheStatus } from './status-bar.js'
+import type { CacheStatus } from './status-types.js'
 
 export interface CacheTelemetrySession {
   getCacheHistory(): TurnCacheSnapshot[]

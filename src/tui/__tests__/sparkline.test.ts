@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { brailleSparkline } from '../summary-bar.js'
+import { brailleSparkline } from '../format-utils.js'
 
 describe('brailleSparkline', () => {
   it('renders empty sparkline for no data', () => {

@@ -1,7 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { getTheme } from '../theme.js'
-import { contextBar } from '../summary-bar.js'
+import { contextBar } from '../format-utils.js'
 
 export interface ModelPanelProps {
   model: string

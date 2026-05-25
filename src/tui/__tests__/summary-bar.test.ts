@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatSummaryLine1, formatSummaryLine2, formatSummaryLine3 } from '../summary-bar.js'
-import type { SummaryState } from '../summary-bar.js'
+import { formatSummaryLine1, formatSummaryLine2, formatSummaryLine3 } from '../format-utils.js'
+import type { SummaryState } from '../summary-state.js'
 
 describe('SummaryBar formatting', () => {
   const state: SummaryState = {
