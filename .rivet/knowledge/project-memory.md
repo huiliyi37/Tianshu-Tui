@@ -1,3 +1,11 @@
+### 2026-05-25 — session be849c60
+
+**Modified** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/artifact-threshold.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/__tests__/artifact-threshold.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/grep.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/read-file.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts
+**Read** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/compact/constants.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/model-read-cap.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/tool-pipeline.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/grep.ts
+**Tests**: ⚠️ unverified
+**Tools used**: read_file×11, edit_file×8, bash×7, todo×5, grep×3, write_file×2, git×1
+- Decision: put this in a simple function in `src/compact/constants
+
 ### 2026-05-25 — session 36692179
 **Modified**: src/agent/__tests__/tool-pipeline.test.ts
 **Tests**: ✅ 17 passed (tool-pipeline)
