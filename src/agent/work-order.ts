@@ -61,11 +61,13 @@ export const aggregationPolicySchema = z.enum([
 
 export type AggregationPolicy = z.infer<typeof aggregationPolicySchema>
 
-const workOrderScopeSchema = z.object({
+export const workOrderScopeSchema = z.object({
   files: z.array(z.string()).optional(),
   symbols: z.array(z.string()).optional(),
   commands: z.array(z.string()).optional(),
   externalUrls: z.array(z.string()).optional(),
+  maxFiles: z.number().int().positive().optional(),
+  maxTokens: z.number().int().min(1000).optional(),
 })
 
 export type WorkOrderScope = z.infer<typeof workOrderScopeSchema>
