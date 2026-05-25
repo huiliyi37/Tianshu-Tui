@@ -53,6 +53,7 @@ import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
 import { ArtifactStore } from '../artifact/store.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
+import { debugLog } from '../utils/debug.js'
 import { TurnStreamController } from './turn-stream.js'
 import { classifySeason, type CognitiveSeason } from './cognitive-season.js'
 import { createVigorState } from './vigor.js'
@@ -422,8 +423,7 @@ export class AgentLoop {
             .then(() => persist.appendOaiWithChecksum(msg))
             .then(() => {
               // P0-1 trace: verify every message triggers persistence
-              // eslint-disable-next-line no-console
-              console.warn(`[persist] append message role=${msg.role}`)
+              debugLog(`[persist] append message role=${msg.role}`)
             })
             .catch(err => {
               // Persistence failures must not crash the agent loop.
@@ -1002,7 +1002,7 @@ export class AgentLoop {
           // eslint-disable-next-line no-console
           const tokenRatio = tokenBudget / contextWindow
           const skipGate = tokenRatio < 0.5
-          console.warn(`[token-gate] tokens=${tokenBudget} window=${contextWindow} ratio=${tokenRatio.toFixed(2)} skip=${skipGate}`)
+          debugLog(`[token-gate] tokens=${tokenBudget} window=${contextWindow} ratio=${tokenRatio.toFixed(2)} skip=${skipGate}`)
           if (tokenRatio >= 0.5 && contextWindow < 1_000_000) {
             // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
             const dietBefore = this.session.getMessages()

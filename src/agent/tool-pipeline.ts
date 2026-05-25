@@ -23,6 +23,7 @@ import { assessToolRisk, CONFIDENCE_THRESHOLDS, requiresBashWriteApproval } from
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed } from './permissions.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
+import { debugLog } from '../utils/debug.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
 import { PrewarmCache } from './prewarm.js'
 import { compactThresholds, pruneThresholds } from '../compact/constants.js'
@@ -201,8 +202,7 @@ async function artifactIntercept(
   }
 
   if (content.length <= threshold) {
-    // eslint-disable-next-line no-console
-    console.warn(`[artifact-intercept-skip] tool=${toolName} len=${content.length} threshold=${threshold} isError=${isError}`)
+    debugLog(`[artifact-intercept-skip] tool=${toolName} len=${content.length} threshold=${threshold} isError=${isError}`)
     return content
   }
   if (content.startsWith('[artifact:')) return content // already an artifact ref

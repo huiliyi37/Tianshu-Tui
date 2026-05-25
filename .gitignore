@@ -11,7 +11,7 @@ task_plan.md
 .superpowers/
 
 # Local agent runtime state
-.claude/
+.claude/worktrees/
 .wolf/
 .omc/
 .github/workflows/
