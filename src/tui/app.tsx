@@ -96,6 +96,7 @@ interface AppProps {
 const THINKING_FLUSH_MS = 1000
 const TOOL_FLUSH_MS = 120
 const LIVE_STREAM_MAX_CHARS = 50_000
+const HISTORY_MAX_ITEMS = 500
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
 import { renderStaticEntry } from './render-entry.js'
@@ -224,12 +225,18 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   useEffect(() => glanceBus.subscribe(() => setGlancePulses(glanceBus.snapshot())), [glanceBus])
 
   const pushStatic = useCallback((entry: LogEntry) => {
-    setHistoryItems(prev => [...prev, entry])
+    setHistoryItems(prev => {
+      const next = [...prev, entry]
+      return next.length > HISTORY_MAX_ITEMS ? next.slice(next.length - HISTORY_MAX_ITEMS) : next
+    })
   }, [])
 
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     const grouped = groupLogs(entries)
-    setHistoryItems(prev => [...prev, ...grouped])
+    setHistoryItems(prev => {
+      const next = [...prev, ...grouped]
+      return next.length > HISTORY_MAX_ITEMS ? next.slice(next.length - HISTORY_MAX_ITEMS) : next
+    })
   }, [])
 
   const streamStartRef = useRef(0)
