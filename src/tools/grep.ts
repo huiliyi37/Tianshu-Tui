@@ -64,7 +64,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const artifactThreshold = getToolArtifactThreshold('grep', params.contextWindow)
 
     // Try ripgrep first, fall back to native search
-    const rgResult = await tryRipgrep(pattern, absPath, glob, maxResults, params.cwd, literal, modelCap, params.artifactStore, artifactThreshold)
+    const rgResult = await tryRipgrep(pattern, absPath, searchPath, glob, maxResults, params.cwd, literal, modelCap, params.artifactStore, artifactThreshold)
     if (rgResult !== null) return rgResult
 
     // Native fallback
@@ -81,35 +81,36 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
       const text = results.length > maxResults
         ? results.slice(0, maxResults).join('\n') + '\n... (truncated)'
         : results.join('\n')
+      const hintedText = appendLogRangeHints(text, searchPath)
 
       // Use ArtifactStore if available — but only when content actually warrants it.
       // See bash.ts/read-file.ts for the full rationale: small results returned as
       // [artifact:X] summary made the model think grep was hiding hits.
       if (params.artifactStore) {
-        if (text.length < artifactThreshold) {
+        if (hintedText.length < artifactThreshold) {
           // eslint-disable-next-line no-console
-          console.warn(`[artifact-skip] tool=grep pattern=${pattern.slice(0, 40)} raw=${text.length} threshold=${artifactThreshold}`)
-          return { content: truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) }
+          console.warn(`[artifact-skip] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+          return { content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) }
         }
         // eslint-disable-next-line no-console
-        console.warn(`[artifact-wrap] tool=grep pattern=${pattern.slice(0, 40)} raw=${text.length} threshold=${artifactThreshold}`)
-        const { summary, sections } = summarizeGrepResult(text, pattern)
+        console.warn(`[artifact-wrap] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+        const { summary, sections } = summarizeGrepResult(hintedText, pattern)
         const artifactId = await params.artifactStore.save({
           tool: 'grep',
           target: searchPath,
-          rawContent: text,
+          rawContent: hintedText,
           summary,
           sections,
         })
         // Return a truncated view of the actual matches plus the artifact ref —
         // model sees real hits up front, artifact is only the recovery path.
-        const truncated = truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars)
+        const truncated = truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars)
         return {
           content: `${truncated}\n\n${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L500") for the full match list.\n[artifact:${artifactId}]`,
         }
       }
 
-      return { content: truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) }
+      return { content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       return { content: `Error: ${message}`, isError: true }
@@ -130,9 +131,28 @@ function buildRegex(pattern: string, literal: boolean): RegExp | null {
   }
 }
 
+function isLogLikeFilePath(path: string): boolean {
+  return /\.(?:log|jsonl|ndjson|out|err|trace)(?:\.\d+)?$/i.test(path)
+}
+
+function appendLogRangeHints(content: string, searchPath: string): string {
+  if (!isLogLikeFilePath(searchPath)) return content
+  const hints: string[] = []
+  for (const line of content.split('\n')) {
+    const match = line.match(/:(\d+):/) ?? line.match(/^(\d+):/)
+    if (!match?.[1]) continue
+    const offset = Math.max(1, Number(match[1]) - 20)
+    hints.push(`- read_file(file_path="${searchPath}", offset=${offset}, limit<=80)`)
+    if (hints.length >= 5) break
+  }
+  if (hints.length === 0) return content
+  return `${content}\n\nSuggested next reads:\n${hints.join('\n')}`
+}
+
 async function tryRipgrep(
   pattern: string,
   absPath: string,
+  searchPath: string,
   glob: string | undefined,
   maxResults: number,
   cwd: string,
@@ -206,38 +226,39 @@ async function tryRipgrep(
       const lines = stdout.split('\n').filter(l => l.length > 0).slice(0, maxResults)
       const suffix = lineCount >= maxResults ? '\n... (truncated)' : ''
       const text = lines.join('\n') + suffix
+      const hintedText = appendLogRangeHints(text, searchPath)
 
       // Use ArtifactStore if available — but only when content warrants it.
       // See bash.ts/read-file.ts for rationale.
       if (artifactStore) {
-        if (text.length < artifactThreshold) {
+        if (hintedText.length < artifactThreshold) {
           // eslint-disable-next-line no-console
-          console.warn(`[artifact-skip] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${text.length} threshold=${artifactThreshold}`)
-          resolve({ content: truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
+          console.warn(`[artifact-skip] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+          resolve({ content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
           return
         }
         // eslint-disable-next-line no-console
-        console.warn(`[artifact-wrap] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${text.length} threshold=${artifactThreshold}`)
-        const { summary, sections } = summarizeGrepResult(text, pattern)
+        console.warn(`[artifact-wrap] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+        const { summary, sections } = summarizeGrepResult(hintedText, pattern)
         void artifactStore.save({
           tool: 'grep',
           target: absPath,
-          rawContent: text,
+          rawContent: hintedText,
           summary,
           sections,
         }).then(artifactId => {
-          const truncated = truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars)
+          const truncated = truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars)
           resolve({
             content: `${truncated}\n\n${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L500") for the full match list.\n[artifact:${artifactId}]`,
           })
         }).catch(() => {
           // Fallback to truncation if artifact save fails
-          resolve({ content: truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
+          resolve({ content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
         })
         return
       }
 
-      resolve({ content: truncateContent(text, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
+      resolve({ content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
     })
   })
 }

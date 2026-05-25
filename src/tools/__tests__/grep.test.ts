@@ -121,6 +121,21 @@ describe('GREP_TOOL', () => {
     }
   })
 
+  it('suggests bounded read_file ranges for single-file log matches', async () => {
+    const logsDir = join(testDir, 'logs')
+    mkdirSync(logsDir, { recursive: true })
+    const lines = Array.from({ length: 200 }, (_, i) => i === 120 ? `L${i} ERROR failed` : `L${i} ok`)
+    writeFileSync(join(logsDir, 'app.log'), lines.join('\n'))
+
+    const result = await GREP_TOOL.execute(makeParams({ pattern: 'ERROR', path: 'logs/app.log', max_results: 10 }))
+
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('Suggested next reads:'))
+    assert.ok(result.content.includes('read_file(file_path="logs/app.log"'))
+    assert.ok(result.content.includes('limit<=80'))
+    assert.ok(!result.content.includes('scan the whole project'))
+  })
+
   it('requiresApproval and isConcurrencySafe', () => {
     assert.equal(GREP_TOOL.requiresApproval(makeParams({ pattern: 'test' })), false)
     assert.equal(GREP_TOOL.isConcurrencySafe(), true)
