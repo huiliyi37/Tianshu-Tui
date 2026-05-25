@@ -49,6 +49,8 @@ export class PromptEngine {
   /** Cached FRESH volatile block — only regenerated when a NEW user message arrives */
   private cachedFreshBlock: string = ''
   private cachedFreshForUser: string = ''
+  /** Frozen merged content for historical user messages (preserves prefix stability) */
+  private frozenUserMerged: Map<string, string> = new Map()
   private taskProgress?: TaskState
   private behaviorMirror?: string | null
   private strategyShift?: string | null
@@ -176,12 +178,22 @@ export class PromptEngine {
           // instead of pushing as separate message. Keeps message array append-only,
           // preserving DeepSeek exact-prefix cache across user-message boundaries.
           const merged = this.cachedFreshBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
+          const key = typeof msg.content === 'string' ? msg.content : ''
+          this.frozenUserMerged.set(key, merged)
           result.push({ role: 'user', content: merged })
         } else if (i === firstUserIdx) {
           result.push({ role: 'user', content: this.volatileBlock })
           result.push(msg)
         } else {
-          result.push(msg)
+          // Historical user message: use frozen merged content if available
+          // to preserve prefix stability (avoids content change when msg loses "last" status)
+          const key = typeof msg.content === 'string' ? msg.content : ''
+          const frozen = this.frozenUserMerged.get(key)
+          if (frozen) {
+            result.push({ role: 'user', content: frozen })
+          } else {
+            result.push(msg)
+          }
         }
       } else {
         result.push(msg)
