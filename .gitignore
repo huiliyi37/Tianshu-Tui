@@ -9,9 +9,11 @@ findings.md
 progress.md
 task_plan.md
 .superpowers/
+docs/sessions/
 
 # Local agent runtime state
 .claude/worktrees/
+.claude/skills/**/*.bak
 .wolf/
 .omc/
 .github/workflows/
