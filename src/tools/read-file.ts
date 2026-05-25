@@ -42,6 +42,20 @@ interface ReadHistoryEntry {
 const readHistory = new Map<string, ReadHistoryEntry>()
 const READ_HISTORY_MAX = 500
 
+/** File-level dedup: records full-file reads so fragment reads can be
+ * blocked without re-reading. Key = canonicalPath, no offset/limit.
+ * Independent of readHistory (per-slice dedup). */
+interface FileReadHistoryEntry {
+  mtimeMs: number
+  totalLines: number
+  rawBytes: number
+  modelBytes: number
+  artifactId?: string
+  recordedAt: number
+}
+const fileReadHistory = new Map<string, FileReadHistoryEntry>()
+const FILE_READ_HISTORY_MAX = 200
+
 function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limit: number | undefined): string {
   return `${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
 }
@@ -53,9 +67,17 @@ function trimReadHistory(): void {
   for (let i = 0; i < drop; i++) readHistory.delete(sorted[i]![0])
 }
 
+function trimFileReadHistory(): void {
+  if (fileReadHistory.size <= FILE_READ_HISTORY_MAX) return
+  const sorted = [...fileReadHistory.entries()].sort((a, b) => a[1].recordedAt - b[1].recordedAt)
+  const drop = Math.ceil(fileReadHistory.size * 0.2)
+  for (let i = 0; i < drop; i++) fileReadHistory.delete(sorted[i]![0])
+}
+
 /** Test-only: clear dedup state between unit tests. */
 export function __resetReadHistoryForTests(): void {
   readHistory.clear()
+  fileReadHistory.clear()
 }
 
 function getGitignoreFilter(cwd: string): GitignoreFilter {
@@ -192,8 +214,9 @@ Bad:  re-reading the same file you already read this session  → look at your p
     const limit = params.input.limit as number | undefined
     let dedupKey: string | null = null
     let currentMtimeMs: number | null = null
+    let canonical: string | null = null
     try {
-      const canonical = validatePath(params.cwd, filePath)
+      canonical = validatePath(params.cwd, filePath)
       if (existsSync(canonical)) {
         currentMtimeMs = statSync(canonical).mtimeMs
         dedupKey = readHistoryKey(params.cwd, canonical, offset, limit)
@@ -214,6 +237,28 @@ Bad:  re-reading the same file you already read this session  → look at your p
             recoveryHint,
             `Do NOT call read_file again with the same args — it will be deduped again.`,
             `If you need a different slice, change offset/limit. If you suspect the file changed, edit it first or read a different file.`,
+          ].join('\n')
+          return { content: message }
+        }
+        // File-level dedup: if this file was already read in full and hasn't changed,
+        // any non-full (fragment) read is a subset — block it.
+        // Full→full is handled by readHistory (per-slice) above.
+        const fullEntry = fileReadHistory.get(canonical)
+        if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && (offset !== 1 || limit !== undefined)) {
+          // Full read exists and file unchanged → this read (any offset/limit) is redundant
+          // eslint-disable-next-line no-console
+          console.warn(`[read-dedup-file] skip file=${canonical} offset=${offset} limit=${limit ?? 'all'} prior_age_ms=${Date.now() - fullEntry.recordedAt}`)
+          const recoveryHint = fullEntry.artifactId
+            ? `If you can no longer see the earlier result (it may have been compacted), call read_section(artifactId="${fullEntry.artifactId}", section="L${offset}-L${offset + (limit ?? fullEntry.totalLines) - 1}") to retrieve it from disk.`
+            : `Look at the earlier tool_result in your context.`
+          const message = [
+            `read_file: this file was already read in full earlier and has not been modified since.`,
+            `  file: ${canonical}`,
+            `  prior result: ${fullEntry.rawBytes} bytes raw, ${fullEntry.totalLines} lines total`,
+            `  current request: offset=${offset}, limit=${limit ?? 'all'} — this range is covered by the earlier full read.`,
+            ``,
+            recoveryHint,
+            `Do NOT call read_file for fragments of an already-read file — use your earlier tool_result.`,
           ].join('\n')
           return { content: message }
         }
@@ -252,6 +297,21 @@ Bad:  re-reading the same file you already read this session  → look at your p
       trimReadHistory()
     }
 
+    // Record file-level dedup entry for full-file reads.
+    const recordFileDedup = (artifactId?: string): void => {
+      if (!canonical || currentMtimeMs === null) return
+      if (offset !== 1 || limit !== undefined) return // only full reads
+      fileReadHistory.set(canonical, {
+        mtimeMs: currentMtimeMs,
+        totalLines: payload.rawContent.split('\n').length,
+        rawBytes: payload.rawContent.length,
+        modelBytes: payload.modelContent.length,
+        artifactId,
+        recordedAt: Date.now(),
+      })
+      trimFileReadHistory()
+    }
+
     if (params.artifactStore) {
       // Skip artifact wrapping for content small enough that prune won't touch it.
       // Why: every [artifact:X] reference is a "your content might be hidden"
@@ -268,6 +328,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
         // eslint-disable-next-line no-console
         console.warn(`[artifact-skip] tool=read_file file=${payload.canonicalPath} raw=${payload.rawContent.length} threshold=${artifactThreshold}`)
         recordDedup()
+        recordFileDedup()
         return {
           content: payload.modelContent,
           uiContent: payload.uiContent,
@@ -286,6 +347,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
         sections,
       })
       recordDedup(artifactId)
+      recordFileDedup(artifactId)
       // MODEL SEES FULL CODE — not just structural summary
       // Agent needs actual source to construct edit_file old_string
       const summaryBlock = summary.trim()
@@ -304,6 +366,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
 
     // No artifact store — record dedup without an artifactId.
     recordDedup()
+    recordFileDedup()
     return {
       content: payload.modelContent,
       uiContent: payload.uiContent,
