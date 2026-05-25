@@ -1,4 +1,5 @@
 import type { Phase, LastAction } from './phase-tracker.js'
+import { PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
 
 export interface SummaryState {
   task: string
@@ -22,4 +23,9 @@ export interface SummaryState {
   starPhaseLabel?: string
   alchemyConfidence?: number
   recentToolSummary?: string[]
+}
+
+export function phaseFromSummary(state: SummaryState): StarPhase {
+  if (!state.starPhaseLabel) return 'tianshu-planning'
+  return (Object.entries(PHASE_SHORT_LABELS).find(([, v]) => v === state.starPhaseLabel)?.[0] as StarPhase | undefined) ?? 'tianshu-planning'
 }

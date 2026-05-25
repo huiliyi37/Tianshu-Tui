@@ -15,7 +15,7 @@ import { ToolGroup } from './tool-group.js'
 import { AssistantMessage } from './assistant-message.js'
 import { groupLogs } from './group-logs.js'
 import { toolLabel, type ToolCallItem } from './agent-status.js'
-import type { SummaryState } from './summary-state.js'
+import { phaseFromSummary, type SummaryState } from './summary-state.js'
 import type { InterviewState } from './status-bar.js'
 import { PhaseTracker } from './phase-tracker.js'
 import { FluencyTracker } from './fluency-hook.js'
@@ -42,8 +42,8 @@ import { createSurfaceRouter } from './surface/router.js'
 import { useSurface } from './surface/use-surface.js'
 import { createSurfaceDefinitions } from './surface/registry.js'
 import { createGlanceBus } from './surface/glance-bus.js'
+import { glanceOnToolStart, glanceOnToolResult } from './surface/tool-domain.js'
 import { GlanceBar } from './glance-bar.js'
-import type { StarDomainId } from '../agent/star-domain.js'
 import { appendStreamWindow } from './stream-window.js'
 import { RenderBatcher } from './render-batch.js'
 import { SteerBuffer } from './steer-buffer.js'
@@ -98,28 +98,6 @@ const THINKING_FLUSH_MS = 200
 const TOOL_FLUSH_MS = 120
 const ACTIVE_THRESHOLD = 20
 const LIVE_STREAM_MAX_CHARS = 50_000
-const TOOL_DOMAIN_MAP: Record<string, StarDomainId> = {
-  grep: 'tianxuan',
-  glob: 'tianxuan',
-  read_file: 'tianxuan',
-  repo_map: 'tianxuan',
-  inspect_project: 'tianxuan',
-  edit_file: 'tianliang',
-  write_file: 'tianliang',
-  bash: 'pojun',
-  run_tests: 'tianquan',
-  delegate_task: 'tianji',
-  delegate_batch: 'tianji',
-}
-
-function domainForTool(name: string): StarDomainId {
-  return TOOL_DOMAIN_MAP[name] ?? 'tianfu'
-}
-
-function phaseFromSummary(summaryState: SummaryState): StarPhase {
-  if (!summaryState.starPhaseLabel) return 'tianshu-planning'
-  return (Object.entries(PHASE_SHORT_LABELS).find(([, v]) => v === summaryState.starPhaseLabel)?.[0] as StarPhase | undefined) ?? 'tianshu-planning'
-}
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
 import { renderStaticEntry } from './render-entry.js'
@@ -759,8 +737,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setLiveTools(liveToolsRef.current)
 
         const label = toolLabel(name, input)
-        const domain = domainForTool(name)
-        glanceBus.setActive(domain)
+        glanceOnToolStart(glanceBus, name)
         toolCallTracker.current.set(id, { id, name, label, done: false, error: false })
 
         // Begin tool activity for status bar
@@ -835,9 +812,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           tcEntry.done = true
           tcEntry.error = !!isError
         }
-        const domain = domainForTool(toolName)
-        if (isError) glanceBus.pushAlert(domain, `${toolName} failed`)
-        else glanceBus.reset(domain)
+        glanceOnToolResult(glanceBus, toolName, !!isError)
 
         phaseTracker.current.onToolResult(name, !!isError)
         const risk = (name === 'bash' && !autoSafeRef.current) ? 'medium' as const : 'none' as const

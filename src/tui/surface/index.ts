@@ -2,3 +2,5 @@ export type { SurfaceLayer, GlancePulse, SurfaceDefinition, SurfaceEvent, Surfac
 export { createSurfaceRouter } from './router.js'
 export { useSurface } from './use-surface.js'
 export { createGlanceBus, type GlanceBus } from './glance-bus.js'
+export { useGlanceBus } from './use-glance-bus.js'
+export { domainForTool, glanceOnToolStart, glanceOnToolResult } from './tool-domain.js'
