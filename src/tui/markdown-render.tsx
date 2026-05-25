@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo, useMemo, type ReactNode } from 'react'
 import { getTheme } from './theme.js'
+import { useTerminalSize } from './use-terminal-size.js'
 
 interface Segment {
   text: string
@@ -457,7 +458,7 @@ function renderTable(content: string): ReactNode {
   )
 }
 
-function renderBlock(block: Block, key: number): ReactNode {
+function renderBlock(block: Block, key: number, columns: number): ReactNode {
   const theme = getTheme()
 
   switch (block.type) {
@@ -491,7 +492,7 @@ function renderBlock(block: Block, key: number): ReactNode {
         </Box>
       )
     case 'hr':
-      return <Text key={key} dimColor>{'─'.repeat(40)}</Text>
+      return <Text key={key} dimColor>{'─'.repeat(Math.max(20, columns - 4))}</Text>
     case 'table':
       return <Box key={key}>{renderTable(block.content)}</Box>
     case 'paragraph':
@@ -502,6 +503,7 @@ function renderBlock(block: Block, key: number): ReactNode {
 
 export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
   const blocks = useMemo(() => parseBlocks(text), [text])
+  const { columns } = useTerminalSize()
 
   if (!text) return null
 
@@ -513,7 +515,7 @@ export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
 
   return (
     <Box flexDirection="column">
-      {blocks.map((block, i) => renderBlock(block, i))}
+      {blocks.map((block, i) => renderBlock(block, i, columns))}
     </Box>
   )
 })
