@@ -470,6 +470,16 @@ describe('DelegationCoordinator', () => {
     })
 
     assert.equal(selectedModels[0], 'MiniMax-M2.7')
+
+    // doc_research also maps to repo_summarization → cheap
+    await coordinator.delegate({
+      parentTurnId: 'turn_r2',
+      objective: 'Research the documentation about how surface routing works in this project.',
+      kind: 'doc_research',
+      profile: 'doc_scout',
+      scope: { files: ['docs/superpowers/specs/'] },
+    })
+    assert.equal(selectedModels[1], 'MiniMax-M2.7')
   })
 
   it('falls back to recommendModelForTask when routed provider lacks credentials', async () => {

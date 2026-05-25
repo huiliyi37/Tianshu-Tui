@@ -209,12 +209,13 @@ export const DEFAULT_CONFIG: Config = {
   workers: {
     profiles: {
       cheap: { provider: 'deepseek', model: 'deepseek-v4-flash' },
+      'cheap-minimax': { provider: 'minimax', model: 'MiniMax-M2.7' },
       capable: { provider: 'deepseek', model: 'deepseek-v4-pro' },
       mimo: { provider: 'mimo', model: 'mimo-v2.5' },
       'mimo-pro': { provider: 'mimo', model: 'mimo-v2.5-pro' },
     },
     routing: {
-      repo_summarization: 'mimo',
+      repo_summarization: 'cheap',
       code_edit: 'capable',
       test_failure_diagnosis: 'capable',
       risky_refactor: 'capable',
