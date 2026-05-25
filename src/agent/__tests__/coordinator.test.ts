@@ -674,4 +674,77 @@ describe('DelegationCoordinator', () => {
     assert.equal(run.status, 'completed')
     assert.ok(workerCalled)
   })
+
+  it('blocks exploration worker when scope exceeds maxFiles budget', async () => {
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_b1',
+      objective: 'Search for all test files across the entire codebase.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: Array.from({ length: 25 }, (_, i) => `src/module${i}.ts`), maxFiles: 10 },
+    })
+
+    assert.equal(run.results[0]!.status, 'blocked')
+    assert.ok(run.results[0]!.summary.includes('maxFiles'))
+  })
+
+  it('allows exploration worker when scope is within budget', async () => {
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_b2',
+      objective: 'Search for test files in the tui directory.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: Array.from({ length: 5 }, (_, i) => `src/tui/component${i}.tsx`), maxFiles: 10 },
+    })
+
+    assert.equal(run.results[0]!.status, 'passed')
+  })
 })

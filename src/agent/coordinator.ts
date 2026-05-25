@@ -201,6 +201,29 @@ export class DelegationCoordinator {
     }
 
     const task = mapWorkOrderKindToCapabilityTask(order.kind)
+
+    // Scope budget check for exploration workers (code_search, doc_research, plan)
+    if (order.kind === 'code_search' || order.kind === 'doc_research' || order.kind === 'plan') {
+      if (order.scope.maxFiles !== undefined && (order.scope.files?.length ?? 0) > order.scope.maxFiles) {
+        return {
+          status: 'completed',
+          order,
+          results: [{
+            workOrderId: order.id,
+            status: 'blocked',
+            summary: `Scope budget exceeded: ${order.scope.files!.length} files exceeds maxFiles=${order.scope.maxFiles}`,
+            findings: [],
+            artifacts: [{ kind: 'risk', title: 'Scope budget exceeded', content: `Requested ${order.scope.files!.length} files but maxFiles=${order.scope.maxFiles}` }],
+            changedFiles: [],
+            risks: [`scope budget: ${order.scope.files!.length} > ${order.scope.maxFiles} maxFiles`],
+            nextActions: ['Reduce file scope or increase maxFiles budget'],
+            evidenceStatus: 'blocked',
+          }],
+          packet: buildPrimaryWorkerPacket([]),
+        }
+      }
+    }
+
     const selected = this.selectModelForTask(task)
     const toolSet = isWrite ? WRITE_WORKER_TOOLS : READ_ONLY_WORKER_TOOLS
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, toolSet)
