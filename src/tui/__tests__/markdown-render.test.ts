@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseBlocks, parseInline } from '../markdown-render.js'
+import { parseBlocks, parseInline, keywordsForLang } from '../markdown-render.js'
 
 describe('parseInline', () => {
   it('parses bold text', () => {
@@ -112,5 +112,64 @@ describe('parseBlocks', () => {
     const blocks = parseBlocks(text)
     assert.equal(blocks.length, 4)
     assert.deepEqual(blocks.map(b => b.type), ['header', 'paragraph', 'code', 'list'])
+  })
+})
+
+describe('keywordsForLang', () => {
+  it('returns keywords for C++', () => {
+    const config = keywordsForLang('cpp')
+    assert.ok(config)
+    assert.ok(config.keywords.has('class'))
+    assert.ok(config.keywords.has('template'))
+  })
+
+  it('returns keywords for Java', () => {
+    const config = keywordsForLang('java')
+    assert.ok(config)
+    assert.ok(config.keywords.has('public'))
+    assert.ok(config.keywords.has('synchronized'))
+  })
+
+  it('returns case-insensitive config for SQL', () => {
+    const config = keywordsForLang('sql')
+    assert.ok(config)
+    assert.equal(config.caseInsensitive, true)
+    assert.ok(config.keywords.has('select'))
+  })
+
+  it('returns case-insensitive config for Dockerfile', () => {
+    const config = keywordsForLang('dockerfile')
+    assert.ok(config)
+    assert.equal(config.caseInsensitive, true)
+    assert.ok(config.keywords.has('from'))
+  })
+
+  it('returns keywords for Ruby', () => {
+    const config = keywordsForLang('ruby')
+    assert.ok(config)
+    assert.ok(config.keywords.has('def'))
+  })
+
+  it('returns keywords for PHP', () => {
+    const config = keywordsForLang('php')
+    assert.ok(config)
+    assert.ok(config.keywords.has('foreach'))
+  })
+
+  it('returns keywords for Swift', () => {
+    const config = keywordsForLang('swift')
+    assert.ok(config)
+    assert.ok(config.keywords.has('guard'))
+  })
+
+  it('returns keywords for Kotlin', () => {
+    const config = keywordsForLang('kotlin')
+    assert.ok(config)
+    assert.ok(config.keywords.has('companion'))
+  })
+
+  it('returns null for unknown language', () => {
+    const config = keywordsForLang('unknown')
+    assert.equal(config, null)
   })
 })

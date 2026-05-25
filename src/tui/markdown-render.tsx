@@ -241,17 +241,136 @@ const BASH_KEYWORDS = new Set([
   'local', 'readonly', 'set', 'unset', 'true', 'false',
 ])
 
-function keywordsForLang(lang: string): Set<string> | null {
+const CPP_KEYWORDS = new Set([
+  'alignas', 'alignof', 'and', 'and_eq', 'asm', 'atomic_cancel', 'atomic_commit',
+  'atomic_noexcept', 'auto', 'bitand', 'bitor', 'bool', 'break', 'case', 'catch',
+  'char', 'char8_t', 'char16_t', 'char32_t', 'class', 'compl', 'concept', 'const',
+  'consteval', 'constexpr', 'constinit', 'const_cast', 'continue', 'co_await',
+  'co_return', 'co_yield', 'decltype', 'default', 'delete', 'do', 'double',
+  'dynamic_cast', 'else', 'enum', 'explicit', 'export', 'extern', 'false', 'float',
+  'for', 'friend', 'goto', 'if', 'inline', 'int', 'long', 'mutable', 'namespace',
+  'new', 'noexcept', 'not', 'not_eq', 'nullptr', 'operator', 'or', 'or_eq',
+  'private', 'protected', 'public', 'reflexpr', 'register', 'reinterpret_cast',
+  'requires', 'return', 'short', 'signed', 'sizeof', 'static', 'static_assert',
+  'static_cast', 'struct', 'switch', 'template', 'this', 'thread_local', 'throw',
+  'true', 'try', 'typedef', 'typeid', 'typename', 'union', 'unsigned', 'using',
+  'virtual', 'void', 'volatile', 'wchar_t', 'while', 'xor', 'xor_eq',
+])
+
+const JAVA_KEYWORDS = new Set([
+  'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char',
+  'class', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum',
+  'extends', 'final', 'finally', 'float', 'for', 'goto', 'if', 'implements',
+  'import', 'instanceof', 'int', 'interface', 'long', 'native', 'new', 'package',
+  'private', 'protected', 'public', 'return', 'short', 'static', 'strictfp',
+  'super', 'switch', 'synchronized', 'this', 'throw', 'throws', 'transient',
+  'try', 'void', 'volatile', 'while', 'true', 'false', 'null',
+])
+
+const SQL_KEYWORDS = new Set([
+  'select', 'insert', 'update', 'delete', 'from', 'where', 'join', 'left',
+  'right', 'inner', 'outer', 'on', 'group', 'by', 'order', 'having', 'limit',
+  'offset', 'create', 'table', 'alter', 'drop', 'index', 'view', 'into',
+  'values', 'set', 'and', 'or', 'not', 'in', 'is', 'null', 'true', 'false',
+  'as', 'distinct', 'count', 'sum', 'avg', 'min', 'max', 'union', 'all',
+  'any', 'exists', 'like', 'between', 'case', 'when', 'then', 'else', 'end',
+])
+
+const RUBY_KEYWORDS = new Set([
+  'alias', 'and', 'begin', 'break', 'case', 'class', 'def', 'defined?', 'do',
+  'else', 'elsif', 'end', 'ensure', 'false', 'for', 'if', 'in', 'module',
+  'next', 'nil', 'not', 'or', 'redo', 'rescue', 'retry', 'return', 'self',
+  'super', 'then', 'true', 'undef', 'unless', 'until', 'when', 'while', 'yield',
+])
+
+const PHP_KEYWORDS = new Set([
+  'abstract', 'and', 'array', 'as', 'break', 'callable', 'case', 'catch',
+  'class', 'clone', 'const', 'continue', 'declare', 'default', 'die', 'do',
+  'echo', 'else', 'elsif', 'empty', 'enddeclare', 'endfor', 'endforeach',
+  'endif', 'endswitch', 'endwhile', 'eval', 'exit', 'extends', 'final',
+  'finally', 'fn', 'for', 'foreach', 'function', 'global', 'goto', 'if',
+  'implements', 'include', 'include_once', 'instanceof', 'insteadof',
+  'interface', 'isset', 'list', 'match', 'namespace', 'new', 'or', 'print',
+  'private', 'protected', 'public', 'readonly', 'require', 'require_once',
+  'return', 'static', 'switch', 'throw', 'trait', 'try', 'unset', 'use',
+  'var', 'while', 'xor', 'yield', 'true', 'false', 'null',
+])
+
+const SWIFT_KEYWORDS = new Set([
+  'associatedtype', 'class', 'deinit', 'enum', 'extension', 'fileprivate',
+  'func', 'import', 'init', 'inout', 'internal', 'let', 'open', 'operator',
+  'private', 'protocol', 'public', 'rethrows', 'static', 'struct', 'subscript',
+  'typealias', 'var', 'break', 'case', 'continue', 'default', 'defer', 'do',
+  'else', 'fallthrough', 'for', 'guard', 'if', 'in', 'repeat', 'return',
+  'switch', 'where', 'while', 'as', 'any', 'some', 'nil', 'true', 'false',
+  'self', 'Self', 'throw', 'try', 'catch',
+])
+
+const KOTLIN_KEYWORDS = new Set([
+  'as', 'break', 'class', 'continue', 'do', 'else', 'false', 'for', 'fun',
+  'if', 'in', 'interface', 'is', 'null', 'object', 'package', 'return',
+  'super', 'this', 'throw', 'true', 'try', 'typealias', 'val', 'var',
+  'when', 'while', 'by', 'companion', 'constructor', 'delegate', 'dynamic',
+  'field', 'file', 'get', 'init', 'import', 'open', 'out', 'override',
+  'private', 'protected', 'public', 'set', 'value',
+])
+
+const DOCKERFILE_KEYWORDS = new Set([
+  'from', 'run', 'cmd', 'label', 'maintainer', 'expose', 'env', 'add',
+  'copy', 'entrypoint', 'volume', 'user', 'workdir', 'arg', 'onbuild',
+  'stopsignal', 'healthcheck', 'shell',
+])
+
+interface LangConfig {
+  keywords: Set<string>
+  caseInsensitive?: boolean
+}
+
+function keywordsForLang(lang: string): LangConfig | null {
   const l = lang.toLowerCase()
-  if (l === 'typescript' || l === 'ts' || l === 'javascript' || l === 'js' || l === 'jsx' || l === 'tsx') return JS_KEYWORDS
-  if (l === 'python' || l === 'py') return PY_KEYWORDS
-  if (l === 'go' || l === 'golang') return GO_KEYWORDS
-  if (l === 'rust' || l === 'rs') return RUST_KEYWORDS
-  if (l === 'bash' || l === 'sh' || l === 'shell' || l === 'zsh') return BASH_KEYWORDS
+  if (l === 'typescript' || l === 'ts' || l === 'javascript' || l === 'js' || l === 'jsx' || l === 'tsx') {
+    return { keywords: JS_KEYWORDS }
+  }
+  if (l === 'python' || l === 'py') {
+    return { keywords: PY_KEYWORDS }
+  }
+  if (l === 'go' || l === 'golang') {
+    return { keywords: GO_KEYWORDS }
+  }
+  if (l === 'rust' || l === 'rs') {
+    return { keywords: RUST_KEYWORDS }
+  }
+  if (l === 'bash' || l === 'sh' || l === 'shell' || l === 'zsh') {
+    return { keywords: BASH_KEYWORDS }
+  }
+  if (l === 'cpp' || l === 'c' || l === 'cc' || l === 'h' || l === 'hpp' || l === 'cxx' || l === 'hxx') {
+    return { keywords: CPP_KEYWORDS }
+  }
+  if (l === 'java') {
+    return { keywords: JAVA_KEYWORDS }
+  }
+  if (l === 'sql') {
+    return { keywords: SQL_KEYWORDS, caseInsensitive: true }
+  }
+  if (l === 'ruby' || l === 'rb') {
+    return { keywords: RUBY_KEYWORDS }
+  }
+  if (l === 'php') {
+    return { keywords: PHP_KEYWORDS }
+  }
+  if (l === 'swift') {
+    return { keywords: SWIFT_KEYWORDS }
+  }
+  if (l === 'kotlin' || l === 'kt') {
+    return { keywords: KOTLIN_KEYWORDS }
+  }
+  if (l === 'dockerfile' || l === 'docker') {
+    return { keywords: DOCKERFILE_KEYWORDS, caseInsensitive: true }
+  }
   return null
 }
 
-function highlightLine(line: string, keywords: Set<string> | null): Segment[] {
+function highlightLine(line: string, keywords: Set<string> | null, caseInsensitive = false): Segment[] {
   if (!keywords) return [{ text: line }]
 
   const segments: Segment[] = []
@@ -278,12 +397,15 @@ function highlightLine(line: string, keywords: Set<string> | null): Segment[] {
       segments.push({ text: token })
     } else if (/^["'`]/.test(token)) {
       segments.push({ text: token, code: true }) // green via code=true
-    } else if (keywords.has(token)) {
-      segments.push({ text: token, bold: true }) // yellow-ish via bold
-    } else if (/^\d+$/.test(token)) {
-      segments.push({ text: token, italic: true }) // numbers in italic
     } else {
-      segments.push({ text: token })
+      const matchToken = caseInsensitive ? token.toLowerCase() : token
+      if (keywords.has(matchToken)) {
+        segments.push({ text: token, bold: true }) // yellow-ish via bold
+      } else if (/^\d+$/.test(token)) {
+        segments.push({ text: token, italic: true }) // numbers in italic
+      } else {
+        segments.push({ text: token })
+      }
     }
   }
 
@@ -299,13 +421,15 @@ function highlightLine(line: string, keywords: Set<string> | null): Segment[] {
 function renderCodeBlock(language: string | undefined, content: string): ReactNode {
   const theme = getTheme()
   const lines = content.split('\n')
-  const keywords = language ? keywordsForLang(language) : null
+  const langConfig = language ? keywordsForLang(language) : null
+  const keywords = langConfig?.keywords ?? null
+  const caseInsensitive = langConfig?.caseInsensitive ?? false
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor={theme.dim} paddingX={1}>
       {language && <Text dimColor>{language}</Text>}
       {lines.map((line, i) => {
-        const segs = highlightLine(line, keywords)
+        const segs = highlightLine(line, keywords, caseInsensitive)
         const isComment = segs.length === 1 && segs[0]!.text === line && (line.trimStart().startsWith('//') || line.trimStart().startsWith('#'))
         return (
           <Text key={i} dimColor={isComment}>
@@ -394,4 +518,4 @@ export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
   )
 })
 
-export { parseBlocks, parseInline, type Block, type Segment }
+export { parseBlocks, parseInline, type Block, type Segment, keywordsForLang }
