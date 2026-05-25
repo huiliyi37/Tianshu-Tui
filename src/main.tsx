@@ -41,7 +41,6 @@ import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 import { killAll } from './tools/process-tracker.js'
 import { runConfigCLI, loadConfig as loadLayeredConfig } from './config/manager.js'
-import { McpManager } from './mcp/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
@@ -49,7 +48,6 @@ import { MeridianIndexer } from './repo/meridian-indexer.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { PlaybookStore } from './agent/playbook-store.js'
 import type { Config, ProviderConfig } from './config/schema.js'
-import { SessionRegistry } from './agent/session-registry.js'
 import { spawnSync } from 'node:child_process'
 import type { BaselineSnapshot } from './agent/worktree-baseline.js'
 import { cleanupOrphanedTmpFiles } from './fs-atomic.js'
@@ -114,7 +112,7 @@ let _taskLedgerRef: import('./agent/task-ledger.js').TaskLedger | null = null
 let _meridianIndexerRef: import('./repo/meridian-indexer.js').MeridianIndexer | null = null
 
 // Module-level MCP manager reference — initialized in Root, shut down on exit
-let _mcpManager: McpManager | null = null
+let _mcpManager: any = null
 
 let isShuttingDown = false
 
@@ -191,7 +189,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
 
   // MCP initialization — discovers tools from configured MCP servers and registers them
   const [, setMcpReady] = useState(false)
-  const mcpManagerRef = useRef<McpManager | null>(null)
+  const mcpManagerRef = useRef<any>(null)
   const agentRef = useRef<AgentLoop | null>(null)
 
   useEffect(() => {
@@ -200,39 +198,45 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       return
     }
 
-    const mgr = new McpManager(config.mcp)
-    _mcpManager = mgr
-    mcpManagerRef.current = mgr
+    let cancelled = false
+    import('./mcp/manager.js').then(({ McpManager }) => {
+      if (cancelled) return
+      const mgr = new McpManager(config.mcp)
+      _mcpManager = mgr
+      mcpManagerRef.current = mgr
 
-    mgr.initialize().then(() => {
-      const mcpTools = mgr.getAllTools()
-      for (const tool of mcpTools) {
-        toolRegistry.register(tool)
-      }
-      setMcpReady(true)
-      agentRef.current?.updateTools()
+      return mgr.initialize().then(() => {
+        if (cancelled) return
+        const mcpTools = mgr.getAllTools()
+        for (const tool of mcpTools) {
+          toolRegistry.register(tool)
+        }
+        setMcpReady(true)
+        agentRef.current?.updateTools()
 
-      const states = mgr.getStates()
-      const connected = states.filter(s => s.status === 'connected')
-      const failed = states.filter(s => s.status === 'error')
-      if (connected.length > 0 || failed.length > 0) {
-        const parts: string[] = []
-        if (connected.length > 0) {
-          const toolCount = connected.reduce((s, c) => s + c.toolCount, 0)
-          parts.push(`${connected.length} server(s) connected (${toolCount} tools)`)
+        const states = mgr.getStates()
+        const connected = states.filter(s => s.status === 'connected')
+        const failed = states.filter(s => s.status === 'error')
+        if (connected.length > 0 || failed.length > 0) {
+          const parts: string[] = []
+          if (connected.length > 0) {
+            const toolCount = connected.reduce((s, c) => s + c.toolCount, 0)
+            parts.push(`${connected.length} server(s) connected (${toolCount} tools)`)
+          }
+          if (failed.length > 0) {
+            parts.push(`${failed.length} server(s) failed: ${failed.map(s => `${s.serverId}: ${s.error}`).join(', ')}`)
+          }
+          console.error(`[MCP] ${parts.join('; ')}`)
         }
-        if (failed.length > 0) {
-          parts.push(`${failed.length} server(s) failed: ${failed.map(s => `${s.serverId}: ${s.error}`).join(', ')}`)
-        }
-        console.error(`[MCP] ${parts.join('; ')}`)
-      }
+      })
     }).catch((err) => {
       console.error('[MCP] Initialization failed:', (err as Error).message)
       setMcpReady(true)
     })
 
     return () => {
-      mgr.shutdown().catch(() => {})
+      cancelled = true
+      _mcpManager?.shutdown().catch(() => {})
       _mcpManager = null
       mcpManagerRef.current = null
     }
@@ -771,7 +775,8 @@ async function main() {
 
   // Session Registry: 多实例共存 + 崩溃检测
   const stateDir = join(homedir(), '.rivet', 'state')
-  const registry = new SessionRegistry(stateDir)
+  const { SessionRegistry } = await import('./agent/session-registry.js')
+  const registry = await SessionRegistry.create(stateDir)
 
   // 清理崩溃会话 + stale claims
   const crashedSessions = registry.detectCrashedSessions()

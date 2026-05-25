@@ -9,9 +9,9 @@ describe('SessionRegistry events', () => {
   let registry: SessionRegistry
   let tmpDir: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'reg-events-test-'))
-    registry = new SessionRegistry(tmpDir)
+    registry = await SessionRegistry.create(tmpDir)
   })
 
   afterEach(() => {

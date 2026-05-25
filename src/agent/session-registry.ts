@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3'
 import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 
@@ -69,16 +68,22 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 `
 
 export class SessionRegistry {
-  private db: Database.Database
+  private db: any
 
-  constructor(stateDir: string) {
+  static async create(stateDir: string): Promise<SessionRegistry> {
     if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
+    const { default: Database } = await import('better-sqlite3')
     const dbPath = join(stateDir, 'registry.db')
-    this.db = new Database(dbPath)
-    this.db.pragma('journal_mode = WAL')
-    this.db.pragma('busy_timeout = 3000')
-    this.db.pragma('foreign_keys = ON')
-    this.db.exec(SCHEMA)
+    const db = new Database(dbPath)
+    db.pragma('journal_mode = WAL')
+    db.pragma('busy_timeout = 3000')
+    db.pragma('foreign_keys = ON')
+    db.exec(SCHEMA)
+    return new SessionRegistry(db)
+  }
+
+  private constructor(db: any) {
+    this.db = db
   }
 
   register(sessionId: string, cwd: string, role: 'coordinator' | 'worker' | 'standalone' = 'standalone'): void {

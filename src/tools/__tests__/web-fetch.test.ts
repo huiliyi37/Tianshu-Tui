@@ -4,54 +4,54 @@ import { createWebFetchTool, htmlToMarkdown } from '../web-fetch.js'
 import { isPrivateIP } from '../web-fetch.js'
 
 describe('htmlToMarkdown (turndown)', () => {
-  it('strips HTML tags and preserves text', () => {
-    const result = htmlToMarkdown('<p>Hello <strong>world</strong></p>')
+  it('strips HTML tags and preserves text', async () => {
+    const result = await htmlToMarkdown('<p>Hello <strong>world</strong></p>')
     assert.ok(result.includes('Hello'))
     assert.ok(!result.includes('<p>'))
     assert.ok(result.includes('**world**'))
   })
 
-  it('converts links to markdown format', () => {
-    const result = htmlToMarkdown('<a href="https://example.com">link</a>')
+  it('converts links to markdown format', async () => {
+    const result = await htmlToMarkdown('<a href="https://example.com">link</a>')
     assert.ok(result.includes('[link](https://example.com)'))
   })
 
-  it('handles empty input', () => {
-    assert.equal(htmlToMarkdown(''), '')
+  it('handles empty input', async () => {
+    assert.equal(await htmlToMarkdown(''), '')
   })
 
-  it('converts headings', () => {
-    const result = htmlToMarkdown('<h1>Title</h1>')
+  it('converts headings', async () => {
+    const result = await htmlToMarkdown('<h1>Title</h1>')
     assert.ok(result.includes('# Title'))
   })
 
-  it('converts unordered lists', () => {
-    const result = htmlToMarkdown('<ul><li>one</li><li>two</li></ul>')
+  it('converts unordered lists', async () => {
+    const result = await htmlToMarkdown('<ul><li>one</li><li>two</li></ul>')
     assert.ok(result.includes('one'))
     assert.ok(result.includes('two'))
   })
 
-  it('converts code blocks', () => {
-    const result = htmlToMarkdown('<pre><code>const x = 1</code></pre>')
+  it('converts code blocks', async () => {
+    const result = await htmlToMarkdown('<pre><code>const x = 1</code></pre>')
     assert.ok(result.includes('const x = 1'))
   })
 
-  it('strips script and style tags', () => {
-    const result = htmlToMarkdown('<script>alert("xss")</script><p>visible</p><style>.x{color:red}</style>')
+  it('strips script and style tags', async () => {
+    const result = await htmlToMarkdown('<script>alert("xss")</script><p>visible</p><style>.x{color:red}</style>')
     assert.ok(!result.includes('alert'))
     assert.ok(!result.includes('color'))
     assert.ok(result.includes('visible'))
   })
 
-  it('converts tables to readable text', () => {
+  it('converts tables to readable text', async () => {
     const html = '<table><tr><th>Name</th><th>Value</th></tr><tr><td>foo</td><td>bar</td></tr></table>'
-    const result = htmlToMarkdown(html)
+    const result = await htmlToMarkdown(html)
     assert.ok(result.includes('Name'))
     assert.ok(result.includes('foo'))
   })
 
-  it('decodes HTML entities', () => {
-    const result = htmlToMarkdown('<p>a &amp; b</p>')
+  it('decodes HTML entities', async () => {
+    const result = await htmlToMarkdown('<p>a &amp; b</p>')
     assert.ok(result.includes('a & b'))
   })
 })

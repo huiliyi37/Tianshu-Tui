@@ -1,6 +1,5 @@
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import TurndownService from 'turndown'
 import type { Tool, ToolCallParams } from './types.js'
 
 const MAX_CONTENT_LENGTH = 50_000
@@ -16,14 +15,23 @@ const defaultDeps: FetchDeps = {
   fetch: globalThis.fetch.bind(globalThis),
 }
 
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  codeBlockStyle: 'fenced',
-})
-turndown.remove(['script', 'style'])
+let _turndown: any = null
 
-export function htmlToMarkdown(html: string): string {
-  return turndown.turndown(html)
+async function getTurndown(): Promise<any> {
+  if (!_turndown) {
+    const { default: TurndownService } = await import('turndown')
+    _turndown = new TurndownService({
+      headingStyle: 'atx',
+      codeBlockStyle: 'fenced',
+    })
+    _turndown.remove(['script', 'style'])
+  }
+  return _turndown
+}
+
+export async function htmlToMarkdown(html: string): Promise<string> {
+  const td = await getTurndown()
+  return td.turndown(html)
 }
 
 export function isPrivateIP(ip: string): boolean {
@@ -157,7 +165,7 @@ export function createWebFetchTool(deps: FetchDeps = defaultDeps): Tool {
 
         let content: string
         if (contentType.includes('text/html')) {
-          content = htmlToMarkdown(body)
+          content = await htmlToMarkdown(body)
         } else {
           content = body
         }
