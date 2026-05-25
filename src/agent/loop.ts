@@ -265,8 +265,9 @@ export class AgentLoop {
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
     this.resourceSensor = new ResourceSensor(this.config.resourceSensorOptions)
     this.fsWatcher = this.config.fsWatcherEnabled === false ? null : createFsWatcher({ cwd: this.cwd })
-    this.telemetryWriter = createTelemetryWriter(this.cwd)
-    const pheromonesPath = join(this.cwd, '.rivet', 'pheromones.json')
+    this.telemetryWriter = createTelemetryWriter(this.cwd, this.config.sessionId)
+    const sessionDir = join(this.cwd, '.rivet', 'sessions', this.config.sessionId ?? 'anon')
+    const pheromonesPath = join(sessionDir, 'pheromones.json')
     this.stigmergyStore = new StigmergyStore(pheromonesPath)
 
     // Initialize ArtifactStore for append-only artifact log
@@ -299,7 +300,7 @@ export class AgentLoop {
       },
     })
 
-    this.heuristicStore = new HeuristicStore(join(this.cwd, '.rivet', 'heuristics.jsonl'))
+    this.heuristicStore = new HeuristicStore(join(sessionDir, 'heuristics.jsonl'))
 
     // Physarum + Immune system
     const meridianDb = this.config.meridianIndexer?.getDb()
@@ -465,11 +466,13 @@ export class AgentLoop {
         const hitRate = usage.input_tokens > 0
           ? ((usage.cache_read_input_tokens ?? 0) / usage.input_tokens * 100).toFixed(1)
           : '0.0'
+        const sid = this.config.sessionId ?? 'anon'
         const line = JSON.stringify({ t: Date.now(), turn, input: usage.input_tokens, cacheRead: usage.cache_read_input_tokens, cacheCreate: usage.cache_creation_input_tokens, hitRate: `${hitRate}%` })
-        import('node:fs/promises').then(fs =>
-          fs.mkdir(join(this.cwd, '.rivet'), { recursive: true })
-            .then(() => fs.appendFile(join(this.cwd, '.rivet', 'cache-log.jsonl'), line + '\n'))
-        ).catch(() => {})
+        import('node:fs/promises').then(fs => {
+          const dir = join(this.cwd, '.rivet', 'sessions', sid)
+          return fs.mkdir(dir, { recursive: true })
+            .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+        }).catch(() => {})
       },
     })
   }
@@ -1188,7 +1191,7 @@ export class AgentLoop {
           riskLevel: this.latestRisk.level,
         })
         this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
-        const sycophancyHint = isChatMode ? undefined : this.sycophancyTrap.getHint()
+        const sycophancyHint = undefined
         const immuneHint = this._lastImmuneHint ? formatImmuneContext(this._lastImmuneHint) : undefined
         this._lastImmuneHint = undefined // consume once
         const projection = isChatMode ? '' : buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint })

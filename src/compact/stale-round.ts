@@ -1,8 +1,11 @@
 import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES, staleRoundThresholds } from './constants.js'
 
-// Match a trailing artifact marker like "[artifact:abc123]" optionally followed
-// by whitespace. We preserve this when truncating so the model can still call
+// Match an artifact marker at the END of the tool result content string.
+// All tools producing artifact refs MUST place "[artifact:XYZ]" as the last
+// token — any usage instructions, summaries, or other suffixes go BEFORE it.
+// See docs/superpowers/plans/2026-05-24-工具输出 artifact 标记格式统一与窗口感知预算.md.
+// We preserve this marker when truncating so the model can still call
 // read_section(artifactId=...) to retrieve the original content.
 const ARTIFACT_MARKER_REGEX = /\[artifact:([A-Za-z0-9_-]+)\]\s*$/
 

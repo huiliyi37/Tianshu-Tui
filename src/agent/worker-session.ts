@@ -100,6 +100,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     maxTurns: config.maxTurns,
     contextWindow: config.contextWindow,
     compact: config.compact,
+    sessionId: `worker-${config.order.id}`,
   }, session, config.cwd)
 
   const timeoutMs = config.order.budget.timeoutMs

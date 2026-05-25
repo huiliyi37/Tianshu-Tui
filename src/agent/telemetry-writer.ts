@@ -6,14 +6,15 @@ export interface TelemetryWriter {
   flush(): Promise<void>
 }
 
-export function createTelemetryWriter(cwd: string): TelemetryWriter {
-  const path = join(cwd, '.rivet', 'sensorium.jsonl')
+export function createTelemetryWriter(cwd: string, sessionId?: string): TelemetryWriter {
+  const dir = sessionId ? join(cwd, '.rivet', 'sessions', sessionId) : join(cwd, '.rivet')
+  const path = join(dir, 'sensorium.jsonl')
   const pendingWrites: Promise<void>[] = []
   return {
     write(snapshot) {
       const line = JSON.stringify(snapshot)
       const writePromise = import('node:fs/promises').then(async fs => {
-        await fs.mkdir(join(cwd, '.rivet'), { recursive: true })
+        await fs.mkdir(dir, { recursive: true })
         await fs.appendFile(path, line + '\n', 'utf-8')
       }).catch(() => {})
       pendingWrites.push(writePromise)
