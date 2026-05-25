@@ -82,6 +82,23 @@ describe('ice-mirror: cache stability', () => {
     const frozen2 = buildStableVolatileBlock(baseCtx)
     assert.equal(frozen1, frozen2, 'FROZEN must be deterministic')
   })
+
+  it('FROZEN includes heuristicRules (session-level stable, belongs in frozen base)', () => {
+    const frozen = buildStableVolatileBlock({
+      ...baseCtx,
+      heuristicRules: '<heuristic-rules>\n- always check types\n</heuristic-rules>',
+    })
+    assert.ok(frozen.includes('heuristic-rules'), 'FROZEN must contain heuristicRules')
+    assert.ok(frozen.includes('always check types'))
+  })
+
+  it('dynamic appendix does NOT include heuristicRules (moved to frozen base)', () => {
+    const appendix = buildDynamicAppendix({
+      ...baseCtx,
+      heuristicRules: '<heuristic-rules>\n- always check types\n</heuristic-rules>',
+    })
+    assert.ok(!appendix.includes('heuristic-rules'), 'dynamic appendix must NOT contain heuristicRules after move to frozen base')
+  })
 })
 
 describe('multi-turn prefix stability (PromptEngine integration)', () => {

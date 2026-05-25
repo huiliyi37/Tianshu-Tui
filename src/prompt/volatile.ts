@@ -54,7 +54,7 @@ export interface VolatileContext {
    * MUST stay out of buildVolatileBlockInternal to preserve prefix cache stability.
    */
   worktreeReality?: WorktreeReality
-  /** Cross-session heuristic rules formatted for injection (cache-safe: dynamic appendix only) */
+  /** Cross-session heuristic rules — session-level stable, rendered into frozen base */
   heuristicRules?: string
 }
 
@@ -141,6 +141,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     impactHint: undefined,
     routingReason: undefined,
     cerebellarHint: undefined,
+    // heuristicRules is session-level stable — belongs in frozen base
     // gitStatus moved to dynamic appendix — changes every turn, breaks prefix cache
     gitStatus: undefined,
     // Session snapshot fields — KEEP in FROZEN:
@@ -225,9 +226,7 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     parts.push(ctx.crossSessionEvents)
   }
 
-  if (ctx.heuristicRules) {
-    parts.push(ctx.heuristicRules)
-  }
+  // heuristicRules moved to frozen base (session-level stable)
 
   if (ctx.sessionState) {
     parts.push(ctx.sessionState)
@@ -368,6 +367,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
       })
       .join('\n')
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+  }
+
+  // heuristicRules is session-level stable — rendered into frozen base
+  // so it doesn't consume Turn 0 uncached delta tokens.
+  if (ctx.heuristicRules) {
+    parts.push(ctx.heuristicRules)
   }
 
   if (ctx.worktreeReality && ctx.worktreeReality.severity !== 'green') {
