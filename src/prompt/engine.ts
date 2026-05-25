@@ -182,8 +182,15 @@ export class PromptEngine {
           this.frozenUserMerged.set(key, merged)
           result.push({ role: 'user', content: merged })
         } else if (i === firstUserIdx) {
-          result.push({ role: 'user', content: this.volatileBlock })
-          result.push(msg)
+          // Use frozen merged content if available (preserves prefix from when this was lastUserIdx)
+          const key = typeof msg.content === 'string' ? msg.content : ''
+          const frozen = this.frozenUserMerged.get(key)
+          if (frozen) {
+            result.push({ role: 'user', content: frozen })
+          } else {
+            result.push({ role: 'user', content: this.volatileBlock })
+            result.push(msg)
+          }
         } else {
           // Historical user message: use frozen merged content if available
           // to preserve prefix stability (avoids content change when msg loses "last" status)
