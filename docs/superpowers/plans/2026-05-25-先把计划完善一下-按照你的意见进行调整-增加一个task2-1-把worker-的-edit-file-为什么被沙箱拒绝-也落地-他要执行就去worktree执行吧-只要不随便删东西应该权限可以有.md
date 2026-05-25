@@ -1,0 +1,248 @@
+# Rivet TUI DX 改进：天枢反馈四连修状态标记
+
+更新时间：2026-05-25  
+状态：**本轮只核查并归档 Task 2.1 worker / 沙箱权限 / worktree 隔离；其它三项标记为后续待办，不在本轮推进。**
+
+## 本轮结论
+
+四连修原计划包含四项：
+
+1. Task 1：`edit_file replace_all expected_count`
+2. Task 2.1：worker 写权限被 host sandbox 拦截 + worktree 隔离
+3. Task 2.2：scout vs worker 技能文档
+4. Task 3：长 session 阶段 checkpoint 技能文档
+
+本轮按用户要求只查 Task 2.1。结论：**Rivet 侧 worker/write/worktree 实现已经落地，未发现需要再改代码的问题；host agent framework 的 subagent sandbox 仍可能拦截写工具，这是宿主层限制，不是 Rivet work-order 权限 bug。**
+
+---
+
+## 状态表
+
+| 项 | 当前状态 | 说明 |
+|---|---|---|
+| Task 1：edit_file expected_count | 后续待办 / 本轮不处理 | 已知已有 `6589d75 fix(edit): replace_all warns when actual count mismatches expected_count`，但本轮不重新核验、不改文档为完成态。 |
+| Task 2.1：worker 写权限 + worktree 隔离 | ✅ 已核查 | 代码已走 hands session + isolated git worktree；worker 工具权限配置正确；host sandbox caveat 已在 coordinator 注释中说明。 |
+| Task 2.2：scout vs worker 技能文档 | 后续待办 / 本轮不处理 | 已知可能已有技能文档提交，但本轮只处理 worker 实现核查，不扩大范围。 |
+| Task 3：阶段 checkpoint 技能文档 | 后续待办 / 本轮不处理 | 本轮不处理。 |
+
+---
+
+## Task 2.1 核查结果
+
+### 1. patcher / verifier 被识别为 write-capable worker
+
+文件：`src/agent/coordinator.ts`
+
+实现路径：
+
+```ts
+const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
+const isWrite = writeProfiles.includes(request.profile)
+const order = isWrite
+  ? createWriteWorkOrder(...)
+  : createReadOnlyWorkOrder(...)
+```
+
+进入 `delegateOrder()` 后再次用 allowedTools 判定：
+
+```ts
+const isWrite = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
+const toolSet = isWrite ? WRITE_WORKER_TOOLS : READ_ONLY_WORKER_TOOLS
+const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, toolSet)
+```
+
+因此 Rivet work-order 层面对 patcher / verifier 的 write tool 授权是正确的。
+
+### 2. write worker 工具集包含写入和验证工具
+
+文件：`src/agent/work-order.ts`
+
+```ts
+export const WRITE_WORKER_TOOLS = [
+  'read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests',
+  'edit_file', 'write_file', 'bash', 'run_tests',
+] as const
+```
+
+`createWriteWorkOrder()` 会把 `WRITE_WORKER_TOOLS` 写入 `allowedTools`，并禁止 worker 再递归 delegation：
+
+```ts
+allowedTools: [...WRITE_WORKER_TOOLS],
+disallowedTools: ['delegate_task', 'delegate_batch'],
+```
+
+### 3. write worker 已通过 hands route 进入 isolated git worktree
+
+文件：`src/agent/coordinator.ts`
+
+```ts
+const role = classifyProfile(order.profile)
+...
+if (role === 'hands') {
+  const handsRun = await this.runHands({
+    order,
+    wtCoordinator: new WorktreeCoordinator(cwd),
+    cwd,
+    ...
+    runAgent: async (prompt, callbacks, workerCwd) => {
+      const sessionRun = await this.runWorker({
+        ...workerConfig,
+        order,
+        cwd: workerCwd,
+        activeClaims,
+      })
+      ...
+    },
+  })
+}
+```
+
+`classifyProfile()` 在 `src/agent/coordination-policy.ts` 中把 `patcher` / `verifier` 归为 `hands`：
+
+```ts
+case 'patcher':
+case 'verifier':
+  return 'hands'
+```
+
+也就是说，写 worker 不再直接在主 cwd 执行，而是由 `runHandsSession()` 创建隔离 worktree 后再执行。
+
+### 4. worktree 生命周期已实现：create → run → collect diff → cleanup
+
+文件：`src/agent/hands-session.ts`
+
+`runHandsSession()` 的生命周期：
+
+1. `config.wtCoordinator.create(config.order.id)` 创建 worktree。
+2. `config.runAgent(..., wt.path)` 把 workerCwd 传给 worker。
+3. 用 `collectDiff(config.cwd, wt.path, baseRef)` 收集 worker 修改。
+4. 把 diff 附加到 `WorkerResult.artifacts`。
+5. `finally` 中 `config.wtCoordinator.remove(config.order.id)` 清理 worktree。
+
+这意味着 worker 修改不会直接污染主工作区；主 agent 能看到 diff artifact，再决定是否接受/应用。
+
+### 5. worktree coordinator 使用 git worktree 隔离
+
+文件：`src/agent/worktree-coordinator.ts`、`src/agent/worktree.ts`
+
+- `WorktreeCoordinator.create()` 为每个 worker 创建独立 branch：`rivet-hands-<workerId>`。
+- `createWorktree()` 使用 `git worktree add -b <branch> <tmpPath>`。
+- `removeWorktree()` 使用 `git worktree remove --force` 并删除 worker branch。
+- `parseWorktreeList()` 使用 `git worktree list --porcelain`，可稳定处理路径空格。
+
+### 6. 文件 claim / semantic lock 也在 write worker 前置保护
+
+文件：`src/agent/coordinator.ts`
+
+在 hands worker dispatch 前，coordinator 会：
+
+- 通过 `CollaborationProtocol` 尝试 semantic lock；冲突则返回 blocked。
+- 如果配置了 `SessionRegistry`，对 scoped files 获取 exclusive file claim；冲突则返回 blocked 并释放已拿到的 claim。
+
+这能降低多 worker / 多 session 同时写同一文件的风险。
+
+### 7. host sandbox caveat 已在代码中明确
+
+文件：`src/agent/coordinator.ts`
+
+当前注释已经说明：
+
+```ts
+// NOTE: The host agent framework (Claude Code etc.) may still sandbox
+// subagent write operations (edit_file/write_file/bash) even when Rivet
+// correctly provisions write tools and worktree isolation. This is a
+// host-layer constraint, not a Rivet work-order or worktree bug.
+```
+
+所以如果某个外层宿主继续拒绝 subagent 的 `edit_file` / `write_file` / `bash`，它不应再被归因到 Rivet worker 工具授权或 worktree 隔离未实现。
+
+---
+
+## 已有测试覆盖
+
+### `src/agent/__tests__/coordinator.test.ts`
+
+覆盖点：
+
+- patcher profile routes through injected hands runner seam。
+- `runWorker()` 收到的 cwd 不是主 `/repo`，而是包含 `rivet-wt-` 的 isolated worktree。
+- hands result 能携带 diff artifact。
+- semantic lock conflict 会阻止 worker。
+
+### `src/agent/__tests__/hands-session.test.ts`
+
+覆盖点：
+
+- 创建 worktree → worker 写入文件 → 收集 diff artifact → 清理 worktree。
+- 未提供 baseRef 时，diff 当前 feature branch，而不是 hard-coded main。
+- worker failure 时也清理 worktree。
+- worker result 不可解析时返回 blocked。
+
+### `src/agent/__tests__/worktree-coordinator.test.ts`
+
+覆盖点：
+
+- 创建 worker worktree 并返回路径。
+- 删除 worktree 并删除 branch。
+- `cleanupAll()` 清理所有 active worktrees。
+- active count / getWorktree / unknown worker id no-op。
+
+---
+
+## 本轮验证
+
+计划执行：
+
+```bash
+npm run typecheck
+npm exec -- tsx --test \
+  src/agent/__tests__/coordinator.test.ts \
+  src/agent/__tests__/hands-session.test.ts \
+  src/agent/__tests__/worktree-coordinator.test.ts
+```
+
+如果以上通过，则本轮只提交此文档标记，不改 worker 代码。
+
+---
+
+## 后续待办（本轮不做）
+
+### Task 1：edit_file expected_count 状态复核
+
+虽然历史中已有：
+
+```text
+6589d75 fix(edit): replace_all warns when actual count mismatches expected_count
+```
+
+但如果要正式把 Task 1 标为完成，应单独核查：
+
+- `src/tools/edit.ts` schema 是否包含 `expected_count`。
+- `src/tools/__tests__/edit.test.ts` 是否覆盖 count mismatch / count match。
+- 运行 `npm exec -- tsx --test src/tools/__tests__/edit.test.ts`。
+
+### Task 2.2：scout vs worker 技能文档状态复核
+
+如果要正式标完成，应单独核查：
+
+- subagent-driven-development 技能文件中的 scout vs worker 决策表。
+- host sandbox root cause 说明是否准确。
+- 相关 docs commit 是否已包含最终版本。
+
+### Task 3：阶段 checkpoint 技能文档状态复核
+
+如果要正式标完成，应单独核查：
+
+- executing-plans 技能文件是否包含 phase checkpoint 机制。
+- checkpoint 触发条件与 handoff summary 说明是否仍符合当前 agent 设计。
+
+---
+
+## 提交建议
+
+若验证通过，提交：
+
+```bash
+git add docs/superpowers/plans/2026-05-25-先把计划完善一下-按照你的意见进行调整-增加一个task2-1-把worker-的-edit-file-为什么被沙箱拒绝-也落地-他要执行就去worktree执行吧-只要不随便删东西应该权限可以有.md
+git commit -m "docs(workers): mark worker sandbox fix verified"
+```
