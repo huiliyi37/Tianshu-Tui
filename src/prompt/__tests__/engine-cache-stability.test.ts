@@ -4,6 +4,26 @@ import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicApp
 import { PromptEngine } from '../engine.js'
 import type { OaiMessage } from '../../api/oai-types.js'
 
+function stringContent(message: OaiMessage | undefined): string {
+  if (!message || typeof message.content !== 'string') {
+    throw new Error('expected message with string content')
+  }
+  return message.content
+}
+
+function latestUserTrailer(messages: readonly OaiMessage[]): { fresh: string; user: string } {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg?.role === 'user' && typeof msg.content === 'string') {
+      const sep = '\n---\n'
+      const idx = msg.content.indexOf(sep)
+      if (idx === -1) return { fresh: msg.content, user: '' }
+      return { fresh: msg.content.slice(0, idx), user: msg.content.slice(idx + sep.length) }
+    }
+  }
+  throw new Error('expected at least one user message')
+}
+
 describe('ice-mirror: cache stability', () => {
   const baseCtx = {
     cwd: '/test',
@@ -160,20 +180,13 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
     ], [{ tool: 'read_file', target: 'x', status: 'success' }])
 
     // messages[1] = FROZEN volatile for "hello"
-    const frozenVol = (req.messages[1] as { content: string }).content
+    const frozenVol = stringContent(req.messages[1])
 
-    // Find the FRESH volatile - it's the message before the last user text
-    let freshVol = ''
-    for (let i = req.messages.length - 1; i >= 0; i--) {
-      const msg = req.messages[i] as { role: string; content: string }
-      if (msg.role === 'user' && msg.content === 'read file') {
-        freshVol = (req.messages[i - 1] as { content: string }).content
-        break
-      }
-    }
+    const { fresh: freshVol, user } = latestUserTrailer(req.messages)
+    assert.equal(user, 'read file')
 
     assert.ok(freshVol.startsWith(frozenVol),
-      'FRESH volatile must start with exact FROZEN bytes')
+      'FRESH trailer must start with exact FROZEN bytes')
   })
 
   it('system prompt is identical across turns', () => {
@@ -243,7 +256,7 @@ describe('habituation: three-zone consolidation', () => {
     assert.ok(vol.includes('tianshu'), 'Consolidated should contain domain name')
   })
 
-  it('historical volatile includes consolidated block after promotion', () => {
+  it('historical volatile stays frozen while latest trailer carries consolidated block after promotion', () => {
     const engine = createEngineH(3)
     engine.setPhaseHint('execute')
 
@@ -259,8 +272,12 @@ describe('habituation: three-zone consolidation', () => {
       { role: 'user', content: 'msg 1' },
     ])
 
-    const histVol = (req.messages[1] as { content: string }).content
-    assert.ok(histVol.includes('<consolidated>'), 'Historical volatile must include consolidated')
+    const histVol = stringContent(req.messages[1])
+    const { fresh: freshVol, user } = latestUserTrailer(req.messages)
+    assert.equal(user, 'msg 1')
+    assert.ok(!histVol.includes('<consolidated>'), 'Historical volatile must stay frozen for prefix cache')
+    assert.ok(freshVol.startsWith(histVol), 'Latest trailer must preserve frozen prefix')
+    assert.ok(freshVol.includes('<consolidated>'), 'Latest trailer must include consolidated dynamic appendix')
   })
 
   it('dehabituation removes field from consolidated block', () => {
@@ -282,7 +299,7 @@ describe('habituation: three-zone consolidation', () => {
     assert.ok(!vol.includes('<consolidated>'), 'Consolidated should disappear after dehabituation')
   })
 
-  it('FROZEN+CONSOLIDATED is byte prefix of FRESH with active appendix', () => {
+  it('FROZEN is byte prefix of FRESH trailer with consolidated and active appendix', () => {
     const engine = createEngineH(3)
     engine.setPhaseHint('execute')
 
@@ -298,19 +315,17 @@ describe('habituation: three-zone consolidation', () => {
       { role: 'user', content: 'read' },
     ], [{ tool: 'read_file', target: 'x', status: 'success' }])
 
-    const histVol = (req.messages[1] as { content: string }).content
+    const histVol = stringContent(req.messages[1])
 
-    let freshVol = ''
-    for (let i = req.messages.length - 1; i >= 0; i--) {
-      const m = req.messages[i] as { role: string; content: string }
-      if (m.role === 'user' && m.content === 'read') {
-        freshVol = (req.messages[i - 1] as { content: string }).content
-        break
-      }
-    }
+    const { fresh: freshVol, user } = latestUserTrailer(req.messages)
+    assert.equal(user, 'read')
 
     assert.ok(freshVol.startsWith(histVol),
-      'FRESH must start with FROZEN+CONSOLIDATED bytes')
+      'FRESH trailer must start with FROZEN bytes')
+    assert.ok(freshVol.includes('<consolidated>'),
+      'FRESH trailer must include consolidated dynamic appendix')
+    assert.ok(freshVol.includes('<tool-history'),
+      'FRESH trailer must include active appendix')
   })
 
   it('disabling habituation (threshold=0) falls back to v1 behavior', () => {
@@ -380,14 +395,14 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     const req1 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
     ])
-    const vol1 = (req1.messages[1] as { content: string }).content
+    const vol1 = latestUserTrailer(req1.messages).fresh
 
     const req2 = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'bash', arguments: '{"command":"ls"}' } }] },
       { role: 'tool', tool_call_id: 'c1', content: 'file1\nfile2' },
     ])
-    const vol2 = (req2.messages[1] as { content: string }).content
+    const vol2 = latestUserTrailer(req2.messages).fresh
     assert.equal(vol1, vol2, 'Same user message → cached volatile')
 
     engine.setRepairHint('fix the path')
@@ -396,14 +411,8 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
       { role: 'assistant', content: 'done' },
       { role: 'user', content: 'read file' },
     ])
-    let freshVol = ''
-    for (let i = req3.messages.length - 1; i >= 0; i--) {
-      const m = req3.messages[i] as { role: string; content: string }
-      if (m.role === 'user' && m.content === 'read file') {
-        freshVol = (req3.messages[i - 1] as { content: string }).content
-        break
-      }
-    }
+    const { fresh: freshVol, user } = latestUserTrailer(req3.messages)
+    assert.equal(user, 'read file')
     assert.notEqual(freshVol, vol1, 'New user message → regenerated volatile')
   })
 
@@ -440,13 +449,15 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     ]
 
     const before = engine.buildOaiRequest(messages)
-    assert.doesNotMatch(before.messages[1]!.content as string, /task-contract/)
+    const beforeFresh = latestUserTrailer(before.messages).fresh
+    assert.doesNotMatch(beforeFresh, /task-contract/)
 
     engine.setCognitiveProjection('<task-contract status="executing"><objective>implement feature X</objective></task-contract>')
     // Same user message → cached fresh block reused (prefix cache preserved)
     const after = engine.buildOaiRequest(messages)
-    const context = after.messages[1]!.content as string
-    assert.doesNotMatch(context, /<task-contract status="executing">/)
+    const afterFresh = latestUserTrailer(after.messages).fresh
+    assert.equal(afterFresh, beforeFresh)
+    assert.doesNotMatch(afterFresh, /<task-contract status="executing">/)
 
     // Projection appears when a NEW user message arrives (different content triggers rebuild)
     const messages2: OaiMessage[] = [
@@ -454,10 +465,8 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
       { role: 'user', content: 'now do Y' },
     ]
     const withNewUser = engine.buildOaiRequest(messages2)
-    // Fresh volatile is injected as user message right before the last user message
-    // Structure: [system, frozen-vol, user1, assistant, tool, fresh-vol, user2]
-    const freshIdx = withNewUser.messages.length - 2
-    const freshContext = withNewUser.messages[freshIdx]!.content as string
+    const { fresh: freshContext, user } = latestUserTrailer(withNewUser.messages)
+    assert.equal(user, 'now do Y')
     assert.match(freshContext, /<task-contract status="executing">/)
     assert.equal(engine.checkDrift(), null)
   })
@@ -531,15 +540,8 @@ describe('sessionState injection — cache safety + path coverage', () => {
       { role: 'assistant', content: 'done' },
       { role: 'user', content: 'second task' },
     ])
-    const msgs = req2.messages
-    let secondTaskFresh = ''
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i] as { role: string; content: string }
-      if (m.role === 'user' && m.content === 'second task') {
-        secondTaskFresh = (msgs[i - 1] as { content: string }).content
-        break
-      }
-    }
+    const { fresh: secondTaskFresh, user } = latestUserTrailer(req2.messages)
+    assert.equal(user, 'second task')
     assert.match(secondTaskFresh, /State: B/, 'New user message must see latest sessionState snapshot')
   })
 
