@@ -190,7 +190,7 @@ git commit -m "test(prompt): update P1.1b assertion for trailer mode merge"
 
 - [ ] **步骤 13：实际 session 验证**
 
-启动新 session，观察 `.rivet/cache-log.jsonl`：
+启动新 session，观察 `.rivet/sessions/<sessionId>/cache-log.jsonl`（旧 commit 可能仍写 `.rivet/cache-log.jsonl`）：
 - Turn 0: 20-30%（冷启动，正常）
 - Turn 1: 恢复到 80%+
 - Turn 2+: 稳定 95%+

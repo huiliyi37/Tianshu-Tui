@@ -195,7 +195,7 @@ npx tsc --noEmit && npx tsx --test src/**/__tests__/*.test.ts
 ```
 
 ### 手动验证（运行时）
-启动 TUI 进行一次对话，观察 cache-log 文件（位于 `.rivet/logs/` 目录）中的 `hitRate` 字段从 0% 变为非零值。
+启动 TUI 进行一次对话，观察 cache-log 文件（位于 `.rivet/sessions/<sessionId>/cache-log.jsonl`，旧 commit 可能仍写 `.rivet/cache-log.jsonl`）中的 `hitRate` 字段从 0% 变为非零值。
 
 注意：首轮对话 hitRate 始终为 0%（冷启动，无 prefix cache），需从第 2 轮开始观察。
 

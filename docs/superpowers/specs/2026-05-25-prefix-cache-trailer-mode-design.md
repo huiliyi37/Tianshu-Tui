@@ -119,7 +119,7 @@ result.push({ role: 'user', content: this.cachedFreshBlock + '\n---\n' + msg.con
 
 1. `node --import tsx --test src/prompt/__tests__/engine.test.ts` 全部 pass
 2. `npx tsc --noEmit` 0 errors
-3. 新 session 的 cache-log.jsonl：Turn 2+ 稳定 95%+，无 >10% 骤降
+3. 新 session 的 cache-log.jsonl（位于 `.rivet/sessions/<sessionId>/cache-log.jsonl`）：Turn 2+ 稳定 95%+，无 >10% 骤降
 
 ## 参考
 
