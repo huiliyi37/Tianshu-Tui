@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatMissionStrip } from '../mission-strip.js'
+import { formatMissionStrip } from '../mission.js'
 import type { CognitivePhaseSnapshot } from '../../context/cognitive-ledger.js'
 
 function makeSnapshot(overrides: Partial<CognitivePhaseSnapshot> = {}): CognitivePhaseSnapshot {

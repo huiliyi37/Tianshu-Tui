@@ -7,6 +7,9 @@ export interface RivetTheme {
   warning: string
   error: string
   dim: string
+  pulseQuiet: string
+  pulseActive: string
+  pulseAlert: string
   userColor: string
   assistantColor: string
   systemColor: string
@@ -23,6 +26,9 @@ interface ColorSet {
   warning: string
   error: string
   dim: string
+  pulseQuiet: string
+  pulseActive: string
+  pulseAlert: string
 }
 
 // Pastel theme — soft, pleasant, 二次元-inspired (default)
@@ -34,6 +40,9 @@ const PASTEL_TRUECOLOR: ColorSet = {
   warning: '#ffdac1',   // warm peach — delegation/warnings
   error: '#ff9aa2',     // coral pink — errors
   dim: '#8585a0',       // soft gray — secondary info
+  pulseQuiet: '#4a4a5a', // dim violet gray — dark cockpit quiet
+  pulseActive: '#a8e6cf', // mint green — active pulse
+  pulseAlert: '#ff9aa2',  // coral pink — alert pulse
 }
 
 const PASTEL_FALLBACK: ColorSet = {
@@ -43,6 +52,9 @@ const PASTEL_FALLBACK: ColorSet = {
   warning: 'yellow',
   error: 'red',
   dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'cyan',
+  pulseAlert: 'red',
 }
 
 // Cyberpunk theme — high-saturation neon (legacy, switchable)
@@ -53,6 +65,9 @@ const CYBERPUNK_TRUECOLOR: ColorSet = {
   warning: '#ffaa00',
   error: '#ff3333',
   dim: '#4a4a6a',
+  pulseQuiet: '#2f3048',
+  pulseActive: '#00ffcc',
+  pulseAlert: '#ff3333',
 }
 
 const CYBERPUNK_FALLBACK: ColorSet = {
@@ -62,6 +77,9 @@ const CYBERPUNK_FALLBACK: ColorSet = {
   warning: 'yellow',
   error: 'red',
   dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'cyan',
+  pulseAlert: 'red',
 }
 
 // Observatory theme — 五色星辰 (Five-Color Star Palette)
@@ -73,6 +91,9 @@ const OBSERVATORY_TRUECOLOR: ColorSet = {
   warning: '#f59e0b',   // 星金黄 — 活跃星/炼金高阶
   error: '#f87171',     // 警报珊 — 错误/高风险
   dim: '#64748b',       // 远星灰 — 非活跃/次要信息
+  pulseQuiet: '#334155', // 玄灰 — quiet pulse
+  pulseActive: '#38bdf8', // 天青 — active pulse
+  pulseAlert: '#f87171',  // 警报珊 — alert pulse
 }
 
 const OBSERVATORY_FALLBACK: ColorSet = {
@@ -82,6 +103,9 @@ const OBSERVATORY_FALLBACK: ColorSet = {
   warning: 'yellow',
   error: 'red',
   dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'cyan',
+  pulseAlert: 'red',
 }
 
 function makeToolColor(c: ColorSet) {

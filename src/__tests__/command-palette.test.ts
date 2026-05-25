@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterCommands, type PaletteCommand } from '../tui/command-palette.js'
+import { filterCommands, getPaletteCommands, type PaletteCommand } from '../tui/command-palette.js'
 
 const COMMANDS: PaletteCommand[] = [
   { name: 'compact', description: 'Compact context' },
@@ -28,5 +28,17 @@ describe('filterCommands', () => {
   it('matches description', () => {
     const result = filterCommands(COMMANDS, 'switch')
     assert.equal(result[0]!.name, 'model')
+  })
+
+  it('includes discoverable surface entries with palette hotkeys', () => {
+    const surfaces = getPaletteCommands().filter(c => c.category === 'surface')
+    assert.deepEqual(
+      surfaces.map(c => [c.name, c.hotkey]),
+      [
+        ['__surface:cockpit', 'c'],
+        ['__surface:starmap', 's'],
+        ['__surface:chronicle', 'h'],
+      ]
+    )
   })
 })

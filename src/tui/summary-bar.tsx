@@ -1,32 +1,10 @@
 import { Box, Text } from 'ink'
 import { memo, useState, useEffect } from 'react'
-import type { Phase, LastAction } from './phase-tracker.js'
 import { getTheme } from './theme.js'
 import { alchemyBar, ALCHEMY_COLORS, alchemyStage } from './alchemy-bar.js'
+import type { SummaryState } from './summary-state.js'
 
-export interface SummaryState {
-  task: string
-  phase: Phase
-  stepCount: number
-  totalSteps: number
-  contextPct: number
-  elapsedMs: number
-  lastAction: LastAction | null
-  risk: 'none' | 'medium' | 'high'
-  compactEvent?: { beforeTokens: number; afterTokens: number } | null
-  approvalNeeded?: { tool: string; target: string } | null
-  tokenHistory?: number[]  // last N context percentages (0-1)
-  /** How long the current phase has been running (ms) */
-  phaseDurationMs?: number
-  /** Current turn / max turns */
-  turnCount?: number
-  maxTurns?: number
-  // 天枢之眼 — star phase + alchemy
-  starPhaseGlyph?: string        // e.g. "🔨"
-  starPhaseLabel?: string        // e.g. "铸形" (short Chinese label)
-  alchemyConfidence?: number     // 0-1, maps to alchemy 4-stage bar
-  recentToolSummary?: string[]   // last 3 tool labels, e.g. ["write auth.ts", "test", "fix bug"]
-}
+export type { SummaryState } from './summary-state.js'
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s

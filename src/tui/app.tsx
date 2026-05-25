@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo, type RefObject } from 'react'
 import { Box, Text, useInput, Static } from 'ink'
 import { WelcomeScreen } from './onboarding.js'
-import { StatusBar } from './status-bar.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
 import { StarmapView } from './starmap-view.js'
 import { ChronicleView } from './chronicle-view.js'
@@ -15,8 +14,8 @@ import { SystemMessage } from './system-message.js'
 import { ToolGroup } from './tool-group.js'
 import { AssistantMessage } from './assistant-message.js'
 import { groupLogs } from './group-logs.js'
-import { AgentStatus, toolLabel, type ToolCallItem } from './agent-status.js'
-import { SummaryBar, type SummaryState } from './summary-bar.js'
+import { toolLabel, type ToolCallItem } from './agent-status.js'
+import type { SummaryState } from './summary-state.js'
 import type { InterviewState } from './status-bar.js'
 import { PhaseTracker } from './phase-tracker.js'
 import { FluencyTracker } from './fluency-hook.js'
@@ -42,6 +41,9 @@ import { BlockStreamWriter } from './block-stream-writer.js'
 import { createSurfaceRouter } from './surface/router.js'
 import { useSurface } from './surface/use-surface.js'
 import { createSurfaceDefinitions } from './surface/registry.js'
+import { createGlanceBus } from './surface/glance-bus.js'
+import { GlanceBar } from './glance-bar.js'
+import type { StarDomainId } from '../agent/star-domain.js'
 import { appendStreamWindow } from './stream-window.js'
 import { RenderBatcher } from './render-batch.js'
 import { SteerBuffer } from './steer-buffer.js'
@@ -96,6 +98,28 @@ const THINKING_FLUSH_MS = 200
 const TOOL_FLUSH_MS = 120
 const ACTIVE_THRESHOLD = 20
 const LIVE_STREAM_MAX_CHARS = 50_000
+const TOOL_DOMAIN_MAP: Record<string, StarDomainId> = {
+  grep: 'tianxuan',
+  glob: 'tianxuan',
+  read_file: 'tianxuan',
+  repo_map: 'tianxuan',
+  inspect_project: 'tianxuan',
+  edit_file: 'tianliang',
+  write_file: 'tianliang',
+  bash: 'pojun',
+  run_tests: 'tianquan',
+  delegate_task: 'tianji',
+  delegate_batch: 'tianji',
+}
+
+function domainForTool(name: string): StarDomainId {
+  return TOOL_DOMAIN_MAP[name] ?? 'tianfu'
+}
+
+function phaseFromSummary(summaryState: SummaryState): StarPhase {
+  if (!summaryState.starPhaseLabel) return 'tianshu-planning'
+  return (Object.entries(PHASE_SHORT_LABELS).find(([, v]) => v === summaryState.starPhaseLabel)?.[0] as StarPhase | undefined) ?? 'tianshu-planning'
+}
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
 import { renderStaticEntry } from './render-entry.js'
@@ -126,7 +150,6 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
     <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor={theme.primary}>
       <Text color={theme.primary} bold>─── COCKPIT ───</Text>
       <CockpitRail activePanel={panel} panelStatuses={snap.panelStatuses} onSelect={() => {}} />
-      {panel === 'summary' && <SummaryBar state={summaryState} />}
       {panel === 'trace' && <TracePanel events={snap.trace.events} />}
       {panel === 'verify' && <VerificationPanel filesRead={snap.verification.filesRead} filesModified={snap.verification.filesModified} verifications={snap.verification.runs} deliveryStatus={snap.verification.deliveryStatus} impactedFiles={snap.verification.impactedFiles} impactedTests={snap.verification.impactedTests} />}
       {panel === 'context' && snap.context && <ContextPanel estimatedTokens={snap.context.estimatedTokens} maxTokens={snap.context.maxTokens} rounds={snap.context.rounds} compactionState={snap.context.compactionState} brokenRounds={snap.context.brokenRounds} compactEvents={compactEvents.map(e => ({ turn: e.turn, tier: e.tier, beforeTokens: e.beforeTokens, afterTokens: e.afterTokens }))} layers={snap.context.layers} />}
@@ -177,7 +200,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [fluencyStale, setFluencyStale] = useState<string | null>(null)
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
-  const [cacheStatus, setCacheStatus] = useState<import('./status-bar.js').CacheStatus>('healthy')
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [pendingIntent, setPendingIntent] = useState<PendingIntentPreview | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
@@ -208,13 +230,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     contextPct: 0, elapsedMs: 0, lastAction: null, risk: 'none',
     phaseDurationMs: 0, turnCount: 0, maxTurns: 50,
   })
-  const [cockpitPanel, setCockpitPanel] = useState<Panel | null>(null)
-  const cockpitPanelRef = useRef<Panel | null>(null)
+  const [cockpitPanel, setCockpitPanel] = useState<Panel>('summary')
   const chronicleRef = useRef(new Chronicle())
-  const [starbridgeMode, setStarbridgeMode] = useState<'conversation' | 'starmap' | 'chronicle'>('conversation')
   const [interviewState, setInterviewState] = useState<InterviewState | null>(null)
   const [clarityHistory, setClarityHistory] = useState<number[]>([])
-  useEffect(() => { cockpitPanelRef.current = cockpitPanel }, [cockpitPanel])
 
   // --- SurfaceRouter (unified navigation state machine) ---
   const surfaceRouterRef = useRef(createSurfaceRouter())
@@ -225,6 +244,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     for (const def of createSurfaceDefinitions()) surfaceRouter.register(def)
   }
   const { activeOverlay, isVisible: isSurfaceVisible, push: surfacePush, pop: surfacePop } = useSurface(surfaceRouter)
+
+  const glanceBusRef = useRef(createGlanceBus())
+  const glanceBus = glanceBusRef.current
+  const [glancePulses, setGlancePulses] = useState(glanceBus.snapshot())
+  useEffect(() => glanceBus.subscribe(() => setGlancePulses(glanceBus.snapshot())), [glanceBus])
 
   const pushStatic = useCallback((entry: LogEntry) => {
     staticBuf.push(entry)
@@ -250,7 +274,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const thinkStartRef = useRef(0)
   const thinkTimeRef = useRef(0)
   const toolCallTracker = useRef<Map<string, ToolCallItem>>(new Map())
-  const [toolCallsDisplay, setToolCallsDisplay] = useState<ToolCallItem[]>([])
 
   const streamBuf = useRef('')
   const thinkBuf = useRef('')
@@ -273,7 +296,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const activityTextRef = useRef<string | undefined>(undefined)
   const activityProjectedAtRef = useRef(0)
   const activityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [activitySummary, setActivitySummary] = useState<string | undefined>(undefined)
   const [completedThinkingDurationMs, setCompletedThinkingDurationMs] = useState<number | undefined>(undefined)
   const thinkingStartedAtRef = useRef(0)
 
@@ -281,7 +303,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const lastCtrlCRef = useRef(0)
   const lastEscRef = useRef(0)
 
-  // Tool target tracking for SummaryBar
+  // Tool target tracking for GlanceBar and phase summaries
   const toolTargetMap = useRef<Map<string, string>>(new Map())
   const recentToolLabels = useRef<string[]>([])
 
@@ -340,7 +362,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     activityTextRef.current = nextText
     activityProjectedAtRef.current = now
-    setActivitySummary(nextText)
   }, [])
 
   useEffect(() => {
@@ -379,7 +400,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     activityIntervalRef.current = setInterval(() => {
       const now = Date.now()
       projectActivity(now)
-      // Also feed phase duration + turn count into SummaryBar for live heartbeat
+      // Also feed phase duration + turn count into GlanceBar/Starmap state for live heartbeat
       const phaseMs = now - activityRef.current.startedAt
       setSummaryState(prev => {
         if (prev.phaseDurationMs === phaseMs && prev.turnCount === turnCountRef.current) return prev
@@ -461,8 +482,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
     // Starbridge mode switching via SurfaceRouter (during streaming, no pending prompts)
     if (isStreaming && !pendingApproval && !pendingIntent) {
-      if (_input === '2') { activeOverlay === 'starmap' ? surfacePop() : surfacePush('starmap'); return }
-      if (_input === '3') { activeOverlay === 'chronicle' ? surfacePop() : surfacePush('chronicle'); return }
     }
     if (sessionPrompt === 'waiting') {
       const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
@@ -545,7 +564,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     activityRef.current = clearActivity(activityRef.current, Date.now())
     activityTextRef.current = undefined
     activityProjectedAtRef.current = 0
-    setActivitySummary(undefined)
     setCompletedThinkingDurationMs(undefined)
     thinkingStartedAtRef.current = 0
 
@@ -557,7 +575,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     thinkStartRef.current = 0
     thinkTimeRef.current = 0
     toolCallTracker.current.clear()
-    setToolCallsDisplay([])
 
     const taskDesc = userInput.length > 30 ? userInput.slice(0, 29) + '…' : userInput
     const initPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
@@ -663,9 +680,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         parts, agent, session, persist, model, maxTokens, availableModels, onModelSwitch,
         allProviders, currentProvider,
         currentSessionId, cost, cacheHitRate, autoSafeRef, verboseRef,
-        setVerbose, setAutoSafe, rollbackTokenRef, cockpitPanelRef,
+        setVerbose, setAutoSafe, rollbackTokenRef,
         setCockpitPanel, pushStatic, setIsStreaming, setCacheHitRate, setSummaryState,
         mcpManagerRef, claimStoreRef,
+        activeOverlay,
         surfacePush, surfacePop,
         setReasoningEffort: (effort) => {
           agent.setReasoningEffort(effort)
@@ -741,8 +759,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setLiveTools(liveToolsRef.current)
 
         const label = toolLabel(name, input)
+        const domain = domainForTool(name)
+        glanceBus.setActive(domain)
         toolCallTracker.current.set(id, { id, name, label, done: false, error: false })
-        setToolCallsDisplay([...toolCallTracker.current.values()])
 
         // Begin tool activity for status bar
         const now = Date.now()
@@ -815,8 +834,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (tcEntry) {
           tcEntry.done = true
           tcEntry.error = !!isError
-          setToolCallsDisplay([...toolCallTracker.current.values()])
         }
+        const domain = domainForTool(toolName)
+        if (isError) glanceBus.pushAlert(domain, `${toolName} failed`)
+        else glanceBus.reset(domain)
 
         phaseTracker.current.onToolResult(name, !!isError)
         const risk = (name === 'bash' && !autoSafeRef.current) ? 'medium' as const : 'none' as const
@@ -958,7 +979,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         liveToolsRef.current = []
         setLiveTools([])
 
-        // Turn-level cache hit rate for StatusBar (last 3 turns)
+        // Turn-level cache hit rate for GlanceBar (last 3 turns)
         const recentHitRate = session.getRecentTurnHitRate(3) ?? session.getCacheHitRate()
         setCacheHitRate(recentHitRate)
 
@@ -967,15 +988,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const wasCompacted = turnNumber > 1 && session.wasCompactedAt(turnNumber - 1)
         if (latestHitRate !== null && latestHitRate < 0.4 && turnNumber > 1) {
           if (wasCompacted) {
-            setCacheStatus('degraded')
             pushStatic(createLogEntry({ type: 'system', content: `Cache degraded (${(latestHitRate * 100).toFixed(0)}%) — compaction restructured prefix. Normal on next turn.` }))
-          } else {
-            setCacheStatus('degraded')
           }
-        } else if (latestHitRate !== null && latestHitRate >= 0.6) {
-          setCacheStatus(cacheStatus === 'degraded' ? 'recovering' : 'healthy')
-        } else {
-          setCacheStatus('healthy')
         }
 
         phaseTracker.current.onTurnComplete()
@@ -1136,8 +1150,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     })
   }, [agent, session, pushStatic, pushStaticBatch, migrateToFrozen, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
-  const currentTokens = session.getEstimatedTokens()
-  const tokenEstimate = Math.floor(streamingText.length / 4)
   const groupedActive = useMemo(() => groupLogs(activeItems), [activeItems])
 
   return (
@@ -1152,24 +1164,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {(item) => renderStaticEntry(item, verbose)}
       </Static>
       <Box flexDirection="column">
-        <StatusBar
-          model={model}
+        <GlanceBar
+          pulses={glancePulses}
+          phase={phaseFromSummary(summaryState)}
           cacheHitRate={cacheHitRate}
-          cacheStatus={cacheStatus}
-          totalCost={cost.toFixed(2)}
-          currentTokens={currentTokens}
-          maxTokens={maxTokens}
-          contextHealth={session.getContextLedger()?.tokenBudget.compactionState ?? 'healthy'}
-          apiSafe={(session.getContextLedger()?.apiInvariantStatus.brokenRounds ?? 0) === 0}
-          interview={interviewState}
-          clarityHistory={clarityHistory}
-          reasoningEffort={reasoningEffort}
-          verification={agent.getVerificationSummary()}
+          cost={cost}
+          model={model}
+          isStreaming={isStreaming}
         />
-        {isStreaming && !activeOverlay && <SummaryBar state={summaryState} />}
         {activeOverlay === 'starmap' && (
           <StarmapView
-            activePhase={(summaryState.starPhaseLabel ? Object.entries(PHASE_SHORT_LABELS).find(([, v]) => v === summaryState.starPhaseLabel)?.[0] as StarPhase : 'tianshu-planning') ?? 'tianshu-planning'}
+            activePhase={phaseFromSummary(summaryState)}
             turnCount={summaryState.turnCount ?? 0}
             maxTurns={summaryState.maxTurns ?? 50}
             elapsedMs={summaryState.elapsedMs}
@@ -1182,7 +1187,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             elapsedMs={summaryState.elapsedMs}
           />
         )}
-        {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel ?? 'summary'} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
+        {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">Previous session found.</Text>
@@ -1201,15 +1206,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           </Box>
         )}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
-        <AgentStatus
-          isStreaming={isStreaming}
-          startMs={streamStartRef.current || Date.now()}
-          tokenEstimate={tokenEstimate}
-          thinkingTime={thinkTimeRef.current}
-          hasActiveThinking={isThinkingActive}
-          tools={toolCallsDisplay}
-          activitySummary={activitySummary}
-        />
         {pendingIntent && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">{formatIntentPreview(pendingIntent.intent)}</Text>
@@ -1226,6 +1222,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             commands={getPaletteCommands()}
             onSelect={(name) => {
               surfacePop()
+              if (name.startsWith('__surface:')) {
+                surfacePush(name.slice('__surface:'.length))
+                return
+              }
               handleSubmit(name)
             }}
             onCancel={() => surfacePop()}

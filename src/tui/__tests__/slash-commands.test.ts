@@ -28,6 +28,7 @@ function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext 
       getVerificationSummary: () => ({ total: 0, verified: 0, pending: 0, files: [] }),
       getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set(), fileVerificationLevels: new Map() }),
       getLatestPheromones: () => [],
+      getCognitiveSnapshot: () => undefined,
     } as any,
     session: null as any,
     persist: null as any,
@@ -45,7 +46,6 @@ function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext 
     setVerbose: () => {},
     setAutoSafe: () => {},
     rollbackTokenRef: { current: null },
-    cockpitPanelRef: { current: null },
     setCockpitPanel: () => {},
     pushStatic: () => {},
     setIsStreaming: () => {},
@@ -188,5 +188,54 @@ describe('handleSlashCommand', () => {
     assert.match(formatted, /src\/prompt\/mode\.ts \(tested\)/)
     assert.match(formatted, /src\/tui\/app\.tsx \(pending\)/)
     assert.match(formatted, /Verification: 1\/2/)
+  })
+
+  it('/cockpit opens via SurfaceRouter and records selected panel', () => {
+    let selected = ''
+    let pushed = ''
+    const entries: LogEntry[] = []
+    const handled = handleSlashCommand(makeCtx({
+      parts: ['/cockpit', 'trace'],
+      setCockpitPanel: panel => { selected = String(panel) },
+      surfacePush: id => { pushed = id },
+      pushStatic: entry => { entries.push(entry) },
+    }))
+    assert.equal(handled, true)
+    assert.equal(selected, 'trace')
+    assert.equal(pushed, 'cockpit')
+    assert.ok(entries[0]?.content.includes('Trace'))
+  })
+
+  it('/cockpit toggles off through SurfaceRouter when cockpit overlay is active', () => {
+    let popped = false
+    const handled = handleSlashCommand(makeCtx({
+      parts: ['/cockpit'],
+      activeOverlay: 'cockpit',
+      surfacePop: () => { popped = true },
+    }))
+    assert.equal(handled, true)
+    assert.equal(popped, true)
+  })
+
+  it('/mission shows the current task contract from the cognitive snapshot', () => {
+    const entries: LogEntry[] = []
+    const handled = handleSlashCommand(makeCtx({
+      parts: ['/mission'],
+      agent: {
+        ...makeCtx().agent,
+        getCognitiveSnapshot: () => ({
+          contractStatus: 'executing',
+          objective: 'ship glance bar',
+          scopeFileCount: 2,
+          isActionableTask: true,
+          hasVerificationGap: true,
+          deliveryStatus: 'unverified',
+        }),
+      } as any,
+      pushStatic: entry => { entries.push(entry) },
+    }))
+    assert.equal(handled, true)
+    assert.ok(entries[0]?.content.includes('天契 行'))
+    assert.ok(entries[0]?.content.includes('ship glance bar'))
   })
 })

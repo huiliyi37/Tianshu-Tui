@@ -4,6 +4,8 @@ import { Box, Text, useInput } from 'ink'
 export interface PaletteCommand {
   name: string
   description: string
+  category?: 'command' | 'surface'
+  hotkey?: string
 }
 
 export function filterCommands(commands: PaletteCommand[], query: string): PaletteCommand[] {
@@ -44,6 +46,11 @@ export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteP
       onCancel()
       return
     }
+    const hotkeyMatch = filtered.find(c => c.category === 'surface' && c.hotkey === _input)
+    if (hotkeyMatch) {
+      onSelect(hotkeyMatch.name)
+      return
+    }
     if (key.return && filtered.length > 0) {
       onSelect(filtered[selectedIdx]!.name)
       return
@@ -76,6 +83,7 @@ export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteP
             <Text color={i === selectedIdx ? 'green' : undefined}>
               {i === selectedIdx ? '❯ ' : '  '}
               <Text bold={i === selectedIdx}>{cmd.name}</Text>
+              {cmd.hotkey && <Text color="cyan"> [{cmd.hotkey}]</Text>}
               <Text dimColor> — {cmd.description}</Text>
             </Text>
           </Box>
@@ -87,7 +95,10 @@ export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteP
 
 export function getPaletteCommands(): PaletteCommand[] {
   return [
-    { name: '/help', description: 'Show all commands' },
+    { name: '__surface:cockpit', description: 'Cockpit — trace / verify / context', category: 'surface', hotkey: 'c' },
+    { name: '__surface:starmap', description: 'Starmap — 星图总览', category: 'surface', hotkey: 's' },
+    { name: '__surface:chronicle', description: 'Chronicle — 阶段传说', category: 'surface', hotkey: 'h' },
+    { name: '/help', description: 'Show all commands', category: 'command' },
     { name: '/compact', description: 'Compact conversation context' },
     { name: '/model list', description: 'List available models' },
     { name: '/chat', description: 'Switch to lightweight chat mode' },
@@ -102,6 +113,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/evidence', description: 'Show last turn evidence' },
     { name: '/context', description: 'Show context ledger' },
     { name: '/memory', description: 'Show session memory' },
+    { name: '/mission', description: '天契 — 当前任务契约', category: 'command' },
     { name: '/mcp', description: 'Show MCP server status' },
     { name: '/cockpit', description: 'Toggle cockpit panel' },
     { name: '/scroll', description: 'Browse output history' },

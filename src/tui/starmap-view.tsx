@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink'
 import { memo } from 'react'
-import { renderConstellation } from './constellation.js'
+import { renderStarmapConstellation } from './starmap-constellation.js'
 import { alchemyBar, alchemyStage, ALCHEMY_COLORS } from './alchemy-bar.js'
 import { formatElapsed } from './summary-bar.js'
 import { getTheme } from './theme.js'
@@ -37,7 +37,7 @@ function gauge(label: string, value: number, width = 8): string {
 export const StarmapView = memo(function StarmapView(props: StarmapViewProps) {
   const { activePhase, sensorium, turnCount, maxTurns, elapsedMs, recentRadio } = props
   const theme = getTheme()
-  const constellationLines = renderConstellation(activePhase)
+  const constellationLines = renderStarmapConstellation(activePhase)
   const confidence = sensorium?.confidence ?? 0
   const alchemyColor = ALCHEMY_COLORS[alchemyStage(confidence)]
 

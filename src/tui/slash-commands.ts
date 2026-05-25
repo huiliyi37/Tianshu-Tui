@@ -10,8 +10,9 @@ import { PhaseTracker } from './phase-tracker.js'
 import { createLogEntry, type LogEntry } from './log-state.js'
 import { getPaletteCommands } from './command-palette.js'
 import { openInEditor } from './external-editor.js'
+import { formatMissionStrip } from './mission.js'
 import { PANEL_LABELS, type Panel } from './cockpit/types.js'
-import type { SummaryState } from './summary-bar.js'
+import type { SummaryState } from './summary-state.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimStatus } from '../context/claims.js'
 import { loadProjectRules } from '../context/rules-loader.js'
@@ -42,8 +43,8 @@ export interface SlashHandlerContext {
   setVerbose: (v: boolean) => void
   setAutoSafe: (v: boolean) => void
   rollbackTokenRef: React.MutableRefObject<string | null>
-  cockpitPanelRef: React.MutableRefObject<Panel | null>
-  setCockpitPanel: (v: Panel | null | ((prev: Panel | null) => Panel | null)) => void
+  setCockpitPanel: (v: Panel | ((prev: Panel) => Panel)) => void
+  activeOverlay?: string | null
   surfacePush?: (id: string) => void
   surfacePop?: () => void
   pushStatic: (entry: LogEntry) => void
@@ -166,6 +167,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
 /memory [text] — Show or save session memory entries
+/mission — Show current task contract
 /rollback — Preview changes since last checkpoint (/rollback confirm to execute)
 /context — Show context ledger health, tokens, rounds, and compact events
 /evidence — Show last turn evidence summary
@@ -588,6 +590,14 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       return true
     }
 
+    case '/mission': {
+      const snapshot = ctx.agent.getCognitiveSnapshot?.()
+      const strip = formatMissionStrip(snapshot)
+      pushStatic(createLogEntry({ type: 'system', content: strip ? `Mission\n\n${strip}` : 'Mission\n\nNo actionable task contract is active.' }))
+      setIsStreaming(false)
+      return true
+    }
+
     case '/undo': {
       const fh = ctx.agent.getFileHistory()
       if (!fh) {
@@ -631,7 +641,6 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     case '/cockpit': {
       const subcmd = parts[1] as Panel | 'off' | undefined
       if (subcmd === 'off') {
-        ctx.setCockpitPanel(null)
         ctx.surfacePop?.()
         pushStatic(createLogEntry({ type: 'system', content: 'Cockpit panel collapsed.' }))
       } else if (subcmd && subcmd in PANEL_LABELS) {
@@ -639,9 +648,13 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         ctx.surfacePush?.('cockpit')
         pushStatic(createLogEntry({ type: 'system', content: `Cockpit: ${PANEL_LABELS[subcmd as Panel]} panel. /cockpit off to collapse.` }))
       } else {
-        const wasOpen = ctx.cockpitPanelRef.current !== null
-        ctx.setCockpitPanel(prev => prev ? null : 'summary')
-        if (wasOpen) { ctx.surfacePop?.() } else { ctx.surfacePush?.('cockpit') }
+        const wasOpen = ctx.activeOverlay === 'cockpit'
+        if (wasOpen) {
+          ctx.surfacePop?.()
+        } else {
+          ctx.setCockpitPanel('summary')
+          ctx.surfacePush?.('cockpit')
+        }
         pushStatic(createLogEntry({ type: 'system', content: wasOpen ? 'Cockpit panel collapsed.' : `Cockpit: ${PANEL_LABELS['summary']} panel. /cockpit off to collapse.` }))
       }
       setIsStreaming(false)

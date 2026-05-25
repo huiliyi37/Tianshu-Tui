@@ -1,10 +1,4 @@
-import { Box, Text } from 'ink'
-import { memo } from 'react'
 import type { CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
-
-export interface MissionStripProps {
-  snapshot?: CognitivePhaseSnapshot
-}
 
 const STATUS_LABELS: Record<string, string> = {
   exploring: '探',
@@ -40,14 +34,3 @@ export function formatMissionStrip(snapshot?: CognitivePhaseSnapshot): string | 
 
   return `天契 ${status} · ${objective} · ${scope} · ${delivery}`
 }
-
-export const MissionStrip = memo(function MissionStrip({ snapshot }: MissionStripProps) {
-  const text = formatMissionStrip(snapshot)
-  if (!text) return null
-
-  return (
-    <Box paddingX={1}>
-      <Text dimColor>{text}</Text>
-    </Box>
-  )
-})
