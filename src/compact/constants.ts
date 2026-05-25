@@ -254,3 +254,15 @@ export function perMessageToolResultBudget(contextWindow: number): number {
   }
   return Math.min(scaled, 300_000)
 }
+
+/**
+ * Maximum characters of a tool result content to keep inline in SessionContext.oaiMessages.
+ * Results exceeding this are truncated in memory (full content remains on disk via artifact).
+ *
+ * 50KB ~= 0.005% of a 1M window, or ~12.5K tokens. Large enough for the model to get
+ * meaningful context from recent results, small enough to bound per-message memory.
+ *
+ * This is a memory-safety constraint, distinct from the cache-oriented prune thresholds.
+ * Prune thresholds control what the API sees; this constant controls what stays in JS heap.
+ */
+export const INLINE_TOOL_RESULT_MAX_CHARS = 50_000
