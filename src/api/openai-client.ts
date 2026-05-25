@@ -26,6 +26,8 @@ export interface OpenAIClientConfig {
   providerName?: string
   /** Enable DeepSeek Beta prefix completion (skip preamble) */
   prefixCompletion?: boolean
+  /** Use max_completion_tokens instead of max_tokens (MiMo requires this per API docs) */
+  useMaxCompletionTokens?: boolean
 }
 
 interface ToolCallChunk {
@@ -90,8 +92,14 @@ export class OpenAIClient implements StreamClient {
     const body: Record<string, unknown> = {
       model: request.model,
       messages,
-      max_tokens: request.max_tokens ?? this.config.maxTokens,
       stream: true,
+    }
+
+    // MiMo API uses max_completion_tokens, standard OpenAI uses max_tokens
+    if (this.config.useMaxCompletionTokens) {
+      body.max_completion_tokens = request.max_tokens ?? this.config.maxTokens
+    } else {
+      body.max_tokens = request.max_tokens ?? this.config.maxTokens
     }
 
     // stream_options: { include_usage: true } is an OpenAI extension.

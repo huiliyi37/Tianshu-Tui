@@ -71,6 +71,7 @@ export function createProviderClient(
       ? provider.unsupported
       : capabilities.stripParams,
     prefixCompletion: provider.capabilities.prefixCompletion,
+    useMaxCompletionTokens: provider.name === 'mimo',
   })
 }
 
