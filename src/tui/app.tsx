@@ -1208,9 +1208,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             <Text>{steerBuffer.current.getPending().slice(-1)[0]?.slice(0, 60)}{(steerBuffer.current.getPending().slice(-1)[0]?.length ?? 0) > 60 ? '...' : ''}</Text>
           </Box>
         )}
-        <Box paddingX={2}>
-          <Text dimColor>Ctrl+C clear · ↑↓ history · Alt+Enter newline · /help commands</Text>
-        </Box>
       </Box>
     </>
   )
