@@ -44,6 +44,8 @@ export interface SlashHandlerContext {
   rollbackTokenRef: React.MutableRefObject<string | null>
   cockpitPanelRef: React.MutableRefObject<Panel | null>
   setCockpitPanel: (v: Panel | null | ((prev: Panel | null) => Panel | null)) => void
+  surfacePush?: (id: string) => void
+  surfacePop?: () => void
   pushStatic: (entry: LogEntry) => void
   setIsStreaming: (v: boolean) => void
   setCacheHitRate: (v: number) => void
@@ -630,13 +632,17 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       const subcmd = parts[1] as Panel | 'off' | undefined
       if (subcmd === 'off') {
         ctx.setCockpitPanel(null)
+        ctx.surfacePop?.()
         pushStatic(createLogEntry({ type: 'system', content: 'Cockpit panel collapsed.' }))
       } else if (subcmd && subcmd in PANEL_LABELS) {
         ctx.setCockpitPanel(subcmd as Panel)
+        ctx.surfacePush?.('cockpit')
         pushStatic(createLogEntry({ type: 'system', content: `Cockpit: ${PANEL_LABELS[subcmd as Panel]} panel. /cockpit off to collapse.` }))
       } else {
+        const wasOpen = ctx.cockpitPanelRef.current !== null
         ctx.setCockpitPanel(prev => prev ? null : 'summary')
-        pushStatic(createLogEntry({ type: 'system', content: ctx.cockpitPanelRef.current ? `Cockpit: ${PANEL_LABELS[ctx.cockpitPanelRef.current]} panel. /cockpit off to collapse.` : 'Cockpit panel collapsed.' }))
+        if (wasOpen) { ctx.surfacePop?.() } else { ctx.surfacePush?.('cockpit') }
+        pushStatic(createLogEntry({ type: 'system', content: wasOpen ? 'Cockpit panel collapsed.' : `Cockpit: ${PANEL_LABELS['summary']} panel. /cockpit off to collapse.` }))
       }
       setIsStreaming(false)
       return true

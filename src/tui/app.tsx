@@ -39,6 +39,9 @@ import { CommandPalette, getPaletteCommands } from './command-palette.js'
 import { openInEditor } from './external-editor.js'
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from './slash-commands.js'
 import { BlockStreamWriter } from './block-stream-writer.js'
+import { createSurfaceRouter } from './surface/router.js'
+import { useSurface } from './surface/use-surface.js'
+import { createSurfaceDefinitions } from './surface/registry.js'
 import { appendStreamWindow } from './stream-window.js'
 import { RenderBatcher } from './render-batch.js'
 import { SteerBuffer } from './steer-buffer.js'
@@ -178,7 +181,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [pendingIntent, setPendingIntent] = useState<PendingIntentPreview | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
-  const [showPalette, setShowPalette] = useState(false)
   const [reasoningEffort, setReasoningEffortState] = useState<string>('')
   const reasoningSyncedRef = useRef(false)
 
@@ -213,6 +215,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [interviewState, setInterviewState] = useState<InterviewState | null>(null)
   const [clarityHistory, setClarityHistory] = useState<number[]>([])
   useEffect(() => { cockpitPanelRef.current = cockpitPanel }, [cockpitPanel])
+
+  // --- SurfaceRouter (unified navigation state machine) ---
+  const surfaceRouterRef = useRef(createSurfaceRouter())
+  const surfaceRouter = surfaceRouterRef.current
+  const surfaceInitRef = useRef(false)
+  if (!surfaceInitRef.current) {
+    surfaceInitRef.current = true
+    for (const def of createSurfaceDefinitions()) surfaceRouter.register(def)
+  }
+  const { activeOverlay, isVisible: isSurfaceVisible, push: surfacePush, pop: surfacePop } = useSurface(surfaceRouter)
 
   const pushStatic = useCallback((entry: LogEntry) => {
     staticBuf.push(entry)
@@ -426,14 +438,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       return
     }
 
-    // Escape — close starbridge/cockpit or double-press to interrupt streaming
+    // Escape — close surface overlay/popup or double-press to interrupt streaming
     if (_key.escape) {
-      if (starbridgeMode !== 'conversation') {
-        setStarbridgeMode('conversation')
-        return
-      }
-      if (cockpitPanel) {
-        setCockpitPanel(null)
+      if (activeOverlay || surfaceRouter.activeOf('popup')) {
+        surfacePop()
         return
       }
       if (isStreaming) {
@@ -451,10 +459,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
       return
     }
-    // Starbridge mode switching (during streaming, no pending prompts)
+    // Starbridge mode switching via SurfaceRouter (during streaming, no pending prompts)
     if (isStreaming && !pendingApproval && !pendingIntent) {
-      if (_input === '2') { setStarbridgeMode(prev => prev === 'starmap' ? 'conversation' : 'starmap'); setCockpitPanel(null); return }
-      if (_input === '3') { setStarbridgeMode(prev => prev === 'chronicle' ? 'conversation' : 'chronicle'); setCockpitPanel(null); return }
+      if (_input === '2') { activeOverlay === 'starmap' ? surfacePop() : surfacePush('starmap'); return }
+      if (_input === '3') { activeOverlay === 'chronicle' ? surfacePop() : surfacePush('chronicle'); return }
     }
     if (sessionPrompt === 'waiting') {
       const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
@@ -476,7 +484,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
 
     if (_key.ctrl && _input === '\x0b') {
-      setShowPalette(prev => !prev)
+      isSurfaceVisible('command-palette') ? surfacePop() : surfacePush('command-palette')
       return
     }
     if (_key.ctrl && _input === '\x0f') {
@@ -658,6 +666,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setVerbose, setAutoSafe, rollbackTokenRef, cockpitPanelRef,
         setCockpitPanel, pushStatic, setIsStreaming, setCacheHitRate, setSummaryState,
         mcpManagerRef, claimStoreRef,
+        surfacePush, surfacePop,
         setReasoningEffort: (effort) => {
           agent.setReasoningEffort(effort)
           setReasoningEffortState(effort)
@@ -1157,8 +1166,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           reasoningEffort={reasoningEffort}
           verification={agent.getVerificationSummary()}
         />
-        {isStreaming && !cockpitPanel && <SummaryBar state={summaryState} />}
-        {starbridgeMode === 'starmap' && (
+        {isStreaming && !activeOverlay && <SummaryBar state={summaryState} />}
+        {activeOverlay === 'starmap' && (
           <StarmapView
             activePhase={(summaryState.starPhaseLabel ? Object.entries(PHASE_SHORT_LABELS).find(([, v]) => v === summaryState.starPhaseLabel)?.[0] as StarPhase : 'tianshu-planning') ?? 'tianshu-planning'}
             turnCount={summaryState.turnCount ?? 0}
@@ -1167,13 +1176,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             recentRadio={chronicleRef.current.getRecentRadio(5)}
           />
         )}
-        {starbridgeMode === 'chronicle' && (
+        {activeOverlay === 'chronicle' && (
           <ChronicleView
             segments={chronicleRef.current.getPhaseSegments()}
             elapsedMs={summaryState.elapsedMs}
           />
         )}
-        {cockpitPanel && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
+        {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel ?? 'summary'} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">Previous session found.</Text>
@@ -1212,14 +1221,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             <Text> [y/n] </Text>
           </Box>
         )}
-        {showPalette && (
+        {isSurfaceVisible('command-palette') && (
           <CommandPalette
             commands={getPaletteCommands()}
             onSelect={(name) => {
-              setShowPalette(false)
+              surfacePop()
               handleSubmit(name)
             }}
-            onCancel={() => setShowPalette(false)}
+            onCancel={() => surfacePop()}
           />
         )}
         <InputBar onSubmit={isStreaming ? (text: string) => {
