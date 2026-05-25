@@ -52,6 +52,8 @@ import type { Config, ProviderConfig } from './config/schema.js'
 import { SessionRegistry } from './agent/session-registry.js'
 import { spawnSync } from 'node:child_process'
 import type { BaselineSnapshot } from './agent/worktree-baseline.js'
+import { cleanupOrphanedTmpFiles } from './fs-atomic.js'
+import { cleanupOldArtifactSessions } from './artifact/store.js'
 
 function captureGitBaseline(cwd: string): BaselineSnapshot {
   try {
@@ -242,6 +244,26 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
 
   // Evict old session files to stay within the session limit
   useState(() => { evictOldSessions(sessionId) })
+
+  // Clean up orphaned .tmp files from crashed atomic writes and old artifact sessions
+  useState(() => {
+    const cwd = process.cwd()
+    const rivetDir = join(cwd, '.rivet')
+    const dirsToScan = [
+      rivetDir,
+      join(rivetDir, 'sessions'),
+      join(rivetDir, 'artifacts'),
+      join(rivetDir, 'checkpoints'),
+    ]
+    const tmpCleaned = cleanupOrphanedTmpFiles(dirsToScan)
+    if (tmpCleaned > 0) {
+      console.error(`[startup] Cleaned ${tmpCleaned} orphaned .tmp file(s)`)
+    }
+    const artifactCleaned = cleanupOldArtifactSessions(join(rivetDir, 'artifacts'), sessionId)
+    if (artifactCleaned > 0) {
+      console.error(`[startup] Cleaned ${artifactCleaned} old artifact session(s)`)
+    }
+  })
 
   const [persist] = useState(() => {
     const p = new SessionPersist(sessionId)

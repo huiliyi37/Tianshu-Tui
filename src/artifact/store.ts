@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Artifact, ArtifactSection } from './types.js'
 
@@ -178,4 +178,61 @@ function lineCount(content: string): number {
 
 function sha256(content: string): string {
   return createHash('sha256').update(content).digest('hex')
+}
+
+const ARTIFACT_SESSION_TTL_MS = 7 * 24 * 3_600_000 // 7 days
+const MAX_ARTIFACT_SESSIONS = 50
+
+/**
+ * Clean up old artifact session directories that exceed the TTL or count limit.
+ * Call once at startup to reclaim disk space from abandoned sessions.
+ *
+ * @param baseDir - the artifacts root directory (e.g. `.rivet/artifacts`)
+ * @param activeSessionId - the current session ID (never deleted)
+ * @returns number of session directories removed
+ */
+export function cleanupOldArtifactSessions(baseDir: string, activeSessionId: string): number {
+  if (!existsSync(baseDir)) return 0
+
+  let entries: string[]
+  try {
+    entries = readdirSync(baseDir)
+  } catch {
+    return 0
+  }
+
+  // Collect session dirs with their mtime
+  const sessionDirs: Array<{ name: string; path: string; mtimeMs: number }> = []
+  for (const entry of entries) {
+    if (entry === activeSessionId) continue
+    const fullPath = join(baseDir, entry)
+    try {
+      const st = statSync(fullPath)
+      if (st.isDirectory()) {
+        sessionDirs.push({ name: entry, path: fullPath, mtimeMs: st.mtimeMs })
+      }
+    } catch {
+      // skip inaccessible entries
+    }
+  }
+
+  // Sort by mtime ascending (oldest first)
+  sessionDirs.sort((a, b) => a.mtimeMs - b.mtimeMs)
+
+  const cutoff = Date.now() - ARTIFACT_SESSION_TTL_MS
+  let cleaned = 0
+
+  for (const dir of sessionDirs) {
+    // Delete if older than TTL, or if remaining count still exceeds the limit
+    if (dir.mtimeMs < cutoff || sessionDirs.length - cleaned > MAX_ARTIFACT_SESSIONS) {
+      try {
+        rmSync(dir.path, { recursive: true, force: true })
+        cleaned++
+      } catch {
+        // skip if removal fails
+      }
+    }
+  }
+
+  return cleaned
 }
