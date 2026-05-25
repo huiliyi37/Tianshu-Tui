@@ -26,3 +26,6 @@ docs/sessions/
 .rivet/meridian.db*
 .rivet/playbook.jsonl
 .gitlog_temp.txt
+.rivet/runtime/
+.rivet/tmp/
+.rivet/prefix-diag.jsonl
