@@ -5,13 +5,6 @@ import { PromptEngine } from '../engine.js'
 import { latestUserTrailer, userMessages } from './helpers/message-selectors.js'
 import type { OaiMessage } from '../../api/oai-types.js'
 
-function stringContent(message: OaiMessage | undefined): string {
-  if (!message || typeof message.content !== 'string') {
-    throw new Error('expected message with string content')
-  }
-  return message.content
-}
-
 function historicalUserContent(messages: readonly OaiMessage[], userContent: string): string {
   const msg = userMessages(messages)
     .find(m => typeof m.content === 'string' && m.content.endsWith(`\n---\n${userContent}`))
@@ -177,7 +170,7 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
     ], [{ tool: 'read_file', target: 'x', status: 'success' }])
 
     // messages[1] = FROZEN volatile for "hello"
-    const frozenVol = stringContent(req.messages[1])
+    const frozenVol = (req.messages[1] as { content: string }).content
 
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
     assert.equal(user, 'read file')
@@ -313,7 +306,7 @@ describe('habituation: three-zone consolidation', () => {
       { role: 'user', content: 'read' },
     ], [{ tool: 'read_file', target: 'x', status: 'success' }])
 
-    const histVol = stringContent(req.messages[1])
+    const histVol = (req.messages[1] as { content: string }).content
 
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
     assert.equal(user, 'read')
