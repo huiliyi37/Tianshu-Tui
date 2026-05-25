@@ -178,12 +178,16 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
   // context by ~1,700 tokens/turn — "thorns not leaves" (direction A).
 
   if (ctx.toolHistory && ctx.toolHistory.length > 0) {
-    const entries = ctx.toolHistory.map(e => {
+    const maxRecent = 8
+    const recent = ctx.toolHistory.length > maxRecent
+      ? ctx.toolHistory.slice(-maxRecent)
+      : ctx.toolHistory
+    const entries = recent.map(e => {
       const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
       if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
       return `  <tool-summary ${attrs.join(' ')} />`
     }).join('\n')
-    parts.push(`<tool-history recent="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
+    parts.push(`<tool-history recent="${recent.length}" total="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
   }
 
   if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {

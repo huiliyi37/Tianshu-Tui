@@ -648,6 +648,9 @@ ${check.formatted}`
         deps.taskLedger.record({ type: 'file_write', path: filePath })
       } else if (tu.name === 'bash' && !harnessResult.isError) {
         const cmd = (tu.input.command as string | undefined) ?? ''
+        if (cmd.startsWith('git ') || /\b(rm|mv|cp|touch|mkdir)\b/.test(cmd)) {
+          deps.config.promptEngine.markGitDirty()
+        }
         if (cmd.startsWith('git ')) {
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
         } else if (/\b(test|jest|vitest|mocha|pytest)\b/.test(cmd)) {
@@ -754,6 +757,7 @@ ${check.formatted}`
       }
     } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
       deps.evidence.trackFileModified(tu.input.file_path as string)
+      deps.config.promptEngine.markGitDirty()
       deps.config.contextClaimStore?.markClaimsStaleForFile(
         tu.input.file_path as string,
         `file modified by ${tu.name}`,

@@ -71,6 +71,8 @@ export class PromptEngine {
   private heuristicRulesText?: string
   private worktreeReality?: WorktreeReality
   private mode: PromptMode = DEFAULT_MODE
+  private gitDirty = false
+  private userMessagesSinceGitRefresh = 0
 
   constructor(config: PromptEngineConfig) {
     this.config = config
@@ -125,7 +127,13 @@ export class PromptEngine {
 
           if (userContent !== this.cachedFreshForUser) {
             this.cachedFreshForUser = userContent
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, heuristicRules: this.heuristicRulesText, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality }
+            this.userMessagesSinceGitRefresh++
+            const refreshGit = this.gitDirty || this.userMessagesSinceGitRefresh >= 3
+            if (refreshGit) {
+              this.gitDirty = false
+              this.userMessagesSinceGitRefresh = 0
+            }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, heuristicRules: this.heuristicRulesText, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -423,6 +431,15 @@ export class PromptEngine {
   private invalidateFreshCache(): void {
     this.cachedFreshForUser = ''
     this.cachedFreshBlock = ''
+  }
+
+  /**
+   * Mark git status as dirty — next user-message boundary will use live gitStatusCache
+   * instead of the frozen session-start snapshot. Call after file-modifying tools
+   * (Write, Edit, Bash with git commands) to keep multi-session git state fresh.
+   */
+  markGitDirty(): void {
+    this.gitDirty = true
   }
 
   setActiveDomain(domain: VolatileContext['activeDomain']): void {
