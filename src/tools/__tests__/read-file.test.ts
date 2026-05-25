@@ -106,6 +106,36 @@ describe('readFilePayload', () => {
     assert.ok(defaultPayload.modelContent.length > 0)
   })
 
+  it('guards first full reads of large log-like files with a head/tail preview', () => {
+    mkdirSync(join(dir, 'logs'), { recursive: true })
+    const log = Array.from({ length: 500 }, (_, i) => `event ${i} ${'x'.repeat(80)}`).join('\n')
+    writeFileSync(join(dir, 'logs/app.log'), log, 'utf-8')
+
+    const payload = readFilePayload(dir, { filePath: 'logs/app.log' })
+
+    assert.equal(payload.rawContent, log)
+    assert.ok(payload.modelContent.includes('looks like a log/JSONL output file'))
+    assert.ok(payload.modelContent.includes('bounded preview only'))
+    assert.ok(payload.modelContent.includes('Preview boundaries: head offset=1 limit=80; tail offset=421 limit=80'))
+    assert.ok(payload.modelContent.includes('offset=<known line>, limit<=200'))
+    assert.ok(payload.modelContent.includes('Do not scan the whole project for this log'))
+    assert.ok(payload.modelContent.includes('event 0'))
+    assert.ok(payload.modelContent.includes('event 499'))
+    assert.ok(payload.modelContent.length < log.length, 'model should only receive preview, not full log')
+  })
+
+  it('allows explicit ranges for large log-like files', () => {
+    mkdirSync(join(dir, 'logs'), { recursive: true })
+    const log = Array.from({ length: 500 }, (_, i) => `event ${i} ${'x'.repeat(80)}`).join('\n')
+    writeFileSync(join(dir, 'logs/app.jsonl'), log, 'utf-8')
+
+    const payload = readFilePayload(dir, { filePath: 'logs/app.jsonl', offset: 200, limit: 3 })
+
+    assert.ok(payload.modelContent.includes('event 199'))
+    assert.ok(payload.modelContent.includes('event 201'))
+    assert.ok(!payload.modelContent.includes('looks like a log/JSONL output file'))
+  })
+
   it('does not truncate content shorter than the cap', () => {
     mkdirSync(join(dir, 'src'), { recursive: true })
     const short = 'short content'

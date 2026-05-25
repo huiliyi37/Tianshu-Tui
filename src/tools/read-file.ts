@@ -93,6 +93,35 @@ function getGitignoreFilter(cwd: string): GitignoreFilter {
 }
 
 const MAX_TOOL_INPUT_BYTES = 100 * 1024
+const LOG_FULL_READ_GUARD_BYTES = 16 * 1024
+const LOG_PREVIEW_LINES = 80
+
+function isLogLikePath(filePath: string): boolean {
+  return /\.(?:log|jsonl|ndjson|out|err|trace)(?:\.\d+)?$/i.test(filePath)
+}
+
+function buildLogPreviewContent(filePath: string, content: string): string {
+  const lines = content.split('\n')
+  const headCount = Math.min(LOG_PREVIEW_LINES, lines.length)
+  const tailCount = Math.min(LOG_PREVIEW_LINES, Math.max(0, lines.length - headCount))
+  const head = lines.slice(0, headCount)
+  const tail = tailCount > 0 ? lines.slice(-tailCount) : []
+  const omitted = Math.max(0, lines.length - head.length - tail.length)
+  const tailStart = tail.length > 0 ? lines.length - tail.length + 1 : 1
+  const parts = [
+    `read_file: ${filePath} looks like a log/JSONL output file (${content.length} chars, ${lines.length} lines).`,
+    `Full first reads of log files waste context; returning a bounded preview only.`,
+    `Preview boundaries: head offset=1 limit=${head.length}${tail.length > 0 ? `; tail offset=${tailStart} limit=${tail.length}` : ''}.`,
+    `Next step: use read_file(file_path=..., offset=<known line>, limit<=200) for a specific range; use grep on this file for keywords/timestamps before reading middle ranges. Do not scan the whole project for this log.`,
+    '',
+    `── head (L1-L${head.length}) ──`,
+    ...head,
+  ]
+  if (omitted > 0) {
+    parts.push('', `... ${omitted} lines omitted ...`, '', `── tail (L${tailStart}-L${lines.length}) ──`, ...tail)
+  }
+  return parts.join('\n')
+}
 
 /** TUI display: head + tail with line numbers, compact for large files. */
 function buildFileUiOutput(raw: string, maxLines: number): string {
@@ -154,6 +183,17 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
   let content = readFileSync(filePath, 'utf-8')
   const offset = options.offset ?? 1
   const limit = options.limit
+  const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
+
+  if (isLogLikePath(filePath) && fileSize > LOG_FULL_READ_GUARD_BYTES && !options.offset && !options.limit) {
+    const preview = buildLogPreviewContent(filePath, content)
+    return {
+      canonicalPath: filePath,
+      rawContent: content,
+      modelContent: truncateContent(preview, cap.maxChars, cap.headChars, cap.tailChars),
+      uiContent: buildFileUiOutput(content, 80),
+    }
+  }
 
   if (offset > 1 || limit) {
     const lines = content.split('\n')
@@ -162,7 +202,6 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
     content = lines.slice(startIdx, endIdx).join('\n')
   }
 
-  const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
   return {
     canonicalPath: filePath,
     rawContent: content,
