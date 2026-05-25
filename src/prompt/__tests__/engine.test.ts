@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { PromptEngine } from '../engine.js'
 import { stableStringify } from '../../api/stable-json.js'
+import { latestUserTrailer } from './helpers/message-selectors.js'
 import type { OaiChatRequest, OaiMessage } from '../../api/oai-types.js'
 
 function makeEngine() {
@@ -26,6 +27,16 @@ function canonicalOaiBody(request: OaiChatRequest): Record<string, unknown> {
 }
 
 describe('PromptEngine OpenAI-native request building', () => {
+  it('message selector parses latest user trailer', () => {
+    const parsed = latestUserTrailer([{ role: 'user', content: 'fresh\n---\nhello' }])
+    assert.equal(parsed.fresh, 'fresh')
+    assert.equal(parsed.user, 'hello')
+  })
+
+  it('message selector rejects message lists without user messages', () => {
+    assert.throws(() => latestUserTrailer([{ role: 'assistant', content: 'x' }]), /expected at least one user message/)
+  })
+
   it('injects volatile user messages around OAI user messages only', () => {
     const engine = makeEngine()
     const messages: OaiMessage[] = [
@@ -389,5 +400,68 @@ describe('PromptEngine active claims projection', () => {
       reqWith1M.messages.map(m => m.content),
       'repeated calls should produce identical content for cache stability'
     )
+  })
+})
+
+describe('git-dirty flag and toolHistory cap', () => {
+  function lastUserContent(req: OaiChatRequest): string {
+    for (let i = req.messages.length - 1; i >= 0; i--) {
+      if (req.messages[i]!.role === 'user') return req.messages[i]!.content as string
+    }
+    return ''
+  }
+
+  it('markGitDirty causes gitStatus to refresh from cache on next user message', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo', gitStatus: 'Current branch: main\nStatus:\nM old.ts' },
+    })
+
+    const req1 = engine.buildOaiRequest([{ role: 'user', content: 'msg1' }])
+    assert.ok(lastUserContent(req1).includes('old.ts'), 'first request uses frozen snapshot')
+
+    engine.markGitDirty()
+    const req2 = engine.buildOaiRequest([{ role: 'user', content: 'msg2' }])
+    assert.ok(!lastUserContent(req2).includes('old.ts'), 'after markGitDirty, frozen snapshot is bypassed')
+  })
+
+  it('periodic refresh every 3 user messages without markGitDirty', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo', gitStatus: 'Current branch: main\nStatus:\nM stale.ts' },
+    })
+
+    engine.buildOaiRequest([{ role: 'user', content: 'a' }])
+    const req2 = engine.buildOaiRequest([{ role: 'user', content: 'b' }])
+    assert.ok(lastUserContent(req2).includes('stale.ts'), 'message 2 still uses frozen snapshot')
+
+    const req3 = engine.buildOaiRequest([{ role: 'user', content: 'c' }])
+    assert.ok(!lastUserContent(req3).includes('stale.ts'), 'message 3 triggers periodic git refresh')
+  })
+
+  it('toolHistory caps at 8 most recent entries', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+
+    const history = Array.from({ length: 12 }, (_, i) => ({
+      tool: `tool_${i}`,
+      target: `target_${i}`,
+      status: 'success' as const,
+    }))
+
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'x' }], history)
+    const vol = lastUserContent(req)
+    assert.ok(vol.includes('total="12"'), 'total attribute shows full count')
+    assert.ok(vol.includes('recent="8"'), 'recent attribute shows capped count')
+    assert.ok(!vol.includes('tool_0'), 'oldest entries are dropped')
+    assert.ok(vol.includes('tool_11'), 'newest entries are kept')
   })
 })
