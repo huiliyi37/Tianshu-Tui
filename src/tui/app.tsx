@@ -44,6 +44,7 @@ import { createGlanceBus } from './surface/glance-bus.js'
 import { glanceOnToolStart, glanceOnToolResult } from './surface/tool-domain.js'
 import { GlanceBar } from './glance-bar.js'
 import { appendStreamWindow } from './stream-window.js'
+import { createRingBuffer, type RingBuffer } from './ring-buffer.js'
 import { RenderBatcher } from './render-batch.js'
 import { SteerBuffer } from './steer-buffer.js'
 import { replayMessagesToLogEntries } from './history-replay.js'
@@ -163,7 +164,9 @@ function parseInterviewMarker(text: string): { state: InterviewState; cleanText:
 // --- Main App ---
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode }: AppProps) {
-  const [historyItems, setHistoryItems] = useState<LogEntry[]>([])
+  const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
+  const [historyVersion, setHistoryVersion] = useState(0)
+  const historyItems = useMemo(() => historyBufferRef.current.items(), [historyVersion])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const liveToolsRef = useRef<LogEntry[]>([])
 
@@ -225,18 +228,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   useEffect(() => glanceBus.subscribe(() => setGlancePulses(glanceBus.snapshot())), [glanceBus])
 
   const pushStatic = useCallback((entry: LogEntry) => {
-    setHistoryItems(prev => {
-      const next = [...prev, entry]
-      return next.length > HISTORY_MAX_ITEMS ? next.slice(next.length - HISTORY_MAX_ITEMS) : next
-    })
+    historyBufferRef.current.push(entry)
+    setHistoryVersion(v => v + 1)
   }, [])
 
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     const grouped = groupLogs(entries)
-    setHistoryItems(prev => {
-      const next = [...prev, ...grouped]
-      return next.length > HISTORY_MAX_ITEMS ? next.slice(next.length - HISTORY_MAX_ITEMS) : next
-    })
+    for (const entry of grouped) {
+      historyBufferRef.current.push(entry)
+    }
+    setHistoryVersion(v => v + 1)
   }, [])
 
   const streamStartRef = useRef(0)
@@ -467,7 +468,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const messages = p.loadOai()
         session.replaceMessages(messages)
         const { entries, toolCount, turnCount } = replayMessagesToLogEntries(session.getMessages())
-        setHistoryItems(prev => [...prev, ...entries])
+        pushStaticBatch(entries)
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setCacheHitRate(session.getCacheHitRate())
         setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
