@@ -7,6 +7,7 @@ import { persistRawOutput } from './output-store.js'
 import { summarizeFileContent } from '../artifact/summarize.js'
 import { computeModelReadCap, DEFAULT_MODEL_READ_CAP, type ModelReadCap } from './model-read-cap.js'
 import { pruneThresholds } from '../compact/constants.js'
+import { getToolArtifactThreshold } from './artifact-threshold.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
@@ -321,7 +322,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
       // model second-guess what it can see. Tianshu's post-mortem showed this
       // exact pattern: any [artifact:X] marker triggered "let me try a different
       // approach" workarounds even when the content was right there.
-      const { minChars: artifactThreshold } = pruneThresholds(params.contextWindow ?? 0)
+      const artifactThreshold = getToolArtifactThreshold('read_file', params.contextWindow)
       const wrapInArtifact = payload.rawContent.length >= artifactThreshold
 
       if (!wrapInArtifact) {

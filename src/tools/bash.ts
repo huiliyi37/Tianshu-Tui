@@ -6,6 +6,7 @@ import { killProcessTree } from './process-kill.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { summarizeBashOutput } from '../artifact/summarize.js'
 import { pruneThresholds } from '../compact/constants.js'
+import { getToolArtifactThreshold } from './artifact-threshold.js'
 
 function rtkRewrite(command: string): string {
   try {
@@ -86,7 +87,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           // truncated even though it has the whole thing in modelOutput. Tianshu's
           // post-mortem: every bash result became "[artifact:X] ... use read_section"
           // → the model started writing /tmp files just to escape the artifact loop.
-          const { minChars: artifactThreshold } = pruneThresholds(params.contextWindow ?? 0)
+          const artifactThreshold = getToolArtifactThreshold('bash', params.contextWindow)
           const wrapInArtifact = raw.length >= artifactThreshold
 
           if (!wrapInArtifact) {

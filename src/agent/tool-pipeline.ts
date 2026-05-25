@@ -27,6 +27,7 @@ import { debugLog } from '../utils/debug.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
 import { PrewarmCache } from './prewarm.js'
 import { compactThresholds, pruneThresholds } from '../compact/constants.js'
+import { getToolArtifactThreshold } from '../tools/artifact-threshold.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 import { getStarSignature } from './star-signature.js'
 import type { ImmuneHook } from './immune-hook.js'
@@ -187,7 +188,7 @@ async function artifactIntercept(
   // Errors keep the original behavior: stack traces below ~30K are useful inline,
   // and we want larger error blobs (e.g. 200K test output) to still be intercepted.
   if (!isError && contextWindow != null) {
-    const floor = pruneThresholds(contextWindow).minChars
+    const floor = getToolArtifactThreshold(toolName, contextWindow)
     threshold = Math.max(threshold, floor)
   }
 

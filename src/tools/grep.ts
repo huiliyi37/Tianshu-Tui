@@ -11,6 +11,7 @@ import { summarizeGrepResult } from '../artifact/summarize.js'
 import type { ArtifactStore } from '../artifact/store.js'
 import { computeModelReadCap, type ModelReadCap } from './model-read-cap.js'
 import { pruneThresholds } from '../compact/constants.js'
+import { getToolArtifactThreshold } from './artifact-threshold.js'
 
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
@@ -60,7 +61,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     }
     const absPath = validated.path
 
-    const { minChars: artifactThreshold } = pruneThresholds(params.contextWindow ?? 0)
+    const artifactThreshold = getToolArtifactThreshold('grep', params.contextWindow)
 
     // Try ripgrep first, fall back to native search
     const rgResult = await tryRipgrep(pattern, absPath, glob, maxResults, params.cwd, literal, modelCap, params.artifactStore, artifactThreshold)
