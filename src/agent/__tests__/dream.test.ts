@@ -5,9 +5,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { distillSession, persistDream, type DreamInput } from '../dream.js'
 
-function todaySessionPath(cwd: string): string {
-  const date = new Date().toISOString().slice(0, 10)
-  return join(cwd, '.rivet', 'sessions', `${date}.md`)
+function knowledgePath(cwd: string): string {
+  return join(cwd, '.rivet', 'knowledge', 'project-memory.md')
 }
 
 describe('distillSession', () => {
@@ -98,7 +97,7 @@ describe('persistDream', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('writes session log when files modified', () => {
+  it('writes to .rivet/knowledge/project-memory.md when files modified', () => {
     const input: DreamInput = {
       filesModified: ['src/a.ts'],
       filesRead: [],
@@ -108,17 +107,17 @@ describe('persistDream', () => {
       sessionId: 'test-session',
     }
     persistDream(tmpDir, input)
-    const path = todaySessionPath(tmpDir)
-    assert.ok(existsSync(path))
+    const path = knowledgePath(tmpDir)
+    assert.ok(existsSync(path), 'should create .rivet/knowledge/project-memory.md')
     const content = readFileSync(path, 'utf-8')
     assert.ok(content.includes('src/a.ts'))
     assert.ok(content.includes('3 passed'))
   })
 
   it('does not create file when no files modified', () => {
-    const sessionsDir = join(tmpDir, '.rivet', 'sessions')
-    const path = todaySessionPath(tmpDir)
-    try { rmSync(sessionsDir, { recursive: true, force: true }) } catch { /* ok */ }
+    const knowledgeDir = join(tmpDir, '.rivet', 'knowledge')
+    const path = knowledgePath(tmpDir)
+    try { rmSync(knowledgeDir, { recursive: true, force: true }) } catch { /* ok */ }
 
     const input: DreamInput = {
       filesModified: [],
@@ -153,7 +152,7 @@ describe('persistDream', () => {
     }
     persistDream(tmpDir, input2)
 
-    const path = todaySessionPath(tmpDir)
+    const path = knowledgePath(tmpDir)
     const content = readFileSync(path, 'utf-8')
     const idxA = content.indexOf('src/a.ts')
     const idxB = content.indexOf('src/b.ts')
@@ -176,7 +175,7 @@ describe('persistDream', () => {
       persistDream(dedupDir, { ...baseInput, sessionId: 'session-dup2' })
       persistDream(dedupDir, { ...baseInput, sessionId: 'session-dup3' })
 
-      const path = todaySessionPath(dedupDir)
+      const path = knowledgePath(dedupDir)
       const content = readFileSync(path, 'utf-8')
       const entryCount = (content.match(/^### /gm) || []).length
       assert.ok(entryCount <= 2, `expected <=2 entries but got ${entryCount}`)
@@ -185,23 +184,24 @@ describe('persistDream', () => {
     }
   })
 
-  it('never writes to .rivet/knowledge/ — human-maintained zone', () => {
-    const isolatedDir = mkdtempSync(join(tmpdir(), 'dream-protect-'))
+  it('writes to knowledge/ which volatile.ts reads for prompt injection', () => {
+    const isolatedDir = mkdtempSync(join(tmpdir(), 'dream-target-'))
     try {
-      const knowledgeDir = join(isolatedDir, '.rivet', 'knowledge')
       persistDream(isolatedDir, {
         filesModified: ['src/anything.ts', 'src/agent/loop.ts', 'src/tui/app.tsx'],
         filesRead: [],
         verifications: [],
         decisions: [],
         trajectoryEntries: [],
-        sessionId: 'protect-test',
+        sessionId: 'target-test',
       })
-      assert.ok(
-        !existsSync(knowledgeDir),
-        '.rivet/knowledge/ must NEVER be auto-created by dream telemetry — it is the human zone',
-      )
-      assert.ok(existsSync(todaySessionPath(isolatedDir)), 'telemetry should land in .rivet/sessions/')
+      const kPath = knowledgePath(isolatedDir)
+      assert.ok(existsSync(kPath), 'dream must write to .rivet/knowledge/project-memory.md')
+      const content = readFileSync(kPath, 'utf-8')
+      assert.ok(content.includes('anything.ts'), 'knowledge should contain modified files')
+      // sessions/ is NOT written — single write target
+      const sessionsDir = join(isolatedDir, '.rivet', 'sessions')
+      assert.ok(!existsSync(sessionsDir), 'should not create .rivet/sessions/')
     } finally {
       rmSync(isolatedDir, { recursive: true, force: true })
     }

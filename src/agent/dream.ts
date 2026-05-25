@@ -1,9 +1,9 @@
 /**
  * Dream distillation — session-end knowledge extraction.
  *
- * Telemetry writes to .rivet/sessions/{YYYY-MM-DD}.md — machine-only zone.
- * Never writes to .rivet/knowledge/*, which is reserved for human-maintained content
- * (star identities, design decisions, retrospectives).
+ * Writes to .rivet/knowledge/project-memory.md — the single source that
+ * volatile.ts reads and injects into the system prompt.  This closes the
+ * memory loop: session ends → distill → knowledge file → next session's prompt.
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -110,26 +110,38 @@ function ensureDir(dir: string): void {
   }
 }
 
-/** Persist a distilled session entry to the machine-only session log. */
+const MAX_FILE_SIZE = 8192
+
+/** Persist a distilled session entry to the project knowledge file. */
 export function persistDream(cwd: string, input: DreamInput): void {
   const entry = distillSession(input)
   if (!entry) return
 
-  const dir = join(cwd, '.rivet', 'sessions')
+  const dir = join(cwd, '.rivet', 'knowledge')
   ensureDir(dir)
+  const path = join(dir, 'project-memory.md')
 
-  const date = new Date().toISOString().slice(0, 10)
-  writeSessionEntry(join(dir, `${date}.md`), entry, input)
-}
-
-function writeSessionEntry(path: string, entry: string, input: DreamInput): void {
   let existing = ''
-  try { existing = readFileSync(path, 'utf-8') } catch {}
+  try { existing = readFileSync(path, 'utf-8') } catch { /* first write */ }
 
+  // Deduplicate: same day + same files → keep latest only
   const dedupKey = buildDedupKey(input)
   const deduped = dedupKey ? removeMatchingEntry(existing, dedupKey) : existing
 
-  writeFileAtomicSync(path, entry + '\n' + deduped)
+  const combined = entry + '\n' + deduped
+  const trimmed = trimToEntryBoundary(combined, MAX_FILE_SIZE)
+  writeFileAtomicSync(path, trimmed)
+}
+
+/** Trim from the tail, but only at `### ` entry boundaries — never mid-entry. */
+function trimToEntryBoundary(content: string, maxSize: number): string {
+  if (content.length <= maxSize) return content
+  // Remove oldest entries (at the end) until we fit
+  const entries = content.split(/(?=^### )/m).filter(e => e.trim())
+  while (entries.length > 1 && entries.join('').length > maxSize) {
+    entries.pop() // oldest is at the end (new entries are prepended)
+  }
+  return entries.join('') + '\n'
 }
 
 function buildDedupKey(input: DreamInput): string | null {

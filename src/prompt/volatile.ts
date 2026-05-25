@@ -102,7 +102,7 @@ function escapeXml(text: string): string {
     .replaceAll('"', '&quot;')
 }
 
-const KNOWLEDGE_MAX_CHARS = 2000
+const KNOWLEDGE_MAX_CHARS = 4096
 
 function readKnowledgeFiles(cwd: string): string | undefined {
   const dir = join(cwd, '.rivet', 'knowledge')
