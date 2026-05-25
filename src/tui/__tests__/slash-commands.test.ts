@@ -77,10 +77,13 @@ describe('resolveAppPromptInput', () => {
   })
 
   it('resolves /write-plan into a writing-plans workflow prompt', () => {
-    const resolved = resolveAppPromptInput('/write-plan add Context7 MCP preset', '/cwd')
+    const resolved = resolveAppPromptInput('/write-plan 你说的很好，把这个内容记录到设计文档。如果行数太长就拆分两个，一个背景说明，一个是设计文档。其次，即便我使用 claude code 也是多个会话来并行执行。', '/cwd')
 
     assert.ok(resolved.includes('writing-plans'))
-    assert.ok(resolved.includes('add Context7 MCP preset'))
+    assert.ok(resolved.includes('Create a comprehensive implementation plan for: 你说的很好，把这个内容记录到设计文档。'))
+    assert.ok(resolved.includes('docs/superpowers/plans/'))
+    assert.ok(resolved.includes('多会话并行开发设计文档.md'))
+    assert.ok(!resolved.includes('你说的很好-把这个内容记录到设计文档-如果行数太长'))
     assert.ok(resolved.includes('Execution handoff'))
   })
 

@@ -35,6 +35,41 @@ export function slugifyFeatureName(feature: string): string {
   return slug || 'implementation-plan'
 }
 
+const MAX_PLAN_SLUG_BYTES = 96
+
+export function semanticPlanSlug(feature: string): string {
+  const normalized = feature.trim()
+  if (!normalized) return 'implementation-plan'
+
+  const lower = normalized.toLowerCase()
+  const longNarrative = normalized.length > 48 || Buffer.byteLength(normalized, 'utf8') > MAX_PLAN_SLUG_BYTES
+
+  if (longNarrative) {
+    if ((lower.includes('多会话') || lower.includes('多个会话') || lower.includes('单会话'))
+      && (lower.includes('设计文档') || lower.includes('背景说明'))) {
+      return '多会话并行开发设计文档'
+    }
+    if (lower.includes('plan') && (lower.includes('命名') || lower.includes('文件名'))) {
+      return 'plan中文语义命名规则修复'
+    }
+  }
+
+  return truncateSlugByUtf8Bytes(slugifyFeatureName(normalized), MAX_PLAN_SLUG_BYTES)
+}
+
+function truncateSlugByUtf8Bytes(slug: string, maxBytes: number): string {
+  if (Buffer.byteLength(slug, 'utf8') <= maxBytes) return slug
+
+  let result = ''
+  for (const char of slug) {
+    const next = `${result}${char}`
+    if (Buffer.byteLength(next, 'utf8') > maxBytes) break
+    result = next
+  }
+
+  return result.replace(/-+$/g, '') || 'implementation-plan'
+}
+
 export function formatPlanDate(date: Date = new Date()): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -43,7 +78,7 @@ export function formatPlanDate(date: Date = new Date()): string {
 }
 
 export function defaultPlanPath(feature: string, date: Date = new Date()): string {
-  return `docs/superpowers/plans/${formatPlanDate(date)}-${slugifyFeatureName(feature)}.md`
+  return `docs/superpowers/plans/${formatPlanDate(date)}-${semanticPlanSlug(feature)}.md`
 }
 
 export function buildWritingPlanPrompt(options: WritingPlanPromptOptions): string {
@@ -58,6 +93,7 @@ Requirements:
 - Do not write implementation code yet.
 - Read relevant docs/specs/code first before proposing tasks.
 - Save the plan to \`${path}\` unless the user explicitly chooses another path.
+- Plan filenames must be short business-semantic names. Do not mechanically use the entire \`/plan\` argument as the filename. Summarize the business need into a concise Chinese or English title that stays within filesystem filename limits.
 - Assume the implementing engineer has near-zero context about this codebase.
 - Assume the engineer is experienced but may not design tests well.
 - Prefer DRY, YAGNI, TDD, small focused files, and frequent commits.
