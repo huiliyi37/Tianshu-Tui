@@ -268,29 +268,30 @@ export class PromptEngine {
       }
     }
 
-    // File content dedup: if same large tool result appears multiple times, keep only the latest
-    const seenContent = new Map<string, number>() // content hash → latest index
-    for (let i = result.length - 1; i >= 0; i--) {
-      const msg = result[i]!
-      if (msg.role === 'tool' && msg.content.length > 500 && !msg.content.startsWith('[observation masked')) {
-        const hash = simpleHash(msg.content)
-        if (!seenContent.has(hash)) {
-          seenContent.set(hash, i)
-        } else {
-          // This is an older duplicate — replace with placeholder
-          result[i] = { ...msg, content: `[duplicate content, see later tool result]` }
+    // File content dedup + disk budget: skip on 1M+ windows — mutating historical
+    // tool results breaks DeepSeek exact-prefix cache (same rationale as pruning/masking).
+    if (!contextWindow || contextWindow < 1_000_000) {
+      const seenContent = new Map<string, number>()
+      for (let i = result.length - 1; i >= 0; i--) {
+        const msg = result[i]!
+        if (msg.role === 'tool' && msg.content.length > 500 && !msg.content.startsWith('[observation masked')) {
+          const hash = simpleHash(msg.content)
+          if (!seenContent.has(hash)) {
+            seenContent.set(hash, i)
+          } else {
+            result[i] = { ...msg, content: `[duplicate content, see later tool result]` }
+          }
         }
       }
-    }
 
-    // Disk budget: truncate any remaining tool result >50K chars to a 2KB preview
-    const DISK_BUDGET_CHARS = 50_000
-    const PREVIEW_CHARS = 2000
-    for (let i = 0; i < result.length; i++) {
-      const msg = result[i]!
-      if (msg.role === 'tool' && msg.content.length > DISK_BUDGET_CHARS) {
-        const preview = msg.content.slice(0, PREVIEW_CHARS)
-        result[i] = { ...msg, content: `${preview}\n\n[output truncated: ${msg.content.length} chars total, showing first ${PREVIEW_CHARS}]` }
+      const DISK_BUDGET_CHARS = 50_000
+      const PREVIEW_CHARS = 2000
+      for (let i = 0; i < result.length; i++) {
+        const msg = result[i]!
+        if (msg.role === 'tool' && msg.content.length > DISK_BUDGET_CHARS) {
+          const preview = msg.content.slice(0, PREVIEW_CHARS)
+          result[i] = { ...msg, content: `${preview}\n\n[output truncated: ${msg.content.length} chars total, showing first ${PREVIEW_CHARS}]` }
+        }
       }
     }
 
