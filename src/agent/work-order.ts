@@ -237,8 +237,9 @@ export function mapWorkOrderKindToCapabilityTask(kind: WorkOrderKind): Capabilit
   switch (kind) {
     case 'code_search':
     case 'doc_research':
-    case 'plan':
       return 'repo_summarization'
+    case 'plan':
+      return 'code_edit'
     case 'verify':
       return 'test_failure_diagnosis'
     case 'review':
