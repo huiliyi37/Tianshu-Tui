@@ -150,6 +150,22 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(needsApproval, false)
   })
 
+  it('includes ownership health warnings without changing gate state', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: [],
+      externalFiles: ['.rivet/prefix-diag.jsonl'],
+    })
+
+    const result = await tool.execute(params)
+
+    assert.equal(result.isError ?? false, false)
+    assert.match(result.content, /Delivery Gate: GREEN/)
+    assert.match(result.content, /Owned files \(0\)/)
+    assert.match(result.content, /External files \(1\)/)
+    assert.match(result.content, /Ownership health warnings:/)
+  })
+
   it('generates consistent report for same state', async () => {
     const ctx1 = makeContext({
       taskId: 't1',

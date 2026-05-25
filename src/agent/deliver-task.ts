@@ -23,6 +23,7 @@ import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
 import type { DeliveryGateV2 } from './delivery-gate-v2.js'
+import { summarizeOwnershipHealth } from './ownership-health.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -74,6 +75,16 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         '',
         `Verifications: ${report.verificationCount}`,
       ]
+
+      const health = summarizeOwnershipHealth({
+        ownedFiles: report.ownedFiles,
+        externalFiles: report.externalFiles,
+        dirtyFiles: [...report.ownedFiles, ...report.externalFiles],
+      })
+      if (health.warningLines.length > 0) {
+        lines.push('', 'Ownership health warnings:')
+        lines.push(...health.warningLines.map(line => `  ${line}`))
+      }
 
       if (report.blockingReason) {
         lines.push('', `⚠️  Blocking: ${report.blockingReason}`)
