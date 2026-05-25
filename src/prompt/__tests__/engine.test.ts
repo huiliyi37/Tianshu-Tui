@@ -87,9 +87,15 @@ describe('PromptEngine OpenAI-native request building', () => {
       { role: 'user', content: 'continue' },
     ])
 
-    const injectedBeforeLatest = request.messages[4]
-    assert.equal(injectedBeforeLatest?.role, 'user')
-    assert.match(injectedBeforeLatest?.content ?? '', /state v2/)
+    const latestUser = [...request.messages].reverse()
+      .find(msg => msg.role === 'user' && typeof msg.content === 'string')
+    assert.ok(latestUser, 'expected latest user message')
+    const content = latestUser.content as string
+    const sep = '\n---\n'
+    const sepIdx = content.indexOf(sep)
+    assert.notEqual(sepIdx, -1, 'latest user message should use trailer-mode separator')
+    assert.match(content.slice(0, sepIdx), /state v2/)
+    assert.equal(content.slice(sepIdx + sep.length), 'continue')
   })
 
   it('produces stable canonical OAI body bytes for equivalent construction', () => {
