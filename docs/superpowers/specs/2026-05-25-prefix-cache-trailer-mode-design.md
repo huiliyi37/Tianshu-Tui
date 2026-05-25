@@ -1,5 +1,18 @@
 # Prefix Cache Trailer Mode 设计文档
 
+## 实施状态更新（2026-05-25）
+
+Trailer mode 已在 `2e37179 fix(prompt): trailer mode — merge cachedFreshBlock into last user message` 落地，并由 `974699a test(prompt): add P2 test for cachedFreshBlock trailer mode merge` 补充测试。
+
+当前 `src/prompt/engine.ts` 的行为：
+
+- 不再 push 独立 `cachedFreshBlock` user message。
+- 最后一条 user message 的 content 变为 `cachedFreshBlock + '\n---\n' + 原始用户输入`。
+- `src/prompt/__tests__/engine.test.ts` P2 断言 user message 数量不增加，cachedFreshBlock 被合并进最后 user content。
+- 后续 `27a6679` 又在 1M+ context window 下完全跳过 observation masking，避免 trailer mode 以外的 request-time masking 继续制造字节漂移。
+
+本文下面保留原始设计说明。
+
 ## 背景
 
 ### 问题
