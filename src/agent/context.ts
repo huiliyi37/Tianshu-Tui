@@ -4,6 +4,8 @@ import type { CompactEvent, ContextLedger } from '../context/types.js'
 import { estimateOaiMessageTokens, estimateOaiTokens } from '../compact/micro.js'
 import { stableStringify } from '../api/stable-json.js'
 
+import { INLINE_TOOL_RESULT_MAX_CHARS } from '../compact/constants.js'
+
 const MAX_TRACKED_FILES = 500
 const MAX_TEST_RESULTS = 500
 const MAX_CACHE_HISTORY = 500
@@ -116,7 +118,8 @@ export class SessionContext {
   addToolResults(results: ContentBlock[]): void {
     for (const block of results) {
       if (block.type === 'tool_result') {
-        const msg: OaiMessage = { role: 'tool', tool_call_id: block.tool_use_id, content: block.content }
+        const trimmed = trimToolResultForMemory(block.content)
+        const msg: OaiMessage = { role: 'tool', tool_call_id: block.tool_use_id, content: trimmed }
         this.state.oaiMessages.push(msg)
         this.state.estimatedTokens += estimateOaiMessageTokens(msg)
         this.onMutation?.({ type: 'append', message: msg })
@@ -264,4 +267,34 @@ export class SessionContext {
   getCompactEvents(): CompactEvent[] {
     return [...this.state.compactEvents]
   }
+}
+
+// ─── Memory-safety helpers ───────────────────────────────────────
+
+/** Artifact marker pattern: "[artifact:ID]" at end of content. */
+const ARTIFACT_MARKER_REGEX = /\[artifact:([A-Za-z0-9_-]+)\]\s*$/
+
+/**
+ * Trim tool result content that exceeds {@link INLINE_TOOL_RESULT_MAX_CHARS}.
+ * Preserves the artifact marker so the model can still recover full content
+ * via read_section. Full content remains on disk — this only bounds JS heap usage.
+ */
+function trimToolResultForMemory(content: string): string {
+  if (content.length <= INLINE_TOOL_RESULT_MAX_CHARS) return content
+
+  const artifactMatch = content.match(ARTIFACT_MARKER_REGEX)
+  const marker = artifactMatch ? artifactMatch[0] : ''
+  const markerLen = marker.length
+
+  // Reserve space for the marker + the memory-trimmed tag
+  const tagOverhead = `<memory-trimmed original_chars="${content.length}" />\n`.length
+  const keepChars = Math.max(0, INLINE_TOOL_RESULT_MAX_CHARS - markerLen - tagOverhead)
+  const truncated = content.slice(0, keepChars)
+
+  const memoryTag = `<memory-trimmed original_chars="${content.length}" kept_chars="${keepChars}" />`
+
+  if (artifactMatch) {
+    return truncated + '\n' + memoryTag + '\n' + marker
+  }
+  return truncated + '\n' + memoryTag
 }
