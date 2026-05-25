@@ -11,8 +11,10 @@ task_plan.md
 .superpowers/
 
 # Local agent runtime state
-.claude/worktrees/
+.claude/
 .wolf/
+.omc/
+.github/workflows/
 .rivet/sensorium.jsonl
 .rivet/pheromones.json
 .rivet/debug-400.json

@@ -3,6 +3,7 @@ import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
+import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 export interface DelegateBatchCoordinator {
@@ -91,6 +92,30 @@ export function createDelegateBatchTool(
     async execute(params: ToolCallParams): Promise<ToolResult> {
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
+
+      // Pre-flight: validate file paths are within project root for all tasks
+      const outOfProject: { taskIdx: number; paths: string[] }[] = []
+      for (let i = 0; i < parsed.data.tasks.length; i++) {
+        const t = parsed.data.tasks[i]!
+        if (t.files && t.files.length > 0) {
+          const bad = t.files.filter(f => !validatePathSafe(params.cwd, f).ok)
+          if (bad.length > 0) outOfProject.push({ taskIdx: i, paths: bad })
+        }
+      }
+      if (outOfProject.length > 0) {
+        const details = outOfProject
+          .map(o => `  task[${o.taskIdx}]: ${o.paths.join(', ')}`)
+          .join('\n')
+        return {
+          content: [
+            `delegate_batch blocked: ${outOfProject.length} task(s) reference files outside the project directory.`,
+            details,
+            `Workers cannot access files outside the project root (${params.cwd}).`,
+            `If you need to analyze external code, copy it into the project first or use bash to cat the file content inline.`,
+          ].join('\n'),
+          isError: true,
+        }
+      }
 
       const requests: DelegationRequest[] = parsed.data.tasks.map((t, i) => ({
         parentTurnId: `${params.toolUseId}:${i}`,

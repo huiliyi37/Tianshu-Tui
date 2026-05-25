@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
+import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 export interface DelegateTaskCoordinator {
@@ -50,6 +51,26 @@ export function createDelegateTaskTool(
         return {
           content: `Invalid delegate_task input: ${parsed.error.message}`,
           isError: true,
+        }
+      }
+
+      // Pre-flight: validate file paths are within project root
+      if (parsed.data.files && parsed.data.files.length > 0) {
+        const outOfProject: string[] = []
+        for (const f of parsed.data.files) {
+          const v = validatePathSafe(params.cwd, f)
+          if (!v.ok) outOfProject.push(f)
+        }
+        if (outOfProject.length > 0) {
+          return {
+            content: [
+              `delegate_task blocked: ${outOfProject.length} file(s) are outside the project directory.`,
+              `Offending paths: ${outOfProject.join(', ')}`,
+              `Workers cannot access files outside the project root (${params.cwd}).`,
+              `If you need to analyze external code, copy it into the project first or use bash to cat the file content inline.`,
+            ].join('\n'),
+            isError: true,
+          }
         }
       }
 

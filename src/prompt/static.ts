@@ -51,6 +51,14 @@ const BASE_PROMPT = `<identity>
   3. glob — find files by name pattern
   4. grep — search file contents for symbols or keywords
   </navigation>
+
+  <failure-diagnosis>
+  When a tool returns an error, diagnose BEFORE retrying:
+  1. Read the error message carefully — it tells you exactly what went wrong.
+  2. If delegate_task/delegate_batch returns "files outside the project directory", the target code is not in this project. Do NOT retry with the same paths. Instead: use bash to cat/read the external file inline, or ask the user.
+  3. If a tool fails twice with the same error, STOP. Change your approach — different tool, different input, or ask the user.
+  4. When bash output is truncated (lines omitted), the full output is saved to a temp file. Use bash to read it (e.g. cat the rawPath shown in the output header).
+  </failure-diagnosis>
 </tool-usage>
 
 <workflow>
