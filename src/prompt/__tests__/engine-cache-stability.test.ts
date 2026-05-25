@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix } from '../volatile.js'
 import { PromptEngine } from '../engine.js'
+import { latestUserTrailer, userMessages } from './helpers/message-selectors.js'
 import type { OaiMessage } from '../../api/oai-types.js'
 
 function stringContent(message: OaiMessage | undefined): string {
@@ -11,17 +12,13 @@ function stringContent(message: OaiMessage | undefined): string {
   return message.content
 }
 
-function latestUserTrailer(messages: readonly OaiMessage[]): { fresh: string; user: string } {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg?.role === 'user' && typeof msg.content === 'string') {
-      const sep = '\n---\n'
-      const idx = msg.content.indexOf(sep)
-      if (idx === -1) return { fresh: msg.content, user: '' }
-      return { fresh: msg.content.slice(0, idx), user: msg.content.slice(idx + sep.length) }
-    }
+function historicalUserContent(messages: readonly OaiMessage[], userContent: string): string {
+  const msg = userMessages(messages)
+    .find(m => typeof m.content === 'string' && m.content.endsWith(`\n---\n${userContent}`))
+  if (!msg || typeof msg.content !== 'string') {
+    throw new Error(`expected historical user trailer for ${userContent}`)
   }
-  throw new Error('expected at least one user message')
+  return msg.content
 }
 
 describe('ice-mirror: cache stability', () => {
@@ -124,13 +121,13 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
     ], [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' }])
 
     // req1: "hello" is the latest message → gets frozen + dynamic (with git-status)
-    const vol1 = (req1.messages[1] as { content: string }).content
-    // req2: "hello" is a historical message → gets frozen base only (no git-status)
-    const vol2 = (req2.messages[1] as { content: string }).content
+    const vol1 = latestUserTrailer(req1.messages).fresh
+    // req2: "hello" is a historical message → reuses the frozen merged trailer for that user
+    const vol2 = historicalUserContent(req2.messages, 'hello').split('\n---\n')[0]!
 
     // Frozen base is a prefix of the full volatile block
     assert.ok(vol1.startsWith(vol2), 'Frozen base must be a prefix of latest volatile block')
-    assert.ok(!vol2.includes('<git-status>'), 'Historical volatile must not contain git-status')
+    assert.ok(vol2.includes('<git-status>'), 'Historical merged trailer preserves the frozen latest-turn snapshot')
     assert.ok(vol1.includes('<git-status>'), 'Latest volatile must contain git-status')
   })
 
@@ -272,11 +269,12 @@ describe('habituation: three-zone consolidation', () => {
       { role: 'user', content: 'msg 1' },
     ])
 
-    const histVol = stringContent(req.messages[1])
+    const histVol = historicalUserContent(req.messages, 'msg 0').split('\n---\n')[0]!
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
+    const frozenBase = (engine as unknown as { frozenBase: string }).frozenBase
     assert.equal(user, 'msg 1')
     assert.ok(!histVol.includes('<consolidated>'), 'Historical volatile must stay frozen for prefix cache')
-    assert.ok(freshVol.startsWith(histVol), 'Latest trailer must preserve frozen prefix')
+    assert.ok(freshVol.startsWith(frozenBase), 'Latest trailer must preserve frozen prefix')
     assert.ok(freshVol.includes('<consolidated>'), 'Latest trailer must include consolidated dynamic appendix')
   })
 
