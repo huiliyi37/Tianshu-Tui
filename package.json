@@ -1,6 +1,6 @@
 {
   "name": "rivet",
-  "version": "0.1.0",
+  "version": "2.9.0",
   "description": "Terminal coding agent optimized for DeepSeek V4 prefix cache",
   "license": "MIT",
   "type": "module",

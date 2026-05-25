@@ -23,6 +23,7 @@ export function WelcomeScreen({ model, cwd }: WelcomeScreenProps) {
     <Box flexDirection="column" paddingX={2} paddingY={1}>
       <Box marginBottom={1}>
         <Text color={theme.primary} bold>rivet</Text>
+        <Text color={theme.secondary}> v2.9</Text>
         <Text color={theme.dim}> · </Text>
         <Text color={theme.secondary}>{model}</Text>
         <Text color={theme.dim}> · </Text>
