@@ -136,6 +136,15 @@ describe('readFilePayload', () => {
     assert.ok(!payload.modelContent.includes('looks like a log/JSONL output file'))
   })
 
+  it('keeps existing gitignore guard precedence for generated minified files', () => {
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    writeFileSync(join(dir, 'src/app.min.js'), 'x'.repeat(20_000), 'utf-8')
+    assert.throws(
+      () => readFilePayload(dir, { filePath: 'src/app.min.js' }),
+      /gitignored/,
+    )
+  })
+
   it('does not truncate content shorter than the cap', () => {
     mkdirSync(join(dir, 'src'), { recursive: true })
     const short = 'short content'

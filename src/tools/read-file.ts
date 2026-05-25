@@ -8,6 +8,7 @@ import { summarizeFileContent } from '../artifact/summarize.js'
 import { computeModelReadCap, DEFAULT_MODEL_READ_CAP, type ModelReadCap } from './model-read-cap.js'
 import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
+import { decideReadPolicy } from './read-policy.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
@@ -93,12 +94,7 @@ function getGitignoreFilter(cwd: string): GitignoreFilter {
 }
 
 const MAX_TOOL_INPUT_BYTES = 100 * 1024
-const LOG_FULL_READ_GUARD_BYTES = 16 * 1024
 const LOG_PREVIEW_LINES = 80
-
-function isLogLikePath(filePath: string): boolean {
-  return /\.(?:log|jsonl|ndjson|out|err|trace)(?:\.\d+)?$/i.test(filePath)
-}
 
 function buildLogPreviewContent(filePath: string, content: string): string {
   const lines = content.split('\n')
@@ -172,7 +168,10 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
   }
 
   const fileSize = statSync(filePath).size
-  if (fileSize > MAX_TOOL_INPUT_BYTES && !options.offset && !options.limit) {
+  const hasExplicitRange = options.offset !== undefined || options.limit !== undefined
+  const policy = decideReadPolicy({ filePath, sizeBytes: fileSize, hasExplicitRange })
+
+  if (fileSize > MAX_TOOL_INPUT_BYTES && !hasExplicitRange) {
     const sizeKB = (fileSize / 1024).toFixed(0)
     const estLines = Math.ceil(fileSize / 80)
     throw new Error(
@@ -185,7 +184,11 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
   const limit = options.limit
   const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
 
-  if (isLogLikePath(filePath) && fileSize > LOG_FULL_READ_GUARD_BYTES && !options.offset && !options.limit) {
+  if (policy.action === 'reject-with-range' && !hasExplicitRange) {
+    throw new Error(`${policy.reason}. Use offset and limit to read a specific range.`)
+  }
+
+  if (policy.action === 'preview' && !hasExplicitRange) {
     const preview = buildLogPreviewContent(filePath, content)
     return {
       canonicalPath: filePath,
