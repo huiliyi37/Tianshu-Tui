@@ -191,8 +191,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
 
   // MCP initialization — discovers tools from configured MCP servers and registers them
   const [, setMcpReady] = useState(false)
-  const [toolVersion, setToolVersion] = useState(0)
   const mcpManagerRef = useRef<McpManager | null>(null)
+  const agentRef = useRef<AgentLoop | null>(null)
 
   useEffect(() => {
     if (!config.mcp.enabled || Object.keys(config.mcp.servers).length === 0) {
@@ -210,7 +210,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         toolRegistry.register(tool)
       }
       setMcpReady(true)
-      setToolVersion(v => v + 1)
+      agentRef.current?.updateTools()
 
       const states = mgr.getStates()
       const connected = states.filter(s => s.status === 'connected')
@@ -477,7 +477,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       session,
       cwd,
     )
-  }, [activeProvider, activeApiKey, activeAuth, currentModel, toolVersion, fileHistory])
+  }, [activeProvider, activeApiKey, activeAuth, currentModel, fileHistory])
+  agentRef.current = agent
 
   const allProviders: Record<string, { models: Array<{ id: string; alias: string }> }> = {}
   for (const [name, prov] of Object.entries(config.provider.providers)) {

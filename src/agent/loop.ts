@@ -662,6 +662,10 @@ export class AgentLoop {
     this.config.promptEngine.updateSessionMemory(block)
   }
 
+  updateTools(): void {
+    this.config.promptEngine.updateTools(this.config.toolRegistry.getDefinitions())
+  }
+
   getTrajectoryStats(): { totalTools: number; failures: number; retries: number; avgDurationMs: number } {
     return this.trajectory.summarize()
   }

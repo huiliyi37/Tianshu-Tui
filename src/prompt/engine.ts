@@ -3,6 +3,7 @@ import { semanticPruneLayer1 } from '../compact/semantic-prune.js'
 import { detectStaleness } from '../compact/staleness-detect.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
+import type { ToolDefinition } from '../api/types.js'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import { analyzeVolatilePayload, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
 import type { TaskState } from '../agent/task-state.js'
@@ -198,16 +199,19 @@ export class PromptEngine {
       }))
       : undefined
 
-    // Layer 1: Semantic rule-based pruning (junk dirs, test pass lists, grep dedup)
-    const { messages: semanticPruned } = semanticPruneLayer1(result, CACHE_ANCHOR_MESSAGES)
-    if (semanticPruned !== result) {
-      for (let i = 0; i < result.length; i++) result[i] = semanticPruned[i]!
-    }
+    // On 1M+ windows, skip pruning entirely — same rationale as observation masking:
+    // mutating message content breaks DeepSeek exact-prefix cache. trySessionSplit (86%)
+    // handles context overflow instead.
+    if (!contextWindow || contextWindow < 1_000_000) {
+      const { messages: semanticPruned } = semanticPruneLayer1(result, CACHE_ANCHOR_MESSAGES)
+      if (semanticPruned !== result) {
+        for (let i = 0; i < result.length; i++) result[i] = semanticPruned[i]!
+      }
 
-    // Layer 2: Staleness detection (superseded file reads, unreferenced results)
-    const { messages: stalenessPruned } = detectStaleness(result, CACHE_ANCHOR_MESSAGES)
-    if (stalenessPruned !== result) {
-      for (let i = 0; i < result.length; i++) result[i] = stalenessPruned[i]!
+      const { messages: stalenessPruned } = detectStaleness(result, CACHE_ANCHOR_MESSAGES)
+      if (stalenessPruned !== result) {
+        for (let i = 0; i < result.length; i++) result[i] = stalenessPruned[i]!
+      }
     }
 
     // Observation masking: replace tool result content older than 10 user turns
@@ -285,6 +289,11 @@ export class PromptEngine {
 
   getSystemPrompt(): string {
     return this.systemPrompt
+  }
+
+  updateTools(tools: ToolDefinition[]): void {
+    this.config.staticCtx.tools = tools
+    this.fingerprint = computeFingerprint(this.systemPrompt, tools, this.volatileBlock)
   }
 
   updateSessionMemory(block: string): void {
