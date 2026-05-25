@@ -145,7 +145,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
       if (startRef.current > 0) {
         setElapsed(Date.now() - startRef.current)
       }
-    }, 1000)
+    }, 2000)
     return () => clearInterval(id)
   }, [isStreaming])
 

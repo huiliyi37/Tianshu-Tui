@@ -19,7 +19,6 @@ import { phaseFromSummary, type SummaryState } from './summary-state.js'
 import type { InterviewState } from './status-types.js'
 import { PhaseTracker } from './phase-tracker.js'
 import { FluencyTracker } from './fluency-hook.js'
-import { createRingBuffer } from './ring-buffer.js'
 import { getTheme } from './theme.js'
 import { AgentLoop } from '../agent/loop.js'
 import { formatIntentPreview, type IntentPreview, type IntentPreviewAction } from '../agent/intent-preview.js'
@@ -94,9 +93,8 @@ interface AppProps {
   approvalMode?: 'auto-accept' | 'auto-safe' | 'suggest' | 'manual'
 }
 
-const THINKING_FLUSH_MS = 200
+const THINKING_FLUSH_MS = 1000
 const TOOL_FLUSH_MS = 120
-const ACTIVE_THRESHOLD = 20
 const LIVE_STREAM_MAX_CHARS = 50_000
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
@@ -164,11 +162,8 @@ function parseInterviewMarker(text: string): { state: InterviewState; cleanText:
 // --- Main App ---
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode }: AppProps) {
-  const [frozenItems, setFrozenItems] = useState<LogEntry[]>([])
-  const [activeItems, setActiveItems] = useState<LogEntry[]>([])
+  const [historyItems, setHistoryItems] = useState<LogEntry[]>([])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
-  const staticBuf = useMemo(() => createRingBuffer<LogEntry>(500), [])
-  const frozenBuf = useMemo(() => createRingBuffer<LogEntry>(500), [])
   const liveToolsRef = useRef<LogEntry[]>([])
 
   const [streamingText, setStreamingText] = useState('')
@@ -229,24 +224,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   useEffect(() => glanceBus.subscribe(() => setGlancePulses(glanceBus.snapshot())), [glanceBus])
 
   const pushStatic = useCallback((entry: LogEntry) => {
-    staticBuf.push(entry)
-    setActiveItems(staticBuf.items())
-  }, [staticBuf])
+    setHistoryItems(prev => [...prev, entry])
+  }, [])
 
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
-    for (const entry of entries) staticBuf.push(entry)
-    setActiveItems(staticBuf.items())
-  }, [staticBuf])
-
-  const migrateToFrozen = useCallback(() => {
-    const active = staticBuf.items()
-    if (active.length <= ACTIVE_THRESHOLD) return
-    const migrateCount = active.length - ACTIVE_THRESHOLD
-    const toFreeze = staticBuf.drain(migrateCount)
-    for (const item of toFreeze) frozenBuf.push(item)
-    setFrozenItems(frozenBuf.items())
-    setActiveItems(staticBuf.items())
-  }, [staticBuf, frozenBuf])
+    const grouped = groupLogs(entries)
+    setHistoryItems(prev => [...prev, ...grouped])
+  }, [])
 
   const streamStartRef = useRef(0)
   const thinkStartRef = useRef(0)
@@ -303,6 +287,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const flushThink = useCallback(() => {
     thinkTimer.current = null
     if (thinkBuf.current !== lastFlushedThink.current) {
+      // Skip update if new content is <500 chars — avoids thrashing during slow thinks
+      const delta = thinkBuf.current.length - lastFlushedThink.current.length
+      if (delta < 500 && lastFlushedThink.current.length > 0) {
+        // Re-schedule to accumulate more
+        thinkTimer.current = setTimeout(flushThink, THINKING_FLUSH_MS)
+        return
+      }
       lastFlushedThink.current = thinkBuf.current
       setStreamingThinking(thinkBuf.current)
     }
@@ -469,8 +460,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const messages = p.loadOai()
         session.replaceMessages(messages)
         const { entries, toolCount, turnCount } = replayMessagesToLogEntries(session.getMessages())
-        for (const entry of entries) frozenBuf.push(entry)
-        setFrozenItems(frozenBuf.items())
+        setHistoryItems(prev => [...prev, ...entries])
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
         setCacheHitRate(session.getCacheHitRate())
         setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
@@ -528,7 +518,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setFluencyStale(null)
     fluencyRef.current.onTurnComplete()
     foldedCountRef.current = 0
-    migrateToFrozen()
 
     streamBuf.current = ''
     thinkBuf.current = ''
@@ -1123,19 +1112,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }).finally(() => {
       promptQueueRef.current.running = false
     })
-  }, [agent, session, pushStatic, pushStaticBatch, migrateToFrozen, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
-
-  const groupedActive = useMemo(() => groupLogs(activeItems), [activeItems])
+  }, [agent, session, pushStatic, pushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   return (
     <>
-      {frozenItems.length === 0 && activeItems.length === 0 && !isStreaming && (
+      {historyItems.length === 0 && !isStreaming && (
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
-      <Static items={frozenItems}>
-        {(item) => renderStaticEntry(item, verbose)}
-      </Static>
-      <Static items={groupedActive}>
+      <Static items={historyItems}>
         {(item) => renderStaticEntry(item, verbose)}
       </Static>
       <Box flexDirection="column">
