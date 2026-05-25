@@ -21,41 +21,31 @@ export function WelcomeScreen({ model, cwd }: WelcomeScreenProps) {
 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1}>
-      <Box flexDirection="column" marginBottom={1}>
-        <Text color={theme.primary} bold>
-          {'  ╭─────────────────────────╮'}
-        </Text>
-        <Text color={theme.primary} bold>
-          {'  │    ◆  R I V E T  ◆     │'}
-        </Text>
-        <Text color={theme.primary} bold>
-          {'  ╰─────────────────────────╯'}
-        </Text>
+      <Box marginBottom={1}>
+        <Text color={theme.primary} bold>rivet</Text>
+        <Text color={theme.dim}> · </Text>
+        <Text color={theme.secondary}>{model}</Text>
+        <Text color={theme.dim}> · </Text>
+        <Text color={theme.dim}>{dir}/</Text>
       </Box>
-      <Box flexDirection="column" marginBottom={1}>
-        <Text>  Model: <Text bold color={theme.secondary}>{model}</Text></Text>
-        <Text>  Dir:   <Text dimColor>{dir}/</Text></Text>
-      </Box>
-      <Box flexDirection="column" paddingX={2}>
-        <Text dimColor>{'─'.repeat(36)}</Text>
-        <Text dimColor>  Ctrl+C  clear input / interrupt</Text>
-        <Text dimColor>  ↑ ↓     history navigation</Text>
-        <Text dimColor>  /help   commands list</Text>
-        <Text dimColor>  /model  switch model</Text>
-        <Text dimColor>  Alt+Ent multi-line input</Text>
-        <Text dimColor>{'─'.repeat(36)}</Text>
+      <Box flexDirection="column">
+        <Text color={theme.dim}>  Ctrl+C  </Text><Text color={theme.secondary}>clear / interrupt</Text>
+        <Text color={theme.dim}>  Ctrl+K  </Text><Text color={theme.secondary}>command palette</Text>
+        <Text color={theme.dim}>  /help   </Text><Text color={theme.secondary}>all commands</Text>
+        <Text color={theme.dim}>  Alt+Ent </Text><Text color={theme.secondary}>multi-line</Text>
       </Box>
     </Box>
   )
 }
 
 export function OnboardingPanel() {
+  const theme = getTheme()
   return (
-    <Box paddingX={2} marginBottom={1} borderStyle="single" borderColor="cyan" flexDirection="column">
-      <Text bold color="cyan">Welcome to Rivet</Text>
-      <Text>Configure a provider key with: <Text bold>rivet config set-key &lt;provider&gt; &lt;api-key&gt;</Text></Text>
-      <Text>Try <Text bold>/help</Text> for commands, <Text bold>/model list</Text> for models, and <Text bold>/mcp</Text> for server status.</Text>
-      <Text>Run <Text bold>/onboarding dismiss</Text> when you are ready to hide this guide.</Text>
+    <Box paddingX={2} marginBottom={1} flexDirection="column">
+      <Text color={theme.primary} bold>Welcome to Rivet</Text>
+      <Text color={theme.secondary}>Configure a provider key with: <Text bold>rivet config set-key &lt;provider&gt; &lt;api-key&gt;</Text></Text>
+      <Text color={theme.secondary}>Try <Text bold>/help</Text> for commands, <Text bold>/model list</Text> for models, and <Text bold>/mcp</Text> for server status.</Text>
+      <Text color={theme.dim}>Run <Text bold>/onboarding dismiss</Text> to hide this guide.</Text>
     </Box>
   )
 }

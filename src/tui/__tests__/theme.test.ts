@@ -2,19 +2,19 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
 
-afterEach(() => { setTheme('pastel') })
+afterEach(() => { setTheme('midnight') })
 
 describe('getTheme', () => {
-  it('defaults to pastel theme', () => {
-    assert.equal(getActiveThemeName(), 'pastel')
+  it('defaults to midnight theme', () => {
+    assert.equal(getActiveThemeName(), 'midnight')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#a8e6cf')
-    assert.equal(theme.error, '#ff9aa2')
+    assert.equal(theme.primary, '#58a6ff')
+    assert.equal(theme.error, '#f85149')
   })
 
   it('returns 256-color fallback when colorLevel < 3', () => {
     const theme = getTheme(1)
-    assert.equal(theme.primary, 'cyan')
+    assert.equal(theme.primary, 'blue')
     assert.equal(theme.error, 'red')
   })
 
@@ -44,11 +44,11 @@ describe('theme switching', () => {
     assert.equal(theme.error, '#ff3333')
   })
 
-  it('switches back to pastel theme', () => {
+  it('switches back to midnight theme', () => {
     setTheme('cyberpunk')
-    setTheme('pastel')
-    assert.equal(getActiveThemeName(), 'pastel')
+    setTheme('midnight')
+    assert.equal(getActiveThemeName(), 'midnight')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#a8e6cf')
+    assert.equal(theme.primary, '#58a6ff')
   })
 })

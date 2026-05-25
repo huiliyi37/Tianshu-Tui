@@ -173,7 +173,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /evidence — Show last turn evidence summary
 /mcp — Show MCP server status
 /auto — Toggle auto-approve (current: ${ctx.autoSafeRef.current ? 'auto-safe' : 'manual'})
-/theme [pastel|cyberpunk|list] — Switch color theme
+/theme [midnight|pastel|cyberpunk|observatory] — Switch color theme
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle or switch cockpit panel
 /skill [list|<name>] — List or load Claude skills
 /interview <topic> — Start deep interview to clarify requirements before coding
@@ -282,7 +282,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
 
     case '/theme': {
       const raw = parts[1]?.toLowerCase()
-      const validThemes: ThemeName[] = ['pastel', 'cyberpunk']
+      const validThemes: ThemeName[] = ['midnight', 'pastel', 'cyberpunk', 'observatory']
       if (!raw || raw === 'list') {
         const current = getActiveThemeName()
         const list = validThemes.map(t => `  ${t}${t === current ? ' ← current' : ''}`).join('\n')

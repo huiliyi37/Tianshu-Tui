@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Box, Text, useInput } from 'ink'
+import { getTheme } from './theme.js'
 
 export interface PaletteCommand {
   name: string
@@ -15,7 +16,6 @@ export function filterCommands(commands: PaletteCommand[], query: string): Palet
     .filter(c => {
       if (c.name.toLowerCase().includes(lower)) return true
       if (c.description.toLowerCase().includes(lower)) return true
-      // Fuzzy subsequence match
       let qi = 0
       for (let i = 0; i < c.name.length && qi < lower.length; i++) {
         if (c.name[i]!.toLowerCase() === lower[qi]) qi++
@@ -38,6 +38,7 @@ interface CommandPaletteProps {
 export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
+  const theme = getTheme()
 
   const filtered = filterCommands(commands, query)
 
@@ -75,19 +76,23 @@ export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteP
   })
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold color="cyan">▎{query || 'Type to search...'}</Text>
+    <Box flexDirection="column" paddingX={1} paddingY={0}>
+      <Box>
+        <Text color={theme.primary} bold>&gt; </Text>
+        <Text color={query ? '#e6edf3' : theme.dim}>{query || 'search commands...'}</Text>
+      </Box>
       <Box flexDirection="column" marginTop={1}>
-        {filtered.slice(0, 10).map((cmd, i) => (
-          <Box key={cmd.name}>
-            <Text color={i === selectedIdx ? 'green' : undefined}>
-              {i === selectedIdx ? '❯ ' : '  '}
-              <Text bold={i === selectedIdx}>{cmd.name}</Text>
-              {cmd.hotkey && <Text color="cyan"> [{cmd.hotkey}]</Text>}
-              <Text dimColor> — {cmd.description}</Text>
-            </Text>
-          </Box>
-        ))}
+        {filtered.slice(0, 10).map((cmd, i) => {
+          const isSelected = i === selectedIdx
+          return (
+            <Box key={cmd.name}>
+              <Text color={isSelected ? theme.primary : theme.dim}>{isSelected ? '>' : ' '} </Text>
+              <Text color={isSelected ? '#e6edf3' : theme.secondary} bold={isSelected}>{cmd.name}</Text>
+              {cmd.hotkey && <Text color={theme.dim}> [{cmd.hotkey}]</Text>}
+              <Text color={theme.dim}> {cmd.description}</Text>
+            </Box>
+          )
+        })}
       </Box>
     </Box>
   )

@@ -17,7 +17,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight'
 
 interface ColorSet {
   primary: string
@@ -108,6 +108,32 @@ const OBSERVATORY_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
+// Midnight theme — GitHub Dark inspired, clear hierarchy, functional color
+// Three-layer gray (fg / muted / subtle) + single accent blue + semantic colors
+const MIDNIGHT_TRUECOLOR: ColorSet = {
+  primary: '#58a6ff',   // accent blue — links, selection, active
+  secondary: '#8b949e', // muted gray — labels, secondary text
+  success: '#3fb950',   // green — pass, active pulse
+  warning: '#d29922',   // gold — attention, delegation
+  error: '#f85149',     // red — errors, alerts
+  dim: '#484f58',       // subtle gray — borders, inactive
+  pulseQuiet: '#30363d', // dark border gray — quiet pulse
+  pulseActive: '#58a6ff', // accent blue — active pulse
+  pulseAlert: '#f85149',  // red — alert pulse
+}
+
+const MIDNIGHT_FALLBACK: ColorSet = {
+  primary: 'blue',
+  secondary: 'white',
+  success: 'green',
+  warning: 'yellow',
+  error: 'red',
+  dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'blue',
+  pulseAlert: 'red',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -128,12 +154,12 @@ function makeContextColor(c: Pick<ColorSet, 'primary' | 'warning' | 'error'>) {
   }
 }
 
-function buildTheme(colors: ColorSet): RivetTheme {
+function buildTheme(colors: ColorSet, overrides?: { userColor?: string; assistantColor?: string }): RivetTheme {
   return {
     ...colors,
-    userColor: colors.primary,       // mint green
-    assistantColor: colors.secondary, // lavender
-    systemColor: colors.dim,          // dim gray
+    userColor: overrides?.userColor ?? colors.primary,
+    assistantColor: overrides?.assistantColor ?? colors.secondary,
+    systemColor: colors.dim,
     toolColor: makeToolColor(colors),
     contextColor: makeContextColor(colors),
   }
@@ -152,9 +178,13 @@ const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetTheme }>
     truecolor: buildTheme(OBSERVATORY_TRUECOLOR),
     fallback: buildTheme(OBSERVATORY_FALLBACK),
   },
+  midnight: {
+    truecolor: buildTheme(MIDNIGHT_TRUECOLOR, { userColor: '#e6edf3', assistantColor: '#e6edf3' }),
+    fallback: buildTheme(MIDNIGHT_FALLBACK, { userColor: 'white', assistantColor: 'white' }),
+  },
 }
 
-let activeTheme: ThemeName = 'pastel'
+let activeTheme: ThemeName = 'midnight'
 
 export function setTheme(name: ThemeName): void {
   activeTheme = name

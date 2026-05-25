@@ -125,8 +125,8 @@ function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summary
   const compactEvents = useMemo(() => session.getCompactEvents(), [session])
 
   return (
-    <Box flexDirection="column" paddingX={1} borderStyle="round" borderColor={theme.primary}>
-      <Text color={theme.primary} bold>─── COCKPIT ───</Text>
+    <Box flexDirection="column" paddingX={1} borderStyle="single" borderColor={theme.dim}>
+      <Text color={theme.primary} bold>cockpit</Text>
       <CockpitRail activePanel={panel} panelStatuses={snap.panelStatuses} onSelect={() => {}} />
       {panel === 'trace' && <TracePanel events={snap.trace.events} />}
       {panel === 'verify' && <VerificationPanel filesRead={snap.verification.filesRead} filesModified={snap.verification.filesModified} verifications={snap.verification.runs} deliveryStatus={snap.verification.deliveryStatus} impactedFiles={snap.verification.impactedFiles} impactedTests={snap.verification.impactedTests} />}
