@@ -50,6 +50,16 @@ Layer 4  retrospective   追溯事实和更新 brief 时读
 
 不要用于：只改普通工具/测试的小任务。
 
+### `2026-05-27-runtime-paths-troubleshooting-guide.md`
+
+读取时机：
+
+- 任务涉及 `.rivet/`、`~/.rivet/sessions/`、cache-log、sensorium、artifacts、checkpoint、session memory、claims。
+- 排查 DeepSeek prefix cache 命中率、session split、compact hygiene、runtime artifact 归属。
+- 需要判断 session-scoped 路径与 legacy `.rivet/*` 路径的兼容关系。
+
+不要用于：与 runtime 文件、日志、排障无关的普通代码任务。
+
 ---
 
 ## T2：异常与接续

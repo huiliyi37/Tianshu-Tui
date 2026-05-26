@@ -79,6 +79,36 @@ describe('TurnStreamController', () => {
     assert.equal(turnCaches[0]?.usage.cache_read_input_tokens, 70)
   })
 
+  it('buffers provider text deltas until the stream finishes', async () => {
+    let callbacksDuringStream: string[] = []
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        cb.onTextDelta('first ')
+        cb.onTextDelta('second')
+        callbacksDuringStream = [...observedCallbacks]
+        cb.onStopReason('end_turn', {})
+      }),
+    }
+    const { controller, getStreamedText } = makeController(client)
+    const observedCallbacks: string[] = []
+
+    await controller.streamTurn({
+      request,
+      turn: 1,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: text => { observedCallbacks.push(text) },
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+
+    assert.equal(getStreamedText(), 'first second')
+    assert.deepEqual(callbacksDuringStream, [])
+    assert.deepEqual(observedCallbacks, ['first second'])
+  })
+
   it('deduplicates repeated display text against the previous turn fingerprint', async () => {
     const client: StreamClient = {
       stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {

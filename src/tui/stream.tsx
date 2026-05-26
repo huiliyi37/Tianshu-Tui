@@ -10,10 +10,17 @@ interface StreamOutputProps {
 
 export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: StreamOutputProps) {
   const theme = getTheme()
-  // Guard: if there's no text, render nothing — even if isStreaming is still true.
-  // This prevents a blank-cursor frame when onTurnComplete clears streamingText
-  // before setIsStreaming(false) in the same render cycle.
-  if (!text) return null
+  // While the agent is active but no visible text has arrived yet, keep a
+  // lightweight status on screen. Without this, long provider/tool/post-turn
+  // silent windows look like a frozen TUI.
+  if (!text) {
+    if (!isStreaming) return null
+    return (
+      <Box paddingX={1} marginBottom={1}>
+        <Text color={theme.dim}>◌ Waiting for model…</Text>
+      </Box>
+    )
+  }
 
   const textWithCursor = isStreaming ? text + '▊' : text
 

@@ -175,6 +175,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [isStreaming, setIsStreaming] = useState(false)
   const [isThinkingActive, setIsThinkingActive] = useState(false)
   const [fluencyStale, setFluencyStale] = useState<string | null>(null)
+  const [heartbeatStatus, setHeartbeatStatus] = useState<string | null>(null)
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
@@ -524,6 +525,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setLiveTools([])
     liveToolsRef.current = []
     setFluencyStale(null)
+    setHeartbeatStatus(null)
     fluencyRef.current.onTurnComplete()
     foldedCountRef.current = 0
 
@@ -674,6 +676,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     await agent.run(promptInput, {
       onTextDelta: (text) => {
+        setHeartbeatStatus(null)
         const now = Date.now()
         fluencyRef.current.setPhase('streaming')
         if (activityRef.current.phase === 'thinking') {
@@ -696,6 +699,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         blockWriterRef.current?.push(text)
       },
       onThinkingDelta: (thinking) => {
+        setHeartbeatStatus(null)
         const now = Date.now()
         fluencyRef.current.setPhase('thinking')
         if (thinkStartRef.current === 0) {
@@ -715,6 +719,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
       },
       onToolUse: (id, name, input) => {
+        setHeartbeatStatus(null)
         toolNames.current.set(id, name)
         setIsThinkingActive(false)
 
@@ -760,6 +765,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }))
       },
       onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {
+        setHeartbeatStatus(null)
         if (isError === undefined) {
           toolAccum.current.set(id, (toolAccum.current.get(id) ?? '') + result)
           dirtyTools.current.add(id)
@@ -846,6 +852,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         pushStatic(createLogEntry({ type: 'checkpoint', content: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore` }))
       },
       onTurnComplete: (_usage, turnNumber, isFinal) => {
+        setHeartbeatStatus(null)
         // Sync reasoning effort from agent (auto-reasoning may have changed it)
         const currentEffort = agent.getReasoningEffort()
         if (currentEffort && currentEffort !== reasoningEffort) {
@@ -993,6 +1000,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
       },
       onPhaseChange: (phase, detail) => {
+        if (phase === 'heartbeat') {
+          setHeartbeatStatus(detail?.reason ?? 'still working')
+          return
+        }
         if (phase === 'tianshu-radio' && detail?.reason) {
           chronicleRef.current.addRadio(detail.reason, turnCountRef.current)
         }
@@ -1176,6 +1187,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {fluencyStale && !streamingText && (
           <Box paddingX={2}>
             <Text dimColor color="yellow">⚠ {fluencyStale}</Text>
+          </Box>
+        )}
+        {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
+          <Box paddingX={2}>
+            <Text dimColor>◌ {heartbeatStatus}</Text>
           </Box>
         )}
         {pendingIntent && (
