@@ -12,6 +12,7 @@ function makeContext(opts: {
   taskId: string
   ownedFiles: string[]
   externalFiles?: string[]
+  dirtyFiles?: string[]
   verifications?: Array<{ command: string; status: 'passed' | 'failed' | 'blocked' }>
 }) {
   const baseline = createWorktreeBaseline({
@@ -33,6 +34,7 @@ function makeContext(opts: {
     taskLedger: ledger,
     ownership,
     gate,
+    getCurrentDirtyFiles: () => opts.dirtyFiles,
   }))
 
   const params: ToolCallParams = {
@@ -59,15 +61,27 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.ok(result.content.includes('GREEN'))
   })
 
-  it('reports RED and blocks when unverified', async () => {
+  it('reports RED without marking status-only report as tool error when unverified', async () => {
     const { tool, params } = makeContext({
       taskId: 't1',
       ownedFiles: ['src/a.ts'],
     })
 
     const result = await tool.execute(params)
+    assert.equal(result.isError ?? false, false)
+    assert.ok(result.content.includes('RED'))
+  })
+
+  it('marks commit=true RED as tool error because commit request is rejected', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: test' } })
     assert.equal(result.isError, true)
     assert.ok(result.content.includes('RED'))
+    assert.ok(result.content.includes('Cannot commit'))
   })
 
   it('reports YELLOW when external verification blocked but owned files verified', async () => {
@@ -116,7 +130,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     })
 
     const result = await tool.execute(params)
-    assert.equal(result.isError, true)
+    assert.equal(result.isError ?? false, false)
     assert.ok(result.content.includes('RED'))
     assert.ok(result.content.includes('failure'))
   })
@@ -150,7 +164,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(needsApproval, false)
   })
 
-  it('includes ownership health warnings without changing gate state', async () => {
+  it('reports external dirty files as informational caveats, not ownership warnings', async () => {
     const { tool, params } = makeContext({
       taskId: 't1',
       ownedFiles: [],
@@ -163,7 +177,9 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /Delivery Gate: GREEN/)
     assert.match(result.content, /Owned files \(0\)/)
     assert.match(result.content, /External files \(1\)/)
-    assert.match(result.content, /Ownership health warnings:/)
+    assert.doesNotMatch(result.content, /Ownership health warnings:/)
+    assert.match(result.content, /Ownership caveats:/)
+    assert.match(result.content, /External dirty files are present and excluded from delivery scope\./)
   })
 
   it('auto-populates ownership from task ledger at execution time', async () => {
@@ -179,6 +195,34 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(result.isError ?? false, false)
     assert.match(result.content, /Owned files \(1\)/)
     assert.match(result.content, /src\/late-write\.ts/)
+  })
+
+  it('treats clean historical owned files as non-blocking when current dirty snapshot is empty', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/already-committed.ts'],
+      dirtyFiles: [],
+    })
+
+    const result = await tool.execute(params)
+    assert.equal(result.isError ?? false, false)
+    assert.match(result.content, /Delivery Gate: GREEN/)
+    assert.match(result.content, /Owned files \(0\)/)
+    assert.match(result.content, /Historical owned files \(1\)/)
+    assert.match(result.content, /src\/already-committed\.ts/)
+  })
+
+  it('still blocks current dirty owned files when unverified', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/current-dirty.ts'],
+      dirtyFiles: ['src/current-dirty.ts'],
+    })
+
+    const result = await tool.execute(params)
+    assert.equal(result.isError ?? false, false)
+    assert.match(result.content, /Delivery Gate: RED/)
+    assert.match(result.content, /Owned files \(1\)/)
   })
 
   it('generates consistent report for same state', async () => {

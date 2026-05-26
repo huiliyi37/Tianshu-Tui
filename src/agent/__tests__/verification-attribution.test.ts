@@ -63,7 +63,7 @@ describe('verification-attribution — classify verification results by ownershi
     assert.equal(a.isBlocking, true)
   })
 
-  it('classifies failed full test as ambiguous when ownership is unknown', () => {
+  it('classifies failed full test as unattributed non-blocking caveat when ownership is unknown', () => {
     const attr = makeAttribution(['src/tools/git.ts'])
     const result: VerificationMetadata = {
       command: 'npm test',
@@ -77,9 +77,8 @@ describe('verification-attribution — classify verification results by ownershi
     }
 
     const a = attr.attribute(result)
-    assert.equal(a.attribution, 'ambiguous')
-    // ambiguous full-test failure: can't tell if ours or external, so blocking
-    assert.equal(a.isBlocking, true)
+    assert.equal(a.attribution, 'unattributed_failure')
+    assert.equal(a.isBlocking, false)
   })
 
   it('classifies blocked verification as external_blocked', () => {
@@ -146,6 +145,18 @@ describe('verification-attribution — classify verification results by ownershi
     const agg = attr.getAggregateAttribution(results)
     assert.equal(agg.attribution, 'owned_failure')
     assert.equal(agg.isBlocking, true)
+  })
+
+  it('getAggregateAttribution with full-scope failed verification → unattributed_failure caveat', () => {
+    const attr = makeAttribution(['src/a.ts'])
+    const results: VerificationMetadata[] = [
+      { command: 'typecheck', status: 'passed', scope: 'full', exitCode: 0, passed: 1, failed: 0, skipped: 0, durationMs: 100 },
+      { command: 'tests', status: 'failed', scope: 'full', exitCode: 1, passed: 3, failed: 1, skipped: 0, durationMs: 200 },
+    ]
+
+    const agg = attr.getAggregateAttribution(results)
+    assert.equal(agg.attribution, 'unattributed_failure')
+    assert.equal(agg.isBlocking, false)
   })
 
   it('empty verification list → unverified', () => {

@@ -124,13 +124,91 @@ describe('delivery-gate-v2 — ownership-aware delivery gate with GREEN/YELLOW/R
     assert.ok(report.blockingReason)
   })
 
-  it('handles empty state gracefully', () => {
-    const { gate } = makeGate([])
+  it('does not block on historical owned files when no current dirty files are passed', () => {
+    const { gate } = makeGate(['src/tools/git.ts'])
 
-    const result = gate.assess([])
+    const result = gate.assess([], [])
+    assert.equal(result.state, 'GREEN')
+    assert.equal(result.canDeliver, true)
+    assert.equal(result.isBlocked, false)
+    assert.equal(result.ownedFileCount, 0)
+  })
+
+  it('blocks on current dirty owned files when unverified', () => {
+    const { gate } = makeGate(['src/tools/git.ts'])
+
+    const result = gate.assess([], ['src/tools/git.ts'])
+    assert.equal(result.state, 'RED')
+    assert.equal(result.canDeliver, false)
+    assert.equal(result.isBlocked, true)
+    assert.equal(result.ownedFileCount, 1)
+  })
+
+  it('excludes external dirty files from current owned gate', () => {
+    const { gate } = makeGate(['src/tools/git.ts'], ['src/external-dirty.ts'])
+
+    const result = gate.assess([], ['src/external-dirty.ts'])
     assert.equal(result.state, 'GREEN')
     assert.equal(result.canDeliver, true)
     assert.equal(result.ownedFileCount, 0)
-    assert.equal(result.externalFileCount, 0)
+    assert.equal(result.externalFileCount, 1)
+  })
+
+  it('returns YELLOW for full-scope failed verification without owned attribution', () => {
+    const { gate } = makeGate(['src/tools/git.ts'])
+    const fullFailure: VerificationMetadata = {
+      command: 'npm test',
+      status: 'failed',
+      scope: 'full',
+      exitCode: 1,
+      passed: 100,
+      failed: 1,
+      skipped: 0,
+      durationMs: 1000,
+    }
+
+    const result = gate.assess([fullFailure])
+    assert.equal(result.state, 'YELLOW')
+    assert.equal(result.canDeliver, true)
+    assert.equal(result.isBlocked, false)
+    assert.match(result.reason!, /unresolved full-suite failure/)
+  })
+
+  it('returns YELLOW for full-scope failed ledger verification without owned attribution', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({ type: 'verification', command: 'npm test', status: 'failed', meta: { scope: 'full' } })
+
+    const result = gate.assess([])
+    assert.equal(result.state, 'YELLOW')
+    assert.equal(result.canDeliver, true)
+    assert.equal(result.isBlocked, false)
+    assert.match(result.reason!, /unresolved full-suite failure/)
+  })
+
+  it('keeps failed ledger verifications targeted by default for backward compatibility', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({ type: 'verification', command: 'run_tests src/tools/__tests__/git.test.ts', status: 'failed' })
+
+    const result = gate.assess([])
+    assert.equal(result.state, 'RED')
+    assert.equal(result.canDeliver, false)
+    assert.equal(result.isBlocked, true)
+  })
+
+  it('getReport separates current owned dirty files from historical owned files', () => {
+    const { gate } = makeGate(['src/tools/git.ts', 'src/tools/diff.ts'])
+
+    const report = gate.getReport([], ['src/tools/git.ts'])
+    assert.equal(report.ownedFileCount, 1)
+    assert.deepEqual(report.ownedFiles, ['src/tools/git.ts'])
+    assert.deepEqual(report.historicalOwnedFiles, ['src/tools/diff.ts'])
+  })
+
+  it('getReport filters historical external files to current dirty files when a dirty snapshot is passed', () => {
+    const { gate } = makeGate([], ['src/external-now.ts', 'src/external-clean.ts'])
+
+    const report = gate.getReport([], ['src/external-now.ts'])
+    assert.equal(report.externalFileCount, 1)
+    assert.deepEqual(report.externalFiles, ['src/external-now.ts'])
   })
 })

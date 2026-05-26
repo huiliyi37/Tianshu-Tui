@@ -19,8 +19,9 @@ describe('summarizeOwnershipHealth', () => {
     assert.ok(report.warningLines.includes('Dirty file has no ownership classification: src/unknown.ts'))
   })
 
-  it('warns when no owned files are registered but dirty files exist', () => {
+  it('reports external-only dirty files as informational caveats, not warnings', () => {
     const report = summarizeOwnershipHealth({ ownedFiles: [], externalFiles: ['src/external.ts'], dirtyFiles: ['src/external.ts'] })
-    assert.ok(report.warningLines.includes('No owned files registered, but dirty files exist. Check task-ledger write events.'))
+    assert.deepEqual(report.warningLines, [])
+    assert.ok(report.infoLines.includes('No current owned dirty files. External dirty files are present and excluded from delivery scope.'))
   })
 })

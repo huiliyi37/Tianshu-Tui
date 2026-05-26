@@ -84,6 +84,7 @@ describe('executeToolUse', () => {
       type: 'verification',
       command: 'run_tests src/foo.test.ts',
       status: 'passed',
+      meta: { scope: 'targeted' },
     })
   })
 
@@ -112,6 +113,7 @@ describe('executeToolUse', () => {
       type: 'verification',
       command: 'npx tsc --noEmit',
       status: 'failed',
+      meta: { scope: 'full' },
     })
   })
 

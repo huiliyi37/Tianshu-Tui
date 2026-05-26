@@ -9,6 +9,7 @@ export interface OwnershipHealthReport {
   dirtyExternal: string[]
   cleanOwned: string[]
   warningLines: string[]
+  infoLines: string[]
 }
 
 export function summarizeOwnershipHealth(input: OwnershipHealthInput): OwnershipHealthReport {
@@ -20,15 +21,16 @@ export function summarizeOwnershipHealth(input: OwnershipHealthInput): Ownership
   const dirtyExternal = input.dirtyFiles.filter(f => external.has(f)).sort()
   const cleanOwned = input.ownedFiles.filter(f => !dirty.has(f)).sort()
   const warningLines: string[] = []
+  const infoLines: string[] = []
 
   for (const f of input.dirtyFiles) {
     if (!owned.has(f) && !external.has(f)) {
       warningLines.push(`Dirty file has no ownership classification: ${f}`)
     }
   }
-  if (input.ownedFiles.length === 0 && input.dirtyFiles.length > 0) {
-    warningLines.push('No owned files registered, but dirty files exist. Check task-ledger write events.')
+  if (untrackedDirtyOwned.length === 0 && dirtyExternal.length > 0 && warningLines.length === 0) {
+    infoLines.push('No current owned dirty files. External dirty files are present and excluded from delivery scope.')
   }
 
-  return { untrackedDirtyOwned, dirtyExternal, cleanOwned, warningLines }
+  return { untrackedDirtyOwned, dirtyExternal, cleanOwned, warningLines, infoLines }
 }

@@ -25,6 +25,7 @@ export type AttributionClass =
   | 'owned_failure'
   | 'external_blocked'
   | 'ambiguous'
+  | 'unattributed_failure'
   | 'unverified'
 
 export interface AttributionResult {
@@ -78,11 +79,11 @@ export function createVerificationAttribution(opts: {
         }
       }
 
-      // Full test: can't determine ownership from scope alone → ambiguous
+      // Full test without failure-file attribution is a caveat, not an owned blocker.
       return {
-        attribution: 'ambiguous',
-        isBlocking: true,
-        reason: `Full-scope verification failed: ${result.command} — ${result.failed} test(s) failed. Attribution to owned vs external files requires further diagnosis.`,
+        attribution: 'unattributed_failure',
+        isBlocking: false,
+        reason: `Full-scope verification failed: ${result.command} — ${result.failed} test(s) failed. Attribution to owned vs external files is unresolved.`,
         source: result,
       }
     }
@@ -117,7 +118,7 @@ export function createVerificationAttribution(opts: {
 
     const attributions = results.map(r => attribute(r))
 
-    // Priority: owned_failure > ambiguous > external_blocked > verified
+    // Priority: owned_failure > ambiguous > unattributed_failure > external_blocked > verified
     const hasOwnedFailure = attributions.some(a => a.attribution === 'owned_failure')
     if (hasOwnedFailure) {
       const first = attributions.find(a => a.attribution === 'owned_failure')!
@@ -136,6 +137,17 @@ export function createVerificationAttribution(opts: {
         attribution: 'ambiguous',
         isBlocking: true,
         reason: `Ambiguous verification failure: ${first.source.command}. Investigate whether failures are in owned or external files.`,
+        source: first.source,
+      }
+    }
+
+    const hasUnattributedFailure = attributions.some(a => a.attribution === 'unattributed_failure')
+    if (hasUnattributedFailure) {
+      const first = attributions.find(a => a.attribution === 'unattributed_failure')!
+      return {
+        attribution: 'unattributed_failure',
+        isBlocking: false,
+        reason: `Full-suite verification failed without owned-file attribution: ${first.source.command}. Treat as delivery caveat until diagnosed.`,
         source: first.source,
       }
     }

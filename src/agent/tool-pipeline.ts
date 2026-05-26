@@ -657,14 +657,14 @@ ${check.formatted}`
         if (cmd.startsWith('git ')) {
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
         } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
-          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: harnessResult.isError ? 'failed' : 'passed' })
+          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: harnessResult.isError ? 'failed' : 'passed', meta: { scope: 'full' } })
         } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
         }
       } else if (tu.name === 'run_tests') {
         const filter = typeof tu.input.filter === 'string' ? tu.input.filter : undefined
         const command = filter ? `run_tests ${filter}` : 'run_tests'
-        deps.taskLedger.record({ type: 'verification', command, status: harnessResult.isError ? 'failed' : 'passed' })
+        deps.taskLedger.record({ type: 'verification', command, status: harnessResult.isError ? 'failed' : 'passed', meta: { scope: rawToolResult?.verification?.scope ?? (filter ? 'targeted' : 'full') } })
       } else {
         deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
       }

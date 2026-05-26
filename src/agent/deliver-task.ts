@@ -19,6 +19,8 @@
  * @task B1-8
  */
 
+import { spawnSync } from 'node:child_process'
+import { resolve } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
@@ -29,6 +31,34 @@ export interface B1Context {
   taskLedger: TaskLedger
   ownership: OwnershipLedger
   gate: DeliveryGateV2
+  /** Test hook / alternate runtime source for current dirty files. */
+  getCurrentDirtyFiles?: (cwd: string) => string[] | undefined
+}
+
+function parseNulFileList(output: string): string[] {
+  return output.split('\0').filter(Boolean)
+}
+
+function gitNameList(cwd: string, args: string[]): string[] | null {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf-8', timeout: 5000 })
+  if (result.status !== 0) return null
+  return parseNulFileList(result.stdout)
+}
+
+export function collectCurrentDirtyFiles(cwd: string): string[] | undefined {
+  const unstaged = gitNameList(cwd, ['diff', '--name-only', '-z'])
+  const staged = gitNameList(cwd, ['diff', '--cached', '--name-only', '-z'])
+  const untracked = gitNameList(cwd, ['ls-files', '--others', '--exclude-standard', '-z'])
+  if (!unstaged || !staged || !untracked) return undefined
+
+  const files = new Set<string>()
+  for (const file of [...unstaged, ...staged, ...untracked]) {
+    files.add(file)
+    // Tool inputs are often absolute paths, while git reports project-relative
+    // paths. Keep both forms so DeliveryGate can match either ledger encoding.
+    files.add(resolve(cwd, file))
+  }
+  return [...files].sort()
 }
 
 export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
@@ -58,7 +88,8 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
     async execute(params: ToolCallParams): Promise<ToolResult> {
       const ctx = getB1Context()
       ctx.ownership.autoOwnFromLedger()
-      const report = ctx.gate.getReport([])
+      const currentDirtyFiles = ctx.getCurrentDirtyFiles?.(params.cwd) ?? collectCurrentDirtyFiles(params.cwd)
+      const report = ctx.gate.getReport([], currentDirtyFiles)
 
       const lines: string[] = [
         `Delivery Gate: ${report.state}`,
@@ -67,6 +98,11 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         `Owned files (${report.ownedFileCount}):`,
         ...(report.ownedFiles.length > 0
           ? report.ownedFiles.map(f => `  ${f}`)
+          : ['  (none)']),
+        '',
+        `Historical owned files (${report.historicalOwnedFileCount}):`,
+        ...(report.historicalOwnedFiles.length > 0
+          ? report.historicalOwnedFiles.map(f => `  ${f}`)
           : ['  (none)']),
         '',
         `External files (${report.externalFileCount}):`,
@@ -85,6 +121,10 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
       if (health.warningLines.length > 0) {
         lines.push('', 'Ownership health warnings:')
         lines.push(...health.warningLines.map(line => `  ${line}`))
+      }
+      if (health.infoLines.length > 0) {
+        lines.push('', 'Ownership caveats:')
+        lines.push(...health.infoLines.map(line => `  ${line}`))
       }
 
       if (report.blockingReason) {
@@ -110,8 +150,7 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         lines.push('   Use git commit to execute.')
       }
 
-      const isError = report.state === 'RED'
-      return { content: lines.join('\n'), isError }
+      return { content: lines.join('\n') }
     },
 
     requiresApproval(params: ToolCallParams): boolean {
