@@ -27,6 +27,8 @@ export interface VolatileContext {
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
   _knowledgeSnapshot?: string
+  /** Model substrate identity — factual, not prescriptive */
+  modelSubstrate?: { provider: string; model: string }
   playbookLessons?: PlaybookBullet[]
   activeClaims?: ContextClaim[]
   toolHistory?: ToolHistoryEntry[]
@@ -269,6 +271,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   const parts: string[] = []
 
   parts.push(`<environment platform="${process.platform}" cwd="${escapeXml(ctx.cwd)}" os="${escapeXml(`${os.type()} ${os.release()}`)}" />`)
+
+  if (ctx.modelSubstrate) {
+    parts.push(`<model-substrate provider="${escapeXml(ctx.modelSubstrate.provider)}" model="${escapeXml(ctx.modelSubstrate.model)}" />`)
+  }
 
   if (ctx.activeDomain) {
     parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)

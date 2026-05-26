@@ -57,6 +57,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     volatileCtx: createVolatileSnapshot({
       cwd,
       sessionMemoryBlock: input.sessionMemoryBlock,
+      modelSubstrate: { provider: provider.name, model: model.id },
     }),
     habituationThreshold: input.habituationThreshold ?? 5,
   })
