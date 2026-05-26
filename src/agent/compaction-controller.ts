@@ -315,4 +315,66 @@ export class CompactionController {
     })
     this.deps.refreshLedger()
   }
+
+  /**
+   * Forked Agent LLM compaction: sends a compact-summary request through the
+   * primary model's StreamClient, reusing cache anchors (first 2 messages)
+   * for ~90% prefix cache hit rate.
+   *
+   * @returns compact summary string, or null if primaryClient unavailable
+   *          or session has insufficient messages.
+   */
+  async llmCompact(): Promise<string | null> {
+    if (!this.deps.primaryClient) return null
+
+    const messages = this.deps.session.getMessages()
+    if (messages.length < CACHE_ANCHOR_MESSAGES + 2) return null
+
+    const compactMessages = [
+      ...messages.slice(0, CACHE_ANCHOR_MESSAGES),
+      {
+        role: 'user' as const,
+        content: [
+          '请总结上述对话的关键信息，用于上下文压缩。',
+          '保留以下内容：',
+          '1. 用户的核心需求和意图',
+          '2. 所有关键技术决策及其原因',
+          '3. 涉及的文件路径及变更摘要',
+          '4. 遇到的错误及修复方法',
+          '5. 当前工作状态和进度',
+          '6. 明确的待办事项和下一步',
+          '',
+          '只输出总结内容，不要调用工具。',
+        ].join('\n'),
+      },
+    ]
+
+    const request = this.deps.promptEngine.buildOaiRequest(
+      compactMessages,
+      undefined,
+      this.deps.contextWindow,
+    )
+    request.tools = undefined
+
+    const chunks: string[] = []
+    let errored = false
+    try {
+      await this.deps.primaryClient.stream(request, {
+        onTextDelta: (text) => { chunks.push(text) },
+        onThinkingDelta: () => {},
+        onContentBlock: () => {},
+        onStopReason: () => {},
+        onError: () => { errored = true },
+      })
+    } catch {
+      return null
+    }
+
+    if (errored || chunks.length === 0) return null
+
+    const summary = chunks.join('').trim()
+    if (summary.length === 0) return null
+
+    return `<compact-summary turn="${this.deps.session.getTurnCount()}" tokens="${this.deps.session.getEstimatedTokens()}">\n${summary}\n</compact-summary>`
+  }
 }
