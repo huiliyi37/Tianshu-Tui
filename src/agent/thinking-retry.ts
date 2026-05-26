@@ -29,6 +29,17 @@ export function evaluateThinkingRetry(input: ThinkingRetryInput): ThinkingRetryR
     }
   }
 
+  // Completely empty response (no text, no blocks, no thinking).
+  // Retrying is pointless — the model produced nothing to recover from.
+  // End the turn and let the user decide what to do.
+  if (thinkingAccum.length === 0) {
+    return {
+      shouldRetry: false, isLooping: false,
+      nextState: { lastThinkingContent: '', thinkingOnlyRetries: 0 },
+      retryMessage: '',
+    }
+  }
+
   const midChunk = thinkingAccum.length > 400 ? thinkingAccum.slice(150, 250) : ''
   const repeatsInBlock = midChunk.length > 0 && (thinkingAccum.split(midChunk).length - 1) >= 3
 

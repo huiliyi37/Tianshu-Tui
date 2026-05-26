@@ -184,6 +184,7 @@ export class AgentLoop {
   private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
   private recentToolHistory: ToolHistoryEntry[] = []
   private prewarm = new PrewarmCache(60_000, 50)
+  private _running = false
   private streamedText = ''
   private thinkingOnlyRetries = 0
   private lastThinkingContent = ''
@@ -871,6 +872,22 @@ export class AgentLoop {
   }
 
   async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
+    // Re-entry guard: prevent concurrent agent.run() calls.
+    // React strict mode or rapid re-submits could trigger handleSubmit
+    // while a previous run is still in-flight, corrupting SessionContext.
+    if (this._running) {
+      debugLog('[agent] run() called while already running — skipping duplicate')
+      return
+    }
+    this._running = true
+    try {
+      await this._runInner(userInput, callbacks)
+    } finally {
+      this._running = false
+    }
+  }
+
+  private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     this.abortController = new AbortController()
     await this.startFsWatcher()
     // P7: heartbeat watchdog — surfaces "still working" signal during long
