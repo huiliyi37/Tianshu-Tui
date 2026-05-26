@@ -2,6 +2,7 @@ import { Box, Text, useInput } from 'ink'
 import { memo, useMemo, useState } from 'react'
 import { getTheme } from './theme.js'
 import { getToolFamily } from './tool-family.js'
+import { Markdown } from './markdown-render.js'
 
 const MAX_COLLAPSED_LINES = 15
 
@@ -55,7 +56,7 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
         {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text dimColor> {totalLines} lines</Text>}
         {focused && totalLines > MAX_COLLAPSED_LINES ? <Text dimColor> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
       </Text>
-      <Text>{displayText}</Text>
+      <Markdown text={displayText} />
       {truncated > 0 && (
         <Text dimColor>  {truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
       )}
