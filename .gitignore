@@ -11,6 +11,9 @@ task_plan.md
 .superpowers/
 docs/sessions/
 
+# Local project reference materials
+其他项目资料/
+
 # Local agent runtime state
 .claude/worktrees/
 .claude/skills/**/*.bak
