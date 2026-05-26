@@ -81,10 +81,10 @@ export const workerProfileSchema = z.object({
 })
 
 export const workerRoutingSchema = z.record(z.string(), z.string()).default({
-  repo_summarization: 'mimo',
-  code_edit: 'capable',
-  test_failure_diagnosis: 'capable',
-  risky_refactor: 'capable',
+  repo_summarization: 'cheap-flash',
+  code_edit: 'cheap-flash',
+  test_failure_diagnosis: 'cheap-flash',
+  risky_refactor: 'cheap-flash',
 })
 
 export const workersSchema = z.object({

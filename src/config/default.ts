@@ -215,10 +215,10 @@ export const DEFAULT_CONFIG: Config = {
       'mimo-pro': { provider: 'mimo', model: 'mimo-v2.5-pro' },
     },
     routing: {
-      repo_summarization: 'cheap',
-      code_edit: 'capable',
-      test_failure_diagnosis: 'capable',
-      risky_refactor: 'capable',
+      repo_summarization: 'cheap-flash',
+      code_edit: 'cheap-flash',
+      test_failure_diagnosis: 'cheap-flash',
+      risky_refactor: 'cheap-flash',
     },
   },
 }

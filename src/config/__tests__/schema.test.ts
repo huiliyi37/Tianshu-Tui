@@ -31,23 +31,37 @@ describe('config permissions schema', () => {
     assert.deepEqual(parsed.agent.permissions.allow, [])
   })
 
-  it('routes repo summarization workers to MiMo by default', () => {
+  it('routes repo summarization workers to V4 Flash by default', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 
-    assert.equal(parsed.workers.routing.repo_summarization, 'mimo')
-    assert.equal(parsed.workers.profiles.mimo?.provider, 'mimo')
-    assert.equal(parsed.workers.profiles.mimo?.model, 'mimo-v2.5')
+    assert.equal(parsed.workers.routing.repo_summarization, 'cheap-flash')
+    assert.equal(parsed.workers.profiles['cheap-flash']?.provider, 'deepseek')
+    assert.equal(parsed.workers.profiles['cheap-flash']?.model, 'deepseek-v4-flash')
   })
 
-  it('fills missing worker routing defaults with MiMo for repo summarization', () => {
+  it('fills missing worker routing defaults with cheap-flash for repo summarization', () => {
     const parsed = workersSchema.parse({
       profiles: {
-        mimo: { provider: 'mimo', model: 'mimo-v2.5' },
+        'cheap-flash': { provider: 'deepseek', model: 'deepseek-v4-flash' },
         capable: { provider: 'deepseek', model: 'deepseek-v4-pro' },
       },
     })
 
-    assert.equal(parsed.routing.repo_summarization, 'mimo')
-    assert.equal(parsed.routing.code_edit, 'capable')
+    assert.equal(parsed.routing.repo_summarization, 'cheap-flash')
+    assert.equal(parsed.routing.code_edit, 'cheap-flash')
+  })
+
+  it('routes ALL worker tasks to non-Pro models', () => {
+    const parsed = configSchema.parse(DEFAULT_CONFIG)
+
+    // Pro is for primary session only — workers never get 'capable'
+    const capableRoutes = Object.entries(parsed.workers.routing)
+      .filter(([, profile]) => profile === 'capable')
+    assert.equal(capableRoutes.length, 0, `Found Pro routes: ${capableRoutes.map(([k]) => k).join(', ')}`)
+
+    // All routes point to cheap-flash (V4 Flash)
+    for (const [task, profile] of Object.entries(parsed.workers.routing)) {
+      assert.equal(profile, 'cheap-flash', `${task} should route to cheap-flash, got ${profile}`)
+    }
   })
 })
