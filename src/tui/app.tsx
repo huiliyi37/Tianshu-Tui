@@ -97,7 +97,7 @@ interface AppProps {
 const THINKING_FLUSH_MS = 1000
 const TOOL_FLUSH_MS = 120
 const LIVE_STREAM_MAX_CHARS = 50_000
-const HISTORY_MAX_ITEMS = 500
+const HISTORY_MAX_ITEMS = 1000
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
 import { renderStaticEntry } from './render-entry.js'
@@ -1142,6 +1142,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           cost={cost}
           model={model}
           isStreaming={isStreaming}
+          historyCount={historyItems.length}
         />
         {activeOverlay === 'starmap' && (
           <StarmapView

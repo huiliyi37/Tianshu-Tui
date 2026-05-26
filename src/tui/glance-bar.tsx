@@ -13,9 +13,10 @@ interface GlanceBarProps {
   cost: number
   model: string
   isStreaming: boolean
+  historyCount?: number
 }
 
-export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming }: GlanceBarProps) {
+export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount }: GlanceBarProps) {
   const theme = getTheme()
   const { columns } = useTerminalSize()
   const phaseGlyph = PHASE_GLYPHS[phase] ?? ''
@@ -38,6 +39,9 @@ export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, 
       <Text color={cacheColor}>{cachePct}%</Text>
       <Text color={theme.dim}> · </Text>
       <Text color={theme.dim}>${cost.toFixed(2)}</Text>
+      {historyCount !== undefined && !narrow && (
+        <><Text color={theme.dim}> · </Text><Text color={theme.dim}>{historyCount} msgs</Text></>
+      )}
       {isStreaming && <Text color={theme.primary}> ●</Text>}
       {alertPulse?.hint && <Text color={theme.error}> {alertPulse.hint}</Text>}
     </Box>
