@@ -48,10 +48,12 @@ import { MeridianIndexer } from './repo/meridian-indexer.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { PlaybookStore } from './agent/playbook-store.js'
 import type { Config, ProviderConfig } from './config/schema.js'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, spawn } from 'node:child_process'
 import type { BaselineSnapshot } from './agent/worktree-baseline.js'
 import { cleanupOrphanedTmpFiles } from './fs-atomic.js'
 import { cleanupOldArtifactSessions } from './artifact/store.js'
+import { createLspManager } from './lsp/manager.js'
+import { createGotoDefinitionTool, createFindReferencesTool } from './lsp/tools.js'
 
 function captureGitBaseline(cwd: string): BaselineSnapshot {
   try {
@@ -241,6 +243,47 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       _mcpManager?.shutdown().catch(() => {})
       _mcpManager = null
       mcpManagerRef.current = null
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // LSP initialization — starts typescript-language-server and registers go-to-definition / find-references tools
+  const [lspManager] = useState(() => {
+    const cwd = process.cwd()
+    return createLspManager(
+      () => spawn('npx', ['-y', 'typescript-language-server', '--stdio'], {
+        cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }),
+      cwd,
+    )
+  })
+
+  useEffect(() => {
+    let cancelled = false
+
+    lspManager.initialize().then(() => {
+      if (cancelled) return
+      if (lspManager.isReady()) {
+        toolRegistry.register(createGotoDefinitionTool(lspManager))
+        toolRegistry.register(createFindReferencesTool(lspManager))
+        agentRef.current?.updateTools()
+        console.error(
+          `[LSP] typescript-language-server ready — ` +
+          `definition: ${lspManager.supportsDefinition()}, ` +
+          `references: ${lspManager.supportsReferences()}`,
+        )
+      } else {
+        console.error('[LSP] typescript-language-server failed to initialize — tools not registered')
+      }
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error('[LSP] Initialization error:', (err as Error).message)
+      }
+    })
+
+    return () => {
+      cancelled = true
+      lspManager.dispose()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
