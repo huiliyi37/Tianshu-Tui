@@ -19,6 +19,7 @@
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
 import type { VerificationAttribution } from './verification-attribution.js'
+import { getEffectiveVerifications } from './verification-attribution.js'
 import type { VerificationMetadata } from '../tools/types.js'
 
 export type GateState = 'GREEN' | 'YELLOW' | 'RED'
@@ -32,6 +33,8 @@ export interface DeliveryGateResult {
   ownedFileCount: number
   externalFileCount: number
   verificationCount: number
+  /** Count of earlier failures superseded by later successes */
+  supersededFailures: number
 }
 
 export interface DeliveryReport {
@@ -45,6 +48,8 @@ export interface DeliveryReport {
   externalFiles: string[]
   externalFileCount: number
   verificationCount: number
+  /** Count of earlier failures superseded by later successes */
+  supersededFailures: number
   blockingReason?: string
   /** Full attribution result for diagnostics */
   attributionSummary: string
@@ -84,23 +89,14 @@ export function createDeliveryGateV2(opts: {
 
   function assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[]): DeliveryGateResult {
     const { ownedFilesForGate: ownedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
-    const ownedVerifications = taskLedger.getVerifications()
+
+    // Use effective verifications (deduplicated by supersession)
+    const rawVerifications = taskLedger.getVerifications()
+    const { effective: ownedVerifications, supersededFailures } = getEffectiveVerifications(rawVerifications)
 
     // Combine owned + external verifications for full picture
     const allVerifications = [
-      ...ownedVerifications.map(e => {
-        const scope = e.meta?.scope === 'full' ? 'full' as const : 'targeted' as const
-        return {
-          command: e.command ?? 'unknown',
-          status: (e.status ?? 'passed') as 'passed' | 'failed' | 'blocked',
-          scope,
-          exitCode: e.status === 'failed' ? 1 : 0,
-          passed: e.status === 'passed' ? 1 : 0,
-          failed: e.status === 'failed' ? 1 : 0,
-          skipped: 0,
-          durationMs: 0,
-        }
-      }),
+      ...ownedVerifications,
       ...externalVerifications,
     ]
 
@@ -117,6 +113,7 @@ export function createDeliveryGateV2(opts: {
         ownedFileCount: 0,
         externalFileCount: externalFiles.length,
         verificationCount: allVerifications.length,
+        supersededFailures,
       }
     }
 
@@ -133,6 +130,7 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
+          supersededFailures,
         }
 
       case 'external_blocked':
@@ -144,6 +142,7 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
+          supersededFailures,
         }
 
       case 'owned_failure':
@@ -156,6 +155,7 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
+          supersededFailures,
         }
 
       case 'unattributed_failure':
@@ -167,6 +167,7 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
+          supersededFailures,
         }
 
       case 'ambiguous':
@@ -179,6 +180,7 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
+          supersededFailures,
         }
 
       case 'unverified':
@@ -191,6 +193,7 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
+          supersededFailures,
         }
 
       default:
@@ -202,6 +205,7 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
+          supersededFailures,
         }
     }
   }
@@ -220,6 +224,7 @@ export function createDeliveryGateV2(opts: {
       externalFiles,
       externalFileCount: result.externalFileCount,
       verificationCount: result.verificationCount,
+      supersededFailures: result.supersededFailures,
       blockingReason: result.blockingReason,
       attributionSummary: result.reason ?? 'No attribution available.',
     }

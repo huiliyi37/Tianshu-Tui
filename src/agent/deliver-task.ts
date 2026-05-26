@@ -113,6 +113,10 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         `Verifications: ${report.verificationCount}`,
       ]
 
+      if (report.supersededFailures > 0) {
+        lines.push(`Superseded verification failures: ${report.supersededFailures}`)
+      }
+
       const health = summarizeOwnershipHealth({
         ownedFiles: report.ownedFiles,
         externalFiles: report.externalFiles,

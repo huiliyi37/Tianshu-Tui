@@ -19,6 +19,86 @@
 
 import type { VerificationMetadata } from '../tools/types.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
+import type { TaskLedgerEvent } from './task-ledger.js'
+
+/**
+ * Result of getEffectiveVerifications — deduplicates verification events
+ * by (command, scope) key, keeping only the latest event per key.
+ */
+export interface EffectiveVerifications {
+  /** Deduplicated verification metadata (only latest per key) */
+  effective: VerificationMetadata[]
+  /** Count of earlier failures that were superseded by later successes */
+  supersededFailures: number
+  /** Total raw event count before deduplication */
+  totalRawCount: number
+}
+
+/**
+ * Normalize a verification command for key generation.
+ * Strips common noise (extra whitespace, quotes) to group equivalent commands.
+ */
+function normalizeCommand(command: string): string {
+  return command.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/**
+ * Generate a stable deduplication key for a verification event.
+ * Events with the same key are considered "same verification" for supersession.
+ */
+function verificationKey(command: string, scope: string): string {
+  return `${normalizeCommand(command)}::${scope}`
+}
+
+/**
+ * Deduplicate verification events by (command, scope) key.
+ * Later events supersede earlier events with the same key.
+ * Old failures that are superseded by later successes are counted
+ * but excluded from the effective set.
+ */
+export function getEffectiveVerifications(
+  events: ReadonlyArray<TaskLedgerEvent>,
+): EffectiveVerifications {
+  const verificationEvents = events.filter(e => e.type === 'verification')
+
+  // Process in chronological order (events are already sorted by timestamp)
+  const keyMap = new Map<string, { event: TaskLedgerEvent; index: number }>()
+  let supersededFailures = 0
+
+  for (let i = 0; i < verificationEvents.length; i++) {
+    const event = verificationEvents[i]!
+    const command = event.command ?? 'unknown'
+    const scope = event.meta?.scope === 'full' ? 'full' : 'targeted'
+    const key = verificationKey(command, scope)
+
+    const existing = keyMap.get(key)
+    if (existing) {
+      // Later event supersedes earlier — if earlier was failed and later is passed, count it
+      if (existing.event.status === 'failed' && event.status === 'passed') {
+        supersededFailures++
+      }
+    }
+    keyMap.set(key, { event, index: i })
+  }
+
+  // Convert to VerificationMetadata
+  const effective: VerificationMetadata[] = []
+  for (const { event } of keyMap.values()) {
+    const scope = event.meta?.scope === 'full' ? 'full' as const : 'targeted' as const
+    effective.push({
+      command: event.command ?? 'unknown',
+      status: (event.status ?? 'passed') as 'passed' | 'failed' | 'blocked',
+      scope,
+      exitCode: event.status === 'failed' ? 1 : 0,
+      passed: event.status === 'passed' ? 1 : 0,
+      failed: event.status === 'failed' ? 1 : 0,
+      skipped: 0,
+      durationMs: 0,
+    })
+  }
+
+  return { effective, supersededFailures, totalRawCount: verificationEvents.length }
+}
 
 export type AttributionClass =
   | 'verified'
