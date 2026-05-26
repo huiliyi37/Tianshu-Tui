@@ -17,6 +17,7 @@ describe('Wave 5 integration', () => {
     assert.ok(names.includes('repo_map'))
     assert.ok(names.includes('inspect_project'))
     assert.ok(names.includes('related_tests'))
+    assert.ok(names.includes('apply_patch'))
   })
 
   it('persistFileHistory round-trips entries', () => {

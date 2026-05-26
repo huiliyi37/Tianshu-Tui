@@ -36,7 +36,7 @@ export function collectDiff(_baseCwd: string, workerCwd: string, baseBranch: str
 
   const committed = git(workerCwd, ['diff', `${baseBranch}...HEAD`])
   if (committed.ok && committed.stdout.trim()) {
-    parts.push(committed.stdout.trim())
+    parts.push(committed.stdout)
   }
 
   // `git add -A` is safe here because hands-session owns and removes this
@@ -44,10 +44,10 @@ export function collectDiff(_baseCwd: string, workerCwd: string, baseBranch: str
   git(workerCwd, ['add', '-A'])
   const staged = git(workerCwd, ['diff', '--cached', 'HEAD'])
   if (staged.ok && staged.stdout.trim()) {
-    parts.push(staged.stdout.trim())
+    parts.push(staged.stdout)
   }
 
-  return parts.join('\n')
+  return parts.join('')
 }
 
 /**

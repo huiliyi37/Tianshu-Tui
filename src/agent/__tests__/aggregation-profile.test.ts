@@ -45,7 +45,7 @@ describe('aggregateResults with profile propagation', () => {
     assert.equal(results[0]!.status, 'passed', 'Read-only worker with empty changedFiles should remain passed')
   })
 
-  it('should block a worker with changedFiles but no verification when profile is not read-only', () => {
+  it('should keep patcher advisory instead of blocked when profile is propagated', () => {
     const writeResult: WorkerResult = {
       workOrderId: 'wo-patcher',
       status: 'passed',
@@ -63,7 +63,8 @@ describe('aggregateResults with profile propagation', () => {
     const results = aggregateResults([writeResult], 'primary_decides', profiles)
 
     assert.equal(results.length, 1)
-    assert.equal(results[0]!.status, 'blocked', 'Write worker with changedFiles but no verification should be blocked')
+    assert.equal(results[0]!.status, 'passed', 'Patcher with changedFiles but no verification should remain passed with advisory risk')
+    assert.ok(results[0]!.risks.some(r => r.includes('advisory')))
   })
 
   it('should handle missing profile gracefully (backward compatible)', () => {

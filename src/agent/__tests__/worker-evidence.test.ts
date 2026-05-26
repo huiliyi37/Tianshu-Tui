@@ -116,22 +116,26 @@ test('passes through read-only worker with examinedFiles even when evidenceStatu
   assert.equal(checked.evidenceStatus, 'verified')
 })
 
-test('write profile does not skip verification gate', () => {
+test('patcher profile gets advisory risk instead of blocked', () => {
   const checked = verifyWorkerEvidence(result({
     changedFiles: ['src/a.ts'],
     evidenceStatus: 'unverified',
   }), 'patcher')
 
-  assert.equal(checked.status, 'blocked')
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('advisory')))
 })
 
-test('verifier profile does not skip verification gate', () => {
+test('verifier profile gets advisory risk instead of blocked', () => {
   const checked = verifyWorkerEvidence(result({
     changedFiles: ['src/a.ts'],
     evidenceStatus: 'unverified',
   }), 'verifier')
 
-  assert.equal(checked.status, 'blocked')
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('advisory')))
 })
 
 test('blocks write worker with changedFiles and examinedFiles but no verification', () => {

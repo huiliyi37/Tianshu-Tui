@@ -318,7 +318,8 @@ export class DelegationCoordinator {
       }
     }
 
-    const results = aggregateResults([run.result], 'primary_decides')
+    const profileMap = new Map([[order.id, order.profile]])
+    const results = aggregateResults([run.result], 'primary_decides', profileMap)
 
     return {
       status: 'completed',
@@ -388,7 +389,8 @@ export class DelegationCoordinator {
     }
     await Promise.all(inflight)
 
-    const aggregated = aggregateResults(allResults, policy)
+    const profileMap = new Map(orders.map(o => [o.id, o.profile] as const))
+    const aggregated = aggregateResults(allResults, policy, profileMap)
     return {
       status: 'completed',
       results: aggregated,

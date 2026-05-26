@@ -5,6 +5,7 @@ function addRisk(risks: string[], risk: string): string[] {
 }
 
 const READ_ONLY_PROFILES = ['code_scout', 'doc_scout', 'planner', 'reviewer']
+const WRITE_PROFILES_ADVISORY = ['patcher', 'verifier']
 
 /**
  * Verify worker evidence for mutation safety.
@@ -26,6 +27,16 @@ export function verifyWorkerEvidence(result: WorkerResult, profile?: string): Wo
   // Read-only profiles skip the verification gate when no files were changed.
   // Without a profile, the same mutation-based rule still applies: examinedFiles are informational only.
   if (result.changedFiles.length === 0) return result
+
+  if (profile && WRITE_PROFILES_ADVISORY.includes(profile)) {
+    if (result.evidenceStatus !== 'verified') {
+      return {
+        ...result,
+        risks: addRisk(result.risks, `advisory: ${result.changedFiles.length} file(s) changed without verified evidence`),
+      }
+    }
+    return result
+  }
 
   const unverifiedRisk = `unverified: ${result.changedFiles.length} file(s) changed without verified evidence`
 

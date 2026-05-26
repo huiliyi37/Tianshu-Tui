@@ -1,5 +1,6 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 export interface ScopeMaterializeResult {
   /** Relative file paths copied from the base repo into the worker worktree. */
@@ -13,6 +14,25 @@ function normalizeScopePath(baseCwd: string, filePath: string): string | null {
   const rel = relative(baseCwd, filePath)
   if (rel === '' || rel.startsWith('..')) return null
   return rel
+}
+
+function workerGitPath(workerCwd: string, gitPath: string): string | null {
+  const result = spawnSync('git', ['rev-parse', '--git-path', gitPath], {
+    cwd: workerCwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  if (result.status !== 0) return null
+  const resolved = result.stdout.trim()
+  if (!resolved) return null
+  return isAbsolute(resolved) ? resolved : resolve(workerCwd, resolved)
+}
+
+function excludeFromWorkerDiff(workerCwd: string, relPath: string): void {
+  const excludePath = workerGitPath(workerCwd, 'info/exclude')
+  if (!excludePath) return
+  mkdirSync(dirname(excludePath), { recursive: true })
+  appendFileSync(excludePath, `\n/${relPath}\n`)
 }
 
 /**
@@ -46,6 +66,7 @@ export function materializeScope(
 
     mkdirSync(dirname(workerPath), { recursive: true })
     copyFileSync(basePath, workerPath)
+    excludeFromWorkerDiff(workerCwd, relPath)
     materialized.push(relPath)
   }
 

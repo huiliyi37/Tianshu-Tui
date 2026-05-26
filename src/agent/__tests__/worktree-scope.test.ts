@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -10,6 +10,10 @@ function git(cwd: string, args: string[]) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
   if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
   return result
+}
+
+function gitOutput(cwd: string, args: string[]): string {
+  return git(cwd, args).stdout.trim()
 }
 
 describe('materializeScope', () => {
@@ -47,6 +51,8 @@ describe('materializeScope', () => {
     assert.deepEqual(result.materialized, ['plan.md'])
     assert.deepEqual(result.missing, [])
     assert.ok(existsSync(join(wtDir, 'plan.md')))
+    const excludePath = gitOutput(wtDir, ['rev-parse', '--git-path', 'info/exclude'])
+    assert.match(readFileSync(excludePath, 'utf-8'), /\/plan\.md/)
   })
 
   it('copies untracked absolute files when they are inside the repo', () => {
