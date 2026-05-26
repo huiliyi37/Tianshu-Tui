@@ -19,8 +19,7 @@ export interface CompactionControllerDeps {
   promptEngine: PromptEngine
   contextWindow: number
   providerProfile?: ProviderProfile
-  compactClient?: StreamClient
-  compactModel?: string
+  primaryClient?: StreamClient
   pressureMonitor: PressureMonitor
   getTrajectoryEntries: () => TrajectoryEntry[]
   getStreamedText: () => string

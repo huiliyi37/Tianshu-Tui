@@ -324,7 +324,6 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
   })
 
   const agent = useMemo(() => {
-    const compactModelSpec = activeProvider.models.find(m => m.id === config.compact.model || m.alias === config.compact.model)
     const playbookStore = new PlaybookStore(cwd)
 
     const agentCfg = createAgentConfig({
@@ -335,7 +334,6 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       compact: config.compact,
       sessionId,
       toolDefinitions: toolRegistry.getDefinitions(),
-      compactModel: compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort } : undefined,
       sessionMemoryBlock: persist.buildMemoryBlock(),
       approvalMode: config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
       auth: activeAuth,
@@ -682,7 +680,6 @@ async function main() {
     if (!key) { console.error('API key not configured'); process.exit(1) }
 
     const model = prov.models[0]!
-    const compactModelSpec = prov.models.find(m => m.id === cfg.compact.model || m.alias === cfg.compact.model)
     const sessionId = randomUUID()
     const persist = new SessionPersist(sessionId)
     const claimStore = persist.createClaimStore()
@@ -707,7 +704,6 @@ async function main() {
           compact: cfg.compact,
           sessionId,
           toolDefinitions: toolRegistry.getDefinitions(),
-          compactModel: compactModelSpec ? { id: compactModelSpec.id, maxTokens: compactModelSpec.maxTokens, contextWindow: compactModelSpec.contextWindow, reasoningEffort: compactModelSpec.reasoningEffort } : undefined,
           sessionMemoryBlock: persist.buildMemoryBlock(),
           approvalMode: 'auto-accept',
         })

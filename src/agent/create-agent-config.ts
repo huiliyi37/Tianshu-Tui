@@ -24,7 +24,6 @@ export interface AgentConfigInput {
   sessionId: string
   toolDefinitions: ToolDefinition[]
   provider: ProviderConfig
-  compactModel?: ModelSpec
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual'
   auth?: AuthProvider
@@ -33,7 +32,7 @@ export interface AgentConfigInput {
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'compactClient' | 'compactModel' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -62,27 +61,13 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     habituationThreshold: input.habituationThreshold ?? 5,
   })
 
-  let compactClient: AgentConfig['compactClient']
-  let compactModelId: string | undefined
-  if (input.compactModel) {
-    compactClient = createProviderClient(provider, capabilities, {
-      apiKey,
-      model: input.compactModel.id,
-      reasoningEffort: input.compactModel.reasoningEffort,
-      maxTokens: Math.min(2048, input.compactModel.maxTokens),
-      thinkingBudget: 1024,
-    })
-    compactModelId = input.compactModel.id
-  }
-
   return {
     client,
     promptEngine,
     contextWindow: model.contextWindow,
     compact: input.compact,
     providerProfile: getProviderProfile(provider.name, model.contextWindow),
-    compactClient,
-    compactModel: compactModelId,
+    primaryClient: client,
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,
     autoReasoning: true,

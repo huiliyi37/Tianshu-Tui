@@ -41,19 +41,10 @@ describe('createAgentConfig', () => {
     assert.equal(cfg.providerProfile?.contextWindow, 128000)
   })
 
-  it('creates compactClient when compactModel provided', () => {
-    const cfg = createAgentConfig({
-      ...baseInput,
-      compactModel: { id: 'deepseek-flash', maxTokens: 4096, contextWindow: 64000, reasoningEffort: undefined },
-    })
-    assert.ok(cfg.compactClient)
-    assert.equal(cfg.compactModel, 'deepseek-flash')
-  })
-
-  it('omits compactClient when no compactModel', () => {
+  it('returns primaryClient as the main model client', () => {
     const cfg = createAgentConfig(baseInput)
-    assert.equal(cfg.compactClient, undefined)
-    assert.equal(cfg.compactModel, undefined)
+    assert.ok(cfg.primaryClient)
+    // primaryClient is the same StreamClient used for main model calls
   })
 
   it('applies thinkingBudget based on reasoningEffort', () => {

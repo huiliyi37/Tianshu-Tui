@@ -125,8 +125,8 @@ export interface AgentConfig {
   contextWindow: number
   compact: CompactionConfig
   providerProfile?: ProviderProfile
-  compactClient?: StreamClient
-  compactModel?: string
+  /** Primary model's StreamClient — reused for LLM compaction via Forked Agent pattern. */
+  primaryClient?: StreamClient
   approvalMode?: ApprovalMode
   sessionId?: string
   /** Optional session registry for cross-session event communication. */
@@ -393,8 +393,7 @@ export class AgentLoop {
       promptEngine: this.config.promptEngine,
       contextWindow: this.config.contextWindow,
       providerProfile: this.config.providerProfile,
-      compactClient: this.config.compactClient,
-      compactModel: this.config.compactModel,
+      primaryClient: this.config.primaryClient,
       pressureMonitor: this.pressureMonitor,
       getTrajectoryEntries: () => this.trajectory.getEntries(),
       getStreamedText: () => this.streamedText,
