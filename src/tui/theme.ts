@@ -116,8 +116,8 @@ const MIDNIGHT_TRUECOLOR: ColorSet = {
   success: '#3fb950',   // green — pass, active pulse
   warning: '#d29922',   // gold — attention, delegation
   error: '#f85149',     // red — errors, alerts
-  dim: '#484f58',       // subtle gray — borders, inactive
-  pulseQuiet: '#30363d', // dark border gray — quiet pulse
+  dim: '#6e7681',       // subtle gray — borders, inactive (lighter for better contrast)
+  pulseQuiet: '#3d4450', // dark border gray — quiet pulse (slightly brighter)
   pulseActive: '#58a6ff', // accent blue — active pulse
   pulseAlert: '#f85149',  // red — alert pulse
 }
