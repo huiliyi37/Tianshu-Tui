@@ -81,6 +81,83 @@ describe('REPO_MAP_TOOL', () => {
     }
   })
 
+  it('respects depth parameter', async () => {
+    const depthDir = mkdtempSync(join(tmpdir(), 'repomap-depth-param-'))
+    try {
+      mkdirSync(join(depthDir, 'a', 'b', 'c', 'd', 'e'), { recursive: true })
+      writeFileSync(join(depthDir, 'a', 'b', 'c', 'd', 'e', 'deep.ts'), '')
+      writeFileSync(join(depthDir, 'a', 'b', 'c', 'd', 'mid.ts'), '')
+      writeFileSync(join(depthDir, 'a', 'b', 'shallow.ts'), '')
+      // depth=2: should show a/ → b/ → shallow.ts but not c/ or deeper
+      const result = await REPO_MAP_TOOL.execute({
+        input: { depth: 2 },
+        toolUseId: 'test',
+        cwd: depthDir,
+      })
+      assert.ok(result.content.includes('shallow.ts'), 'depth 2 should include a/b/shallow.ts')
+      assert.ok(!result.content.includes('mid.ts'), 'depth 2 should exclude a/b/c/d/mid.ts')
+      assert.ok(!result.content.includes('deep.ts'), 'depth 2 should exclude deep.ts')
+    } finally {
+      rmSync(depthDir, { recursive: true, force: true })
+    }
+  })
+
+  it('focuses on subdirectory with path parameter', async () => {
+    const result = await REPO_MAP_TOOL.execute({
+      input: { path: 'src/agent' },
+      toolUseId: 'test',
+      cwd: testDir,
+    })
+    assert.equal(result.isError, undefined)
+    // Should show the focused subdirectory in header
+    assert.ok(result.content.includes('agent'), 'should include agent directory')
+    assert.ok(result.content.includes('loop.ts'), 'should include loop.ts inside agent')
+    // Should NOT include files outside the focused path
+    assert.ok(!result.content.includes('app.tsx'), 'should not include tui/app.tsx')
+    assert.ok(!result.content.includes('package.json'), 'should not include root package.json')
+  })
+
+  it('returns error for non-existent path', async () => {
+    const result = await REPO_MAP_TOOL.execute({
+      input: { path: 'nonexistent/dir' },
+      toolUseId: 'test',
+      cwd: testDir,
+    })
+    assert.ok(result.isError, 'should be an error')
+    assert.ok(result.content.includes('not found') || result.content.includes('Error'), 'should mention error')
+  })
+
+  it('returns error when path is a file', async () => {
+    const result = await REPO_MAP_TOOL.execute({
+      input: { path: 'package.json' },
+      toolUseId: 'test',
+      cwd: testDir,
+    })
+    assert.ok(result.isError, 'should be an error')
+    assert.ok(result.content.includes('Not a directory'), 'should mention not a directory')
+  })
+
+  it('rejects path traversal outside project', async () => {
+    const result = await REPO_MAP_TOOL.execute({
+      input: { path: '../../etc' },
+      toolUseId: 'test',
+      cwd: testDir,
+    })
+    assert.ok(result.isError, 'should be an error')
+    assert.ok(result.content.includes('within the project'), 'should mention project boundary')
+  })
+
+  it('backward compatible: no params gives same behavior', async () => {
+    const result = await REPO_MAP_TOOL.execute(makeParams())
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('src'))
+    assert.ok(result.content.includes('agent'))
+    assert.ok(result.content.includes('tools'))
+    // Same as original test — full tree with default depth=4
+    assert.ok(result.content.includes('bash.ts'))
+    assert.ok(result.content.includes('bash.test.ts'))
+  })
+
   it('max depth limit', async () => {
     const depthDir = mkdtempSync(join(tmpdir(), 'repomap-depth-'))
     try {

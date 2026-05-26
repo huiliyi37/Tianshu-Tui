@@ -1,5 +1,5 @@
 import { readdirSync, statSync, existsSync } from 'fs'
-import { join, basename } from 'path'
+import { join, basename, resolve, relative } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 
 const EXCLUDE_DIRS = new Set([
@@ -7,7 +7,7 @@ const EXCLUDE_DIRS = new Set([
   '__pycache__', '.turbo', '.cache',
 ])
 const DEFAULT_MAX_FILES = 200
-const MAX_DEPTH = 4
+const DEFAULT_DEPTH = 4
 
 const ENTRY_FILES = new Set([
   'main.ts', 'main.tsx', 'index.ts', 'index.tsx',
@@ -49,8 +49,8 @@ interface TreeNode {
   annotation?: string
 }
 
-function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFiles: number): TreeNode[] {
-  if (depth > MAX_DEPTH) return []
+function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFiles: number, maxDepth: number): TreeNode[] {
+  if (depth > maxDepth) return []
   let names: string[]
   try {
     names = readdirSync(dir)
@@ -86,7 +86,7 @@ function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFile
   const nodes: TreeNode[] = []
   for (const entry of entries) {
     if (entry.isDir) {
-      const children = buildTree(join(dir, entry.name), depth + 1, fileCount, maxFiles)
+      const children = buildTree(join(dir, entry.name), depth + 1, fileCount, maxFiles, maxDepth)
       // Only include directory if it has contents
       if (children.length > 0) {
         // Check if directory itself should be annotated (e.g., __tests__)
@@ -127,12 +127,19 @@ export const REPO_MAP_TOOL: Tool = {
 
 ### Usage
 - Use repo_map when entering a project to understand its file layout
-- Shows directory tree (max depth 4) with important files annotated
+- Shows directory tree with important files annotated
 - Excludes node_modules, .git, dist, build, .next, coverage
 
+### On-demand exploration
+- Start with a shallow scan: \`repo_map({ depth: 2 })\` for a high-level overview
+- Then drill into specific areas: \`repo_map({ path: "src/agent/" })\`
+- This avoids dumping the entire project tree at once
+
 ### Examples
-Good: repo_map() — get project file tree
-Good: repo_map(max_files=100) — smaller tree for large projects`,
+Good: repo_map() — get project file tree (depth 4, up to 200 files)
+Good: repo_map({ depth: 2 }) — shallow overview of large projects
+Good: repo_map({ path: "src/agent/" }) — focus on a specific directory
+Good: repo_map({ max_files: 100 }) — smaller tree for large projects`,
     input_schema: {
       type: 'object',
       properties: {
@@ -140,13 +147,33 @@ Good: repo_map(max_files=100) — smaller tree for large projects`,
           type: 'integer',
           description: 'Max files to include (default: 200)',
         },
+        path: {
+          type: 'string',
+          description: 'Subdirectory to focus on (relative to project root). Default: project root.',
+        },
+        depth: {
+          type: 'integer',
+          description: 'Maximum directory depth (default: 4). Use 2 for a shallow overview.',
+        },
       },
     },
   },
 
   async execute(params: ToolCallParams) {
     const maxFiles = (params.input.max_files as number) || DEFAULT_MAX_FILES
-    const root = params.cwd
+    const maxDepth = (params.input.depth as number) || DEFAULT_DEPTH
+    const subPath = params.input.path as string | undefined
+
+    let root = params.cwd
+
+    // If a subdirectory is specified, resolve it relative to cwd
+    if (subPath) {
+      root = resolve(params.cwd, subPath)
+      // Security: ensure resolved path is within cwd
+      if (!root.startsWith(resolve(params.cwd))) {
+        return { content: 'Error: path must be within the project directory', isError: true }
+      }
+    }
 
     if (!existsSync(root)) {
       return { content: `Error: Directory not found: ${root}`, isError: true }
@@ -162,10 +189,14 @@ Good: repo_map(max_files=100) — smaller tree for large projects`,
     }
 
     const fileCount = { n: 0 }
-    const tree = buildTree(root, 0, fileCount, maxFiles)
-    const projectName = basename(root)
+    const tree = buildTree(root, 0, fileCount, maxFiles, maxDepth)
 
-    const header = `${projectName}/`
+    // Header: show relative path when focused on subdirectory
+    const displayRoot = subPath
+      ? `${basename(params.cwd)}/${relative(params.cwd, root)}/`
+      : `${basename(root)}/`
+
+    const header = displayRoot
     const lines = formatTree(tree, '', [])
 
     let dirCount = 0
