@@ -47,6 +47,7 @@ interface TreeNode {
   isDir: boolean
   children?: TreeNode[]
   annotation?: string
+  sizeBytes?: number
 }
 
 function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFiles: number, maxDepth: number): TreeNode[] {
@@ -59,7 +60,7 @@ function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFile
   }
 
   // Sort: directories first, then files; alphabetically within each group
-  const entries: { name: string; isDir: boolean }[] = []
+  const entries: { name: string; isDir: boolean; sizeBytes?: number }[] = []
   for (const name of names) {
     // Skip hidden files/dirs except allowed ones
     if (name.startsWith('.') && name !== '.env.example' && name !== '.gitignore') continue
@@ -74,7 +75,7 @@ function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFile
       if (EXCLUDE_DIRS.has(name)) continue
       entries.push({ name, isDir: true })
     } else if (s.isFile()) {
-      entries.push({ name, isDir: false })
+      entries.push({ name, isDir: false, sizeBytes: s.size })
     }
   }
 
@@ -97,10 +98,17 @@ function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFile
       if (fileCount.n >= maxFiles) continue
       fileCount.n++
       const annotation = annotateFile(entry.name)
-      nodes.push({ name: entry.name, isDir: false, annotation: annotation ?? undefined })
+      nodes.push({ name: entry.name, isDir: false, annotation: annotation ?? undefined, sizeBytes: entry.sizeBytes })
     }
   }
   return nodes
+}
+
+function formatSize(bytes: number | undefined): string {
+  if (bytes === undefined) return ''
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
 
 function formatTree(nodes: TreeNode[], prefix: string, isLast: boolean[]): string[] {
@@ -110,7 +118,8 @@ function formatTree(nodes: TreeNode[], prefix: string, isLast: boolean[]): strin
     const last = i === nodes.length - 1
     const connector = last ? '└── ' : '├── '
     const annotation = node.annotation ? ` [${node.annotation}]` : ''
-    lines.push(`${prefix}${connector}${node.name}${annotation}`)
+    const size = !node.isDir ? ` ${formatSize(node.sizeBytes)}` : ''
+    lines.push(`${prefix}${connector}${node.name}${annotation}${size}`)
 
     if (node.isDir && node.children && node.children.length > 0) {
       const childPrefix = prefix + (last ? '    ' : '│   ')

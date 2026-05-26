@@ -158,6 +158,40 @@ describe('REPO_MAP_TOOL', () => {
     assert.ok(result.content.includes('bash.test.ts'))
   })
 
+  it('shows file sizes in tree output', async () => {
+    const result = await REPO_MAP_TOOL.execute(makeParams())
+    // Files should have size suffixes like "123B", "5KB", "1.2MB"
+    assert.match(result.content, /\d+B\b/, 'should show byte sizes')
+    // Directories should NOT have size suffixes
+    const lines = result.content.split('\n')
+    const dirLine = lines.find(l => l.includes('agent') && l.includes('├──') && !l.includes('.'))
+    if (dirLine) {
+      assert.ok(!/\d+[BKMG]/.test(dirLine), `directory line should not have size: ${dirLine}`)
+    }
+  })
+
+  it('formats large files with KB/MB', async () => {
+    const bigDir = mkdtempSync(join(tmpdir(), 'repomap-size-'))
+    try {
+      // 50KB file
+      writeFileSync(join(bigDir, 'medium.ts'), 'x'.repeat(50 * 1024))
+      // 2MB file
+      writeFileSync(join(bigDir, 'huge.json'), 'x'.repeat(2 * 1024 * 1024))
+      // 100B file
+      writeFileSync(join(bigDir, 'tiny.ts'), 'x'.repeat(100))
+      const result = await REPO_MAP_TOOL.execute({
+        input: {},
+        toolUseId: 'test',
+        cwd: bigDir,
+      })
+      assert.match(result.content, /tiny\.ts.*100B/)
+      assert.match(result.content, /medium\.ts.*50KB/)
+      assert.match(result.content, /huge\.json.*2\.0MB/)
+    } finally {
+      rmSync(bigDir, { recursive: true, force: true })
+    }
+  })
+
   it('max depth limit', async () => {
     const depthDir = mkdtempSync(join(tmpdir(), 'repomap-depth-'))
     try {
