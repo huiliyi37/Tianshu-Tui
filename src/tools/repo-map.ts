@@ -170,7 +170,7 @@ Good: repo_map({ max_files: 100 }) — smaller tree for large projects`,
 
   async execute(params: ToolCallParams) {
     const maxFiles = (params.input.max_files as number) || DEFAULT_MAX_FILES
-    const maxDepth = (params.input.depth as number) || DEFAULT_DEPTH
+    const maxDepth = (params.input.depth as number | undefined) ?? DEFAULT_DEPTH
     const subPath = params.input.path as string | undefined
 
     let root = params.cwd
@@ -178,8 +178,9 @@ Good: repo_map({ max_files: 100 }) — smaller tree for large projects`,
     // If a subdirectory is specified, resolve it relative to cwd
     if (subPath) {
       root = resolve(params.cwd, subPath)
-      // Security: ensure resolved path is within cwd
-      if (!root.startsWith(resolve(params.cwd))) {
+      // Security: ensure resolved path is within cwd (trailing sep prevents prefix injection)
+      const safeCwd = resolve(params.cwd) + '/'
+      if (!root.startsWith(safeCwd) && root !== resolve(params.cwd)) {
         return { content: 'Error: path must be within the project directory', isError: true }
       }
     }

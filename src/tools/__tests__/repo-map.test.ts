@@ -147,6 +147,46 @@ describe('REPO_MAP_TOOL', () => {
     assert.ok(result.content.includes('within the project'), 'should mention project boundary')
   })
 
+  it('rejects prefix injection via sibling directory', async () => {
+    // e.g. cwd=/tmp/app, path="../app-secrets" → /tmp/app-secrets
+    // This passes startsWith("/tmp/app") but should be blocked
+    const parentDir = mkdtempSync(join(tmpdir(), 'repomap-parent-'))
+    const targetDir = join(parentDir, 'app')
+    const siblingDir = join(parentDir, 'app-secrets')
+    mkdirSync(targetDir, { recursive: true })
+    mkdirSync(siblingDir, { recursive: true })
+    try {
+      const result = await REPO_MAP_TOOL.execute({
+        input: { path: '../app-secrets' },
+        toolUseId: 'test',
+        cwd: targetDir,
+      })
+      assert.ok(result.isError, 'should block sibling with shared prefix')
+    } finally {
+      rmSync(parentDir, { recursive: true, force: true })
+    }
+  })
+
+  it('allows depth: 0 (only files at root)', async () => {
+    const d0Dir = mkdtempSync(join(tmpdir(), 'repomap-d0-'))
+    try {
+      mkdirSync(join(d0Dir, 'sub'), { recursive: true })
+      writeFileSync(join(d0Dir, 'root.txt'), '')
+      writeFileSync(join(d0Dir, 'sub', 'nested.txt'), '')
+      const result = await REPO_MAP_TOOL.execute({
+        input: { depth: 0 },
+        toolUseId: 'test',
+        cwd: d0Dir,
+      })
+      assert.equal(result.isError, undefined)
+      assert.ok(result.content.includes('root.txt'), 'should include root file')
+      assert.ok(!result.content.includes('nested.txt'), 'depth 0 should exclude nested files')
+      assert.ok(!result.content.includes('sub'), 'depth 0 should exclude subdirectories')
+    } finally {
+      rmSync(d0Dir, { recursive: true, force: true })
+    }
+  })
+
   it('backward compatible: no params gives same behavior', async () => {
     const result = await REPO_MAP_TOOL.execute(makeParams())
     assert.equal(result.isError, undefined)
