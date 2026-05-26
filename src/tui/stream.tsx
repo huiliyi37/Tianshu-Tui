@@ -25,7 +25,13 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
           <Text color={theme.assistantColor} bold>Assistant</Text>
         </Box>
         <Box flexDirection="column" paddingLeft={2}>
-          <Markdown text={textWithCursor} />
+          {isStreaming ? (
+            // Simplified rendering during streaming: plain text to avoid
+            // broken markdown from incomplete code blocks, links, etc.
+            <Text>{textWithCursor}</Text>
+          ) : (
+            <Markdown text={textWithCursor} />
+          )}
         </Box>
       </Box>
     </Box>

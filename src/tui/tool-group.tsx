@@ -17,7 +17,7 @@ export const ToolGroup = memo(function ToolGroup({ tools, verbose, focused }: To
   const [localExpanded, setLocalExpanded] = useState(false)
 
   useInput((_input, key) => {
-    if (focused && key.tab) {
+    if (focused && (key.tab || key.return)) {
       setLocalExpanded(v => !v)
     }
   })
