@@ -101,7 +101,9 @@ inspect_project → repo_map(shallow) → 选中目录 repo_map(deep)
 
 ## 4. 优化方案
 
-### P1: repo_map 支持目录聚焦（最小改动，最大收益）
+### P1: repo_map 支持目录聚焦 ✅ 已完成
+
+> commit: `321cf47` feat(repo_map): 支持按需读取 — path 聚焦子目录 + depth 控制深度
 
 **目标**：让模型能指定只看某个子目录的树，而不是全项目。
 
@@ -159,7 +161,9 @@ DeepSeek V4 Pro 实际生效值（1M 窗口 + cache-preserving 策略）：
 **修复**：`codex` provider 之前没有在 `provider-profile.ts` 中注册，回退到 `{ cacheType: 'none' }` → aggressive → maxChars=130K。
 已添加 codex profile（与 openai 一致：`partial-prefix`），现在 balanced → maxChars=200K。
 
-### P3: repo_map 输出增加文件大小提示
+### P3: repo_map 输出增加文件大小提示 ✅ 已完成
+
+> commit: `3a21b02` feat(repo_map): 目录树输出增加文件大小提示
 
 **目标**：在目录树中标注文件大小，帮助模型决定是否需要按范围读取。
 
@@ -170,18 +174,20 @@ DeepSeek V4 Pro 实际生效值（1M 窗口 + cache-preserving 策略）：
 └── huge-data.json 2MB
 ```
 
-### P4: 截断改为行级（可选）
+### P4: 截断改为行级（可选）⏳ 后续收束
 
 **目标**：`truncateContent` 从字符级截断改为行级截断，避免在行中间断开。
+
+**评估**：当前 1M 窗口下 maxChars=200K，几乎不会触发截断，优先级低。待后续有空闲时处理。
 
 ## 5. 优先级排序
 
 | Phase | 影响 | 难度 | 风险 | 状态 |
 |-------|------|------|------|------|
-| P1 | 高 | 低 | 低 | ✅ 已完成 |
-| P2 | 高 | 低 | 低 | ✅ 已验证（链路完整，无需修复） |
-| P3 | 中 | 低 | 低 | P1/P2 稳定后 |
-| P4 | 低 | 中 | 中 | 视情况决定 |
+| P1 | 高 | 低 | 低 | ✅ 已完成 `321cf47` |
+| P2 | 高 | 低 | 低 | ✅ 已验证（链路完整，无需修复）`5ac7648` |
+| P3 | 中 | 低 | 低 | ✅ 已完成 `3a21b02` |
+| P4 | 低 | 中 | 中 | ⏳ 后续收束 |
 
 ## 6. P1 实现计划
 
