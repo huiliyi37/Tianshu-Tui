@@ -35,7 +35,8 @@ describe('getProviderProfile', () => {
 
   it('returns mimo profile', () => {
     const p = getProviderProfile('mimo')
-    assert.equal(p.cacheType, 'none')
+    assert.equal(p.cacheType, 'exact-prefix')
+    assert.equal(p.persistent, true)
   })
 
   it('returns opencode-go profile', () => {

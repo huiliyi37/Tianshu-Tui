@@ -135,7 +135,7 @@ export const DEFAULT_CONFIG: Config = {
           cacheControl: false,
           stripParams: [],
           toolJsonBug: false,
-          prefixCache: 'none' as const,
+          prefixCache: 'deepseek-native' as const,
           prefixCompletion: false,
         },
         thinking: 'enabled',

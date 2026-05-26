@@ -18,7 +18,7 @@ const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
   vllm: { cacheType: 'block-kv', persistent: false, minCacheTokens: 0 },
   glm: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
   minimax: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
-  mimo: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
+  mimo: { cacheType: 'exact-prefix' as CacheType, persistent: true, minCacheTokens: 0 },
   'opencode-go': { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
   claude: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
 }
