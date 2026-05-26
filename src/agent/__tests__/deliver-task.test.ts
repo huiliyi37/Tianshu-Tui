@@ -166,6 +166,21 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /Ownership health warnings:/)
   })
 
+  it('auto-populates ownership from task ledger at execution time', async () => {
+    const ctx = makeContext({
+      taskId: 't1',
+      ownedFiles: [],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+    })
+
+    ctx.ledger.record({ type: 'file_write', path: 'src/late-write.ts' })
+    const result = await ctx.tool.execute(ctx.params)
+
+    assert.equal(result.isError ?? false, false)
+    assert.match(result.content, /Owned files \(1\)/)
+    assert.match(result.content, /src\/late-write\.ts/)
+  })
+
   it('generates consistent report for same state', async () => {
     const ctx1 = makeContext({
       taskId: 't1',

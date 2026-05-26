@@ -57,6 +57,7 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
 
     async execute(params: ToolCallParams): Promise<ToolResult> {
       const ctx = getB1Context()
+      ctx.ownership.autoOwnFromLedger()
       const report = ctx.gate.getReport([])
 
       const lines: string[] = [

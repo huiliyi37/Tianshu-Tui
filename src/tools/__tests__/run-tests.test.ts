@@ -85,6 +85,17 @@ describe('mixed', () => {
     assert.ok(result.content.includes('passed'))
     assert.ok(result.verification)
     assert.equal(result.verification!.scope, 'targeted')
+    assert.equal(result.verification!.command, 'tsx --test src/example.test.ts')
+  })
+
+  it('runs targeted tsx tests without npx npm-command ambiguity', async () => {
+    const result = await RUN_TESTS_TOOL.execute(
+      makeParams({ filter: 'src/example.test.ts' }, passingDir),
+    )
+
+    assert.equal(result.isError, false)
+    assert.equal(result.verification!.command.startsWith('npx '), false)
+    assert.equal(result.verification!.command, 'tsx --test src/example.test.ts')
   })
 
   it('requiresApproval returns false', () => {

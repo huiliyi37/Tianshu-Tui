@@ -67,6 +67,54 @@ describe('executeToolUse', () => {
     }
   }
 
+  it('records run_tests as verification in task ledger', async () => {
+    const events: any[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-ledger-run-tests', name: 'run_tests', input: { filter: 'src/foo.test.ts' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.deepEqual(events.at(-1), {
+      type: 'verification',
+      command: 'run_tests src/foo.test.ts',
+      status: 'passed',
+    })
+  })
+
+  it('records failed bash typecheck as failed verification', async () => {
+    const events: any[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'type error', isError: true }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-ledger-tsc', name: 'bash', input: { command: 'npx tsc --noEmit' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.deepEqual(events.at(-1), {
+      type: 'verification',
+      command: 'npx tsc --noEmit',
+      status: 'failed',
+    })
+  })
+
   const noopCallbacks = {
     onTextDelta: () => {},
     onThinkingDelta: () => {},

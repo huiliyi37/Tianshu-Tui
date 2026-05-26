@@ -44,7 +44,11 @@ function buildTestCommand(cwd: string, filter?: string): TestCommand {
   const safeFilter = filter.replace(/[`$\\;"'|]/g, '')
   if (runner === 'node-test' && isTestFileFilter(safeFilter)) {
     if (base.includes('tsx')) {
-      return { command: 'npx', args: ['tsx', '--test', safeFilter], display: `npx tsx --test ${safeFilter}`, runner, scope: 'targeted' }
+      // Do not spawn `npx tsx ...`: npm 11 can parse that form as an npm
+      // command and fail with `Missing script: "tsx"` / `Unknown command: "tsx"`.
+      // buildExecutionEnv prepends local node_modules/.bin, so invoking `tsx`
+      // directly is both faster and deterministic.
+      return { command: 'tsx', args: ['--test', safeFilter], display: `tsx --test ${safeFilter}`, runner, scope: 'targeted' }
     }
     return { command: 'node', args: ['--test', safeFilter], display: `node --test ${safeFilter}`, runner, scope: 'targeted' }
   }
