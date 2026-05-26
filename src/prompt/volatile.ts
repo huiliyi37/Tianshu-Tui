@@ -80,18 +80,28 @@ function readRivetMd(cwd: string): string | undefined {
     return cached.value
   }
 
-  const path = join(cwd, '.rivet.md')
+  // Load AGENTS.md (architecture map) + .rivet.md (operating manual)
+  // AGENTS.md is the "map" (per OpenAI Harness Engineering guidance),
+  // .rivet.md is the procedural rules. Together they form project-instructions.
+  const parts: string[] = []
+  const agentsPath = join(cwd, 'AGENTS.md')
+  const rivetPath = join(cwd, '.rivet.md')
+
   try {
-    if (existsSync(path)) {
-      const value = readFileSync(path, 'utf-8')
-      rivetMdCache.set(cwd, { value, timestamp: Date.now() })
-      trimCache()
-      return value
+    if (existsSync(agentsPath)) {
+      parts.push(readFileSync(agentsPath, 'utf-8'))
     }
   } catch { /* ignore */ }
-  rivetMdCache.set(cwd, { value: undefined, timestamp: Date.now() })
+  try {
+    if (existsSync(rivetPath)) {
+      parts.push(readFileSync(rivetPath, 'utf-8'))
+    }
+  } catch { /* ignore */ }
+
+  const value = parts.length > 0 ? parts.join('\n\n') : undefined
+  rivetMdCache.set(cwd, { value, timestamp: Date.now() })
   trimCache()
-  return undefined
+  return value
 }
 
 function escapeXml(text: string): string {

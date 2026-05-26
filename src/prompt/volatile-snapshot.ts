@@ -16,10 +16,17 @@ export interface SnapshotInput {
 const KNOWLEDGE_MAX_CHARS = 2000
 
 function readRivetMdOnce(cwd: string): string | undefined {
-  const path = join(cwd, '.rivet.md')
+  // Load AGENTS.md (architecture map) + .rivet.md (operating manual)
+  const parts: string[] = []
+  const agentsPath = join(cwd, 'AGENTS.md')
+  const rivetPath = join(cwd, '.rivet.md')
   try {
-    return existsSync(path) ? readFileSync(path, 'utf-8') : undefined
-  } catch { return undefined }
+    if (existsSync(agentsPath)) parts.push(readFileSync(agentsPath, 'utf-8'))
+  } catch { /* ignore */ }
+  try {
+    if (existsSync(rivetPath)) parts.push(readFileSync(rivetPath, 'utf-8'))
+  } catch { /* ignore */ }
+  return parts.length > 0 ? parts.join('\n\n') : undefined
 }
 
 function readKnowledgeOnce(cwd: string): string | undefined {
