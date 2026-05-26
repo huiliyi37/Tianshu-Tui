@@ -8,6 +8,7 @@ import { summarizeFileContent } from '../artifact/summarize.js'
 import { computeModelReadCap, DEFAULT_MODEL_READ_CAP, type ModelReadCap } from './model-read-cap.js'
 import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
+import { debugLog } from '../utils/debug.js'
 import { decideReadPolicy } from './read-policy.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
@@ -266,8 +267,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
         const prior = readHistory.get(dedupKey)
         if (prior && prior.mtimeMs === currentMtimeMs && prior.artifactId) {
           // Already read this exact slice; file hasn't changed since.
-          // eslint-disable-next-line no-console
-          console.warn(`[read-dedup] skip file=${canonical} offset=${offset} limit=${limit ?? 'all'} prior_age_ms=${Date.now() - prior.recordedAt}`)
+          debugLog(`[read-dedup] skip file=${canonical} offset=${offset} limit=${limit ?? 'all'} prior_age_ms=${Date.now() - prior.recordedAt}`)
           const recoveryHint = prior.artifactId
             ? `If you can no longer see the earlier result (it may have been compacted to a summary), call read_section(artifactId="${prior.artifactId}", section="L1-L500") to retrieve it from disk.`
             : `Look at the earlier tool_result in your context.`
@@ -289,8 +289,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
         const fullEntry = fileReadHistory.get(canonical)
         if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && (offset !== 1 || limit !== undefined)) {
           // Full read exists and file unchanged → this read (any offset/limit) is redundant
-          // eslint-disable-next-line no-console
-          console.warn(`[read-dedup-file] skip file=${canonical} offset=${offset} limit=${limit ?? 'all'} prior_age_ms=${Date.now() - fullEntry.recordedAt}`)
+          debugLog(`[read-dedup-file] skip file=${canonical} offset=${offset} limit=${limit ?? 'all'} prior_age_ms=${Date.now() - fullEntry.recordedAt}`)
           const recoveryHint = fullEntry.artifactId
             ? `If you can no longer see the earlier result (it may have been compacted), call read_section(artifactId="${fullEntry.artifactId}", section="L${offset}-L${offset + (limit ?? fullEntry.totalLines) - 1}") to retrieve it from disk.`
             : `Look at the earlier tool_result in your context.`
@@ -321,8 +320,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
     }
 
     // P0-2 trace: verify read_file returns full content, not truncated
-    // eslint-disable-next-line no-console
-    console.warn(`[read-cap] file=${payload.canonicalPath} raw=${payload.rawContent.length} model=${payload.modelContent.length} truncated=${payload.rawContent.length !== payload.modelContent.length} cap=${computedCap.maxChars} ctxWindow=${params.contextWindow ?? 'undefined'}`)
+    debugLog(`[read-cap] file=${payload.canonicalPath} raw=${payload.rawContent.length} model=${payload.modelContent.length} truncated=${payload.rawContent.length !== payload.modelContent.length} cap=${computedCap.maxChars} ctxWindow=${params.contextWindow ?? 'undefined'}`)
 
     const rawPath = await persistRawOutput(params.toolUseId, payload.rawContent)
 
@@ -368,8 +366,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
       const wrapInArtifact = payload.rawContent.length >= artifactThreshold
 
       if (!wrapInArtifact) {
-        // eslint-disable-next-line no-console
-        console.warn(`[artifact-skip] tool=read_file file=${payload.canonicalPath} raw=${payload.rawContent.length} threshold=${artifactThreshold}`)
+        debugLog(`[artifact-skip] tool=read_file file=${payload.canonicalPath} raw=${payload.rawContent.length} threshold=${artifactThreshold}`)
         recordDedup()
         recordFileDedup()
         return {
@@ -379,8 +376,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
         }
       }
 
-      // eslint-disable-next-line no-console
-      console.warn(`[artifact-wrap] tool=read_file file=${payload.canonicalPath} raw=${payload.rawContent.length} threshold=${artifactThreshold}`)
+      debugLog(`[artifact-wrap] tool=read_file file=${payload.canonicalPath} raw=${payload.rawContent.length} threshold=${artifactThreshold}`)
       const { summary, sections } = summarizeFileContent(payload.rawContent, payload.canonicalPath)
       const artifactId = await params.artifactStore.save({
         tool: 'read_file',

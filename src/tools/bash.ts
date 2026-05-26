@@ -7,6 +7,7 @@ import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-stor
 import { summarizeBashOutput } from '../artifact/summarize.js'
 import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
+import { debugLog } from '../utils/debug.js'
 
 function rtkRewrite(command: string): string {
   try {
@@ -91,8 +92,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           const wrapInArtifact = raw.length >= artifactThreshold
 
           if (!wrapInArtifact) {
-            // eslint-disable-next-line no-console
-            console.warn(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
+            debugLog(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
             const rawPath = await persistRawOutput(params.toolUseId, raw)
             return {
               content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
@@ -102,8 +102,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
             }
           }
 
-          // eslint-disable-next-line no-console
-          console.warn(`[artifact-wrap] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
+          debugLog(`[artifact-wrap] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
           const { summary, sections } = summarizeBashOutput(raw, rawCommand, exitCode)
           const artifactId = await params.artifactStore.save({
             tool: 'bash',

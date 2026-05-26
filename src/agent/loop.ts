@@ -1063,8 +1063,7 @@ export class AgentLoop {
           : 0
         if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
           // P3 trace: verify phase 2 (round deletion) is blocked, phase 1 only
-          // eslint-disable-next-line no-console
-          console.warn(`[memory-pressure] heap=${heapRatio.toFixed(2)} phase2-blocked=true msgCount=${this.session.getMessages().length}`)
+          debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} phase2-blocked=true msgCount=${this.session.getMessages().length}`)
           const before = this.session.getMessages()
           // Pass full contextWindow so phase 2 (round removal) never triggers.
           // Phase 1 (tool_result + reasoning_content truncation) still applies.

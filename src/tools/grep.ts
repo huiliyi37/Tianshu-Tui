@@ -12,6 +12,7 @@ import type { ArtifactStore } from '../artifact/store.js'
 import { computeModelReadCap, type ModelReadCap } from './model-read-cap.js'
 import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
+import { debugLog } from '../utils/debug.js'
 
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
@@ -88,12 +89,10 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
       // [artifact:X] summary made the model think grep was hiding hits.
       if (params.artifactStore) {
         if (hintedText.length < artifactThreshold) {
-          // eslint-disable-next-line no-console
-          console.warn(`[artifact-skip] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+          debugLog(`[artifact-skip] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
           return { content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) }
         }
-        // eslint-disable-next-line no-console
-        console.warn(`[artifact-wrap] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+        debugLog(`[artifact-wrap] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
         const { summary, sections } = summarizeGrepResult(hintedText, pattern)
         const artifactId = await params.artifactStore.save({
           tool: 'grep',
@@ -232,13 +231,11 @@ async function tryRipgrep(
       // See bash.ts/read-file.ts for rationale.
       if (artifactStore) {
         if (hintedText.length < artifactThreshold) {
-          // eslint-disable-next-line no-console
-          console.warn(`[artifact-skip] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+          debugLog(`[artifact-skip] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
           resolve({ content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
           return
         }
-        // eslint-disable-next-line no-console
-        console.warn(`[artifact-wrap] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+        debugLog(`[artifact-wrap] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
         const { summary, sections } = summarizeGrepResult(hintedText, pattern)
         void artifactStore.save({
           tool: 'grep',

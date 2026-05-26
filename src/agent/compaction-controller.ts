@@ -3,6 +3,7 @@ import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { pruneStaleToolResults } from '../compact/prune.js'
+import { debugLog } from '../utils/debug.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import type { CompactCircuitBreakerState, CompactTier } from '../context/types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
@@ -168,8 +169,7 @@ export class CompactionController {
       // We compute prune stats here for logging but do NOT mutate storage via
       // replaceMessages. Immutable history = stable byte prefix = higher cache hit.
       const afterPruneTokens = this.deps.session.getEstimatedTokens()
-      // eslint-disable-next-line no-console
-      console.warn(`[prune] (request-time mask) would-prune=${pruneResult.prunedCount} freedChars=${pruneResult.freedChars} ctxWindow=${this.deps.contextWindow} tokens=${beforePruneTokens}->${afterPruneTokens}`)
+      debugLog(`[prune] (request-time mask) would-prune=${pruneResult.prunedCount} freedChars=${pruneResult.freedChars} ctxWindow=${this.deps.contextWindow} tokens=${beforePruneTokens}->${afterPruneTokens}`)
     }
 
     // Phase 2: On 1M+ context windows, skip micro compact entirely.
@@ -359,8 +359,7 @@ export class CompactionController {
       fallbackText: `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context. ${taskState.current}</session-handoff>`,
     })
 
-    // eslint-disable-next-line no-console
-    console.warn(
+    debugLog(
       `[session-split] ratio=${ratio.toFixed(2)} files=${filesSeen.size} ` +
       `reasoning_chars=${reasoningParts.join('').length} ` +
       `tokens=${this.deps.session.getEstimatedTokens()}`
