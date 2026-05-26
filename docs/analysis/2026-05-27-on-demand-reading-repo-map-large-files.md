@@ -147,6 +147,18 @@ DeepSeek V4 Pro 实际生效值（1M 窗口 + cache-preserving 策略）：
 1. `prewarm-file.ts` 调用 `readFilePayload` 时不传 `modelCap`，回退到 DEFAULT (8,000)。这是 **有意设计** — tool-pipeline.ts L519-523 的注释明确说明：read_file 始终走真实 execute 以使用正确的 cap。
 2. 仅当 `contextWindow` 为 undefined 或 ≤0 时才回退到 DEFAULT_MODEL_READ_CAP (8,000 chars)。正常运行时不会触发。
 
+### P2b: 各 Provider 1M 窗口 read cap 对比
+
+| Provider | contextWindow | cacheType | strategy | maxChars | 状态 |
+|----------|--------------|-----------|----------|----------|------|
+| deepseek | 1,000,000 | exact-prefix | cache-preserving (1.3x) | 200,000 | ✅ |
+| mimo | 1,000,000 | exact-prefix | cache-preserving (1.3x) | 200,000 | ✅ |
+| codex (gpt-5.5) | 1,000,000 | partial-prefix | balanced (1.0x) | 200,000 | ✅ 已修复 |
+| cliproxy (gpt-5.3) | 1,000,000 | none | aggressive (0.65x) | 130,000 | ✅ 正确（无缓存） |
+
+**修复**：`codex` provider 之前没有在 `provider-profile.ts` 中注册，回退到 `{ cacheType: 'none' }` → aggressive → maxChars=130K。
+已添加 codex profile（与 openai 一致：`partial-prefix`），现在 balanced → maxChars=200K。
+
 ### P3: repo_map 输出增加文件大小提示
 
 **目标**：在目录树中标注文件大小，帮助模型决定是否需要按范围读取。

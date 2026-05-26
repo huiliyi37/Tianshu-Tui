@@ -43,4 +43,12 @@ describe('getProviderProfile', () => {
     const p = getProviderProfile('opencode-go')
     assert.equal(p.cacheType, 'none')
   })
+
+  it('returns codex profile with openai-like caching', () => {
+    const p = getProviderProfile('codex')
+    assert.equal(p.cacheType, 'partial-prefix')
+    assert.equal(p.persistent, false)
+    assert.equal(p.cacheGranularity, 128)
+    assert.equal(p.ttlSeconds, 600)
+  })
 })
