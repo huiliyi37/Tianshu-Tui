@@ -1,7 +1,7 @@
 import { type LogEntry } from './log-state.js'
 import { getGroupSummary } from './tool-family.js'
 
-const GROUP_THRESHOLD = 3
+const GROUP_THRESHOLD = 5
 
 export function groupLogs(items: readonly LogEntry[]): LogEntry[] {
   const result: LogEntry[] = []
