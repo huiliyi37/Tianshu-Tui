@@ -870,6 +870,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             activityRef.current = completeActivity(activityRef.current, midNow)
             projectActivity(midNow)
           }
+          // Signal that we're waiting for the next LLM response
+          activityRef.current = beginActivity(activityRef.current, 'waiting', 'Waiting for LLM', midNow)
+          fluencyRef.current.setPhase('waiting')
+          projectActivity(midNow)
           // Freeze live tools into static log
           const midTools = liveToolsRef.current
           if (midTools.length > 0) {

@@ -39,6 +39,7 @@ interface ToolCallChunk {
 
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
+const FIRST_BYTE_TIMEOUT_MS = 45_000
 const READ_TIMEOUT_MS = 120_000
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -264,6 +265,7 @@ export class OpenAIClient implements StreamClient {
     let buffer = ''
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
+    let receivedFirstChunk = false
     // GLM-5.1 mandatory thinking mode outputs everything as reasoning_content
     // with no content field. Accumulate reasoning to promote if no content arrives.
     let reasoningAccum = ''
@@ -272,10 +274,11 @@ export class OpenAIClient implements StreamClient {
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
+      const timeout = receivedFirstChunk ? READ_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
       idleTimer = setTimeout(() => {
         streamTimedOut = true
         reader.cancel().catch(() => {})
-      }, READ_TIMEOUT_MS)
+      }, timeout)
     }
 
     try {
@@ -288,6 +291,7 @@ export class OpenAIClient implements StreamClient {
         const { done, value } = await reader.read()
         if (done) break
 
+        receivedFirstChunk = true
         resetIdleTimer()
 
         buffer += decoder.decode(value, { stream: true })

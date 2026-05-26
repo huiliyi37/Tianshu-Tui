@@ -108,6 +108,8 @@ export interface ToolPipelineDeps {
   phaseHint?: string
   /** Optional TaskLedger for B1 ownership tracking */
   taskLedger?: TaskLedger
+  /** Optional OwnershipLedger for real-time file ownership registration */
+  ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
   /** P3 integration facade for speculative execution + mistake hints */
   p3?: P3Integration
   /** Turn-scoped accumulator: artifact IDs evicted (created by artifactIntercept) */
@@ -646,6 +648,7 @@ ${check.formatted}`
         deps.taskLedger.record({ type: 'file_read', path: filePath })
       } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && filePath) {
         deps.taskLedger.record({ type: 'file_write', path: filePath })
+        deps.ownershipLedger?.registerOwned(filePath)
       } else if (tu.name === 'bash') {
         const cmd = (tu.input.command as string | undefined) ?? ''
         if (!harnessResult.isError && (cmd.startsWith('git ') || /\b(rm|mv|cp|touch|mkdir)\b/.test(cmd))) {
@@ -653,7 +656,7 @@ ${check.formatted}`
         }
         if (cmd.startsWith('git ')) {
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
-        } else if (/\b(tsc|typecheck|test|jest|vitest|mocha|pytest)\b/.test(cmd)) {
+        } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
           deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: harnessResult.isError ? 'failed' : 'passed' })
         } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, meta: { command: cmd.slice(0, 200) } })

@@ -197,16 +197,19 @@ export class CodexClient implements StreamClient {
     }
 
     // SSE idle timeout — same pattern as ApiClient and OpenAIClient
+    const FIRST_BYTE_TIMEOUT_MS = 45_000
     const READ_TIMEOUT_MS = 180_000
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
+    let receivedFirstChunk = false
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
+      const timeout = receivedFirstChunk ? READ_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
       idleTimer = setTimeout(() => {
         streamTimedOut = true
         reader.cancel().catch(() => {})
-      }, READ_TIMEOUT_MS)
+      }, timeout)
     }
 
     try {
@@ -217,6 +220,7 @@ export class CodexClient implements StreamClient {
 
         const { done, value } = await reader.read()
         if (done) break
+        receivedFirstChunk = true
         resetIdleTimer()
 
         buffer += decoder.decode(value, { stream: true })

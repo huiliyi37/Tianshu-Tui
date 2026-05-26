@@ -155,6 +155,8 @@ export interface AgentConfig {
   fsWatcherEnabled?: boolean
   /** Optional TaskLedger for B1 ownership tracking — records file_read/file_write/tool_exec events. */
   taskLedger?: import('./task-ledger.js').TaskLedger
+  /** Optional OwnershipLedger for real-time file ownership — updated on every file_write. */
+  ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
   /** Optional Meridian code graph indexer for structural context. */
   meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
 }

@@ -107,6 +107,7 @@ let _claimStoreRef: import('./context/claim-store.js').ContextClaimStore | null 
 let _sessionIdRef: string | null = null
 // Module-level TaskLedger reference — created in tool registry, read by AgentLoop config
 let _taskLedgerRef: import('./agent/task-ledger.js').TaskLedger | null = null
+let _ownershipLedgerRef: import('./agent/ownership-ledger.js').OwnershipLedger | null = null
 
 // Module-level Meridian indexer reference — created lazily, read by repo_graph tool
 let _meridianIndexerRef: import('./repo/meridian-indexer.js').MeridianIndexer | null = null
@@ -170,6 +171,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       baseline: _b1Baseline,
       taskLedger: _b1TaskLedger,
     })
+    _ownershipLedgerRef = _b1Ownership
     const _b1Attribution = createVerificationAttribution({
       ownership: _b1Ownership,
     })
@@ -474,6 +476,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         contextClaimStore: claimStore,
         playbookStore,
         taskLedger: _taskLedgerRef ?? undefined,
+        ownershipLedger: _ownershipLedgerRef ?? undefined,
         meridianIndexer: _meridianIndexerRef,
       },
       session,
