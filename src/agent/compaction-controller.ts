@@ -13,6 +13,119 @@ import type { SessionContext } from './context.js'
 import { extractTaskState } from './task-state.js'
 import type { TrajectoryEntry } from './trajectory.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
+import { extractSessionMemories, type ExtractedMemory } from './session-memory-extract.js'
+
+export type HandoffToolStatus = TrajectoryEntry['status'] | 'running'
+
+export interface StructuredHandoffInput {
+  taskState: {
+    current: string
+    completed: string[]
+    remaining: string[]
+    decisions: string[]
+  }
+  turnCount: number
+  filesSeen: string[]
+  reasoningSnippet: string
+  errorCount: number
+  errors: Array<{ turn: number; tool: string; target: string; errorClass: string; summary: string }>
+  toolHistory: Array<{ tool: string; target: string; status: HandoffToolStatus }>
+}
+
+export const STRUCTURED_HANDOFF_SECTIONS = [
+  '1. 用户核心需求',
+  '2. 关键技术决策',
+  '3. 文件与代码',
+  '4. 错误与修复',
+  '5. 当前工作',
+  '6. 已完成工作',
+  '7. 待办事项',
+  '8. 最近工具轨迹',
+  '9. 下一步',
+] as const
+
+function statusLabel(status: HandoffToolStatus): string {
+  if (status === 'failed' || status === 'retried-failed') return 'FAIL'
+  if (status === 'retried-success') return 'ok*'
+  if (status === 'running') return 'running'
+  return 'ok'
+}
+
+export function buildStructuredHandoff(input: StructuredHandoffInput): string {
+  const taskState = input.taskState
+  const lines: string[] = [
+    '<session-handoff>',
+    `Turn: ${input.turnCount}`,
+    '',
+    `## ${STRUCTURED_HANDOFF_SECTIONS[0]}`,
+    taskState.current || '（无明确记录）',
+    '',
+    `## ${STRUCTURED_HANDOFF_SECTIONS[1]}`,
+  ]
+
+  if (taskState.decisions.length > 0) {
+    for (const decision of taskState.decisions.slice(-8)) lines.push(`- ${decision}`)
+  } else {
+    lines.push('（无记录）')
+  }
+
+  lines.push('', `## ${STRUCTURED_HANDOFF_SECTIONS[2]}`)
+  if (input.filesSeen.length > 0) {
+    for (const file of input.filesSeen.slice(0, 15)) {
+      const tools = [...new Set(input.toolHistory.filter(t => t.target === file).map(t => t.tool))]
+      lines.push(`- ${file}${tools.length > 0 ? ` [${tools.join(', ')}]` : ''}`)
+    }
+  } else {
+    lines.push('（无文件记录）')
+  }
+
+  lines.push('', `## ${STRUCTURED_HANDOFF_SECTIONS[3]}`)
+  if (input.errors.length > 0) {
+    lines.push(`Error count: ${input.errorCount}`)
+    for (const error of input.errors.slice(0, 8)) {
+      lines.push(`- [Turn ${error.turn}] failed: ${error.tool} ${error.target}: ${error.summary} (${error.errorClass})`)
+    }
+  } else {
+    lines.push('（无错误）')
+  }
+
+  lines.push('', `## ${STRUCTURED_HANDOFF_SECTIONS[4]}`)
+  lines.push(taskState.current || '（无记录）')
+
+  lines.push('', `## ${STRUCTURED_HANDOFF_SECTIONS[5]}`)
+  if (taskState.completed.length > 0) {
+    for (const item of taskState.completed.slice(-8)) lines.push(`- [x] ${item}`)
+  } else {
+    lines.push('（无记录）')
+  }
+
+  lines.push('', `## ${STRUCTURED_HANDOFF_SECTIONS[6]}`)
+  if (taskState.remaining.length > 0) {
+    for (const item of taskState.remaining.slice(0, 8)) lines.push(`- [ ] ${item}`)
+  } else {
+    lines.push('（无明确待办）')
+  }
+
+  lines.push('', `## ${STRUCTURED_HANDOFF_SECTIONS[7]}`)
+  if (input.toolHistory.length > 0) {
+    for (const tool of input.toolHistory.slice(-12)) {
+      lines.push(`- ${tool.tool} ${tool.target} [${statusLabel(tool.status)}]`)
+    }
+  } else {
+    lines.push('（无工具记录）')
+  }
+
+  lines.push('', `## ${STRUCTURED_HANDOFF_SECTIONS[8]}`)
+  lines.push(taskState.remaining[0] ?? taskState.current ?? '继续当前任务')
+
+  if (input.reasoningSnippet.trim().length > 0) {
+    lines.push('', '## 附录：最近推理摘要')
+    lines.push(input.reasoningSnippet.trim().slice(-2000))
+  }
+
+  lines.push('', '</session-handoff>')
+  return lines.join('\n')
+}
 
 export interface CompactionControllerDeps {
   session: SessionContext
@@ -25,6 +138,7 @@ export interface CompactionControllerDeps {
   getStreamedText: () => string
   refreshLedger: () => void
   cacheAdvisor?: CacheAdvisor
+  persistMemories?: (memories: Array<{ text: string; source: ExtractedMemory['source']; kind: ExtractedMemory['kind'] }>) => void | Promise<void>
 }
 
 export interface MaybeCompactInput {
@@ -126,8 +240,9 @@ export class CompactionController {
     const ceiling = this.deps.contextWindow * 0.95
     if (this.deps.session.getEstimatedTokens() <= ceiling) return
 
-    const taskState = extractTaskState(this.deps.getTrajectoryEntries(), this.deps.getStreamedText())
     const trajectory = this.deps.getTrajectoryEntries()
+    const taskState = extractTaskState(trajectory, this.deps.getStreamedText())
+    this.persistExtractedMemories(trajectory)
 
     const stateLines = [
       `Current: ${taskState.current}`,
@@ -184,7 +299,9 @@ export class CompactionController {
     if (ratio < 0.86) return false
 
     const messages = this.deps.session.getMessages()
-    const taskState = extractTaskState(this.deps.getTrajectoryEntries(), this.deps.getStreamedText())
+    const trajectory = this.deps.getTrajectoryEntries()
+    const taskState = extractTaskState(trajectory, this.deps.getStreamedText())
+    this.persistExtractedMemories(trajectory)
 
     // Extract up to 2KB of the most recent assistant reasoning
     const MAX_REASONING_CHARS = 2000
@@ -206,43 +323,33 @@ export class CompactionController {
       }
     }
 
-    const handoffLines: string[] = [
-      `Session split at ${(ratio * 100).toFixed(0)}% context (turn ${this.deps.session.getTurnCount()})`,
-      `Current: ${taskState.current}`,
-    ]
-    for (const item of taskState.completed.slice(-5)) {
-      handoffLines.push(`Completed: ${item}`)
-    }
-    for (const item of taskState.remaining.slice(0, 3)) {
-      handoffLines.push(`Remaining: ${item}`)
-    }
-    for (const item of taskState.decisions.slice(-3)) {
-      handoffLines.push(`Decision: ${item}`)
-    }
-    if (filesSeen.size > 0) {
-      const files = [...filesSeen].slice(0, 10)
-      handoffLines.push(`Files: ${files.join(', ')}`)
-    }
-
     // Tool call mappings from trajectory (more reliable than regex from content)
-    const trajectory = this.deps.getTrajectoryEntries()
     const recentTools = trajectory.slice(-10)
-    for (const t of recentTools) {
-      const status = t.status === 'failed' ? 'FAIL' : t.status === 'retried-success' ? 'ok*' : 'ok'
-      handoffLines.push(`Tool: ${t.tool} ${t.target} [${status}]`)
-    }
-
-    // Failure patterns with error classes (preserve across session split)
     const failures = trajectory.filter(t => t.status === 'failed' || t.status === 'retried-failed')
-    for (const f of failures.slice(0, 5)) {
-      handoffLines.push(`Failed: ${f.tool} in ${f.target} (${f.errorClass ?? 'unknown'})`)
-    }
-
-    let handoffContent = `<session-handoff>\n${handoffLines.join('\n')}\n</session-handoff>`
-    if (reasoningParts.length > 0) {
-      const reasoning = reasoningParts.join('\n\n---\n\n')
-      handoffContent += `\n\n## Recent reasoning:\n${reasoning.slice(-MAX_REASONING_CHARS)}`
-    }
+    const handoffContent = buildStructuredHandoff({
+      taskState: {
+        current: taskState.current,
+        completed: taskState.completed,
+        remaining: taskState.remaining,
+        decisions: taskState.decisions,
+      },
+      turnCount: this.deps.session.getTurnCount(),
+      filesSeen: [...filesSeen],
+      reasoningSnippet: reasoningParts.join('\n\n---\n\n').slice(-MAX_REASONING_CHARS),
+      errorCount: failures.length,
+      errors: failures.slice(0, 5).map(f => ({
+        turn: f.turn,
+        tool: f.tool,
+        target: f.target,
+        errorClass: f.errorClass ?? 'unknown',
+        summary: f.resultSummary || `${f.tool} in ${f.target} failed`,
+      })),
+      toolHistory: recentTools.map(t => ({
+        tool: t.tool,
+        target: t.target,
+        status: t.status,
+      })),
+    })
 
     this.replaceWithCheckpoint({
       tier: 3,
@@ -281,6 +388,25 @@ export class CompactionController {
     tokenCount: number,
   ): { messages: OaiMessage[] } {
     return microCompactOai(messages, this.deps.contextWindow, tokenCount)
+  }
+
+  private persistExtractedMemories(trajectory: TrajectoryEntry[]): void {
+    if (!this.deps.persistMemories) return
+
+    try {
+      const memories = extractSessionMemories(this.deps.session.getMessages(), {
+        recentToolTargets: trajectory.map(t => t.target),
+      })
+      if (memories.length === 0) return
+      const payload = memories.map(memory => ({
+        text: memory.text,
+        source: memory.source,
+        kind: memory.kind,
+      }))
+      void Promise.resolve(this.deps.persistMemories(payload)).catch(() => {})
+    } catch {
+      // Session memory extraction is opportunistic; compaction must continue.
+    }
   }
 
   /**

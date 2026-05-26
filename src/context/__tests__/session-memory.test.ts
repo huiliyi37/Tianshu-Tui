@@ -63,4 +63,17 @@ describe('session memory', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('deduplicates entries with the same text and source', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-memory-'))
+    try {
+      appendSessionMemory(dir, 's6', { text: 'Same compact memory.', source: 'compact', createdAt: 1000 })
+      appendSessionMemory(dir, 's6', { text: 'Same compact memory.', source: 'compact', createdAt: 2000 })
+      appendSessionMemory(dir, 's6', { text: 'Same compact memory.', source: 'manual', createdAt: 3000 })
+      const loaded = loadSessionMemory(dir, 's6')
+      assert.deepEqual(loaded.entries.map(entry => entry.source), ['compact', 'manual'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

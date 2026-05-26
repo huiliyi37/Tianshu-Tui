@@ -30,6 +30,9 @@ export function appendSessionMemory(
   input: { text: string; source: SessionMemoryEntry['source']; createdAt: number },
 ): SessionMemoryState {
   const state = loadSessionMemory(dir, sessionId)
+  const duplicate = state.entries.some(entry => entry.text === input.text && entry.source === input.source)
+  if (duplicate) return state
+
   const entry: SessionMemoryEntry = { id: idFor(input), ...input }
   const next: SessionMemoryState = { sessionId, entries: [...state.entries, entry].slice(-50) }
   writeFileAtomicSync(memoryPath(dir, sessionId), JSON.stringify(next, null, 2) + '\n')

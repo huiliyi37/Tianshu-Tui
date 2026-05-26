@@ -399,6 +399,18 @@ export class AgentLoop {
       getStreamedText: () => this.streamedText,
       refreshLedger: () => { this.contextInjection.refreshLedger() },
       cacheAdvisor: this.cacheAdvisor,
+      persistMemories: memories => {
+        const persist = this.persist
+        if (!persist) return
+        const createdAt = Date.now()
+        for (const mem of memories) {
+          persist.appendMemory({
+            text: `[${mem.kind}] ${mem.text}`,
+            source: 'compact',
+            createdAt,
+          })
+        }
+      },
     })
     this.turnStream = this.createTurnStreamController()
     this.turnCompletion = this.createTurnCompletionController()
