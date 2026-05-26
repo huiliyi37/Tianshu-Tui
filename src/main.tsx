@@ -460,7 +460,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     _coordinatorRef = new DelegationCoordinator({
       baseToolRegistry: toolRegistry,
       modelCards,
-      maxWorkers: 3,
+      maxWorkers: 8,
       runtimeFactory,
       routing: workerRouting,
     })
@@ -714,7 +714,7 @@ async function main() {
         const goalCoordinator = new DelegationCoordinator({
           baseToolRegistry: toolRegistry,
           modelCards: [{ model: model.id, toolUseReliability: 0.8, jsonStability: 0.8, editSuccessRate: 0.7, testRepairRate: 0.6, contextWindow: model.contextWindow, cacheEconomics: 'strong', recommendedTasks: ['code_search'] }],
-          maxWorkers: 3,
+          maxWorkers: 8,
           runtimeFactory: (order, card, workerRegistry) => ({
             order,
             client: createProviderClient(prov, resolveCapabilities(prov.name, prov.capabilities), { apiKey: key, model: card.model, reasoningEffort: undefined, maxTokens: Math.min(4096, card.contextWindow), thinkingBudget: 4096 }),
