@@ -102,8 +102,8 @@ describe('work-order contract', () => {
 }`, 'wo_1'), /Invalid enum value/)
   })
 
-  it('rejects a packet for the wrong work order', () => {
-    assert.throws(() => parseWorkerResult(JSON.stringify({
+  it('auto-fixes wrong workOrderId to expected one (fault tolerance for cheap models)', () => {
+    const result = parseWorkerResult(JSON.stringify({
       workOrderId: 'other',
       status: 'passed',
       summary: 'wrong id',
@@ -112,7 +112,9 @@ describe('work-order contract', () => {
       changedFiles: [],
       risks: [],
       nextActions: [],
-    }), 'wo_1'), /does not match/)
+    }), 'wo_1')
+    assert.equal(result.workOrderId, 'wo_1')
+    assert.equal(result.status, 'passed')
   })
 
   it('builds a blocked result without leaking raw transcript content', () => {

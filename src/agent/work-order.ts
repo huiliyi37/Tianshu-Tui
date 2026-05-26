@@ -144,15 +144,31 @@ export const workerResultSchema = z.object({
 const workerResultIngestSchema = z.object({
   workOrderId: z.string().min(1),
   status: z.enum(['passed', 'failed', 'blocked', 'escalated']),
-  summary: z.string().min(1),
-  findings: z.array(z.union([workerFindingSchema, z.string().min(1)])).default([]),
-  artifacts: z.array(z.union([workerArtifactSchema, z.string().min(1)])).default([]),
+  summary: z.string().min(1).default('(no summary provided by worker)'),
+  findings: z.union([
+    z.array(z.union([workerFindingSchema, z.string().min(1)])),
+    // Accept missing findings key entirely
+    z.undefined().transform(() => [] as (z.infer<typeof workerFindingSchema> | string)[]),
+  ]).default([]),
+  artifacts: z.union([
+    z.array(z.union([workerArtifactSchema, z.string().min(1)])),
+    z.undefined().transform(() => [] as (z.infer<typeof workerArtifactSchema> | string)[]),
+  ]).default([]),
   patchSummary: z.string().optional(),
   verification: verificationMetadataSchema.optional(),
-  changedFiles: z.array(z.string()).default([]),
+  changedFiles: z.union([
+    z.array(z.string()),
+    z.undefined().transform(() => [] as string[]),
+  ]).default([]),
   examinedFiles: z.array(z.string()).optional(),
-  risks: z.array(z.string()).default([]),
-  nextActions: z.array(z.string()).default([]),
+  risks: z.union([
+    z.array(z.string()),
+    z.undefined().transform(() => [] as string[]),
+  ]).default([]),
+  nextActions: z.union([
+    z.array(z.string()),
+    z.undefined().transform(() => [] as string[]),
+  ]).default([]),
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
 })
 
@@ -315,10 +331,14 @@ function normalizeWorkerResult(raw: z.infer<typeof workerResultIngestSchema>): W
 }
 
 function parseWorkerResultObject(parsed: unknown, expectedWorkOrderId: string): WorkerResult {
-  const ingested = workerResultIngestSchema.parse(parsed)
-  if (ingested.workOrderId !== expectedWorkOrderId) {
-    throw new Error(`WorkerResult workOrderId ${ingested.workOrderId} does not match ${expectedWorkOrderId}`)
+  // Fault tolerance: force workOrderId to the expected value.
+  // Cheap models may omit, blank, or hallucinate a different workOrderId.
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>
+    obj.workOrderId = expectedWorkOrderId
   }
+
+  const ingested = workerResultIngestSchema.parse(parsed)
   return normalizeWorkerResult(ingested)
 }
 

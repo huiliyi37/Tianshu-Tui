@@ -31,9 +31,9 @@ And another attempt:
     }
   })
 
-  it('should preserve schema error when it comes after JSON parse error', () => {
-    // First candidate: invalid JSON (JSON parse error - less specific)
-    // Second candidate: valid JSON but missing required fields (schema validation error - more specific)
+  it('should tolerate missing optional fields (fault tolerance for cheap models)', () => {
+    // Second candidate: valid JSON but missing summary, findings, artifacts etc.
+    // With fault-tolerant ingest schema, this should parse successfully.
     const modelOutput = `
 {"incomplete json
 
@@ -42,18 +42,14 @@ Here is the result:
 {"workOrderId": "wo-1", "status": "passed"}
 \`\`\`
 `
-    try {
-      parseWorkerResult(modelOutput, 'wo-1')
-      assert.fail('Should have thrown')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.log('Actual error message:', message)
-      // Should contain schema validation details
-      assert.ok(
-        message.includes('Invalid') || message.includes('expected') || message.includes('required') || message.includes('Unexpected token'),
-        `Expected specific error, got: ${message}`
-      )
-    }
+    const result = parseWorkerResult(modelOutput, 'wo-1')
+    assert.equal(result.workOrderId, 'wo-1')
+    assert.equal(result.status, 'passed')
+    // summary should get default value
+    assert.ok(result.summary.length > 0)
+    assert.deepEqual(result.findings, [])
+    assert.deepEqual(result.artifacts, [])
+    assert.deepEqual(result.changedFiles, [])
   })
 
   it('should handle normal JSON correctly', () => {
