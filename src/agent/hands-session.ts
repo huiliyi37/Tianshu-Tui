@@ -9,8 +9,15 @@ import {
   type WorkerResult,
 } from './work-order.js'
 import { buildWorkerPrompt } from './worker-prompts.js'
+import { materializeScope } from './worktree-scope.js'
 import type { AgentCallbacks } from './loop.js'
 import type { Usage } from '../api/types.js'
+
+function worktreeScopeFiles(order: WorkOrder): string[] {
+  const changed = order.scope.files ?? []
+  const explicitlyReadable = changed.filter(file => !file.startsWith('src/'))
+  return explicitlyReadable
+}
 
 export interface HandsSessionConfig {
   order: WorkOrder
@@ -47,7 +54,18 @@ export interface HandsSessionRun {
  */
 export async function runHandsSession(config: HandsSessionConfig): Promise<HandsSessionRun> {
   const wt = config.wtCoordinator.create(config.order.id)
+  config.order.workerCwd = wt.path
   try {
+    const scopeResult = materializeScope(config.cwd, wt.path, worktreeScopeFiles(config.order))
+    if (scopeResult.missing.length > 0) {
+      return {
+        result: buildBlockedWorkerResult(
+          config.order,
+          `Worker scope file(s) are missing or outside the project: ${scopeResult.missing.join(', ')}`,
+        ),
+        usage: {},
+      }
+    }
     let text = ''
     let apiError: string | undefined
     let turnUsage: Partial<Usage> = {}

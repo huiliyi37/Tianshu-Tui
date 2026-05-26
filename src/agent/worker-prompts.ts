@@ -64,13 +64,27 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
     `Constraints: ${order.constraints.join(' | ')}`,
     `Allowed tools: ${order.allowedTools.join(', ')}`,
     `Disallowed tools: ${order.disallowedTools.join(', ')}`,
+  ]
+
+  if (order.workerCwd && hasWriteTools) {
+    parts.push(
+      '',
+      '## Working Directory',
+      `CWD: ${order.workerCwd}`,
+      'You are in an isolated git worktree. Use RELATIVE paths for all file operations.',
+      'Do NOT use absolute paths from the original repository.',
+      'After completing edits, run relevant verification if feasible; git commit is optional because the primary session collects uncommitted worktree diffs.',
+    )
+  }
+
+  parts.push(
     'Do not call disallowed tools. Do not claim that files were changed unless you actually modified them.',
     'If you changed files and did not run relevant verification, evidenceStatus must be "unverified".',
     'Use changedFiles ONLY for files you actually modified/created. Use examinedFiles for files you read/inspected.',
     'Return exactly one JSON object and no prose outside the object.',
     'The JSON object must match this shape:',
     resultShape,
-  ]
+  )
 
   if (authoritySuffix) {
     parts.push('', '## 权域指令', '', authoritySuffix)
@@ -104,10 +118,10 @@ export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, 
 /** Maximum characters for the entire worker packet returned to primary session.
  *  ~8K chars ≈ 2K tokens. Enough for 2-3 workers with concise findings,
  *  but prevents a single delegate_task from consuming 50K+ tokens. */
-const MAX_WORKER_PACKET_CHARS = 8_000
+const MAX_WORKER_PACKET_CHARS = 32_000
 
-/** Maximum characters for a single artifact content field. */
-const MAX_ARTIFACT_CONTENT_CHARS = 500
+/** Maximum characters for a single non-diff artifact content field. */
+const MAX_ARTIFACT_CONTENT_CHARS = 2_000
 
 /** Strip empty arrays/strings/undefined from an object to reduce JSON size. */
 function stripEmpty<T extends Record<string, unknown>>(obj: T): Partial<T> {
@@ -123,6 +137,7 @@ function stripEmpty<T extends Record<string, unknown>>(obj: T): Partial<T> {
 
 function truncateArtifactContent(artifacts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
   return artifacts.map(a => {
+    if (a.kind === 'diff') return a
     if (typeof a.content === 'string' && a.content.length > MAX_ARTIFACT_CONTENT_CHARS) {
       return { ...a, content: a.content.slice(0, MAX_ARTIFACT_CONTENT_CHARS) + '…' }
     }

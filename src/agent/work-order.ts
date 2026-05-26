@@ -96,6 +96,7 @@ export const workOrderSchema = z.object({
   aggregationPolicy: aggregationPolicySchema,
   budget: workerBudgetSchema,
   domain: domainAreaSchema.optional(),
+  workerCwd: z.string().optional(),
 })
 
 export type WorkOrder = z.infer<typeof workOrderSchema>

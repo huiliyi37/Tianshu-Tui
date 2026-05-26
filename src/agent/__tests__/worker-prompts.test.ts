@@ -46,6 +46,24 @@ describe('worker prompts', () => {
     }
   })
 
+  it('includes workerCwd guidance for write work orders in isolated worktrees', () => {
+    const order = createWriteWorkOrder({
+      id: 'wo_cwd',
+      parentTurnId: 'turn_1',
+      kind: 'patch_proposal',
+      objective: 'Patch a worker file.',
+      scope: { files: ['src/agent/foo.ts'] },
+    })
+    order.workerCwd = '/tmp/rivet-wt-test'
+
+    const prompt = buildWorkerPrompt(order)
+
+    assert.ok(prompt.includes('## Working Directory'))
+    assert.ok(prompt.includes('CWD: /tmp/rivet-wt-test'))
+    assert.ok(prompt.includes('Use RELATIVE paths'))
+    assert.ok(prompt.includes('Do NOT use absolute paths'))
+  })
+
   it('builds a repair prompt with the parse error but not a new objective', () => {
     const order = createReadOnlyWorkOrder({
       id: 'wo_1',
@@ -127,8 +145,8 @@ describe('worker prompts', () => {
     assert.ok(packet.includes('"summary"'))
   })
 
-  it('truncates artifact content to 500 chars', () => {
-    const longContent = 'x'.repeat(1000)
+  it('truncates non-diff artifact content to 2000 chars', () => {
+    const longContent = 'x'.repeat(3000)
     const packet = buildPrimaryWorkerPacket([
       {
         workOrderId: 'wo_3',
@@ -144,12 +162,32 @@ describe('worker prompts', () => {
     ])
 
     // Artifact content should be truncated
-    assert.ok(packet.length < 2000)
+    assert.ok(packet.length < 4000)
     assert.ok(packet.includes('…'))
-    assert.ok(!packet.includes('x'.repeat(1000)))
+    assert.ok(!packet.includes('x'.repeat(3000)))
   })
 
-  it('caps total packet size at 8K chars by dropping low-value fields', () => {
+  it('does not truncate diff artifacts', () => {
+    const diffContent = `diff --git a/src/a.ts b/src/a.ts\n${'+'.repeat(3000)}`
+    const packet = buildPrimaryWorkerPacket([
+      {
+        workOrderId: 'wo_diff',
+        status: 'passed',
+        summary: 'Has diff.',
+        findings: [],
+        artifacts: [{ kind: 'diff', title: 'Patch', content: diffContent }],
+        changedFiles: ['src/a.ts'],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'unverified',
+      },
+    ])
+
+    assert.ok(packet.includes('+'.repeat(3000)), 'diff content should not be truncated')
+    assert.ok(!packet.includes('…'))
+  })
+
+  it('caps total packet size at 32K chars by dropping low-value fields', () => {
     // Create a result with many fields that would exceed 8K
     const manyFindings = Array.from({ length: 50 }, (_, i) => ({
       claim: `Finding ${i}: ${'detail '.repeat(20)}`,
@@ -171,8 +209,8 @@ describe('worker prompts', () => {
       },
     ])
 
-    // Packet should be capped at ~8K
-    assert.ok(packet.length <= 8200, `packet too large: ${packet.length}`)
+    // Packet should be capped at ~32K
+    assert.ok(packet.length <= 32200, `packet too large: ${packet.length}`)
     // Core fields should survive
     assert.ok(packet.includes('wo_big'))
     assert.ok(packet.includes('Big result.'))

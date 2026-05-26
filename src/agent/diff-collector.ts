@@ -27,13 +27,27 @@ function git(cwd: string, args: string[]): GitResult {
  * @param baseBranch  The branch to diff against (e.g. "main")
  * @returns Unified diff string, or empty string on any error
  */
-export function collectDiff(baseCwd: string, workerCwd: string, baseBranch: string): string {
-  const branch = git(workerCwd, ['rev-parse', '--abbrev-ref', 'HEAD'])
-  const workerBranch = branch.stdout.trim()
-  if (!branch.ok || !workerBranch || workerBranch === 'HEAD') return ''
+export function collectDiff(_baseCwd: string, workerCwd: string, baseBranch: string): string {
+  // Capture every mutation in the worker worktree before it is destroyed.
+  // Committed worker branch changes are visible relative to baseBranch, while
+  // staged/unstaged/untracked changes are captured by staging the isolated
+  // worktree and diffing its index against HEAD.
+  const parts: string[] = []
 
-  const diff = git(baseCwd, ['diff', `${baseBranch}...${workerBranch}`])
-  return diff.ok ? diff.stdout : ''
+  const committed = git(workerCwd, ['diff', `${baseBranch}...HEAD`])
+  if (committed.ok && committed.stdout.trim()) {
+    parts.push(committed.stdout.trim())
+  }
+
+  // `git add -A` is safe here because hands-session owns and removes this
+  // isolated worktree after diff collection.
+  git(workerCwd, ['add', '-A'])
+  const staged = git(workerCwd, ['diff', '--cached', 'HEAD'])
+  if (staged.ok && staged.stdout.trim()) {
+    parts.push(staged.stdout.trim())
+  }
+
+  return parts.join('\n')
 }
 
 /**
