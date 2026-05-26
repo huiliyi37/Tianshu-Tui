@@ -1168,6 +1168,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {liveTools.map(log => (
           <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} />
         ))}
+        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
           <StreamOutput text={streamingText} isStreaming={isStreaming} />
         )}
@@ -1176,7 +1177,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             <Text dimColor color="yellow">⚠ {fluencyStale}</Text>
           </Box>
         )}
-        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {pendingIntent && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">{formatIntentPreview(pendingIntent.intent)}</Text>

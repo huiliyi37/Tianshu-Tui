@@ -112,7 +112,9 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
     if (isStreaming && thinking && startRef.current === 0) {
       startRef.current = Date.now()
       setElapsed(0)
-      setExpanded(true) // auto-expand on new thinking
+      // Don't auto-expand during streaming — keep compact status line
+      // to prevent layout instability and scroll jumping.
+      // User can Tab to expand manually.
     }
     if (!isStreaming) {
       startRef.current = 0
@@ -159,6 +161,22 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
 
   const spinner = isStreaming ? (elapsed % 2000 < 1000 ? '⠋' : '⠙') : ''
   const statusLabel = thinkingStatusLabel({ isStreaming, elapsedMs: elapsed, completedDurationMs, stale })
+
+  // During streaming: compact single-line status to prevent layout instability.
+  // Only expand on explicit Tab toggle (focused && key.tab).
+  // After streaming: show collapsed preview of last few lines.
+  if (isStreaming && !expanded) {
+    return (
+      <Box flexDirection="column" paddingX={2}>
+        <Text dimColor>
+          {'▸'} {spinner} Thinking {statusLabel}
+          {thinking ? ` (${formatThinkingSize(thinking.length)})` : ''}
+          {focused ? ' (Tab to expand)' : ''}
+        </Text>
+      </Box>
+    )
+  }
+
   const MAX_VISIBLE_LINES = 8
   const COLLAPSED_PREVIEW_LINES = 3
   const thinkingLines = truncateThinking(thinking).split('\n')
