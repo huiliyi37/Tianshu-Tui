@@ -119,14 +119,33 @@ repo_map({ path: "src/agent/" })  → agent 目录深层树
 repo_map({ depth: 2 })            → 全项目浅层概览
 ```
 
-### P2: read_file 动态容量生效验证
+### P2: read_file 动态容量生效验证 ✅ 链路完整
 
 **目标**：确保 `computeModelReadCap()` 的动态计算真正在调用链中生效。
 
-**改动**：
-- 验证 `contextWindow` 从 `ToolCallParams` → `read_file execute` → `computeModelReadCap()` 的传递链
-- 如果断链，修复传递
-- 添加诊断日志
+**验证结论：链路完整，无需修复。**
+
+完整传递链：
+```
+config/default.ts: contextWindow: 1_000_000 (模型定义)
+  → main.tsx:329: createAgentConfig({ contextWindow: currentModel.contextWindow })
+    → create-agent-config.ts:86: AgentConfig.contextWindow = model.contextWindow
+    → create-agent-config.ts:89: providerProfile = getProviderProfile(provider.name, model.contextWindow)
+      → tool-pipeline.ts:337: ToolCallParams.contextWindow = deps.config.contextWindow
+      → tool-pipeline.ts:338: ToolCallParams.providerProfile = deps.config.providerProfile
+        → read-file.ts:248: computeModelReadCap({ contextWindow, providerProfile })
+          → truncateContent(cap.maxChars, cap.headChars, cap.tailChars)
+```
+
+DeepSeek V4 Pro 实际生效值（1M 窗口 + cache-preserving 策略）：
+- maxChars = min(1,000,000 × 0.05 × 4 × 1.3, 200,000) = **200,000 chars**
+- headChars = 120,000, tailChars = 60,000
+
+对任何源文件都不会触发截断（200K chars ≈ 50K tokens）。
+
+**已知边界情况**：
+1. `prewarm-file.ts` 调用 `readFilePayload` 时不传 `modelCap`，回退到 DEFAULT (8,000)。这是 **有意设计** — tool-pipeline.ts L519-523 的注释明确说明：read_file 始终走真实 execute 以使用正确的 cap。
+2. 仅当 `contextWindow` 为 undefined 或 ≤0 时才回退到 DEFAULT_MODEL_READ_CAP (8,000 chars)。正常运行时不会触发。
 
 ### P3: repo_map 输出增加文件大小提示
 
@@ -145,10 +164,10 @@ repo_map({ depth: 2 })            → 全项目浅层概览
 
 ## 5. 优先级排序
 
-| Phase | 影响 | 难度 | 风险 | 建议 |
+| Phase | 影响 | 难度 | 风险 | 状态 |
 |-------|------|------|------|------|
-| P1 | 高 | 低 | 低 | ✅ 立即执行 |
-| P2 | 高 | 低 | 低 | ✅ 紧跟 P1 |
+| P1 | 高 | 低 | 低 | ✅ 已完成 |
+| P2 | 高 | 低 | 低 | ✅ 已验证（链路完整，无需修复） |
 | P3 | 中 | 低 | 低 | P1/P2 稳定后 |
 | P4 | 低 | 中 | 中 | 视情况决定 |
 
