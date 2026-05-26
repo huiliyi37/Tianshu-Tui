@@ -11,7 +11,6 @@ export interface SnapshotInput {
   sessionMemoryBlock?: string
   workingSet?: string[]
   activeDomain?: VolatileContext['activeDomain']
-  modelSubstrate?: { provider: string; model: string }
 }
 
 const KNOWLEDGE_MAX_CHARS = 2000
@@ -60,7 +59,6 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
     workingSet,
     activeDomain: input.activeDomain ?? undefined,
     sessionMemoryBlock: input.sessionMemoryBlock,
-    modelSubstrate: input.modelSubstrate,
     _knowledgeSnapshot: readKnowledgeOnce(input.cwd),
   }) as VolatileContext
 }
