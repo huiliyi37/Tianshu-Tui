@@ -208,7 +208,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     dependencies: input.dependencies ?? [],
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
-      maxTurns: input.budget?.maxTurns ?? 4,
+      maxTurns: input.budget?.maxTurns ?? 8,
       maxTokens: input.budget?.maxTokens ?? 4096,
       timeoutMs: input.budget?.timeoutMs ?? 120_000,
       maxRetries: input.budget?.maxRetries ?? 2,
