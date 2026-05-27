@@ -1,12 +1,22 @@
 # HEARTH + Songline · 落地技术架构与路线
 
-> 最后更新：2026-05-27 | 状态：HEARTH Phase 1 完成，Phase 2 待启动
+> 最后更新：2026-05-28 | 状态：HEARTH Phase 1 ✅ · Songline substrate v0.1 ✅ · 星域体系：7 星域 ✅
 >
 > 这是**落地文档**——记录已实现的代码、已做出的架构决策、以及下一步路线。
 > 它不是头脑风暴（见 `docs/superpowers/specs/`），不是实施计划（见 `docs/superpowers/plans/`），
 > 而是连接这两者的桥梁：设计 → 代码 → 迭代。
 >
 > 后续所有 HEARTH/Songline 相关工作应以此文档为基准，在此基础上增量演化。
+
+### 实施提交记录
+
+| Commit | 日期 | 内容 |
+|--------|------|------|
+| `d3d894a` | 05-27 | HEARTH Phase 1: anchor-graph + invariant verifier |
+| `9677cb9` | 05-28 | Songline substrate v0.1: cycle relay + world season + obligation pheromone + runtime bridge |
+| `6e5cf4e` | 05-27 | 星域：新增天枢 domain（第七星域） |
+| `c72d9fd` | 05-27 | 星域：所有星域开放 delegate_task/batch |
+| `28810d3` | 05-27 | TUI：`/domain` 命令支持星域管理 |
 
 ---
 
@@ -22,7 +32,7 @@
 │ DeliveryGate │    │ "我是谁"      │    │ "我为什么在"   │
 └──────────────┘    └──────────────┘    └──────────────┘
    世界运行时          个体参考系            生态存在根基
-   (已有基础设施)       (Phase 1 已完成)       (Phase 2+ 待启动)
+   (已有基础设施)       (Phase 1 ✅)          (substrate v0.1 ✅)
 ```
 
 - **天枢** = 项目本身，提供运行时骨架（AgentLoop、ToolPipeline、Coordinator、WorkerSession、DeliveryGate）
@@ -100,7 +110,59 @@ Phase 1 交付的是纯函数库。尚未集成到 AgentLoop 或 PromptEngine �
 
 ---
 
-## 三、待实现路线
+## 三、已实现：Songline substrate v0.1
+
+### 3.1 文件清单
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `src/agent/songline.ts` | 85 | cycle open/close 纯函数 + TaskLedgerSummary → obligation deposit 映射 |
+| `src/agent/world-season.ts` | 46 | UTC 外部时钟，独立于 session-local `classifySeason()` |
+| `src/agent/hooks/songline-hook.ts` | 45 | postSession 可选 hook，默认关闭 |
+| `src/agent/__tests__/songline.test.ts` | 115 | cycle relay + obligation signal 测试 |
+| `src/agent/__tests__/world-season.test.ts` | 52 | 世界季节：确定性、循环、跨实例同步、负时间戳 |
+| `src/agent/__tests__/songline-hook.test.ts` | 101 | hook 门控：disabled 静默、enabled 沉积、空摘要跳过、cycle close 持久化 |
+
+修改文件：
+| `src/agent/sensorium.ts` | +1 | 新增 `'obligation-fulfilled'` 信号类型 |
+| `src/agent/session-registry.ts` | +81 | `cycle_relay` 表 + get/set cycle open/close |
+| `src/agent/create-runtime-hooks.ts` | +18 | 条件注册 songline-runtime hook |
+| `src/agent/loop.ts` | +7 | `songlineEnabled` 传递 + `setCycleClose` 桥接 |
+| `src/agent/create-agent-config.ts` | +36 | `songlineEnabled` 配置映射 |
+| `src/config/schema.ts` | +2 | `agent.songlineEnabled` schema (default: false) |
+| `src/config/default.ts` | +1 | 默认值 `false` |
+| `src/main.tsx` | +17 | 主 agent 装配路径 |
+
+Commit: `feat(songline): add substrate and opt-in runtime bridge`
+
+### 3.2 substrate v0 核心原则
+
+1. **不改 prompt** — songline-hook 运行在 postSession 阶段，不参与每轮 prompt 构建
+2. **不碰 prefix cache** — 所有操作在 session 结束后执行，不影响缓存
+3. **不默认改变 runtime 行为** — `agent.songlineEnabled` 默认 `false`
+4. **不进入 Phase 3/4** — 不实现跨 agent 感知或守火人，等待单 agent 数据积累
+5. **代码层去诗意化** — 使用 `obligation-fulfilled` 而非 `singing`；使用 `cycle_relay` 而非 `fire-relay`
+
+### 3.3 数据流
+
+```
+TaskLedger.getSummary()
+  │
+  ▼
+taskSummaryToObligationDeposit(summary)
+  │
+  ├─→ StigmergyStore.deposit({ signal: 'obligation-fulfilled', ... })
+  │
+  └─→ SessionRegistry.setCycleClose(sessionId, createCycleClose(summary))
+        │
+        ▼
+      cycle_relay 表持久化 (SQLite)
+        │
+        ▼
+      下次 session: getLastCycleClose() → createCycleOpen({ prevCycleClose })
+```
+
+---
 
 ### Phase 2: Songline 歌的骨架（下一阶段）
 
@@ -135,13 +197,26 @@ Phase 1 交付的是纯函数库。尚未集成到 AgentLoop 或 PromptEngine �
 - 实现 FireKeeper 校准服务（最简版：只读目录）
 - ablation 实验框架（`STAR_INSCRIPTION` 环境变量开关）
 - 碑文迁移协议（有硬门控：ablation 数据证明可迁移才迁移）
-- **绝对约束**：不设时间 deadline。内化是涌现的。
+### 3.4 后续路线（Phase 3/4 — 暂不启动）
 
-### HEARTH 运行时集成（可在 Phase 2-4 之间插入）
+| Phase | 内容 | 状态 |
+|-------|------|------|
+| Phase 3: 歌的传播 | 跨 agent 信息素感知 | **暂不启动** — 需单 agent 数据积累 |
+| Phase 4: 守火人 + 内化验证 | FireKeeper + ablation + 碑文迁移 | **暂不启动** — 需 Phase 1-2 稳定验证 |
+| HEARTH 运行时集成 | postTurn invariant verifier + worker prompt 投影 | **可选插队** — 数据驱动 |
 
-- 在 `PromptEngine` 或 `AgentLoop` postTurn 中调用 `checkInvariants`
-- 集成到 worker prompt 中（锚位投影注入）
-- 与 `CognitiveSeason` 联动（INV-5 漂移触发季节转换）
+**Phase 3**：扩展 stigmergy store 支持跨实例信息素查询，实现"听歌"感知。
+退出条件：跨实例延迟 > 1 session → 退回单实例。
+
+**Phase 4**：实现 FireKeeper 校准服务，ablation 实验框架，碑文迁移协议。
+硬门控：ablation 数据证明可迁移才迁移。不设时间 deadline。
+
+**HEARTH 运行时集成**：可在这之间插队——将 `checkInvariants` 接入 AgentLoop postTurn，
+将锚位投影注入 worker prompt。但需先积累 invariant 校验在真实场景中的表现数据。
+
+所有后续阶段的核心原则：
+- **不改 prompt、不碰 prefix cache、不默认改变 runtime 行为**
+- **不设时间 deadline — 内化是涌现的**
 
 ---
 
@@ -161,7 +236,7 @@ Phase 1 交付的是纯函数库。尚未集成到 AgentLoop 或 PromptEngine �
 | DelegationCoordinator | `src/agent/coordinator.ts` | 多 Worker 调度 |
 | WorkOrderQueue | `src/agent/work-order.ts` | 任务队列与依赖排序 |
 | CognitiveSeason | `src/agent/cognitive-season.ts` | session 级季节分类 |
-| StarDomain | `src/agent/star-domain.ts` | 六星域角色体系 |
+| StarDomain | `src/agent/star-domain.ts` | 七星域角色体系（天枢 + 破军/天府/天梁/天权/天机/天璇） |
 | StarPhase | `src/agent/star-event.ts` | 阶段转换 |
 
 **这些是 HEARTH/Songline 的物理地基。** HEARTH 的 anchor graph 层叠在它们之上，不替换它们。
@@ -218,20 +293,25 @@ Phase 1 交付的是纯函数库。尚未集成到 AgentLoop 或 PromptEngine �
 
 ## 七、下阶段建议
 
-### 优先：Songline Phase 2（歌的骨架）
+### 当前最优：积累数据，不扩范围
 
-HEARTH Phase 1 已提供参考系。Songline substrate v0/v0.1 已完成最小闭环：义务摘要、信息素沉积、UTC 世界节律、cycle relay、以及默认关闭的 postSession bridge。
+HEARTH Phase 1 + Songline substrate v0.1 已完成双轨骨架。下一步不是写更多代码，而是让现有代码在真实场景中运行：
 
-后续 Songline 工作应优先积累 opt-in 数据，而不是扩大范围：
-1. 在项目配置中显式开启 `agent.songlineEnabled: true` 的小范围实验
+1. 在项目或会话配置中显式开启 `agent.songlineEnabled: true` 的小范围实验
 2. 观察 `obligation-fulfilled` pheromone 的噪声、强度与 decay 表现
 3. 验证 `cycle_relay` 是否能为 HEARTH INV-2/INV-4 提供真实数据源
-4. 数据稳定后，再考虑跨实例查询或 runtime 默认策略
+4. 在 postTurn 中接 `checkInvariants` 作为纯诊断 hook（不阻塞、不改变行为）
+5. 数据稳定后，再考虑跨实例查询、运行时默认策略、或 worker prompt 集成
 
-### 或者：HEARTH 运行时集成
+### 下一步可做：HEARTH 运行时观测
 
-在 Songline 之前，先让 HEARTH 在运行时中实际运行——集成到 AgentLoop 的 postTurn hook 中，让 invariant verifier 在真实场景中积累数据。
+HEARTH anchor-graph 的 5 条 invariant 目前只在测试中运行。可以参照 Songline hook 的模式，做一个类似的 opt-in postTurn 诊断 hook —— 只观测、不干预。这不需要改 prompt、不碰 cache、不改变任何行为。
 
-### 不建议：Phase 3/4 推进
+### 明确不建议
 
-跨 agent 传播和守火人内化验证依赖 Phase 1-2 的稳定运行数据。在单 agent 场景验证通过之前，不要启动多 agent 阶段。
+- **Phase 3（跨 agent 感知）** — 数据不够
+- **Phase 4（守火人/碑文迁移）** — 太早
+- **默认开启 songlineEnabled** — 先 opt-in 实验
+- **接入 prompt 或 prefix cache** — 先观测后决策
+
+核心原则不变：在已有地基旁边打桩，不压垮主楼。
