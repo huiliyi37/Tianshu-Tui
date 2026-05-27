@@ -75,14 +75,18 @@ describe('recall tool', () => {
     try {
       const knowledgeDir = join(cwd, '.rivet', 'knowledge')
       mkdirSync(knowledgeDir, { recursive: true })
-      writeFileSync(join(knowledgeDir, 'project-memory.md'), '### Session\nThe fluency governor folds large tool output.\n', 'utf-8')
+      writeFileSync(
+        join(knowledgeDir, 'project-memory.md'),
+        '### Curated project memory\n**Claim**: Project memory should be recalled on demand.\n',
+        'utf-8',
+      )
 
       const store = new ContextClaimStore(dir, 'session-1')
       const tool = createRecallTool(store)
-      const result = await tool.execute({ toolUseId: 't1', input: { query: 'governor' }, cwd })
+      const result = await tool.execute({ toolUseId: 't1', input: { query: 'recalled' }, cwd })
 
       assert.ok(result.content.includes('Project knowledge'))
-      assert.ok(result.content.includes('fluency governor'))
+      assert.ok(result.content.includes('Project memory should be recalled on demand'))
     } finally {
       rmSync(dir, { recursive: true, force: true })
       rmSync(cwd, { recursive: true, force: true })
