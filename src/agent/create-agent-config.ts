@@ -27,6 +27,7 @@ export interface AgentConfigInput {
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual'
   songlineEnabled?: boolean
+  hearthObserveEnabled?: boolean
   auth?: AuthProvider
   habituationThreshold?: number
 }
@@ -56,6 +57,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     sessionMemoryBlock: params.sessionMemoryBlock,
     approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
     songlineEnabled: params.config.agent.songlineEnabled,
+    hearthObserveEnabled: params.config.agent.hearthObserveEnabled,
     auth: params.auth,
     habituationThreshold: params.habituationThreshold,
   }
@@ -63,7 +65,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'songlineEnabled'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'songlineEnabled' | 'hearthObserveEnabled'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -102,6 +104,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,
     songlineEnabled: input.songlineEnabled,
+    hearthObserveEnabled: input.hearthObserveEnabled,
     autoReasoning: true,
     reasoningFloor: model.reasoningEffort,
   }

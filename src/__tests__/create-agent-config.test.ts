@@ -27,6 +27,7 @@ const testConfig = {
     mode: 'code',
     autoReasoning: false,
     songlineEnabled: true,
+    hearthObserveEnabled: false,
     permissions: { allow: [] },
   },
   compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },

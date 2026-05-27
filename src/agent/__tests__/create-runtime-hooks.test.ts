@@ -131,4 +131,47 @@ describe('createDefaultRuntimeHooks', () => {
     assert.equal(deposits.length, 1)
     assert.equal(deposits[0]!.signal, 'obligation-fulfilled')
   })
+
+  it('does not register hearth-observe hook unless explicitly enabled', () => {
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      getAnchorGraph: () => ({
+        nodes: [],
+        graphHash: 'hash',
+      }) as never,
+      getPrevAnchorGraphHash: () => null,
+      setPrevAnchorGraphHash: () => {},
+    })
+
+    assert.equal(hooks.some(h => h.name === 'hearth-observe'), false)
+  })
+
+  it('registers hearth-observe hook when explicitly enabled (postTurn, diagnostic)', () => {
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      hearthObserveEnabled: true,
+      getAnchorGraph: () => ({
+        nodes: [],
+        graphHash: 'hash',
+      }) as never,
+      getPrevAnchorGraphHash: () => null,
+      setPrevAnchorGraphHash: () => {},
+    })
+
+    const hearthHooks = hooks.filter(h => h.name === 'hearth-observe')
+    assert.equal(hearthHooks.length, 1)
+    assert.equal(hearthHooks[0]!.phase, 'postTurn')
+  })
 })

@@ -50,6 +50,8 @@ import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
+import { createAnchorGraph } from '../prompt/anchor-graph.js'
+import { createHash } from 'node:crypto'
 import { ArtifactStore } from '../artifact/store.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
@@ -157,6 +159,8 @@ export interface AgentConfig {
   taskLedger?: import('./task-ledger.js').TaskLedger
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. Disabled by default. */
   songlineEnabled?: boolean
+  /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). Disabled by default. */
+  hearthObserveEnabled?: boolean
   /** Optional OwnershipLedger for real-time file ownership — updated on every file_write. */
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
   /** Optional Meridian code graph indexer for structural context. */
@@ -206,6 +210,8 @@ export class AgentLoop {
   private predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   private outputTokenEscalationCount = 0
   private sessionDomain: ActiveStarDomain | null | undefined
+  /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
+  private prevAnchorGraphHash: string | null = null
   private static readonly MAX_OUTPUT_ESCALATION = 3
   private pressureMonitor: PressureMonitor
   private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
@@ -358,6 +364,17 @@ export class AgentLoop {
       getTaskSummary: this.config.taskLedger ? () => this.config.taskLedger!.getSummary() : undefined,
       setCycleClose: this.config.sessionRegistry
         ? (sessionId, closeHash) => this.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
+        : undefined,
+      // ── HEARTH observe (pure diagnostic) ──
+      hearthObserveEnabled: this.config.hearthObserveEnabled,
+      getAnchorGraph: () => this.buildAnchorGraph(),
+      getPrevAnchorGraphHash: () => this.prevAnchorGraphHash,
+      setPrevAnchorGraphHash: (hash: string) => { this.prevAnchorGraphHash = hash },
+      getPrevCycleOpen: this.config.sessionRegistry && this.config.sessionId
+        ? () => this.config.sessionRegistry!.getLastCycleClose()
+        : undefined,
+      getPrevSessionCycleClose: this.config.sessionRegistry
+        ? () => this.config.sessionRegistry!.getLastCycleClose()
         : undefined,
       ...(this.config.sessionId ? {
         dream: {
@@ -637,6 +654,40 @@ export class AgentLoop {
     if (this.sessionDomain !== undefined) return
     this.sessionDomain = isStarSoulEnabled() ? buildActiveDomain(taskDescription) : null
     this.config.promptEngine.setActiveDomain(this.sessionDomain)
+  }
+
+  /**
+   * Build the HEARTH anchor graph from current runtime state.
+   *
+   * - pole_structure = hash of system + tools fingerprint
+   * - pole_void = XOR complement of pole_structure
+   * - cycle_close = last session's cycle_close (or empty if first)
+   * - cycle_open = current session's sessionId (deterministic seed)
+   * - center_belief = hash of system prompt alone (founding covenant)
+   */
+  private buildAnchorGraph(): ReturnType<typeof createAnchorGraph> {
+    const fp = this.config.promptEngine.getFingerprint()
+    const structureHash = createHash('sha256')
+      .update(`${fp.systemSha256}:${fp.toolsSha256}`)
+      .digest('hex')
+    const voidShape = hexComplement(structureHash)
+
+    const prevCycleClose =
+      this.config.sessionRegistry?.getLastCycleClose() ?? ''
+
+    const currentCycleOpen = createHash('sha256')
+      .update(`cycle-open:${this.config.sessionId ?? 'unknown'}`)
+      .digest('hex')
+
+    const centerBeliefHash = fp.systemSha256
+
+    return createAnchorGraph({
+      structureHash,
+      voidShape,
+      prevCycleClose,
+      currentCycleOpen,
+      centerBeliefHash,
+    })
   }
 
   private maybePrewarm(text: string): void {
@@ -1459,4 +1510,17 @@ export class AgentLoop {
       },
     }
   }
+}
+
+/**
+ * Compute the bitwise XOR complement of a hex string.
+ * Each hex digit is XOR'd with 0xf, producing its complement.
+ * Used by HEARTH to compute pole_void from pole_structure.
+ */
+function hexComplement(hex: string): string {
+  let result = ''
+  for (let i = 0; i < hex.length; i++) {
+    result += (0xf ^ parseInt(hex[i]!, 16)).toString(16)
+  }
+  return result
 }

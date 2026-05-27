@@ -188,6 +188,7 @@ export const DEFAULT_CONFIG: Config = {
     mode: 'code',
     autoReasoning: false,
     songlineEnabled: false,
+    hearthObserveEnabled: false,
     permissions: {
       allow: [],
     },

@@ -59,6 +59,8 @@ export const agentSchema = z.object({
   autoReasoning: z.boolean().default(false),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
   songlineEnabled: z.boolean().default(false),
+  /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). */
+  hearthObserveEnabled: z.boolean().default(false),
   permissions: permissionsSchema.default({}),
 })
 

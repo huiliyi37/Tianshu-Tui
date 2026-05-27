@@ -13,6 +13,8 @@ import { createRadioHook, type RadioHookDeps } from './hooks/radio-hook.js'
 import { createConsistencyCheckHook } from './hooks/consistency-check-hook.js'
 import { createMeridianHook, type MeridianHookDeps } from './hooks/meridian-hook.js'
 import { createSonglineRuntimeHook } from './hooks/songline-hook.js'
+import { createHearthObserveHook } from './hooks/hearth-observe-hook.js'
+import type { AnchorGraph } from '../prompt/anchor-graph.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput } from './retrospect.js'
@@ -60,6 +62,20 @@ export interface RuntimeHookDeps {
   getTaskSummary?: () => TaskLedgerSummary | null
   /** Optional cycle relay bridge for Songline substrate. */
   setCycleClose?: (sessionId: string, closeHash: string) => void
+
+  // ── HEARTH observe (pure diagnostic, no intervention) ──
+  /** Explicit opt-in for HEARTH anchor invariant observation. Default: false. */
+  hearthObserveEnabled?: boolean
+  /** Build the current anchor graph from runtime state. */
+  getAnchorGraph?: () => AnchorGraph
+  /** Previous graph hash for INV-5 intra-session drift detection. */
+  getPrevAnchorGraphHash?: () => string | null
+  /** Store current graph hash for next turn INV-5. */
+  setPrevAnchorGraphHash?: (hash: string) => void
+  /** Previous session cycle_open for INV-4 perturbation check. */
+  getPrevCycleOpen?: () => string | null
+  /** Previous session cycle_close for INV-2 relay check. */
+  getPrevSessionCycleClose?: () => string | null
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -124,6 +140,17 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       deposit: deps.stigmergyDeposit,
       sessionId: deps.sessionId,
       setCycleClose: deps.setCycleClose,
+    }))
+  }
+
+  if (deps.hearthObserveEnabled && deps.getAnchorGraph && deps.getPrevAnchorGraphHash && deps.setPrevAnchorGraphHash) {
+    hooks.push(createHearthObserveHook({
+      enabled: true,
+      getAnchorGraph: deps.getAnchorGraph,
+      getPrevGraphHash: deps.getPrevAnchorGraphHash,
+      setPrevGraphHash: deps.setPrevAnchorGraphHash,
+      getPrevCycleOpen: deps.getPrevCycleOpen ?? (() => null),
+      getPrevSessionCycleClose: deps.getPrevSessionCycleClose ?? (() => null),
     }))
   }
 
