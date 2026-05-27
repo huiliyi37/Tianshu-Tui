@@ -673,6 +673,18 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
 
     const promptInput = resolveAppPromptInput(userInput, process.cwd())
+
+    // Guard: block unrecognized slash commands from reaching the LLM
+    // Prevents typos like /mdel being misinterpreted as dangerous instructions
+    if (promptInput === null) {
+      const cmdName = userInput.split(/\s/)[0] ?? userInput
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `⚠️  Unknown command: ${cmdName}\n\nType /help to see available commands.`,
+      }))
+      return
+    }
+
     pushStatic(createLogEntry({ type: 'user_message', content: originalUserInput }))
 
     await agent.run(promptInput, {

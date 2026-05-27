@@ -137,11 +137,14 @@ export function searchMemory(ctx: SlashHandlerContext, query: string): string {
   return hits.length === 0 ? `No memory found for "${query}".` : `Memory search: ${query}\n${hits.map(h => `- ${h}`).join('\n')}`
 }
 
-export function resolveAppPromptInput(input: string, cwd: string): string {
+export function resolveAppPromptInput(input: string, cwd: string): string | null {
   if (!input.startsWith('/')) return input
   const workflow = resolveEcosystemWorkflowInput(input)
   if (workflow) return workflow.prompt
-  return resolveCustomCommand(cwd, input) ?? input
+  const custom = resolveCustomCommand(cwd, input)
+  if (custom) return custom
+  // Unrecognized slash command — return null to signal "blocked"
+  return null
 }
 
 export function handleSlashCommand(ctx: SlashHandlerContext): boolean {

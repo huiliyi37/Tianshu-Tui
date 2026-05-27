@@ -62,12 +62,17 @@ describe('resolveAppPromptInput', () => {
     assert.equal(resolveAppPromptInput('hello world', '/cwd'), 'hello world')
   })
 
-  it('passes unknown slash commands through', () => {
-    assert.equal(resolveAppPromptInput('/unknown-cmd', '/cwd'), '/unknown-cmd')
+  it('returns null for unrecognized slash commands (safety guard)', () => {
+    assert.equal(resolveAppPromptInput('/unknown-cmd', '/cwd'), null)
+  })
+
+  it('returns null for /mdel-style typo (prevents LLM misinterpretation)', () => {
+    assert.equal(resolveAppPromptInput('/mdel', '/cwd'), null)
   })
 
   it('resolves /plan into a writing-plans workflow prompt', () => {
     const resolved = resolveAppPromptInput('/plan add workflow aliases', '/cwd')
+    assert.ok(resolved !== null)
 
     assert.ok(resolved.includes('我正在使用 writing-plans 技能创建实现计划。'))
     assert.ok(resolved.includes('Create a comprehensive implementation plan for: add workflow aliases'))
@@ -78,6 +83,7 @@ describe('resolveAppPromptInput', () => {
 
   it('resolves /write-plan into a writing-plans workflow prompt', () => {
     const resolved = resolveAppPromptInput('/write-plan 你说的很好，把这个内容记录到设计文档。如果行数太长就拆分两个，一个背景说明，一个是设计文档。其次，即便我使用 claude code 也是多个会话来并行执行。', '/cwd')
+    assert.ok(resolved !== null)
 
     assert.ok(resolved.includes('writing-plans'))
     assert.ok(resolved.includes('Create a comprehensive implementation plan for: 你说的很好，把这个内容记录到设计文档。'))
@@ -87,8 +93,8 @@ describe('resolveAppPromptInput', () => {
     assert.ok(resolved.includes('Execution handoff'))
   })
 
-  it('does not resolve empty /plan before slash handler can show usage', () => {
-    assert.equal(resolveAppPromptInput('/plan', '/cwd'), '/plan')
+  it('returns null for empty /plan (handled by handleSlashCommand before resolver)', () => {
+    assert.equal(resolveAppPromptInput('/plan', '/cwd'), null)
   })
 })
 
