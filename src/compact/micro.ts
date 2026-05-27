@@ -3,7 +3,6 @@ import { KEEP_RECENT_MESSAGES, CACHE_ANCHOR_MESSAGES, compactThresholds } from '
 import { groupIntoRoundsOai } from '../context/rounds.js'
 
 const CHARS_PER_TOKEN = 4
-const THINKING_TRUNCATE_CHARS = 200
 
 function compactToolMessage(msg: OaiMessage, contextWindow: number): { msg: OaiMessage; changed: boolean } {
   if (msg.role !== 'tool') return { msg, changed: false }
@@ -14,14 +13,11 @@ function compactToolMessage(msg: OaiMessage, contextWindow: number): { msg: OaiM
   return { msg: { ...msg, content: stub }, changed: true }
 }
 
-function compactOaiReasoning(msg: OaiMessage): { msg: OaiMessage; changed: boolean } {
-  if (msg.role !== 'assistant') return { msg, changed: false }
-  if (!msg.reasoning_content) return { msg, changed: false }
-  if (msg.reasoning_content.length <= THINKING_TRUNCATE_CHARS) return { msg, changed: false }
-  const truncated = msg.reasoning_content.slice(0, THINKING_TRUNCATE_CHARS)
-  const stub = `${truncated}\n<thinking-compacted removed_chars="${msg.reasoning_content.length - THINKING_TRUNCATE_CHARS}" />`
-  if (stub.length >= msg.reasoning_content.length) return { msg, changed: false }
-  return { msg: { ...msg, reasoning_content: stub }, changed: true }
+function compactOaiReasoning(_msg: OaiMessage): { msg: OaiMessage; changed: boolean } {
+  // reasoning_content is always passed back intact — truncation savings are
+  // negligible once prefix cache kicks in, and incomplete reasoning degrades
+  // model quality on providers that require it (MiMo, DeepSeek).
+  return { msg: _msg, changed: false }
 }
 
 export function estimateOaiMessageTokens(msg: OaiMessage): number {
