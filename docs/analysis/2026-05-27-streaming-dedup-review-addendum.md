@@ -1,6 +1,7 @@
 # 增补集：实时流式输出与跨 Turn 去重审查
 
 > 日期：2026-05-27  
+> **Status**: implemented / verified  
 > 类型：文化文档 / 审查增补 / 能力侧写  
 > 范围：`TurnStreamController` token 级流式输出、`AgentLoop` turn 级去重三态机、DeepSeek 重复 chunk 防御。  
 > 状态：已完成代码审阅、增补修复与局部验证；本文记录审查结论、已落地修复与剩余后续项。
