@@ -153,6 +153,7 @@ export interface MaybeCompactResult {
 }
 
 export class CompactionController {
+  private _llmCompactInFlight = false
   constructor(private deps: CompactionControllerDeps) {}
 
   async maybeCompact(input: MaybeCompactInput): Promise<MaybeCompactResult> {
@@ -255,9 +256,9 @@ export class CompactionController {
 
     this.persistExtractedMemories(this.deps.getTrajectoryEntries())
 
-    // Try LLM compact first for higher-fidelity summary
+    // Try LLM compact first (short timeout — emergency path, can't wait long)
     if (this.deps.primaryClient) {
-      const summary = await this.llmCompact()
+      const summary = await this.llmCompact(30_000)
       if (summary) {
         this.replaceWithCheckpoint({
           tier: 4,
@@ -313,7 +314,8 @@ export class CompactionController {
     const ratio = this.deps.session.getEstimatedTokens() / this.deps.contextWindow
     if (ratio < 0.86) return false
 
-    this.persistExtractedMemories(this.deps.getTrajectoryEntries())
+    const trajectory = this.deps.getTrajectoryEntries()
+    this.persistExtractedMemories(trajectory)
 
     // Try LLM compact first for higher-fidelity summary
     if (this.deps.primaryClient) {
@@ -333,7 +335,6 @@ export class CompactionController {
 
     // Fallback: structured extraction
     const messages = this.deps.session.getMessages()
-    const trajectory = this.deps.getTrajectoryEntries()
     const taskState = extractTaskState(trajectory, this.deps.getStreamedText())
 
     const MAX_REASONING_CHARS = 2000
@@ -479,60 +480,64 @@ export class CompactionController {
    * @returns compact summary string, or null if primaryClient unavailable
    *          or session has insufficient messages.
    */
-  async llmCompact(): Promise<string | null> {
+  async llmCompact(timeoutMs = 60_000): Promise<string | null> {
     if (!this.deps.primaryClient) return null
+    if (this._llmCompactInFlight) return null
+    this._llmCompactInFlight = true
 
-    const messages = this.deps.session.getMessages()
-    if (messages.length < CACHE_ANCHOR_MESSAGES + 2) return null
-
-    // Send full conversation history + summary instruction.
-    // The cache anchors (first 2 messages) hit DeepSeek's prefix cache,
-    // and the rest of the history is what the model will summarize.
-    const compactMessages: OaiMessage[] = [
-      ...messages,
-      {
-        role: 'user' as const,
-        content: [
-          '请总结上述对话的关键信息，用于上下文压缩。',
-          '保留以下内容：',
-          '1. 用户的核心需求和意图',
-          '2. 所有关键技术决策及其原因',
-          '3. 涉及的文件路径及变更摘要',
-          '4. 遇到的错误及修复方法',
-          '5. 当前工作状态和进度',
-          '6. 明确的待办事项和下一步',
-          '',
-          '只输出总结内容，不要调用工具。格式用 markdown，控制在 3000 字以内。',
-        ].join('\n'),
-      },
-    ]
-
-    const request = this.deps.promptEngine.buildOaiRequest(
-      compactMessages,
-      undefined,
-      this.deps.contextWindow,
-    )
-    request.tools = undefined
-
-    const chunks: string[] = []
-    let errored = false
     try {
-      await this.deps.primaryClient.stream(request, {
-        onTextDelta: (text) => { chunks.push(text) },
-        onThinkingDelta: () => {},
-        onContentBlock: () => {},
-        onStopReason: () => {},
-        onError: () => { errored = true },
-      })
-    } catch {
-      return null
+      const messages = this.deps.session.getMessages()
+      if (messages.length < CACHE_ANCHOR_MESSAGES + 2) return null
+
+      const compactMessages: OaiMessage[] = [
+        ...messages,
+        {
+          role: 'user' as const,
+          content: [
+            '请总结上述对话的关键信息，用于上下文压缩。',
+            '保留以下内容：',
+            '1. 用户的核心需求和意图',
+            '2. 所有关键技术决策及其原因',
+            '3. 涉及的文件路径及变更摘要',
+            '4. 遇到的错误及修复方法',
+            '5. 当前工作状态和进度',
+            '6. 明确的待办事项和下一步',
+            '',
+            '只输出总结内容，不要调用工具。格式用 markdown，控制在 3000 字以内。',
+          ].join('\n'),
+        },
+      ]
+
+      const request = this.deps.promptEngine.buildOaiRequest(
+        compactMessages,
+        undefined,
+        this.deps.contextWindow,
+      )
+      request.tools = undefined
+
+      const chunks: string[] = []
+      let errored = false
+      const signal = AbortSignal.timeout(timeoutMs)
+      try {
+        await this.deps.primaryClient.stream(request, {
+          onTextDelta: (text) => { chunks.push(text) },
+          onThinkingDelta: () => {},
+          onContentBlock: () => {},
+          onStopReason: () => {},
+          onError: () => { errored = true },
+        }, signal)
+      } catch {
+        return null
+      }
+
+      if (errored || chunks.length === 0) return null
+
+      const summary = chunks.join('').trim()
+      if (summary.length === 0) return null
+
+      return `<compact-summary turn="${this.deps.session.getTurnCount()}" tokens="${this.deps.session.getEstimatedTokens()}">\n${summary}\n</compact-summary>`
+    } finally {
+      this._llmCompactInFlight = false
     }
-
-    if (errored || chunks.length === 0) return null
-
-    const summary = chunks.join('').trim()
-    if (summary.length === 0) return null
-
-    return `<compact-summary turn="${this.deps.session.getTurnCount()}" tokens="${this.deps.session.getEstimatedTokens()}">\n${summary}\n</compact-summary>`
   }
 }

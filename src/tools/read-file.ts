@@ -83,6 +83,20 @@ export function __resetReadHistoryForTests(): void {
   fileReadHistory.clear()
 }
 
+async function sliceFromArtifact(
+  store: { readRaw(id: string): Promise<string | null> },
+  artifactId: string,
+  offset: number,
+  limit: number | undefined,
+): Promise<string | null> {
+  const recovered = await store.readRaw(artifactId)
+  if (!recovered) return null
+  const lines = recovered.split('\n')
+  const start = Math.max(0, offset - 1)
+  const end = limit ? start + limit : lines.length
+  return lines.slice(start, end).join('\n')
+}
+
 function getGitignoreFilter(cwd: string): GitignoreFilter {
   const cached = gitignoreCache.get(cwd)
   if (cached && Date.now() - cached.ts < GITIGNORE_CACHE_TTL) {
@@ -266,43 +280,24 @@ Bad:  re-reading the same file you already read this session  → look at your p
         dedupKey = readHistoryKey(params.cwd, canonical, offset, limit)
         const prior = readHistory.get(dedupKey)
         if (prior && prior.mtimeMs === currentMtimeMs && prior.artifactId) {
-          // Already read this exact slice; file hasn't changed since.
-          // Instead of blocking and telling the model to call read_section,
-          // silently re-serve content from the artifact. This avoids an extra
-          // tool call round-trip AND handles the case where stale-round
-          // compaction has truncated the original tool_result from context.
           if (params.artifactStore) {
-            const recovered = await params.artifactStore.readRaw(prior.artifactId)
-            if (recovered) {
+            const slice = await sliceFromArtifact(params.artifactStore, prior.artifactId, offset, limit)
+            if (slice !== null) {
               debugLog(`[read-dedup] re-serve from artifact file=${canonical} offset=${offset} limit=${limit ?? 'all'}`)
-              const lines = recovered.split('\n')
-              const start = Math.max(0, offset - 1)
-              const end = limit ? start + limit : lines.length
-              const slice = lines.slice(start, end).join('\n')
               return { content: slice }
             }
           }
-          // Fallback: artifact unreadable, allow normal re-read
           debugLog(`[read-dedup] artifact unreadable, falling through to normal read file=${canonical}`)
         }
-        // File-level dedup: if this file was already read in full and hasn't changed,
-        // any non-full (fragment) read is a subset — block it.
-        // Full→full is handled by readHistory (per-slice) above.
         const fullEntry = fileReadHistory.get(canonical)
         if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && fullEntry.artifactId && (offset !== 1 || limit !== undefined)) {
-          // Full read exists and file unchanged → serve the requested slice from artifact
           if (params.artifactStore) {
-            const recovered = await params.artifactStore.readRaw(fullEntry.artifactId)
-            if (recovered) {
+            const slice = await sliceFromArtifact(params.artifactStore, fullEntry.artifactId, offset, limit)
+            if (slice !== null) {
               debugLog(`[read-dedup-file] re-serve slice from artifact file=${canonical} offset=${offset} limit=${limit ?? 'all'}`)
-              const lines = recovered.split('\n')
-              const start = Math.max(0, offset - 1)
-              const end = limit ? start + limit : lines.length
-              const slice = lines.slice(start, end).join('\n')
               return { content: slice }
             }
           }
-          // Fallback: artifact unreadable, allow normal read
           debugLog(`[read-dedup-file] artifact unreadable, falling through file=${canonical}`)
         }
       }
