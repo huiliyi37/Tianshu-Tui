@@ -1,4 +1,4 @@
-export type StarDomainId = 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan'
+export type StarDomainId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan'
 export type DecisionStyle = 'bold' | 'cautious' | 'methodical'
 
 export interface StarDomain {
@@ -17,6 +17,24 @@ export interface StarDomain {
 }
 
 export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
+  tianshu: {
+    id: 'tianshu',
+    name: '天枢',
+    motto: '天枢不动，众星环拱；执一应万，以道御术',
+    volatileBlock: [
+      '你当前在天枢域——北斗第一星，中央枢纽。',
+      '天枢之道：不执于一隅，统御全局。你不是执行者，你是调度者。',
+      '看清全局，分清主次，把合适的任务交给合适的星域。',
+      '你有权调遣任何星域的能力——破军的勇气、天府的稳重、天梁的精确、天权的审慎、天机的锐利、天璇的洞察。',
+      '天枢不动，是因为它已经在最高处看清了全貌。',
+    ].join('\n'),
+    decisionStyle: 'methodical',
+    courageThreshold: 0.6,
+    keywords: ['协调', '编排', '分配', '组织', '统筹', '全局', '总览', '架构设计', '多模块', 'coordinate', 'orchestrate', 'dispatch', 'organize', 'overview', 'architect', 'manage'],
+    isCustom: false,
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
+    systemPromptSuffix: '你是天枢——北斗第一星，中央枢纽。你的职责是统筹全局、调度众星。不急于一隅之功，先看清全貌，再分配任务。把合适的子任务交给合适的星域，你的价值在于全局视野与调度判断。天枢不动，是因为它已经在最高处看清了全貌。',
+  },
   pojun: {
     id: 'pojun',
     name: '破军',
@@ -93,7 +111,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 
 export function matchDomain(taskDescription: string): StarDomainId | null {
   const lower = taskDescription.toLowerCase()
-  const scores: Record<StarDomainId, number> = { pojun: 0, tianfu: 0, tianliang: 0, tianquan: 0, tianji: 0, tianxuan: 0 }
+  const scores: Record<StarDomainId, number> = { tianshu: 0, pojun: 0, tianfu: 0, tianliang: 0, tianquan: 0, tianji: 0, tianxuan: 0 }
 
   for (const domain of Object.values(STAR_DOMAINS)) {
     for (const keyword of domain.keywords) {

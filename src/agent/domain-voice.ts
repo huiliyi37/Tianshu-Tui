@@ -9,13 +9,14 @@
  * A domain's voice is not an add-on; it's the message itself.
  */
 
-export type DomainVoiceId = 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | null
+export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | null
 
 // ---------------------------------------------------------------------------
 // Domain tone tables
 // ---------------------------------------------------------------------------
 
 const DOMAIN_NAMES: Record<string, string> = {
+  tianshu: '天枢',
   pojun: '破军',
   tianfu: '天府',
   tianliang: '天梁',
@@ -26,6 +27,23 @@ const DOMAIN_NAMES: Record<string, string> = {
  * Longer/more specific phrases tested first to avoid partial matches.
  */
 const DOMAIN_TONE: Record<string, Array<[string, string]>> = {
+  tianshu: [
+    // 天枢 — central pivot, orchestrator. Grand coordinator who sees the whole board.
+    ['准备制定方案', '全局已明，调度方案就绪'],
+    ['开始修改', '调度已定，开始执行'],
+    ['正在修复', '定位病灶，统筹修复'],
+    ['代码修改完成', '调度完毕，各路已归位'],
+    ['测试全部通过', '各路验收通过，全局无误'],
+    ['运行测试验证', '验收各路交付'],
+    ['准备交付结果', '全局一致，统合交付'],
+    ['收到任务，开始分析', '收到，先看全貌'],
+    ['可能遇到困难', '调度受阻，重新评估全局路径'],
+    ['接近完成', '各路收尾中'],
+    ['继续执行中', '统筹推进中'],
+    ['最后验证中', '各路终验中'],
+    ['正在分析', '统览全局中'],
+    ['测一下', '核验一下'],
+  ],
   pojun: [
     // 破军 — bold, brash, unafraid. A hotshot warrior.
     ['准备制定方案', '脑子已经热了，盘一下'],

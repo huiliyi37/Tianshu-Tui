@@ -5,7 +5,7 @@ import type { AlchemyStage } from '../alchemy-bar.js'
  * Star Domain IDs — from domain-voice.ts
  * Kept as independent type to avoid cross-module coupling.
  */
-export type DomainId = 'pojun' | 'tianfu' | 'tianliang' | null
+export type DomainId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | null
 
 /**
  * 三国英雄 ID — 工程预留

@@ -88,6 +88,7 @@ export const GESTURES: Record<AvatarMode, string> = {
  * 叠加在印章冠右侧，不改变文/武模式。
  */
 const DOMAIN_BADGE: Record<string, string> = {
+  tianshu: '☸',
   pojun: '⚔',
   tianfu: '🛡',
   tianliang: '📏',

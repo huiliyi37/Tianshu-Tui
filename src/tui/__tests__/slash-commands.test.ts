@@ -314,7 +314,7 @@ describe('handleSlashCommand', () => {
       assert.ok(entries[0]!.includes('无星域'))
     })
 
-    it('/domain list shows all 6 domains', () => {
+    it('/domain list shows all domains including tianshu', () => {
       const entries: string[] = []
       const handled = handleSlashCommand(makeCtx({
         parts: ['/domain', 'list'],
@@ -332,6 +332,7 @@ describe('handleSlashCommand', () => {
       assert.ok(content.includes('天权'))
       assert.ok(content.includes('天机'))
       assert.ok(content.includes('天璇'))
+      assert.ok(content.includes('天枢'))
     })
 
     it('/domain <id> switches to a domain by English id', () => {
