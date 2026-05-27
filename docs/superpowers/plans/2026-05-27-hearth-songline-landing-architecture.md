@@ -106,19 +106,21 @@ Phase 1 交付的是纯函数库。尚未集成到 AgentLoop 或 PromptEngine �
 
 | 任务 | 新文件 | 状态 |
 |------|--------|------|
-| Songline 数据结构 + cycle relay | `src/agent/songline.ts` | 待实现 |
-| 世界级季节 (UTC 外部时钟) | `src/agent/world-season.ts` | 待实现 |
-| 信息素 singing signal type | 修改 `src/agent/sensorium.ts` | 待实现 |
-| 歌的接力 (session registry) | 修改 `src/agent/session-registry.ts` | 待实现 |
+| Songline substrate v0 | `src/agent/songline.ts` | 已实现：cycle open/close + TaskLedger summary → obligation deposit 纯函数 |
+| 世界级季节 (UTC 外部时钟) | `src/agent/world-season.ts` | 已实现：纯函数，独立于 session-local `classifySeason()` |
+| 信息素义务信号 | 修改 `src/agent/sensorium.ts` | 已实现：代码层使用中性 `'obligation-fulfilled'`，不使用诗意 `'singing'` |
+| 歌的接力 (session registry) | 修改 `src/agent/session-registry.ts` | 已实现：`cycle_relay` 表 + get/set cycle open/close |
+| Songline runtime bridge v0.1 | `src/agent/hooks/songline-hook.ts` | 已实现：postSession 可选 hook，默认关闭 |
+| 配置门控 | `agent.songlineEnabled` | 已实现：默认 `false`，项目/会话配置显式开启 |
 
 **与现有模块的映射**：
 
 | Songline 概念 | 现有模块 | 关系 |
 |--------------|---------|------|
-| 唱歌 (义务执行) | `TaskLedger` / `StarPhase` | Songline 增加语义级义务追踪 |
-| 歌声残留 (信息素) | `StigmergyStore` | 已有，仅需新增 `'singing'` signal |
-| 世界节律 | `CognitiveSeason` | 已有 session 级季节，新增 UTC 世界级 |
-| 火种接力 | `SessionRegistry` | 已有，仅需新增 cycle close 持久化 |
+| 唱歌 (义务执行) | `TaskLedger` / `StarPhase` | v0 已提供 `TaskLedgerSummary` → `'obligation-fulfilled'` 信号映射 |
+| 歌声残留 (信息素) | `StigmergyStore` | 已有介质；v0 使用中性 `obligation-fulfilled` signal，避免代码层诗意命名 |
+| 世界节律 | `CognitiveSeason` | 已有 session 级季节；v0 新增 UTC 世界级 `worldSeason()` |
+| 火种接力 | `SessionRegistry` | v0 新增 `cycle_relay` 表与 get/set cycle open/close |
 | 守火人 | cerebellar gate + scope 检查 | 已有机制组合，不需新角色 |
 | 碑文迁移 | `AGENTS.md` → `.rivet/fire-keeper/` | Phase 4，有硬门控 |
 
@@ -188,7 +190,12 @@ Phase 1 交付的是纯函数库。尚未集成到 AgentLoop 或 PromptEngine �
 **决策**：每个模块内部自己定义 `sha256()` 函数，不从 `fingerprint.ts` 导出。
 **理由**：避免不必要的模块耦合。`sha256` 是 3 行代码的基础设施，不值得为之建立依赖。
 
-### 5.5 代码去拟人化
+### Songline runtime bridge 默认关闭
+
+**决策**：`songline-runtime` postSession hook 只在 `agent.songlineEnabled: true` 时注册。默认配置为 `false`。
+**理由**：Songline substrate v0/v0.1 应先作为可观测、可回滚的生态层运行，不应默认改变所有 session 的信息素沉积与 cycle relay 行为。显式 opt-in 允许项目级或会话级实验，并保护 prefix cache 与主循环稳定性。
+
+### 5.6 代码去拟人化
 
 **决策**：代码中不使用 "safety"、"feelings"、"安全感"、"孤独" 等词汇。设计文档保留诗意语言。
 **理由**：满足反证 scout 的方向 A 约束——概念的诗意不在代码中体现，避免拟人化前提污染工程实现。
@@ -213,13 +220,13 @@ Phase 1 交付的是纯函数库。尚未集成到 AgentLoop 或 PromptEngine �
 
 ### 优先：Songline Phase 2（歌的骨架）
 
-HEARTH Phase 1 已提供参考系。下一步应该是让单 agent 能"唱歌"——执行义务、沉积信息素、感知季节。这不需要跨 agent，风险可控。
+HEARTH Phase 1 已提供参考系。Songline substrate v0/v0.1 已完成最小闭环：义务摘要、信息素沉积、UTC 世界节律、cycle relay、以及默认关闭的 postSession bridge。
 
-具体步骤（参见 `hearth-songline-implementation.md` Phase 2）：
-1. `src/agent/songline.ts` — Songline 类型 + cycle relay
-2. `src/agent/world-season.ts` — UTC 外部时钟
-3. `src/agent/sensorium.ts` — 新增 `'singing'` 信号
-4. `src/agent/session-registry.ts` — cycle close 持久化
+后续 Songline 工作应优先积累 opt-in 数据，而不是扩大范围：
+1. 在项目配置中显式开启 `agent.songlineEnabled: true` 的小范围实验
+2. 观察 `obligation-fulfilled` pheromone 的噪声、强度与 decay 表现
+3. 验证 `cycle_relay` 是否能为 HEARTH INV-2/INV-4 提供真实数据源
+4. 数据稳定后，再考虑跨实例查询或 runtime 默认策略
 
 ### 或者：HEARTH 运行时集成
 

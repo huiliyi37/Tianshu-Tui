@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createAgentConfig, type AgentConfigInput } from '../agent/create-agent-config.js'
-import type { ProviderConfig } from '../config/schema.js'
+import { createAgentConfig, createMainAgentConfigInput, type AgentConfigInput } from '../agent/create-agent-config.js'
+import type { Config, ProviderConfig } from '../config/schema.js'
 
 const testProvider: ProviderConfig = {
   name: 'deepseek',
@@ -19,6 +19,18 @@ const testProvider: ProviderConfig = {
   models: [{ id: 'deepseek-r1', contextWindow: 128000, maxTokens: 8192 }],
   unsupported: [],
 }
+
+const testConfig = {
+  agent: {
+    approval: 'manual',
+    maxTurns: 50,
+    mode: 'code',
+    autoReasoning: false,
+    songlineEnabled: true,
+    permissions: { allow: [] },
+  },
+  compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+} satisfies Pick<Config, 'agent' | 'compact'>
 
 describe('createAgentConfig', () => {
   const baseInput: AgentConfigInput = {
@@ -74,6 +86,32 @@ describe('createAgentConfig', () => {
       model: { ...baseInput.model, reasoningEffort: 'high' },
     })
     assert.equal(cfg.reasoningFloor, 'high')
+  })
+
+  it('passes songlineEnabled through when explicitly enabled', () => {
+    const cfg = createAgentConfig({ ...baseInput, songlineEnabled: true })
+
+    assert.equal(cfg.songlineEnabled, true)
+  })
+
+  it('builds main AgentConfig input from layered config including songlineEnabled', () => {
+    const input = createMainAgentConfigInput({
+      apiKey: 'test-key',
+      model: baseInput.model,
+      cwd: '/tmp/test',
+      config: testConfig,
+      sessionId: 'session-1',
+      toolDefinitions: [],
+      provider: testProvider,
+      sessionMemoryBlock: 'memory block text',
+    })
+
+    assert.equal(input.compact, testConfig.compact)
+    assert.equal(input.approvalMode, 'manual')
+    assert.equal(input.songlineEnabled, true)
+
+    const cfg = createAgentConfig(input)
+    assert.equal(cfg.songlineEnabled, true)
   })
 
   it('passes sessionMemoryBlock to promptEngine', () => {

@@ -12,12 +12,14 @@ import { createCourageHook } from './hooks/courage-hook.js'
 import { createRadioHook, type RadioHookDeps } from './hooks/radio-hook.js'
 import { createConsistencyCheckHook } from './hooks/consistency-check-hook.js'
 import { createMeridianHook, type MeridianHookDeps } from './hooks/meridian-hook.js'
+import { createSonglineRuntimeHook } from './hooks/songline-hook.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RetrospectInput } from './retrospect.js'
 import type { DoomLoopLevel } from './trace-store.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import type { EvidenceState } from './evidence.js'
+import type { TaskLedgerSummary } from './task-ledger.js'
 import type { TrajectoryEntry } from './trajectory.js'
 import type { DomainVoiceId } from './domain-voice.js'
 import type { ContextClaim } from '../context/claims.js'
@@ -52,6 +54,12 @@ export interface RuntimeHookDeps {
   getFileObservations?: () => Array<Pick<ContextClaim, 'id' | 'text' | 'evidence'>>
   /** Meridian code graph indexer (optional). */
   meridianIndexer?: MeridianIndexer | null
+  /** Explicit opt-in for Songline substrate post-session deposit. Default: false. */
+  songlineEnabled?: boolean
+  /** Task summary source for Songline substrate. Required only when songlineEnabled is true. */
+  getTaskSummary?: () => TaskLedgerSummary | null
+  /** Optional cycle relay bridge for Songline substrate. */
+  setCycleClose?: (sessionId: string, closeHash: string) => void
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -107,6 +115,16 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   if (deps.meridianIndexer !== undefined) {
     const indexerRef = deps.meridianIndexer
     hooks.push(createMeridianHook({ getIndexer: () => indexerRef }))
+  }
+
+  if (deps.songlineEnabled && deps.getTaskSummary) {
+    hooks.push(createSonglineRuntimeHook({
+      enabled: true,
+      getTaskSummary: deps.getTaskSummary,
+      deposit: deps.stigmergyDeposit,
+      sessionId: deps.sessionId,
+      setCycleClose: deps.setCycleClose,
+    }))
   }
 
   return hooks

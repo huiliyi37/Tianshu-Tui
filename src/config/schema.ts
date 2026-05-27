@@ -57,6 +57,8 @@ export const agentSchema = z.object({
   maxTurns: z.number().int().positive().default(50),
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
   autoReasoning: z.boolean().default(false),
+  /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
+  songlineEnabled: z.boolean().default(false),
   permissions: permissionsSchema.default({}),
 })
 

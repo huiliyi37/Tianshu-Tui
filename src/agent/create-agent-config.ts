@@ -5,7 +5,7 @@ import { createVolatileSnapshot } from '../prompt/volatile-snapshot.js'
 import type { AgentConfig } from './loop.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
-import type { ProviderConfig } from '../config/schema.js'
+import type { ProviderConfig, Config } from '../config/schema.js'
 import type { AuthProvider } from '../auth/types.js'
 import { getProviderProfile } from '../api/provider-profile.js'
 
@@ -26,13 +26,44 @@ export interface AgentConfigInput {
   provider: ProviderConfig
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual'
+  songlineEnabled?: boolean
   auth?: AuthProvider
   habituationThreshold?: number
 }
 
+export interface MainAgentConfigInputParams {
+  apiKey: string
+  model: ModelSpec
+  cwd: string
+  config: Pick<Config, 'agent' | 'compact'>
+  sessionId: string
+  toolDefinitions: ToolDefinition[]
+  provider: ProviderConfig
+  sessionMemoryBlock?: string
+  auth?: AuthProvider
+  habituationThreshold?: number
+}
+
+export function createMainAgentConfigInput(params: MainAgentConfigInputParams): AgentConfigInput {
+  return {
+    apiKey: params.apiKey,
+    model: params.model,
+    cwd: params.cwd,
+    compact: params.config.compact,
+    sessionId: params.sessionId,
+    toolDefinitions: params.toolDefinitions,
+    provider: params.provider,
+    sessionMemoryBlock: params.sessionMemoryBlock,
+    approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
+    songlineEnabled: params.config.agent.songlineEnabled,
+    auth: params.auth,
+    habituationThreshold: params.habituationThreshold,
+  }
+}
+
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'songlineEnabled'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -70,6 +101,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     primaryClient: client,
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,
+    songlineEnabled: input.songlineEnabled,
     autoReasoning: true,
     reasoningFloor: model.reasoningEffort,
   }

@@ -42,6 +42,25 @@ describe('loadConfig — 3-layer resolution', () => {
     assert.equal(config.agent.approval, 'auto-accept')
   })
 
+  it('applies Songline runtime opt-in from project config and session overlay', () => {
+    const projectDir = join(tempDir, 'songline-project')
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(projectDir, '.rivet-config.json'), JSON.stringify({
+      agent: { songlineEnabled: true },
+    }))
+
+    const projectConfig = loadConfig({ cwd: projectDir })
+    assert.equal(projectConfig.agent.songlineEnabled, true)
+
+    const overlayConfig = loadConfig({
+      cwd: projectDir,
+      sessionOverlay: { agent: { songlineEnabled: false } },
+    })
+    assert.equal(overlayConfig.agent.songlineEnabled, false)
+
+    rmSync(projectDir, { recursive: true, force: true })
+  })
+
   it('uses explicit projectConfigPath when provided', () => {
     const customConfigPath = join(tempDir, 'custom-config.json')
     writeFileSync(customConfigPath, JSON.stringify({

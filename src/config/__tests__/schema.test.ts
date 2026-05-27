@@ -31,6 +31,20 @@ describe('config permissions schema', () => {
     assert.deepEqual(parsed.agent.permissions.allow, [])
   })
 
+  it('keeps Songline runtime disabled by default', () => {
+    const agent = agentSchema.parse({})
+    const parsed = configSchema.parse(DEFAULT_CONFIG)
+
+    assert.equal(agent.songlineEnabled, false)
+    assert.equal(parsed.agent.songlineEnabled, false)
+  })
+
+  it('parses explicit Songline runtime opt-in', () => {
+    const agent = agentSchema.parse({ songlineEnabled: true })
+
+    assert.equal(agent.songlineEnabled, true)
+  })
+
   it('routes repo summarization workers to V4 Flash by default', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 

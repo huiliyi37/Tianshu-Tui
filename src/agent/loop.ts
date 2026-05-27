@@ -155,6 +155,8 @@ export interface AgentConfig {
   fsWatcherEnabled?: boolean
   /** Optional TaskLedger for B1 ownership tracking — records file_read/file_write/tool_exec events. */
   taskLedger?: import('./task-ledger.js').TaskLedger
+  /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. Disabled by default. */
+  songlineEnabled?: boolean
   /** Optional OwnershipLedger for real-time file ownership — updated on every file_write. */
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
   /** Optional Meridian code graph indexer for structural context. */
@@ -352,6 +354,11 @@ export class AgentLoop {
       telemetryWriter: this.telemetryWriter,
       getDomainId: () => this.sessionDomain?.id ?? null,
       getFileObservations: () => this.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
+      songlineEnabled: this.config.songlineEnabled,
+      getTaskSummary: this.config.taskLedger ? () => this.config.taskLedger!.getSummary() : undefined,
+      setCycleClose: this.config.sessionRegistry
+        ? (sessionId, closeHash) => this.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
+        : undefined,
       ...(this.config.sessionId ? {
         dream: {
           cwd: this.cwd,

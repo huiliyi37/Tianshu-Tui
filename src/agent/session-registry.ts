@@ -32,6 +32,15 @@ export interface EventRecord {
   createdAt: string
 }
 
+export interface CycleRelayEntry {
+  sessionId: string
+  cycleOpen: string
+  cycleClose: string | null
+  generation: number
+  createdAt: string
+  closedAt: string | null
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -65,6 +74,16 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+
+CREATE TABLE IF NOT EXISTS cycle_relay (
+  session_id TEXT PRIMARY KEY,
+  cycle_open TEXT NOT NULL,
+  cycle_close TEXT,
+  generation INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cycle_relay_closed ON cycle_relay(closed_at);
 `
 
 export class SessionRegistry {
@@ -218,6 +237,68 @@ export class SessionRegistry {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
     const result = this.db.prepare('DELETE FROM events WHERE created_at < ?').run(cutoff)
     return result.changes
+  }
+
+  // ── Cycle relay (Songline substrate) ─────────────────────
+
+  setCycleOpen(sessionId: string, cycleOpen: string, generation = 0): void {
+    this.db.prepare(`
+      INSERT INTO cycle_relay (session_id, cycle_open, generation)
+      VALUES (?, ?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET
+        cycle_open = excluded.cycle_open,
+        generation = excluded.generation
+    `).run(sessionId, cycleOpen, generation)
+  }
+
+  setCycleClose(sessionId: string, cycleClose: string): void {
+    this.db.prepare(`
+      INSERT INTO cycle_relay (session_id, cycle_open, cycle_close, generation, closed_at)
+      VALUES (?, ?, ?, 0, datetime('now'))
+      ON CONFLICT(session_id) DO UPDATE SET
+        cycle_close = excluded.cycle_close,
+        generation = cycle_relay.generation + 1,
+        closed_at = excluded.closed_at
+    `).run(sessionId, cycleClose, cycleClose)
+  }
+
+  getCycleOpen(sessionId: string): string | null {
+    const row = this.db.prepare(
+      'SELECT cycle_open AS cycleOpen FROM cycle_relay WHERE session_id = ?'
+    ).get(sessionId) as { cycleOpen: string } | undefined
+    return row?.cycleOpen ?? null
+  }
+
+  getCycleClose(sessionId: string): string | null {
+    const row = this.db.prepare(
+      'SELECT cycle_close AS cycleClose FROM cycle_relay WHERE session_id = ?'
+    ).get(sessionId) as { cycleClose: string | null } | undefined
+    return row?.cycleClose ?? null
+  }
+
+  getLastCycleClose(): string | null {
+    const row = this.db.prepare(`
+      SELECT cycle_close AS cycleClose
+      FROM cycle_relay
+      WHERE cycle_close IS NOT NULL
+      ORDER BY closed_at DESC, created_at DESC
+      LIMIT 1
+    `).get() as { cycleClose: string } | undefined
+    return row?.cycleClose ?? null
+  }
+
+  getCycleRelay(sessionId: string): CycleRelayEntry | null {
+    const row = this.db.prepare(`
+      SELECT session_id AS sessionId,
+             cycle_open AS cycleOpen,
+             cycle_close AS cycleClose,
+             generation,
+             created_at AS createdAt,
+             closed_at AS closedAt
+      FROM cycle_relay
+      WHERE session_id = ?
+    `).get(sessionId) as CycleRelayEntry | undefined
+    return row ?? null
   }
 
   private isProcessRunning(pid: number): boolean {

@@ -187,6 +187,7 @@ export const DEFAULT_CONFIG: Config = {
     maxTurns: 50,
     mode: 'code',
     autoReasoning: false,
+    songlineEnabled: false,
     permissions: {
       allow: [],
     },

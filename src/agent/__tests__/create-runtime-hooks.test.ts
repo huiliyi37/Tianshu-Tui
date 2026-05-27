@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { RuntimeHookPipeline, createRuntimeHookContext } from '../runtime-hooks.js'
 import { createDefaultRuntimeHooks } from '../create-runtime-hooks.js'
 
 describe('createDefaultRuntimeHooks', () => {
@@ -84,5 +85,50 @@ describe('createDefaultRuntimeHooks', () => {
       ['dream-distill', 'postSession'],
       ['telemetry-flush', 'postSession'],
     ])
+  })
+
+  it('does not register songline hook unless explicitly enabled', () => {
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      getTaskSummary: () => ({ taskId: 'task-1', eventCount: 1, readFileCount: 0, writeFileCount: 0, ownedFileCount: 0, verificationCount: 0, verificationStatus: 'verified', firstEventAt: 1, lastEventAt: 1 }),
+    })
+
+    assert.equal(hooks.some(h => h.name === 'songline-runtime'), false)
+  })
+
+  it('registers songline hook when explicitly enabled and deposits on postSession', async () => {
+    const deposits: any[] = []
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async deposit => { deposits.push(deposit) },
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      songlineEnabled: true,
+      getTaskSummary: () => ({ taskId: 'task-1', eventCount: 1, readFileCount: 0, writeFileCount: 0, ownedFileCount: 0, verificationCount: 1, verificationStatus: 'verified', firstEventAt: 1, lastEventAt: 1 }),
+    })
+
+    assert.equal(hooks.at(-1)?.name, 'songline-runtime')
+    await new RuntimeHookPipeline(hooks).runPostSession(createRuntimeHookContext({
+      cwd: '/tmp/project',
+      turn: 1,
+      recentToolHistory: [],
+      sensorium: null,
+      strategy: null,
+      vigor: null,
+      gitChangeRate: 0,
+      season: null,
+    }))
+
+    assert.equal(deposits.length, 1)
+    assert.equal(deposits[0]!.signal, 'obligation-fulfilled')
   })
 })

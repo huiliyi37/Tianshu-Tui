@@ -14,7 +14,7 @@ import { createElement, useState, useMemo, useCallback, useEffect, useRef } from
 import { App } from './tui/app.js'
 import { ErrorBoundary } from './tui/error-boundary.js'
 import { AgentLoop } from './agent/loop.js'
-import { createAgentConfig } from './agent/create-agent-config.js'
+import { createAgentConfig, createMainAgentConfigInput } from './agent/create-agent-config.js'
 import { SessionContext } from './agent/context.js'
 import { SessionPersist } from './agent/session-persist.js'
 import { evictOldSessions } from './agent/session-persist.js'
@@ -371,18 +371,17 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
   const agent = useMemo(() => {
     const playbookStore = new PlaybookStore(cwd)
 
-    const agentCfg = createAgentConfig({
+    const agentCfg = createAgentConfig(createMainAgentConfigInput({
       apiKey: activeApiKey,
       model: { id: currentModel.id, maxTokens: currentModel.maxTokens, contextWindow: currentModel.contextWindow, reasoningEffort: currentModel.reasoningEffort },
       cwd,
       provider: activeProvider,
-      compact: config.compact,
+      config,
       sessionId,
       toolDefinitions: toolRegistry.getDefinitions(),
       sessionMemoryBlock: persist.buildMemoryBlock(),
-      approvalMode: config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
       auth: activeAuth,
-    })
+    }))
 
     // --- DelegationCoordinator ---
     // Build model capability cards for all available models in the active provider.
@@ -742,17 +741,17 @@ async function main() {
       createAgent: () => {
         const toolRegistry = createDefaultToolRegistry()
 
-        const agentCfg = createAgentConfig({
+        const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,
           model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
           cwd: process.cwd(),
           provider: prov,
-          compact: cfg.compact,
+          config: cfg,
           sessionId,
           toolDefinitions: toolRegistry.getDefinitions(),
           sessionMemoryBlock: persist.buildMemoryBlock(),
-          approvalMode: 'auto-accept',
-        })
+          auth: undefined,
+        }))
 
         const goalCoordinator = new DelegationCoordinator({
           baseToolRegistry: toolRegistry,

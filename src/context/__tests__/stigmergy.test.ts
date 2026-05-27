@@ -233,6 +233,21 @@ describe('StigmergyStore', () => {
     assert.equal(fragile.length, 1)
     assert.equal(fragile[0]!.strength, 0.9)
   })
+
+  it('accepts obligation-fulfilled signal deposits', async () => {
+    const store = new StigmergyStore(storePath)
+    await store.deposit({
+      path: 'task://task-123',
+      signal: 'obligation-fulfilled',
+      strength: 0.8,
+      context: 'task task-123 verified',
+    })
+
+    const results = await store.query('task://task-123')
+    assert.equal(results.length, 1)
+    assert.equal(results[0]!.signal, 'obligation-fulfilled')
+    assert.equal(results[0]!.strength, 0.8)
+  })
 })
 
 // ─── Integration with Sensorium freshness ───────────────────────────

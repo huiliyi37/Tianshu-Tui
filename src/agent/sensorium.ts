@@ -21,6 +21,7 @@ export type PheromoneSignal =
   | 'boundary-respect'
   | 'strategic-awareness'
   | 'cache-loyalty'
+  | 'obligation-fulfilled'
 
 export interface PheromoneRef {
   path: string
