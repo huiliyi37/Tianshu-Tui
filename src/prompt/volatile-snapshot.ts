@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, readdirSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { gitStatusCache } from './volatile-git.js'
 import { summarizeGitStatus } from './git-status-summary.js'
@@ -13,8 +13,6 @@ export interface SnapshotInput {
   activeDomain?: VolatileContext['activeDomain']
 }
 
-const KNOWLEDGE_MAX_CHARS = 2000
-
 function readRivetMdOnce(cwd: string): string | undefined {
   // Load AGENTS.md (architecture map) + .rivet.md (operating manual)
   const parts: string[] = []
@@ -27,24 +25,6 @@ function readRivetMdOnce(cwd: string): string | undefined {
     if (existsSync(rivetPath)) parts.push(readFileSync(rivetPath, 'utf-8'))
   } catch { /* ignore */ }
   return parts.length > 0 ? parts.join('\n\n') : undefined
-}
-
-function readKnowledgeOnce(cwd: string): string | undefined {
-  const dir = join(cwd, '.rivet', 'knowledge')
-  try {
-    if (!existsSync(dir)) return undefined
-    const files = readdirSync(dir).filter(f => f.endsWith('.md'))
-    if (files.length === 0) return undefined
-    files.sort((a, b) => (a === 'project-memory.md' ? -1 : b === 'project-memory.md' ? 1 : a.localeCompare(b)))
-    let combined = ''
-    for (const file of files) {
-      const content = readFileSync(join(dir, file), 'utf-8').trim()
-      if (!content) continue
-      if (combined.length + content.length + 10 > KNOWLEDGE_MAX_CHARS) break
-      combined += (combined ? `\n\n<!-- ${file} -->\n` : '') + content
-    }
-    return combined || undefined
-  } catch { return undefined }
 }
 
 export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
@@ -66,6 +46,5 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
     workingSet,
     activeDomain: input.activeDomain ?? undefined,
     sessionMemoryBlock: input.sessionMemoryBlock,
-    _knowledgeSnapshot: readKnowledgeOnce(input.cwd),
   }) as VolatileContext
 }

@@ -1,5 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createVolatileSnapshot } from '../volatile-snapshot.js'
 
 describe('createVolatileSnapshot', () => {
@@ -80,5 +83,21 @@ describe('createVolatileSnapshot', () => {
       sessionMemoryBlock: 'remember this',
     })
     assert.equal(snapshot.sessionMemoryBlock, 'remember this')
+  })
+
+  it('does not snapshot project knowledge files', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'volatile-snapshot-knowledge-'))
+    try {
+      const knowledgeDir = join(cwd, '.rivet', 'knowledge')
+      mkdirSync(knowledgeDir, { recursive: true })
+      writeFileSync(join(knowledgeDir, 'project-memory.md'), '### Memory\nDo not inject me.\n', 'utf-8')
+
+      const snapshot = createVolatileSnapshot({ cwd })
+
+      assert.equal('_knowledgeSnapshot' in snapshot, false)
+      assert.equal(JSON.stringify(snapshot).includes('Do not inject me'), false)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 })
