@@ -352,7 +352,7 @@ Claude Code 有 `src/services/autoDream/`：
 **补强建议**：
 - P2: 实现自动 Dream（session 空闲时自动运行记忆整理）
 
-### 7.3 LSP 集成（天枢缺失 ❌）
+### 7.3 LSP 集成（✅ 已实现 — 2026-05-27）
 
 Claude Code 有 `src/services/lsp/`：
 - LSP 客户端 (`LSPClient.ts`)
@@ -360,13 +360,16 @@ Claude Code 有 `src/services/lsp/`：
 - LSP 服务器实例管理 (`LSPServerInstance.ts`, `LSPServerManager.ts`)
 - 被动反馈 (`passiveFeedback.ts`)
 
-天枢无 LSP 集成。
+天枢已实现：
+- `src/lsp/rpc.ts` — JSON-RPC over stdio 消息层
+- `src/lsp/manager.ts` — typescript-language-server 生命周期管理
+- `src/lsp/tools.ts` — `lsp_goto_definition` + `lsp_find_references` 工具
 
 **补强建议**：
-- P1: 实现 LSP 集成（go-to-definition, find-references）
+- ✅ P1: 实现 LSP 集成（go-to-definition, find-references）— **已完成**
 - 直接影响 tool call 信噪比和 token 效率
 
-### 7.4 MCP 集成（天枢缺失 ❌）
+### 7.4 MCP 集成（✅ 已实现 — 2026-05-16 基础 + 2026-05-27 SSE）
 
 Claude Code 有 `src/services/mcp/`：
 - MCP 客户端
@@ -374,10 +377,14 @@ Claude Code 有 `src/services/mcp/`：
 - MCP 工具集成
 - MCP Skill 构建器
 
-天枢无 MCP 集成。
+天枢已实现：
+- `src/mcp/manager.ts` — stdio + SSE 双传输，工具发现，连接生命周期
+- `src/mcp/wrapper.ts` — MCP Tool → Rivet Tool 适配
+- `src/mcp/config.ts` — 配置管理 + CLI (`rivet config mcp`)
+- Cockpit MCP 面板 + `/mcp` 命令 + 5 类错误分类器 + 策略评估
 
 **补强建议**：
-- P1: 实现 MCP 客户端（扩展工具生态）
+- ✅ P1: 实现 MCP 客户端（扩展工具生态）— **已完成**
 
 ### 7.5 Analytics/遥测（天枢缺失 ❌）
 
@@ -400,8 +407,8 @@ Claude Code 有：
 | 功能 | 价值 | 复杂度 |
 |------|------|--------|
 | Memory 系统 | 跨会话知识积累 | 中 |
-| LSP 集成 | 提升 tool call 信噪比 | 中 |
-| MCP 客户端 | 扩展工具生态 | 中 |
+| LSP 集成 | 提升 tool call 信噪比 | 中 | ✅ 已完成 (2026-05-27) |
+| MCP 客户端 | 扩展工具生态 | 中 | ✅ 已完成 (2026-05-16 + 2026-05-27 SSE) |
 
 ### P1 — 重要差异（应在 1-2 个迭代内补齐）
 
@@ -469,8 +476,8 @@ Claude Code 有：
 3. 破坏性命令警告（移植 `destructiveCommandWarning.ts` 模式）
 
 ### Phase 2（2 周）：能力扩展
-4. LSP 集成原型（go-to-definition）
-5. MCP 客户端原型
+4. ~~LSP 集成原型（go-to-definition）~~ ✅ 已完成 (2026-05-27, `src/lsp/`)
+5. ~~MCP 客户端原型~~ ✅ 已完成 (2026-05-16 stdio + 2026-05-27 SSE, `src/mcp/`)
 6. Plan Mode 工作流
 7. Agent 定义外部化
 

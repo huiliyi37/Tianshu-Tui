@@ -168,6 +168,14 @@
 | policy.ts | 63 | tool approval policy |
 | failure-classifier.ts | 35 | MCP failure classification |
 
+### lsp/ (3 files) — Language Server Protocol client
+
+| File | Lines | Key |
+|------|-------|-----|
+| rpc.ts | 133 | JSON-RPC message encode/decode + request/response matching |
+| manager.ts | 192 | LspManager: typescript-language-server lifecycle, goto-def, find-refs |
+| tools.ts | 137 | lsp_goto_definition + lsp_find_references tools |
+
 ### model/ (3 files)
 
 | File | Lines | Key |

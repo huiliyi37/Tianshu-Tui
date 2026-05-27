@@ -288,7 +288,7 @@ cd ../project-feature-a && rivet
 
 - **Prefix cache optimization** — Frozen system prompt + structured message ordering
 - **Streaming TUI** — Ink 6 (React for CLI), 50ms render batching (~20fps)
-- **15 builtin tools** — bash, diff, edit_file, read_file, write_file, grep, glob, run_tests, git, todo, web_fetch, undo, inspect_project, repo_map, related_tests
+- **17 builtin tools** — bash, diff, edit_file, read_file, write_file, grep, glob, run_tests, git, todo, web_fetch, undo, inspect_project, repo_map, related_tests, lsp_goto_definition, lsp_find_references
 - **Non-blocking git status** — Stale cache + async refresh, no event loop blocking
 - **Approval workflow** — y/n confirmation for dangerous operations
 - **Session persistence** — JSONL append, resume on restart, compact on exit
@@ -309,7 +309,8 @@ cd ../project-feature-a && rivet
 - **Slash commands** — /help /exit /compact /model /clear /rollback /sessions /resume /verbose /debug /evidence /undo /auto /mcp /context /memory /theme /cockpit /interview /effort
 - **Reasoning effort** — `/effort` controls reasoning depth: `off` | `low` | `medium` | `high` | `max`; persists for the session, `max` for full thinking on every turn
 - **Config CLI** — Manage API keys, providers, models, MCP servers from terminal
-- **MCP client** — Model Context Protocol: connect external tool servers (stdio), auto-discover tools, register as `mcp__<server>__<tool>` (with `__` sanitization), parallel init, approval heuristics, 5-class error classifier (config/auth/network/protocol/tool_error), `/mcp` + `/debug mcp` status
+- **MCP client** — Model Context Protocol: connect external tool servers via stdio or SSE, auto-discover tools, register as `mcp__<server>__<tool>` (with `__` sanitization), parallel init, approval heuristics, 5-class error classifier (config/auth/network/protocol/tool_error), `/mcp` + `/debug mcp` status
+- **LSP integration** — Language Server Protocol: `lsp_goto_definition` and `lsp_find_references` tools powered by typescript-language-server, symbol-level navigation replaces blind grep for TypeScript projects
 - **.gitignore filter** — Skips node_modules, .git, build artifacts
 - **Headless mode** — `-p`/`--print` flag runs AgentLoop without Ink; `--json` returns structured JSON with success/text/usage/error
 - **Permission allow rules** — Configurable allowlist with exact, wildcard, and pattern matching; allowlisted tools skip approval while preserving risk tracking
