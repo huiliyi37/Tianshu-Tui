@@ -96,6 +96,27 @@ describe('closePlanMarkdown', () => {
     assert.ok(second.content.includes('**执行状态：** 已闭环。Task 1,2,4 均已完成；验证通过；交付门检查：GREEN。'))
   })
 
+  it('ignores task headings and checkboxes inside fenced code blocks', () => {
+    const input = `# Demo 实现计划\n\n### Task 1 — Real\n\n- [ ] 修改：\`src/real.ts\`\n\n\`\`\`md\n### Task 2 — Example Only\n\n- [ ] 修改：\`src/example.ts\`\n\`\`\`\n\n### Task 3 — Real Later\n\n- [ ] 测试：\`src/real.test.ts\`\n`
+
+    const result = closePlanMarkdown(input, { tasks: '1-3', updateClosure: false })
+
+    assert.deepEqual(result.changes.map(change => change.taskNumber), [1, 3])
+    assert.equal(result.totalChangedCheckboxes, 2)
+    assert.ok(result.content.includes('### Task 2 — Example Only\n\n- [ ] 修改：`src/example.ts`'))
+    assert.ok(result.content.includes('### Task 3 — Real Later\n\n- [x] 测试：`src/real.test.ts`'))
+  })
+
+  it('ignores execution closure headings inside fenced code blocks', () => {
+    const input = `# Demo 实现计划\n\n**技术栈：** TypeScript strict。\n\n### Task 1 — Real\n\n- [ ] 修改：\`src/real.ts\`\n\n\`\`\`md\n## 7. Execution closure\n\n示例闭环内容，不是真实章节。\n\`\`\`\n\n### Task 2 — Real Later\n\n- [ ] 测试：\`src/real.test.ts\`\n\n## 7. Execution handoff\n\n选哪种方式？\n`
+
+    const result = closePlanMarkdown(input, { tasks: '1-2', deliveryState: 'GREEN' })
+
+    assert.ok(result.content.includes('```md\n## 7. Execution closure\n\n示例闭环内容，不是真实章节。\n```'))
+    assert.ok(result.content.includes('## 7. Execution closure\n\n已闭环：Task 1-2 均已完成并通过验证。'))
+    assert.ok(!result.content.includes('选哪种方式？'))
+  })
+
   it('throws when no selected task blocks match', () => {
     assert.throws(() => closePlanMarkdown(fixture, { tasks: '9' }), /No matching task blocks/)
   })

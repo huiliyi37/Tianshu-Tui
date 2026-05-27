@@ -60,7 +60,15 @@ export function parseTaskSelection(selection: string): number[] {
 
 function findTaskBlocks(lines: string[]): TaskBlock[] {
   const blocks: TaskBlock[] = []
+  let inFence = false
+
   for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i]!)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) continue
+
     const match = lines[i]!.match(/^###\s+Task\s+(\d+)\b/)
     if (!match) continue
     if (blocks.length > 0) {
@@ -69,6 +77,22 @@ function findTaskBlocks(lines: string[]): TaskBlock[] {
     blocks.push({ taskNumber: Number(match[1]), startLine: i, endLineExclusive: lines.length })
   }
   return blocks
+}
+
+function computeFenceMask(lines: string[]): boolean[] {
+  const mask = new Array<boolean>(lines.length).fill(false)
+  let inFence = false
+
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i]!)) {
+      mask[i] = true
+      inFence = !inFence
+      continue
+    }
+    mask[i] = inFence
+  }
+
+  return mask
 }
 
 function restoreTrailingNewline(lines: string[], hasTrailingNewline: boolean): string {
@@ -85,14 +109,15 @@ function formatTaskLabel(tasks: string, selected: number[], allTaskNumbers: numb
 }
 
 function upsertExecutionStatus(lines: string[], statusLine: string): { lines: string[]; updated: boolean; inserted: boolean } {
-  const existingIndex = lines.findIndex(line => line.startsWith('**执行状态：**'))
+  const fenceMask = computeFenceMask(lines)
+  const existingIndex = lines.findIndex((line, index) => !fenceMask[index] && line.startsWith('**执行状态：**'))
   if (existingIndex >= 0) {
     const next = [...lines]
     next[existingIndex] = statusLine
     return { lines: next, updated: true, inserted: false }
   }
 
-  const techIndex = lines.findIndex(line => line.startsWith('**技术栈：**'))
+  const techIndex = lines.findIndex((line, index) => !fenceMask[index] && line.startsWith('**技术栈：**'))
   if (techIndex >= 0) {
     const insertAt = lines.findIndex((line, index) => index > techIndex && line.trim() === '')
     const target = insertAt >= 0 ? insertAt : techIndex + 1
@@ -107,7 +132,8 @@ function upsertExecutionStatus(lines: string[], statusLine: string): { lines: st
 }
 
 function upsertExecutionClosure(lines: string[], closure: string[]): { lines: string[]; updated: boolean; inserted: boolean } {
-  const headingIndex = lines.findIndex(line => /^##\s+7\.\s+Execution\s+(handoff|closure)\b/.test(line))
+  const fenceMask = computeFenceMask(lines)
+  const headingIndex = lines.findIndex((line, index) => !fenceMask[index] && /^##\s+7\.\s+Execution\s+(handoff|closure)\b/.test(line))
   if (headingIndex >= 0) {
     return { lines: [...lines.slice(0, headingIndex), ...closure], updated: true, inserted: false }
   }
@@ -147,6 +173,7 @@ function buildClosure(taskLabel: string, options: PlanCloseOptions): string[] {
 export function closePlanMarkdown(markdown: string, options: PlanCloseOptions): PlanCloseResult {
   const hasTrailingNewline = markdown.endsWith('\n')
   const lines = hasTrailingNewline ? markdown.slice(0, -1).split('\n') : markdown.split('\n')
+  const fenceMask = computeFenceMask(lines)
   const blocks = findTaskBlocks(lines)
   const selected = parseTaskSelection(options.tasks)
   const selectedSet = selected.length > 0 ? new Set(selected) : new Set(blocks.map(b => b.taskNumber))
@@ -163,6 +190,7 @@ export function closePlanMarkdown(markdown: string, options: PlanCloseOptions): 
     let checkboxCount = 0
     let changedCheckboxCount = 0
     for (let i = block.startLine; i < block.endLineExclusive; i++) {
+      if (fenceMask[i]) continue
       const line = nextLines[i]!
       if (/^\s*- \[[ xX]\]/.test(line)) checkboxCount++
       if (/^(\s*- \[) \](.*)$/.test(line)) {
