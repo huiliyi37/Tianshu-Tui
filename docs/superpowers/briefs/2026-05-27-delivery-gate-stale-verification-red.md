@@ -60,6 +60,20 @@ Attribution: Owned verification failure: run_tests src/agent/__tests__/scoped-gi
 - typecheck 已通过；
 - deliver_task RED 来自旧 `run_tests` 误用记录，没有被后续等价验证 supersede。
 
+## TODO 小任务：tool invocation failure 归类
+
+> 优先级：P2
+> 范围：`src/agent/verification-attribution.ts`、验证记录生成路径、相关测试
+
+目标：把 test runner/filter 用法错误导致的失败归类为 `tool_invocation_failure`，不要直接标记为 owned test failure。
+
+验收标准：
+
+- `run_tests` 或等价验证命令返回 `exit=1` 但 `0 passed, 0 failed, 0 skipped` 时，不进入 `owned_failure`；
+- 交付报告显示为工具调用/验证调用错误，并提示使用 repo 推荐命令重跑；
+- 后续等价的成功验证可以 supersede 这条 invocation failure；
+- 真正包含 failed tests 的 targeted failure 仍保持 RED 阻塞。
+
 ## 后续优化方向
 
 可以考虑让验证 supersession key 从纯 command 字符串升级为结构化 verification identity：
