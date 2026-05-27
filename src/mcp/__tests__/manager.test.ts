@@ -174,4 +174,38 @@ describe('McpManager', () => {
     assert.equal(closed, true)
     assert.deepEqual(mgr.getStates(), [])
   })
+
+  it('connects to SSE server via URL config', async () => {
+    let connectedUrl = ''
+    let connectedHeaders: Record<string, string> = {}
+
+    const mgr = new McpManager(makeConfig({
+      remote: { url: 'http://localhost:3001/mcp', headers: { Authorization: 'Bearer test' } },
+    }))
+
+    // Override connect & discover — mock SSE connection
+    mgr['_connectServer'] = async (serverId, config) => {
+      if (config && 'url' in config && config.url) {
+        connectedUrl = config.url
+        connectedHeaders = (config as any).headers ?? {}
+        return {
+          client: {} as any,
+          transport: { close: async () => {} },
+          serverId,
+        }
+      }
+      throw new Error('not sse')
+    }
+    mgr['_discoverTools'] = async () => [{
+      name: 'remote_tool',
+      description: 'Remote tool via SSE',
+      inputSchema: { type: 'object' as const, properties: {} },
+    }]
+
+    await mgr.initialize()
+    assert.equal(connectedUrl, 'http://localhost:3001/mcp')
+    assert.equal(connectedHeaders['Authorization'], 'Bearer test')
+    assert.equal(mgr.getAllTools().length, 1)
+    assert.equal(mgr.getAllTools()[0]!.definition.name, 'mcp__remote__remote_tool')
+  })
 })

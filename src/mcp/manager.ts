@@ -170,7 +170,17 @@ export class McpManager {
       await withTimeout(client.connect(transport), `MCP connect ${serverId}`, this.timeoutMs)
       return { client, transport, serverId }
     } else if (cfg.url) {
-      throw new Error(`SSE transport not yet implemented for server ${serverId}`)
+      const { StreamableHTTPClientTransport } = await import(
+        '@modelcontextprotocol/sdk/client/streamableHttp.js'
+      ) as typeof import('@modelcontextprotocol/sdk/client/streamableHttp.js')
+      const transport = new StreamableHTTPClientTransport(
+        new URL(cfg.url),
+        {
+          requestInit: cfg.headers ? { headers: cfg.headers as Record<string, string> } : undefined,
+        },
+      )
+      await withTimeout(client.connect(transport), `MCP connect ${serverId}`, this.timeoutMs)
+      return { client, transport, serverId }
     }
 
     throw new Error(`Invalid MCP server config for ${serverId}`)
