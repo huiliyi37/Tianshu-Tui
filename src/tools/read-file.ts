@@ -267,42 +267,43 @@ Bad:  re-reading the same file you already read this session  → look at your p
         const prior = readHistory.get(dedupKey)
         if (prior && prior.mtimeMs === currentMtimeMs && prior.artifactId) {
           // Already read this exact slice; file hasn't changed since.
-          debugLog(`[read-dedup] skip file=${canonical} offset=${offset} limit=${limit ?? 'all'} prior_age_ms=${Date.now() - prior.recordedAt}`)
-          const recoveryHint = prior.artifactId
-            ? `If you can no longer see the earlier result (it may have been compacted to a summary), call read_section(artifactId="${prior.artifactId}", section="L1-L500") to retrieve it from disk.`
-            : `Look at the earlier tool_result in your context.`
-          const message = [
-            `read_file: this exact range was already returned earlier in the conversation and the file has not been modified since.`,
-            `  file: ${canonical}`,
-            `  offset: ${offset}, limit: ${limit ?? 'all'}`,
-            `  prior result: ${prior.rawBytes} bytes raw${prior.truncated ? ` (model saw ${prior.modelBytes})` : ''}`,
-            ``,
-            recoveryHint,
-            `Do NOT call read_file again with the same args — it will be deduped again.`,
-            `If you need a different slice, change offset/limit. If you suspect the file changed, edit it first or read a different file.`,
-          ].join('\n')
-          return { content: message }
+          // Instead of blocking and telling the model to call read_section,
+          // silently re-serve content from the artifact. This avoids an extra
+          // tool call round-trip AND handles the case where stale-round
+          // compaction has truncated the original tool_result from context.
+          if (params.artifactStore) {
+            const recovered = await params.artifactStore.readRaw(prior.artifactId)
+            if (recovered) {
+              debugLog(`[read-dedup] re-serve from artifact file=${canonical} offset=${offset} limit=${limit ?? 'all'}`)
+              const lines = recovered.split('\n')
+              const start = Math.max(0, offset - 1)
+              const end = limit ? start + limit : lines.length
+              const slice = lines.slice(start, end).join('\n')
+              return { content: slice }
+            }
+          }
+          // Fallback: artifact unreadable, allow normal re-read
+          debugLog(`[read-dedup] artifact unreadable, falling through to normal read file=${canonical}`)
         }
         // File-level dedup: if this file was already read in full and hasn't changed,
         // any non-full (fragment) read is a subset — block it.
         // Full→full is handled by readHistory (per-slice) above.
         const fullEntry = fileReadHistory.get(canonical)
-        if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && (offset !== 1 || limit !== undefined)) {
-          // Full read exists and file unchanged → this read (any offset/limit) is redundant
-          debugLog(`[read-dedup-file] skip file=${canonical} offset=${offset} limit=${limit ?? 'all'} prior_age_ms=${Date.now() - fullEntry.recordedAt}`)
-          const recoveryHint = fullEntry.artifactId
-            ? `If you can no longer see the earlier result (it may have been compacted), call read_section(artifactId="${fullEntry.artifactId}", section="L${offset}-L${offset + (limit ?? fullEntry.totalLines) - 1}") to retrieve it from disk.`
-            : `Look at the earlier tool_result in your context.`
-          const message = [
-            `read_file: this file was already read in full earlier and has not been modified since.`,
-            `  file: ${canonical}`,
-            `  prior result: ${fullEntry.rawBytes} bytes raw, ${fullEntry.totalLines} lines total`,
-            `  current request: offset=${offset}, limit=${limit ?? 'all'} — this range is covered by the earlier full read.`,
-            ``,
-            recoveryHint,
-            `Do NOT call read_file for fragments of an already-read file — use your earlier tool_result.`,
-          ].join('\n')
-          return { content: message }
+        if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && fullEntry.artifactId && (offset !== 1 || limit !== undefined)) {
+          // Full read exists and file unchanged → serve the requested slice from artifact
+          if (params.artifactStore) {
+            const recovered = await params.artifactStore.readRaw(fullEntry.artifactId)
+            if (recovered) {
+              debugLog(`[read-dedup-file] re-serve slice from artifact file=${canonical} offset=${offset} limit=${limit ?? 'all'}`)
+              const lines = recovered.split('\n')
+              const start = Math.max(0, offset - 1)
+              const end = limit ? start + limit : lines.length
+              const slice = lines.slice(start, end).join('\n')
+              return { content: slice }
+            }
+          }
+          // Fallback: artifact unreadable, allow normal read
+          debugLog(`[read-dedup-file] artifact unreadable, falling through file=${canonical}`)
         }
       }
     } catch { /* fall through to real read; e.g. invalid path → let readFilePayload error normally */ }
