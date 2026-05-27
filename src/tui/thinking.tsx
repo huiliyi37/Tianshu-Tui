@@ -157,20 +157,17 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
     }
   })
 
-  if (!thinking && !isStreaming) return null
+  if (!thinking || !isStreaming) return null
 
-  const spinner = isStreaming ? (elapsed % 2000 < 1000 ? '⠋' : '⠙') : ''
+  const spinner = elapsed % 2000 < 1000 ? '⠋' : '⠙'
   const statusLabel = thinkingStatusLabel({ isStreaming, elapsedMs: elapsed, completedDurationMs, stale })
 
-  // During streaming: compact single-line status to prevent layout instability.
-  // Only expand on explicit Tab toggle (focused && key.tab).
-  // After streaming: show collapsed preview of last few lines.
-  if (isStreaming && !expanded) {
+  if (!expanded) {
     return (
       <Box flexDirection="column" paddingX={2}>
         <Text dimColor>
           {'▸'} {spinner} Thinking {statusLabel}
-          {thinking ? ` (${formatThinkingSize(thinking.length)})` : ''}
+          {` (${formatThinkingSize(thinking.length)})`}
           {focused ? ' (Tab to expand)' : ''}
         </Text>
       </Box>
@@ -178,39 +175,21 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
   }
 
   const MAX_VISIBLE_LINES = 8
-  const COLLAPSED_PREVIEW_LINES = 3
   const thinkingLines = truncateThinking(thinking).split('\n')
   const visibleThinking = thinkingLines.length > MAX_VISIBLE_LINES
-    ? [...thinkingLines.slice(-MAX_VISIBLE_LINES), `... ${thinkingLines.length - MAX_VISIBLE_LINES} earlier lines`].join('\n')
+    ? [`... ${thinkingLines.length - MAX_VISIBLE_LINES} earlier lines`, ...thinkingLines.slice(-MAX_VISIBLE_LINES)].join('\n')
     : thinkingLines.join('\n')
 
-  // Collapsed preview: show last N lines so user can see recent thinking without expanding
-  const previewLines = thinkingLines.slice(-COLLAPSED_PREVIEW_LINES)
-  const previewOmitted = Math.max(0, thinkingLines.length - COLLAPSED_PREVIEW_LINES)
-
   return (
-    <Box flexDirection="column" paddingX={thinking ? 2 : 1}>
+    <Box flexDirection="column" paddingX={2}>
       <Text dimColor>
-        {expanded ? '▾' : '▸'} {spinner} Thinking{isStreaming ? ` ${statusLabel}` : ` ${statusLabel}`}
-        {thinking ? ` (${formatThinkingSize(thinking.length)})` : ''}
-        {focused ? ` (Tab to ${expanded ? 'collapse' : 'expand'})` : ''}
+        {'▾'} {spinner} Thinking {statusLabel}
+        {` (${formatThinkingSize(thinking.length)})`}
+        {focused ? ' (Tab to collapse)' : ''}
       </Text>
-      {expanded ? (
-        <Box paddingLeft={2} borderStyle="single" borderColor="gray">
-          <Text dimColor>{visibleThinking}</Text>
-        </Box>
-      ) : (
-        previewLines.length > 0 && (
-          <Box paddingLeft={2} flexDirection="column">
-            {previewOmitted > 0 && (
-              <Text dimColor>  ... {previewOmitted} earlier lines</Text>
-            )}
-            {previewLines.map((line, i) => (
-              <Text key={i} dimColor>  {line}</Text>
-            ))}
-          </Box>
-        )
-      )}
+      <Box paddingLeft={2} borderStyle="single" borderColor="gray">
+        <Text dimColor>{visibleThinking}</Text>
+      </Box>
     </Box>
   )
 }

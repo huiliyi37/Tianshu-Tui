@@ -964,8 +964,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           clearTimeout(thinkTimer.current)
           thinkTimer.current = null
         }
-        lastFlushedThink.current = thinkBuf.current
-        setStreamingThinking(thinkBuf.current)
+        lastFlushedThink.current = ''
+        setStreamingThinking('')
         thinkBuf.current = ''
 
         const remaining = liveToolsRef.current

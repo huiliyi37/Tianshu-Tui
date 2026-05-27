@@ -3,6 +3,8 @@ import { memo } from 'react'
 import { Markdown } from './markdown-render.js'
 import { getTheme } from './theme.js'
 
+const MAX_STREAMING_LINES = 20
+
 interface StreamOutputProps {
   text: string
   isStreaming: boolean
@@ -10,9 +12,6 @@ interface StreamOutputProps {
 
 export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: StreamOutputProps) {
   const theme = getTheme()
-  // While the agent is active but no visible text has arrived yet, keep a
-  // lightweight status on screen. Without this, long provider/tool/post-turn
-  // silent windows look like a frozen TUI.
   if (!text) {
     if (!isStreaming) return null
     return (
@@ -22,7 +21,17 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
     )
   }
 
-  const textWithCursor = isStreaming ? text + '▊' : text
+  let displayText = text
+  let omittedLines = 0
+  if (isStreaming) {
+    const lines = text.split('\n')
+    if (lines.length > MAX_STREAMING_LINES) {
+      omittedLines = lines.length - MAX_STREAMING_LINES
+      displayText = lines.slice(-MAX_STREAMING_LINES).join('\n')
+    }
+  }
+
+  const textWithCursor = isStreaming ? displayText + '▊' : displayText
 
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={1}>
@@ -30,11 +39,12 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
         <Box flexDirection="row" gap={1} marginBottom={1}>
           <Text color={theme.assistantColor} bold>{'●'}</Text>
           <Text color={theme.assistantColor} bold>Assistant</Text>
+          {isStreaming && omittedLines > 0 && (
+            <Text dimColor>(… {omittedLines} earlier lines)</Text>
+          )}
         </Box>
         <Box flexDirection="column" paddingLeft={2}>
           {isStreaming ? (
-            // Simplified rendering during streaming: plain text to avoid
-            // broken markdown from incomplete code blocks, links, etc.
             <Text>{textWithCursor}</Text>
           ) : (
             <Markdown text={textWithCursor} />

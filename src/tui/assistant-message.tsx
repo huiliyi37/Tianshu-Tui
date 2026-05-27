@@ -2,7 +2,7 @@ import { Box, Text, useInput } from 'ink'
 import { memo, useState } from 'react'
 import { getTheme } from './theme.js'
 import { Markdown } from './markdown-render.js'
-import { formatThinkingSize, formatDuration } from './thinking.js'
+import { formatThinkingSize } from './thinking.js'
 
 interface AssistantMessageProps {
   content: string
@@ -10,6 +10,7 @@ interface AssistantMessageProps {
 }
 
 const THINKING_PREVIEW_LINES = 3
+const THINKING_MAX_EXPANDED_LINES = 30
 
 export const AssistantMessage = memo(function AssistantMessage({ content, thinking }: AssistantMessageProps) {
   const theme = getTheme()
@@ -26,8 +27,9 @@ export const AssistantMessage = memo(function AssistantMessage({ content, thinki
   // Thinking-only turn: model produced reasoning but no text output
   if (!content && thinking) {
     const lines = thinking.split('\n')
-    const visibleLines = thinkingExpanded ? lines : lines.slice(0, THINKING_PREVIEW_LINES)
-    const omitted = thinkingExpanded ? 0 : Math.max(0, lines.length - THINKING_PREVIEW_LINES)
+    const maxLines = thinkingExpanded ? THINKING_MAX_EXPANDED_LINES : THINKING_PREVIEW_LINES
+    const visibleLines = lines.slice(0, maxLines)
+    const omitted = Math.max(0, lines.length - maxLines)
     return (
       <Box flexDirection="column" paddingX={1} marginBottom={1}>
         <Box borderStyle="round" borderColor={theme.assistantColor} paddingX={1} flexDirection="column">
@@ -55,8 +57,9 @@ export const AssistantMessage = memo(function AssistantMessage({ content, thinki
   // Content + thinking: show content, with collapsible thinking section
   if (content && thinking) {
     const thinkLines = thinking.split('\n')
-    const visibleThink = thinkingExpanded ? thinkLines : thinkLines.slice(0, THINKING_PREVIEW_LINES)
-    const omitted = thinkingExpanded ? 0 : Math.max(0, thinkLines.length - THINKING_PREVIEW_LINES)
+    const maxLines = thinkingExpanded ? THINKING_MAX_EXPANDED_LINES : THINKING_PREVIEW_LINES
+    const visibleThink = thinkLines.slice(0, maxLines)
+    const omitted = Math.max(0, thinkLines.length - maxLines)
     return (
       <Box flexDirection="column" paddingX={1} marginBottom={1}>
         <Box borderStyle="round" borderColor={theme.assistantColor} paddingX={1} flexDirection="column">
