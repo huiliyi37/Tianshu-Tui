@@ -14,6 +14,8 @@ function makeContext(opts: {
   externalFiles?: string[]
   dirtyFiles?: string[]
   verifications?: Array<{ command: string; status: 'passed' | 'failed' | 'blocked' }>
+  projectMemory?: string
+  commitOwnedFiles?: (cwd: string, files: string[], message: string) => { ok: boolean; output: string }
 }) {
   const baseline = createWorktreeBaseline({
     branch: 'feat/b1',
@@ -35,6 +37,8 @@ function makeContext(opts: {
     ownership,
     gate,
     getCurrentDirtyFiles: () => opts.dirtyFiles,
+    getProjectMemoryContent: () => opts.projectMemory,
+    commitOwnedFiles: opts.commitOwnedFiles,
   }))
 
   const params: ToolCallParams = {
@@ -76,6 +80,9 @@ describe('deliver-task — semantic task delivery tool', () => {
     const { tool, params } = makeContext({
       taskId: 't1',
       ownedFiles: ['src/a.ts'],
+      commitOwnedFiles: () => {
+        throw new Error('commit executor should not run when gate is RED')
+      },
     })
 
     const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: test' } })
@@ -241,5 +248,59 @@ describe('deliver-task — semantic task delivery tool', () => {
     const r2 = await ctx2.tool.execute(ctx2.params)
 
     assert.equal(r1.content, r2.content)
+  })
+
+  it('includes review principle checklist for owned files matching project memory evidence', async () => {
+    const projectMemory = `### 2026-05-27 — Real-Time Systems Need Boundary Clarity Before Speed
+
+**Kind**: architectural_invariant / review_principle
+
+**Claim**: Boundary clarity comes before speed.
+
+**Review rule**:
+Do not declare a streamed response duplicate in the middle of the stream.
+
+**Evidence**:
+- \`src/agent/loop.ts\`
+`
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/agent/loop.ts'],
+      dirtyFiles: ['src/agent/loop.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      projectMemory,
+    })
+
+    const result = await tool.execute(params)
+
+    assert.match(result.content, /Review principle checklist:/)
+    assert.match(result.content, /Do not declare a streamed response duplicate/)
+    assert.match(result.content, /Delivery Gate: GREEN/)
+  })
+
+  it('does not include checklist when no evidence paths match owned files', async () => {
+    const projectMemory = `### 2026-05-27 — Real-Time Systems Need Boundary Clarity Before Speed
+
+**Kind**: architectural_invariant / review_principle
+
+**Claim**: Boundary clarity comes before speed.
+
+**Review rule**:
+Do not declare a streamed response duplicate in the middle of the stream.
+
+**Evidence**:
+- \`src/agent/loop.ts\`
+`
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/config/schema.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      projectMemory,
+    })
+
+    const result = await tool.execute(params)
+
+    assert.doesNotMatch(result.content, /Review principle checklist:/)
+    assert.match(result.content, /Delivery Gate: GREEN/)
   })
 })

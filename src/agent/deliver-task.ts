@@ -9,8 +9,8 @@
  * - 如果 YELLOW（external blockers），说明但不阻塞
  * - 如果 GREEN，输出结构化交付报告
  *
- * 不会自动执行 git commit —— agent 应读取报告后自行决定。
- * 这是"交付门判断"，不是"交付执行"。
+ * 默认只输出交付门报告。
+ * 当 commit=true 且 approval 通过时，会执行 ownership-scoped commit。
  *
  * HEARTH 兼容：交付报告可沉积为 cycle_close 的 durable evidence。
  * Songline 兼容：交付状态是 obligation fulfillment 信号，可沉积 pheromone。
@@ -19,13 +19,16 @@
  * @task B1-8
  */
 
+import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
 import type { DeliveryGateV2 } from './delivery-gate-v2.js'
 import { summarizeOwnershipHealth } from './ownership-health.js'
+import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
+import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -33,10 +36,18 @@ export interface B1Context {
   gate: DeliveryGateV2
   /** Test hook / alternate runtime source for current dirty files. */
   getCurrentDirtyFiles?: (cwd: string) => string[] | undefined
+  /** Test hook / alternate runtime source for project memory markdown. */
+  getProjectMemoryContent?: (cwd: string) => string | undefined
+  /** Test hook / alternate runtime executor for scoped commits. */
+  commitOwnedFiles?: (cwd: string, files: string[], message: string) => ScopedCommitResult
 }
 
 function parseNulFileList(output: string): string[] {
   return output.split('\0').filter(Boolean)
+}
+
+function readProjectMemory(cwd: string): string | undefined {
+  try { return readFileSync(join(cwd, '.rivet', 'knowledge', 'project-memory.md'), 'utf-8') } catch { return undefined }
 }
 
 function gitNameList(cwd: string, args: string[]): string[] | null {
@@ -117,6 +128,20 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         lines.push(`Superseded verification failures: ${report.supersededFailures}`)
       }
 
+      // Memory-driven review checklist (non-blocking, informational only)
+      const projectMemory = ctx.getProjectMemoryContent?.(params.cwd) ?? readProjectMemory(params.cwd)
+      const checklist = projectMemory
+        ? buildReviewPrincipleChecklist({ knowledgeMarkdown: projectMemory, changedFiles: report.ownedFiles })
+        : []
+      if (checklist.length > 0) {
+        lines.push('', 'Review principle checklist:')
+        for (const item of checklist) {
+          lines.push(`  - ${item.question}`)
+          lines.push(`    Source: ${item.source}`)
+          lines.push(`    Reason: ${item.reason}`)
+        }
+      }
+
       const health = summarizeOwnershipHealth({
         ownedFiles: report.ownedFiles,
         externalFiles: report.externalFiles,
@@ -149,9 +174,15 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
           lines.push('', '❌ Commit requires a "message" parameter.')
           return { content: lines.join('\n'), isError: true }
         }
-        lines.push('', `✅ Ready to commit with message: "${message}"`)
-        lines.push(`   (scoped to ${report.ownedFileCount} owned file(s))`)
-        lines.push('   Use git commit to execute.')
+        const executor = ctx.commitOwnedFiles ?? ((cwd, files, msg) => commitScopedFiles({ cwd, files, message: msg }))
+        const commitResult = executor(params.cwd, report.ownedFiles, message)
+        if (!commitResult.ok) {
+          lines.push('', `❌ Scoped commit failed: ${commitResult.output}`)
+          return { content: lines.join('\n'), isError: true }
+        }
+        lines.push('', `✅ Scoped commit created with message: "${message}"`)
+        lines.push(`   Files: ${report.ownedFiles.join(', ') || '(none)'}`)
+        if (commitResult.output) lines.push(`   ${commitResult.output}`)
       }
 
       return { content: lines.join('\n') }
