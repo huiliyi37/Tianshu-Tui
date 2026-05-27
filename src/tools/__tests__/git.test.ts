@@ -113,7 +113,7 @@ describe('GIT_TOOL', () => {
       cwd: TMP,
     })
     assert.equal(result.isError, true)
-    assert.match(result.content, /No session-owned files/)
+    assert.match(result.content, /deliver_task with commit=true/)
     assert.equal(execSync('git rev-parse --short HEAD', { cwd: TMP, encoding: 'utf-8' }).trim(), headBefore)
   })
 

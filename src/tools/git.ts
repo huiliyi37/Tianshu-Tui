@@ -126,7 +126,7 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
             commitArgs.push('--only', '--', ...scopedFiles)
           } else if (!hasStagedChanges(cwd)) {
             return {
-              content: 'No session-owned files to commit and no staged changes. Stage explicit files first, or modify files in this session before using git commit.',
+              content: 'No session-owned files were provided to git commit and no staged changes exist. Use deliver_task with commit=true for ownership-scoped delivery, or stage explicit files if you intentionally manage git manually.',
               isError: true,
             }
           }
