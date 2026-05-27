@@ -84,6 +84,45 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(writePlan?.prompt.includes('writing-plans'))
   })
 
+  it('resolves /plan close into a plan_close tool prompt', () => {
+    const resolved = resolveEcosystemWorkflowInput('/plan close docs/superpowers/plans/demo.md --tasks 1-7 --verified npx tsc --noEmit --delivery YELLOW --note external files present')
+
+    assert.equal(resolved?.command, '/plan')
+    assert.ok(resolved?.prompt.includes('Use the plan_close tool'))
+    assert.ok(resolved?.prompt.includes('- file_path: docs/superpowers/plans/demo.md'))
+    assert.ok(resolved?.prompt.includes('- tasks: 1-7'))
+    assert.ok(resolved?.prompt.includes('- apply: false'))
+    assert.ok(resolved?.prompt.includes('Preview only; do not write the file.'))
+    assert.ok(resolved?.prompt.includes('npx tsc --noEmit'))
+    assert.ok(resolved?.prompt.includes('- deliveryState: YELLOW'))
+    assert.ok(resolved?.prompt.includes('- note: external files present'))
+  })
+
+  it('resolves /plan-close into a plan_close tool prompt with apply flag', () => {
+    const resolved = resolveEcosystemWorkflowInput('/plan-close docs/superpowers/plans/demo.md --tasks all --apply')
+
+    assert.equal(resolved?.command, '/plan-close')
+    assert.ok(resolved?.prompt.includes('Use the plan_close tool'))
+    assert.ok(resolved?.prompt.includes('- tasks: all'))
+    assert.ok(resolved?.prompt.includes('- apply: true'))
+    assert.ok(!resolved?.prompt.includes('Preview only'))
+  })
+
+  it('keeps /write-plan close as writing-plans workflow', () => {
+    const resolved = resolveEcosystemWorkflowInput('/write-plan close workflow docs')
+
+    assert.equal(resolved?.command, '/write-plan')
+    assert.ok(resolved?.prompt.includes('Create a comprehensive implementation plan for: close workflow docs'))
+    assert.ok(!resolved?.prompt.includes('Use the plan_close tool'))
+  })
+
+  it('returns usage prompt for invalid plan close args', () => {
+    const resolved = resolveEcosystemWorkflowInput('/plan close docs/superpowers/plans/demo.md')
+
+    assert.equal(resolved?.command, '/plan')
+    assert.ok(resolved?.prompt.includes('Plan close usage:'))
+  })
+
   it('does not resolve empty or unrelated commands', () => {
     assert.equal(resolveEcosystemWorkflowInput('/plan'), null)
     assert.equal(resolveEcosystemWorkflowInput('/quality-gate'), null)

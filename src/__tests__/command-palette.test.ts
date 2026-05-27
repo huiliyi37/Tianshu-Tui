@@ -41,4 +41,10 @@ describe('filterCommands', () => {
       ]
     )
   })
+
+  it('includes plan close command entry', () => {
+    const commands = getPaletteCommands().map(c => c.name)
+
+    assert.ok(commands.includes('/plan-close'))
+  })
 })

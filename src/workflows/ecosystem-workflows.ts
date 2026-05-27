@@ -4,12 +4,22 @@ export interface WritingPlanPromptOptions {
   planPath?: string
 }
 
+export interface PlanClosePromptOptions {
+  filePath: string
+  tasks: string
+  apply: boolean
+  verifiedCommands: string[]
+  deliveryState?: 'GREEN' | 'YELLOW' | 'RED'
+  note?: string
+}
+
 export interface WorkflowResolveResult {
   command: string
   prompt: string
 }
 
 const WRITING_PLAN_COMMANDS = new Set(['/plan', '/write-plan'])
+const PLAN_CLOSE_COMMANDS = new Set(['/plan-close'])
 
 export function isWritingPlanCommand(command: string): boolean {
   return WRITING_PLAN_COMMANDS.has(command.toLowerCase())
@@ -154,11 +164,114 @@ End with this handoff:
 `
 }
 
+const PLAN_CLOSE_FLAGS = new Set(['--apply', '--tasks', '--verified', '--delivery', '--note'])
+
+function readUntilNextPlanCloseFlag(tokens: string[], start: number): { value: string; nextIndex: number } {
+  const parts: string[] = []
+  let i = start
+  while (i < tokens.length && !PLAN_CLOSE_FLAGS.has(tokens[i]!)) {
+    parts.push(tokens[i]!)
+    i++
+  }
+  return { value: parts.join(' ').trim(), nextIndex: i }
+}
+
+export function parsePlanCloseArgs(args: string): PlanClosePromptOptions | null {
+  const tokens = args.trim().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return null
+
+  const filePath = tokens[0]
+  if (!filePath || filePath.startsWith('--')) return null
+
+  let tasks = ''
+  let apply = false
+  const verifiedCommands: string[] = []
+  let deliveryState: PlanClosePromptOptions['deliveryState']
+  let note: string | undefined
+
+  let i = 1
+  while (i < tokens.length) {
+    const token = tokens[i]!
+    if (token === '--apply') {
+      apply = true
+      i++
+      continue
+    }
+    if (token === '--tasks') {
+      const value = tokens[i + 1]
+      if (!value || value.startsWith('--')) return null
+      tasks = value
+      i += 2
+      continue
+    }
+    if (token === '--verified') {
+      const result = readUntilNextPlanCloseFlag(tokens, i + 1)
+      if (!result.value) return null
+      verifiedCommands.push(result.value)
+      i = result.nextIndex
+      continue
+    }
+    if (token === '--delivery') {
+      const value = tokens[i + 1]
+      if (value !== 'GREEN' && value !== 'YELLOW' && value !== 'RED') return null
+      deliveryState = value
+      i += 2
+      continue
+    }
+    if (token === '--note') {
+      const result = readUntilNextPlanCloseFlag(tokens, i + 1)
+      if (!result.value) return null
+      note = result.value
+      i = result.nextIndex
+      continue
+    }
+    return null
+  }
+
+  if (!tasks) return null
+  return { filePath, tasks, apply, verifiedCommands, ...(deliveryState ? { deliveryState } : {}), ...(note ? { note } : {}) }
+}
+
+export function buildPlanClosePrompt(options: PlanClosePromptOptions): string {
+  const lines = [
+    'Use the plan_close tool to close an implementation plan.',
+    '',
+    'Tool call requirements:',
+    `- file_path: ${options.filePath}`,
+    `- tasks: ${options.tasks}`,
+    `- apply: ${options.apply}`,
+  ]
+
+  if (options.verifiedCommands.length > 0) {
+    lines.push('- verifiedCommands:')
+    for (const command of options.verifiedCommands) lines.push(`  - ${command}`)
+  }
+  if (options.deliveryState) lines.push(`- deliveryState: ${options.deliveryState}`)
+  if (options.note) lines.push(`- note: ${options.note}`)
+  if (!options.apply) lines.push('', 'Preview only; do not write the file.')
+
+  return lines.join('\n')
+}
+
+const PLAN_CLOSE_USAGE = 'Plan close usage: /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply] [--verified <command>] [--delivery GREEN|YELLOW|RED] [--note <text>]'
+
 export function resolveEcosystemWorkflowInput(input: string, opts?: { date?: Date }): WorkflowResolveResult | null {
   const parsed = parseSlashInput(input)
   if (!parsed) return null
+
+  if (PLAN_CLOSE_COMMANDS.has(parsed.command)) {
+    const planClose = parsePlanCloseArgs(parsed.args)
+    return { command: parsed.command, prompt: planClose ? buildPlanClosePrompt(planClose) : PLAN_CLOSE_USAGE }
+  }
+
   if (!isWritingPlanCommand(parsed.command)) return null
   if (!parsed.args) return null
+
+  if (parsed.command === '/plan' && parsed.args.toLowerCase().startsWith('close ')) {
+    const planClose = parsePlanCloseArgs(parsed.args.slice('close '.length))
+    return { command: parsed.command, prompt: planClose ? buildPlanClosePrompt(planClose) : PLAN_CLOSE_USAGE }
+  }
+
   return {
     command: parsed.command,
     prompt: buildWritingPlanPrompt({ feature: parsed.args, date: opts?.date }),
