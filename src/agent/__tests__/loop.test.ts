@@ -525,6 +525,44 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.equal(allText.match(/审查发现了 4 个中风险问题/g)?.length, 1)
     assert.ok(allText.includes('完成。'))
   })
+
+  it('does not suppress new content after matching the previous turn fingerprint prefix', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const repeatedPrefix = '我来检查这个文件。'
+    const newContent = '接下来继续分析第二个问题。'
+    let callCount = 0
+    const client: StreamClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        callCount++
+        if (callCount === 1) {
+          cb.onTextDelta(repeatedPrefix)
+          cb.onContentBlock(makeTextBlock(repeatedPrefix))
+          cb.onContentBlock(makeToolUseBlock('tu_prefix', 'read_file', { file_path: '/test/a.ts' }))
+          cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 50 })
+          return
+        }
+        cb.onTextDelta(repeatedPrefix)
+        cb.onTextDelta(newContent)
+        cb.onContentBlock(makeTextBlock(repeatedPrefix + newContent))
+        cb.onStopReason('end_turn', { input_tokens: 200, output_tokens: 40 })
+      }),
+    } as unknown as StreamClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const texts: string[] = []
+
+    await agent.run('continue after prefix', {
+      ...makeCallbacks(),
+      onTextDelta: (t) => texts.push(t),
+    })
+
+    const allText = texts.join('')
+    assert.ok(allText.includes(newContent), 'new content after a matching prefix must not be swallowed')
+    assert.equal(callCount, 2)
+  })
 })
 
 describe('AgentLoop — session lifecycle', () => {

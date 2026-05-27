@@ -76,6 +76,30 @@ Otherwise it should be discarded, kept as session log, or promoted to `docs/anal
 - `docs/superpowers/specs/2026-05-16-rivet-evolutionary-tui-memory-design.md`
 - `docs/superpowers/specs/2026-05-17-project-memory-brainstorm.md`
 
+### 2026-05-27 — Real-Time Systems Need Boundary Clarity Before Speed
+
+**Kind**: architectural_invariant / review_principle
+
+**Claim**: 实时系统的敌人不是慢，而是边界模糊；审查的价值不是否定实现，而是让每个边界在出错前被看见。
+
+**Why it matters**:
+In streaming systems, many failures appear as latency or UI stall, but the root cause is often an unclear boundary: provider delta vs agent turn semantics, UI rendering vs session history, chunk-level noise vs cross-turn narrative repetition, partial prefix match vs final duplicate. Optimizing speed before naming these boundaries can make the system feel faster while silently swallowing valid output or preserving duplicated context.
+
+**Applies when**:
+- designing real-time token/delta streaming
+- reviewing deduplication or suppression logic
+- deciding whether logic belongs in provider stream handling, AgentLoop turn semantics, TUI rendering, or session memory
+- diagnosing "stuck" UI reports that may actually be boundary/visibility failures
+
+**Review rule**:
+Do not declare a streamed response duplicate in the middle of the stream. During streaming, only classify prefix/divergence and buffer if necessary; make final suppression decisions at stream boundaries. UI dedup and session-history dedup must be treated as separate contracts unless explicitly unified.
+
+**Evidence**:
+- `docs/analysis/2026-05-27-streaming-dedup-review-addendum.md`
+- `docs/analysis/2026-05-27-tui-stall-visibility-fix.md`
+- `src/agent/turn-stream.ts`
+- `src/agent/loop.ts`
+
 ### 2026-05-27 — Scout Findings Are Higher-Value Memory Than Execution Telemetry
 
 **Kind**: convergence_insight

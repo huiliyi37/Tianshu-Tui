@@ -1259,7 +1259,7 @@ export class AgentLoop {
           this.config.contextWindow,
         )
         let turnTextAccum = ''
-        let turnDedupState: 'tracking' | 'flushed' | 'suppressed' = 'tracking'
+        let turnDedupState: 'tracking' | 'flushed' = 'tracking'
         let pendingFlush = ''
         const prevFingerprint = this.lastTurnTextFingerprint
 
@@ -1274,7 +1274,6 @@ export class AgentLoop {
                 callbacks.onTextDelta(text)
                 return
               }
-              if (turnDedupState === 'suppressed') return
               if (!prevFingerprint) {
                 turnDedupState = 'flushed'
                 callbacks.onTextDelta(text)
@@ -1282,26 +1281,28 @@ export class AgentLoop {
               }
               pendingFlush += text
               const fp = turnTextAccum.replace(/\s+/g, ' ').trim()
-              if (fp === prevFingerprint) {
-                // Full match — suppress this turn's text
-                turnDedupState = 'suppressed'
-                pendingFlush = ''
-              } else if (!prevFingerprint.startsWith(fp)) {
-                // Diverged — flush all pending and switch to pass-through
+              if (!prevFingerprint.startsWith(fp)) {
+                // Diverged or extended beyond the previous fingerprint — flush all pending
+                // and switch to pass-through. Do not suppress mid-stream: a full match so
+                // far may still be followed by new content in a later delta.
                 turnDedupState = 'flushed'
                 callbacks.onTextDelta(pendingFlush)
                 pendingFlush = ''
               }
-              // else: still a prefix of prev fingerprint, keep buffering
+              // else: still equal to or a prefix of prev fingerprint, keep buffering until stream end
             },
             onThinkingDelta: callbacks.onThinkingDelta,
             onToolUse: callbacks.onToolUse,
             onError: callbacks.onError,
           },
         })
-        // If still tracking at stream end (partial match that never completed), flush
+        // Only decide full-turn suppression at the stream boundary. A mid-stream exact
+        // fingerprint match is not final; later deltas may add new content.
         if (turnDedupState === 'tracking' && pendingFlush) {
-          callbacks.onTextDelta(pendingFlush)
+          const fp = turnTextAccum.replace(/\s+/g, ' ').trim()
+          if (fp !== prevFingerprint) {
+            callbacks.onTextDelta(pendingFlush)
+          }
         }
         const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
         this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
