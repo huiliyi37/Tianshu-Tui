@@ -30,9 +30,12 @@ export const ASK_USER_QUESTION_TOOL: Tool = {
 
   async execute(params: ToolCallParams): Promise<ToolResult> {
     const question = params.input.question as string
-    // Display the question visibly as tool output
-    params.onOutput?.(`${question}`)
-    return { content: '[Awaiting your response…]' }
+    // content: what the LLM sees (placeholder only — it already knows the question)
+    // uiContent: what the user sees in the TUI (the actual question + prompt)
+    return {
+      content: '[Awaiting your response…]',
+      uiContent: question,
+    }
   },
 
   requiresApproval(): boolean {

@@ -6,6 +6,7 @@ import { UserMessage } from './user-message.js'
 import { AssistantMessage } from './assistant-message.js'
 import { SystemMessage } from './system-message.js'
 import { StreamOutput } from './stream.js'
+import { QuestionCard } from './question-card.js'
 
 export function renderStaticEntry(entry: LogEntry, verbose: boolean) {
   switch (entry.type) {
@@ -14,6 +15,9 @@ export function renderStaticEntry(entry: LogEntry, verbose: boolean) {
     case 'assistant_message':
       return <AssistantMessage key={entry.id} content={entry.content} thinking={entry.thinking} />
     case 'tool':
+      if (entry.toolName === 'ask_user_question') {
+        return <QuestionCard key={entry.id} question={entry.content} />
+      }
       return <ToolCard key={entry.id} name={entry.toolName ?? ''} result={entry.content} isError={entry.isError} verbose={verbose} rawPath={entry.rawPath} />
     case 'tool_group':
       return <ToolGroup key={entry.id} tools={entry.children ?? []} verbose={verbose} />

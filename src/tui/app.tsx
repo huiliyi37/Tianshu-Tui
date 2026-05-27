@@ -9,6 +9,7 @@ import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
 import { ThinkingCollapser } from './thinking.js'
 import { ToolCard } from './tool-card.js'
+import { QuestionCard } from './question-card.js'
 import { UserMessage } from './user-message.js'
 import { SystemMessage } from './system-message.js'
 import { ToolGroup } from './tool-group.js'
@@ -1178,7 +1179,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           </Box>
         )}
         {liveTools.map(log => (
-          <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} />
+          log.toolName === 'ask_user_question'
+            ? <QuestionCard key={log.id} question={log.content} />
+            : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} />
         ))}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
