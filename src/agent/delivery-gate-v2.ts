@@ -36,6 +36,10 @@ export interface DeliveryGateResult {
   verificationCount: number
   /** Count of earlier failures superseded by later successes */
   supersededFailures: number
+  staleFailureCandidates: number
+  toolInvocationFailureCandidates: string[]
+  currentBlockingFailure?: string
+  shortestNextStep?: string
 }
 
 export interface DeliveryReport {
@@ -53,6 +57,10 @@ export interface DeliveryReport {
   verificationCount: number
   /** Count of earlier failures superseded by later successes */
   supersededFailures: number
+  staleFailureCandidates: number
+  toolInvocationFailureCandidates: string[]
+  currentBlockingFailure?: string
+  shortestNextStep?: string
   blockingReason?: string
   /** Full attribution result for diagnostics */
   attributionSummary: string
@@ -71,6 +79,28 @@ export function createDeliveryGateV2(opts: {
   attribution: VerificationAttribution
 }): DeliveryGateV2 {
   const { taskLedger, ownership, attribution } = opts
+
+  const emptyDiagnostics = {
+    staleFailureCandidates: 0,
+    toolInvocationFailureCandidates: [] as string[],
+  }
+
+  function isToolInvocationFailure(v: VerificationMetadata): boolean {
+    return v.failureKind === 'tool_invocation_failure'
+      || (v.status === 'failed' && v.exitCode !== 0 && v.passed === 0 && v.failed === 0 && v.skipped === 0)
+  }
+
+  function verificationDiagnostics(verifications: VerificationMetadata[], supersededFailures: number): Pick<DeliveryGateResult, 'staleFailureCandidates' | 'toolInvocationFailureCandidates' | 'shortestNextStep'> {
+    const invocationFailures = verifications.filter(isToolInvocationFailure)
+    const shortestNextStep = invocationFailures
+      .map(v => v.recommendedCommand ?? v.resolvedCommand)
+      .find((cmd): cmd is string => typeof cmd === 'string' && cmd.length > 0)
+    return {
+      staleFailureCandidates: supersededFailures,
+      toolInvocationFailureCandidates: invocationFailures.map(v => v.command),
+      ...(shortestNextStep ? { shortestNextStep } : {}),
+    }
+  }
 
   function getGateFiles(currentDirtyFiles?: string[]): {
     ownedFilesForGate: string[]
@@ -120,6 +150,7 @@ export function createDeliveryGateV2(opts: {
           externalFileCount: externalFiles.length,
           verificationCount: externalVerifications.length,
           supersededFailures: 0,
+          ...emptyDiagnostics,
         }
       }
     }
@@ -133,6 +164,7 @@ export function createDeliveryGateV2(opts: {
       ...ownedVerifications,
       ...externalVerifications,
     ]
+    const diagnostics = verificationDiagnostics(allVerifications, supersededFailures)
 
     // Nothing to deliver
     if (ownedFiles.length === 0) {
@@ -148,6 +180,7 @@ export function createDeliveryGateV2(opts: {
         externalFileCount: externalFiles.length,
         verificationCount: allVerifications.length,
         supersededFailures,
+        ...diagnostics,
       }
     }
 
@@ -165,6 +198,7 @@ export function createDeliveryGateV2(opts: {
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
           supersededFailures,
+          ...diagnostics,
         }
 
       case 'external_blocked':
@@ -177,6 +211,7 @@ export function createDeliveryGateV2(opts: {
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
           supersededFailures,
+          ...diagnostics,
         }
 
       case 'owned_failure':
@@ -190,6 +225,23 @@ export function createDeliveryGateV2(opts: {
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
           supersededFailures,
+          ...diagnostics,
+          currentBlockingFailure: aggregate.reason,
+        }
+
+      case 'tool_invocation_failure':
+        return {
+          state: 'RED',
+          canDeliver: false,
+          isBlocked: true,
+          reason: aggregate.reason,
+          blockingReason: `Verification invocation failed. Rerun verification with the repo recommended command.`,
+          ownedFileCount: ownedFiles.length,
+          externalFileCount: externalFiles.length,
+          verificationCount: allVerifications.length,
+          supersededFailures,
+          ...diagnostics,
+          currentBlockingFailure: aggregate.reason,
         }
 
       case 'unattributed_failure':
@@ -202,6 +254,7 @@ export function createDeliveryGateV2(opts: {
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
           supersededFailures,
+          ...diagnostics,
         }
 
       case 'unverified':
@@ -215,6 +268,8 @@ export function createDeliveryGateV2(opts: {
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
           supersededFailures,
+          ...diagnostics,
+          currentBlockingFailure: `${ownedFiles.length} owned file(s) modified but unverified.`,
         }
 
       default:
@@ -227,6 +282,8 @@ export function createDeliveryGateV2(opts: {
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
           supersededFailures,
+          ...diagnostics,
+          currentBlockingFailure: 'Unknown verification state.',
         }
     }
   }
@@ -248,6 +305,10 @@ export function createDeliveryGateV2(opts: {
       externalFileCount: result.externalFileCount,
       verificationCount: result.verificationCount,
       supersededFailures: result.supersededFailures,
+      staleFailureCandidates: result.staleFailureCandidates,
+      toolInvocationFailureCandidates: result.toolInvocationFailureCandidates,
+      currentBlockingFailure: result.currentBlockingFailure,
+      shortestNextStep: result.shortestNextStep,
       blockingReason: result.blockingReason,
       attributionSummary: result.reason ?? 'No attribution available.',
     }

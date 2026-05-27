@@ -204,11 +204,56 @@ describe('delivery-gate-v2 — ownership-aware delivery gate with GREEN/YELLOW/R
     assert.deepEqual(report.historicalOwnedFiles, ['src/tools/diff.ts'])
   })
 
-  it('getReport filters historical external files to current dirty files when a dirty snapshot is passed', () => {
-    const { gate } = makeGate([], ['src/external-now.ts', 'src/external-clean.ts'])
+  it('equivalent success supersedes old run_tests invocation failure', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({
+      type: 'verification',
+      command: 'run_tests src/tools/__tests__/git.test.ts',
+      status: 'failed',
+      meta: { scope: 'targeted', exitCode: 1, passed: 0, failed: 0, skipped: 0 },
+    })
+    ledger.record({
+      type: 'verification',
+      command: "tsx --test 'src/tools/__tests__/git.test.ts'",
+      status: 'passed',
+      meta: { scope: 'targeted', exitCode: 0, passed: 5, failed: 0, skipped: 0 },
+    })
 
-    const report = gate.getReport([], ['src/external-now.ts'])
-    assert.equal(report.externalFileCount, 1)
-    assert.deepEqual(report.externalFiles, ['src/external-now.ts'])
+    const result = gate.assess([], ['src/tools/git.ts'])
+    assert.equal(result.state, 'GREEN')
+    assert.equal(result.supersededFailures, 1)
+    assert.equal(result.staleFailureCandidates, 1)
+  })
+
+  it('returns RED for invocation failure with current owned dirty files', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({
+      type: 'verification',
+      command: 'run_tests src/tools/__tests__/git.test.ts',
+      status: 'failed',
+      meta: { scope: 'targeted', exitCode: 1, passed: 0, failed: 0, skipped: 0, recommendedCommand: 'tsx --test src/tools/__tests__/git.test.ts' },
+    })
+
+    const result = gate.assess([], ['src/tools/git.ts'])
+    assert.equal(result.state, 'RED')
+    assert.match(result.blockingReason!, /Verification invocation failed/)
+    assert.deepEqual(result.toolInvocationFailureCandidates, ['run_tests src/tools/__tests__/git.test.ts'])
+    assert.equal(result.shortestNextStep, 'tsx --test src/tools/__tests__/git.test.ts')
+  })
+
+  it('keeps invocation failure as low-strength diagnostic when no current owned dirty files', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({
+      type: 'verification',
+      command: 'run_tests src/tools/__tests__/git.test.ts',
+      status: 'failed',
+      meta: { scope: 'targeted', exitCode: 1, passed: 0, failed: 0, skipped: 0 },
+    })
+
+    const result = gate.assess([], [])
+    assert.equal(result.state, 'GREEN')
+    assert.equal(result.ownedFileCount, 0)
+    assert.equal(result.isBlocked, false)
+    assert.deepEqual(result.toolInvocationFailureCandidates, ['run_tests src/tools/__tests__/git.test.ts'])
   })
 })
