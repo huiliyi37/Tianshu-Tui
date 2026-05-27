@@ -179,6 +179,7 @@ export type AttributionClass =
   | 'verified'
   | 'owned_failure'
   | 'external_blocked'
+  | 'tool_invocation_failure'
   | 'unattributed_failure'
   | 'unverified'
 
@@ -195,6 +196,14 @@ export interface AttributionResult {
 export interface VerificationAttribution {
   attribute(result: VerificationMetadata): AttributionResult
   getAggregateAttribution(results: VerificationMetadata[]): AttributionResult
+}
+
+function isInvocationFailure(result: VerificationMetadata): boolean {
+  return result.status === 'failed'
+    && result.exitCode !== 0
+    && result.passed === 0
+    && result.failed === 0
+    && result.skipped === 0
 }
 
 export function createVerificationAttribution(opts: {
@@ -223,6 +232,15 @@ export function createVerificationAttribution(opts: {
 
     // Failed — determine attribution
     if (result.status === 'failed') {
+      if (result.failureKind === 'tool_invocation_failure' || isInvocationFailure(result)) {
+        return {
+          attribution: 'tool_invocation_failure',
+          isBlocking: true,
+          reason: `Verification invocation failed: ${result.command}. No tests were executed; rerun with the repo recommended command.`,
+          source: result,
+        }
+      }
+
       // Targeted test: scope is narrow, likely owned
       if (result.scope === 'targeted') {
         return {
@@ -272,7 +290,7 @@ export function createVerificationAttribution(opts: {
 
     const attributions = results.map(r => attribute(r))
 
-    // Priority: owned_failure > unattributed_failure > external_blocked > verified
+    // Priority: owned_failure > tool_invocation_failure > unattributed_failure > external_blocked > verified
     const hasOwnedFailure = attributions.some(a => a.attribution === 'owned_failure')
     if (hasOwnedFailure) {
       const first = attributions.find(a => a.attribution === 'owned_failure')!
@@ -280,6 +298,17 @@ export function createVerificationAttribution(opts: {
         attribution: 'owned_failure',
         isBlocking: true,
         reason: `Owned verification failure: ${first.source.command}`,
+        source: first.source,
+      }
+    }
+
+    const hasToolInvocationFailure = attributions.some(a => a.attribution === 'tool_invocation_failure')
+    if (hasToolInvocationFailure) {
+      const first = attributions.find(a => a.attribution === 'tool_invocation_failure')!
+      return {
+        attribution: 'tool_invocation_failure',
+        isBlocking: true,
+        reason: `Verification invocation failure: ${first.source.command}`,
         source: first.source,
       }
     }

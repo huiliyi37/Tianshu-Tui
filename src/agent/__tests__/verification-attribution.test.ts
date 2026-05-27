@@ -159,6 +159,38 @@ describe('verification-attribution — classify verification results by ownershi
     assert.equal(agg.isBlocking, false)
   })
 
+  it('classifies verification invocation failure separately from owned test failure', () => {
+    const attr = makeAttribution(['src/tools/git.ts'])
+    const result: VerificationMetadata = {
+      command: 'run_tests src/tools/__tests__/git.test.ts',
+      status: 'failed',
+      scope: 'targeted',
+      exitCode: 1,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      durationMs: 100,
+      failureKind: 'tool_invocation_failure',
+    }
+
+    const a = attr.attribute(result)
+    assert.equal(a.attribution, 'tool_invocation_failure')
+    assert.equal(a.isBlocking, true)
+    assert.match(a.reason, /verification invocation failed/i)
+  })
+
+  it('getAggregateAttribution with invocation failure does not report owned_failure', () => {
+    const attr = makeAttribution(['src/a.ts'])
+    const results: VerificationMetadata[] = [
+      { command: 'typecheck', status: 'passed', scope: 'full', exitCode: 0, passed: 1, failed: 0, skipped: 0, durationMs: 100 },
+      { command: 'run_tests src/a.test.ts', status: 'failed', scope: 'targeted', exitCode: 1, passed: 0, failed: 0, skipped: 0, durationMs: 100, failureKind: 'tool_invocation_failure' },
+    ]
+
+    const agg = attr.getAggregateAttribution(results)
+    assert.equal(agg.attribution, 'tool_invocation_failure')
+    assert.equal(agg.isBlocking, true)
+  })
+
   it('empty verification list → unverified', () => {
     const attr = makeAttribution(['src/a.ts'])
     const agg = attr.getAggregateAttribution([])
