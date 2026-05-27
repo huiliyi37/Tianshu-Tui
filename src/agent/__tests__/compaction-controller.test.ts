@@ -57,7 +57,7 @@ describe('CompactionController', () => {
     assert.ok(session.getEstimatedTokens() < 96_000 || session.getMessages().length <= 8)
   })
 
-  it('falls back to cache anchors plus resume state when over the hard ceiling', () => {
+  it('falls back to cache anchors plus resume state when over the hard ceiling', async () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(80_000 * 4)
     session.replaceMessages([
@@ -83,7 +83,7 @@ describe('CompactionController', () => {
       refreshLedger: () => { refreshed = true },
     })
 
-    controller.enforceContextCeiling()
+    await controller.enforceContextCeiling()
 
     const messages = session.getMessages()
     assert.equal(messages[0]?.content, 'anchor user')
@@ -223,7 +223,7 @@ describe('CompactionController', () => {
   // Phase 2.1: enforceContextCeiling MUST still fire on 1M+ windows.
   // The 95% ceiling is the emergency last resort — if we're truly about to
   // overflow, we checkpoint-resume regardless of cache implications.
-  it('P2.1: enforceContextCeiling still fires on 1M+ window', () => {
+  it('P2.1: enforceContextCeiling still fires on 1M+ window', async () => {
     const session = new SessionContext()
     // Create enough to exceed 95% of 1M window = 950K tokens.
     // Each huge message: 200K * 4 chars = 200K tokens. 5 messages = 1M tokens.
@@ -244,7 +244,7 @@ describe('CompactionController', () => {
       refreshLedger: () => { refreshed = true },
     })
 
-    controller.enforceContextCeiling()
+    await controller.enforceContextCeiling()
 
     const messages = session.getMessages()
     // Ceiling still fired: only 2 anchor messages + checkpoint-resume remain
@@ -257,7 +257,7 @@ describe('CompactionController', () => {
   // Phase 2.3: Session split at 86% context proactively replaces message
   // history with cache anchors + handoff summary. Preserves exact prefix
   // (system+tools+2 anchors) for DeepSeek disk cache hits.
-  it('P2.3: session split at 86% context preserves prefix anchors', () => {
+  it('P2.3: session split at 86% context preserves prefix anchors', async () => {
     const session = new SessionContext()
     // Create enough content to cross 86% of 1M window = 860K tokens
     const huge = 'x'.repeat(220_000 * 4) // 220K tokens per message
@@ -283,7 +283,7 @@ describe('CompactionController', () => {
       refreshLedger: () => { refreshed = true },
     })
 
-    const didSplit = controller.trySessionSplit()
+    const didSplit = await controller.trySessionSplit()
 
     assert.equal(didSplit, true, 'session split should occur at 86%')
 
@@ -305,7 +305,7 @@ describe('CompactionController', () => {
     assert.equal(refreshed, true)
   })
 
-  it('P2.3: session split is skipped when below 86% threshold', () => {
+  it('P2.3: session split is skipped when below 86% threshold', async () => {
     const session = new SessionContext()
     session.replaceMessages([
       { role: 'user', content: 'hello' },
@@ -314,14 +314,14 @@ describe('CompactionController', () => {
 
     const controller = makeController(session, { contextWindow: 1_000_000 })
 
-    const didSplit = controller.trySessionSplit()
+    const didSplit = await controller.trySessionSplit()
     assert.equal(didSplit, false, 'should not split below 86%')
 
     // Messages should be unchanged
     assert.equal(session.getMessages().length, 2)
   })
 
-  it('P2.3: session split is skipped on small windows (< 500K)', () => {
+  it('P2.3: session split is skipped on small windows (< 500K)', async () => {
     const session = new SessionContext()
     // Fill to nearly the window size (but under 500K window)
     const chunk = 'x'.repeat(50_000)
@@ -335,7 +335,7 @@ describe('CompactionController', () => {
     const tokensBefore = session.getMessages().length
     const controller = makeController(session, { contextWindow: 128_000 })
 
-    const didSplit = controller.trySessionSplit()
+    const didSplit = await controller.trySessionSplit()
     assert.equal(didSplit, false, 'should not split on small windows')
     // Messages should be unchanged
     assert.equal(session.getMessages().length, tokensBefore)
@@ -344,7 +344,7 @@ describe('CompactionController', () => {
   // P3: trySessionSplit and enforceContextCeiling share the same structural
   // pattern: preserve CACHE_ANCHOR_MESSAGES + inject a handoff user message.
   // The unified replaceWithCheckpoint method powers both.
-  it('P3: trySessionSplit and enforceContextCeiling produce structurally equivalent output', () => {
+  it('P3: trySessionSplit and enforceContextCeiling produce structurally equivalent output', async () => {
     // === trySessionSplit path ===
     const session1 = new SessionContext()
     const huge = 'x'.repeat(220_000 * 4)
@@ -361,7 +361,7 @@ describe('CompactionController', () => {
       contextWindow: 1_000_000,
       refreshLedger: () => { refreshed1 = true },
     })
-    const didSplit = ctrl1.trySessionSplit()
+    const didSplit = await ctrl1.trySessionSplit()
     assert.equal(didSplit, true)
     const msgs1 = session1.getMessages()
     // Structural invariant: anchors + 1 handoff
@@ -389,7 +389,7 @@ describe('CompactionController', () => {
       contextWindow: 1_000_000,
       refreshLedger: () => { refreshed2 = true },
     })
-    ctrl2.enforceContextCeiling()
+    await ctrl2.enforceContextCeiling()
     const msgs2 = session2.getMessages()
     // Same structural invariant: anchors + 1 handoff
     assert.equal(msgs2.length, 3)
@@ -402,7 +402,7 @@ describe('CompactionController', () => {
 
   // P4: Session split handoff should include tool call mappings from
   // trajectory (tool → target, status) and failure patterns with error classes.
-  it('P4: session split handoff includes tool call mappings from trajectory', () => {
+  it('P4: session split handoff includes tool call mappings from trajectory', async () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(220_000 * 4)
     session.replaceMessages([
@@ -429,7 +429,7 @@ describe('CompactionController', () => {
       refreshLedger: () => { refreshed = true },
     })
 
-    const didSplit = controller.trySessionSplit()
+    const didSplit = await controller.trySessionSplit()
     assert.equal(didSplit, true)
 
     const msgs = session.getMessages()
@@ -450,7 +450,7 @@ describe('CompactionController', () => {
     assert.equal(refreshed, true)
   })
 
-  it('P4: enforceContextCeiling handoff also benefits from trajectory data', () => {
+  it('P4: enforceContextCeiling handoff also benefits from trajectory data', async () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(200_000 * 4)
     session.replaceMessages([
@@ -476,7 +476,7 @@ describe('CompactionController', () => {
       refreshLedger: () => { refreshed = true },
     })
 
-    controller.enforceContextCeiling()
+    await controller.enforceContextCeiling()
 
     const msgs = session.getMessages()
     const handoff = String(msgs[2]?.content ?? '')

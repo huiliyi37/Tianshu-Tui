@@ -249,13 +249,30 @@ export class CompactionController {
     }
   }
 
-  enforceContextCeiling(): void {
+  async enforceContextCeiling(): Promise<void> {
     const ceiling = this.deps.contextWindow * 0.95
     if (this.deps.session.getEstimatedTokens() <= ceiling) return
 
+    this.persistExtractedMemories(this.deps.getTrajectoryEntries())
+
+    // Try LLM compact first for higher-fidelity summary
+    if (this.deps.primaryClient) {
+      const summary = await this.llmCompact()
+      if (summary) {
+        this.replaceWithCheckpoint({
+          tier: 4,
+          reason: 'context ceiling exceeded; LLM compact checkpoint',
+          summary,
+          maxFallback: ceiling,
+          fallbackText: '<checkpoint-resume>Context ceiling exceeded. Continue from preserved cache anchors.</checkpoint-resume>',
+        })
+        return
+      }
+    }
+
+    // Fallback: structured extraction when LLM unavailable or fails
     const trajectory = this.deps.getTrajectoryEntries()
     const taskState = extractTaskState(trajectory, this.deps.getStreamedText())
-    this.persistExtractedMemories(trajectory)
 
     const stateLines = [
       `Current: ${taskState.current}`,
@@ -264,14 +281,12 @@ export class CompactionController {
       ...taskState.decisions.map(item => `Decision: ${item}`),
     ]
 
-    // Tool call mappings from trajectory (more reliable than regex from content)
     const recentTools = trajectory.slice(-10)
     for (const t of recentTools) {
       const status = t.status === 'failed' ? 'FAIL' : t.status === 'retried-success' ? 'ok*' : 'ok'
       stateLines.push(`Tool: ${t.tool} ${t.target} [${status}]`)
     }
 
-    // Failure patterns with error classes
     const failures = trajectory.filter(t => t.status === 'failed' || t.status === 'retried-failed')
     for (const f of failures.slice(0, 5)) {
       stateLines.push(`Failed: ${f.tool} in ${f.target} (${f.errorClass ?? 'unknown'})`)
@@ -290,33 +305,37 @@ export class CompactionController {
 
   /**
    * Phase 2.3: Proactive session split at 86% context threshold.
-   *
-   * Unlike compaction (which mutates message history and breaks the prefix
-   * cache), session split replaces ALL messages with just the cache anchors +
-   * a rich handoff summary. The system prompt + tools + first 2 messages
-   * remain byte-identical, so DeepSeek's disk cache hits immediately on
-   * the next API call.
-   *
-   * enforceContextCeiling (95%) remains as the emergency last resort, but
-   * in a healthy 1M window session, trySessionSplit should fire first.
-   *
-   * @returns true if a split occurred, false if below threshold or ineligible.
+   * Tries LLM compact first; falls back to structured handoff extraction.
    */
-  trySessionSplit(): boolean {
-    // Only for large windows (500K+) where we have enough headroom for
-    // the split to meaningfully reduce context. Small windows need
-    // compaction, not split.
+  async trySessionSplit(): Promise<boolean> {
     if (this.deps.contextWindow < 500_000) return false
 
     const ratio = this.deps.session.getEstimatedTokens() / this.deps.contextWindow
     if (ratio < 0.86) return false
 
+    this.persistExtractedMemories(this.deps.getTrajectoryEntries())
+
+    // Try LLM compact first for higher-fidelity summary
+    if (this.deps.primaryClient) {
+      const summary = await this.llmCompact()
+      if (summary) {
+        this.replaceWithCheckpoint({
+          tier: 3,
+          reason: `session split at ${(ratio * 100).toFixed(0)}% context (LLM compact)`,
+          summary,
+          maxFallback: this.deps.contextWindow * 0.3,
+          fallbackText: `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context.</session-handoff>`,
+        })
+        debugLog(`[session-split] LLM compact ratio=${ratio.toFixed(2)} tokens=${this.deps.session.getEstimatedTokens()}`)
+        return true
+      }
+    }
+
+    // Fallback: structured extraction
     const messages = this.deps.session.getMessages()
     const trajectory = this.deps.getTrajectoryEntries()
     const taskState = extractTaskState(trajectory, this.deps.getStreamedText())
-    this.persistExtractedMemories(trajectory)
 
-    // Extract up to 2KB of the most recent assistant reasoning
     const MAX_REASONING_CHARS = 2000
     const reasoningParts: string[] = []
     for (let i = messages.length - 1; i >= 0 && reasoningParts.join('\n').length < MAX_REASONING_CHARS; i--) {
@@ -326,7 +345,6 @@ export class CompactionController {
       }
     }
 
-    // Extract file paths from tool result content
     const filePattern = /(?:\/[^\s\n"'`{}()[\]]+\.[a-z]{1,6})\b/g
     const filesSeen = new Set<string>()
     for (const m of messages) {
@@ -336,7 +354,6 @@ export class CompactionController {
       }
     }
 
-    // Tool call mappings from trajectory (more reliable than regex from content)
     const recentTools = trajectory.slice(-10)
     const failures = trajectory.filter(t => t.status === 'failed' || t.status === 'retried-failed')
     const handoffContent = buildStructuredHandoff({

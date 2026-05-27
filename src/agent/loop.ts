@@ -965,7 +965,7 @@ export class AgentLoop {
     // Phase 2.3: Proactive session split at 86% context — MUST run BEFORE
     // addUserMessage, otherwise the split replaces the just-added user message
     // and the model never sees the new user input.
-    this.compaction.trySessionSplit()
+    await this.compaction.trySessionSplit()
 
     this.session.addUserMessage(userInput)
     const isChatMode = this.config.promptEngine.getMode() === 'chat'
@@ -999,7 +999,7 @@ export class AgentLoop {
         // preserving exact prefix for DeepSeek disk cache hits.
         // When split succeeds, the session is already pruned to
         // ~3 messages → all subsequent compaction is a no-op.
-        this.compaction.trySessionSplit()
+        await this.compaction.trySessionSplit()
 
         const compactResult = await this.compaction.maybeCompact({
           loopTurn: turn,
@@ -1176,7 +1176,7 @@ export class AgentLoop {
 
         this.refreshReliabilityDecision()
 
-        this.compaction.enforceContextCeiling()
+        await this.compaction.enforceContextCeiling()
         this.contextInjection.refreshActiveClaims()
 
         // ── Sycophancy Trap: record previous turn agreement ──
