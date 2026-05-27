@@ -1,9 +1,10 @@
 /**
  * Dream distillation — session-end knowledge extraction.
  *
- * Writes to .rivet/knowledge/project-memory.md — the single source that
- * volatile.ts reads and injects into the system prompt.  This closes the
- * memory loop: session ends → distill → knowledge file → next session's prompt.
+ * Writes curated project memory to .rivet/knowledge/project-memory.md.
+ * The write gate is intentionally high: Dream should preserve reusable judgment
+ * signals (scout convergence, architecture invariants, selection rules,
+ * conceptual reframes, reusable design patterns), not session telemetry.
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
@@ -27,81 +28,114 @@ export interface DreamInput {
   sessionId: string
 }
 
-const MAX_FILES = 8
+export type DreamCriterion =
+  | 'convergence_insight'
+  | 'architectural_invariant'
+  | 'selection_rule'
+  | 'conceptual_reframe'
+  | 'reusable_design_pattern'
+
+interface CuratedMemoryCandidate {
+  criterion: DreamCriterion
+  claim: string
+}
+
+const CRITERIA: Array<{ criterion: DreamCriterion; pattern: RegExp; prefix: RegExp }> = [
+  {
+    criterion: 'convergence_insight',
+    pattern: /\b(convergence insight|core insight|key insight|scout convergence)\b|收敛洞察|核心洞察/i,
+    prefix: /^\s*(?:convergence insight|core insight|key insight|scout convergence|收敛洞察|核心洞察)\s*[:：-]\s*/i,
+  },
+  {
+    criterion: 'architectural_invariant',
+    pattern: /\b(architectural invariant|architecture invariant|invariant)\b|架构不变量|架构约束/i,
+    prefix: /^\s*(?:architectural invariant|architecture invariant|invariant|架构不变量|架构约束)\s*[:：-]\s*/i,
+  },
+  {
+    criterion: 'selection_rule',
+    pattern: /\b(selection rule|write gate|memory gate|routing rule|decision rule)\b|选择规则|写入门槛|记忆门槛/i,
+    prefix: /^\s*(?:selection rule|write gate|memory gate|routing rule|decision rule|选择规则|写入门槛|记忆门槛)\s*[:：-]\s*/i,
+  },
+  {
+    criterion: 'conceptual_reframe',
+    pattern: /\b(conceptual reframe|reframe|reframing)\b|概念重构|重新定义/i,
+    prefix: /^\s*(?:conceptual reframe|reframe|reframing|概念重构|重新定义)\s*[:：-]\s*/i,
+  },
+  {
+    criterion: 'reusable_design_pattern',
+    pattern: /\b(reusable design pattern|reusable pattern|design pattern)\b|可复用设计模式|可复用模式/i,
+    prefix: /^\s*(?:reusable design pattern|reusable pattern|design pattern|可复用设计模式|可复用模式)\s*[:：-]\s*/i,
+  },
+]
+
+const NAVIGATOR_PREFERENCE_RE = /\b(navigator preference|user preference)\b|领航星偏好|用户偏好/i
+const MIN_CLAIM_LENGTH = 20
 
 /**
- * Distill a session into a Markdown knowledge entry.
+ * Distill a session into a curated Markdown knowledge entry.
  *
- * Returns null when no meaningful work was done (no files modified).
- * Phase 1: template-based, no LLM. Phase 2 upgrades to LLM distillation.
+ * A session is written only when at least one explicit decision matches the
+ * curated memory criteria from docs/analysis/2026-05-27-project-memory-signal-vs-noise.md §6,
+ * excluding Navigator preference by current product decision.
  */
 export function distillSession(input: DreamInput): string | null {
-  if (input.filesModified.length === 0) return null
+  const candidates = extractCuratedMemoryCandidates(input.decisions)
+  if (candidates.length === 0) return null
 
   const now = new Date().toISOString()
+  const criteria = [...new Set(candidates.map(c => c.criterion))]
   const lines: string[] = []
 
-  lines.push(`### ${now.slice(0, 10)} — session ${input.sessionId.slice(0, 8)}`)
+  lines.push(`### ${now.slice(0, 10)} — Curated project memory`)
+  lines.push(`<!-- dream-key: ${buildCandidateHash(candidates)} -->`)
+  lines.push('')
+  lines.push(`**Kind**: ${criteria.join(' / ')}`)
+  lines.push('')
+  lines.push('**Claims**:')
+  for (const candidate of candidates) {
+    lines.push(`- [${candidate.criterion}] ${candidate.claim}`)
+  }
+  lines.push('')
+  lines.push('**Why it matters**:')
+  lines.push('These claims matched the curated project-memory write gate: they are intended to improve future architectural judgment rather than replay session telemetry.')
+  lines.push('')
+  lines.push('**Evidence**:')
+  lines.push(`- session: ${input.sessionId.slice(0, 8)}`)
+  lines.push('- source: explicit session decisions')
   lines.push('')
 
-  // Files modified
-  const modified = truncateList(input.filesModified, MAX_FILES)
-  lines.push(`**Modified** (${input.filesModified.length}): ${modified}`)
-
-  // Files read (only if any)
-  if (input.filesRead.length > 0) {
-    const read = truncateList(input.filesRead, MAX_FILES)
-    lines.push(`**Read** (${input.filesRead.length}): ${read}`)
-  }
-
-  // Verification
-  if (input.verifications.length > 0) {
-    const v = input.verifications[input.verifications.length - 1]!
-    if (v.status === 'passed') {
-      lines.push(`**Tests**: ✅ ${v.passed} passed, ${v.failed} failed (${v.command})`)
-    } else if (v.status === 'failed') {
-      lines.push(`**Tests**: ❌ ${v.passed} passed, ${v.failed} failed (${v.command})`)
-    } else if (v.status === 'blocked') {
-      lines.push(`**Tests**: ⛔ blocked (${v.command})`)
-    }
-  } else if (input.filesModified.length > 0) {
-    lines.push('**Tests**: ⚠️ unverified')
-  }
-
-  // Trajectory summary
-  if (input.trajectoryEntries.length > 0) {
-    const tools = countTools(input.trajectoryEntries)
-    const toolSummary = Object.entries(tools)
-      .sort((a, b) => b[1] - a[1])
-      .map(([tool, count]) => `${tool}×${count}`)
-      .join(', ')
-    lines.push(`**Tools used**: ${toolSummary}`)
-  }
-
-  // Decisions
-  if (input.decisions.length > 0) {
-    for (const d of input.decisions) {
-      lines.push(`- Decision: ${d}`)
-    }
-  }
-
-  lines.push('')
   return lines.join('\n')
 }
 
-function truncateList(items: string[], max: number): string {
-  if (items.length <= max) return items.join(', ')
-  const shown = items.slice(0, max).join(', ')
-  const remaining = items.length - max
-  return `${shown} +${remaining} more`
+function extractCuratedMemoryCandidates(decisions: string[]): CuratedMemoryCandidate[] {
+  const candidates: CuratedMemoryCandidate[] = []
+  const seen = new Set<string>()
+
+  for (const decision of decisions) {
+    const raw = normalizeDecision(decision)
+    if (!raw || NAVIGATOR_PREFERENCE_RE.test(raw)) continue
+
+    for (const criterion of CRITERIA) {
+      if (!criterion.pattern.test(raw)) continue
+      const claim = raw.replace(criterion.prefix, '').trim()
+      if (claim.length < MIN_CLAIM_LENGTH) continue
+      const key = `${criterion.criterion}:${claim.toLowerCase()}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      candidates.push({ criterion: criterion.criterion, claim })
+      break
+    }
+  }
+
+  return candidates
 }
 
-function countTools(entries: TrajectoryEntry[]): Record<string, number> {
-  const counts: Record<string, number> = {}
-  for (const e of entries) {
-    counts[e.tool] = (counts[e.tool] ?? 0) + 1
-  }
-  return counts
+function normalizeDecision(decision: string): string {
+  return decision
+    .replace(/^\s*[-*]\s*/, '')
+    .replace(/^\s*Decision\s*:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function ensureDir(dir: string): void {
@@ -124,8 +158,7 @@ export function persistDream(cwd: string, input: DreamInput): void {
   let existing = ''
   try { existing = readFileSync(path, 'utf-8') } catch { /* first write */ }
 
-  // Deduplicate: same day + same files → keep latest only
-  const dedupKey = buildDedupKey(input)
+  const dedupKey = extractDreamKey(entry)
   const deduped = dedupKey ? removeMatchingEntry(existing, dedupKey) : existing
 
   const combined = entry + '\n' + deduped
@@ -144,23 +177,28 @@ function trimToEntryBoundary(content: string, maxSize: number): string {
   return entries.join('') + '\n'
 }
 
-function buildDedupKey(input: DreamInput): string | null {
-  if (input.filesModified.length === 0) return null
-  const date = new Date().toISOString().slice(0, 10)
-  const files = [...input.filesModified].sort().join(',')
-  return `${date}:${files}`
+function removeMatchingEntry(content: string, dedupKey: string): string {
+  const entries = content.split(/(?=^### )/m)
+  return entries.filter(entry => extractDreamKey(entry) !== dedupKey).join('')
 }
 
-function removeMatchingEntry(content: string, dedupKey: string): string {
-  const date = dedupKey.split(':')[0]!
-  const files = dedupKey.split(':').slice(1).join(':')
-  const entries = content.split(/(?=^### )/m)
-  return entries.filter(entry => {
-    if (!entry.startsWith('### ' + date)) return true
-    // Check if same files
-    const modifiedMatch = entry.match(/\*\*Modified\*\*[^:]*:\s*(.+)/)
-    if (!modifiedMatch) return true
-    const entryFiles = modifiedMatch[1]!.replace(/\s*\+\d+ more$/, '').split(', ').sort().join(',')
-    return entryFiles !== files
-  }).join('')
+function extractDreamKey(entry: string): string | null {
+  const match = entry.match(/<!--\s*dream-key:\s*([^\s]+)\s*-->/)
+  return match?.[1] ?? null
+}
+
+function buildCandidateHash(candidates: CuratedMemoryCandidate[]): string {
+  const source = candidates
+    .map(c => `${c.criterion}:${c.claim.toLowerCase().replace(/\s+/g, ' ').trim()}`)
+    .sort()
+    .join('|')
+  return simpleHash(source)
+}
+
+function simpleHash(text: string): string {
+  let hash = 5381
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  }
+  return Math.abs(hash).toString(36)
 }

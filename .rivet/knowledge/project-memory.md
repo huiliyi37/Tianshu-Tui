@@ -1,83 +1,101 @@
-### 2026-05-26 — session e8df1e1f
+### 2026-05-27 — session 8f2bcf2d
 
-**Modified** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/group-logs.test.ts
-**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/group-logs.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/group-logs.ts
-**Tests**: ✅ 7 passed, 0 failed (tsx --test src/tui/__tests__/group-logs.test.ts)
-**Tools used**: edit_file×5, todo×4, read_file×2, bash×2, run_tests×1
-
-### 2026-05-26 — session b7f0e951
-
-**Modified** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/stream.test.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/turn-stream.test.ts
-**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/thinking.test.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/glance-bar.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/markdown-render.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/assistant-message.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/turn-stream.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/tsconfig.json
-**Tests**: ✅ 4 passed, 0 failed (tsx --test src/agent/__tests__/turn-stream.test.ts)
-**Tools used**: read_file×6, todo×5, run_tests×5, bash×4, diff×3, edit_file×2, deliver_task×2, glob×1, grep×1, write_file×1, git×1
-
-### 2026-05-26 — session f5e24f7d
-
-**Modified** (5): /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/grep.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/read-file.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/compaction-controller.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
-**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/utils/debug.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/bash.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/grep.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/read-file.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/compaction-controller.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts
-**Tests**: ❌ 3277 passed, 5 failed (npm test)
-**Tools used**: read_file×24, edit_file×19, grep×10, todo×7, bash×3, run_tests×1
-
-### 2026-05-26 — session 46e040e6
-
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/tool-group.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/stream.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/glance-bar.tsx
-**Read** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/stream.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/tool-group.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/glance-bar.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/tool-card.tsx
+**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/docs/codebase-index.md, /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-26-claude-code-feature-gap-analysis.md
+**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/docs/codebase-index.md, /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-26-claude-code-feature-gap-analysis.md
 **Tests**: ⚠️ unverified
-**Tools used**: git×5, todo×4, read_file×4, edit_file×3, bash×2
+**Tools used**: edit_file×6, bash×6, read_file×4, glob×2, grep×2, todo×1
+- Decision: make three targeted changes:
 
-### 2026-05-26 — session 46e040e6
+1
+- Decision: update these sections to mark them as done
 
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/tool-card.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/tool-group.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/group-logs.ts
-**Read** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/tool-card.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/tool-group.tsx, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/group-logs.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/render-entry.tsx
-**Tests**: ⚠️ unverified
-**Tools used**: edit_file×5, todo×4, read_file×4, bash×3, git×2
-- Decision: add a useState for expanded and useInput for Tab toggle
+### 2026-05-27 — Memory Selection Principle
 
-### 2026-05-26 — session 46e040e6
+**Kind**: architectural_invariant / selection_rule
 
-**Modified** (4): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/verification-attribution.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/delivery-gate-v2.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/deliver-task.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/verification-supersession.test.ts
-**Read** (6): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/deliver-task.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/delivery-gate-v2.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/verification-attribution.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/task-ledger.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/tools/types.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/verification-attribution.test.ts
-**Tests**: ⚠️ unverified
-**Tools used**: read_file×13, edit_file×11, todo×7, bash×2, related_tests×1, write_file×1
-- Decision: implement the changes
-- Decision: also need to export it so delivery-gate-v2 can use it
-- Decision: add `supersededFailures` to each return statement in the switch cases
+**Claim**: Project memory should preserve high-level scout findings, design principles, and architecture invariants — not low-level execution traces.
 
-### 2026-05-26 — session 77aaa230
+**Why it matters**:
+Current Dream distillation can turn session telemetry into prompt noise: modified files, tools used, ordinary test failures, unverified markers, and transient worker/tool errors. Tianshu usually recovers from these low-level failures through tool feedback, state hints, verification gates, and alternate paths. Re-injecting them as long-term prompt memory is low value and can dilute the truly useful design signal.
 
-**Modified** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/theme.ts
-**Read** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/tui/__tests__/theme.test.ts
-**Tests**: ❌ 3268 passed, 2 failed (npm test)
-**Tools used**: bash×3, run_tests×2, grep×2, git×2, edit_file×1, read_file×1, diff×1, deliver_task×1
-- Decision: ：在组件中，当使用 `dimColor` 时，不要使用 `dim` 颜色，而是使用 `secondary` 颜色，这样对比度会更高
+**Applies when**:
+- deciding whether a session-end finding belongs in `.rivet/knowledge/project-memory.md`
+- designing or modifying `src/agent/dream.ts`
+- deciding what should be injected into prompt vs kept for recall/search
+- triaging whether a failure pattern is structural or merely transient
 
-### 2026-05-26 — session c96ecde1
+**Store**:
+- scout convergence insights
+- architecture invariants
+- selection rules that affect future tradeoffs
+- conceptual reframes
+- reusable design patterns
 
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/config/default.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/config/schema.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/config/__tests__/schema.test.ts
-**Read** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/config/__tests__/schema.test.ts
-**Tests**: ✅ 6 passed, 0 failed (tsx --test src/config/__tests__/schema.test.ts)
-**Tools used**: edit_file×3, read_file×1, bash×1, run_tests×1, diff×1
+**Do not store**:
+- modified/read file lists
+- tools-used counts
+- ordinary unverified markers
+- transient test/tool/schema failures
+- worker blocked events unless they reveal a structural design constraint
+- personal or Navigator preferences as automatic Dream output
+- information already represented well by git history, session logs, delivery gate, or test output
 
-### 2026-05-26 — session c96ecde1
+**Evidence**:
+- `docs/analysis/2026-05-27-project-memory-signal-vs-noise.md`
+- `docs/superpowers/specs/2026-05-17-project-memory-dream-design.md`
+- `docs/superpowers/specs/2026-05-16-rivet-subagent-orchestration-design.md`
+- `docs/superpowers/assets/2026-05-19-tianxuan-design-notes.md`
 
-**Modified** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/config/schema.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/config/__tests__/schema.test.ts
-**Read** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/config/__tests__/schema.test.ts
-**Tests**: ✅ 5 passed, 0 failed (tsx --test src/config/__tests__/schema.test.ts)
-**Tools used**: run_tests×3, edit_file×3, bash×2, read_file×2, grep×1, diff×1
+### 2026-05-27 — Memory Is Selection, Not Storage
 
-### 2026-05-26 — session 722aa68f
+**Kind**: conceptual_reframe / architectural_invariant
 
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order.test.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/work-order-parse.test.ts
-**Read** (2): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/worker-session.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/work-order.ts
-**Tests**: ⚠️ unverified
-**Tools used**: bash×28, edit_file×5, read_file×2, todo×2, diff×1, deliver_task×1
+**Claim**: The project-memory problem is not primarily storage; it is selection. Without selection pressure, memory becomes an archive cabinet and eventually prompt noise.
 
-### 2026-05-26 — session 722aa68f
+**Why it matters**:
+A local knowledge file is valuable only if it improves future judgment. The system should ask: “Will this change how a future agent decides?” not “Did this happen?” Low-level session facts should move to session logs or analysis docs; curated project memory should stay small, judgement-oriented, and reusable.
 
-**Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/loop.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/thinking-retry.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/thinking-retry.test.ts
-**Read** (3): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/turn-heartbeat.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/turn-stream.ts, /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/thinking-retry.ts
-**Tests**: ⚠️ unverified
-**Tools used**: bash×11, todo×6, read_file×3, edit_file×3, grep×2, diff×2, glob×1, related_tests×1, write_file×1
+**Applies when**:
+- designing Dream write gates
+- deciding whether to default-inject `.rivet/knowledge/*.md`
+- choosing between automatic memory and human/agent-curated memory
 
+**Selection gate**:
+A candidate memory should enter project memory only if it is one of:
 
+1. convergence insight
+2. architecture invariant
+3. selection rule
+4. conceptual reframe
+5. reusable design pattern
+
+Otherwise it should be discarded, kept as session log, or promoted to `docs/analysis` / `docs/superpowers` if it needs human-readable archival.
+
+**Evidence**:
+- `docs/analysis/2026-05-27-project-memory-signal-vs-noise.md`
+- `docs/superpowers/specs/2026-05-16-rivet-evolutionary-tui-memory-design.md`
+- `docs/superpowers/specs/2026-05-17-project-memory-brainstorm.md`
+
+### 2026-05-27 — Scout Findings Are Higher-Value Memory Than Execution Telemetry
+
+**Kind**: convergence_insight
+
+**Claim**: Scout findings and brainstorm convergence are usually more useful to future Tianshu agents than raw failure patterns or execution telemetry.
+
+**Why it matters**:
+Scout outputs often identify seams, hidden assumptions, cross-domain analogies, and design constraints. Those alter future architectural judgment. By contrast, ordinary failures are usually handled locally during execution and do not deserve long-term prompt weight.
+
+**Examples of high-value memory shape**:
+- “Subagent coordination is not about more concurrency; it is about typed work order/result packets plus primary authority.”
+- “SessionContext is mutable shared state; workers must use independent sessions.”
+- “Collaboration is not sharing all memory, but passing the right granularity at the right time.”
+
+**Applies when**:
+- extracting lessons from brainstorm/spec documents
+- deciding what to summarize from worker/scout results
+- curating `.rivet/knowledge/project-memory.md`
+
+**Evidence**:
+- `docs/superpowers/specs/2026-05-16-rivet-subagent-orchestration-design.md`
+- `docs/superpowers/assets/2026-05-19-tianxuan-design-notes.md`
+- `docs/superpowers/plans/2026-05-24-immune-system-completion.md`

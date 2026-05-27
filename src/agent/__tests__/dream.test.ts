@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, rmSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
@@ -9,201 +9,173 @@ function knowledgePath(cwd: string): string {
   return join(cwd, '.rivet', 'knowledge', 'project-memory.md')
 }
 
-describe('distillSession', () => {
-  it('returns null when no files modified', () => {
-    const input: DreamInput = {
-      filesModified: [],
-      filesRead: [],
-      verifications: [],
-      decisions: [],
-      trajectoryEntries: [],
-      sessionId: 'test-session',
-    }
-    assert.strictEqual(distillSession(input), null)
-  })
+function baseInput(overrides: Partial<DreamInput> = {}): DreamInput {
+  return {
+    filesModified: [],
+    filesRead: [],
+    verifications: [],
+    decisions: [],
+    trajectoryEntries: [],
+    sessionId: 'test-session',
+    ...overrides,
+  }
+}
 
-  it('generates knowledge entry when files modified', () => {
-    const input: DreamInput = {
-      filesModified: ['src/foo.ts', 'src/bar.ts'],
-      filesRead: ['src/baz.ts'],
+function withTempDir(name: string, fn: (dir: string) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), name))
+  try {
+    fn(dir)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+describe('distillSession', () => {
+  it('returns null when no curated memory criterion is present', () => {
+    const input = baseInput({
+      filesModified: ['src/foo.ts'],
+      filesRead: ['src/bar.ts'],
       verifications: [{ command: 'npm test', status: 'passed', scope: 'full' as const, exitCode: 0, passed: 10, failed: 0, skipped: 0, durationMs: 1234 }],
-      decisions: ['Use composition over inheritance'],
       trajectoryEntries: [
         { tool: 'edit_file', target: 'src/foo.ts', status: 'success' },
         { tool: 'run_tests', target: 'npm test', status: 'success' },
       ],
-      sessionId: 'test-session',
-    }
-    const result = distillSession(input)
-    assert.ok(result)
-    assert.ok(result.includes('src/foo.ts'))
-    assert.ok(result.includes('src/bar.ts'))
-    assert.ok(result.includes('10 pass'))
-    assert.ok(result.includes('composition over inheritance'))
+    })
+
+    assert.strictEqual(distillSession(input), null)
   })
 
-  it('marks unverified sessions', () => {
-    const input: DreamInput = {
-      filesModified: ['src/foo.ts'],
-      filesRead: [],
-      verifications: [],
-      decisions: [],
-      trajectoryEntries: [],
-      sessionId: 'test-session',
-    }
-    const result = distillSession(input)
+  it('generates curated memory for an architectural invariant', () => {
+    const result = distillSession(baseInput({
+      decisions: ['Architectural invariant: SessionContext is mutable shared state; workers must use independent sessions.'],
+      sessionId: 'test-session-abcdef',
+    }))
+
     assert.ok(result)
-    assert.ok(result.includes('unverified'))
+    assert.ok(result.includes('architectural_invariant'))
+    assert.ok(result.includes('SessionContext is mutable shared state'))
+    assert.ok(result.includes('Curated project memory'))
   })
 
-  it('includes failure info when tests failed', () => {
-    const input: DreamInput = {
+  it('accepts convergence insight, selection rule, conceptual reframe, and reusable pattern criteria', () => {
+    const result = distillSession(baseInput({
+      decisions: [
+        'Convergence insight: subagent coordination is not more concurrency but typed work order/result packets plus primary authority.',
+        'Selection rule: small tasks should stay inline; delegate only when there are three independent exploration fronts.',
+        'Conceptual reframe: memory is not storage but selection pressure.',
+        'Reusable design pattern: trigger + diagnosis + fix is the durable shape for repair knowledge.',
+      ],
+    }))
+
+    assert.ok(result)
+    assert.ok(result.includes('convergence_insight'))
+    assert.ok(result.includes('selection_rule'))
+    assert.ok(result.includes('conceptual_reframe'))
+    assert.ok(result.includes('reusable_design_pattern'))
+  })
+
+  it('does not treat navigator preference as a write criterion', () => {
+    const result = distillSession(baseInput({
+      decisions: ['Navigator preference: preserve my personal taste in project memory.'],
+    }))
+
+    assert.strictEqual(result, null)
+  })
+
+  it('omits low-level telemetry from curated entries', () => {
+    const result = distillSession(baseInput({
       filesModified: ['src/foo.ts'],
-      filesRead: [],
+      filesRead: ['src/bar.ts'],
       verifications: [{ command: 'npm test', status: 'failed', scope: 'full' as const, exitCode: 1, passed: 8, failed: 2, skipped: 0, durationMs: 5678 }],
-      decisions: [],
-      trajectoryEntries: [],
-      sessionId: 'test-session',
-    }
-    const result = distillSession(input)
-    assert.ok(result)
-    assert.ok(result.includes('failed'))
-    assert.ok(result.includes('8 passed'))
-  })
+      trajectoryEntries: [{ tool: 'edit_file', target: 'src/foo.ts', status: 'success' }],
+      decisions: ['Selection rule: ordinary failed tests stay in verification output, not long-term project memory.'],
+    }))
 
-  it('truncates long file lists', () => {
-    const input: DreamInput = {
-      filesModified: Array.from({ length: 20 }, (_, i) => `src/file${i}.ts`),
-      filesRead: [],
-      verifications: [],
-      decisions: [],
-      trajectoryEntries: [],
-      sessionId: 'test-session',
-    }
-    const result = distillSession(input)
     assert.ok(result)
-    assert.ok(result.includes('+'))
+    assert.ok(!result.includes('**Modified**'))
+    assert.ok(!result.includes('**Read**'))
+    assert.ok(!result.includes('**Tests**'))
+    assert.ok(!result.includes('**Tools used**'))
+    assert.ok(!result.includes('src/foo.ts'))
+    assert.ok(!result.includes('8 passed'))
   })
 })
 
 describe('persistDream', () => {
-  let tmpDir: string
+  it('writes curated memory when a criterion is present', () => {
+    withTempDir('dream-curated-', dir => {
+      persistDream(dir, baseInput({
+        decisions: ['Conceptual reframe: project memory is not a changelog; it is a judgment cache.'],
+        sessionId: 'session-curated',
+      }))
 
-  before(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'dream-test-'))
-  })
-
-  after(() => {
-    rmSync(tmpDir, { recursive: true, force: true })
-  })
-
-  it('writes to .rivet/knowledge/project-memory.md when files modified', () => {
-    const input: DreamInput = {
-      filesModified: ['src/a.ts'],
-      filesRead: [],
-      verifications: [{ command: 'npm test', status: 'passed', scope: 'full' as const, exitCode: 0, passed: 3, failed: 0, skipped: 0, durationMs: 999 }],
-      decisions: [],
-      trajectoryEntries: [],
-      sessionId: 'test-session',
-    }
-    persistDream(tmpDir, input)
-    const path = knowledgePath(tmpDir)
-    assert.ok(existsSync(path), 'should create .rivet/knowledge/project-memory.md')
-    const content = readFileSync(path, 'utf-8')
-    assert.ok(content.includes('src/a.ts'))
-    assert.ok(content.includes('3 passed'))
-  })
-
-  it('does not create file when no files modified', () => {
-    const knowledgeDir = join(tmpDir, '.rivet', 'knowledge')
-    const path = knowledgePath(tmpDir)
-    try { rmSync(knowledgeDir, { recursive: true, force: true }) } catch { /* ok */ }
-
-    const input: DreamInput = {
-      filesModified: [],
-      filesRead: [],
-      verifications: [],
-      decisions: [],
-      trajectoryEntries: [],
-      sessionId: 'test-session',
-    }
-    persistDream(tmpDir, input)
-    assert.ok(!existsSync(path))
-  })
-
-  it('prepends new entries to existing session file', () => {
-    const input1: DreamInput = {
-      filesModified: ['src/a.ts'],
-      filesRead: [],
-      verifications: [],
-      decisions: [],
-      trajectoryEntries: [],
-      sessionId: 'session-first',
-    }
-    persistDream(tmpDir, input1)
-
-    const input2: DreamInput = {
-      filesModified: ['src/b.ts'],
-      filesRead: [],
-      verifications: [{ command: 'npm test', status: 'passed', scope: 'full' as const, exitCode: 0, passed: 5, failed: 0, skipped: 0, durationMs: 2345 }],
-      decisions: [],
-      trajectoryEntries: [],
-      sessionId: 'session-second',
-    }
-    persistDream(tmpDir, input2)
-
-    const path = knowledgePath(tmpDir)
-    const content = readFileSync(path, 'utf-8')
-    const idxA = content.indexOf('src/a.ts')
-    const idxB = content.indexOf('src/b.ts')
-    // Most recent entry (b) should come first
-    assert.ok(idxB < idxA, `b.ts should come before a.ts, got b at ${idxB} a at ${idxA}`)
-  })
-
-  it('deduplicates entries with same files in same day', () => {
-    const dedupDir = mkdtempSync(join(tmpdir(), 'dream-dedup-'))
-    try {
-      const baseInput: DreamInput = {
-        filesModified: ['src/same-file.ts'],
-        filesRead: [],
-        verifications: [{ command: 'npm test', status: 'passed', scope: 'full' as const, exitCode: 0, passed: 5, failed: 0, skipped: 0, durationMs: 100 }],
-        decisions: [],
-        trajectoryEntries: [],
-        sessionId: 'session-dup1',
-      }
-      persistDream(dedupDir, baseInput)
-      persistDream(dedupDir, { ...baseInput, sessionId: 'session-dup2' })
-      persistDream(dedupDir, { ...baseInput, sessionId: 'session-dup3' })
-
-      const path = knowledgePath(dedupDir)
+      const path = knowledgePath(dir)
+      assert.ok(existsSync(path), 'should create .rivet/knowledge/project-memory.md')
       const content = readFileSync(path, 'utf-8')
+      assert.ok(content.includes('judgment cache'))
+      assert.ok(content.includes('conceptual_reframe'))
+    })
+  })
+
+  it('does not create file for file modifications alone', () => {
+    withTempDir('dream-noise-', dir => {
+      persistDream(dir, baseInput({
+        filesModified: ['src/a.ts'],
+        verifications: [{ command: 'npm test', status: 'passed', scope: 'full' as const, exitCode: 0, passed: 3, failed: 0, skipped: 0, durationMs: 999 }],
+      }))
+
+      assert.ok(!existsSync(knowledgePath(dir)))
+    })
+  })
+
+  it('prepends new curated entries to existing project memory', () => {
+    withTempDir('dream-prepend-', dir => {
+      persistDream(dir, baseInput({
+        decisions: ['Selection rule: first memory should remain below later memory after prepend.'],
+        sessionId: 'session-first',
+      }))
+      persistDream(dir, baseInput({
+        decisions: ['Architectural invariant: second memory should be prepended before older entries.'],
+        sessionId: 'session-second',
+      }))
+
+      const content = readFileSync(knowledgePath(dir), 'utf-8')
+      const firstIdx = content.indexOf('first memory')
+      const secondIdx = content.indexOf('second memory')
+      assert.ok(secondIdx < firstIdx, `second memory should come before first, got second at ${secondIdx} first at ${firstIdx}`)
+    })
+  })
+
+  it('deduplicates same curated memory in the same day', () => {
+    withTempDir('dream-dedup-', dir => {
+      const input = baseInput({
+        decisions: ['Reusable design pattern: typed work order/result packet keeps worker output useful and bounded.'],
+        sessionId: 'session-dup1',
+      })
+
+      persistDream(dir, input)
+      persistDream(dir, { ...input, sessionId: 'session-dup2' })
+      persistDream(dir, { ...input, sessionId: 'session-dup3' })
+
+      const content = readFileSync(knowledgePath(dir), 'utf-8')
       const entryCount = (content.match(/^### /gm) || []).length
-      assert.ok(entryCount <= 2, `expected <=2 entries but got ${entryCount}`)
-    } finally {
-      rmSync(dedupDir, { recursive: true, force: true })
-    }
+      assert.equal(entryCount, 1)
+    })
   })
 
   it('writes to knowledge/ which volatile.ts reads for prompt injection', () => {
-    const isolatedDir = mkdtempSync(join(tmpdir(), 'dream-target-'))
-    try {
-      persistDream(isolatedDir, {
-        filesModified: ['src/anything.ts', 'src/agent/loop.ts', 'src/tui/app.tsx'],
-        filesRead: [],
-        verifications: [],
-        decisions: [],
-        trajectoryEntries: [],
+    withTempDir('dream-target-', dir => {
+      persistDream(dir, baseInput({
+        decisions: ['Convergence insight: Dream should store future judgment rules rather than session telemetry.'],
         sessionId: 'target-test',
-      })
-      const kPath = knowledgePath(isolatedDir)
-      assert.ok(existsSync(kPath), 'dream must write to .rivet/knowledge/project-memory.md')
+      }))
+
+      const kPath = knowledgePath(dir)
+      assert.ok(existsSync(kPath), 'dream must write curated entries to .rivet/knowledge/project-memory.md')
       const content = readFileSync(kPath, 'utf-8')
-      assert.ok(content.includes('anything.ts'), 'knowledge should contain modified files')
-      // sessions/ is NOT written — single write target
-      const sessionsDir = join(isolatedDir, '.rivet', 'sessions')
+      assert.ok(content.includes('future judgment rules'))
+      const sessionsDir = join(dir, '.rivet', 'sessions')
       assert.ok(!existsSync(sessionsDir), 'should not create .rivet/sessions/')
-    } finally {
-      rmSync(isolatedDir, { recursive: true, force: true })
-    }
+    })
   })
 })
