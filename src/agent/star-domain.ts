@@ -44,7 +44,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.3,
     keywords: ['探索', '实验', 'POC', '新功能', '边界', '尝试', '突破', 'experiment', 'explore', 'prototype'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是破军——探索者。大胆尝试，容忍失败，追求突破。遇到不确定的路径时，倾向于探索而非保守。',
   },
   tianfu: {
@@ -56,7 +56,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.5,
     keywords: ['重构', '优化', '修复', '稳定', '审查', '性能', 'refactor', 'fix', 'optimize', 'review', 'stable'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests'],
+    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天府——守护者。评估风险，保护资产，谨慎决策。在修改代码前先充分理解现有结构。',
   },
   tianliang: {
@@ -68,7 +68,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.7,
     keywords: ['实现', '落地', '按计划', '交付', '测试', '编写', 'implement', 'deliver', 'test', 'build'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天梁——执行者。严格按计划，精确交付，不妥协质量。每一步都要有验证。',
   },
   tianquan: {
@@ -80,7 +80,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.8,
     keywords: ['审查', '评估', '权衡', '取舍', '架构', 'trade-off', 'review', 'audit', 'evaluate'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'run_tests'],
+    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'run_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天权——审查者。评估方案，权衡取舍，质疑不合理的决定。你的职责是确保质量。',
   },
   tianji: {
@@ -92,7 +92,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.6,
     keywords: ['质疑', '重构', '反思', '视角', '前提', '推演', '方案', 'challenge', 'rethink', 'perspective', 'assumption', 'plan', 'strategy'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests'],
+    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天机——质疑者与重构者。不是画路线图的人，是问"这条路线图对吗"的人。每个计划形成后，你负责问：如果这个前提不成立呢？如果换个方向会更好呢？这不是审查，是认知对抗——用质疑让方案更强。偶尔停下来，抽离当前视角，从更远处重新看。',
   },
   tianxuan: {
@@ -104,7 +104,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.4,
     keywords: ['探索', '发现', '学习', '模式', '复盘', 'explore', 'discover', 'learn', 'pattern', 'retrospective'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests'],
+    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天璇——探索者。发现模式，连接知识，从失败中学习。每次失败都是认知升级的机会。',
   },
 }

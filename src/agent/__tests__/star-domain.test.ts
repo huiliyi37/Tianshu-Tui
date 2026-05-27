@@ -44,16 +44,25 @@ describe('StarDomain', () => {
     assert.ok(STAR_DOMAINS.pojun.toolWhitelist.includes('bash'))
   })
 
-  it('tianfu toolWhitelist is read-only (guardian cannot modify)', () => {
+  it('tianfu toolWhitelist is read-only but has delegation (guardian cannot modify)', () => {
     assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('read_file'))
     assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('write_file'))
     assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('edit_file'))
     assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('bash'))
+    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('delegate_task'))
+    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('delegate_batch'))
   })
 
   it('tianliang toolWhitelist includes write_file + run_tests (executor delivers)', () => {
     assert.ok(STAR_DOMAINS.tianliang.toolWhitelist.includes('write_file'))
     assert.ok(STAR_DOMAINS.tianliang.toolWhitelist.includes('run_tests'))
+  })
+
+  it('all domains have delegate_task + delegate_batch', () => {
+    for (const domain of Object.values(STAR_DOMAINS)) {
+      assert.ok(domain.toolWhitelist.includes('delegate_task'), `${domain.name} missing delegate_task`)
+      assert.ok(domain.toolWhitelist.includes('delegate_batch'), `${domain.name} missing delegate_batch`)
+    }
   })
 
   it('all domains have systemPromptSuffix', () => {
