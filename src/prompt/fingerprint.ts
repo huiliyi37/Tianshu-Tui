@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import type { ToolDefinition } from '../api/types.js'
+import type { AnchorGraph } from './anchor-graph.js'
 import { stableStringify } from '../api/stable-json.js'
 
 export interface PrefixFingerprint {
@@ -54,4 +55,15 @@ export function detectDrift(
   const message = `Prefix cache drift detected: ${parts.join(' and ')} changed`
 
   return { systemChanged, toolsChanged, stableVolatileChanged, message }
+}
+
+/**
+ * Compute an independent hash for the HEARTH anchor graph.
+ *
+ * This is NOT part of the prefix cache fingerprint — it's a parallel
+ * verification layer that does not affect cache stability.
+ * Uses the 'hearth:' salt to avoid collision with graph.graphHash.
+ */
+export function computeAnchorGraphHash(graph: AnchorGraph): string {
+  return sha256(`hearth:${graph.graphHash}`)
 }
