@@ -80,9 +80,9 @@ function runnerFamily(command: string): string {
 
 function isInvocationFailureMeta(status: TaskLedgerEvent['status'], meta: Record<string, unknown> | undefined): boolean {
   if (status !== 'failed') return false
-  return asNumber(meta?.exitCode, status === 'failed' ? 1 : 0) !== 0
-    && asNumber(meta?.passed, status === 'passed' ? 1 : 0) === 0
-    && asNumber(meta?.failed, status === 'failed' ? 1 : 0) === 0
+  return asNumber(meta?.exitCode, 1) !== 0
+    && asNumber(meta?.passed, 0) === 0
+    && asNumber(meta?.failed, 1) === 0
     && asNumber(meta?.skipped, 0) === 0
 }
 
