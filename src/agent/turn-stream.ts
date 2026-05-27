@@ -58,7 +58,8 @@ export class TurnStreamController {
     const toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
     let stopReason = ''
     let turnDisplayBuffer = ''
-    let lastChunk = ''
+    const CHUNK_DEDUP_HISTORY = 5
+    const chunkHistory: string[] = []
 
     const streamCallbacks: StreamCallbacks = {
       onTextDelta: (text) => {
@@ -69,10 +70,17 @@ export class TurnStreamController {
         }
         turnDisplayBuffer += text
         // Real-time push with duplicate-chunk guard (DeepSeek repeats 50+ char chunks)
-        if (text !== lastChunk || text.length < 50) {
-          input.callbacks.onTextDelta(text)
+        // Check recent history for both consecutive and non-consecutive duplicates
+        if (text.length >= 50 && chunkHistory.includes(text)) {
+          return // skip duplicate — appendStreamedText/turnDisplayBuffer already updated above
         }
-        lastChunk = text
+        if (text.length >= 50) {
+          chunkHistory.push(text)
+          if (chunkHistory.length > CHUNK_DEDUP_HISTORY) {
+            chunkHistory.shift()
+          }
+        }
+        input.callbacks.onTextDelta(text)
       },
       onThinkingDelta: (thinking) => {
         thinkingAccum += thinking

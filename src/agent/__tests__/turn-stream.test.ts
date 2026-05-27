@@ -164,4 +164,178 @@ describe('TurnStreamController', () => {
     assert.equal(result.collectedBlocks.length, 1)
     assert.equal(usage.at(-1)?.output_tokens, 4)
   })
+
+  it('suppresses consecutive duplicate chunks (≥50 chars)', async () => {
+    const longChunk = 'a'.repeat(60)
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        cb.onTextDelta(longChunk)
+        cb.onTextDelta(longChunk) // consecutive duplicate
+        cb.onTextDelta(longChunk) // triple
+        cb.onTextDelta('short')
+        cb.onStopReason('end_turn', {})
+      }),
+    }
+    const { controller } = makeController(client)
+    const texts: string[] = []
+
+    await controller.streamTurn({
+      request,
+      turn: 1,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: text => { texts.push(text) },
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+
+    assert.deepEqual(texts, [longChunk, 'short'])
+  })
+
+  it('suppresses non-consecutive duplicate chunks (≥50 chars)', async () => {
+    const longA = 'This is chunk A with enough length to exceed fifty character threshold!'
+    const longB = 'Completely different chunk B that also exceeds the fifty char limit!!'
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        cb.onTextDelta(longA)
+        cb.onTextDelta(longB)
+        cb.onTextDelta(longA) // non-consecutive duplicate of chunk A
+        cb.onStopReason('end_turn', {})
+      }),
+    }
+    const { controller } = makeController(client)
+    const texts: string[] = []
+
+    await controller.streamTurn({
+      request,
+      turn: 1,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: text => { texts.push(text) },
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+
+    assert.deepEqual(texts, [longA, longB])
+  })
+
+  it('passes through short duplicate chunks (<50 chars)', async () => {
+    const shortChunk = 'hello world'
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        cb.onTextDelta(shortChunk)
+        cb.onTextDelta(shortChunk) // duplicate but short — should pass
+        cb.onStopReason('end_turn', {})
+      }),
+    }
+    const { controller } = makeController(client)
+    const texts: string[] = []
+
+    await controller.streamTurn({
+      request,
+      turn: 1,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: text => { texts.push(text) },
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+
+    // Short chunks are never deduped — only 50+ char chunks are
+    assert.deepEqual(texts, [shortChunk, shortChunk])
+  })
+
+  it('delivers partial text deltas before mid-stream error', async () => {
+    const expected = new Error('connection reset')
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        cb.onTextDelta('Hello ')
+        cb.onTextDelta('world')
+        cb.onTextDelta(' this is partial')
+        // Stream dies mid-way — no onStopReason, no clean end
+        cb.onContentBlock({ type: 'text', text: 'Hello world this is partial' })
+        throw expected
+      }),
+    }
+    const { controller } = makeController(client)
+    const texts: string[] = []
+
+    const result = await controller.streamTurn({
+      request,
+      turn: 1,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: text => { texts.push(text) },
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+
+    // All deltas pushed before the error are received by the callback
+    assert.deepEqual(texts, ['Hello ', 'world', ' this is partial'])
+    // Error is still recorded
+    assert.equal(result.streamError, expected)
+    // Blocks collected before error are preserved
+    assert.equal(result.collectedBlocks.length, 1)
+    // Fingerprint is computed from partial buffer for next turn's cross-turn dedup
+    assert.equal(result.lastTurnTextFingerprint, 'Hello world this is partial')
+  })
+
+  it('propagates fingerprint across two turns for cross-turn dedup', async () => {
+    const identicalText = 'I will analyze the code for you.'
+    let callCount = 0
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        callCount++
+        cb.onTextDelta(identicalText)
+        cb.onContentBlock({ type: 'text', text: identicalText })
+        cb.onStopReason('end_turn', {})
+      }),
+    }
+    const { controller } = makeController(client)
+    const turn1Texts: string[] = []
+    const turn2Texts: string[] = []
+
+    // Turn 1: normal output, computes fingerprint
+    const result1 = await controller.streamTurn({
+      request,
+      turn: 1,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: text => { turn1Texts.push(text) },
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+    assert.deepEqual(turn1Texts, [identicalText])
+    assert.equal(result1.lastTurnTextFingerprint, identicalText)
+
+    // Turn 2: model retries with identical text — TurnStreamController pushes in real-time,
+    // but the fingerprint matches. The caller (AgentLoop three-state machine) uses this
+    // to suppress. Here we verify fingerprint propagation, not suppression.
+    const result2 = await controller.streamTurn({
+      request,
+      turn: 2,
+      lastTurnTextFingerprint: result1.lastTurnTextFingerprint,
+      callbacks: {
+        onTextDelta: text => { turn2Texts.push(text) },
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+    // TurnStreamController pushes real-time regardless — suppression is AgentLoop's job
+    assert.deepEqual(turn2Texts, [identicalText])
+    // But the fingerprint is identical, enabling the caller to detect the retry
+    assert.equal(result2.lastTurnTextFingerprint, identicalText)
+    assert.equal(callCount, 2)
+  })
 })
