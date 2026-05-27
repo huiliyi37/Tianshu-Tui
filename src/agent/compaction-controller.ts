@@ -172,13 +172,26 @@ export class CompactionController {
       debugLog(`[prune] (request-time mask) would-prune=${pruneResult.prunedCount} freedChars=${pruneResult.freedChars} ctxWindow=${this.deps.contextWindow} tokens=${beforePruneTokens}->${afterPruneTokens}`)
     }
 
-    // Phase 2: On 1M+ context windows, skip micro compact entirely.
-    // The 1M window has enough headroom for typical coding sessions
-    // (30-100 turns). Disabling compaction preserves the exact byte
-    // prefix for DeepSeek's persistent cache, eliminating the 3-4%
-    // compaction-induced miss rate. enforceContextCeiling (95%) remains
-    // as the emergency last resort.
+    // Phase 2: On 1M+ context windows, skip micro compact but allow LLM
+    // compact at 75% as a graceful degradation before the 86% session split.
+    // This preserves key context via model-generated summary rather than the
+    // abrupt "nuke everything" of trySessionSplit.
     if (this.deps.contextWindow >= 1_000_000) {
+      const ratio = this.deps.session.getEstimatedTokens() / this.deps.contextWindow
+      if (ratio >= 0.75 && this.deps.primaryClient) {
+        debugLog(`[llm-compact] 1M window at ${(ratio * 100).toFixed(0)}% — triggering LLM compact`)
+        const summary = await this.llmCompact()
+        if (summary) {
+          this.replaceWithCheckpoint({
+            tier: 2,
+            reason: `LLM compact at ${(ratio * 100).toFixed(0)}% context (1M window graceful degradation)`,
+            summary,
+            maxFallback: this.deps.contextWindow * 0.3,
+            fallbackText: '<compact-summary>LLM compact failed to fit; session continues with cache anchors.</compact-summary>',
+          })
+          return { failures: input.failures, compacted: true }
+        }
+      }
       return { failures: input.failures, compacted: false }
     }
 
@@ -455,8 +468,11 @@ export class CompactionController {
     const messages = this.deps.session.getMessages()
     if (messages.length < CACHE_ANCHOR_MESSAGES + 2) return null
 
-    const compactMessages = [
-      ...messages.slice(0, CACHE_ANCHOR_MESSAGES),
+    // Send full conversation history + summary instruction.
+    // The cache anchors (first 2 messages) hit DeepSeek's prefix cache,
+    // and the rest of the history is what the model will summarize.
+    const compactMessages: OaiMessage[] = [
+      ...messages,
       {
         role: 'user' as const,
         content: [
@@ -469,7 +485,7 @@ export class CompactionController {
           '5. 当前工作状态和进度',
           '6. 明确的待办事项和下一步',
           '',
-          '只输出总结内容，不要调用工具。',
+          '只输出总结内容，不要调用工具。格式用 markdown，控制在 3000 字以内。',
         ].join('\n'),
       },
     ]
