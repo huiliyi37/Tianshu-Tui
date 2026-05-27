@@ -3,6 +3,7 @@ import type { OaiMessage, OaiToolCall } from '../api/oai-types.js'
 import type { CompactEvent, ContextLedger } from '../context/types.js'
 import { estimateOaiMessageTokens, estimateOaiTokens } from '../compact/micro.js'
 import { stableStringify } from '../api/stable-json.js'
+import { sanitizeForJsonTransport } from '../utils/sanitize.js'
 
 import { INLINE_TOOL_RESULT_MAX_CHARS } from '../compact/constants.js'
 
@@ -82,7 +83,7 @@ export class SessionContext {
   }
 
   addUserMessage(content: string): void {
-    const msg: OaiMessage = { role: 'user', content }
+    const msg: OaiMessage = { role: 'user', content: sanitizeForJsonTransport(content) }
     this.state.oaiMessages.push(msg)
     this.state.estimatedTokens += estimateOaiMessageTokens(msg)
     this.state.turnCount++
@@ -118,7 +119,7 @@ export class SessionContext {
   addToolResults(results: ContentBlock[]): void {
     for (const block of results) {
       if (block.type === 'tool_result') {
-        const trimmed = trimToolResultForMemory(block.content)
+        const trimmed = sanitizeForJsonTransport(trimToolResultForMemory(block.content))
         const msg: OaiMessage = { role: 'tool', tool_call_id: block.tool_use_id, content: trimmed }
         this.state.oaiMessages.push(msg)
         this.state.estimatedTokens += estimateOaiMessageTokens(msg)

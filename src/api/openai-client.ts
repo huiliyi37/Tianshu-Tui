@@ -3,6 +3,7 @@ import type { StreamCallbacks } from './stream-client.js'
 import type { OaiChatRequest } from './oai-types.js'
 import type { ProviderProfile } from './provider-profile.js'
 import { shouldInjectPrefix, buildPrefixMessage } from './prefix-completion.js'
+import { sanitizeMessageContent } from '../utils/sanitize.js'
 
 export interface OpenAIClientConfig {
   baseUrl: string
@@ -172,7 +173,12 @@ export class OpenAIClient implements StreamClient {
       ;(body.messages as unknown[]).push(buildPrefixMessage())
     }
 
-    await this.sendStream(body, callbacks, signal)
+    // Sanitize messages to remove problematic characters (control chars, lone surrogates)
+    // that inflate JSON body size and can cause "unexpected end of hex escape" parse errors
+    // when the API server truncates the body at a byte boundary.
+    const sanitizedBody = sanitizeMessageContent(body)
+
+    await this.sendStream(sanitizedBody, callbacks, signal)
   }
 
   /** Shared inner retry+fetch+SSE loop used by both stream and streamOai. */
