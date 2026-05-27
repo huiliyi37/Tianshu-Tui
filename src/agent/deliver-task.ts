@@ -112,6 +112,11 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
           ? report.ownedFiles.map(f => `  ${f}`)
           : ['  (none)']),
         '',
+        `Co-owned files (${report.coOwnedFileCount}):`,
+        ...(report.coOwnedFiles.length > 0
+          ? report.coOwnedFiles.map(f => `  ${f}`)
+          : ['  (none)']),
+        '',
         `Historical owned files (${report.historicalOwnedFileCount}):`,
         ...(report.historicalOwnedFiles.length > 0
           ? report.historicalOwnedFiles.map(f => `  ${f}`)
@@ -145,8 +150,9 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
 
       const health = summarizeOwnershipHealth({
         ownedFiles: report.ownedFiles,
+        coOwnedFiles: report.coOwnedFiles,
         externalFiles: report.externalFiles,
-        dirtyFiles: [...report.ownedFiles, ...report.externalFiles],
+        dirtyFiles: currentDirtyFiles ?? [...report.ownedFiles, ...report.coOwnedFiles, ...report.externalFiles],
       })
       if (health.warningLines.length > 0) {
         lines.push('', 'Ownership health warnings:')

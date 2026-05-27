@@ -333,6 +333,7 @@ export async function executeToolUse(
       callbacks.onToolResult(tu.id, tu.name, chunk)
     },
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
+    ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     artifactStore: deps.artifactStore,
     contextWindow: deps.config.contextWindow,
     providerProfile: deps.config.providerProfile,

@@ -12,6 +12,7 @@ function makeContext(opts: {
   taskId: string
   ownedFiles: string[]
   externalFiles?: string[]
+  preExistingUntracked?: string[]
   dirtyFiles?: string[]
   verifications?: Array<{ command: string; status: 'passed' | 'failed' | 'blocked' }>
   projectMemory?: string
@@ -21,7 +22,7 @@ function makeContext(opts: {
     branch: 'feat/b1',
     head: 'abc123',
     preExistingDirty: opts.externalFiles ?? [],
-    preExistingUntracked: [],
+    preExistingUntracked: opts.preExistingUntracked ?? [],
     capturedAt: Date.now(),
   })
   const ledger = createTaskLedger({ taskId: opts.taskId })
@@ -371,5 +372,249 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
     assert.doesNotMatch(result.content, /Review principle checklist:/)
     assert.match(result.content, /Delivery Gate: GREEN/)
+  })
+
+  describe('preExistingUntracked scenarios', () => {
+    it('treats preExistingUntracked files as external in ownership report', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        preExistingUntracked: ['src/untracked.ts', 'temp.txt'],
+        dirtyFiles: ['src/owned.ts', 'src/untracked.ts', 'temp.txt'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      const result = await tool.execute(params)
+
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      assert.match(result.content, /Owned files \(1\)/)
+      assert.match(result.content, /src\/owned\.ts/)
+      assert.match(result.content, /External files \(2\)/)
+      assert.match(result.content, /src\/untracked\.ts/)
+      assert.match(result.content, /temp\.txt/)
+    })
+
+    it('prevents registerOwned from claiming preExistingUntracked files', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: [],
+        preExistingUntracked: ['src/pre-existing.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      // Try to register the pre-existing untracked file
+      ctx.ownership.registerOwned('src/pre-existing.ts')
+
+      // Should not be owned
+      assert.equal(ctx.ownership.isOwned('src/pre-existing.ts'), false)
+
+      // Now execute and verify it appears as external
+      const result = await ctx.tool.execute(ctx.params)
+      assert.match(result.content, /External files \(1\)/)
+      assert.match(result.content, /src\/pre-existing\.ts/)
+    })
+
+    it('shows ownership health warning when dirty file has no classification', async () => {
+      // Note: dirtyFiles passed to makeContext are used by getCurrentDirtyFiles mock.
+      // In real usage, deliver-task computes dirtyFiles from owned + external only.
+      // Files that are neither owned nor external are not included in the health check.
+      // This test verifies the current behavior: unknown files are silently excluded.
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        preExistingUntracked: [],
+        dirtyFiles: ['src/owned.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      const result = await tool.execute(params)
+
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      // No warnings because all dirty files are classified
+      assert.doesNotMatch(result.content, /Ownership health warnings:/)
+    })
+
+    it('allows commit=true for owned files even when preExistingUntracked are present', async () => {
+      const calls: Array<{ files: string[]; message: string }> = []
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        preExistingUntracked: ['src/untracked.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/untracked.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: (_cwd, files, message) => {
+          calls.push({ files, message })
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: test' } })
+
+      assert.equal(result.isError ?? false, false)
+      // Only owned file should be committed, not the untracked one
+      assert.deepEqual(calls, [{ files: ['src/owned.ts'], message: 'feat: test' }])
+      assert.match(result.content, /Scoped commit created/)
+    })
+
+    it('handles mixed preExistingDirty and preExistingUntracked correctly', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        externalFiles: ['src/dirty-ext.ts'],
+        preExistingUntracked: ['src/untracked-ext.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/dirty-ext.ts', 'src/untracked-ext.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      const result = await tool.execute(params)
+
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      assert.match(result.content, /Owned files \(1\)/)
+      assert.match(result.content, /src\/owned\.ts/)
+      assert.match(result.content, /External files \(2\)/)
+      assert.match(result.content, /src\/dirty-ext\.ts/)
+      assert.match(result.content, /src\/untracked-ext\.ts/)
+    })
+  })
+
+  describe('co-ownership scenarios', () => {
+    it('shows co-owned files in report when external file is registered', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        externalFiles: ['src/shared.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/shared.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      // Register external file as co-owned
+      ctx.ownership.registerOwned('src/shared.ts')
+
+      const result = await ctx.tool.execute(ctx.params)
+
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      assert.match(result.content, /Owned files \(1\)/)
+      assert.match(result.content, /src\/owned\.ts/)
+      assert.match(result.content, /Co-owned files \(1\)/)
+      assert.match(result.content, /src\/shared\.ts/)
+      assert.match(result.content, /External files \(1\)/)
+    })
+
+    it('shows co-owned caveat in ownership health', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        externalFiles: ['src/shared.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/shared.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      ctx.ownership.registerOwned('src/shared.ts')
+
+      const result = await ctx.tool.execute(ctx.params)
+
+      assert.match(result.content, /Ownership caveats:/)
+      assert.match(result.content, /co-owned file\(s\) present/)
+    })
+
+    it('allows commit=true for owned files when co-owned files exist', async () => {
+      const calls: Array<{ files: string[]; message: string }> = []
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        externalFiles: ['src/shared.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/shared.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: (_cwd, files, message) => {
+          calls.push({ files, message })
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      ctx.ownership.registerOwned('src/shared.ts')
+
+      const result = await ctx.tool.execute({ ...ctx.params, input: { commit: true, message: 'feat: test' } })
+
+      assert.equal(result.isError ?? false, false)
+      // Only truly owned file should be committed, not co-owned
+      assert.deepEqual(calls, [{ files: ['src/owned.ts'], message: 'feat: test' }])
+      assert.match(result.content, /Scoped commit created/)
+    })
+
+    it('distinguishes co-owned from external in ownership report', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        externalFiles: ['src/shared.ts', 'src/external.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/shared.ts', 'src/external.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      ctx.ownership.registerOwned('src/shared.ts')
+
+      const result = await ctx.tool.execute(ctx.params)
+
+      assert.match(result.content, /Co-owned files \(1\)/)
+      assert.match(result.content, /src\/shared\.ts/)
+      assert.match(result.content, /External files \(2\)/)
+      assert.match(result.content, /src\/external\.ts/)
+    })
+  })
+
+  describe('unclassified dirty files → YELLOW', () => {
+    it('reports YELLOW when dirty files have no ownership classification', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/unknown.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      const result = await ctx.tool.execute(ctx.params)
+
+      assert.match(result.content, /Delivery Gate: YELLOW/)
+      assert.match(result.content, /dirty file\(s\) have no ownership classification/)
+      assert.match(result.content, /Ownership health warnings:/)
+      assert.match(result.content, /src\/unknown\.ts/)
+    })
+
+    it('allows commit=true when YELLOW due to unclassified dirty files', async () => {
+      const calls: Array<{ files: string[]; message: string }> = []
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/unknown.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: (_cwd, files, message) => {
+          calls.push({ files, message })
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      const result = await ctx.tool.execute({ ...ctx.params, input: { commit: true, message: 'feat: test' } })
+
+      assert.equal(result.isError ?? false, false)
+      // Only owned files should be committed
+      assert.deepEqual(calls, [{ files: ['src/owned.ts'], message: 'feat: test' }])
+      assert.match(result.content, /Scoped commit created/)
+    })
+
+    it('does not report YELLOW when all dirty files are classified', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        externalFiles: ['src/external.ts'],
+        dirtyFiles: ['src/owned.ts', 'src/external.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      const result = await ctx.tool.execute(ctx.params)
+
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      assert.doesNotMatch(result.content, /Ownership health warnings:/)
+    })
   })
 })

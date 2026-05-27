@@ -22,6 +22,8 @@ export interface OwnershipReport {
   taskId: string
   ownedFiles: string[]
   ownedFileCount: number
+  coOwnedFiles: string[]
+  coOwnedFileCount: number
   externalFiles: string[]
   externalFileCount: number
 }
@@ -32,7 +34,9 @@ export interface OwnershipLedger {
   autoOwnFromLedger(): void
   isOwned(filePath: string | null | undefined): boolean
   isExternal(filePath: string): boolean
+  isCoOwned(filePath: string): boolean
   getOwnedFiles(): string[]
+  getCoOwnedFiles(): string[]
   getExternalFiles(): string[]
   /** Filter a file list to only owned files */
   scopeToOwned(files: string[]): string[]
@@ -45,10 +49,14 @@ export function createOwnershipLedger(opts: {
 }): OwnershipLedger {
   const { baseline, taskLedger } = opts
   const ownedSet = new Set<string>()
+  const coOwnedSet = new Set<string>()
 
   function registerOwned(filePath: string): void {
-    // External files cannot be owned, even if registered
-    if (baseline.isExternal(filePath)) return
+    // External files can be co-owned (shared worktree scenario)
+    if (baseline.isExternal(filePath)) {
+      coOwnedSet.add(filePath)
+      return
+    }
     ownedSet.add(filePath)
   }
 
@@ -70,8 +78,16 @@ export function createOwnershipLedger(opts: {
     return baseline.isExternal(filePath)
   }
 
+  function isCoOwned(filePath: string): boolean {
+    return coOwnedSet.has(filePath)
+  }
+
   function getOwnedFiles(): string[] {
     return [...ownedSet].sort()
+  }
+
+  function getCoOwnedFiles(): string[] {
+    return [...coOwnedSet].sort()
   }
 
   function getExternalFiles(): string[] {
@@ -84,11 +100,14 @@ export function createOwnershipLedger(opts: {
 
   function getOwnershipReport(): OwnershipReport {
     const owned = getOwnedFiles()
+    const coOwned = getCoOwnedFiles()
     const external = getExternalFiles()
     return {
       taskId: taskLedger.getTaskId(),
       ownedFiles: owned,
       ownedFileCount: owned.length,
+      coOwnedFiles: coOwned,
+      coOwnedFileCount: coOwned.length,
       externalFiles: external,
       externalFileCount: external.length,
     }
@@ -99,7 +118,9 @@ export function createOwnershipLedger(opts: {
     autoOwnFromLedger,
     isOwned,
     isExternal,
+    isCoOwned,
     getOwnedFiles,
+    getCoOwnedFiles,
     getExternalFiles,
     scopeToOwned,
     getOwnershipReport,

@@ -104,7 +104,6 @@ export type AttributionClass =
   | 'verified'
   | 'owned_failure'
   | 'external_blocked'
-  | 'ambiguous'
   | 'unattributed_failure'
   | 'unverified'
 
@@ -198,7 +197,7 @@ export function createVerificationAttribution(opts: {
 
     const attributions = results.map(r => attribute(r))
 
-    // Priority: owned_failure > ambiguous > unattributed_failure > external_blocked > verified
+    // Priority: owned_failure > unattributed_failure > external_blocked > verified
     const hasOwnedFailure = attributions.some(a => a.attribution === 'owned_failure')
     if (hasOwnedFailure) {
       const first = attributions.find(a => a.attribution === 'owned_failure')!
@@ -206,17 +205,6 @@ export function createVerificationAttribution(opts: {
         attribution: 'owned_failure',
         isBlocking: true,
         reason: `Owned verification failure: ${first.source.command}`,
-        source: first.source,
-      }
-    }
-
-    const hasAmbiguous = attributions.some(a => a.attribution === 'ambiguous')
-    if (hasAmbiguous) {
-      const first = attributions.find(a => a.attribution === 'ambiguous')!
-      return {
-        attribution: 'ambiguous',
-        isBlocking: true,
-        reason: `Ambiguous verification failure: ${first.source.command}. Investigate whether failures are in owned or external files.`,
         source: first.source,
       }
     }

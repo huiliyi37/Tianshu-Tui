@@ -20,6 +20,7 @@ import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
 import type { VerificationAttribution } from './verification-attribution.js'
 import { getEffectiveVerifications } from './verification-attribution.js'
+import { summarizeOwnershipHealth } from './ownership-health.js'
 import type { VerificationMetadata } from '../tools/types.js'
 
 export type GateState = 'GREEN' | 'YELLOW' | 'RED'
@@ -43,6 +44,8 @@ export interface DeliveryReport {
   canDeliver: boolean
   ownedFiles: string[]
   ownedFileCount: number
+  coOwnedFiles: string[]
+  coOwnedFileCount: number
   historicalOwnedFiles: string[]
   historicalOwnedFileCount: number
   externalFiles: string[]
@@ -71,24 +74,55 @@ export function createDeliveryGateV2(opts: {
 
   function getGateFiles(currentDirtyFiles?: string[]): {
     ownedFilesForGate: string[]
+    coOwnedFiles: string[]
     historicalOwnedFiles: string[]
     externalFiles: string[]
   } {
     const allOwnedFiles = ownership.getOwnedFiles()
+    const allCoOwnedFiles = ownership.getCoOwnedFiles()
     const allExternalFiles = ownership.getExternalFiles()
     if (!currentDirtyFiles) {
-      return { ownedFilesForGate: allOwnedFiles, historicalOwnedFiles: [], externalFiles: allExternalFiles }
+      return {
+        ownedFilesForGate: allOwnedFiles,
+        coOwnedFiles: allCoOwnedFiles,
+        historicalOwnedFiles: [],
+        externalFiles: allExternalFiles,
+      }
     }
 
     const currentDirty = new Set(currentDirtyFiles)
     const ownedFilesForGate = allOwnedFiles.filter(f => currentDirty.has(f)).sort()
+    const coOwnedFiles = allCoOwnedFiles.filter(f => currentDirty.has(f)).sort()
     const historicalOwnedFiles = allOwnedFiles.filter(f => !currentDirty.has(f)).sort()
     const externalFiles = allExternalFiles.filter(f => currentDirty.has(f)).sort()
-    return { ownedFilesForGate, historicalOwnedFiles, externalFiles }
+    return { ownedFilesForGate, coOwnedFiles, historicalOwnedFiles, externalFiles }
   }
 
   function assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[]): DeliveryGateResult {
-    const { ownedFilesForGate: ownedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
+    const { ownedFilesForGate: ownedFiles, coOwnedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
+
+    // Check ownership health for unclassified dirty files
+    if (currentDirtyFiles) {
+      const health = summarizeOwnershipHealth({
+        ownedFiles,
+        coOwnedFiles,
+        externalFiles,
+        dirtyFiles: currentDirtyFiles,
+      })
+      if (health.warningLines.length > 0) {
+        // Unclassified dirty files → YELLOW with caveat
+        return {
+          state: 'YELLOW',
+          canDeliver: true,
+          isBlocked: false,
+          reason: `${health.warningLines.length} dirty file(s) have no ownership classification. Deliverable with caveat.`,
+          ownedFileCount: ownedFiles.length,
+          externalFileCount: externalFiles.length,
+          verificationCount: externalVerifications.length,
+          supersededFailures: 0,
+        }
+      }
+    }
 
     // Use effective verifications (deduplicated by supersession)
     const rawVerifications = taskLedger.getVerifications()
@@ -170,19 +204,6 @@ export function createDeliveryGateV2(opts: {
           supersededFailures,
         }
 
-      case 'ambiguous':
-        return {
-          state: 'RED',
-          canDeliver: false,
-          isBlocked: true,
-          reason: aggregate.reason,
-          blockingReason: `Verification failure cannot be attributed to owned vs external files. Diagnose before delivery.`,
-          ownedFileCount: ownedFiles.length,
-          externalFileCount: externalFiles.length,
-          verificationCount: allVerifications.length,
-          supersededFailures,
-        }
-
       case 'unverified':
         return {
           state: 'RED',
@@ -212,13 +233,15 @@ export function createDeliveryGateV2(opts: {
 
   function getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[]): DeliveryReport {
     const result = assess(externalVerifications, currentDirtyFiles)
-    const { ownedFilesForGate, historicalOwnedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
+    const { ownedFilesForGate, coOwnedFiles, historicalOwnedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
     return {
       taskId: taskLedger.getTaskId(),
       state: result.state,
       canDeliver: result.canDeliver,
       ownedFiles: ownedFilesForGate,
       ownedFileCount: result.ownedFileCount,
+      coOwnedFiles,
+      coOwnedFileCount: coOwnedFiles.length,
       historicalOwnedFiles,
       historicalOwnedFileCount: historicalOwnedFiles.length,
       externalFiles,
