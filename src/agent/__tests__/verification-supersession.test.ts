@@ -205,6 +205,47 @@ describe('getEffectiveVerifications — deduplicate by (command, scope) key', ()
     assert.equal(result.supersededFailures, 1)
   })
 
+  it('npx tsx --test success supersedes run_tests failure for the same files', () => {
+    const events: TaskLedgerEvent[] = [
+      makeVerificationEvent(
+        'run_tests src/agent/__tests__/deliver-task.test.ts src/tools/__tests__/git.test.ts',
+        'failed',
+        'targeted',
+        1000,
+        { exitCode: 1, passed: 0, failed: 0, skipped: 0 },
+      ),
+      makeVerificationEvent(
+        'npx tsx --test src/tools/__tests__/git.test.ts src/agent/__tests__/deliver-task.test.ts',
+        'passed',
+        'targeted',
+        2000,
+        { exitCode: 0, passed: 22, failed: 0, skipped: 0 },
+      ),
+    ]
+
+    const result = getEffectiveVerifications(events)
+
+    assert.equal(result.effective.length, 1)
+    assert.equal(result.effective[0]!.status, 'passed')
+    assert.equal(result.supersededFailures, 1)
+  })
+
+  it('does not merge runner-family-equivalent commands when no test files can be extracted', () => {
+    const events: TaskLedgerEvent[] = [
+      makeVerificationEvent('run_tests', 'failed', 'targeted', 1000),
+      makeVerificationEvent('npx tsx --test', 'passed', 'targeted', 2000),
+    ]
+
+    const result = getEffectiveVerifications(events)
+
+    assert.equal(result.effective.length, 2)
+    assert.equal(result.effective[0]!.command, 'run_tests')
+    assert.equal(result.effective[0]!.status, 'failed')
+    assert.equal(result.effective[1]!.command, 'npx tsx --test')
+    assert.equal(result.effective[1]!.status, 'passed')
+    assert.equal(result.supersededFailures, 0)
+  })
+
   it('tool invocation failure metadata is preserved when parsed counts are all zero', () => {
     const events: TaskLedgerEvent[] = [
       makeVerificationEvent(
