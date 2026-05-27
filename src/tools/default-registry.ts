@@ -6,6 +6,7 @@ import { GIT_TOOL } from './git.js'
 import { GLOB_TOOL } from './glob.js'
 import { GREP_TOOL } from './grep.js'
 import { INSPECT_PROJECT_TOOL } from './inspect-project.js'
+import { PLAN_CLOSE_TOOL } from './plan-close.js'
 import { READ_FILE_TOOL } from './read-file.js'
 import { READ_SECTION_TOOL } from './read-section.js'
 import { RELATED_TESTS_TOOL } from './related-tests.js'
@@ -24,6 +25,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(APPLY_PATCH_TOOL)
   registry.register(READ_FILE_TOOL)
   registry.register(WRITE_FILE_TOOL)
+  registry.register(PLAN_CLOSE_TOOL)
   registry.register(BASH_TOOL)
   registry.register(EDIT_FILE_TOOL)
   registry.register(GREP_TOOL)

@@ -650,6 +650,13 @@ ${check.formatted}`
       } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && filePath) {
         deps.taskLedger.record({ type: 'file_write', path: filePath })
         deps.ownershipLedger?.registerOwned(filePath)
+      } else if (tu.name === 'plan_close' && filePath) {
+        if (tu.input.apply === true && !harnessResult.isError) {
+          deps.taskLedger.record({ type: 'file_write', path: filePath })
+          deps.ownershipLedger?.registerOwned(filePath)
+        } else {
+          deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
+        }
       } else if (tu.name === 'bash') {
         const cmd = (tu.input.command as string | undefined) ?? ''
         if (!harnessResult.isError && (cmd.startsWith('git ') || /\b(rm|mv|cp|touch|mkdir)\b/.test(cmd))) {

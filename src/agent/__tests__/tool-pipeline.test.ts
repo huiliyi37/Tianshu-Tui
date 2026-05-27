@@ -67,6 +67,72 @@ describe('executeToolUse', () => {
     }
   }
 
+  it('records applied plan_close as file_write in task ledger', async () => {
+    const events: any[] = []
+    const owned: string[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+      } as any,
+      ownershipLedger: {
+        registerOwned: (file: string) => { owned.push(file) },
+        getOwnedFiles: () => owned,
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'Plan closed: docs/superpowers/plans/demo.md', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-plan-close-apply', name: 'plan_close', input: { file_path: 'docs/superpowers/plans/demo.md', tasks: '1', apply: true } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const event = events.at(-1)
+    assert.equal(event.type, 'file_write')
+    assert.equal(event.path, 'docs/superpowers/plans/demo.md')
+    assert.deepEqual(owned, ['docs/superpowers/plans/demo.md'])
+  })
+
+  it('records preview plan_close as tool_exec without owning the file', async () => {
+    const events: any[] = []
+    const owned: string[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+        getOwnedFiles: () => owned,
+      } as any,
+      ownershipLedger: {
+        registerOwned: (file: string) => { owned.push(file) },
+        getOwnedFiles: () => owned,
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'Plan close preview: docs/superpowers/plans/demo.md', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-plan-close-preview', name: 'plan_close', input: { file_path: 'docs/superpowers/plans/demo.md', tasks: '1', apply: false } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const event = events.at(-1)
+    assert.equal(event.type, 'tool_exec')
+    assert.equal(event.tool, 'plan_close')
+    assert.equal(event.path, 'docs/superpowers/plans/demo.md')
+    assert.deepEqual(owned, [])
+  })
+
   it('records run_tests as verification in task ledger', async () => {
     const events: any[] = []
     const deps = makeDeps({

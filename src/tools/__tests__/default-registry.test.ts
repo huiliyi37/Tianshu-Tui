@@ -24,6 +24,7 @@ describe('createDefaultToolRegistry', () => {
 
     assert.ok(names.includes('read_file'))
     assert.ok(names.includes('write_file'))
+    assert.ok(names.includes('plan_close'))
     assert.ok(names.includes('bash'))
     assert.ok(names.includes('edit_file'))
     assert.ok(names.includes('grep'))
