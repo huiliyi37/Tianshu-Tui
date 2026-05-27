@@ -665,7 +665,20 @@ ${check.formatted}`
       } else if (tu.name === 'run_tests') {
         const filter = typeof tu.input.filter === 'string' ? tu.input.filter : undefined
         const command = filter ? `run_tests ${filter}` : 'run_tests'
-        deps.taskLedger.record({ type: 'verification', command, status: harnessResult.isError ? 'failed' : 'passed', meta: { scope: rawToolResult?.verification?.scope ?? (filter ? 'targeted' : 'full') } })
+        const verification = rawToolResult?.verification
+        const meta: Record<string, unknown> = { scope: verification?.scope ?? (filter ? 'targeted' : 'full') }
+        if (verification) {
+          meta.exitCode = verification.exitCode
+          meta.passed = verification.passed
+          meta.failed = verification.failed
+          meta.skipped = verification.skipped
+          meta.durationMs = verification.durationMs
+          meta.resolvedCommand = verification.command
+          meta.recommendedCommand = verification.command
+          if (verification.failureKind) meta.failureKind = verification.failureKind
+          if (verification.targetFiles) meta.targetFiles = verification.targetFiles
+        }
+        deps.taskLedger.record({ type: 'verification', command, status: harnessResult.isError ? 'failed' : 'passed', meta })
       } else {
         deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
       }

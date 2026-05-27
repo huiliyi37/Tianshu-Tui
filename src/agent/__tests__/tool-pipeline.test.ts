@@ -80,11 +80,60 @@ describe('executeToolUse', () => {
       deps, noopCallbacks as any, 1, false,
     )
 
-    assert.deepEqual(events.at(-1), {
-      type: 'verification',
-      command: 'run_tests src/foo.test.ts',
-      status: 'passed',
-      meta: { scope: 'targeted' },
+    const event = events.at(-1)
+    assert.equal(event.type, 'verification')
+    assert.equal(event.command, 'run_tests src/foo.test.ts')
+    assert.equal(event.status, 'passed')
+    assert.equal(event.meta.scope, 'targeted')
+  })
+
+  it('records run_tests parsed verification counts in task ledger meta', async () => {
+    const events: any[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({
+            content: 'Exit code: 1\n0 passed, 0 failed, 0 skipped',
+            isError: true,
+            verification: {
+              command: 'tsx --test src/foo.test.ts',
+              status: 'failed',
+              scope: 'targeted',
+              exitCode: 1,
+              passed: 0,
+              failed: 0,
+              skipped: 0,
+              durationMs: 25,
+            },
+          }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-ledger-run-tests-failed', name: 'run_tests', input: { filter: 'src/foo.test.ts' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const event = events.at(-1)
+    assert.equal(event.type, 'verification')
+    assert.equal(event.command, 'run_tests src/foo.test.ts')
+    assert.equal(event.status, 'failed')
+    assert.deepEqual(event.meta, {
+      scope: 'targeted',
+      exitCode: 1,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      durationMs: 25,
+      resolvedCommand: 'tsx --test src/foo.test.ts',
+      recommendedCommand: 'tsx --test src/foo.test.ts',
     })
   })
 
