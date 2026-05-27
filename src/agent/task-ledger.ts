@@ -33,7 +33,13 @@ export interface TaskLedgerEvent {
   status?: 'passed' | 'failed' | 'blocked'
   /** Tool name for tool_exec events */
   tool?: string
-  /** Arbitrary context for extension */
+  /**
+   * Arbitrary context for extension.
+   * Verification events may store structured metadata mirrored from
+   * VerificationMetadata: scope, exitCode, passed, failed, skipped,
+   * durationMs, resolvedCommand, targetFiles, recommendedCommand,
+   * failureKind.
+   */
   meta?: Record<string, unknown>
 }
 

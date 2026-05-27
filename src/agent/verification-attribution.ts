@@ -39,14 +39,101 @@ export interface EffectiveVerifications {
  * Strips common noise (extra whitespace, quotes) to group equivalent commands.
  */
 function normalizeCommand(command: string): string {
-  return command.trim().replace(/\s+/g, ' ').toLowerCase()
+  return command.trim().replace(/["']/g, '').replace(/\s+/g, ' ').toLowerCase()
+}
+
+function asNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function extractTestFiles(command: string): string[] {
+  const files = new Set<string>()
+  const matches = command.matchAll(/[^\s'"]+\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)/g)
+  for (const match of matches) {
+    const file = match[0]?.trim().replace(/^['"]|['"]$/g, '')
+    if (file) files.add(file)
+  }
+  return [...files].sort()
+}
+
+function getMetaTargetFiles(meta: Record<string, unknown> | undefined): string[] {
+  const raw = meta?.targetFiles
+  if (!Array.isArray(raw)) return []
+  return raw.filter((f): f is string => typeof f === 'string' && f.length > 0).sort()
+}
+
+function runnerFamily(command: string): string {
+  const normalized = normalizeCommand(command)
+  if (
+    normalized.startsWith('run_tests')
+    || normalized.includes('tsx --test')
+    || normalized.includes('node --test')
+  ) {
+    return 'node-test'
+  }
+  return normalized.split(' ')[0] ?? normalized
+}
+
+function isInvocationFailureMeta(status: TaskLedgerEvent['status'], meta: Record<string, unknown> | undefined): boolean {
+  if (status !== 'failed') return false
+  return asNumber(meta?.exitCode, status === 'failed' ? 1 : 0) !== 0
+    && asNumber(meta?.passed, status === 'passed' ? 1 : 0) === 0
+    && asNumber(meta?.failed, status === 'failed' ? 1 : 0) === 0
+    && asNumber(meta?.skipped, 0) === 0
+}
+
+function eventToVerificationMetadata(event: TaskLedgerEvent): VerificationMetadata {
+  const scope = event.meta?.scope === 'full' ? 'full' as const : 'targeted' as const
+  const status = (event.status ?? 'passed') as 'passed' | 'failed' | 'blocked'
+  const command = event.command ?? 'unknown'
+  const targetFiles = getMetaTargetFiles(event.meta)
+  const resolvedCommand = asString(event.meta?.resolvedCommand)
+  const recommendedCommand = asString(event.meta?.recommendedCommand)
+  const failureKind = asString(event.meta?.failureKind) === 'tool_invocation_failure' || isInvocationFailureMeta(status, event.meta)
+    ? 'tool_invocation_failure' as const
+    : asString(event.meta?.failureKind) === 'test_failure'
+      ? 'test_failure' as const
+      : undefined
+
+  return {
+    command,
+    status,
+    scope,
+    exitCode: asNumber(event.meta?.exitCode, status === 'failed' ? 1 : 0),
+    passed: asNumber(event.meta?.passed, status === 'passed' ? 1 : 0),
+    failed: asNumber(event.meta?.failed, status === 'failed' ? 1 : 0),
+    skipped: asNumber(event.meta?.skipped, 0),
+    durationMs: asNumber(event.meta?.durationMs, 0),
+    ...(failureKind ? { failureKind } : {}),
+    ...(targetFiles.length > 0 ? { targetFiles } : {}),
+    ...(resolvedCommand ? { resolvedCommand } : {}),
+    ...(recommendedCommand ? { recommendedCommand } : {}),
+  }
 }
 
 /**
  * Generate a stable deduplication key for a verification event.
  * Events with the same key are considered "same verification" for supersession.
  */
-function verificationKey(command: string, scope: string): string {
+function verificationKey(event: TaskLedgerEvent): string {
+  const command = event.command ?? 'unknown'
+  const scope = event.meta?.scope === 'full' ? 'full' : 'targeted'
+  const resolvedCommand = asString(event.meta?.resolvedCommand) ?? ''
+  const targetFiles = [
+    ...getMetaTargetFiles(event.meta),
+    ...extractTestFiles(command),
+    ...extractTestFiles(resolvedCommand),
+  ]
+  const uniqueTargetFiles = [...new Set(targetFiles)].sort()
+
+  if (uniqueTargetFiles.length > 0) {
+    return `tests::${scope}::${runnerFamily(`${command} ${resolvedCommand}`)}::${uniqueTargetFiles.join('|')}`
+  }
+
   return `${normalizeCommand(command)}::${scope}`
 }
 
@@ -67,9 +154,7 @@ export function getEffectiveVerifications(
 
   for (let i = 0; i < verificationEvents.length; i++) {
     const event = verificationEvents[i]!
-    const command = event.command ?? 'unknown'
-    const scope = event.meta?.scope === 'full' ? 'full' : 'targeted'
-    const key = verificationKey(command, scope)
+    const key = verificationKey(event)
 
     const existing = keyMap.get(key)
     if (existing) {
@@ -84,17 +169,7 @@ export function getEffectiveVerifications(
   // Convert to VerificationMetadata
   const effective: VerificationMetadata[] = []
   for (const { event } of keyMap.values()) {
-    const scope = event.meta?.scope === 'full' ? 'full' as const : 'targeted' as const
-    effective.push({
-      command: event.command ?? 'unknown',
-      status: (event.status ?? 'passed') as 'passed' | 'failed' | 'blocked',
-      scope,
-      exitCode: event.status === 'failed' ? 1 : 0,
-      passed: event.status === 'passed' ? 1 : 0,
-      failed: event.status === 'failed' ? 1 : 0,
-      skipped: 0,
-      durationMs: 0,
-    })
+    effective.push(eventToVerificationMetadata(event))
   }
 
   return { effective, supersededFailures, totalRawCount: verificationEvents.length }

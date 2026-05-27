@@ -16,13 +16,14 @@ function makeVerificationEvent(
   status: 'passed' | 'failed' | 'blocked',
   scope: 'full' | 'targeted' = 'full',
   timestamp: number = Date.now(),
+  metaOverrides: Record<string, unknown> = {},
 ): TaskLedgerEvent {
   return {
     type: 'verification',
     timestamp,
     command,
     status,
-    meta: { scope },
+    meta: { scope, ...metaOverrides },
   }
 }
 
@@ -177,5 +178,48 @@ describe('getEffectiveVerifications — deduplicate by (command, scope) key', ()
     assert.equal(result.effective[1]!.status, 'passed')
     assert.equal(result.supersededFailures, 2)
     assert.equal(result.totalRawCount, 4)
+  })
+
+  it('run_tests targeted failure is superseded by equivalent tsx --test success for same files', () => {
+    const events: TaskLedgerEvent[] = [
+      makeVerificationEvent(
+        'run_tests src/agent/__tests__/scoped-git-commit.test.ts src/agent/__tests__/deliver-task.test.ts src/tools/__tests__/git.test.ts',
+        'failed',
+        'targeted',
+        1000,
+        { exitCode: 1, passed: 0, failed: 0, skipped: 0 },
+      ),
+      makeVerificationEvent(
+        "./node_modules/.bin/tsx --test 'src/agent/__tests__/scoped-git-commit.test.ts' 'src/agent/__tests__/deliver-task.test.ts' 'src/tools/__tests__/git.test.ts'",
+        'passed',
+        'targeted',
+        2000,
+        { exitCode: 0, passed: 40, failed: 0, skipped: 0 },
+      ),
+    ]
+
+    const result = getEffectiveVerifications(events)
+
+    assert.equal(result.effective.length, 1)
+    assert.equal(result.effective[0]!.status, 'passed')
+    assert.equal(result.supersededFailures, 1)
+  })
+
+  it('tool invocation failure metadata is preserved when parsed counts are all zero', () => {
+    const events: TaskLedgerEvent[] = [
+      makeVerificationEvent(
+        'run_tests src/tools/__tests__/git.test.ts',
+        'failed',
+        'targeted',
+        1000,
+        { exitCode: 1, passed: 0, failed: 0, skipped: 0 },
+      ),
+    ]
+
+    const result = getEffectiveVerifications(events)
+
+    assert.equal(result.effective[0]!.failed, 0)
+    assert.equal(result.effective[0]!.passed, 0)
+    assert.equal(result.effective[0]!.failureKind, 'tool_invocation_failure')
   })
 })

@@ -23,6 +23,8 @@ export interface ToolCallParams {
   providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
 }
 
+export type VerificationFailureKind = 'test_failure' | 'tool_invocation_failure'
+
 export interface VerificationMetadata {
   command: string
   status: 'passed' | 'failed' | 'blocked'
@@ -32,6 +34,10 @@ export interface VerificationMetadata {
   failed: number
   skipped: number
   durationMs: number
+  failureKind?: VerificationFailureKind
+  targetFiles?: string[]
+  resolvedCommand?: string
+  recommendedCommand?: string
 }
 
 export interface ToolResult {
