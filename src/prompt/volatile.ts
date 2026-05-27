@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, readdirSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import os from 'os'
 import { gitStatusCache } from './volatile-git.js'
@@ -26,7 +26,6 @@ export interface VolatileContext {
   activeDomain?: { name: string; volatileBlock: string; motto: string } | null
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
-  _knowledgeSnapshot?: string
   playbookLessons?: PlaybookBullet[]
   activeClaims?: ContextClaim[]
   toolHistory?: ToolHistoryEntry[]
@@ -110,27 +109,6 @@ function escapeXml(text: string): string {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
-}
-
-const KNOWLEDGE_MAX_CHARS = 4096
-
-function readKnowledgeFiles(cwd: string): string | undefined {
-  const dir = join(cwd, '.rivet', 'knowledge')
-  try {
-    if (!existsSync(dir)) return undefined
-    const files = readdirSync(dir).filter(f => f.endsWith('.md'))
-    if (files.length === 0) return undefined
-    files.sort((a, b) => (a === 'project-memory.md' ? -1 : b === 'project-memory.md' ? 1 : a.localeCompare(b)))
-
-    let combined = ''
-    for (const file of files) {
-      const content = readFileSync(join(dir, file), 'utf-8').trim()
-      if (!content) continue
-      if (combined.length + content.length + 10 > KNOWLEDGE_MAX_CHARS) break
-      combined += (combined ? `\n\n<!-- ${file} -->\n` : '') + content
-    }
-    return combined || undefined
-  } catch { return undefined }
 }
 
 /** Build stable volatile block — excludes per-turn dynamic sections for exact-prefix cache stability. */
@@ -289,11 +267,8 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<project-instructions>\n${escapeXml(md)}\n</project-instructions>`)
   }
 
-  // Inject project memory — prefer snapshot, fall back to filesystem
-  const knowledge = ctx._knowledgeSnapshot ?? readKnowledgeFiles(ctx.cwd)
-  if (knowledge) {
-    parts.push(`<project-memory>\n${escapeXml(knowledge)}\n</project-memory>`)
-  }
+  // Project knowledge is intentionally not injected into the prompt.
+  // Use the recall tool to search .rivet/knowledge/*.md on demand.
 
   // Only render git status if explicitly provided — no cache fallback here.
   // buildStableVolatileBlock passes gitStatus: undefined to keep FROZEN prefix stable;

@@ -1,5 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ContextLedger } from '../../context/types.js'
 import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext } from '../volatile.js'
 
@@ -46,6 +49,26 @@ describe('volatile context layers', () => {
     assert.doesNotMatch(block, /<working-set>/)
     assert.doesNotMatch(block, /<context-ledger/)
     assert.doesNotMatch(block, /<session-memory>/)
+  })
+
+  it('does not inject project knowledge files into prompt context', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'volatile-knowledge-'))
+    try {
+      const knowledgeDir = join(cwd, '.rivet', 'knowledge')
+      mkdirSync(knowledgeDir, { recursive: true })
+      writeFileSync(
+        join(knowledgeDir, 'project-memory.md'),
+        '### Curated Memory\nProject memory should be recalled on demand.\n',
+        'utf-8',
+      )
+
+      const block = buildLatestTurnVolatileBlock({ cwd })
+
+      assert.doesNotMatch(block, /<project-memory>/)
+      assert.doesNotMatch(block, /Project memory should be recalled on demand/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 })
 
