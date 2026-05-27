@@ -14,7 +14,7 @@ function makeContext(opts: {
   externalFiles?: string[]
   preExistingUntracked?: string[]
   dirtyFiles?: string[]
-  verifications?: Array<{ command: string; status: 'passed' | 'failed' | 'blocked' }>
+  verifications?: Array<{ command: string; status: 'passed' | 'failed' | 'blocked'; meta?: Record<string, unknown> }>
   projectMemory?: string
   commitOwnedFiles?: (cwd: string, files: string[], message: string) => { ok: boolean; output: string }
 }) {
@@ -27,7 +27,7 @@ function makeContext(opts: {
   })
   const ledger = createTaskLedger({ taskId: opts.taskId })
   for (const f of opts.ownedFiles) ledger.record({ type: 'file_write', path: f })
-  for (const v of (opts.verifications ?? [])) ledger.record({ type: 'verification', command: v.command, status: v.status })
+  for (const v of (opts.verifications ?? [])) ledger.record({ type: 'verification', command: v.command, status: v.status, meta: v.meta })
   const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
   ownership.autoOwnFromLedger()
   const attribution = createVerificationAttribution({ ownership })
@@ -561,6 +561,75 @@ Do not declare a streamed response duplicate in the middle of the stream.
       assert.match(result.content, /src\/shared\.ts/)
       assert.match(result.content, /External files \(2\)/)
       assert.match(result.content, /src\/external\.ts/)
+    })
+  })
+
+  describe('verification diagnostics', () => {
+    it('reports invocation failure separately from owned test failure', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        dirtyFiles: ['src/a.ts'],
+        verifications: [{
+          command: 'run_tests src/a.test.ts',
+          status: 'failed',
+          meta: { scope: 'targeted', exitCode: 1, passed: 0, failed: 0, skipped: 0, recommendedCommand: 'tsx --test src/a.test.ts' },
+        }],
+      })
+
+      const result = await tool.execute(params)
+
+      assert.match(result.content, /Delivery Gate: RED/)
+      assert.match(result.content, /Verification diagnostics:/)
+      assert.match(result.content, /Tool invocation failure candidates:/)
+      assert.match(result.content, /Shortest next step: tsx --test src\/a\.test\.ts/)
+      assert.doesNotMatch(result.content, /Owned verification failed\. Fix failures before delivery\./)
+    })
+
+    it('reports stale superseded failures without blocking wording', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        dirtyFiles: ['src/a.ts'],
+        verifications: [
+          {
+            command: 'run_tests src/a.test.ts',
+            status: 'failed',
+            meta: { scope: 'targeted', exitCode: 1, passed: 0, failed: 0, skipped: 0 },
+          },
+          {
+            command: 'tsx --test src/a.test.ts',
+            status: 'passed',
+            meta: { scope: 'targeted', exitCode: 0, passed: 1, failed: 0, skipped: 0 },
+          },
+        ],
+      })
+
+      const result = await tool.execute(params)
+
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      assert.match(result.content, /Stale failure candidates: 1/)
+      assert.doesNotMatch(result.content, /Cannot commit/)
+    })
+
+    it('does not amplify stale failures when no current owned dirty files', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/already-clean.ts'],
+        dirtyFiles: [],
+        verifications: [{
+          command: 'run_tests src/a.test.ts',
+          status: 'failed',
+          meta: { scope: 'targeted', exitCode: 1, passed: 0, failed: 0, skipped: 0 },
+        }],
+      })
+
+      const result = await tool.execute(params)
+
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      assert.match(result.content, /Owned files \(0\)/)
+      assert.match(result.content, /Tool invocation failure candidates:/)
+      assert.doesNotMatch(result.content, /⚠️  Blocking:/)
     })
   })
 

@@ -130,8 +130,27 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         `Verifications: ${report.verificationCount}`,
       ]
 
-      if (report.supersededFailures > 0) {
-        lines.push(`Superseded verification failures: ${report.supersededFailures}`)
+      const hasVerificationDiagnostics = report.currentBlockingFailure
+        || report.staleFailureCandidates > 0
+        || report.toolInvocationFailureCandidates.length > 0
+        || report.shortestNextStep
+      if (hasVerificationDiagnostics) {
+        lines.push('', 'Verification diagnostics:')
+        if (report.currentBlockingFailure) {
+          lines.push(`  Current blocking failure: ${report.currentBlockingFailure}`)
+        }
+        if (report.staleFailureCandidates > 0) {
+          lines.push(`  Stale failure candidates: ${report.staleFailureCandidates}`)
+        }
+        if (report.toolInvocationFailureCandidates.length > 0) {
+          lines.push('  Tool invocation failure candidates:')
+          for (const candidate of report.toolInvocationFailureCandidates) {
+            lines.push(`    - ${candidate}`)
+          }
+        }
+        if (report.shortestNextStep) {
+          lines.push(`  Shortest next step: ${report.shortestNextStep}`)
+        }
       }
 
       // Memory-driven review checklist (non-blocking, informational only)
