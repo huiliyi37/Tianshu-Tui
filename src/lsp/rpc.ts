@@ -34,34 +34,38 @@ export function encodeMessage(msg: JsonRpcMessage): string {
   return `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`
 }
 
-export function decodeMessages(buffer: string): { messages: JsonRpcMessage[]; rest: string } {
+const CRLFCRLF = Buffer.from('\r\n\r\n')
+
+export function decodeMessages(input: string | Buffer): { messages: JsonRpcMessage[]; rest: string } {
   const messages: JsonRpcMessage[] = []
-  let rest = buffer
+  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8')
+  let offset = 0
 
   while (true) {
-    const headerEnd = rest.indexOf('\r\n\r\n')
+    const headerEnd = buf.indexOf(CRLFCRLF, offset)
     if (headerEnd === -1) break
 
-    const header = rest.slice(0, headerEnd)
+    const header = buf.subarray(offset, headerEnd).toString('utf8')
     const lengthMatch = /^Content-Length: (\d+)/m.exec(header)
     if (!lengthMatch) {
-      rest = rest.slice(headerEnd + 4)
+      offset = headerEnd + 4
       continue
     }
 
     const contentLength = parseInt(lengthMatch[1]!, 10)
     const bodyStart = headerEnd + 4
-    if (rest.length < bodyStart + contentLength) break
+    if (buf.length - bodyStart < contentLength) break
 
-    const body = rest.slice(bodyStart, bodyStart + contentLength)
+    const body = buf.subarray(bodyStart, bodyStart + contentLength).toString('utf8')
     try {
       messages.push(JSON.parse(body) as JsonRpcMessage)
     } catch {
       // Skip malformed message
     }
-    rest = rest.slice(bodyStart + contentLength)
+    offset = bodyStart + contentLength
   }
 
+  const rest = buf.subarray(offset).toString('utf8')
   return { messages, rest }
 }
 
@@ -69,12 +73,12 @@ export function createRpcClient(readable: Readable, writable: Writable): RpcClie
   let nextId = 1
   const pending = new Map<number, { resolve(v: unknown): void; reject(e: Error): void }>()
   const notificationHandlers = new Map<string, Array<(params: Record<string, unknown>) => void>>()
-  let buffer = ''
+  let buffer = Buffer.alloc(0)
 
   readable.on('data', (chunk: Buffer) => {
-    buffer += chunk.toString()
+    buffer = Buffer.concat([buffer, chunk])
     const { messages, rest } = decodeMessages(buffer)
-    buffer = rest
+    buffer = Buffer.from(rest, 'utf8')
 
     for (const msg of messages) {
       if ('id' in msg && 'result' in msg && !('method' in msg)) {

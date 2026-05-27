@@ -50,16 +50,20 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
   let proc: ChildProcess | null = null
   let capabilities: ServerCapabilities | null = null
   let ready = false
+  const openedDocs = new Set<string>()
 
   /**
    * Ensure the document is opened in the LSP server.
    * Uses a dummy text because TypeScript language server reads from disk
    * and does not rely on the text content from didOpen.
+   * Caches opened URIs — only sends didOpen + waits on first access.
    */
   async function ensureDocument(filePath: string): Promise<void> {
     if (!rpc) return
     const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
     const uri = `file://${absPath}`
+    if (openedDocs.has(uri)) return
+    openedDocs.add(uri)
     try {
       rpc.notify('textDocument/didOpen', {
         textDocument: {
