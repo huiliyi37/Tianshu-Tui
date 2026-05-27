@@ -11,6 +11,15 @@ interface AssistantMessageProps {
 
 const THINKING_PREVIEW_LINES = 3
 const THINKING_MAX_EXPANDED_LINES = 30
+const CONTENT_MAX_LINES = 40
+
+function truncateLines(text: string, max: number): { text: string; omitted: number } {
+  if (!text) return { text, omitted: 0 }
+  const lines = text.split('\n')
+  if (lines.length <= max) return { text, omitted: 0 }
+  const kept = lines.slice(-max)
+  return { text: kept.join('\n'), omitted: lines.length - max }
+}
 
 export const AssistantMessage = memo(function AssistantMessage({ content, thinking }: AssistantMessageProps) {
   const theme = getTheme()
@@ -23,6 +32,8 @@ export const AssistantMessage = memo(function AssistantMessage({ content, thinki
   })
 
   if (!content && !thinking) return null
+
+  const truncatedContent = truncateLines(content, CONTENT_MAX_LINES)
 
   // Thinking-only turn: model produced reasoning but no text output
   if (!content && thinking) {
@@ -84,7 +95,10 @@ export const AssistantMessage = memo(function AssistantMessage({ content, thinki
             )}
           </Box>
           <Box flexDirection="column" paddingLeft={2}>
-            <Markdown text={content} />
+            {truncatedContent.omitted > 0 && (
+              <Text dimColor>… {truncatedContent.omitted} earlier lines omitted</Text>
+            )}
+            <Markdown text={truncatedContent.text} />
           </Box>
         </Box>
       </Box>
@@ -99,7 +113,10 @@ export const AssistantMessage = memo(function AssistantMessage({ content, thinki
           <Text color={theme.assistantColor} bold>Assistant</Text>
         </Box>
         <Box flexDirection="column" paddingLeft={2}>
-          <Markdown text={content} />
+          {truncatedContent.omitted > 0 && (
+            <Text dimColor>… {truncatedContent.omitted} earlier lines omitted</Text>
+          )}
+          <Markdown text={truncatedContent.text} />
         </Box>
       </Box>
     </Box>
