@@ -706,6 +706,23 @@ export class AgentLoop {
     return this.config.promptEngine.getMode()
   }
 
+  /** Get the currently active star domain (null = no domain, undefined = not yet resolved). */
+  getSessionDomain(): ActiveStarDomain | null | undefined {
+    return this.sessionDomain
+  }
+
+  /** Manually set the active star domain. Pass null to disable, or a valid ActiveStarDomain. */
+  setSessionDomain(domain: ActiveStarDomain | null): void {
+    this.sessionDomain = domain
+    this.config.promptEngine.setActiveDomain(domain)
+  }
+
+  /** Reset domain to undefined so the next run() will auto-detect from user input. */
+  resetSessionDomain(): void {
+    this.sessionDomain = undefined
+    this.config.promptEngine.setActiveDomain(undefined)
+  }
+
   getLatestPheromones() { return this.loadedPheromones }
 
   getDecisions(): string[] { return this.decisions }

@@ -1,6 +1,7 @@
 import type { AgentLoop } from '../agent/loop.js'
 import type { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
+import { STAR_DOMAINS, type StarDomainId } from '../agent/star-domain.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
@@ -165,6 +166,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /verify — Show verification status
 /verbose — Toggle verbose tool output
 /effort [off|low|medium|high|max] — Set reasoning effort (max = always full reasoning)
+/domain [list|<name>|auto|off] — Show or switch star domain personality
 /debug [prompt|fingerprint|cache|context-payload|mcp] — Debug prefix cache, prompt, context payload, and MCP connections
 /clear — Clear screen (visual only)
 /sessions — List all saved sessions
@@ -181,6 +183,8 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /skill [list|<name>] — List or load Claude skills
 /interview <topic> — Start deep interview to clarify requirements before coding
 /plan <feature> — Create a superpowers-style implementation plan before coding
+/plan close <file> --tasks <range> [--apply] — Preview or apply plan closure updates
+/plan-close <file> --tasks <range> [--apply] — Alias of /plan close
 /write-plan <feature> — Alias of /plan
 Ctrl+C — Interrupt current turn (press twice to exit)` }))
       setIsStreaming(false)
@@ -261,6 +265,49 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         pushStatic(createLogEntry({ type: 'system', content: `Mode switched to ${requested}.` }))
       } else {
         pushStatic(createLogEntry({ type: 'system', content: 'Unknown mode. Usage: /mode chat | /mode task', isError: true }))
+      }
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/domain': {
+      const sub = parts[1]?.toLowerCase()
+      if (!sub || sub === 'status') {
+        // Show current domain
+        const current = ctx.agent.getSessionDomain()
+        if (current === undefined) {
+          pushStatic(createLogEntry({ type: 'system', content: '星域\n\n尚未激活。发送第一条消息后将根据内容自动匹配。\n使用 /domain list 查看所有星域，/domain <名称> 手动指定。' }))
+        } else if (current === null) {
+          pushStatic(createLogEntry({ type: 'system', content: '星域\n\n当前无星域（自动匹配未命中）。\n使用 /domain <名称> 手动指定，或 /domain auto 重置为自动检测。' }))
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: `星域\n\n当前: ${current.name} (${current.id})\n座右铭: ${current.motto}\n\n${current.volatileBlock}` }))
+        }
+      } else if (sub === 'list' || sub === 'ls') {
+        const current = ctx.agent.getSessionDomain()
+        const currentId = current?.id
+        const lines = (Object.values(STAR_DOMAINS) as Array<{ id: StarDomainId; name: string; keywords: string[]; decisionStyle: string; motto: string }>).map(d => {
+          const marker = d.id === currentId ? ' ← current' : ''
+          return `  ${d.name} (${d.id}) [${d.decisionStyle}]${marker}\n    ${d.motto}\n    keywords: ${d.keywords.join(', ')}`
+        })
+        pushStatic(createLogEntry({ type: 'system', content: `星域一览\n\n${lines.join('\n\n')}\n\n使用 /domain <id|名称> 切换，/domain auto 恢复自动检测。` }))
+      } else if (sub === 'auto') {
+        ctx.agent.resetSessionDomain()
+        pushStatic(createLogEntry({ type: 'system', content: '星域已重置为自动检测模式。下一次对话将根据输入内容自动匹配星域。' }))
+      } else if (sub === 'off' || sub === 'none') {
+        ctx.agent.setSessionDomain(null)
+        pushStatic(createLogEntry({ type: 'system', content: '星域已关闭。本会话将不激活任何星域人格。' }))
+      } else {
+        // Try to match by id or Chinese name
+        const allDomains = Object.values(STAR_DOMAINS) as Array<(typeof STAR_DOMAINS)[StarDomainId]>
+        const matched = allDomains.find(d => d.id === sub || d.name === parts[1] || d.id === parts[1]?.toLowerCase())
+        if (matched) {
+          const domain = { id: matched.id, name: matched.name, volatileBlock: matched.volatileBlock, motto: matched.motto }
+          ctx.agent.setSessionDomain(domain)
+          pushStatic(createLogEntry({ type: 'system', content: `星域切换: ${domain.name} (${domain.id})\n${domain.motto}\n\n${domain.volatileBlock}` }))
+        } else {
+          const validNames = allDomains.map(d => `${d.name}|${d.id}`).join(', ')
+          pushStatic(createLogEntry({ type: 'system', content: `未知星域: "${parts[1]}"\n\n可用星域: ${validNames}\n\n使用 /domain list 查看所有星域。`, isError: true }))
+        }
       }
       setIsStreaming(false)
       return true
@@ -692,7 +739,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
     case '/write-plan': {
       const feature = parts.slice(1).join(' ').trim()
       if (!feature) {
-        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\nExample: ${cmd} add Context7 MCP preset` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply]\nExample: ${cmd} add Context7 MCP preset` }))
         setIsStreaming(false)
         return true
       }

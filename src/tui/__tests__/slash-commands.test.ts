@@ -93,6 +93,25 @@ describe('resolveAppPromptInput', () => {
     assert.ok(resolved.includes('Execution handoff'))
   })
 
+  it('resolves /plan close into a plan_close workflow prompt', () => {
+    const resolved = resolveAppPromptInput('/plan close docs/superpowers/plans/demo.md --tasks 1-7', '/cwd')
+    assert.ok(resolved !== null)
+
+    assert.ok(resolved.includes('Use the plan_close tool'))
+    assert.ok(resolved.includes('- file_path: docs/superpowers/plans/demo.md'))
+    assert.ok(resolved.includes('- tasks: 1-7'))
+    assert.ok(resolved.includes('Preview only; do not write the file.'))
+  })
+
+  it('resolves /plan-close into a plan_close workflow prompt', () => {
+    const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all --apply', '/cwd')
+    assert.ok(resolved !== null)
+
+    assert.ok(resolved.includes('Use the plan_close tool'))
+    assert.ok(resolved.includes('- tasks: all'))
+    assert.ok(resolved.includes('- apply: true'))
+  })
+
   it('returns null for empty /plan (handled by handleSlashCommand before resolver)', () => {
     assert.equal(resolveAppPromptInput('/plan', '/cwd'), null)
   })
@@ -109,6 +128,7 @@ describe('handleSlashCommand', () => {
     assert.ok(entries[0]!.includes('/help'))
     assert.ok(entries[0]!.includes('/exit'))
     assert.ok(entries[0]!.includes('/compact'))
+    assert.ok(entries[0]!.includes('/plan close'))
   })
 
   it('/clear returns true', () => {
@@ -246,5 +266,158 @@ describe('handleSlashCommand', () => {
     assert.equal(handled, true)
     assert.ok(entries[0]?.content.includes('天契 行'))
     assert.ok(entries[0]?.content.includes('ship glance bar'))
+  })
+
+  describe('/domain', () => {
+    it('/domain shows "not yet activated" when undefined', () => {
+      const entries: string[] = []
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => undefined,
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes('尚未激活'))
+      assert.ok(entries[0]!.includes('自动匹配'))
+    })
+
+    it('/domain shows current domain when set', () => {
+      const entries: string[] = []
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => ({ id: 'pojun', name: '破军', volatileBlock: '破军之道', motto: '好男儿当负三尺剑立不世之功' }),
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes('破军'))
+      assert.ok(entries[0]!.includes('pojun'))
+      assert.ok(entries[0]!.includes('好男儿'))
+    })
+
+    it('/domain shows "no domain" when null', () => {
+      const entries: string[] = []
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => null,
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes('无星域'))
+    })
+
+    it('/domain list shows all 6 domains', () => {
+      const entries: string[] = []
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain', 'list'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => undefined,
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      const content = entries[0]!
+      assert.ok(content.includes('破军'))
+      assert.ok(content.includes('天府'))
+      assert.ok(content.includes('天梁'))
+      assert.ok(content.includes('天权'))
+      assert.ok(content.includes('天机'))
+      assert.ok(content.includes('天璇'))
+    })
+
+    it('/domain <id> switches to a domain by English id', () => {
+      const entries: string[] = []
+      const setCalls: any[] = []
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain', 'tianfu'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => undefined,
+          setSessionDomain: (d: any) => setCalls.push(d),
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.equal(setCalls.length, 1)
+      assert.equal(setCalls[0]!.id, 'tianfu')
+      assert.equal(setCalls[0]!.name, '天府')
+      assert.ok(entries[0]!.includes('天府'))
+    })
+
+    it('/domain <name> switches by Chinese name', () => {
+      const entries: string[] = []
+      const setCalls: any[] = []
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain', '破军'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => undefined,
+          setSessionDomain: (d: any) => setCalls.push(d),
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.equal(setCalls.length, 1)
+      assert.equal(setCalls[0]!.id, 'pojun')
+      assert.ok(entries[0]!.includes('破军'))
+    })
+
+    it('/domain auto resets to auto-detect', () => {
+      const entries: string[] = []
+      let resetCalled = false
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain', 'auto'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => ({ id: 'pojun', name: '破军', volatileBlock: 'test', motto: 'test' }),
+          resetSessionDomain: () => { resetCalled = true },
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.equal(resetCalled, true)
+      assert.ok(entries[0]!.includes('自动检测'))
+    })
+
+    it('/domain off disables domain', () => {
+      const entries: string[] = []
+      const setCalls: any[] = []
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain', 'off'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => ({ id: 'pojun', name: '破军', volatileBlock: 'test', motto: 'test' }),
+          setSessionDomain: (d: any) => setCalls.push(d),
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.deepEqual(setCalls, [null])
+      assert.ok(entries[0]!.includes('关闭'))
+    })
+
+    it('/domain <unknown> shows error with valid names', () => {
+      const entries: string[] = []
+      const handled = handleSlashCommand(makeCtx({
+        parts: ['/domain', 'xyz'],
+        agent: {
+          ...makeCtx().agent,
+          getSessionDomain: () => undefined,
+        } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes('未知星域'))
+      assert.ok(entries[0]!.includes('pojun'))
+    })
   })
 })
