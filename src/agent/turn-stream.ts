@@ -58,6 +58,7 @@ export class TurnStreamController {
     const toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
     let stopReason = ''
     let turnDisplayBuffer = ''
+    let lastChunk = ''
 
     const streamCallbacks: StreamCallbacks = {
       onTextDelta: (text) => {
@@ -67,6 +68,11 @@ export class TurnStreamController {
           this.deps.maybePrewarm(text)
         }
         turnDisplayBuffer += text
+        // Real-time push with duplicate-chunk guard (DeepSeek repeats 50+ char chunks)
+        if (text !== lastChunk || text.length < 50) {
+          input.callbacks.onTextDelta(text)
+        }
+        lastChunk = text
       },
       onThinkingDelta: (thinking) => {
         thinkingAccum += thinking
@@ -116,12 +122,6 @@ export class TurnStreamController {
 
     const dedupedBuffer = stripIntraTurnRepetition(turnDisplayBuffer)
     const nextFingerprint = displayTextFingerprint(dedupedBuffer)
-    // Skip dedup for promoted reasoning text — each turn's thinking is a fresh response
-    // even if fingerprint matches (GLM can produce similar short reasoning across retries)
-    const isPromotedReasoning = thinkingAccum && turnDisplayBuffer === thinkingAccum
-    if (dedupedBuffer && (isPromotedReasoning || nextFingerprint !== input.lastTurnTextFingerprint)) {
-      input.callbacks.onTextDelta(dedupedBuffer)
-    }
 
     return {
       collectedBlocks,

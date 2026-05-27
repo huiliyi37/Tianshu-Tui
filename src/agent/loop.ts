@@ -1258,17 +1258,51 @@ export class AgentLoop {
           this.recentToolHistory,
           this.config.contextWindow,
         )
+        let turnTextAccum = ''
+        let turnDedupState: 'tracking' | 'flushed' | 'suppressed' = 'tracking'
+        let pendingFlush = ''
+        const prevFingerprint = this.lastTurnTextFingerprint
+
         const streamResult = await this.turnStream!.streamTurn({
           request,
           turn,
           lastTurnTextFingerprint: this.lastTurnTextFingerprint,
           callbacks: {
-            onTextDelta: callbacks.onTextDelta,
+            onTextDelta: (text) => {
+              turnTextAccum += text
+              if (turnDedupState === 'flushed') {
+                callbacks.onTextDelta(text)
+                return
+              }
+              if (turnDedupState === 'suppressed') return
+              if (!prevFingerprint) {
+                turnDedupState = 'flushed'
+                callbacks.onTextDelta(text)
+                return
+              }
+              pendingFlush += text
+              const fp = turnTextAccum.replace(/\s+/g, ' ').trim()
+              if (fp === prevFingerprint) {
+                // Full match — suppress this turn's text
+                turnDedupState = 'suppressed'
+                pendingFlush = ''
+              } else if (!prevFingerprint.startsWith(fp)) {
+                // Diverged — flush all pending and switch to pass-through
+                turnDedupState = 'flushed'
+                callbacks.onTextDelta(pendingFlush)
+                pendingFlush = ''
+              }
+              // else: still a prefix of prev fingerprint, keep buffering
+            },
             onThinkingDelta: callbacks.onThinkingDelta,
             onToolUse: callbacks.onToolUse,
             onError: callbacks.onError,
           },
         })
+        // If still tracking at stream end (partial match that never completed), flush
+        if (turnDedupState === 'tracking' && pendingFlush) {
+          callbacks.onTextDelta(pendingFlush)
+        }
         const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
         this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
 

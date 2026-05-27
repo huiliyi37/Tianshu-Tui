@@ -79,7 +79,7 @@ describe('TurnStreamController', () => {
     assert.equal(turnCaches[0]?.usage.cache_read_input_tokens, 70)
   })
 
-  it('buffers provider text deltas until the stream finishes', async () => {
+  it('pushes text deltas in real-time during stream', async () => {
     let callbacksDuringStream: string[] = []
     const client: StreamClient = {
       stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
@@ -105,11 +105,11 @@ describe('TurnStreamController', () => {
     })
 
     assert.equal(getStreamedText(), 'first second')
-    assert.deepEqual(callbacksDuringStream, [])
-    assert.deepEqual(observedCallbacks, ['first second'])
+    assert.deepEqual(callbacksDuringStream, ['first ', 'second'])
+    assert.deepEqual(observedCallbacks, ['first ', 'second'])
   })
 
-  it('deduplicates repeated display text against the previous turn fingerprint', async () => {
+  it('computes fingerprint for cross-turn dedup', async () => {
     const client: StreamClient = {
       stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
         cb.onTextDelta('same text')
@@ -131,7 +131,9 @@ describe('TurnStreamController', () => {
       },
     })
 
-    assert.deepEqual(texts, [])
+    // Real-time push happens regardless of fingerprint
+    assert.deepEqual(texts, ['same text'])
+    // Fingerprint is still computed for next turn's use
     assert.equal(result.lastTurnTextFingerprint, 'same text')
   })
 
