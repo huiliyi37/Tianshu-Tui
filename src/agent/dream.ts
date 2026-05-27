@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import type { VerificationMetadata } from '../tools/types.js'
 
 export interface TrajectoryEntry {
@@ -196,9 +197,5 @@ function buildCandidateHash(candidates: CuratedMemoryCandidate[]): string {
 }
 
 function simpleHash(text: string): string {
-  let hash = 5381
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
-  }
-  return Math.abs(hash).toString(36)
+  return createHash('sha256').update(text).digest('hex').slice(0, 12)
 }
