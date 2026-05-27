@@ -85,28 +85,28 @@ export function buildWritingPlanPrompt(options: WritingPlanPromptOptions): strin
   const feature = options.feature.trim()
   const path = options.planPath ?? defaultPlanPath(feature, options.date)
 
-  return `我正在使用 writing-plans 技能创建实现计划。
+  return `我正在使用 writing-plans 技能创建实现计划。加载 /skill writing-plans 查看完整方法论。
 
 Create a comprehensive implementation plan for: ${feature}
 
 Requirements:
 - Do not write implementation code yet.
-- Read relevant docs/specs/code first before proposing tasks.
+- Read relevant code deeply before proposing tasks — understand why each function to modify exists.
+- For functions to delete or change behavior: grep callers, read commit messages, confirm edge cases are covered.
 - Save the plan to \`${path}\` unless the user explicitly chooses another path.
-- Plan filenames must be short business-semantic names. Do not mechanically use the entire \`/plan\` argument as the filename. Summarize the business need into a concise Chinese or English title that stays within filesystem filename limits.
+- Plan filenames must be short business-semantic names. Do not mechanically use the entire \`/plan\` argument as the filename.
 - Assume the implementing engineer has near-zero context about this codebase.
-- Assume the engineer is experienced but may not design tests well.
 - Prefer DRY, YAGNI, TDD, small focused files, and frequent commits.
 
 Required plan header:
 \`\`\`markdown
 # [功能名称] 实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（\`- [ ]\`）语法来跟踪进度。
+> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（\`- [ ]\`）语法来跟踪进度。
 
 **目标：** [一句话描述要构建什么]
 
-**架构：** [2-3 句话描述方案]
+**架构：** [2-3 句话描述方案，关键设计决策及其理由]
 
 **技术栈：** [关键技术/库]
 
@@ -114,16 +114,17 @@ Required plan header:
 \`\`\`
 
 Required sections:
-1. Scope check — if the feature spans independent subsystems, split it into independent plans.
+1. Scope check — if the feature spans independent subsystems, split into independent plans.
 2. File structure — list every file to create or modify before defining tasks, with each file's responsibility.
-3. Tasks — each task must be independently meaningful and testable.
-4. Verification — exact commands and expected results.
-5. Self-check — spec coverage, placeholder scan, and type/signature consistency.
-6. Execution handoff — ask whether to execute via subagent-driven development or inline executing-plans.
+3. Research endorsement（调研背书）— for each delete/behavior-change operation: list callers, existence reason, edge case risks.
+4. Tasks — each task must be independently meaningful and testable, with precise file paths.
+5. Verification — exact commands and expected results.
+6. Self-check — spec coverage, placeholder scan, type/signature consistency.
+7. Execution handoff — ask whether to execute via subagent-driven-development or inline executing-plans.
 
 Task requirements:
 - Each step should be one operation that takes roughly 2-5 minutes.
-- Use TDD shape where applicable: write failing test → run it and confirm failure → implement minimum code → run passing test → commit.
+- Use TDD shape: write failing test → run and confirm failure → implement minimum code → run passing test → commit.
 - Every task must list exact files:
   - 创建：\`exact/path/to/new-file.ts\`
   - 修改：\`exact/path/to/existing-file.ts:line-range\`
@@ -131,6 +132,7 @@ Task requirements:
 - Every code-changing step must include concrete code or an exact edit description precise enough to execute.
 - Every command must include the expected result.
 - Every commit step must use conventional commit format.
+- No research endorsement on a delete operation → flagged as unverified assumption during execution.
 
 Forbidden placeholders:
 - TODO / TBD / 待定 / 后续实现 / 补充细节
