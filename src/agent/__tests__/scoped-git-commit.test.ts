@@ -85,4 +85,15 @@ describe('commitScopedFiles', () => {
     assert.match(result.output, /Commit message is required/)
     assert.equal(after, before)
   })
+
+  it('provides friendly error when owned files have no changes', () => {
+    // Don't modify owned.txt - it's already committed and clean
+    const before = git(['rev-parse', 'HEAD']).trim()
+    const result = commitScopedFiles({ cwd: TMP, files: ['owned.txt'], message: 'fix: no changes' })
+    const after = git(['rev-parse', 'HEAD']).trim()
+    assert.equal(result.ok, false)
+    assert.match(result.output, /No changes in owned files to commit/)
+    assert.match(result.output, /owned\.txt/)
+    assert.equal(after, before)
+  })
 })

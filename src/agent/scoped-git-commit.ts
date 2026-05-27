@@ -21,7 +21,15 @@ export function commitScopedFiles(input: ScopedCommitInput): ScopedCommitResult 
   const add = runGit(input.cwd, ['add', '--', ...files])
   if (!add.ok) return add
 
-  return runGit(input.cwd, ['commit', '-m', input.message, '--only', '--', ...files])
+  const commit = runGit(input.cwd, ['commit', '-m', input.message, '--only', '--', ...files])
+  if (!commit.ok) {
+    // Provide friendlier error for common "nothing changed" case
+    const lower = commit.output.toLowerCase()
+    if (lower.includes('nothing to commit') || lower.includes('no changes')) {
+      return { ok: false, output: `No changes in owned files to commit (${files.join(', ')}). Files may have been committed already or not modified.` }
+    }
+  }
+  return commit
 }
 
 function normalizeFiles(cwd: string, files: string[]): string[] {
