@@ -74,6 +74,28 @@ Attribution: Owned verification failure: run_tests src/agent/__tests__/scoped-gi
 - 后续等价的成功验证可以 supersede 这条 invocation failure；
 - 真正包含 failed tests 的 targeted failure 仍保持 RED 阻塞。
 
+## TODO 小任务：降低 stale RED 的信息噪音与心理噪音
+
+> 优先级：P2
+> 范围：`src/agent/deliver-task.ts`、`src/agent/delivery-gate-v2.ts`、`src/agent/verification-attribution.ts`、交付报告测试
+
+目标：当 Delivery Gate 因旧验证记录或疑似 invocation failure 报 RED 时，报告应帮助 agent 快速判断“这是当前真实阻塞，还是 stale/可恢复状态”，减少反复排查和解释成本。
+
+体验问题：
+
+- stale RED 会让 agent 以为当前 owned files 仍然不安全，即使后续等价验证已经通过；
+- 外层 session summary 和真实 git/deliver_task 状态不同步时，会放大不确定感；
+- agent 会反复重跑测试、解释旧失败、确认 external files，形成心理噪音；
+- 用户看到 RED 也会误以为实现质量有问题，而不是验证账本归因需要优化。
+
+验收标准：
+
+- 交付报告能区分 `current blocking failure`、`stale failure candidate`、`tool invocation failure candidate`；
+- 报告中明确给出“下一步最短路径”，例如重跑哪条 repo 推荐命令；
+- 如果当前 owned dirty files 为空，旧失败不应以同等强度呈现为当前阻塞；
+- external dirty files 和 historical owned files 的说明保持简洁，避免制造额外警报感；
+- 有测试覆盖：旧失败 + 后续等价成功、旧失败 + 当前 owned dirty、旧失败 + no current owned dirty 三种场景。
+
 ## 后续优化方向
 
 可以考虑让验证 supersession key 从纯 command 字符串升级为结构化 verification identity：
