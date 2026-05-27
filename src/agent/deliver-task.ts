@@ -82,7 +82,8 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
 - Use deliver_task to check if the current task is ready to deliver/commit
 - Reports GREEN (ready), YELLOW (ready with external caveats), or RED (blocked)
 - Includes owned files, external files, and verification status
-- Does NOT automatically commit — agent must read report and decide
+- By default, reports readiness without committing
+- With commit=true, executes an ownership-scoped commit after approval
 
 ### Parameters
 - commit: set to true to request approval for scoped commit (default: false)

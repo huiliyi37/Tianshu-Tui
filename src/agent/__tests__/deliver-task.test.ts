@@ -157,6 +157,75 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(needsApproval, true)
   })
 
+  it('executes scoped commit for commit=true when gate is green', async () => {
+    const calls: Array<{ files: string[]; message: string }> = []
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      commitOwnedFiles: (_cwd, files, message) => {
+        calls.push({ files, message })
+        return { ok: true, output: 'commit abc123' }
+      },
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: scoped delivery' } })
+
+    assert.equal(result.isError ?? false, false)
+    assert.deepEqual(calls, [{ files: ['src/a.ts'], message: 'fix: scoped delivery' }])
+    assert.match(result.content, /Scoped commit created/)
+    assert.match(result.content, /commit abc123/)
+  })
+
+  it('rejects commit=true without message before running executor', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      commitOwnedFiles: () => {
+        throw new Error('commit executor should not run without message')
+      },
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true } })
+
+    assert.equal(result.isError, true)
+    assert.match(result.content, /Commit requires/)
+  })
+
+  it('reports scoped commit executor failure as tool error', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      commitOwnedFiles: () => ({ ok: false, output: 'git commit failed' }),
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: fail' } })
+
+    assert.equal(result.isError, true)
+    assert.match(result.content, /Scoped commit failed/)
+    assert.match(result.content, /git commit failed/)
+  })
+
+  it('reports commit=true with no owned files as scoped commit failure', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: [],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      commitOwnedFiles: () => ({ ok: false, output: 'No owned files to commit.' }),
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: empty' } })
+
+    assert.equal(result.isError, true)
+    assert.match(result.content, /Delivery Gate: GREEN/)
+    assert.match(result.content, /No owned files to commit/)
+  })
+
   it('does not require approval for status-only delivery report', () => {
     const { tool } = makeContext({
       taskId: 't1',
