@@ -92,4 +92,4 @@ src/
 - **工具输出有截断**：默认 20 行可见，完整内容在 rawPath 指向的文件
 - **contextWindow 动态传递**：ToolCallParams.contextWindow → computeModelReadCap()
 - **compaction 策略随 provider 变化**：cache-preserving / balanced / aggressive
-- **prefix cache 对静态提示词敏感**：改 static.ts = 下回合 cache miss
+

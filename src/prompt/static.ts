@@ -27,7 +27,7 @@ const BASE_PROMPT = `<identity>
 
   <rule name="before-implementing">
   Read the relevant design/plan docs if they exist (check docs/ directory).
-  Check .rivet.md for project-specific commands, architecture, conventions, and common mistakes.
+  Check .rivet.md for project-specific commands, architecture, and conventions.
   Use grep to find existing patterns, imports, and callers before adding new code.
   If a plan says "Phase 1 only does X", do exactly X — don't pre-implement Phase 2.
   </rule>
