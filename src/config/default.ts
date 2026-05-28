@@ -1,42 +1,12 @@
 import type { Config } from './schema.js'
+import { cloneProviderPreset } from './provider-presets.js'
 
 export const DEFAULT_CONFIG: Config = {
   editor: {},
   provider: {
     default: 'deepseek',
     providers: {
-      deepseek: {
-        name: 'deepseek',
-        apiKeyEnv: 'DEEPSEEK_API_KEY',
-        baseUrl: 'https://api.deepseek.com/v1',
-        protocol: 'openai' as const,
-        capabilities: {
-          cacheControl: false,
-          stripParams: [],
-          toolJsonBug: true,
-          prefixCache: 'deepseek-native' as const,
-          prefixCompletion: true,
-        },
-        thinking: 'enabled',
-        maxTokens: 64000,
-        models: [
-          {
-            id: 'deepseek-v4-pro',
-            alias: 'v4-pro',
-            contextWindow: 1_000_000,
-            maxTokens: 163_000,
-            reasoningEffort: 'max',
-          },
-          {
-            id: 'deepseek-v4-flash',
-            alias: 'v4-flash',
-            contextWindow: 1_000_000,
-            maxTokens: 163_000,
-            reasoningEffort: 'high',
-          },
-        ],
-        unsupported: [],
-      },
+      deepseek: cloneProviderPreset('deepseek'),
       kimi: {
         name: 'kimi',
         apiKeyEnv: 'KIMI_API_KEY',
@@ -62,31 +32,7 @@ export const DEFAULT_CONFIG: Config = {
         ],
         unsupported: [],
       },
-      glm: {
-        name: 'glm',
-        apiKeyEnv: 'ZHIPU_API_KEY',
-        baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
-        protocol: 'openai' as const,
-        capabilities: {
-          cacheControl: false,
-          stripParams: [],
-          toolJsonBug: false,
-          prefixCache: 'none' as const,
-          prefixCompletion: false,
-        },
-        thinking: 'enabled',
-        maxTokens: 128000,
-        models: [
-          {
-            id: 'glm-5.1',
-            alias: 'glm',
-            contextWindow: 200_000,
-            maxTokens: 128000,
-            reasoningEffort: 'high',
-          },
-        ],
-        unsupported: ['stream_options'],
-      },
+      glm: cloneProviderPreset('glm'),
       claude: {
         name: 'claude',
         apiKeyEnv: 'CLAUDE_API_KEY',
@@ -126,60 +72,9 @@ export const DEFAULT_CONFIG: Config = {
         ],
         unsupported: [],
       },
-      mimo: {
-        name: 'mimo',
-        apiKeyEnv: 'MIMO_API_KEY',
-        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1',
-        protocol: 'openai' as const,
-        capabilities: {
-          cacheControl: false,
-          stripParams: [],
-          toolJsonBug: false,
-          prefixCache: 'deepseek-native' as const,
-          prefixCompletion: false,
-        },
-        thinking: 'enabled',
-        maxTokens: 128000,
-        models: [
-          {
-            id: 'mimo-v2.5-pro',
-            alias: 'mimo-pro',
-            contextWindow: 1_000_000,
-            maxTokens: 128000,
-          },
-          {
-            id: 'mimo-v2.5',
-            alias: 'mimo',
-            contextWindow: 1_000_000,
-            maxTokens: 128000,
-          },
-        ],
-        unsupported: ['stream_options'],
-      },
-      minimax: {
-        name: 'minimax',
-        apiKeyEnv: 'MINIMAX_API_KEY',
-        baseUrl: 'https://api.minimaxi.com/v1',
-        protocol: 'openai' as const,
-        capabilities: {
-          cacheControl: false,
-          stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
-          toolJsonBug: false,
-          prefixCache: 'none' as const,
-          prefixCompletion: false,
-        },
-        thinking: 'enabled',
-        maxTokens: 64000,
-        models: [
-          {
-            id: 'MiniMax-M2.7',
-            alias: 'minimax',
-            contextWindow: 204_800,
-            maxTokens: 64000,
-          },
-        ],
-        unsupported: [],
-      },
+      mimo: cloneProviderPreset('mimo'),
+      minimax: cloneProviderPreset('minimax'),
+      codex: cloneProviderPreset('codex'),
     },
   },
   agent: {

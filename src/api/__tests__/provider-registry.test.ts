@@ -58,11 +58,12 @@ test('getProviderEntry returns undefined for unknown provider', () => {
 
 test('listProviders returns all entries', () => {
   const providers = listProviders()
-  assert.ok(providers.length >= 7)
+  assert.ok(providers.length >= 8)
   const keys = providers.map(p => p.key)
   assert.ok(keys.includes('deepseek'))
   assert.ok(keys.includes('openai'))
   assert.ok(keys.includes('kimi'))
+  assert.ok(keys.includes('codex'))
 })
 
 test('isKnownProvider returns true for known providers', () => {
@@ -91,6 +92,14 @@ test('openai has explicit-breakpoint cache', () => {
   const entry = PROVIDER_REGISTRY['openai']
   assert.ok(entry)
   assert.equal(entry.capabilities.prefixCacheStrategy, 'none')
+  assert.equal(entry.cacheProfile.cacheType, 'partial-prefix')
+})
+
+test('codex has OAuth-compatible registry metadata', () => {
+  const entry = PROVIDER_REGISTRY['codex']
+  assert.ok(entry)
+  assert.equal(entry.key, 'codex')
+  assert.equal(entry.capabilities.thinkingFormat, 'openai')
   assert.equal(entry.cacheProfile.cacheType, 'partial-prefix')
 })
 

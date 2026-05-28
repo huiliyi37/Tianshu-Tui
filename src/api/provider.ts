@@ -126,6 +126,15 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     effortFormat: 'reasoning_effort',
     prefixCacheStrategy: 'none',
   },
+  codex: {
+    supportsThinking: true,
+    thinkingFormat: 'openai',
+    supportsCacheControl: true,
+    stripParams: [],
+    hasToolJsonInContentBug: false,
+    effortFormat: 'reasoning_effort',
+    prefixCacheStrategy: 'none',
+  },
   claude: {
     supportsThinking: true,
     thinkingFormat: 'anthropic',

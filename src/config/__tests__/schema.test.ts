@@ -31,6 +31,21 @@ describe('config permissions schema', () => {
     assert.deepEqual(parsed.agent.permissions.allow, [])
   })
 
+  it('includes Codex OAuth provider in DEFAULT_CONFIG', () => {
+    const parsed = configSchema.parse(DEFAULT_CONFIG)
+
+    assert.deepEqual(parsed.provider.providers.codex?.auth, { type: 'oauth', provider: 'codex' })
+    assert.equal(parsed.provider.providers.codex?.models[0]?.id, 'gpt-5.5')
+  })
+
+  it('keeps worker profiles pointing to configured providers', () => {
+    const parsed = configSchema.parse(DEFAULT_CONFIG)
+
+    for (const [profileName, profile] of Object.entries(parsed.workers.profiles)) {
+      assert.ok(parsed.provider.providers[profile.provider], `${profileName} points to missing provider ${profile.provider}`)
+    }
+  })
+
   it('keeps Songline runtime disabled by default', () => {
     const agent = agentSchema.parse({})
     const parsed = configSchema.parse(DEFAULT_CONFIG)

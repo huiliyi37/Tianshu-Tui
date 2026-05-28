@@ -111,6 +111,10 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
     'Partial-prefix cache with 128-token granularity',
     'Ephemeral cache (5 min TTL)',
   ]),
+  codex: buildEntry('codex', 'Codex', WELL_KNOWN_DEFAULTS['codex']!, [
+    'Uses Codex Responses API with OAuth authentication',
+    'Partial-prefix cache profile is provided by provider-profile.ts',
+  ]),
 }
 
 // ─── Lookup Functions ────────────────────────────────────────
