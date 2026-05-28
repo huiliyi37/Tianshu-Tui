@@ -72,4 +72,19 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('node:test'))
     assert.ok(prompt.includes('API keys'))
   })
+
+  it('includes only a short manifest entry for sensitive knowledge domains', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+
+    assert.ok(prompt.includes('.rivet/knowledge/manifest.md'))
+    assert.ok(prompt.includes('prompt, identity, memory, recall, auto-writer, verification, or ownership'))
+  })
+
+  it('does not reintroduce retired long-form warning sections', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+
+    assert.ok(!prompt.includes('Common Mistakes'))
+    assert.ok(!prompt.includes('prefix cache 对静态提示词敏感'))
+    assert.ok(!prompt.includes('891cc1b6'))
+  })
 })

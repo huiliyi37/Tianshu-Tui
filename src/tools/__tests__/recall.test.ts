@@ -93,6 +93,31 @@ describe('recall tool', () => {
     }
   })
 
+  it('searches the knowledge manifest on demand', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-knowledge-manifest-'))
+    try {
+      const knowledgeDir = join(cwd, '.rivet', 'knowledge')
+      mkdirSync(knowledgeDir, { recursive: true })
+      writeFileSync(
+        join(knowledgeDir, 'manifest.md'),
+        '### Prompt and memory hygiene\n- path: docs/superpowers/plans/2026-05-27-项目记忆按需召回.md\n- contract: project memory is recalled on demand via manifest.\n',
+        'utf-8',
+      )
+
+      const store = new ContextClaimStore(dir, 'session-1')
+      const tool = createRecallTool(store)
+      const result = await tool.execute({ toolUseId: 't1', input: { query: 'manifest' }, cwd })
+
+      assert.ok(result.content.includes('Project knowledge'))
+      assert.ok(result.content.includes('Prompt and memory hygiene'))
+      assert.ok(result.content.includes('manifest'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
   it('respects limit parameter', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
     try {
