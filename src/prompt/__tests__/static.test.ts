@@ -70,14 +70,14 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('edit_file'))
     assert.ok(prompt.includes('write_file'))
     assert.ok(prompt.includes('node:test'))
-    assert.ok(prompt.includes('API keys'))
+    assert.ok(prompt.includes('API key'))
   })
 
   it('includes only a short manifest entry for sensitive knowledge domains', () => {
     const prompt = buildSystemPrompt({ tools: [] })
 
     assert.ok(prompt.includes('.rivet/knowledge/manifest.md'))
-    assert.ok(prompt.includes('prompt, identity, memory, recall, auto-writer, verification, or ownership'))
+    assert.ok(prompt.includes('prompt/identity/memory/recall/verification/ownership'))
   })
 
   it('does not reintroduce retired long-form warning sections', () => {
