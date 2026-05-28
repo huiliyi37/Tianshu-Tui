@@ -704,7 +704,7 @@ async function main() {
   }
 
   if (args[0] === 'config') {
-    runConfigCLI(args.slice(1))
+    await runConfigCLI(args.slice(1))
     return
   }
 

@@ -277,35 +277,167 @@ export function listModels(providerName: string): ModelConfig[] {
 
 // --- CLI entry point ---
 
-export function runConfigCLI(args: string[]): void {
+export interface ConfigCliIO {
+  isTTY?: boolean
+  stdout?: (line: string) => void
+  stderr?: (line: string) => void
+  exit?: (code: number) => void
+}
+
+function cliOut(io: ConfigCliIO, line: string): void {
+  ;(io.stdout ?? console.log)(line)
+}
+
+function cliErr(io: ConfigCliIO, line: string): void {
+  ;(io.stderr ?? console.error)(line)
+}
+
+function cliExit(io: ConfigCliIO, code: number): void {
+  ;(io.exit ?? process.exit)(code)
+}
+
+function readFlag(args: string[], name: string): string | undefined {
+  const index = args.indexOf(name)
+  if (index < 0) return undefined
+  const value = args[index + 1]
+  if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`)
+  return value
+}
+
+function hasFlag(args: string[], name: string): boolean {
+  return args.includes(name)
+}
+
+function parsePositiveInt(value: string | undefined, label: string): number {
+  const parsed = Number.parseInt(value ?? '', 10)
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${label} must be a positive integer`)
+  return parsed
+}
+
+function printConfigHelp(io: ConfigCliIO): void {
+  cliOut(io, `Rivet Config Manager
+
+Usage: rivet config <command>
+
+Commands:
+  show                         Show full config (JSON)
+  providers                    List providers with key status
+  setup <provider>             Create/update provider from built-in preset
+  set-url <provider> <url>     Set provider base URL
+  set-model <provider> <id>    Set preferred model for provider
+  set-key <p> <key>            Set API key for provider
+  set-key-env <p> <v>          Set API key from env variable
+  set-default <p>              Set default provider
+  add-model <p> <id>           Add model to provider
+  remove-model <p> <id>        Remove model from provider
+  mcp                          MCP server management
+
+Examples:
+  rivet config providers
+  rivet config setup deepseek --key-env DEEPSEEK_API_KEY --default
+  rivet config setup codex --default
+  rivet config set-url mimo https://token-plan-sgp.xiaomimimo.com/v1
+  rivet config set-model minimax MiniMax-M2.8 300000 64000 m28
+  rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp`)
+}
+
+export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promise<void> {
   const cmd = args[0]
   try {
+    if (!cmd) {
+      printConfigHelp(io)
+      return
+    }
+
     switch (cmd) {
       case 'show':
-        console.log(JSON.stringify(loadConfig(), null, 2))
+        cliOut(io, JSON.stringify(loadConfig(), null, 2))
         break
 
       case 'providers':
-        console.log('Providers:')
+        cliOut(io, 'Providers:')
         for (const [name, p] of Object.entries(loadConfig().provider.providers)) {
           const marker = name === loadConfig().provider.default ? ' (default)' : ''
           const keyStatus = getApiKeyStatus(name)
-          console.log(`  ${name}${marker}`)
-          console.log(`    baseUrl: ${p.baseUrl}`)
-          console.log(`    apiKey: ${keyStatus.source === 'inline' ? keyStatus.ref : keyStatus.source === 'env' ? `$${keyStatus.ref}` : '(not set)'}`)
-          console.log(`    models: ${p.models.map(m => m.alias ?? m.id).join(', ')}`)
+          cliOut(io, `  ${name}${marker}`)
+          cliOut(io, `    baseUrl: ${p.baseUrl}`)
+          cliOut(io, `    apiKey: ${keyStatus.source === 'inline' ? keyStatus.ref : keyStatus.source === 'env' ? `${keyStatus.ref}` : '(not set)'}`)
+          cliOut(io, `    models: ${p.models.map(m => m.alias ?? m.id).join(', ')}`)
         }
         break
+
+      case 'setup': {
+        const providerName = args[1]
+        if (!providerName) {
+          cliErr(io, 'Usage: rivet config setup <provider> [--key KEY|--key-env ENV] [--url URL] [--model ID --context-window N --max-tokens N] [--alias NAME] [--default]')
+          cliExit(io, 1)
+          return
+        }
+        const modelId = readFlag(args, '--model')
+        const alias = readFlag(args, '--alias')
+        const model: ModelConfig | undefined = modelId
+          ? {
+              id: modelId,
+              ...(alias ? { alias } : {}),
+              contextWindow: parsePositiveInt(readFlag(args, '--context-window') ?? '128000', 'context-window'),
+              maxTokens: parsePositiveInt(readFlag(args, '--max-tokens') ?? '64000', 'max-tokens'),
+            }
+          : undefined
+        setupProvider({
+          providerName,
+          apiKey: readFlag(args, '--key'),
+          apiKeyEnv: readFlag(args, '--key-env'),
+          baseUrl: readFlag(args, '--url'),
+          model,
+          makeDefault: hasFlag(args, '--default'),
+        })
+        cliOut(io, `Provider ${providerName} configured${hasFlag(args, '--default') ? ' and set as default' : ''}`)
+        break
+      }
+
+      case 'set-url': {
+        const providerName = args[1]
+        const baseUrl = args[2]
+        if (!providerName || !baseUrl) {
+          cliErr(io, 'Usage: rivet config set-url <provider> <base-url>')
+          cliExit(io, 1)
+          return
+        }
+        updateProviderBaseUrl(providerName, baseUrl)
+        cliOut(io, `Base URL set for ${providerName}: ${baseUrl}`)
+        break
+      }
+
+      case 'set-model': {
+        const providerName = args[1]
+        const modelId = args[2]
+        if (!providerName || !modelId) {
+          cliErr(io, 'Usage: rivet config set-model <provider> <model-id> [context-window] [max-tokens] [alias]')
+          cliExit(io, 1)
+          return
+        }
+        const alias = args[5]
+        const model: ModelConfig = {
+          id: modelId,
+          ...(alias ? { alias } : {}),
+          contextWindow: parsePositiveInt(args[3] ?? '128000', 'context-window'),
+          maxTokens: parsePositiveInt(args[4] ?? '64000', 'max-tokens'),
+        }
+        upsertProviderModel(providerName, model, { preferred: true })
+        cliOut(io, `Preferred model for ${providerName} set to ${modelId}`)
+        break
+      }
 
       case 'set-key': {
         const providerName = args[1]
         const key = args[2]
         if (!providerName || !key) {
-          console.error('Usage: rivet config set-key <provider> <api-key>')
-          process.exit(1)
+          cliErr(io, 'Usage: rivet config set-key <provider> <api-key>')
+          cliExit(io, 1)
+          return
         }
         setApiKey(providerName, key)
-        console.log(`API key set for ${providerName}`)
+        cliOut(io, `API key set for ${providerName}`)
         break
       }
 
@@ -313,22 +445,24 @@ export function runConfigCLI(args: string[]): void {
         const providerName = args[1]
         const envVar = args[2]
         if (!providerName || !envVar) {
-          console.error('Usage: rivet config set-key-env <provider> <ENV_VAR>')
-          process.exit(1)
+          cliErr(io, 'Usage: rivet config set-key-env <provider> <ENV_VAR>')
+          cliExit(io, 1)
+          return
         }
         setApiKeyEnv(providerName, envVar)
-        console.log(`API key source set to $${envVar} for ${providerName}`)
+        cliOut(io, `API key source set to ${envVar} for ${providerName}`)
         break
       }
 
       case 'set-default': {
         const providerName = args[1]
         if (!providerName) {
-          console.error('Usage: rivet config set-default <provider>')
-          process.exit(1)
+          cliErr(io, 'Usage: rivet config set-default <provider>')
+          cliExit(io, 1)
+          return
         }
         setDefaultProvider(providerName)
-        console.log(`Default provider set to ${providerName}`)
+        cliOut(io, `Default provider set to ${providerName}`)
         break
       }
 
@@ -338,11 +472,12 @@ export function runConfigCLI(args: string[]): void {
         const contextWindow = parseInt(args[3] ?? '1000000')
         const maxTokens = parseInt(args[4] ?? '64000')
         if (!providerName || !modelId) {
-          console.error('Usage: rivet config add-model <provider> <model-id> [context-window] [max-tokens]')
-          process.exit(1)
+          cliErr(io, 'Usage: rivet config add-model <provider> <model-id> [context-window] [max-tokens]')
+          cliExit(io, 1)
+          return
         }
         addModel(providerName, { id: modelId, contextWindow, maxTokens })
-        console.log(`Model ${modelId} added to ${providerName}`)
+        cliOut(io, `Model ${modelId} added to ${providerName}`)
         break
       }
 
@@ -350,11 +485,12 @@ export function runConfigCLI(args: string[]): void {
         const providerName = args[1]
         const modelId = args[2]
         if (!providerName || !modelId) {
-          console.error('Usage: rivet config remove-model <provider> <model-id>')
-          process.exit(1)
+          cliErr(io, 'Usage: rivet config remove-model <provider> <model-id>')
+          cliExit(io, 1)
+          return
         }
         removeModel(providerName, modelId)
-        console.log(`Model ${modelId} removed from ${providerName}`)
+        cliOut(io, `Model ${modelId} removed from ${providerName}`)
         break
       }
 
@@ -365,13 +501,13 @@ export function runConfigCLI(args: string[]): void {
           const servers = cfg.mcp?.servers ?? {}
           const entries = Object.entries(servers)
           if (entries.length === 0) {
-            console.log('No MCP servers configured.')
+            cliOut(io, 'No MCP servers configured.')
           } else {
-            console.log('MCP servers:')
+            cliOut(io, 'MCP servers:')
             for (const [id, s] of entries) {
               const type = s.command ? `stdio: ${s.command}` : `sse: ${s.url}`
               const disabled = s.disabled ? ' (disabled)' : ''
-              console.log(`  ${id}: ${type}${disabled}`)
+              cliOut(io, `  ${id}: ${type}${disabled}`)
             }
           }
         } else if (subcmd === 'add-stdio') {
@@ -379,55 +515,61 @@ export function runConfigCLI(args: string[]): void {
           const command = args[3]
           const cmdArgs = args.slice(4)
           if (!id || !command) {
-            console.error('Usage: rivet config mcp add-stdio <id> <command> [args...]')
-            process.exit(1)
+            cliErr(io, 'Usage: rivet config mcp add-stdio <id> <command> [args...]')
+            cliExit(io, 1)
+            return
           }
           const cfg = loadConfig()
           cfg.mcp.servers[id] = { command, args: cmdArgs.length > 0 ? cmdArgs : undefined }
           saveConfig(cfg)
-          console.log(`MCP server "${id}" added (stdio: ${command} ${cmdArgs.join(' ')}). Restart Rivet to connect.`)
+          cliOut(io, `MCP server "${id}" added (stdio: ${command} ${cmdArgs.join(' ')}). Restart Rivet to connect.`)
         } else if (subcmd === 'add-sse') {
           const id = args[2]
           const url = args[3]
           if (!id || !url) {
-            console.error('Usage: rivet config mcp add-sse <id> <url>')
-            process.exit(1)
+            cliErr(io, 'Usage: rivet config mcp add-sse <id> <url>')
+            cliExit(io, 1)
+            return
           }
           const cfg = loadConfig()
           cfg.mcp.servers[id] = { url }
           saveConfig(cfg)
-          console.log(`MCP server "${id}" added (sse: ${url}). Restart Rivet to connect.`)
+          cliOut(io, `MCP server "${id}" added (sse: ${url}). Restart Rivet to connect.`)
         } else if (subcmd === 'remove') {
           const id = args[2]
           if (!id) {
-            console.error('Usage: rivet config mcp remove <id>')
-            process.exit(1)
+            cliErr(io, 'Usage: rivet config mcp remove <id>')
+            cliExit(io, 1)
+            return
           }
           const cfg = loadConfig()
           if (!cfg.mcp?.servers[id]) {
-            console.error(`MCP server "${id}" not found.`)
-            process.exit(1)
+            cliErr(io, `MCP server "${id}" not found.`)
+            cliExit(io, 1)
+            return
           }
           delete cfg.mcp.servers[id]
           saveConfig(cfg)
-          console.log(`MCP server "${id}" removed. Restart Rivet to apply.`)
+          cliOut(io, `MCP server "${id}" removed. Restart Rivet to apply.`)
         } else if (subcmd === 'enable' || subcmd === 'disable') {
           const id = args[2]
           if (!id) {
-            console.error(`Usage: rivet config mcp ${subcmd} <id>`)
-            process.exit(1)
+            cliErr(io, `Usage: rivet config mcp ${subcmd} <id>`)
+            cliExit(io, 1)
+            return
           }
           const cfg = loadConfig()
           const server = cfg.mcp?.servers[id]
           if (!server) {
-            console.error(`MCP server "${id}" not found.`)
-            process.exit(1)
+            cliErr(io, `MCP server "${id}" not found.`)
+            cliExit(io, 1)
+            return
           }
           server.disabled = subcmd === 'disable' ? true : undefined
           saveConfig(cfg)
-          console.log(`MCP server "${id}" ${subcmd}d. Restart Rivet to apply.`)
+          cliOut(io, `MCP server "${id}" ${subcmd}d. Restart Rivet to apply.`)
         } else {
-          console.log(`MCP server management:
+          cliOut(io, `MCP server management:
 
 Usage: rivet config mcp <command>
 
@@ -449,29 +591,10 @@ Examples:
       }
 
       default:
-        console.log(`Rivet Config Manager
-
-Usage: rivet config <command>
-
-Commands:
-  show                Show full config (JSON)
-  providers           List providers with key status
-  set-key <p> <key>   Set API key for provider
-  set-key-env <p> <v> Set API key from env variable
-  set-default <p>     Set default provider
-  add-model <p> <id>  Add model to provider
-  remove-model <p> <id> Remove model from provider
-  mcp                 MCP server management
-
-Examples:
-  rivet config providers
-  rivet config set-key deepseek sk-xxx
-  rivet config set-key-env deepseek DEEPSEEK_API_KEY
-  rivet config add-model deepseek deepseek-v4-flash 1000000 64000
-  rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp`)
+        printConfigHelp(io)
     }
   } catch (err) {
-    console.error(`Error: ${(err as Error).message}`)
-    process.exit(1)
+    cliErr(io, `Error: ${(err as Error).message}`)
+    cliExit(io, 1)
   }
 }
