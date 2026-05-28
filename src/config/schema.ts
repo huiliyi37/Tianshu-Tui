@@ -30,8 +30,8 @@ export const providerCapabilitiesSchema = z.object({
 
 export const providerSchema = z.object({
   name: z.string(),
-  apiKey: z.string().optional(),
-  apiKeyEnv: z.string().optional(),
+  apiKey: z.string().nullable().optional().transform(value => value ?? undefined),
+  apiKeyEnv: z.string().nullable().optional().transform(value => value ?? undefined),
   baseUrl: z.string().url(),
   protocol: z.enum(['openai']).default('openai'),
   auth: authConfigSchema.optional(),

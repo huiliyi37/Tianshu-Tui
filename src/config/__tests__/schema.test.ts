@@ -46,6 +46,24 @@ describe('config permissions schema', () => {
     }
   })
 
+  it('parses null API key tombstones as cleared optional fields', () => {
+    const parsed = configSchema.parse({
+      provider: {
+        default: 'deepseek',
+        providers: {
+          deepseek: {
+            ...DEFAULT_CONFIG.provider.providers.deepseek,
+            apiKey: 'sk-inline',
+            apiKeyEnv: null,
+          },
+        },
+      },
+    })
+
+    assert.equal(parsed.provider.providers.deepseek?.apiKey, 'sk-inline')
+    assert.equal(parsed.provider.providers.deepseek?.apiKeyEnv, undefined)
+  })
+
   it('keeps Songline runtime disabled by default', () => {
     const agent = agentSchema.parse({})
     const parsed = configSchema.parse(DEFAULT_CONFIG)

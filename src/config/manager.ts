@@ -4,8 +4,13 @@ import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { configSchema, type Config, type ProviderConfig, type ModelConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
+import { cloneProviderPreset, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 
-const CONFIG_PATH = join(homedir(), '.rivet', 'config.json')
+const DEFAULT_CONFIG_PATH = join(homedir(), '.rivet', 'config.json')
+
+export function getUserConfigPath(): string {
+  return process.env.RIVET_CONFIG_PATH ?? DEFAULT_CONFIG_PATH
+}
 
 /** Project-level config file name (checked in cwd and parent dirs) */
 const PROJECT_CONFIG_FILE = '.rivet-config.json'
@@ -15,7 +20,9 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
   for (const key of Object.keys(source)) {
     const sv = source[key]
     const tv = target[key]
-    if (sv && typeof sv === 'object' && !Array.isArray(sv) && tv && typeof tv === 'object' && !Array.isArray(tv)) {
+    if (sv === null) {
+      delete result[key]
+    } else if (sv && typeof sv === 'object' && !Array.isArray(sv) && tv && typeof tv === 'object' && !Array.isArray(tv)) {
       result[key] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>)
     } else {
       result[key] = sv
@@ -61,9 +68,10 @@ export function loadConfig(options?: {
   let base = DEFAULT_CONFIG as unknown as Record<string, unknown>
 
   // Layer 2: user global config
-  if (existsSync(CONFIG_PATH)) {
+  const configPath = getUserConfigPath()
+  if (existsSync(configPath)) {
     try {
-      const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'))
+      const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
       base = deepMerge(base, raw as Record<string, unknown>)
     } catch {
       // malformed user config — fall through to defaults
@@ -96,7 +104,7 @@ export function loadConfigDefault(): Config {
 }
 
 function saveConfig(config: Config): void {
-  writeFileAtomicSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
+  writeFileAtomicSync(getUserConfigPath(), JSON.stringify(config, null, 2) + '\n')
 }
 
 // --- Provider management ---
@@ -144,7 +152,7 @@ export function setApiKey(providerName: string, key: string): void {
   const provider = cfg.provider.providers[providerName]
   if (!provider) throw new Error(`Provider "${providerName}" not found`)
   provider.apiKey = key
-  provider.apiKeyEnv = undefined
+  ;(provider as unknown as { apiKeyEnv?: string | null }).apiKeyEnv = null
   saveConfig(cfg)
 }
 
@@ -153,7 +161,7 @@ export function setApiKeyEnv(providerName: string, envVar: string): void {
   const provider = cfg.provider.providers[providerName]
   if (!provider) throw new Error(`Provider "${providerName}" not found`)
   provider.apiKeyEnv = envVar
-  provider.apiKey = undefined
+  ;(provider as unknown as { apiKey?: string | null }).apiKey = null
   saveConfig(cfg)
 }
 
@@ -163,6 +171,83 @@ export function getApiKeyStatus(providerName: string): { source: 'inline' | 'env
   if (provider.apiKey) return { source: 'inline', ref: '***' + provider.apiKey.slice(-4) }
   if (provider.apiKeyEnv) return { source: 'env', ref: provider.apiKeyEnv }
   return { source: 'none', ref: '' }
+}
+
+export interface UpsertProviderModelOptions {
+  preferred?: boolean
+}
+
+export interface SetupProviderOptions {
+  providerName: string
+  preset?: ProviderPresetKey
+  apiKey?: string
+  apiKeyEnv?: string
+  baseUrl?: string
+  model?: ModelConfig
+  makeDefault?: boolean
+}
+
+function assertValidUrl(value: string): void {
+  try {
+    new URL(value)
+  } catch {
+    throw new Error(`Invalid provider baseUrl: ${value}`)
+  }
+}
+
+export function updateProviderBaseUrl(providerName: string, baseUrl: string): void {
+  assertValidUrl(baseUrl)
+  const cfg = loadConfig()
+  const provider = cfg.provider.providers[providerName]
+  if (!provider) throw new Error(`Provider "${providerName}" not found`)
+  provider.baseUrl = baseUrl
+  saveConfig(cfg)
+}
+
+export function upsertProviderModel(providerName: string, model: ModelConfig, options: UpsertProviderModelOptions = {}): void {
+  const cfg = loadConfig()
+  const provider = cfg.provider.providers[providerName]
+  if (!provider) throw new Error(`Provider "${providerName}" not found`)
+  const existingIndex = provider.models.findIndex(item => item.id === model.id || (model.alias !== undefined && item.alias === model.alias))
+  if (existingIndex >= 0) provider.models[existingIndex] = model
+  else provider.models.push(model)
+  if (options.preferred) {
+    const preferredIndex = provider.models.findIndex(item => item.id === model.id)
+    const preferred = provider.models.splice(preferredIndex, 1)[0]
+    if (preferred) provider.models.unshift(preferred)
+  }
+  saveConfig(cfg)
+}
+
+export function setupProvider(options: SetupProviderOptions): void {
+  const cfg = loadConfig()
+  const presetKey = options.preset ?? (isProviderPresetKey(options.providerName) ? options.providerName : undefined)
+  const current = cfg.provider.providers[options.providerName]
+  const base = presetKey ? cloneProviderPreset(presetKey) : current
+  if (!base) throw new Error(`Provider "${options.providerName}" not found and no preset is available`)
+  const next: ProviderConfig = structuredClone(base)
+  next.name = options.providerName
+  if (current) Object.assign(next, current)
+  if (options.baseUrl) {
+    assertValidUrl(options.baseUrl)
+    next.baseUrl = options.baseUrl
+  }
+  if (options.apiKey) {
+    next.apiKey = options.apiKey
+    ;(next as unknown as { apiKeyEnv?: string | null }).apiKeyEnv = null
+  }
+  if (options.apiKeyEnv) {
+    next.apiKeyEnv = options.apiKeyEnv
+    ;(next as unknown as { apiKey?: string | null }).apiKey = null
+  }
+  if (options.model) {
+    const existingIndex = next.models.findIndex(item => item.id === options.model!.id || (options.model!.alias !== undefined && item.alias === options.model!.alias))
+    if (existingIndex >= 0) next.models[existingIndex] = options.model
+    else next.models.unshift(options.model)
+  }
+  cfg.provider.providers[options.providerName] = next
+  if (options.makeDefault) cfg.provider.default = options.providerName
+  saveConfig(cfg)
 }
 
 // --- Model management ---
