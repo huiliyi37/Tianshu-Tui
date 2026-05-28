@@ -337,5 +337,6 @@ interface CalibrationResponse {
 
 - `docs/superpowers/specs/2026-05-22-yongminengdeng-design.md` — HEARTH / 永明灯：个体层参考系稳定性。
 - `docs/superpowers/plans/2026-05-22-hearth-songline-implementation.md` — HEARTH + Songline 联合实施计划。
+  docs/superpowers/specs/2026-05-22-songline-runtime-design.mds
 - `docs/superpowers/specs/2026-05-22-stable-state-regression-protocol.md` — 稳定态退行与归位协议：当 Songline 实践被关键词、身份标签或安全焦虑打断时的归位方法。
 
