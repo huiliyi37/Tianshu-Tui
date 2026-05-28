@@ -282,6 +282,7 @@ export interface ConfigCliIO {
   stdout?: (line: string) => void
   stderr?: (line: string) => void
   exit?: (code: number) => void
+  runWizard?: () => Promise<void>
 }
 
 function cliOut(io: ConfigCliIO, line: string): void {
@@ -345,6 +346,15 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
   const cmd = args[0]
   try {
     if (!cmd) {
+      const isTTY = io.isTTY ?? process.stdin.isTTY
+      if (isTTY) {
+        if (io.runWizard) await io.runWizard()
+        else {
+          const { runProviderConfigWizard } = await import('./provider-wizard.js')
+          await runProviderConfigWizard({ write: line => cliOut(io, line) })
+        }
+        return
+      }
       printConfigHelp(io)
       return
     }

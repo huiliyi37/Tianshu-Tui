@@ -39,6 +39,15 @@ describe('runConfigCLI provider commands', () => {
     assert.match(stdout.join('\n'), /setup <provider>/)
   })
 
+  it('runs provider wizard when config has no args in TTY', async () => {
+    const { stdout, exits, io } = makeIo()
+    let wizardRuns = 0
+    await runConfigCLI([], { ...io, isTTY: true, runWizard: async () => { wizardRuns++ } })
+    assert.equal(wizardRuns, 1)
+    assert.equal(exits.length, 0)
+    assert.equal(stdout.join('\n'), '')
+  })
+
   it('setup updates provider url, env key, model, and default', async () => {
     const { io } = makeIo()
     await runConfigCLI(['setup', 'minimax', '--key-env', 'MY_MINIMAX_KEY', '--url', 'https://proxy.example.com/v1', '--model', 'MiniMax-M2.8', '--alias', 'm28', '--context-window', '300000', '--max-tokens', '64000', '--default'], io)
