@@ -625,14 +625,17 @@ async function main() {
 
   Usage:
     rivet              Start interactive session
-    rivet config       Manage API keys and model configuration
-    rivet --help       Show this help
+    rivet config              Configure providers interactively
+    rivet --help              Show this help
     rivet --version    Show version
     rivet --goal \"text\"  Autonomous goal loop (--budget N, default 100)
 
   Commands:
     config show              Show current configuration
     config providers         List configured providers
+    config setup <p>         Create/update provider from built-in preset
+    config set-url <p> <url> Set provider base URL
+    config set-model <p> <m> Set preferred provider model
     config set-key <p> <k>   Set API key for provider <p>
     config set-key-env <p>   Set API key from env var
     config set-default <p>   Set default provider

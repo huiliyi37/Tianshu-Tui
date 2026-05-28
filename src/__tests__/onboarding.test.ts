@@ -41,7 +41,8 @@ describe('onboarding state', () => {
     const text = onboardingText()
 
     assert.ok(text.includes('Welcome to Rivet'))
-    assert.ok(text.includes('rivet config set-key'))
+    assert.ok(text.includes('rivet config'))
+    assert.ok(text.includes('rivet config setup deepseek'))
     assert.ok(text.includes('/onboarding dismiss'))
   })
 })

@@ -380,23 +380,31 @@ cd ../project-feature-a && rivet
 ### Using the CLI (recommended)
 
 ```bash
+# Interactive provider setup (TTY only)
+rivet config
+
 # List providers and API key status
 rivet config providers
 
-# Set API key (saved to ~/.rivet/config.json)
-rivet config set-key deepseek sk-your-key-here
+# Configure DeepSeek using an environment variable
+rivet config setup deepseek --key-env DEEPSEEK_API_KEY --default
 
-# Or use an environment variable instead
+# Configure GLM using an environment variable
+rivet config setup glm --key-env ZHIPU_API_KEY
+
+# Override MiMo gateway URL
+rivet config setup mimo --key-env MIMO_API_KEY --url https://token-plan-sgp.xiaomimimo.com/v1
+
+# Override MiniMax model and make it default
+rivet config setup minimax --key-env MINIMAX_API_KEY --model MiniMax-M2.8 --alias m28 --context-window 300000 --max-tokens 64000 --default
+
+# Configure Codex OAuth provider; login happens on first run with --provider codex
+rivet config setup codex --default
+
+# Direct updates for existing providers
+rivet config set-url deepseek https://api.deepseek.com/v1
+rivet config set-model deepseek deepseek-v4-pro 1000000 163000 v4-pro
 rivet config set-key-env deepseek DEEPSEEK_API_KEY
-
-# Add a new model to a provider
-rivet config add-model deepseek deepseek-v4-flash 1000000 64000
-
-# Remove a model
-rivet config remove-model deepseek old-model-id
-
-# Switch default provider
-rivet config set-default deepseek
 
 # Show full config
 rivet config show
@@ -404,7 +412,7 @@ rivet config show
 
 ### Manual config file
 
-Place `~/.rivet/config.json` (optional, uses defaults if missing):
+Place `~/.rivet/config.json` (optional, uses built-in provider presets if missing). The file may contain only overrides; defaults are deep-merged before validation:
 
 ```json
 {
@@ -454,13 +462,13 @@ Rivet supports multiple model providers with different authentication methods:
 
 | Provider | Protocol | Auth | Models |
 |----------|----------|------|--------|
-| DeepSeek | Anthropic | API key | v4-pro, v4-flash |
-| **Claude** | **OpenAI (proxy)** | **API key (`CC_SWITCH_PROXY_API_KEY`)** | **opus-4-7, opus-4-6, sonnet-4-5** |
-| GLM | Anthropic | API key | glm-5.1, glm-4.7 |
+| DeepSeek | OpenAI-compatible | API key | deepseek-v4-pro, deepseek-v4-flash |
+| **Claude** | **OpenAI-compatible proxy** | **API key (`CLAUDE_API_KEY`)** | **opus-4-7, opus-4-6, sonnet-4-5** |
+| GLM | OpenAI-compatible | API key | glm-5.1 |
 | Codex (GPT-5.5) | Codex Responses | OAuth PKCE | gpt-5.5 |
-| MiniMax | OpenAI | API key | M2.7, M2.5 |
-| MiMo | OpenAI | API key | V2.5-Pro, V2.5 |
-| OpenCode Go | OpenAI | API key | aggregated models |
+| MiniMax | OpenAI-compatible | API key | MiniMax-M2.7 |
+| MiMo | OpenAI-compatible | API key | mimo-v2.5-pro, mimo-v2.5 |
+| OpenCode Go | OpenAI-compatible | API key | aggregated models |
 
 #### Claude via CLI Proxy
 
@@ -541,13 +549,14 @@ node dist/main.js --provider minimax --model MiniMax-M2.7
 
 #### TUI Model Switching
 
-Inside a session, use `/model <provider>/<model>` to switch:
+Inside a session, use `/model list` to show configured providers and models, then switch by model id or alias:
 
 ```
-/model codex/gpt-5.5
-/model minimax/MiniMax-M2.7
-/model mimo/MiMo-V2.5-Pro
-/model deepseek/v4-pro
+/model list
+/model gpt-5.5
+/model MiniMax-M2.7
+/model mimo-v2.5-pro
+/model v4-pro
 ```
 
 ## Slash Commands (in TUI)

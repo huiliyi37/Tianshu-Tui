@@ -4,7 +4,8 @@ import { getTheme } from './theme.js'
 export function onboardingText(): string {
   return [
     'Welcome to Rivet',
-    'Configure a provider key with: rivet config set-key <provider> <api-key>',
+    'Configure a provider with: rivet config',
+    'Scripted setup: rivet config setup deepseek --key-env DEEPSEEK_API_KEY',
     'Try /help for commands, /model list for models, and /mcp for server status.',
     'Run /onboarding dismiss when you are ready to hide this guide.',
   ].join('\n')
@@ -44,7 +45,8 @@ export function OnboardingPanel() {
   return (
     <Box paddingX={2} marginBottom={1} flexDirection="column">
       <Text color={theme.primary} bold>Welcome to Rivet</Text>
-      <Text color={theme.secondary}>Configure a provider key with: <Text bold>rivet config set-key &lt;provider&gt; &lt;api-key&gt;</Text></Text>
+      <Text color={theme.secondary}>Configure a provider with: <Text bold>rivet config</Text></Text>
+      <Text color={theme.secondary}>Scripted setup: <Text bold>rivet config setup deepseek --key-env DEEPSEEK_API_KEY</Text></Text>
       <Text color={theme.secondary}>Try <Text bold>/help</Text> for commands, <Text bold>/model list</Text> for models, and <Text bold>/mcp</Text> for server status.</Text>
       <Text color={theme.dim}>Run <Text bold>/onboarding dismiss</Text> to hide this guide.</Text>
     </Box>
