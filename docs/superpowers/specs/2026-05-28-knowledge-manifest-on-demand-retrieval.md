@@ -157,19 +157,37 @@ The manifest correctly distinguishes these roles.
 
 Static prompt grew by 1 line (~38 tokens) as intended — the manifest entry rule. All other changes reduced weight.
 
-**What was NOT removed (preserved by design):**
+**Phase 1B — Chinese semantics & structural compression:**
 
-- Identity kernel in `static.ts` — beliefs, rules, tool-usage, workflow, security, ownership, delivery protocol, delegation guide.
-- Core constraints in `AGENTS.md` — tool output truncation, contextWindow, compaction strategy.
-- Design doc index in `AGENTS.md`.
-- Data flow diagram in `AGENTS.md`.
+| Commit | What changed |
+|--------|-------------|
+| `7ea0133` | Compress `static.ts` BASE_PROMPT: English prose → concise Chinese. Remove sub-section nesting (file-operations, shell, navigation, failure-diagnosis, development-loop, tdd, code-references, ownership-protocol, delivery-protocol). **74.7% char reduction** (7711 → 1949 chars, ~2880 tokens saved). Update test assertions to match new phrasing. |
+| `76ad7a4` | Strip `AGENTS.md` to bare module table: drop data-flow diagram, design doc index, core constraints. **58% char reduction** (1278 → 533 chars, ~373 tokens saved). All three sections discoverable on demand via tools. |
 
-**Observation: what data might be "lost"**
+**Cumulative prompt weight reduction (updated):**
 
-The file-level tree in `AGENTS.md` listed every source file with a one-line description. This information is:
+| Layer | Before | After | Saved |
+|-------|--------|-------|-------|
+| `static.ts` (system) | ~7711 chars (~3856 tokens) | ~1949 chars (~975 tokens) | **~2881 tokens** |
+| `AGENTS.md` (volatile) | 2713 chars (~678 tokens) | 533 chars (~267 tokens) | ~411 tokens |
+| `.rivet.md` (volatile) | 1635 chars (~409 tokens) | 1023 chars (~512 tokens) | ~-103 tokens (slight growth from Code Conventions) |
+| **Net static + volatile** | | | **~3189 tokens freed** |
 
-1. Still physically present — agent can call `repo_map` or `repo_graph` to get it.
-2. Covered by tests — if a file is important enough to document inline, it should survive in the code graph.
-3. Not reconstructable from memory alone — a new session without `repo_map` calls won't know that `recovery-trigger.ts` handles error recovery. But this is the intended trade: the agent should use tools, not rely on embedded documentation.
+**Static prompt overhead vs. context window:**
 
-No historical data was deleted. The full tree is preserved in git history (commit `a9c0a3a` and earlier).
+| Provider | Window | Static overhead | Ratio |
+|----------|--------|----------------|-------|
+| GLM-4 | 200K | ~7300 tokens | 3.65% |
+| DeepSeek | 128K | ~7300 tokens | 5.70% |
+
+The biggest single win was `static.ts` — replacing English procedural descriptions with Chinese strategy summaries while keeping all semantics. AGENTS.md is now a pure module table; the agent discovers data-flow via `repo_graph`, doc index via `grep docs/`, and constraints from tool descriptions.
+
+**What was removed in Phase 1B (previously preserved):**
+
+- Data-flow diagram in `AGENTS.md` → `repo_graph`
+- Design doc index in `AGENTS.md` → `grep docs/` / `recall`
+- Core constraints in `AGENTS.md` → already in tool descriptions
+- Sub-section nesting in `static.ts` (8 XML sub-sections) → flattened to 3-line paragraphs
+- Full English delegation guide (20 lines) → 3-line Chinese summary
+
+No historical data was deleted. Full content is preserved in git history.
