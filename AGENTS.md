@@ -1,69 +1,21 @@
 # 天枢 (Tiānshū) — Architecture Map
 
-> 这是一张地图，不是手册。详细设计见 docs/。
+> 顶层目录索引。文件级细节用 `repo_map` 按需获取。
 
-## 模块导航
+## 模块
 
-```
-src/
-├── agent/           核心智能体循环与编排
-│   ├── loop.ts      AgentLoop — 主循环：LLM 调用 → 工具执行 → 迭代
-│   ├── tool-pipeline.ts  工具调用流水线（执行、重试、诊断、artifact 拦截）
-│   ├── coordinator.ts    多模型协调器（路由、回退、能力卡）
-│   ├── compaction-controller.ts  上下文压缩控制器
-│   ├── worker-session.ts 子智能体（delegate）独立会话
-│   ├── recovery-trigger.ts  错误恢复与策略切换
-│   ├── verification.ts  交付验证门禁
-│   └── delivery-gate-v2.ts  文件所有权与归属判定
-│
-├── tools/           工具实现（每个工具 = definition + execute）
-│   ├── read-file.ts      文件读取（动态容量、去重、artifact）
-│   ├── edit.ts           编辑文件（精确字符串替换）
-│   ├── write-file.ts     创建/覆写文件
-│   ├── bash.ts           Shell 执行（spawn，非 execSync）
-│   ├── grep.ts / glob.ts 搜索与查找
-│   ├── repo-map.ts       项目目录树（支持 path/depth 按需聚焦）
-│   ├── repo-graph.ts     代码图探索（依赖/影响分析）
-│   ├── delegate-task.ts  子智能体委派
-│   ├── apply-patch.ts    统一 diff 应用
-│   └── registry.ts       ToolRegistry — 所有工具的注册与执行入口
-│
-├── api/             API 客户端层
-│   ├── openai-client.ts  OpenAI 兼容协议客户端
-│   ├── codex-client.ts   Codex (OAuth) 客户端
-│   ├── provider-profile.ts  Provider 缓存特性档案
-│   └── stream-client.ts  流式响应处理
-│
-├── prompt/          系统提示词工程
-│   ├── static.ts    静态上下文（注入 .rivet.md + 工具描述）
-│   ├── engine.ts    PromptEngine — 组装完整 system prompt
-│   └── volatile-snapshot.ts  动态上下文（cwd、session memory）
-│
-├── tui/             终端 UI（Ink 6 / React）
-│   ├── app.tsx      根组件
-│   ├── stream.tsx   流式消息渲染
-│   └── glance-bar.tsx  底部状态栏
-│
-├── compact/         上下文压缩策略
-│   ├── prune.ts     过期工具结果修剪
-│   ├── micro.ts     微压缩（请求级截断）
-│   └── constants.ts 阈值与策略配置
-│
-├── cache/           前缀缓存管理
-│   └── advisor.ts   CacheAdvisor — 缓存命中诊断
-│
-├── repo/            代码仓库分析
-│   ├── import-graph.ts  导入依赖图
-│   └── meridian-*.ts    Meridian 持久化索引
-│
-├── config/          配置管理
-│   ├── default.ts   内置默认配置
-│   ├── schema.ts    Zod 验证模式
-│   └── manager.ts   多层配置加载（默认 → ~/.rivet → 项目）
-│
-└── artifact/        大输出持久化
-    └── store.ts     ArtifactStore — 超阈值工具输出存磁盘
-```
+| 目录 | 职责 |
+|------|------|
+| `src/agent/` | 核心智能体循环、工具流水线、多模型协调、压缩、子智能体、验证、交付门禁 |
+| `src/tools/` | 工具实现（definition + execute）与注册 |
+| `src/api/` | API 客户端层（OpenAI 兼容、Codex OAuth、流式处理） |
+| `src/prompt/` | 系统提示词工程（static / volatile / engine） |
+| `src/tui/` | 终端 UI（Ink 6 / React） |
+| `src/compact/` | 上下文压缩策略（修剪、微压缩、阈值） |
+| `src/cache/` | 前缀缓存管理与命中诊断 |
+| `src/repo/` | 代码仓库分析（导入图、持久化索引） |
+| `src/config/` | 配置管理（默认 → ~/.rivet → 项目多层加载） |
+| `src/artifact/` | 大输出持久化 |
 
 ## 关键数据流
 
