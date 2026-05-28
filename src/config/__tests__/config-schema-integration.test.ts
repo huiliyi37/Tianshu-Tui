@@ -26,14 +26,22 @@ describe('Config schema integration', () => {
     const providers = config.provider.providers
     for (const [name, provider] of Object.entries(providers)) {
       assert.match(provider.protocol, /^(anthropic|openai)$/, `${name} protocol should be supported`)
+      assert.match(provider.baseUrl, /^https?:\/\//, `${name} baseUrl should be an HTTP(S) URL`)
+      assert.ok(provider.models.length > 0, `${name} must have at least one model`)
+      for (const model of provider.models) {
+        assert.ok(model.contextWindow > 0, `${name}/${model.id} contextWindow must be positive`)
+        assert.ok(model.maxTokens > 0, `${name}/${model.id} maxTokens must be positive`)
+      }
     }
   })
 
-  it('codex auth parsed as oauth', () => {
+  it('codex auth parsed as oauth when configured', () => {
     if (!existsSync(configPath)) return
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
     const config = configSchema.parse(raw)
-    assert.deepEqual(config.provider.providers.codex!.auth, { type: 'oauth', provider: 'codex' })
+    const codex = config.provider.providers.codex
+    if (!codex) return
+    assert.deepEqual(codex.auth, { type: 'oauth', provider: 'codex' })
   })
 
   it('workers config parsed correctly', () => {

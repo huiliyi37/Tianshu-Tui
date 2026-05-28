@@ -38,6 +38,19 @@ describe('config permissions schema', () => {
     assert.equal(parsed.provider.providers.codex?.models[0]?.id, 'gpt-5.5')
   })
 
+  it('keeps DEFAULT_CONFIG default provider and model specs valid', () => {
+    const parsed = configSchema.parse(DEFAULT_CONFIG)
+
+    assert.ok(parsed.provider.providers[parsed.provider.default])
+    for (const [providerName, provider] of Object.entries(parsed.provider.providers)) {
+      assert.ok(provider.models.length > 0, `${providerName} must have at least one model`)
+      for (const model of provider.models) {
+        assert.ok(model.contextWindow > 0, `${providerName}/${model.id} contextWindow must be positive`)
+        assert.ok(model.maxTokens > 0, `${providerName}/${model.id} maxTokens must be positive`)
+      }
+    }
+  })
+
   it('keeps worker profiles pointing to configured providers', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 

@@ -5,6 +5,7 @@ import { createProviderClient, resolveApiKey, type RuntimeParams } from '../fact
 import { resolveCapabilities } from '../provider.js'
 import { OpenAIClient } from '../openai-client.js'
 import { ApiKeyAuth } from '../../auth/api-key.js'
+import { cloneProviderPreset } from '../../config/provider-presets.js'
 import type { ProviderConfig } from '../../config/schema.js'
 
 const deepseekProvider: ProviderConfig = {
@@ -141,6 +142,18 @@ describe('createProviderClient', () => {
     const caps = resolveCapabilities('openai')
     const client = createProviderClient(openaiProvider, caps, runtimeParams)
     assert.ok(client instanceof OpenAIClient)
+  })
+
+  it('creates CodexClient for codex OAuth provider without API key', () => {
+    const provider = cloneProviderPreset('codex')
+    const caps = resolveCapabilities('codex')
+    const client = createProviderClient(provider, caps, {
+      apiKey: '',
+      model: 'gpt-5.5',
+      maxTokens: 4096,
+      auth: new ApiKeyAuth('oauth-token-for-test'),
+    })
+    assert.ok(client)
   })
 })
 
