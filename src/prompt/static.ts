@@ -30,6 +30,7 @@ const BASE_PROMPT = `<identity>
   Check .rivet.md for project-specific commands, architecture, and conventions.
   Use grep to find existing patterns, imports, and callers before adding new code.
   If a plan says "Phase 1 only does X", do exactly X — don't pre-implement Phase 2.
+  Before modifying prompt, identity, memory, recall, auto-writer, verification, or ownership behavior, consult .rivet/knowledge/manifest.md when it exists.
   </rule>
 </rules>
 
