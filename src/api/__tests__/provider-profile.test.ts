@@ -13,7 +13,7 @@ describe('getProviderProfile', () => {
   it('returns claude profile', () => {
     const p = getProviderProfile('anthropic')
     assert.equal(p.cacheType, 'explicit-breakpoint')
-    assert.equal(p.minCacheTokens, 1024)
+    assert.equal(p.minCacheTokens, 4096)
   })
 
   it('returns openai profile', () => {

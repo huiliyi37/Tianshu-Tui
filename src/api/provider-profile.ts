@@ -11,7 +11,7 @@ export interface ProviderProfile {
 
 const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
   deepseek: { cacheType: 'exact-prefix', persistent: true, minCacheTokens: 64 },
-  anthropic: { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 1024, ttlSeconds: 300 },
+  anthropic: { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 4096, ttlSeconds: 300 },
   openai: { cacheType: 'partial-prefix', persistent: false, minCacheTokens: 1024, cacheGranularity: 128, ttlSeconds: 600 },
   codex: { cacheType: 'partial-prefix', persistent: false, minCacheTokens: 1024, cacheGranularity: 128, ttlSeconds: 600 },
   google: { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 4096, ttlSeconds: 3600 },
