@@ -1,13 +1,15 @@
 import type { PostToolRuntimeHook } from '../runtime-hooks.js'
 import type { PheromoneDeposit, PheromoneQueryResult } from '../../context/stigmergy.js'
 import { detectVirtue, virtueToPheromoneDeposit } from '../virtue-signals.js'
-import type { VirtueContext } from '../virtue-signals.js'
+import type { VirtueContext, VirtueSignal } from '../virtue-signals.js'
 
 export interface StigmergyRuntimeHookDeps {
   deposit: (deposit: PheromoneDeposit) => Promise<void>
   query: () => Promise<PheromoneQueryResult[]>
   getEvidenceState: () => { verifications: Array<{ status: string }> }
   setLoadedPheromones: (pheromones: PheromoneQueryResult[]) => void
+  /** Accumulate stance evidence so it survives compaction. */
+  recordStance?: (signal: VirtueSignal) => void
   /** Publish cross-session event to SQLite events table */
   publishEvent?: (input: { eventType: string; filePath?: string; detail?: string; priority?: number }) => void
   /** Current session ID for event attribution */
@@ -77,6 +79,7 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
 
       const virtueSignal = detectVirtue(virtueCtx)
       if (virtueSignal) {
+        deps.recordStance?.(virtueSignal)
         deposits.push(virtueToPheromoneDeposit(
           virtueSignal,
           tool.target ?? 'virtue-signal',

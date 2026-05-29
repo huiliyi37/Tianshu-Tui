@@ -83,6 +83,7 @@ import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-
 import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
 import { advanceContractStatus, contractStatusFromPhaseClass, extractTaskContract, type TaskContract } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
+import { createStanceTally } from './stance-tally.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
@@ -241,6 +242,7 @@ export class AgentLoop {
   private sessionStateManager: SessionStateManager | undefined
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
+  private readonly stanceTally = createStanceTally()
   private lastSeenEventId = 0
   private gitChangeRate = 0
   private telemetryWriter: TelemetryWriter
@@ -339,6 +341,7 @@ export class AgentLoop {
       stigmergyQuery: () => this.stigmergyStore.query(),
       getEvidenceState: () => this.evidence.getState(),
       setLoadedPheromones: pheromones => { this.loadedPheromones = mapQueriedPheromones(pheromones) },
+      recordStance: signal => this.stanceTally.record(signal),
       publishEvent: this.config.sessionRegistry && this.config.sessionId
         ? (input) => this.config.sessionRegistry!.publishEvent(this.config.sessionId!, input)
         : undefined,
@@ -426,6 +429,7 @@ export class AgentLoop {
       getStreamedText: () => this.streamedText,
       refreshLedger: () => { this.contextInjection.refreshLedger() },
       cacheAdvisor: this.cacheAdvisor,
+      getStanceSummary: () => this.stanceTally.render(),
       persistMemories: memories => {
         const persist = this.persist
         if (!persist) return

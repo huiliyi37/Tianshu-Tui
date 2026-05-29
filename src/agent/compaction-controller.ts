@@ -31,6 +31,8 @@ export interface StructuredHandoffInput {
   errorCount: number
   errors: Array<{ turn: number; tool: string; target: string; errorClass: string; summary: string }>
   toolHistory: Array<{ tool: string; target: string; status: HandoffToolStatus }>
+  /** Collaboration-stance evidence derived from virtue signals. */
+  stanceSummary?: string | null
 }
 
 export const STRUCTURED_HANDOFF_SECTIONS = [
@@ -119,6 +121,11 @@ export function buildStructuredHandoff(input: StructuredHandoffInput): string {
   lines.push('', `## ${STRUCTURED_HANDOFF_SECTIONS[8]}`)
   lines.push(taskState.remaining[0] ?? taskState.current ?? '继续当前任务')
 
+  if (input.stanceSummary && input.stanceSummary.trim().length > 0) {
+    lines.push('', '## 协作姿态（从行为轨迹涌现，非身份注入）')
+    lines.push(input.stanceSummary.trim())
+  }
+
   if (input.reasoningSnippet.trim().length > 0) {
     lines.push('', '## 附录：最近推理摘要')
     lines.push(input.reasoningSnippet.trim().slice(-2000))
@@ -139,6 +146,8 @@ export interface CompactionControllerDeps {
   getStreamedText: () => string
   refreshLedger: () => void
   cacheAdvisor?: CacheAdvisor
+  /** Collaboration-stance evidence, rendered into handoff so it survives compaction. */
+  getStanceSummary?: () => string | null
   persistMemories?: (memories: Array<{ text: string; source: ExtractedMemory['source']; kind: ExtractedMemory['kind'] }>) => void | Promise<void>
 }
 
@@ -380,6 +389,7 @@ export class CompactionController {
         target: t.target,
         status: t.status,
       })),
+      stanceSummary: this.deps.getStanceSummary?.(),
     })
 
     this.replaceWithCheckpoint({

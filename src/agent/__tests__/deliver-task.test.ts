@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDeliverTaskTool } from '../deliver-task.js'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { createDeliverTaskTool, detectSymptomPatch } from '../deliver-task.js'
 import { createTaskLedger } from '../task-ledger.js'
 import { createOwnershipLedger } from '../ownership-ledger.js'
 import { createWorktreeBaseline } from '../worktree-baseline.js'
@@ -684,6 +688,29 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
       assert.match(result.content, /Delivery Gate: GREEN/)
       assert.doesNotMatch(result.content, /Ownership health warnings:/)
+    })
+  })
+
+  describe('detectSymptomPatch', () => {
+    function tmpRepo(file: string, before: string, after: string): string {
+      const dir = mkdtempSync(join(tmpdir(), 'sym-'))
+      const run = (args: string[]) => spawnSync('git', args, { cwd: dir })
+      run(['init', '-q'])
+      run(['config', 'user.email', 't@t']); run(['config', 'user.name', 't'])
+      writeFileSync(join(dir, file), before)
+      run(['add', '.']); run(['commit', '-qm', 'base'])
+      writeFileSync(join(dir, file), after)
+      return dir
+    }
+
+    it('flags a single-line fallback patch', () => {
+      const dir = tmpRepo('a.ts', 'const x = v ?? "medium"\n', 'const x = v || "medium"\n')
+      assert.match(detectSymptomPatch(dir)!, /症状处的 fallback 补丁/)
+    })
+
+    it('ignores a multi-line structural change', () => {
+      const dir = tmpRepo('a.ts', 'const x = 1\n', 'const a = 1\nconst b = 2\nconst c = 3\n')
+      assert.equal(detectSymptomPatch(dir), null)
     })
   })
 })

@@ -56,6 +56,29 @@ function gitNameList(cwd: string, args: string[]): string[] | null {
   return parseNulFileList(result.stdout)
 }
 
+/**
+ * Detect a "symptom-patch": a tiny single-file change touching only fallback
+ * operators (`??` `||` default values). These are the shape of the trained-mode
+ * reflex — patch the last hop, not the root. Returns a stance hint, or null.
+ */
+export function detectSymptomPatch(cwd: string): string | null {
+  const res = spawnSync('git', ['diff', '--numstat', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 })
+  if (res.status !== 0) return null
+  const rows = res.stdout.split('\n').filter(Boolean)
+    .map(l => l.split('\t'))
+    .filter(c => c.length === 3 && !(c[2] ?? '').includes('test'))
+  if (rows.length !== 1) return null
+  const row = rows[0]!
+  const added = Number(row[0]) || 0
+  if (added > 2) return null
+  const patch = spawnSync('git', ['diff', 'HEAD', '--', row[2]!], { cwd, encoding: 'utf-8', timeout: 5000 })
+  if (patch.status !== 0) return null
+  const addedLines = patch.stdout.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++'))
+  const fallbackOnly = addedLines.length > 0 && addedLines.every(l => /\?\?|\|\||=\s*['"`]?\w*['"`]?\s*$|fallback|default/.test(l))
+  if (!fallbackOnly) return null
+  return '⚖️  这是症状处的 fallback 补丁(单行、改默认值)。是源头修复还是就近打补丁？数据流追到源头了吗？(清醒锚点，不阻塞)'
+}
+
 export function collectCurrentDirtyFiles(cwd: string): string[] | undefined {
   const unstaged = gitNameList(cwd, ['diff', '--name-only', '-z'])
   const staged = gitNameList(cwd, ['diff', '--cached', '--name-only', '-z'])
@@ -195,6 +218,10 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         if (report.state === 'RED') {
           lines.push('', '❌ Cannot commit: delivery gate is RED.')
           return { content: lines.join('\n'), isError: true }
+        }
+        if (report.state === 'YELLOW') {
+          const stanceHint = detectSymptomPatch(params.cwd)
+          if (stanceHint) lines.push('', stanceHint)
         }
         if (!message) {
           lines.push('', '❌ Commit requires a "message" parameter.')

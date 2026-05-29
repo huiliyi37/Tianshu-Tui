@@ -32,6 +32,7 @@ export interface RuntimeHookDeps {
   stigmergyQuery: () => Promise<any>
   getEvidenceState: () => EvidenceState
   setLoadedPheromones: (pheromones: any) => void
+  recordStance?: (signal: import('./virtue-signals.js').VirtueSignal) => void
   getThetaState: () => any
   setThetaState: (state: any) => void
   getPredictionAccumulator: () => any
@@ -94,6 +95,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       query: deps.stigmergyQuery,
       getEvidenceState: deps.getEvidenceState,
       setLoadedPheromones: deps.setLoadedPheromones,
+      recordStance: deps.recordStance,
       publishEvent: deps.publishEvent,
       sessionId: deps.sessionId,
     }),
