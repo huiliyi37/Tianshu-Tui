@@ -148,7 +148,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       prewarmMisses: prewarmStats.misses,
       prewarmHitRate: prewarmStats.hitRate,
       cacheDiagnostic,
-      reasoningEffort: reasoningEffort ?? 'medium',
+      reasoningEffort: reasoningEffort || 'medium',
     },
     mcp: {
       servers: mcpStates.map(s => ({
