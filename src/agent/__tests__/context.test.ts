@@ -345,3 +345,61 @@ describe('SessionContext mutation listener', () => {
     assert.doesNotThrow(() => ctx.addUserMessage('second'))
   })
 })
+
+describe('SessionContext removeLastMessage', () => {
+  it('removes the last user message and decrements turnCount', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    assert.equal(ctx.getTurnCount(), 1)
+    assert.equal(ctx.getMessages().length, 1)
+
+    const removed = ctx.removeLastMessage()
+    assert.equal(removed!.role, 'user')
+    assert.equal((removed as any).content, 'hello')
+    assert.equal(ctx.getMessages().length, 0)
+    assert.equal(ctx.getTurnCount(), 0)
+  })
+
+  it('removes assistant message without decrementing turnCount', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    ctx.addAssistantBlocks([{ type: 'text', text: 'world' }])
+    assert.equal(ctx.getTurnCount(), 1)
+
+    const removed = ctx.removeLastMessage()
+    assert.equal(removed!.role, 'assistant')
+    assert.equal(ctx.getTurnCount(), 1) // turnCount stays at 1 (user message still present)
+  })
+
+  it('returns undefined when session is empty', () => {
+    const ctx = new SessionContext()
+    assert.equal(ctx.removeLastMessage(), undefined)
+  })
+
+  it('decrements estimatedTokens', () => {
+    const ctx = new SessionContext()
+    const before = ctx.getEstimatedTokens()
+    ctx.addUserMessage('hello world')
+    const after = ctx.getEstimatedTokens()
+    assert.ok(after > before, 'tokens should increase after addUserMessage')
+
+    ctx.removeLastMessage()
+    assert.equal(ctx.getEstimatedTokens(), before, 'tokens should return to baseline after removeLastMessage')
+  })
+
+  it('rollbacks a complete user→assistant→tool sequence in reverse', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('do stuff')
+    ctx.addAssistantBlocks([
+      { type: 'tool_use', id: 'c1', name: 'bash', input: { command: 'ls' } },
+    ])
+    ctx.addToolResults([{ type: 'tool_result', tool_use_id: 'c1', content: 'file.ts' }])
+
+    assert.equal(ctx.getMessages().length, 3)
+    ctx.removeLastMessage() // tool
+    ctx.removeLastMessage() // assistant
+    ctx.removeLastMessage() // user
+    assert.equal(ctx.getMessages().length, 0)
+    assert.equal(ctx.getTurnCount(), 0)
+  })
+})

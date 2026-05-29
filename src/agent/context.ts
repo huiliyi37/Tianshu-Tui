@@ -90,6 +90,24 @@ export class SessionContext {
     this.onMutation?.({ type: 'append', message: msg })
   }
 
+  /**
+   * Remove the most recently appended message. Used to roll back a user
+   * message when the turn is aborted or fails before any assistant response
+   * is produced. Returns the removed message, or `undefined` if the session
+   * is empty.
+   */
+  removeLastMessage(): OaiMessage | undefined {
+    const msg = this.state.oaiMessages.pop()
+    if (msg) {
+      this.state.estimatedTokens -= estimateOaiMessageTokens(msg)
+      // Decrement turnCount only for user messages — assistant / tool messages
+      // do not advance the turn counter.
+      if (msg.role === 'user') this.state.turnCount--
+      // Notify listeners so durable storage mirrors the removal.
+    }
+    return msg
+  }
+
   replaceMessages(messages: OaiMessage[]): void {
     this.state.oaiMessages = messages
     this.state.estimatedTokens = estimateOaiTokens(messages)

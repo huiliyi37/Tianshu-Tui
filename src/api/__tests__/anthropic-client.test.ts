@@ -142,11 +142,13 @@ describe('AnthropicClient message conversion', () => {
     })
     const msg = body.messages[0]!
     const types = msg.content.map(b => b.type)
-    assert.ok(types.includes('thinking'))
+    // Anthropic API rejects `thinking` blocks in the request history — they
+    // are model-output only. The client merges reasoning into the text block.
+    assert.ok(!types.includes('thinking'))
     assert.ok(types.includes('text'))
-    const thinkingBlock = msg.content.find(b => b.type === 'thinking')
-    assert.ok(thinkingBlock)
-    assert.equal(thinkingBlock.thinking, 'thinking...')
+    const textBlock = msg.content.find(b => b.type === 'text')
+    assert.ok(textBlock)
+    assert.equal(textBlock.text, '<thinking>\nthinking...\n</thinking>\n\nanswer')
   })
 
   it('handles no system message gracefully', () => {

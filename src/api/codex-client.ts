@@ -45,7 +45,7 @@ export class CodexClient implements StreamClient {
         },
         body: JSON.stringify(body),
         signal,
-      })
+      }, 90_000)
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
@@ -198,7 +198,8 @@ export class CodexClient implements StreamClient {
     }
 
     // SSE idle timeout — same pattern as ApiClient and OpenAIClient
-    const FIRST_BYTE_TIMEOUT_MS = 45_000
+    // Codex always uses reasoning (effort: high), so first-byte can be slow.
+    const FIRST_BYTE_TIMEOUT_MS = 90_000
     const READ_TIMEOUT_MS = 180_000
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null

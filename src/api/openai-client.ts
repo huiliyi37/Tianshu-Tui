@@ -44,7 +44,9 @@ interface ToolCallChunk {
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
 const FIRST_BYTE_TIMEOUT_MS = 45_000
+const REASONING_FIRST_BYTE_TIMEOUT_MS = 90_000
 const READ_TIMEOUT_MS = 120_000
+const REASONING_READ_TIMEOUT_MS = 180_000
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -209,6 +211,9 @@ export class OpenAIClient implements StreamClient {
 
         // Pre-first-byte timeout prevents fetch from hanging forever
         // when server accepts connection but never sends response headers.
+        const fetchTimeout = this.config.thinking === 'enabled'
+          ? REASONING_FIRST_BYTE_TIMEOUT_MS
+          : FIRST_BYTE_TIMEOUT_MS
         const response = await fetchWithTimeout(`${this.config.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
@@ -220,7 +225,7 @@ export class OpenAIClient implements StreamClient {
           },
           body: JSON.stringify(body),
           signal,
-        })
+        }, fetchTimeout)
 
         if (!response.ok) {
           const errorBody = await response.text().catch(() => '')
@@ -286,7 +291,10 @@ export class OpenAIClient implements StreamClient {
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
-      const timeout = receivedFirstChunk ? READ_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
+      const isReasoning = this.config.thinking === 'enabled'
+      const firstByteMs = isReasoning ? REASONING_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
+      const readMs = isReasoning ? REASONING_READ_TIMEOUT_MS : READ_TIMEOUT_MS
+      const timeout = receivedFirstChunk ? readMs : firstByteMs
       idleTimer = setTimeout(() => {
         streamTimedOut = true
         reader.cancel().catch(() => {})

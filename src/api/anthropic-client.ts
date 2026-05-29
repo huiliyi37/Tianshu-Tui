@@ -68,7 +68,7 @@ export class AnthropicClient implements StreamClient {
         },
         body: JSON.stringify(body),
         signal,
-      })
+      }, 90_000)
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
@@ -220,12 +220,16 @@ export class AnthropicClient implements StreamClient {
     if (msg.role === 'assistant') {
       const blocks: AnthropicContentBlock[] = []
 
+      // Anthropic API rejects requests that contain `thinking` content blocks
+      // in the message history — they are model-output only. Merge previous
+      // reasoning into the text block instead of sending a `thinking` block.
+      let text = msg.content ?? ''
       if (msg.reasoning_content) {
-        blocks.push({ type: 'thinking', thinking: msg.reasoning_content })
+        text = `<thinking>\n${msg.reasoning_content}\n</thinking>\n\n${text}`
       }
 
-      if (msg.content) {
-        blocks.push({ type: 'text', text: msg.content })
+      if (text) {
+        blocks.push({ type: 'text', text })
       }
 
       if (msg.tool_calls) {
@@ -279,7 +283,8 @@ export class AnthropicClient implements StreamClient {
     const toolUseBuffer = new Map<number, { id: string; name: string; partialJson: string }>()
 
     // SSE idle timeout — same pattern as OpenAIClient and CodexClient
-    const FIRST_BYTE_TIMEOUT_MS = 45_000
+    // Anthropic with extended thinking can have long first-byte delays.
+    const FIRST_BYTE_TIMEOUT_MS = 90_000
     const READ_TIMEOUT_MS = 180_000
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null

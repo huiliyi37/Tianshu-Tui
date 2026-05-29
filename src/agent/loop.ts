@@ -1070,9 +1070,15 @@ export class AgentLoop {
 
     let checkpointCreatedThisTurn = false
 
+    // Track whether any assistant response was produced this turn.
+    // If the turn is aborted before any assistant output, we roll back
+    // the user message so it doesn't pollute context on retry.
+    let assistantResponded = false
+
     try {
       for (let turn = 0; turn < this.config.maxTurns; turn++) {
         if (this.abortController.signal.aborted) {
+          if (!assistantResponded) this.session.removeLastMessage()
           callbacks.onAbort()
           return
         }
@@ -1406,20 +1412,22 @@ export class AgentLoop {
         const latestTurnCache = cacheHistory.length > 0 ? cacheHistory[cacheHistory.length - 1] : null
 
         if (this.abortController.signal.aborted) {
-          if (collectedBlocks.length > 0) this.session.addAssistantBlocks(collectedBlocks)
+          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
           if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
+          if (!assistantResponded) this.session.removeLastMessage()
           await this.runPostSession(callbacks)
           callbacks.onAbort()
           return
         }
 
         if (streamError) {
-          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks) }
+          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
+          if (!assistantResponded) this.session.removeLastMessage()
           callbacks.onError(streamError)
           return
         }
 
-        if (collectedBlocks.length > 0) this.session.addAssistantBlocks(collectedBlocks)
+        if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
 
         if (stopReason === 'max_output_tokens' && toolUses.length === 0 && this.outputTokenEscalationCount < AgentLoop.MAX_OUTPUT_ESCALATION) {
           this.outputTokenEscalationCount++
@@ -1489,6 +1497,7 @@ export class AgentLoop {
       }
     } catch (err) {
       this.evidence.reset()
+      if (!assistantResponded) this.session.removeLastMessage()
       if ((err as Error).name === 'AbortError') {
         await this.runPostSession(callbacks)
         callbacks.onAbort()
