@@ -62,6 +62,31 @@ describe('createProviderClient', () => {
     assert.ok(client)
   })
 
+  it('sends User-Agent header for kimi provider', async () => {
+    const capabilities = resolveCapabilities('kimi')
+    const client = createProviderClient(kimiProvider, capabilities, runtimeParams)
+    const originalFetch = globalThis.fetch
+    let capturedHeaders: Record<string, string> = {}
+    globalThis.fetch = mock.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedHeaders = (init?.headers ?? {}) as Record<string, string>
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(stream as unknown as ReadableStream, { status: 200 })
+    }) as unknown as typeof fetch
+
+    await client.stream(
+      { model: 'kimi-code', messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 },
+      { onTextDelta: () => {}, onThinkingDelta: () => {}, onContentBlock: () => {}, onStopReason: () => {}, onError: error => { throw error } },
+    )
+
+    globalThis.fetch = originalFetch
+    assert.equal(capturedHeaders['User-Agent'], 'KimiCLI/1.0')
+  })
+
   it('creates OpenAIClient for openai protocol', () => {
     const openaiProvider: ProviderConfig = {
       ...deepseekProvider,

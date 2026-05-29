@@ -29,6 +29,8 @@ export interface OpenAIClientConfig {
   prefixCompletion?: boolean
   /** Use max_completion_tokens instead of max_tokens (MiMo requires this per API docs) */
   useMaxCompletionTokens?: boolean
+  /** Custom User-Agent header — required by providers that verify caller identity (e.g. Kimi) */
+  userAgent?: string
 }
 
 interface ToolCallChunk {
@@ -209,6 +211,7 @@ export class OpenAIClient implements StreamClient {
           headers: {
             'Content-Type': 'application/json',
             'Connection': 'keep-alive',
+            ...(this.config.userAgent ? { 'User-Agent': this.config.userAgent } : {}),
             ...authHeaders,
             ...(this.config.sessionId ? { 'X-Request-Session': this.config.sessionId } : {}),
           },
