@@ -9,28 +9,35 @@ import { SystemMessage } from './system-message.js'
 import { StreamOutput } from './stream.js'
 import { QuestionCard } from './question-card.js'
 
+type EntryRenderer = (entry: LogEntry, verbose: boolean) => ReturnType<typeof Box>
+
+const RENDER_MAP: Record<string, EntryRenderer> = {
+  user_message: (e) => <UserMessage key={e.id} content={e.content} />,
+  thinking_message: (e) => <ThinkingMessage key={e.id} content={e.content} />,
+  assistant_message: (e) => <AssistantMessage key={e.id} content={e.content} />,
+  tool: (e, verbose) => {
+    if (e.toolName === 'ask_user_question') {
+      return <QuestionCard key={e.id} question={e.content} />
+    }
+    return <ToolCard key={e.id} name={e.toolName ?? ''} result={e.content} isError={e.isError} verbose={verbose} rawPath={e.rawPath} />
+  },
+  tool_group: (e, verbose) => <ToolGroup key={e.id} tools={e.children ?? []} verbose={verbose} />,
+  checkpoint: (e) => <Box key={e.id} paddingX={2}><Text dimColor color="yellow">⚑ {e.content}</Text></Box>,
+  evidence: (e) => <Box key={e.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{e.content}</Text></Box>,
+  system: (e) => <SystemMessage key={e.id} content={e.content} isError={e.isError} />,
+}
+
 export function renderStaticEntry(entry: LogEntry, verbose: boolean) {
-  switch (entry.type) {
-    case 'user_message':
-      return <UserMessage key={entry.id} content={entry.content} />
-    case 'thinking_message':
-      return <ThinkingMessage key={entry.id} content={entry.content} />
-    case 'assistant_message':
-      return <AssistantMessage key={entry.id} content={entry.content} />
-    case 'tool':
-      if (entry.toolName === 'ask_user_question') {
-        return <QuestionCard key={entry.id} question={entry.content} />
-      }
-      return <ToolCard key={entry.id} name={entry.toolName ?? ''} result={entry.content} isError={entry.isError} verbose={verbose} rawPath={entry.rawPath} />
-    case 'tool_group':
-      return <ToolGroup key={entry.id} tools={entry.children ?? []} verbose={verbose} />
-    case 'checkpoint':
-      return <Box key={entry.id} paddingX={2}><Text dimColor color="yellow">⚑ {entry.content}</Text></Box>
-    case 'evidence':
-      return <Box key={entry.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{entry.content}</Text></Box>
-    case 'system':
-      return <SystemMessage key={entry.id} content={entry.content} isError={entry.isError} />
-    default:
-      return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
-  }
+  const renderer = RENDER_MAP[entry.type]
+  if (renderer) return renderer(entry, verbose)
+  return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
+}
+
+/**
+ * 为 Static 列表项生成稳定的 memo key。
+ * 包含 type + id + content 前缀，确保内容变化时触发正确更新。
+ */
+export function renderMemoKey(entry: LogEntry): string {
+  const contentPreview = entry.content.slice(0, 40).replace(/\n/g, '\\n')
+  return `${entry.type}:${entry.id}:${contentPreview}`
 }
