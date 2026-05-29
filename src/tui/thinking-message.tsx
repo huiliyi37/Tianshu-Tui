@@ -2,6 +2,7 @@ import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { formatThinkingSize } from './thinking.js'
 import { useViewportLines } from './viewport.js'
+import { getTheme } from './theme.js'
 
 interface ThinkingMessageProps {
   content: string
@@ -19,6 +20,7 @@ interface ThinkingMessageProps {
  * bordered box 内，各自独立渲染，高度各自受限，避免总高度溢出终端。
  */
 export const ThinkingMessage = memo(function ThinkingMessage({ content }: ThinkingMessageProps) {
+  const theme = getTheme()
   const maxLines = useViewportLines(0.4, 3)
   const lines = content.split('\n')
   const totalLines = lines.length
@@ -26,10 +28,10 @@ export const ThinkingMessage = memo(function ThinkingMessage({ content }: Thinki
   if (totalLines <= maxLines) {
     return (
       <Box flexDirection="column" paddingX={2}>
-        <Text dimColor>▸ Thinking ({formatThinkingSize(content.length)})</Text>
+        <Text color={theme.muted}>▸ Thinking ({formatThinkingSize(content.length)})</Text>
         <Box paddingLeft={2} flexDirection="column">
           {lines.map((line, i) => (
-            <Text key={i} dimColor>{line}</Text>
+            <Text key={i} color={theme.muted}>{line}</Text>
           ))}
         </Box>
       </Box>
@@ -40,11 +42,11 @@ export const ThinkingMessage = memo(function ThinkingMessage({ content }: Thinki
   const visibleLines = lines.slice(-maxLines)
   return (
     <Box flexDirection="column" paddingX={2}>
-      <Text dimColor>▸ Thinking ({formatThinkingSize(content.length)}, {omitted} earlier lines omitted)</Text>
+      <Text color={theme.muted}>▸ Thinking ({formatThinkingSize(content.length)}, {omitted} earlier lines omitted)</Text>
       <Box paddingLeft={2} flexDirection="column">
-        <Text dimColor>…</Text>
+        <Text color={theme.muted}>…</Text>
         {visibleLines.map((line, i) => (
-          <Text key={i} dimColor>{line}</Text>
+          <Text key={i} color={theme.muted}>{line}</Text>
         ))}
       </Box>
     </Box>
