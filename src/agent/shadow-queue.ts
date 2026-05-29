@@ -27,6 +27,10 @@ export class ShadowQueue {
     const target = prediction.likelyTarget
     this.deps.execute(prediction.tool, target).then(result => {
       this.cache.push({ tool: prediction.tool, target, result })
+    }).catch(() => {
+      // Speculative execution failed — silently absorb.
+      // Shadow queue is best-effort; failures should not cause
+      // unhandledRejection or disrupt the main agent loop.
     }).finally(() => { this.inflight-- })
   }
 
