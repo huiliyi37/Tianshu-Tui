@@ -78,7 +78,9 @@ export function semanticPruneLayer1(
   let prunedCount = 0
   let savedChars = 0
 
-  // Build grep dedup map: pattern → latest index
+  // Build grep dedup map: pattern|path|glob → latest index
+  // Uses composite key to avoid incorrectly deduplicating greps with the
+  // same pattern but different search paths or file filters.
   const grepPatterns = new Map<string, number>()
   for (let i = messages.length - 1; i >= anchorCount; i--) {
     const msg = messages[i]!
@@ -96,8 +98,11 @@ export function semanticPruneLayer1(
             try {
               const args = JSON.parse(tc.function.arguments)
               const pattern = args.pattern || args.query || args.regex || ''
-              if (pattern && !grepPatterns.has(pattern)) {
-                grepPatterns.set(pattern, i)
+              if (pattern) {
+                const key = [pattern, args.path ?? '', args.glob ?? ''].join('|')
+                if (!grepPatterns.has(key)) {
+                  grepPatterns.set(key, i)
+                }
               }
             } catch { /* ignore */ }
           }
@@ -128,8 +133,11 @@ export function semanticPruneLayer1(
             try {
               const args = JSON.parse(tc.function.arguments)
               const pattern = args.pattern || args.query || args.regex || ''
-              if (pattern && grepPatterns.get(pattern) !== idx) {
-                newContent = `[outdated grep for "${pattern.slice(0, 40)}", see later result]`
+              if (pattern) {
+                const key = [pattern, args.path ?? '', args.glob ?? ''].join('|')
+                if (grepPatterns.get(key) !== idx) {
+                  newContent = `[outdated grep for "${pattern.slice(0, 40)}", see later result]`
+                }
               }
             } catch { /* ignore */ }
             break

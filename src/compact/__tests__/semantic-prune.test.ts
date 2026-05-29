@@ -70,7 +70,7 @@ describe('semanticPruneLayer1', () => {
     assert.ok(result.prunedCount > 0)
     const oldGrep = result.messages[3]!
     assert.ok(oldGrep.role === 'tool')
-    assert.ok(oldGrep.content.includes('outdated grep'))
+    assert.ok(oldGrep.content!.includes('outdated grep'))
   })
 
   it('skips short tool results', () => {
@@ -93,5 +93,65 @@ describe('semanticPruneLayer1', () => {
     // anchor=3 means all messages are in anchor zone
     const result = semanticPruneLayer1(messages, 3)
     assert.equal(result.prunedCount, 0)
+  })
+
+  // ── Path-aware grep dedup tests ──
+
+  it('does NOT dedup grep with same pattern but different path', () => {
+    // grep(pattern="handleSubmit", path="src/tools/") → search tools dir
+    // grep(pattern="handleSubmit", path="src/agent/") → search agent dir
+    // Different directories → should NOT be deduped
+    const longGrep1 = 'src/tools/bash.ts:42: function handleSubmit()\n' + 'x'.repeat(250)
+    const longGrep2 = 'src/agent/form.ts:15: function handleSubmit()\n' + 'y'.repeat(250)
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      makeAssistant([{ id: 'tc1', name: 'grep', args: '{"pattern":"handleSubmit","path":"src/tools/"}' }]),
+      makeToolResult('tc1', longGrep1),
+      { role: 'user', content: 'more' },
+      makeAssistant([{ id: 'tc2', name: 'grep', args: '{"pattern":"handleSubmit","path":"src/agent/"}' }]),
+      makeToolResult('tc2', longGrep2),
+    ]
+    const result = semanticPruneLayer1(messages, 2)
+    assert.equal(result.prunedCount, 0, 'different paths should NOT be deduped')
+    const firstGrep = result.messages[3]!
+    assert.ok(!firstGrep.content!.includes('outdated grep'), `expected preserved, got: ${firstGrep.content!.slice(0, 80)}`)
+  })
+
+  it('dedups grep with same pattern AND same path', () => {
+    // grep(pattern="TODO", path="src/") → search src/
+    // grep(pattern="TODO", path="src/") → same search → should be deduped
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      makeAssistant([{ id: 'tc1', name: 'grep', args: '{"pattern":"TODO","path":"src/"}' }]),
+      makeToolResult('tc1', 'src/a.ts:5: // TODO fix this\nsrc/b.ts:10: // TODO refactor'),
+      { role: 'user', content: 'more' },
+      makeAssistant([{ id: 'tc2', name: 'grep', args: '{"pattern":"TODO","path":"src/"}' }]),
+      makeToolResult('tc2', 'src/a.ts:5: // TODO fix this\nsrc/b.ts:10: // TODO refactor\nsrc/c.ts:1: // TODO new'),
+    ]
+    const result = semanticPruneLayer1(messages, 2)
+    assert.ok(result.prunedCount > 0, 'same pattern+path should be deduped')
+    const oldGrep = result.messages[3]!
+    assert.ok(oldGrep.content!.includes('outdated grep'))
+  })
+
+  it('does NOT dedup grep with same pattern but different glob', () => {
+    // grep(pattern="API", path=".", glob="*.ts") → search .ts files
+    // grep(pattern="API", path=".", glob="*.tsx") → search .tsx files
+    // Different glob → should NOT be deduped
+    const longGrep1 = 'src/api.ts:5: const API = "...\n' + 'x'.repeat(250)
+    const longGrep2 = 'src/app.tsx:15: const API = "...\n' + 'y'.repeat(250)
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      makeAssistant([{ id: 'tc1', name: 'grep', args: '{"pattern":"API","path":".","glob":"*.ts"}' }]),
+      makeToolResult('tc1', longGrep1),
+      { role: 'user', content: 'more' },
+      makeAssistant([{ id: 'tc2', name: 'grep', args: '{"pattern":"API","path":".","glob":"*.tsx"}' }]),
+      makeToolResult('tc2', longGrep2),
+    ]
+    const result = semanticPruneLayer1(messages, 2)
+    assert.equal(result.prunedCount, 0, 'different glob should NOT be deduped')
   })
 })

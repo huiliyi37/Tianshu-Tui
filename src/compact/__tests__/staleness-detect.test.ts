@@ -105,4 +105,87 @@ describe('detectStaleness', () => {
     const result = detectStaleness(messages, 2)
     assert.equal(result.supersededCount, 0)
   })
+
+  // ── Range-aware superseded tests ──
+
+  it('does NOT supersede read_file with non-overlapping offset ranges', () => {
+    // read_file("app.tsx", offset=1, limit=100) → later read_file("app.tsx", offset=200, limit=100)
+    // Non-overlapping → first read should NOT be superseded
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      assistant([{ id: 'tc1', name: 'read_file', args: '{"file_path":"src/app.tsx","offset":1,"limit":100}' }]),
+      tool('tc1', longContent),
+      assistantText('thinking about top of file'),
+      assistantText('more thinking'),
+      assistantText('even more'),
+      assistant([{ id: 'tc2', name: 'read_file', args: '{"file_path":"src/app.tsx","offset":200,"limit":100}' }]),
+      tool('tc2', longContent + 'different'),
+      assistantText('looking at different section'),
+    ]
+    const result = detectStaleness(messages, 2)
+    assert.equal(result.supersededCount, 0, 'non-overlapping ranges should NOT be superseded')
+    const firstRead = result.messages[3]!
+    assert.ok(!firstRead.content!.includes('superseded'), `expected preserved, got: ${firstRead.content!.slice(0, 80)}`)
+  })
+
+  it('supersedes ranged read when later full read contains it', () => {
+    // read_file("app.tsx", offset=100, limit=50) → later read_file("app.tsx") full
+    // Full read contains the range → should be superseded
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      assistant([{ id: 'tc1', name: 'read_file', args: '{"file_path":"src/app.tsx","offset":100,"limit":50}' }]),
+      tool('tc1', longContent),
+      assistantText('thinking'),
+      assistantText('more thinking'),
+      assistantText('even more'),
+      assistant([{ id: 'tc2', name: 'read_file', args: '{"file_path":"src/app.tsx"}' }]),
+      tool('tc2', longContent + 'full'),
+      assistantText('full read done'),
+    ]
+    const result = detectStaleness(messages, 2)
+    assert.equal(result.supersededCount, 1, 'full read should contain ranged read')
+    const firstRead = result.messages[3]!
+    assert.ok(firstRead.content!.includes('superseded'))
+  })
+
+  it('does NOT supersede full read when later ranged read is partial', () => {
+    // read_file("app.tsx") full → later read_file("app.tsx", offset=500, limit=100)
+    // Partial read does NOT contain full read → should NOT be superseded
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      assistant([{ id: 'tc1', name: 'read_file', args: '{"file_path":"src/app.tsx"}' }]),
+      tool('tc1', longContent),
+      assistantText('thinking about full file'),
+      assistantText('more thinking'),
+      assistantText('even more'),
+      assistant([{ id: 'tc2', name: 'read_file', args: '{"file_path":"src/app.tsx","offset":500,"limit":100}' }]),
+      tool('tc2', longContent + 'partial'),
+      assistantText('looking at specific section'),
+    ]
+    const result = detectStaleness(messages, 2)
+    assert.equal(result.supersededCount, 0, 'partial read should NOT supersede full read')
+  })
+
+  it('supersedes read_file when later read has larger containing range', () => {
+    // read_file(offset=120, limit=30) → later read_file(offset=100, limit=200)
+    // Larger range contains smaller → should be superseded
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      assistant([{ id: 'tc1', name: 'read_file', args: '{"file_path":"src/app.tsx","offset":120,"limit":30}' }]),
+      tool('tc1', longContent),
+      assistantText('thinking'),
+      assistantText('more thinking'),
+      assistantText('even more'),
+      assistant([{ id: 'tc2', name: 'read_file', args: '{"file_path":"src/app.tsx","offset":100,"limit":200}' }]),
+      tool('tc2', longContent + 'larger'),
+      assistantText('larger range done'),
+    ]
+    const result = detectStaleness(messages, 2)
+    assert.equal(result.supersededCount, 1, 'larger range should contain smaller range')
+    assert.ok(result.messages[3]!.content!.includes('superseded'))
+  })
 })
