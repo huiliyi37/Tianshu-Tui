@@ -20,7 +20,6 @@ import { loadProjectRules } from '../context/rules-loader.js'
 import { exportDurableClaims, importClaims } from '../context/claim-export.js'
 import { resolveEcosystemWorkflowInput } from '../workflows/ecosystem-workflows.js'
 import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
-import { parsePromptMode } from '../prompt/mode.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
@@ -242,30 +241,15 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       return true
     }
 
-    case '/chat': {
-      ctx.agent.setPromptMode('chat')
-      pushStatic(createLogEntry({ type: 'system', content: 'Mode switched to chat. CVM/task-contract overhead will be skipped for lightweight conversation.' }))
-      setIsStreaming(false)
-      return true
-    }
-
+    case '/chat':
     case '/task': {
-      ctx.agent.setPromptMode('task')
-      pushStatic(createLogEntry({ type: 'system', content: 'Mode switched to task. Full execution pipeline is enabled.' }))
+      pushStatic(createLogEntry({ type: 'system', content: '模式已由消息内容自动检测，无需手动切换。任务脚手架在有明确意图时自动开启。' }))
       setIsStreaming(false)
       return true
     }
 
     case '/mode': {
-      const requested = parsePromptMode(parts[1])
-      if (!parts[1]) {
-        pushStatic(createLogEntry({ type: 'system', content: `Current mode: ${ctx.agent.getPromptMode()}\nUsage: /mode chat | /mode task` }))
-      } else if (requested) {
-        ctx.agent.setPromptMode(requested)
-        pushStatic(createLogEntry({ type: 'system', content: `Mode switched to ${requested}.` }))
-      } else {
-        pushStatic(createLogEntry({ type: 'system', content: 'Unknown mode. Usage: /mode chat | /mode task', isError: true }))
-      }
+      pushStatic(createLogEntry({ type: 'system', content: '模式已由消息内容自动检测，无需手动切换。' }))
       setIsStreaming(false)
       return true
     }

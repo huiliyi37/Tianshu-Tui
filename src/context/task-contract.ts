@@ -40,8 +40,17 @@ function escapeXml(value: string): string {
     .replaceAll('"', '&quot;')
 }
 
+const GREETING_PREFIX_RE = /^(?:hi|hello|hey|你好|您好|谢谢|多谢|ok|okay|了解|收到|辛苦了|thanks|thank you)[。.!!！？?\s]*(?:\n|$)/i
+
+function stripGreetingPrefix(userMessage: string): string {
+  return userMessage.replace(GREETING_PREFIX_RE, '').trim()
+}
+
 function normalizeObjective(userMessage: string): string {
-  const firstLine = userMessage.split('\n')[0]?.trim() ?? ''
+  // Strip greeting prefix if followed by substantive content on next line
+  const stripped = stripGreetingPrefix(userMessage)
+  const msg = stripped || userMessage
+  const firstLine = msg.split('\n')[0]?.trim() ?? ''
   return firstLine.length > 200 ? firstLine.slice(0, 197).trimEnd() + '...' : firstLine
 }
 
@@ -56,7 +65,13 @@ function makeContractId(objective: string, turn: number): string {
 
 function isActionableObjective(objective: string, mentionedFiles: string[], constraints: string[]): boolean {
   if (mentionedFiles.length > 0 || constraints.length > 0) return true
-  if (objective.length < 8) return false
+  // CJK-aware length: 1 CJK char ≈ 2 Latin chars in semantic density.
+  // "修复bug" (4 chars, weight 2+2+2+1+1+1=9) should pass; "hi" (2 chars, weight 2) should not.
+  const cjkWeight = [...objective].reduce((sum, ch) => {
+    const cp = ch.codePointAt(0) ?? 0
+    return sum + ((cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0x3400 && cp <= 0x4DBF) ? 2 : 1)
+  }, 0)
+  if (cjkWeight < 8) return false
   return !NON_ACTIONABLE_PATTERN.test(objective)
 }
 
@@ -141,4 +156,15 @@ export function renderContractProjection(contract: TaskContract): string {
   }
   parts.push('</task-contract>')
   return parts.join('\n')
+}
+
+/**
+ * Quick intent check: does this user message warrant task-mode scaffolding?
+ * Replaces the old binary chat/task mode switch with automatic detection.
+ * Returns true when the message contains code files, explicit constraints,
+ * or a substantive objective (not just a greeting).
+ */
+export function isActionableTurn(userMessage: string): boolean {
+  const contract = extractTaskContract(userMessage)
+  return contract.isActionable
 }

@@ -18,7 +18,6 @@ import {
 } from './fingerprint.js'
 import { FieldHabituationTracker } from './field-habituation.js'
 import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
-import { DEFAULT_MODE, shouldInjectCvm, shouldInjectDynamicAppendix, type PromptMode } from './mode.js'
 
 export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
 
@@ -70,7 +69,9 @@ export class PromptEngine {
   private sessionStateText?: string
   private heuristicRulesText?: string
   private worktreeReality?: WorktreeReality
-  private mode: PromptMode = DEFAULT_MODE
+  /** Whether current turn message warrants task-mode scaffolding (task contract, CVM, etc.).
+   *  Replaces the old binary chat/task PromptMode — auto-detected from message content. */
+  private actionableTurn: boolean = true
   private gitDirty = false
   private userMessagesSinceGitRefresh = 0
 
@@ -168,17 +169,17 @@ export class PromptEngine {
               if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
               if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
 
-              const activeAppendix = shouldInjectDynamicAppendix(this.mode) ? buildDynamicAppendix(activeCtx) : ''
-              const projection = shouldInjectCvm(this.mode) ? this.cognitiveProjection : null
+              const activeAppendix = this.actionableTurn ? buildDynamicAppendix(activeCtx) : ''
+              const projection = this.actionableTurn ? this.cognitiveProjection : null
               const fullAppendix = [projection, this.consolidatedBlock, activeAppendix].filter(Boolean).join('\n')
               this.cachedFreshBlock = fullAppendix
                 ? this.volatileBlock + '\n' + fullAppendix
                 : this.volatileBlock
             } else {
-              const base = shouldInjectDynamicAppendix(this.mode)
+              const base = this.actionableTurn
                 ? buildLatestTurnVolatileBlock(dynamicCtx)
                 : this.frozenBase
-              const projection = shouldInjectCvm(this.mode) ? this.cognitiveProjection : null
+              const projection = this.actionableTurn ? this.cognitiveProjection : null
               this.cachedFreshBlock = projection ? base + '\n' + projection : base
             }
           }
@@ -336,14 +337,15 @@ export class PromptEngine {
     this.volatileBlock = this.frozenBase
   }
 
-  setMode(mode: PromptMode): void {
-    if (this.mode === mode) return
-    this.mode = mode
+  setActionableTurn(actionable: boolean): void {
+    if (this.actionableTurn === actionable) return
+    this.actionableTurn = actionable
     this.invalidateFreshCache()
   }
 
-  getMode(): PromptMode {
-    return this.mode
+  /** @deprecated Use isActionableTurn from task-contract for auto-detection. */
+  getMode(): 'task' {
+    return 'task'
   }
 
   updateActiveClaims(claims: ContextClaim[]): void {

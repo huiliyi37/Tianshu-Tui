@@ -5,6 +5,7 @@ import {
   contractStatusFromPhaseClass,
   extractTaskContract,
   renderContractProjection,
+  isActionableTurn,
 } from '../task-contract.js'
 
 // StarSpine Phase 1: TaskContract is the smallest mission anchor.
@@ -100,5 +101,48 @@ describe('advanceContractStatus', () => {
     assert.equal(contractStatusFromPhaseClass('verify'), 'verifying')
     assert.equal(contractStatusFromPhaseClass('deliver'), 'ready_to_deliver')
     assert.equal(contractStatusFromPhaseClass('unknown'), undefined)
+  })
+
+  // ── isActionable fixes: CJK weight + greeting prefix ──
+
+  it('classifies short Chinese task as actionable via CJK weight', () => {
+    // "优化性能" = 4 CJK chars = weight 8 (threshold) → actionable
+    const c = extractTaskContract('优化性能', 1)
+    assert.equal(c.isActionable, true, '"优化性能" (CJK weight 8) should be actionable')
+  })
+
+  it('classifies ambiguous 2-char Chinese as non-actionable (insufficient weight)', () => {
+    // "修复" alone = 2 CJK chars = weight 4 < 8 → non-actionable
+    const c = extractTaskContract('修复', 1)
+    assert.equal(c.isActionable, false, '"修复" alone (weight 4) is too ambiguous')
+  })
+
+  it('classifies short Chinese with file as actionable', () => {
+    const c = extractTaskContract('重构 src/api/client.ts', 1)
+    assert.equal(c.isActionable, true, 'file mention should trigger actionable')
+  })
+
+  it('strips greeting prefix and extracts real objective from line 2', () => {
+    const c = extractTaskContract('你好\n请修复 src/api/client.ts 的重试逻辑', 1)
+    assert.equal(c.isActionable, true, 'greeting prefix should be stripped')
+    assert.ok(c.objective.includes('修复'), `expected objective to contain 修复, got: ${c.objective}`)
+  })
+
+  it('still catches pure greeting as non-actionable', () => {
+    const c = extractTaskContract('你好', 1)
+    assert.equal(c.isActionable, false, 'pure greeting should be non-actionable')
+  })
+
+  it('still catches thanks as non-actionable', () => {
+    const c = extractTaskContract('谢谢', 1)
+    assert.equal(c.isActionable, false)
+  })
+
+  it('isActionableTurn returns true for actionable messages', () => {
+    assert.equal(isActionableTurn('修复 src/api/client.ts'), true)
+  })
+
+  it('isActionableTurn returns false for pure greetings', () => {
+    assert.equal(isActionableTurn('谢谢'), false)
   })
 })

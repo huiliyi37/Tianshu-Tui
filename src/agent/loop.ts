@@ -2,7 +2,6 @@ import type { StreamClient } from '../api/stream-client.js'
 import type { Usage } from '../api/types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 import { PromptEngine } from '../prompt/engine.js'
-import type { PromptMode } from '../prompt/mode.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { getGitInjectedContext } from '../prompt/volatile-git.js'
 import { ToolRegistry } from '../tools/registry.js'
@@ -81,7 +80,7 @@ import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
 import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
-import { advanceContractStatus, contractStatusFromPhaseClass, extractTaskContract, type TaskContract } from '../context/task-contract.js'
+import { advanceContractStatus, contractStatusFromPhaseClass, extractTaskContract, isActionableTurn, type TaskContract } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import { createStanceTally } from './stance-tally.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -760,12 +759,14 @@ export class AgentLoop {
 
   getVerificationSummary() { return this.evidence.getVerificationSummary() }
 
-  setPromptMode(mode: PromptMode): void {
-    this.config.promptEngine.setMode(mode)
+  /** @deprecated Mode is now auto-detected from message content via isActionableTurn. */
+  setPromptMode(_mode: string): void {
+    // No-op: mode detection is automatic. Kept for backward compat with slash commands.
   }
 
-  getPromptMode(): PromptMode {
-    return this.config.promptEngine.getMode()
+  /** @deprecated Always returns 'task' — chat/task binary no longer exists. */
+  getPromptMode(): string {
+    return 'task'
   }
 
   /** Get the currently active star domain (null = no domain, undefined = not yet resolved). */
@@ -1047,10 +1048,11 @@ export class AgentLoop {
     await this.compaction.trySessionSplit()
 
     this.session.addUserMessage(userInput)
-    const isChatMode = this.config.promptEngine.getMode() === 'chat'
-    this.taskContract = isChatMode ? undefined : extractTaskContract(userInput, this.session.getTurnCount())
+    const actionable = isActionableTurn(userInput)
+    this.config.promptEngine.setActionableTurn(actionable)
+    this.taskContract = actionable ? extractTaskContract(userInput, this.session.getTurnCount()) : undefined
 
-    if (this.config.autoReasoning && !isChatMode) {
+    if (this.config.autoReasoning && actionable) {
       this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
       this.config.client.setReasoningEffort?.(this.config.reasoningEffort)
     }
@@ -1173,7 +1175,7 @@ export class AgentLoop {
 
         // ── StarFlow v2: Sensorium computation ──
         const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
-        if (isChatMode) {
+        if (!actionable) {
           this.config.promptEngine.setCognitiveProjection(null)
           this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
         }
@@ -1268,7 +1270,7 @@ export class AgentLoop {
           t => t === 'write_file' || t === 'edit_file' || t === 'bash'
         )
         const agreedWithUser = hadDestructive && !hadAskTool
-        if (!isChatMode && (hadDestructive || hadAskTool)) {
+        if (actionable && (hadDestructive || hadAskTool)) {
           this.sycophancyTrap.recordTurn({
             agreedWithUser,
             confidence: this.sensorium?.confidence ?? 0.5,
@@ -1306,14 +1308,14 @@ export class AgentLoop {
         const sycophancyHint = undefined
         const immuneHint = this._lastImmuneHint ? formatImmuneContext(this._lastImmuneHint) : undefined
         this._lastImmuneHint = undefined // consume once
-        const projection = isChatMode ? '' : buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint })
+        const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint }) : ''
         this.config.promptEngine.setCognitiveProjection(projection)
 
         // ── CVM overhead tracking ──
         // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
         // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
         // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
-        if (!isChatMode) {
+        if (actionable) {
           const cvmTokenEstimate = Math.ceil(projection.length / 4)
           this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
         }
