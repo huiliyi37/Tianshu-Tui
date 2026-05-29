@@ -234,6 +234,18 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setHistoryVersion(v => v + 1)
   }, [])
 
+  /** Push assistant content + thinking as separate LogEntries.
+   *  Thinking rendered in its own box (ThinkingMessage), content in AssistantMessage.
+   *  Each entry has independent viewport-aware height limit — prevents total overflow. */
+  const pushAssistantEntry = useCallback((content: string, thinking?: string) => {
+    if (thinking) {
+      pushStatic(createLogEntry({ type: 'thinking_message', content: thinking }))
+    }
+    if (content) {
+      pushStatic(createLogEntry({ type: 'assistant_message', content }))
+    }
+  }, [pushStatic])
+
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     const grouped = groupLogs(entries)
     for (const entry of grouped) {
@@ -945,14 +957,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
                 setSummaryState(prev => ({ ...prev, phase: 'interview' }))
               }
               if (parsed.cleanText) {
-                pushStatic(createLogEntry({ type: 'assistant_message', content: parsed.cleanText, thinking: thinkBuf.current || undefined }))
+                pushAssistantEntry(parsed.cleanText, thinkBuf.current || undefined)
               }
             } else {
-              pushStatic(createLogEntry({ type: 'assistant_message', content: finalText, thinking: thinkBuf.current || undefined }))
+              pushAssistantEntry(finalText, thinkBuf.current || undefined)
             }
           } else {
-            // Only thinking, no visible text — still preserve for history
-            pushStatic(createLogEntry({ type: 'assistant_message', content: '', thinking: thinkBuf.current }))
+            // Only thinking, no visible text — push thinking-only entry
+            pushAssistantEntry('', thinkBuf.current)
           }
         }
         // Stop streaming FIRST so StreamOutput unmounts while text is still present,
@@ -1052,7 +1064,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setFluencyStale(null)
         // Preserve any partial text/thinking before clearing
         if (streamBuf.current || thinkBuf.current) {
-          pushStatic(createLogEntry({ type: 'assistant_message', content: streamBuf.current, thinking: thinkBuf.current || undefined }))
+          pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
         }
         streamBuf.current = ''
         // Stop streaming FIRST, then clear text — prevents flash frame on error.
@@ -1087,7 +1099,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setFluencyStale(null)
         // Preserve any partial text/thinking before clearing
         if (streamBuf.current || thinkBuf.current) {
-          pushStatic(createLogEntry({ type: 'assistant_message', content: streamBuf.current, thinking: thinkBuf.current || undefined }))
+          pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
         }
         streamBuf.current = ''
         // Stop streaming FIRST, then clear text — prevents flash frame on abort.

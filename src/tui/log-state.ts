@@ -1,6 +1,7 @@
 export type LogEntryType =
   | 'user_message'
   | 'assistant_message'
+  | 'thinking_message'
   | 'tool'
   | 'tool_group'
   | 'checkpoint'

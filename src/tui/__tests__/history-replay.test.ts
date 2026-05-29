@@ -55,7 +55,7 @@ describe('replayMessagesToLogEntries', () => {
     assert.equal(result.entries[1]!.isError, false)
   })
 
-  it('preserves thinking blocks in assistant messages', () => {
+  it('splits thinking into separate entry', () => {
     const messages: OaiMessage[] = [
       { role: 'user', content: 'hello' },
       {
@@ -65,9 +65,13 @@ describe('replayMessagesToLogEntries', () => {
       },
     ]
     const { entries } = replayMessagesToLogEntries(messages)
-    const assistantEntry = entries.find(e => e.type === 'assistant_message')!
-    assert.strictEqual(assistantEntry.content, 'Here is my answer.')
-    assert.strictEqual(assistantEntry.thinking, 'Let me think about this...')
+    // Should produce 3 entries: user_message, thinking_message, assistant_message
+    const thinkEntry = entries.find(e => e.type === 'thinking_message')
+    const assistantEntry = entries.find(e => e.type === 'assistant_message')
+    assert.ok(thinkEntry, 'should create thinking_message entry')
+    assert.strictEqual(thinkEntry!.content, 'Let me think about this...')
+    assert.ok(assistantEntry, 'should create assistant_message entry')
+    assert.strictEqual(assistantEntry!.content, 'Here is my answer.')
   })
 
   it('handles thinking-only messages without text', () => {
@@ -80,9 +84,9 @@ describe('replayMessagesToLogEntries', () => {
       },
     ]
     const { entries } = replayMessagesToLogEntries(messages)
-    const assistantEntry = entries.find(e => e.type === 'assistant_message')
-    assert.ok(assistantEntry, 'should create entry for thinking-only message')
-    assert.strictEqual(assistantEntry!.thinking, 'Analyzing...')
+    const thinkEntry = entries.find(e => e.type === 'thinking_message')
+    assert.ok(thinkEntry, 'should create thinking_message for thinking-only turn')
+    assert.strictEqual(thinkEntry!.content, 'Analyzing...')
   })
 
   it('handles multi-turn conversation', () => {

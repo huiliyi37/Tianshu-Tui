@@ -4,6 +4,7 @@ import { ToolCard } from './tool-card.js'
 import { ToolGroup } from './tool-group.js'
 import { UserMessage } from './user-message.js'
 import { AssistantMessage } from './assistant-message.js'
+import { ThinkingMessage } from './thinking-message.js'
 import { SystemMessage } from './system-message.js'
 import { StreamOutput } from './stream.js'
 import { QuestionCard } from './question-card.js'
@@ -12,8 +13,10 @@ export function renderStaticEntry(entry: LogEntry, verbose: boolean) {
   switch (entry.type) {
     case 'user_message':
       return <UserMessage key={entry.id} content={entry.content} />
+    case 'thinking_message':
+      return <ThinkingMessage key={entry.id} content={entry.content} />
     case 'assistant_message':
-      return <AssistantMessage key={entry.id} content={entry.content} thinking={entry.thinking} />
+      return <AssistantMessage key={entry.id} content={entry.content} />
     case 'tool':
       if (entry.toolName === 'ask_user_question') {
         return <QuestionCard key={entry.id} question={entry.content} />

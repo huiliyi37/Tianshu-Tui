@@ -30,15 +30,21 @@ export function replayMessagesToLogEntries(messages: OaiMessage[]): ReplayResult
       continue
     }
 
-    // Assistant message — text + optional thinking
+    // Assistant message — split thinking into separate entry
     if (msg.role === 'assistant') {
       const text = msg.content ?? ''
       const thinking = msg.reasoning_content ?? ''
-      if (text || thinking) {
+      if (thinking) {
+        entries.push(createLogEntry({
+          type: 'thinking_message',
+          content: thinking,
+          turnNumber: turnCount,
+        }))
+      }
+      if (text) {
         entries.push(createLogEntry({
           type: 'assistant_message',
           content: text,
-          thinking: thinking || undefined,
           turnNumber: turnCount,
         }))
       }
