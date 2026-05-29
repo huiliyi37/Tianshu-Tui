@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo, type RefObject } from 'react'
+import React, { useState, useCallback, useRef, useEffect, useMemo, type RefObject } from 'react'
 import { Box, Text, useInput, Static } from 'ink'
 import { WelcomeScreen } from './onboarding.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
@@ -101,7 +101,7 @@ const LIVE_STREAM_MAX_CHARS = 50_000
 const HISTORY_MAX_ITEMS = 1000
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
-import { renderStaticEntry } from './render-entry.js'
+import { renderStaticEntry, renderMemoKey } from './render-entry.js'
 
 // --- Cockpit panel view ---
 
@@ -1168,7 +1168,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
       <Static items={historyItems}>
-        {(item) => renderStaticEntry(item, verbose)}
+        {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
       </Static>
       <Box flexDirection="column">
         <GlanceBar
