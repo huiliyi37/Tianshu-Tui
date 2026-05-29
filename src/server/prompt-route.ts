@@ -52,5 +52,15 @@ export function handlePromptSSE(deps: PromptRouteDeps, res: ServerResponse, prom
     onApprovalRequired: async () => false,
   }).then(() => {
     sse.close()
+  }).catch((err: Error) => {
+    // Agent.run rejected outside the onError callback path
+    // (e.g. unexpected crash, unhandled exception in setup).
+    // Close the SSE connection to prevent resource leak.
+    try {
+      sse.send('error', { error: err.message })
+      sse.close()
+    } catch {
+      // sse.close may throw if response already ended — safe to ignore
+    }
   })
 }

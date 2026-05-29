@@ -199,4 +199,28 @@ describe('handlePromptSSE', () => {
     assert.ok(allChunks.includes('API rate limit'))
     assert.ok(res.ended)
   })
+
+  it('closes SSE connection when agent.run rejects', async () => {
+    const res = mockRes()
+    const deps: PromptRouteDeps = {
+      createAgent: () => ({
+        run: async () => {
+          throw new Error('unexpected agent crash')
+        },
+        abort: () => {},
+      }),
+    }
+
+    handlePromptSSE(deps, res as any, 'test')
+
+    // Wait for the rejected promise to settle
+    await new Promise((r) => setTimeout(r, 50))
+
+    // SSE connection must be closed even when agent.run rejects
+    assert.ok(res.ended, 'SSE response must be ended on agent rejection')
+    // Error event should be sent
+    const allChunks = res.chunks.join('')
+    assert.ok(allChunks.includes('event: error'), 'error event should be sent')
+    assert.ok(allChunks.includes('unexpected agent crash'), 'error message should be in payload')
+  })
 })
