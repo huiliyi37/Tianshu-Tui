@@ -360,15 +360,20 @@ describe('SessionContext removeLastMessage', () => {
     assert.equal(ctx.getTurnCount(), 0)
   })
 
-  it('removes assistant message without decrementing turnCount', () => {
+  it('throws when top message is assistant (not user)', () => {
     const ctx = new SessionContext()
     ctx.addUserMessage('hello')
     ctx.addAssistantBlocks([{ type: 'text', text: 'world' }])
     assert.equal(ctx.getTurnCount(), 1)
+    assert.equal(ctx.getMessages().length, 2)
 
-    const removed = ctx.removeLastMessage()
-    assert.equal(removed!.role, 'assistant')
-    assert.equal(ctx.getTurnCount(), 1) // turnCount stays at 1 (user message still present)
+    assert.throws(
+      () => ctx.removeLastMessage(),
+      /removeLastMessage: expected user message but top was assistant/,
+    )
+    // State must be restored — assistant message should still be on the stack
+    assert.equal(ctx.getMessages().length, 2)
+    assert.equal(ctx.getMessages()[1]!.role, 'assistant')
   })
 
   it('returns undefined when session is empty', () => {
@@ -387,7 +392,7 @@ describe('SessionContext removeLastMessage', () => {
     assert.equal(ctx.getEstimatedTokens(), before, 'tokens should return to baseline after removeLastMessage')
   })
 
-  it('rollbacks a complete user→assistant→tool sequence in reverse', () => {
+  it('throws when attempting to rollback tool or assistant messages', () => {
     const ctx = new SessionContext()
     ctx.addUserMessage('do stuff')
     ctx.addAssistantBlocks([
@@ -396,14 +401,32 @@ describe('SessionContext removeLastMessage', () => {
     ctx.addToolResults([{ type: 'tool_result', tool_use_id: 'c1', content: 'file.ts' }])
 
     assert.equal(ctx.getMessages().length, 3)
-    ctx.removeLastMessage() // tool
-    ctx.removeLastMessage() // assistant
-    ctx.removeLastMessage() // user
+
+    // Tool message is on top — removeLastMessage must throw
+    assert.throws(
+      () => ctx.removeLastMessage(),
+      /removeLastMessage: expected user message but top was tool/,
+    )
+    // State unchanged after throw
+    assert.equal(ctx.getMessages().length, 3)
+    assert.equal(ctx.getTurnCount(), 1)
+  })
+
+  it('rollbacks a lone user message after failed turn (no assistant response)', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('do stuff')
+    // Simulate: turn was aborted before assistant responded
+    // (in production, loop.ts guarantees this via !assistantResponded)
+    assert.equal(ctx.getMessages().length, 1)
+    assert.equal(ctx.getTurnCount(), 1)
+
+    const removed = ctx.removeLastMessage()
+    assert.equal(removed!.role, 'user')
     assert.equal(ctx.getMessages().length, 0)
     assert.equal(ctx.getTurnCount(), 0)
   })
 
-  it('emits replace mutation so persistence layer can rewrite the file', () => {
+  it('emits replace mutation on user message removal', () => {
     const ctx = new SessionContext()
     const events: Array<{ type: string; messages?: OaiMessage[] }> = []
     ctx.setMutationListener(m => {
@@ -412,23 +435,14 @@ describe('SessionContext removeLastMessage', () => {
     })
 
     ctx.addUserMessage('hello')
-    ctx.addAssistantBlocks([{ type: 'text', text: 'world' }])
     assert.deepEqual(events, [
-      { type: 'append' },
       { type: 'append' },
     ])
 
-    // Remove the assistant message — should emit replace with the remaining user message
-    events.length = 0
-    ctx.removeLastMessage()
-    assert.equal(events.length, 1)
-    assert.equal(events[0]!.type, 'replace')
-    assert.equal(events[0]!.messages!.length, 1)
-    assert.equal(events[0]!.messages![0]!.role, 'user')
-
     // Remove the user message — should emit replace with empty array
     events.length = 0
-    ctx.removeLastMessage()
+    const removed = ctx.removeLastMessage()
+    assert.equal(removed!.role, 'user')
     assert.equal(events.length, 1)
     assert.equal(events[0]!.type, 'replace')
     assert.equal(events[0]!.messages!.length, 0)
@@ -442,5 +456,22 @@ describe('SessionContext removeLastMessage', () => {
     const result = ctx.removeLastMessage()
     assert.equal(result, undefined)
     assert.equal(called, false, 'should not emit mutation when nothing was removed')
+  })
+
+  it('does not emit mutation and restores state when guard throws', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    ctx.addAssistantBlocks([{ type: 'text', text: 'world' }])
+
+    let mutationFired = false
+    ctx.setMutationListener(() => { mutationFired = true })
+
+    assert.throws(
+      () => ctx.removeLastMessage(),
+      /removeLastMessage: expected user message but top was assistant/,
+    )
+    assert.equal(mutationFired, false, 'no mutation when guard throws')
+    assert.equal(ctx.getMessages().length, 2, 'state fully restored')
+    assert.equal(ctx.getEstimatedTokens() > 0, true, 'tokens not corrupted')
   })
 })

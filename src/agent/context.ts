@@ -99,10 +99,17 @@ export class SessionContext {
   removeLastMessage(): OaiMessage | undefined {
     const msg = this.state.oaiMessages.pop()
     if (msg) {
+      if (msg.role !== 'user') {
+        // Put the message back — this method is contractually for user-message
+        // rollback only. Non-user removal indicates a caller bug.
+        this.state.oaiMessages.push(msg)
+        throw new Error(
+          `removeLastMessage: expected user message but top was ${msg.role}. ` +
+          'This method may only be used to roll back user messages on abort/error.',
+        )
+      }
       this.state.estimatedTokens -= estimateOaiMessageTokens(msg)
-      // Decrement turnCount only for user messages — assistant / tool messages
-      // do not advance the turn counter.
-      if (msg.role === 'user') this.state.turnCount--
+      this.state.turnCount--
       // Emit a replace mutation so the persistence layer rewrites the file
       // without the removed message. We use 'replace' (full rewrite) rather
       // than a hypothetical 'remove' type because the persistence listener
