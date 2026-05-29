@@ -49,6 +49,13 @@ export const DEFAULT_CONFIG: Config = {
         maxTokens: 128000,
         models: [
           {
+            id: 'claude-opus-4-8',
+            alias: 'opus-4-8',
+            contextWindow: 1_000_000,
+            maxTokens: 128000,
+            reasoningEffort: 'max',
+          },
+          {
             id: 'claude-opus-4-7',
             alias: 'opus-4-7',
             contextWindow: 1_000_000,
