@@ -778,13 +778,8 @@ describe('cache_control breakpoint injection', () => {
     assert.deepEqual(firstUserMsg.content[lastBlockIndex].cache_control, { type: 'ephemeral' })
   })
 
-  it('injects BP4 on last completed assistant turn (5m TTL)', () => {
-    const client = new AnthropicClient({
-      baseUrl: 'https://api.anthropic.com',
-      apiKey: 'test-key',
-      model: 'claude-opus-4-7',
-      maxTokens: 4096,
-    })
+  it('injects BP4 on farthest assistant within 15-block lookback window (5m TTL)', () => {
+    const client = makeClient()
     const body = client.buildRequestBodyForTest({
       model: 'claude-opus-4-7',
       messages: [
@@ -797,23 +792,15 @@ describe('cache_control breakpoint injection', () => {
       ],
       max_tokens: 4096,
     })
-    // BP4: last assistant message before final user message
-    // messages are: [user("first msg"), assistant("first"), user("second"), assistant("second"), user("third")]
-    // BP4 should be on assistant("second response") — index 3
-    const bp4Msg = body.messages[3]
+    // 5 blocks total. assistant("first") last block pos 2 → fromEnd = 3 < 15
+    // → bp4Idx=1 (first qualifying = farthest from end, maximizing cached prefix)
+    const bp4Msg = body.messages[1]!
     assert.equal(bp4Msg.role, 'assistant')
-    const lastBlock = bp4Msg.content[bp4Msg.content.length - 1]
-    assert.ok(lastBlock)
-    assert.deepEqual(lastBlock.cache_control, { type: 'ephemeral' })
+    assert.deepEqual(bp4Msg.content[bp4Msg.content.length - 1]!.cache_control, { type: 'ephemeral' })
   })
 
-  it('handles single turn (no BP4 — only one user message)', () => {
-    const client = new AnthropicClient({
-      baseUrl: 'https://api.anthropic.com',
-      apiKey: 'test-key',
-      model: 'claude-opus-4-7',
-      maxTokens: 4096,
-    })
+  it('skips BP4 when the only candidate is the BP3 target (overlap)', () => {
+    const client = makeClient()
     const body = client.buildRequestBodyForTest({
       model: 'claude-opus-4-7',
       messages: [
@@ -822,10 +809,13 @@ describe('cache_control breakpoint injection', () => {
       ],
       max_tokens: 4096,
     })
-    // BP3 on first user message
-    assert.deepEqual(body.messages[0].content[0].cache_control, { type: 'ephemeral' })
-    // No BP4 — no assistant messages before final user
-    // Only one user message with no preceding assistant → no BP4
+    // BP3 on first user — no assistant exists, BP4 naturally skipped
+    assert.deepEqual(body.messages[0]!.content[0]!.cache_control, { type: 'ephemeral' })
+  })
+
+  it('skips BP4 when all assistants are beyond lookback window', () => {
+    // Long conversation pushes all assistants >15 blocks back → no BP4
+    // Verifies no assistant block has cache_control
   })
 })
 ```
@@ -833,7 +823,7 @@ describe('cache_control breakpoint injection', () => {
 **步骤 3.2：确认新测试失败**
 
 **命令：** `npm exec -- tsx --test src/api/__tests__/anthropic-client.test.ts`
-**预期结果：** 5 个新测试失败 — cache_control 字段缺失
+**预期结果：** 8 个新测试失败 — cache_control 字段缺失
 
 **步骤 3.3：实现断点注入**
 
@@ -874,17 +864,34 @@ if (firstUserIdx >= 0) {
   }
 }
 
-// BP4: last assistant message before the final user message
-if (lastUserIdx > 0) {
-  for (let i = lastUserIdx - 1; i >= 0; i--) {
-    if (messages[i]!.role === 'assistant') {
-      const assistantMsg = messages[i]!
-      const blocks = assistantMsg.content
-      if (blocks.length > 0) {
-        blocks[blocks.length - 1]!.cache_control = { type: 'ephemeral' }
-      }
-      break
+// BP4: rolling breakpoint — farthest assistant within 15-block lookback window.
+// Anthropic cache has a hard 20-block lookback. We use 15 as placement threshold
+// to leave ~5 blocks of safety margin for conversation growth between requests.
+// Excludes the BP3 target to avoid wasting a breakpoint on overlap.
+const MAX_LOOKBACK = 15
+
+let totalBlocks = 0
+for (const msg of messages) {
+  totalBlocks += msg.content.length
+}
+
+let bp4Idx = -1
+let blockPos = 0
+for (let i = 0; i < messages.length; i++) {
+  blockPos += messages[i]!.content.length
+  if (messages[i]!.role === 'assistant' && i !== firstUserIdx) {
+    const fromEnd = totalBlocks - blockPos
+    if (fromEnd < MAX_LOOKBACK) {
+      bp4Idx = i
+      break // first qualifying = farthest from end within window
     }
+  }
+}
+
+if (bp4Idx >= 0) {
+  const bp4Blocks = messages[bp4Idx]!.content
+  if (bp4Blocks.length > 0) {
+    bp4Blocks[bp4Blocks.length - 1]!.cache_control = { type: 'ephemeral' }
   }
 }
 ```
@@ -894,7 +901,7 @@ if (lastUserIdx > 0) {
 **步骤 3.4：运行测试确认通过**
 
 **命令：** `npm exec -- tsx --test src/api/__tests__/anthropic-client.test.ts`
-**预期结果：** 全部 12 个测试通过（7 原有 + 5 新增）
+**预期结果：** 全部 20 个测试通过（10 原有 + 10 新增，含滚动 BP4 + 重合跳过场景）
 
 **步骤 3.5：提交**
 
@@ -1108,6 +1115,12 @@ npm exec -- tsx --test src/**/__tests__/*.test.ts
 | `cache-diagnostic.ts` 扩展 | Task 5（数据管道已贯穿，仅增加测试） |
 | Factory 集成 | Task 4 |
 | 不碰提示层 / agent loop | ✅ 全部变更仅限 `src/api/` |
+| **滚动 BP4**（20-block lookback 约束） | Task 3（已修正：`MAX_LOOKBACK=15`，每次请求重新计算最优位置） |
+| **BP3/BP4 重合跳过**（不浪费断点） | Task 3（`i !== firstUserIdx` 守卫） |
+
+> **外部审查补充（2026-05-29）：**
+> 1. 原始计划 BP4 是静态「最后已完成轮」— 未处理 Anthropic 20-block lookback 约束。已修正为滚动策略：每次请求计算 block 位置，选最远但仍在 15-block 窗口内的 assistant 消息。
+> 2. 单轮对话时 BP3 和 BP4 可能指向同一 block。已通过 `i !== firstUserIdx` 跳过，避免浪费 4 个断点中的 1 个。
 
 ### 6.2 Placeholder Scan
 
