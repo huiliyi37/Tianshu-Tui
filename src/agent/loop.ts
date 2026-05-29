@@ -1105,12 +1105,25 @@ export class AgentLoop {
         if (await this.compaction.trySessionSplit()) {
           userMessageConsumed = true
         }
+        // A2: user may have aborted during trySessionSplit (which can trigger
+        // 60s LLM compact). Bail early instead of continuing into maybeCompact.
+        if (this.abortController.signal.aborted) {
+          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
+          callbacks.onAbort()
+          return
+        }
 
         const compactResult = await this.compaction.maybeCompact({
           loopTurn: turn,
           failures: this.compactFailures,
         })
         if (compactResult.compacted) userMessageConsumed = true
+        // A2: bail after maybeCompact (can also trigger LLM compact on 1M windows)
+        if (this.abortController.signal.aborted) {
+          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
+          callbacks.onAbort()
+          return
+        }
         this.compactFailures = compactResult.failures
         // Immune signal: surface compaction failures as danger signal for dual-signal gating
         if (this.compactFailures.consecutiveFailures > 0) {
@@ -1283,6 +1296,12 @@ export class AgentLoop {
         this.refreshReliabilityDecision()
 
         await this.compaction.enforceContextCeiling()
+        // A2: enforceContextCeiling can trigger LLM compact (30s timeout).
+        if (this.abortController.signal.aborted) {
+          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
+          callbacks.onAbort()
+          return
+        }
         this.contextInjection.refreshActiveClaims()
 
         // ── Sycophancy Trap: record previous turn agreement ──
