@@ -7,4 +7,9 @@ describe('AssistantMessage', () => {
     assert.ok(AssistantMessage, 'AssistantMessage should be defined')
     assert.equal(typeof AssistantMessage, 'object')
   })
+
+  it('is wrapped by React.memo (has $typeof)', () => {
+    // React.memo wraps the component; typeof is 'object' (not 'function')
+    assert.equal(typeof AssistantMessage, 'object', 'memo-wrapped component should be object type')
+  })
 })
