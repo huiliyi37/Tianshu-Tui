@@ -149,6 +149,8 @@ export interface CompactionControllerDeps {
   /** Collaboration-stance evidence, rendered into handoff so it survives compaction. */
   getStanceSummary?: () => string | null
   persistMemories?: (memories: Array<{ text: string; source: ExtractedMemory['source']; kind: ExtractedMemory['kind'] }>) => void | Promise<void>
+  /** Current abort signal from the agent loop, so LLM compact can be cancelled. */
+  getAbortSignal?: () => AbortSignal | undefined
 }
 
 export interface MaybeCompactInput {
@@ -190,7 +192,7 @@ export class CompactionController {
       const ratio = this.deps.session.getEstimatedTokens() / this.deps.contextWindow
       if (ratio >= 0.75 && this.deps.primaryClient) {
         debugLog(`[llm-compact] 1M window at ${(ratio * 100).toFixed(0)}% — triggering LLM compact`)
-        const summary = await this.llmCompact()
+        const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
         if (summary) {
           this.replaceWithCheckpoint({
             tier: 2,
@@ -267,7 +269,7 @@ export class CompactionController {
 
     // Try LLM compact first (short timeout — emergency path, can't wait long)
     if (this.deps.primaryClient) {
-      const summary = await this.llmCompact(30_000)
+      const summary = await this.llmCompact(30_000, this.deps.getAbortSignal?.())
       if (summary) {
         this.replaceWithCheckpoint({
           tier: 4,
@@ -328,7 +330,7 @@ export class CompactionController {
 
     // Try LLM compact first for higher-fidelity summary
     if (this.deps.primaryClient) {
-      const summary = await this.llmCompact()
+      const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
       if (summary) {
         this.replaceWithCheckpoint({
           tier: 3,
@@ -490,7 +492,7 @@ export class CompactionController {
    * @returns compact summary string, or null if primaryClient unavailable
    *          or session has insufficient messages.
    */
-  async llmCompact(timeoutMs = 60_000): Promise<string | null> {
+  async llmCompact(timeoutMs = 60_000, userSignal?: AbortSignal): Promise<string | null> {
     if (!this.deps.primaryClient) return null
     if (this._llmCompactInFlight) return null
     this._llmCompactInFlight = true
@@ -527,7 +529,10 @@ export class CompactionController {
 
       const chunks: string[] = []
       let errored = false
-      const signal = AbortSignal.timeout(timeoutMs)
+      const timeoutSignal = AbortSignal.timeout(timeoutMs)
+      const signal = userSignal
+        ? AbortSignal.any([userSignal, timeoutSignal])
+        : timeoutSignal
       try {
         await this.deps.primaryClient.stream(request, {
           onTextDelta: (text) => { chunks.push(text) },

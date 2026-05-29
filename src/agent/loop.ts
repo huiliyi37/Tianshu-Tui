@@ -441,6 +441,7 @@ export class AgentLoop {
           })
         }
       },
+      getAbortSignal: () => this.abortController?.signal,
     })
     this.turnStream = this.createTurnStreamController()
     this.turnCompletion = this.createTurnCompletionController()
