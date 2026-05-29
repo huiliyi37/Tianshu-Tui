@@ -187,14 +187,14 @@ describe('handleSlashCommand', () => {
     assert.deepEqual(values, [true])
   })
 
-  it('/chat and /task switch prompt mode', () => {
+  it('/chat and /task are deprecated no-ops (mode auto-detected) but still handled', () => {
     const modes: string[] = []
     const chatCtx = makeCtx({ parts: ['/chat'], agent: { ...makeCtx().agent, setPromptMode: (m: string) => modes.push(m) } as any })
     const taskCtx = makeCtx({ parts: ['/task'], agent: { ...makeCtx().agent, setPromptMode: (m: string) => modes.push(m) } as any })
 
     assert.equal(handleSlashCommand(chatCtx), true)
     assert.equal(handleSlashCommand(taskCtx), true)
-    assert.deepEqual(modes, ['chat', 'task'])
+    assert.deepEqual(modes, [])  // mode is auto-detected — commands no longer switch
   })
 
   it('formats verification status with per-file levels', () => {

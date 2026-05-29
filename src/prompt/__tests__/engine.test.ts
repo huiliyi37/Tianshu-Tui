@@ -312,6 +312,13 @@ describe('PromptEngine active claims projection', () => {
       'Frozen base should NOT contain habituated content')
   })
 
+  it('getPhaseHint round-trips with setPhaseHint (wiring for TDD RED exemption)', () => {
+    const engine = new PromptEngine({ model: 'test', maxTokens: 8000, staticCtx: { tools: [] }, volatileCtx: { cwd: '/tmp' } })
+    assert.equal(engine.getPhaseHint(), undefined)
+    engine.setPhaseHint('verify')
+    assert.equal(engine.getPhaseHint(), 'verify')
+  })
+
   // Trailer mode: cachedFreshBlock is merged into the last user message's content
   // instead of being injected as a separate user message. This keeps the message
   // array append-only, preserving DeepSeek exact-prefix cache byte stability.
