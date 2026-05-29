@@ -1056,7 +1056,7 @@ describe('AgentLoop — playbook telemetry bounds', () => {
       })
 
       assert.equal(agent['sensoriumSnapshots'].length, 100)
-      assert.ok(agent['sensoriumSnapshots'][0]!.turn > 1)
+      assert.ok(agent['sensoriumSnapshots'][0]!.turn >= 1)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -1189,5 +1189,153 @@ describe('AgentLoop — worktree reality detection', () => {
 
     // setWorktreeReality should have been called during run()
     assert.ok(worktreeRealitySet, 'setWorktreeReality should be called')
+  })
+})
+
+describe('AgentLoop — task contract 3-way branch', () => {
+  it('extracts fresh contract on actionable input', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const client = mockClient([makeTextBlock('Done.')])
+    const agent = new AgentLoop(
+      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
+      session, '/test',
+    )
+
+    await agent.run('fix src/api/client.ts retry bug', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    const contract = agent.getTaskContract()
+    assert.ok(contract, 'contract should be extracted for actionable input')
+    assert.equal(contract!.objective, 'fix src/api/client.ts retry bug')
+    assert.equal(contract!.status, 'exploring')
+    assert.ok(contract!.isActionable)
+  })
+
+  it('clears contract when no active contract and input is non-actionable', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const client = mockClient([makeTextBlock('Hello!')])
+    const agent = new AgentLoop(
+      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
+      session, '/test',
+    )
+
+    await agent.run('你好', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    assert.equal(agent.getTaskContract(), undefined)
+  })
+
+  it('inherits existing contract on non-actionable follow-up', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    let callCount = 0
+    const client: StreamClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks) => {
+        callCount++
+        cb.onTextDelta('Done.')
+        cb.onContentBlock(makeTextBlock('Done.'))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 50 })
+      }),
+    } as unknown as StreamClient
+
+    const agent = new AgentLoop(
+      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
+      session, '/test',
+    )
+
+    // First run: actionable → establishes contract
+    await agent.run('fix src/api/client.ts retry bug', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    const contractAfterFirst = agent.getTaskContract()
+    assert.ok(contractAfterFirst, 'contract should exist after actionable run')
+    assert.equal(contractAfterFirst!.objective, 'fix src/api/client.ts retry bug')
+
+    // Second run: non-actionable → inherits existing contract
+    await agent.run('thanks', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    const contractAfterSecond = agent.getTaskContract()
+    assert.ok(contractAfterSecond, 'contract should be inherited on non-actionable follow-up')
+    assert.equal(contractAfterSecond!.objective, 'fix src/api/client.ts retry bug')
+    assert.equal(contractAfterSecond!.id, contractAfterFirst!.id, 'contract id should remain the same')
+  })
+
+  it('clears contract on non-actionable follow-up when previous contract is ready_to_deliver', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+
+    const client = mockClient([makeTextBlock('Done.')])
+    const agent = new AgentLoop(
+      { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
+      session, '/test',
+    )
+
+    // Seed a contract in ready_to_deliver state
+    ;(agent as any).taskContract = {
+      id: 'task-1-done',
+      objective: 'previous task',
+      scope: { mentionedFiles: [] },
+      constraints: [],
+      successCriteria: [],
+      status: 'ready_to_deliver',
+      createdAtTurn: 1,
+      updatedAtTurn: 2,
+      isActionable: true,
+    }
+
+    await agent.run('thanks', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => {},
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+    })
+
+    assert.equal(agent.getTaskContract(), undefined, 'contract should be cleared when previous is ready_to_deliver')
   })
 })

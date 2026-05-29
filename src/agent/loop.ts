@@ -886,6 +886,8 @@ export class AgentLoop {
 
   getCognitiveSnapshot(): CognitivePhaseSnapshot | undefined { return this.latestCognitiveSnapshot }
 
+  getTaskContract(): TaskContract | undefined { return this.taskContract }
+
   addAnchor(kind: ContextAnchor['kind'], text: string): void {
     this.contextInjection.addAnchor(kind, text)
   }
