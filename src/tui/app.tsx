@@ -162,6 +162,16 @@ function parseInterviewMarker(text: string): { state: InterviewState; cleanText:
   }
 }
 
+/**
+ * A stream run may end (success / error / abort) after a newer run has already
+ * started. Only the run whose captured generation is still current may flip
+ * isStreaming off — otherwise a stale run kills a live one, or (the inverse bug)
+ * a guard keyed on the wrong ref never flips and freezes the UI in streaming.
+ */
+export function isCurrentGeneration(runGen: number, currentGen: number): boolean {
+  return runGen === currentGen
+}
+
 // --- Main App ---
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode }: AppProps) {
@@ -175,10 +185,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [streamingThinking, setStreamingThinking] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [isThinkingActive, setIsThinkingActive] = useState(false)
-  /** Generation counter: incremented on each new stream start, used to prevent stale onAbort from killing a new run. */
+  /** Generation counter: incremented on each new stream start. A run's onAbort/onError/catch only flips isStreaming when its captured generation still matches — prevents a stale run from killing a newer one. */
   const streamGenRef = useRef(0)
-  /** Generation at the time of last abort initiation; compared with streamGenRef in onAbort. */
-  const abortedAtGenRef = useRef(-1)
   const [fluencyStale, setFluencyStale] = useState<string | null>(null)
   const [heartbeatStatus, setHeartbeatStatus] = useState<string | null>(null)
   const [cost, setCost] = useState(0)
@@ -423,7 +431,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
       if (isStreaming) {
         agent.abort()
-        abortedAtGenRef.current = streamGenRef.current
         steerBuffer.current.clear()
         setIsStreaming(false)
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
@@ -456,7 +463,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const now = Date.now()
         if (lastEscRef.current && now - lastEscRef.current < 1000) {
           agent.abort()
-          abortedAtGenRef.current = streamGenRef.current
           steerBuffer.current.clear()
           setIsStreaming(false)
           pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
@@ -1063,7 +1069,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         streamBuf.current = ''
         // Stop streaming FIRST, then clear text — prevents flash frame on error.
-        if (abortedAtGenRef.current === streamGenRef.current) {
+        // Guard on myGen (this run): only flip if no newer run has started since.
+        if (isCurrentGeneration(myGen, streamGenRef.current)) {
           setIsStreaming(false)
         }
         setStreamingText('')
@@ -1101,8 +1108,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         streamBuf.current = ''
         // Stop streaming FIRST, then clear text — prevents flash frame on abort.
-        // Guard: only flip if this abort belongs to the current generation.
-        if (abortedAtGenRef.current === streamGenRef.current) {
+        // Guard on myGen (this run): only flip if no newer run has started since.
+        if (isCurrentGeneration(myGen, streamGenRef.current)) {
           setIsStreaming(false)
         }
         setStreamingText('')
@@ -1159,7 +1166,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     run().catch((err: Error) => {
       pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
       // Only flip if no newer run has started since this one
-      if (streamGenRef.current === myGen) {
+      if (isCurrentGeneration(myGen, streamGenRef.current)) {
         setIsStreaming(false)
       }
     }).finally(() => {
