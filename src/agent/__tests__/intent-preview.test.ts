@@ -66,11 +66,12 @@ describe('intent preview core', () => {
     assert.ok(intent.alternatives!.length > 0)
   })
 
-  it('formats single-line TUI text', () => {
+  it('formats single-line TUI text without self-rating confidence', () => {
     const formatted = formatIntentPreview({ summary: '修改 src/a.ts', confidence: 0.62, warnings: ['hot path'] })
 
     assert.match(formatted, /^⟡ 修改 src\/a\.ts/)
-    assert.match(formatted, /信心 62%/)
+    assert.doesNotMatch(formatted, /信心/)  // self-rating removed — face-2 bleed stop
+    assert.match(formatted, /hot path/)
     assert.match(formatted, /Enter\/y 继续/)
   })
 })
