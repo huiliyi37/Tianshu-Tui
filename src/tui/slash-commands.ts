@@ -157,34 +157,30 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 /help — Show this help
 /exit — Exit Rivet
 /quit — Exit
-/compact — Compact conversation context
+/compact [status|llm] — Micro-compact context (/compact status for stats)
 /model [name|list] — Show or switch model
-/chat — Switch to lightweight chat mode
-/task — Switch to full task execution mode
-/mode [chat|task] — Show or switch prompt mode
-/verify — Show verification status
-/verbose — Toggle verbose tool output
-/effort [off|low|medium|high|max] — Set reasoning effort (max = always full reasoning)
 /domain [list|<name>|auto|off] — Show or switch star domain personality
-/debug [prompt|fingerprint|cache|context-payload|mcp] — Debug prefix cache, prompt, context payload, and MCP connections
-/clear — Clear screen (visual only)
+/verbose — Toggle verbose tool output
+/auto — Toggle auto-approve
+/theme [midnight|pastel|cyberpunk|observatory] — Switch color theme
+/effort [off|low|medium|high|max] — Set reasoning effort
+/undo [<number>|preview <number>] — Undo file changes with preview
+/clear — Clear screen
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
-/memory [text] — Show or save session memory entries
+/memory [text|add|search|forget] — Session memory entries
 /mission — Show current task contract
-/rollback — Preview changes since last checkpoint (/rollback confirm to execute)
-/context — Show context ledger health, tokens, rounds, and compact events
+/context [pin|claims|antibodies|conflicts|reload|export|import] — Context ledger
+/verify — Show verification status
 /evidence — Show last turn evidence summary
+/debug [prompt|fingerprint|cache|context-payload|mcp] — Debug info
 /mcp — Show MCP server status
-/auto — Toggle auto-approve (current: ${ctx.autoSafeRef.current ? 'auto-safe' : 'manual'})
-/theme [midnight|pastel|cyberpunk|observatory] — Switch color theme
-/cockpit [summary|trace|verify|context|safety|model|off] — Toggle or switch cockpit panel
+/cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
 /skill [list|<name>] — List or load Claude skills
-/interview <topic> — Start deep interview to clarify requirements before coding
-/plan <feature> — Create a superpowers-style implementation plan before coding
-/plan close <file> --tasks <range> [--apply] — Preview or apply plan closure updates
-/plan-close <file> --tasks <range> [--apply] — Alias of /plan close
-/write-plan <feature> — Alias of /plan
+/interview <topic> — Deep interview before coding
+/plan <feature> — Create implementation plan
+/sensorium — Show 天枢 3D self-awareness state
+/dream — Distill session decisions into project memory
 Ctrl+C — Interrupt current turn (press twice to exit)` }))
       setIsStreaming(false)
       return true
@@ -195,26 +191,51 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       pushStatic(createLogEntry({ type: 'system', content: 'Session saved. Goodbye!' }))
       process.emit('SIGINT')
 
-    case '/compact':
-      pushStatic(createLogEntry({ type: 'system', content: 'Compacting conversation...' }))
-      { const msgs = ctx.session.getMessages()
-        const { messages: compacted, truncated } = microCompactOai(msgs, ctx.maxTokens, estimateOaiTokens(msgs))
-        ctx.session.replaceMessages(compacted)
-        ctx.session.recordCompactEvent({
-          turn: ctx.session.getTurnCount(),
-          tier: 1,
-          reason: 'manual /compact command',
-          beforeTokens: estimateOaiTokens(msgs),
-          afterTokens: estimateOaiTokens(compacted),
-          createdAt: Date.now(),
-        })
-        pushStatic(createLogEntry({ type: 'system', content: `Compacted: removed ${truncated} messages. ${compacted.length} remaining.` }))
-        ctx.setSummaryState(prev => ({ ...prev, compactEvent: { beforeTokens: estimateOaiTokens(msgs), afterTokens: estimateOaiTokens(compacted) } }))
-        setTimeout(() => ctx.setSummaryState(prev => ({ ...prev, compactEvent: null })), 5000)
+    case '/compact': {
+      const sub = parts[1]?.toLowerCase()
+      const msgs = ctx.session.getMessages()
+      const beforeTokens = estimateOaiTokens(msgs)
+
+      if (sub === 'status') {
+        const compacts = ctx.session.getCompactEvents()
+        const ledger = ctx.session.getContextLedger()
+        const pct = ledger ? Math.round(ledger.tokenBudget.estimatedTokens / ledger.tokenBudget.maxTokens * 100) : 0
+        const compactStr = compacts.length === 0
+          ? 'No compact events yet.'
+          : compacts.slice(-5).map(e => `  turn ${e.turn}: tier ${e.tier}, ${e.beforeTokens.toLocaleString()}→${e.afterTokens.toLocaleString()}`).join('\n')
+        pushStatic(createLogEntry({ type: 'system', content: `Compact status: ${beforeTokens.toLocaleString()}/${ctx.maxTokens.toLocaleString()} tokens (${pct}%)\n\nRecent events:\n${compactStr}\n\nUse /compact to micro-compact, /compact llm to resume LLM compact.` }))
+        setIsStreaming(false)
+        return true
       }
-      setIsStreaming(false)
+
+      if (sub === 'llm' || sub === 'deep') {
+        // LLM compact — deferred to next turn (triggers automatically at thresholds)
+        pushStatic(createLogEntry({ type: 'system', content: `LLM compact will trigger automatically at context thresholds (currently ${beforeTokens.toLocaleString()} tokens). Use /compact for immediate micro-compact.` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      // micro compact (default)
+      pushStatic(createLogEntry({ type: 'system', content: 'Micro-compacting conversation...' }))
+      const { messages: compacted, truncated } = microCompactOai(msgs, ctx.maxTokens, beforeTokens)
+      ctx.session.replaceMessages(compacted)
+      const afterTokens = estimateOaiTokens(compacted)
+      ctx.session.recordCompactEvent({
+        turn: ctx.session.getTurnCount(),
+        tier: 1,
+        reason: 'manual /compact command',
+        beforeTokens,
+        afterTokens,
+        createdAt: Date.now(),
+      })
+      const pctRemoved = beforeTokens > 0 ? Math.round((1 - afterTokens / beforeTokens) * 100) : 0
+      pushStatic(createLogEntry({ type: 'system', content: `Compacted: ${beforeTokens.toLocaleString()} → ${afterTokens.toLocaleString()} tokens (-${pctRemoved}%, ${truncated} msgs removed, ${compacted.length} remaining).` }))
+      ctx.setSummaryState(prev => ({ ...prev, compactEvent: { beforeTokens, afterTokens } }))
+      setTimeout(() => ctx.setSummaryState(prev => ({ ...prev, compactEvent: null })), 8000)
       ctx.setCacheHitRate(ctx.session.getCacheHitRate())
+      setIsStreaming(false)
       return true
+    }
 
     case '/model': {
       const targetModel = parts[1]
@@ -379,7 +400,9 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       return false
 
     case '/clear':
+      // Clear visual state — reset streaming text and thinking buffers
       setIsStreaming(false)
+      pushStatic(createLogEntry({ type: 'system', content: 'Screen cleared.' }))
       return true
 
     case '/sessions': {
@@ -654,11 +677,23 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           return true
         }
         const target = snapshots[idx]!
-        fh.rewind(target.messageId).then(restored => {
-          pushStatic(createLogEntry({ type: 'system', content: `Undo complete. Restored files: ${restored.join(', ') || '(none)'}` }))
-        }).catch(err => {
-          pushStatic(createLogEntry({ type: 'system', content: `Undo failed: ${(err as Error).message}` }))
-        })
+        const pinnedPush = pushStatic
+        fh.rewind(target.messageId).then(
+          restored => pinnedPush(createLogEntry({ type: 'system', content: `Undo complete. Restored files: ${restored.join(', ') || '(none)'}` })),
+          err => pinnedPush(createLogEntry({ type: 'system', content: `Undo failed: ${(err as Error).message}` })),
+        )
+        pushStatic(createLogEntry({ type: 'system', content: `Undoing snapshot #${idx + 1}...` }))
+      } else if (arg === 'preview' || arg === 'p') {
+        const previewIdx = parts[2] ? parseInt(parts[2], 10) - 1 : snapshots.length - 1
+        if (previewIdx < 0 || previewIdx >= snapshots.length) {
+          pushStatic(createLogEntry({ type: 'system', content: `Invalid index. History has ${snapshots.length} entries.` }))
+          setIsStreaming(false)
+          return true
+        }
+        const target = snapshots[previewIdx]!
+        const files = Object.keys(target.trackedFileBackups)
+        const detail = files.map(f => `  ${f}`).join('\n')
+        pushStatic(createLogEntry({ type: 'system', content: `Undo preview #${previewIdx + 1} [${target.messageId.slice(0, 8)}]:\n${detail || '(no files)'}\n\nUse /undo ${previewIdx + 1} to revert.` }))
       } else {
         const recent = snapshots.slice(-10).reverse()
         const lines = recent.map((s, i) => {
@@ -666,7 +701,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
           const files = Object.keys(s.trackedFileBackups).join(', ')
           return `  ${n}. [${s.messageId.slice(0, 8)}] ${files || '(no files)'}`
         })
-        pushStatic(createLogEntry({ type: 'system', content: `Undo history (${snapshots.length} total):\n${lines.join('\n')}\n\nUse /undo <number> to revert.` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Undo history (${snapshots.length} total):\n${lines.join('\n')}\n\nUse /undo <number> to revert, /undo preview <number> to inspect.` }))
       }
       setIsStreaming(false)
       return true
@@ -797,6 +832,62 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       // Push the skill as the next prompt input by returning false with the skill content
       // Instead, add it to session as a system-pinned context via anchor
       ctx.agent.addAnchor('user_preference', `[Active Skill: ${skill.name}]\n${skillContent.slice(0, 8000)}`)
+      return true
+    }
+
+    // ── 天枢独有命令 ──
+
+    case '/sensorium': {
+      const snapshot = ctx.agent.getCognitiveSnapshot?.()
+      if (!snapshot) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Sensorium not available yet. Send a message first to build cognitive state.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const s = snapshot
+      const sensoriumLines = [
+        '🧠 Sensorium — 天枢 3D 自感知',
+        '',
+        `  任务状态: ${s.contractStatus ?? 'idle'}`,
+        `  目标: ${s.objective ?? '(none)'}`,
+        `  涉及文件: ${s.scopeFileCount}`,
+        `  可执行任务: ${s.isActionableTask ? 'yes' : 'no'}`,
+        `  验证缺口: ${s.hasVerificationGap ? 'WARNING: yes' : 'OK: no'}`,
+        `  交付状态: ${s.deliveryStatus}`,
+        '',
+        '这些信号驱动 Immune 系统、Sycophancy Trap、Doom Loop 防护等自适应行为。',
+        '详细诊断: /debug [prompt|fingerprint|cache|context-payload]',
+      ]
+      pushStatic(createLogEntry({ type: 'system', content: sensoriumLines.join('\n') }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/dream': {
+      // Show dream status — memory distillation runs automatically at session end
+      const dir = knowledgeDir()
+      const memPath = join(dir, 'project-memory.md')
+      const hasMemory = existsSync(memPath)
+      const size = hasMemory ? readFileSync(memPath, 'utf-8').length : 0
+      const entries = hasMemory
+        ? (readFileSync(memPath, 'utf-8').match(/^### /gm) ?? []).length
+        : 0
+
+      pushStatic(createLogEntry({ type: 'system', content:
+        `🌙 Dream — 记忆蒸馏\n\n` +
+        `  状态: ${hasMemory ? 'active' : 'empty'}\n` +
+        `  条目: ${entries} curated memories\n` +
+        `  大小: ${(size / 1024).toFixed(1)} KB\n` +
+        `  路径: .rivet/knowledge/project-memory.md\n\n` +
+        `Dream 在会话结束时自动运行，从决策中提取：\n` +
+        `  • convergence_insight — 收敛洞察\n` +
+        `  • architectural_invariant — 架构不变量\n` +
+        `  • selection_rule — 选择规则\n` +
+        `  • conceptual_reframe — 概念重构\n` +
+        `  • reusable_design_pattern — 可复用设计模式\n\n` +
+        `记忆不注入提示词，通过 recall 工具按需检索。`
+      }))
+      setIsStreaming(false)
       return true
     }
   }
