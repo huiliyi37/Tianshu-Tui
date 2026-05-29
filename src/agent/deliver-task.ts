@@ -124,6 +124,7 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
       const ctx = getB1Context()
       ctx.ownership.autoOwnFromLedger()
       const currentDirtyFiles = ctx.getCurrentDirtyFiles?.(params.cwd) ?? collectCurrentDirtyFiles(params.cwd)
+      if (currentDirtyFiles) ctx.ownership.autoOwnFromBaseline(currentDirtyFiles)
       const report = ctx.gate.getReport([], currentDirtyFiles)
 
       const lines: string[] = [

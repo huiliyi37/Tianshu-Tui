@@ -32,6 +32,10 @@ export interface OwnershipLedger {
   registerOwned(filePath: string): void
   /** Auto-populate owned files from TaskLedger write events */
   autoOwnFromLedger(): void
+  /** Auto-classify unclassified dirty files by checking WorktreeBaseline.
+   *  Files NOT in the baseline (pre-existing sets) are new → auto-owned.
+   *  Call after autoOwnFromLedger to catch files from external writes. */
+  autoOwnFromBaseline(dirtyFiles: string[]): void
   isOwned(filePath: string | null | undefined): boolean
   isExternal(filePath: string): boolean
   isCoOwned(filePath: string): boolean
@@ -65,6 +69,17 @@ export function createOwnershipLedger(opts: {
       if ((event.type === 'file_write' || event.type === 'git_action') && event.path) {
         registerOwned(event.path)
       }
+    }
+  }
+
+  function autoOwnFromBaseline(dirtyFiles: string[]): void {
+    for (const f of dirtyFiles) {
+      // Already classified — skip
+      if (ownedSet.has(f) || coOwnedSet.has(f)) continue
+      // Pre-existing in baseline — not ours to auto-own
+      if (baseline.isExternal(f)) continue
+      // New file created this session → auto-own
+      ownedSet.add(f)
     }
   }
 
@@ -116,6 +131,7 @@ export function createOwnershipLedger(opts: {
   return {
     registerOwned,
     autoOwnFromLedger,
+    autoOwnFromBaseline,
     isOwned,
     isExternal,
     isCoOwned,
