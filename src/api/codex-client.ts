@@ -3,6 +3,7 @@ import type { OaiChatRequest } from './oai-types.js'
 import type { ContentBlock } from './types.js'
 import type { StreamCallbacks } from './stream-client.js'
 import { withStructuredRetry } from './retry-engine.js'
+import { fetchWithTimeout } from './fetch-timeout.js'
 
 export interface CodexClientConfig {
   baseUrl: string
@@ -32,12 +33,7 @@ export class CodexClient implements StreamClient {
         : {}
 
       const url = `${this.config.baseUrl.replace(/\/+$/, '')}/responses`
-      // Combine user abort signal with pre-first-byte timeout.
-      const fetchSignal = signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
-        : AbortSignal.timeout(45_000)
-
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -48,7 +44,7 @@ export class CodexClient implements StreamClient {
           ...authHeaders,
         },
         body: JSON.stringify(body),
-        signal: fetchSignal,
+        signal,
       })
 
       if (!response.ok) {

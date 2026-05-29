@@ -1056,7 +1056,16 @@ describe('AgentLoop — playbook telemetry bounds', () => {
       })
 
       assert.equal(agent['sensoriumSnapshots'].length, 100)
-      assert.ok(agent['sensoriumSnapshots'][0]!.turn >= 1)
+      // All snapshots in a single run share the same turn — session.getTurnCount()
+      // increments once per addUserMessage() call (i.e. once per run()), not per
+      // tool-turn iteration.  Assert the invariant, not a tautology.
+      const firstTurn = agent['sensoriumSnapshots'][0]!.turn
+      assert.ok(firstTurn >= 1, 'turn should be at least 1 after one run()')
+      assert.equal(
+        agent['sensoriumSnapshots'][99]!.turn,
+        firstTurn,
+        'all snapshots within a single run must share the same turn number',
+      )
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

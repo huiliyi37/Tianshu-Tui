@@ -1,6 +1,7 @@
 import type { StreamClient, StreamCallbacks } from './stream-client.js'
 import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from './oai-types.js'
 import { withStructuredRetry } from './retry-engine.js'
+import { fetchWithTimeout } from './fetch-timeout.js'
 
 export interface AnthropicClientConfig {
   baseUrl: string
@@ -57,12 +58,7 @@ export class AnthropicClient implements StreamClient {
     const body = this.buildRequestBody(request)
 
     await withStructuredRetry(async () => {
-      // Combine user abort signal with pre-first-byte timeout.
-      const fetchSignal = signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
-        : AbortSignal.timeout(45_000)
-
-      const response = await fetch(`${this.config.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
+      const response = await fetchWithTimeout(`${this.config.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -71,7 +67,7 @@ export class AnthropicClient implements StreamClient {
           'Accept': 'text/event-stream',
         },
         body: JSON.stringify(body),
-        signal: fetchSignal,
+        signal,
       })
 
       if (!response.ok) {
@@ -302,7 +298,6 @@ export class AnthropicClient implements StreamClient {
       resetIdleTimer()
       while (true) {
         if (signal?.aborted) break
-        if (streamTimedOut) throw new Error('Anthropic SSE stream idle timeout (180s)')
 
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
