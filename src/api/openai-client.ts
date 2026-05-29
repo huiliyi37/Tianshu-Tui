@@ -206,6 +206,13 @@ export class OpenAIClient implements StreamClient {
           ? await this.config.auth.getHeaders()
           : { 'Authorization': `Bearer ${this.config.apiKey}` }
 
+        // Combine user abort signal with pre-first-byte timeout.
+        // Prevents fetch from hanging forever when server accepts connection
+        // but never sends response headers.
+        const fetchSignal = signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(FIRST_BYTE_TIMEOUT_MS)])
+          : AbortSignal.timeout(FIRST_BYTE_TIMEOUT_MS)
+
         const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
@@ -216,7 +223,7 @@ export class OpenAIClient implements StreamClient {
             ...(this.config.sessionId ? { 'X-Request-Session': this.config.sessionId } : {}),
           },
           body: JSON.stringify(body),
-          signal,
+          signal: fetchSignal,
         })
 
         if (!response.ok) {
@@ -298,6 +305,9 @@ export class OpenAIClient implements StreamClient {
         if (streamTimedOut) throw new Error('OpenAI SSE stream idle timeout')
 
         const { done, value } = await reader.read()
+        // Check timeout AFTER read — reader.cancel() from idle timer causes
+        // read() to return done=true, but we must throw, not silently break.
+        if (streamTimedOut) throw new Error('OpenAI SSE stream idle timeout')
         if (done) break
 
         receivedFirstChunk = true

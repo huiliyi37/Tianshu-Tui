@@ -32,6 +32,11 @@ export class CodexClient implements StreamClient {
         : {}
 
       const url = `${this.config.baseUrl.replace(/\/+$/, '')}/responses`
+      // Combine user abort signal with pre-first-byte timeout.
+      const fetchSignal = signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
+        : AbortSignal.timeout(45_000)
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -43,7 +48,7 @@ export class CodexClient implements StreamClient {
           ...authHeaders,
         },
         body: JSON.stringify(body),
-        signal,
+        signal: fetchSignal,
       })
 
       if (!response.ok) {
@@ -219,6 +224,9 @@ export class CodexClient implements StreamClient {
         if (streamTimedOut) throw new Error('Codex SSE stream idle timeout (180s)')
 
         const { done, value } = await reader.read()
+        // Check timeout AFTER read — reader.cancel() from idle timer causes
+        // read() to return done=true, but we must throw, not silently break.
+        if (streamTimedOut) throw new Error('Codex SSE stream idle timeout (180s)')
         if (done) break
         receivedFirstChunk = true
         resetIdleTimer()

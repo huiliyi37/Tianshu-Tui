@@ -50,6 +50,7 @@
     "gradient-string": "^2.0.2",
     "ink": "^6.8.0",
     "react": "^19.2.6",
+    "string-width": "^8.2.1",
     "tree-sitter-wasms": "^0.1.13",
     "turndown": "^7.2.4",
     "undici": "^8.3.0",

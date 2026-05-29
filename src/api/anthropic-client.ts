@@ -57,6 +57,11 @@ export class AnthropicClient implements StreamClient {
     const body = this.buildRequestBody(request)
 
     await withStructuredRetry(async () => {
+      // Combine user abort signal with pre-first-byte timeout.
+      const fetchSignal = signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
+        : AbortSignal.timeout(45_000)
+
       const response = await fetch(`${this.config.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
         method: 'POST',
         headers: {
@@ -66,7 +71,7 @@ export class AnthropicClient implements StreamClient {
           'Accept': 'text/event-stream',
         },
         body: JSON.stringify(body),
-        signal,
+        signal: fetchSignal,
       })
 
       if (!response.ok) {
@@ -300,6 +305,9 @@ export class AnthropicClient implements StreamClient {
         if (streamTimedOut) throw new Error('Anthropic SSE stream idle timeout (180s)')
 
         const { done, value } = await reader.read()
+        // Check timeout AFTER read — reader.cancel() from idle timer causes
+        // read() to return done=true, but we must throw, not silently break.
+        if (streamTimedOut) throw new Error('Anthropic SSE stream idle timeout (180s)')
         if (done) break
         receivedFirstChunk = true
         resetIdleTimer()

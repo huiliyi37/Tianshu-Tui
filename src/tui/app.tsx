@@ -419,6 +419,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
       if (isStreaming) {
         agent.abort()
+        steerBuffer.current.clear()
         setIsStreaming(false)
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
         lastCtrlCRef.current = Date.now()
@@ -450,6 +451,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const now = Date.now()
         if (lastEscRef.current && now - lastEscRef.current < 1000) {
           agent.abort()
+          steerBuffer.current.clear()
           setIsStreaming(false)
           pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
           lastEscRef.current = 0
@@ -1062,6 +1064,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         dirtyTools.current.clear()
         toolTargetMap.current.clear()
         toolCallTracker.current.clear()
+        steerBuffer.current.clear()
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: `Error: ${error.message}`, isError: true }))
@@ -1097,6 +1100,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         dirtyTools.current.clear()
         toolTargetMap.current.clear()
         toolCallTracker.current.clear()
+        steerBuffer.current.clear()
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
