@@ -9,6 +9,7 @@ import { createTraceStore } from '../../../agent/trace-store.js'
 function makeAgent(overrides: Partial<AgentLoop> = {}): AgentLoop {
   return {
     getTraceStore: () => createTraceStore(),
+    getReasoningEffort: () => undefined,
     getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified' as const, impactedFiles: new Set(), impactedTests: new Set() }),
     getDoomLoopLevel: () => 'none' as const,
     getLatestRisk: () => ({ level: 'none' as const, reasons: [], suggestedAction: '' }),

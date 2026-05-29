@@ -115,14 +115,13 @@ interface CockpitViewProps {
   summaryState: SummaryState
   mcpManager: McpManager | null
   claimStoreRef: RefObject<import('../context/claim-store.js').ContextClaimStore | null>
-  reasoningEffort: string
 }
 
-function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState, mcpManager, claimStoreRef, reasoningEffort }: CockpitViewProps) {
+function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState, mcpManager, claimStoreRef }: CockpitViewProps) {
   const theme = getTheme()
   const snap = useMemo(
-    () => buildCockpitSnapshot({ agent, session, model, cacheHitRate, cost, mcpManager, claimCounts: claimStoreRef.current?.getStatusCounts(), reasoningEffort }),
-    [agent, session, model, cacheHitRate, cost, mcpManager, claimStoreRef, reasoningEffort],
+    () => buildCockpitSnapshot({ agent, session, model, cacheHitRate, cost, mcpManager, claimCounts: claimStoreRef.current?.getStatusCounts() }),
+    [agent, session, model, cacheHitRate, cost, mcpManager, claimStoreRef],
   )
   const compactEvents = useMemo(() => session.getCompactEvents(), [session])
 
@@ -183,16 +182,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [pendingIntent, setPendingIntent] = useState<PendingIntentPreview | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
-  const [reasoningEffort, setReasoningEffortState] = useState<string>('')
-  const reasoningSyncedRef = useRef(false)
-
-  // Sync initial reasoning effort from agent config
-  if (!reasoningSyncedRef.current) {
-    reasoningSyncedRef.current = true
-    const initial = agent.getReasoningEffort()
-    if (initial) setReasoningEffortState(initial)
-  }
-
   const [verbose, _setVerbose] = useState(false)
   const [, _setAutoSafe] = useState(true)
   const verboseRef = useRef(false)
@@ -678,9 +667,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         surfacePush, surfacePop,
         setReasoningEffort: (effort) => {
           agent.setReasoningEffort(effort)
-          setReasoningEffortState(effort)
         },
-        reasoningEffort,
+        reasoningEffort: agent.getReasoningEffort() ?? 'medium',
       }
       if (handleSlashCommand(slashCtx)) return
     }
@@ -879,11 +867,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       },
       onTurnComplete: (_usage, turnNumber, isFinal) => {
         setHeartbeatStatus(null)
-        // Sync reasoning effort from agent (auto-reasoning may have changed it)
-        const currentEffort = agent.getReasoningEffort()
-        if (currentEffort && currentEffort !== reasoningEffort) {
-          setReasoningEffortState(currentEffort)
-        }
 
         if (dirtyTools.current.size > 0) {
           flushTools()
@@ -1196,7 +1179,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             elapsedMs={summaryState.elapsedMs}
           />
         )}
-        {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} reasoningEffort={reasoningEffort} />}
+        {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">Previous session found.</Text>
