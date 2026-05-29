@@ -1213,12 +1213,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         )}
         {fluencyStale && !streamingText && (
           <Box paddingX={2}>
-            <Text dimColor color="yellow">⚠ {fluencyStale}</Text>
+            <Text color="yellow">⚠ {fluencyStale}</Text>
           </Box>
         )}
         {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
           <Box paddingX={2}>
-            <Text dimColor>◌ {heartbeatStatus}</Text>
+            <Text>◌ {heartbeatStatus}</Text>
           </Box>
         )}
         {pendingIntent && (
