@@ -77,7 +77,14 @@ function asNum(s: string | undefined, fallback = 0): number {
   return s ? parseInt(s, 10) : fallback
 }
 
-function parseOutput(raw: string, runner: string): ParsedResult {
+/** Strip ANSI escape sequences (colors, cursor moves, etc.) from raw output. */
+export function stripAnsi(input: string): string {
+  // eslint-disable-next-line no-control-regex
+  return input.replace(/\x1b\[[0-9;]*m/g, '')
+}
+
+export function parseOutput(raw: string, runner: string): ParsedResult {
+  const clean = stripAnsi(raw)
   const result: ParsedResult = {
     exitCode: 0,
     passed: 0,
@@ -88,23 +95,23 @@ function parseOutput(raw: string, runner: string): ParsedResult {
   }
 
   if (runner === 'vitest' || runner === 'npm') {
-    const summaryMatch = raw.match(/Tests\s+(.*?)$/m)
+    const summaryMatch = clean.match(/Tests\s+(.*?)$/m)
     if (summaryMatch) {
       const s = summaryMatch[1] ?? ''
       result.failed = asNum(s.match(/(\d+)\s+failed/)?.[1])
       result.passed = asNum(s.match(/(\d+)\s+passed/)?.[1])
       result.skipped = asNum(s.match(/(\d+)\s+skipped/)?.[1])
     }
-    const durMatch = raw.match(/Duration\s+([\d.]+s)/)
+    const durMatch = clean.match(/Duration\s+([\d.]+s)/)
     if (durMatch) result.duration = durMatch[1] ?? ''
   }
 
   if (runner === 'node-test') {
-    const totalMatch = raw.match(/[ℹ#]\s+tests\s+(\d+)/)
-    const failMatch = raw.match(/[ℹ#]\s+fail\s+(\d+)/)
-    const skipMatch = raw.match(/[ℹ#]\s+skip\s+(\d+)/)
-    const passMatch = raw.match(/[ℹ#]\s+pass\s+(\d+)/)
-    const durMatch = raw.match(/[ℹ#]\s+duration\s+([\d.]+m?s)/)
+    const totalMatch = clean.match(/[ℹ#]\s+tests\s+(\d+)/)
+    const failMatch = clean.match(/[ℹ#]\s+fail\s+(\d+)/)
+    const skipMatch = clean.match(/[ℹ#]\s+skip\s+(\d+)/)
+    const passMatch = clean.match(/[ℹ#]\s+pass\s+(\d+)/)
+    const durMatch = clean.match(/[ℹ#]\s+duration\s+([\d.]+m?s)/)
     const total = asNum(totalMatch?.[1])
     const fails = asNum(failMatch?.[1])
     const skips = asNum(skipMatch?.[1])
@@ -118,23 +125,23 @@ function parseOutput(raw: string, runner: string): ParsedResult {
   }
 
   if (runner === 'jest') {
-    const summaryMatch = raw.match(/Tests:\s+(.*?)$/m)
+    const summaryMatch = clean.match(/Tests:\s+(.*?)$/m)
     if (summaryMatch) {
       const s = summaryMatch[1] ?? ''
       result.failed = asNum(s.match(/(\d+)\s+failed/)?.[1])
       result.passed = asNum(s.match(/(\d+)\s+passed/)?.[1])
       result.skipped = asNum(s.match(/(\d+)\s+skipped/)?.[1])
     }
-    const durMatch = raw.match(/Time:\s+([\d.]+s)/)
+    const durMatch = clean.match(/Time:\s+([\d.]+s)/)
     if (durMatch) result.duration = durMatch[1] ?? ''
   }
 
   const failLines: Array<{ name: string; error: string }> = []
-  const nodeTestFails = raw.matchAll(/✖\s+(.+?)(?:\s+\([\d.]+m?s\))?\n((?:  .*\n)*)/g)
+  const nodeTestFails = clean.matchAll(/✖\s+(.+?)(?:\s+\([\d.]+m?s\))?\n((?:  .*\n)*)/g)
   for (const m of nodeTestFails) {
     failLines.push({ name: (m[1] ?? '').trim(), error: (m[2] ?? '').trim() })
   }
-  const vitestFails = raw.matchAll(/FAIL\s+(.+)\n((?:  .*\n|\t.*\n)*)/g)
+  const vitestFails = clean.matchAll(/FAIL\s+(.+)\n((?:  .*\n|\t.*\n)*)/g)
   for (const m of vitestFails) {
     failLines.push({ name: (m[1] ?? '').trim(), error: (m[2] ?? '').trim() })
   }
