@@ -17,7 +17,7 @@ describe('computeSensorium', () => {
     }
     const s = computeSensorium(input)
     assert.equal(s.momentum, 0.7)
-    assert.equal(s.pressure, 0.3)
+    assert.equal(s.pressure, 0.21) // 0.50*0.3 + 0.30*(1/5) + 0.15*0 + 0.05*0
     assert.ok(s.confidence > 0 && s.confidence < 1)
   })
 
@@ -60,8 +60,9 @@ describe('computeSensorium', () => {
     assert.equal(s.complexity, 0.2) // 1 unique / 5 total
   })
 
-  it('computes stability from doom level', () => {
-    const none: SensoriumInput = {
+  it('computes continuous stability from blended signals', () => {
+    // Base input: empty predictions, empty tool history, no files modified
+    const base: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
       pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0 },
       evidenceState: { filesModified: 0, verifiedCount: 0 },
@@ -69,13 +70,109 @@ describe('computeSensorium', () => {
       pheromones: [],
       doomLevel: 'none',
     }
-    assert.equal(computeSensorium(none).stability, 1.0)
+    // none + neutral defaults: 0.40*0.90 + 0.25*0.5 + 0.20*0.5 + 0.15*1.0 = 0.735
+    const sNone = computeSensorium(base).stability
+    assert.ok(sNone > 0.7 && sNone < 0.9, `none stability ${sNone} should be in (0.7, 0.9)`)
 
-    const warn: SensoriumInput = { ...none, doomLevel: 'warn' }
-    assert.ok(computeSensorium(warn).stability < 1.0 && computeSensorium(warn).stability > 0.4)
+    // warn: 0.40*0.50 + 0.25*0.5 + 0.20*0.5 + 0.15*1.0 = 0.575
+    const sWarn = computeSensorium({ ...base, doomLevel: 'warn' }).stability
+    assert.ok(sWarn > 0.45 && sWarn < 0.70, `warn stability ${sWarn} should be in (0.45, 0.70)`)
+    assert.ok(sWarn < sNone, 'warn should have lower stability than none')
 
-    const blocked: SensoriumInput = { ...none, doomLevel: 'blocked' }
-    assert.ok(computeSensorium(blocked).stability < 0.4)
+    // blocked: 0.40*0.10 + 0.25*0.5 + 0.20*0.5 + 0.15*1.0 = 0.415
+    const sBlocked = computeSensorium({ ...base, doomLevel: 'blocked' }).stability
+    assert.ok(sBlocked > 0.25 && sBlocked < 0.55, `blocked stability ${sBlocked} should be in (0.25, 0.55)`)
+    assert.ok(sBlocked < sWarn, 'blocked should have lower stability than warn')
+  })
+
+  it('stability decreases with low prediction accuracy', () => {
+    const input: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [true, false, false, false, false], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: ['read_file', 'edit_file', 'bash', 'read_file', 'edit_file'],
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const s = computeSensorium(input)
+    // predictionRate = 1/5 = 0.2, diversity = 3/5 = 0.6, verificationCoverage = 1.0
+    // 0.40*0.90 + 0.25*0.2 + 0.20*0.6 + 0.15*1.0 = 0.36+0.05+0.12+0.15 = 0.68
+    assert.ok(s.stability < 0.75, `low predictions should reduce stability, got ${s.stability}`)
+    assert.ok(s.stability > 0.55)
+  })
+
+  it('stability decreases with low tool diversity (repetition)', () => {
+    const input: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [true, true, true], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: ['read_file', 'read_file', 'read_file', 'read_file', 'read_file'],
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const s = computeSensorium(input)
+    // predictionRate = 1.0, diversity = 1/5 = 0.2, verificationCoverage = 1.0
+    // 0.40*0.90 + 0.25*1.0 + 0.20*0.2 + 0.15*1.0 = 0.36+0.25+0.04+0.15 = 0.80
+    assert.ok(s.stability < 0.85, `low diversity should reduce stability, got ${s.stability}`)
+    assert.ok(s.stability > 0.70)
+  })
+
+  it('stability decreases with unverified modifications', () => {
+    const input: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [true, true, true], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0 },
+      evidenceState: { filesModified: 5, verifiedCount: 1 },
+      toolCallHistory: ['read_file', 'edit_file', 'bash', 'grep', 'read_file'],
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const s = computeSensorium(input)
+    // predictionRate = 1.0, diversity = 4/5 = 0.8, verificationCoverage = 1/5 = 0.2
+    // 0.40*0.90 + 0.25*1.0 + 0.20*0.8 + 0.15*0.2 = 0.36+0.25+0.16+0.03 = 0.80
+    assert.ok(s.stability < 0.85, `unverified changes should reduce stability, got ${s.stability}`)
+    assert.ok(s.stability > 0.70)
+  })
+
+  it('pressure increases with verification debt', () => {
+    const input: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.2 },
+      evidenceState: { filesModified: 5, verifiedCount: 0 },
+      toolCallHistory: [],
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const s = computeSensorium(input)
+    // verificationDebt = (5-0)/max(5,5) = 5/5 = 1.0
+    // 0.50*0.2 + 0.30*1.0 + 0.15*0 + 0.05*0 = 0.10 + 0.30 = 0.40
+    assert.equal(s.pressure, 0.40)
+  })
+
+  it('pressure stays zero when nothing is happening', () => {
+    const input: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: [],
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const s = computeSensorium(input)
+    assert.equal(s.pressure, 0)
+  })
+
+  it('pressure incorporates CVM overhead', () => {
+    const input: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0.08, shouldThrottleCvm: true, ratio: 0.1 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: [],
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const s = computeSensorium(input)
+    // 0.50*0.1 + 0.30*0 + 0.15*0.08 + 0.05*0 = 0.05 + 0.012 = 0.062
+    assert.ok(s.pressure > 0.05 && s.pressure < 0.08, `CVM overhead should increase pressure, got ${s.pressure}`)
   })
 
   it('computes confidence from evidence state', () => {

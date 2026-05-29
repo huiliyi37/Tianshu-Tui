@@ -38,7 +38,7 @@ describe('createPerceptionRuntimeHook', () => {
 
     assert.ok(ctx.snapshot.sensorium)
     assert.ok(ctx.snapshot.strategy)
-    assert.equal(ctx.snapshot.sensorium.pressure, 0.4)
+    assert.equal(ctx.snapshot.sensorium.pressure, 0.2) // 0.50*0.4 + 0.30*0 + 0.15*0 + 0.05*0 (verification debt=0 with 1 modified, 1 verified)
   })
 
   it('applies provider degradation before computing strategy', async () => {
@@ -58,7 +58,7 @@ describe('createPerceptionRuntimeHook', () => {
 
     await hook.run(ctx)
 
-    assert.equal(ctx.snapshot.sensorium?.stability, 0.7)
+    assert.equal(ctx.snapshot.sensorium?.stability, 0.5845) // 0.835 * 0.7 after provider degradation
   })
 
   it('lets downstream preTurn hooks observe computed sensorium in the same pipeline phase', async () => {
