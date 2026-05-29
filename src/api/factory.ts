@@ -1,5 +1,6 @@
 import { OpenAIClient } from './openai-client.js'
 import { CodexClient } from './codex-client.js'
+import { AnthropicClient } from './anthropic-client.js'
 import type { StreamClient } from './stream-client.js'
 import type { ProviderCapabilities } from './provider.js'
 import { getProviderProfile } from './provider-profile.js'
@@ -51,6 +52,27 @@ export function createProviderClient(
       model: params.model,
       maxTokens: params.maxTokens,
       auth: params.auth,
+    })
+  }
+
+  // Anthropic native protocol — uses explicit cache_control breakpoints
+  if (provider.name === 'anthropic' || capabilities.prefixCacheStrategy === 'anthropic-cache-control') {
+    const budgetMap: Record<string, number> = {
+      max: params.maxTokens,
+      high: Math.floor(params.maxTokens * 0.6),
+      medium: Math.floor(params.maxTokens * 0.3),
+      low: 8192,
+    }
+    const thinkingBudget = params.reasoningEffort
+      ? (budgetMap[params.reasoningEffort] ?? Math.floor(params.maxTokens * 0.6))
+      : undefined
+
+    return new AnthropicClient({
+      baseUrl: provider.baseUrl,
+      apiKey: params.apiKey,
+      model: params.model,
+      maxTokens: params.maxTokens,
+      thinkingBudget,
     })
   }
 

@@ -4,6 +4,7 @@ import { ReadableStream } from 'node:stream/web'
 import { createProviderClient, resolveApiKey, type RuntimeParams } from '../factory.js'
 import { resolveCapabilities } from '../provider.js'
 import { OpenAIClient } from '../openai-client.js'
+import { AnthropicClient } from '../anthropic-client.js'
 import { ApiKeyAuth } from '../../auth/api-key.js'
 import { cloneProviderPreset } from '../../config/provider-presets.js'
 import type { ProviderConfig } from '../../config/schema.js'
@@ -154,6 +155,57 @@ describe('createProviderClient', () => {
       auth: new ApiKeyAuth('oauth-token-for-test'),
     })
     assert.ok(client)
+  })
+  it('creates AnthropicClient for anthropic provider with cache-control strategy', () => {
+    const anthropicProvider: ProviderConfig = {
+      name: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: true,
+        stripParams: [],
+        toolJsonBug: false,
+        prefixCache: 'anthropic-cache-control',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 64000,
+      models: [{ id: 'claude-opus-4-7', contextWindow: 200000, maxTokens: 32000 }],
+      unsupported: [],
+    }
+    const caps = resolveCapabilities('anthropic')
+    // Override to anthropic-cache-control strategy
+    caps.prefixCacheStrategy = 'anthropic-cache-control'
+    const client = createProviderClient(anthropicProvider, caps, {
+      ...runtimeParams,
+      model: 'claude-opus-4-7',
+    })
+    assert.ok(client instanceof AnthropicClient)
+  })
+
+  it('creates AnthropicClient when provider.name is anthropic regardless of prefixCacheStrategy', () => {
+    const anthropicProvider: ProviderConfig = {
+      name: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        prefixCache: 'none',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 64000,
+      models: [{ id: 'claude-opus-4-7', contextWindow: 200000, maxTokens: 32000 }],
+      unsupported: [],
+    }
+    const caps = resolveCapabilities('claude') // claude has prefixCacheStrategy='none'
+    const client = createProviderClient(anthropicProvider, caps, {
+      ...runtimeParams,
+      model: 'claude-opus-4-7',
+    })
+    assert.ok(client instanceof AnthropicClient)
   })
 })
 
