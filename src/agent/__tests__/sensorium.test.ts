@@ -185,10 +185,10 @@ describe('computeSensorium', () => {
       doomLevel: 'none',
     }
     const s = computeSensorium(input)
-    assert.equal(s.confidence, 0.8) // 4/5
+    assert.equal(s.confidence, 0.8) // 4/5 — verification coverage ratio
   })
 
-  it('confidence defaults to 1.0 when no files modified', () => {
+  it('verification coverage defaults to 1.0 when no files modified (vacuously true: 0/0)', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
       pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0 },

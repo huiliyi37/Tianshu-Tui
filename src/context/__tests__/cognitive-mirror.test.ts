@@ -66,12 +66,13 @@ describe('cognitive mirror — 认知镜面', () => {
 
     assert.ok(mirror.startsWith('<cognitive-mirror '))
     assert.ok(mirror.endsWith(' />'))
-    assert.ok(mirror.includes('confidence="0.30"'))
+    assert.ok(mirror.includes('verification_coverage="0.30"'))
     assert.ok(mirror.includes('complexity="0.70"'))
     assert.ok(mirror.includes('freshness="0.60"'))
+    assert.ok(mirror.includes('files_modified="0"'))
   })
 
-  it('includes all six sensorium dimensions', () => {
+  it('includes all sensorium dimensions and files_modified', () => {
     const sensorium = makeSensorium({
       confidence: 0.5,
       complexity: 0.3,
@@ -83,7 +84,8 @@ describe('cognitive mirror — 认知镜面', () => {
     const ledger = makeLedger({ sensorium })
     const mirror = buildCognitiveMirror(ledger)
 
-    assert.ok(mirror.includes('confidence'))
+    assert.ok(mirror.includes('verification_coverage'))
+    assert.ok(mirror.includes('files_modified'))
     assert.ok(mirror.includes('complexity'))
     assert.ok(mirror.includes('momentum'))
     assert.ok(mirror.includes('stability'))
@@ -153,7 +155,7 @@ describe('cognitive mirror — 认知镜面', () => {
     const ledger = makeLedger({ sensorium })
     const mirror = buildCognitiveMirror(ledger)
 
-    assert.ok(mirror.includes('confidence="0.33"'))
+    assert.ok(mirror.includes('verification_coverage="0.33"'))
     assert.ok(mirror.includes('complexity="0.78"'))
   })
 

@@ -79,12 +79,13 @@ export function buildVerificationGapProjection(ledger: CognitiveLedger): string 
  * knows it's in the CVM and can actively adjust behavior.
  *
  * Six sensorium dimensions + strategy + vigor:
- *   confidence — how sure are we about the current approach? (evidence)
+ *   verification_coverage — how many modified files have been verified? (not general confidence)
  *   complexity — how diverse is the recent tool pattern?
  *   momentum   — are we accelerating or coasting?
  *   stability  — is the session healthy or approaching doom loop?
  *   freshness  — how familiar is the current file context?
  *   pressure   — is the context window filling up?
+ *   files_modified — raw count so model can interpret vacuous coverage
  *   strategy   — current reasoning effort + exploration breadth
  *   vigor      — phasic (acute arousal) + tonic (sustained) activation
  *
@@ -95,7 +96,12 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
   const s = ledger.sensorium
   if (!s) return ''
 
-  const parts: string[] = [`confidence="${formatDim(s.confidence)}"`]
+  const parts: string[] = [`verification_coverage="${formatDim(s.confidence)}"`]
+
+  // Show how many files have been modified so the model can interpret
+  // verification_coverage correctly. When files_modified=0,
+  // verification_coverage=1.00 is vacuously true (0/0 = all verified).
+  parts.push(`files_modified="${ledger.evidence.filesModified.size}"`)
 
   if (s.complexity !== undefined) parts.push(`complexity="${formatDim(s.complexity)}"`)
   if (s.momentum !== undefined) parts.push(`momentum="${formatDim(s.momentum)}"`)

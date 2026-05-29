@@ -44,7 +44,10 @@ export interface Sensorium {
   momentum: number
   /** 多维压力：上下文填充 (0.50) + 验证债 (0.30) + CVM 开销 (0.15) + 增速 (0.05) */
   pressure: number
-  /** Verification confidence: verified_count / modified_count (or 1.0 if no changes) */
+  /** Verification coverage ratio: verified_count / modified_count.
+   *  Returns 1.0 when no files modified (vacuously true — 0/0 = all verified).
+   *  This is a coverage metric, NOT general confidence.
+   *  In the cognitive-mirror it is rendered as `verification_coverage`. */
   confidence: number
   /** Tool diversity: unique tools / total calls in sliding window */
   complexity: number
