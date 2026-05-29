@@ -244,9 +244,18 @@ export class OpenAIClient implements StreamClient {
 
           if (attempt < MAX_RETRIES) {
             const retryAfter = response.headers.get('retry-after')
-            const delay = retryAfter
-              ? (parseFloat(retryAfter) || BASE_DELAY_MS) * 1000
-              : BASE_DELAY_MS * Math.pow(2, attempt - 1)
+            let delay: number
+            if (retryAfter) {
+              const parsed = parseFloat(retryAfter)
+              // parseFloat returns NaN for HTTP-date format (e.g. "Fri, 30 May 2026 12:00:00 GMT").
+              // retry-after header is in seconds when numeric; convert to ms.
+              // When NaN (HTTP-date), fall back to exponential backoff instead of stalling.
+              delay = Number.isNaN(parsed)
+                ? BASE_DELAY_MS * Math.pow(2, attempt - 1)
+                : parsed * 1000
+            } else {
+              delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
+            }
             await abortableDelay(delay, signal)
             continue
           }
