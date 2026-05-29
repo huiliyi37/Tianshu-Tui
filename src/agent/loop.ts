@@ -1075,11 +1075,15 @@ export class AgentLoop {
     // If the turn is aborted before any assistant output, we roll back
     // the user message so it doesn't pollute context on retry.
     let assistantResponded = false
+    // Track whether compaction consumed the user message (session split /
+    // LLM compact replace the message list). When true, skip removeLastMessage
+    // because the user message no longer exists at the top of the stack.
+    let userMessageConsumed = false
 
     try {
       for (let turn = 0; turn < this.config.maxTurns; turn++) {
         if (this.abortController.signal.aborted) {
-          if (!assistantResponded) this.session.removeLastMessage()
+          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onAbort()
           return
         }
@@ -1098,12 +1102,15 @@ export class AgentLoop {
         // preserving exact prefix for DeepSeek disk cache hits.
         // When split succeeds, the session is already pruned to
         // ~3 messages → all subsequent compaction is a no-op.
-        await this.compaction.trySessionSplit()
+        if (await this.compaction.trySessionSplit()) {
+          userMessageConsumed = true
+        }
 
         const compactResult = await this.compaction.maybeCompact({
           loopTurn: turn,
           failures: this.compactFailures,
         })
+        if (compactResult.compacted) userMessageConsumed = true
         this.compactFailures = compactResult.failures
         // Immune signal: surface compaction failures as danger signal for dual-signal gating
         if (this.compactFailures.consecutiveFailures > 0) {
@@ -1415,7 +1422,7 @@ export class AgentLoop {
         if (this.abortController.signal.aborted) {
           if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
           if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
-          if (!assistantResponded) this.session.removeLastMessage()
+          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           // runPostSession is best-effort cleanup — its failure must not cause
           // the outer catch to double-delete an unrelated message.
           try { await this.runPostSession(callbacks) } catch { /* best-effort */ }
@@ -1425,7 +1432,7 @@ export class AgentLoop {
 
         if (streamError) {
           if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
-          if (!assistantResponded) this.session.removeLastMessage()
+          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onError(streamError)
           return
         }
@@ -1500,7 +1507,7 @@ export class AgentLoop {
       }
     } catch (err) {
       this.evidence.reset()
-      if (!assistantResponded) this.session.removeLastMessage()
+      if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
       if ((err as Error).name === 'AbortError') {
         await this.runPostSession(callbacks)
         callbacks.onAbort()
