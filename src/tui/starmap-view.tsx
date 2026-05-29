@@ -95,7 +95,7 @@ export const StarmapView = memo(function StarmapView(props: StarmapViewProps) {
       {recentRadio.length > 0 && (
         <Box flexDirection="column">
           {recentRadio.map((entry, i) => (
-            <Text key={i} dimColor color="cyan">
+            <Text key={i} color={theme.muted}>
               {'  '}{entry.summary}
             </Text>
           ))}
@@ -106,7 +106,7 @@ export const StarmapView = memo(function StarmapView(props: StarmapViewProps) {
       <Text>{' '}</Text>
 
       {/* 11. Help */}
-      <Text dimColor>{'  '}按 1 返回对话 {String.fromCodePoint(0x2502)} 按 3 传说 {String.fromCodePoint(0x2502)} 按 4 驾驶舱</Text>
+      <Text color={theme.muted}>{'  '}按 1 返回对话 {String.fromCodePoint(0x2502)} 按 3 传说 {String.fromCodePoint(0x2502)} 按 4 驾驶舱</Text>
     </Box>
   )
 })

@@ -12,7 +12,7 @@ export const SystemMessage = memo(function SystemMessage({ content, isError }: S
   const color = isError ? theme.error : theme.systemColor
   return (
     <Box paddingX={2}>
-      <Text color={color} dimColor={!isError}>{'⌁'} {content}</Text>
+      <Text color={!isError ? theme.muted : color}>{'⌁'} {content}</Text>
     </Box>
   )
 })

@@ -53,7 +53,7 @@ export function Pager({ entries, verbose, onExit }: PagerProps) {
       <Box flexDirection="column">
         {visible.map(entry => renderStaticEntry(entry, verbose))}
       </Box>
-      <Text dimColor>
+      <Text color={theme.muted}>
         ↑↓/j/k: scroll · PgUp/PgDn: page · g/G: top/bottom · q/Esc: close
       </Text>
     </Box>

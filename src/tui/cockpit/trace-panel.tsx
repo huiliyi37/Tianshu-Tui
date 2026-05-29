@@ -41,7 +41,7 @@ export const TracePanel = memo(function TracePanel({ events }: TracePanelProps) 
           {e.durationMs != null && <Text color={theme.dim}> │ {e.durationMs}ms</Text>}
         </Text>
       ))}
-      {events.length === 0 && <Text dimColor>No trace events</Text>}
+      {events.length === 0 && <Text color={theme.muted}>No trace events</Text>}
     </Box>
   )
 })

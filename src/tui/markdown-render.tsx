@@ -428,12 +428,12 @@ function renderCodeBlock(language: string | undefined, content: string): ReactNo
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor={theme.dim} paddingX={1}>
-      {language && <Text dimColor>{language}</Text>}
+      {language && <Text color={theme.muted}>{language}</Text>}
       {lines.map((line, i) => {
         const segs = highlightLine(line, keywords, caseInsensitive)
         const isComment = segs.length === 1 && segs[0]!.text === line && (line.trimStart().startsWith('//') || line.trimStart().startsWith('#'))
         return (
-          <Text key={i} dimColor={isComment}>
+          <Text key={i} color={isComment ? theme.muted : undefined}>
             {isComment ? line : renderSegments(segs)}
           </Text>
         )
@@ -478,7 +478,7 @@ function renderBlock(block: Block, key: number, columns: number): ReactNode {
         <Box key={key} flexDirection="column" paddingLeft={1}>
           {items.map((item, i) => (
             <Text key={i}>
-              <Text dimColor>• </Text>
+              <Text color={theme.muted}>• </Text>
               {renderSegments(parseInline(item))}
             </Text>
           ))}
@@ -487,12 +487,12 @@ function renderBlock(block: Block, key: number, columns: number): ReactNode {
     }
     case 'blockquote':
       return (
-        <Box key={key} paddingLeft={2} borderStyle="single" borderColor="gray">
-          <Text dimColor>{block.content}</Text>
+        <Box key={key} paddingLeft={2} borderStyle="single" borderColor={theme.dim}>
+          <Text color={theme.muted}>{block.content}</Text>
         </Box>
       )
     case 'hr':
-      return <Text key={key} dimColor>{'─'.repeat(Math.max(20, columns - 4))}</Text>
+      return <Text key={key} color={theme.dim}>{'─'.repeat(Math.max(20, columns - 4))}</Text>
     case 'table':
       return <Box key={key}>{renderTable(block.content)}</Box>
     case 'paragraph':

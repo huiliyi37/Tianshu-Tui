@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink'
 import { useMemo } from 'react'
+import { getTheme } from './theme.js'
 import { type PaletteCommand, filterCommands } from './command-palette.js'
 
 interface SlashHintProps {
@@ -9,6 +10,7 @@ interface SlashHintProps {
 }
 
 export function SlashHint({ input, selectedIdx, commands }: SlashHintProps) {
+  const theme = getTheme()
   const query = input.slice(1) // strip leading /
   const filtered = useMemo(() => filterCommands(commands, query), [commands, query])
 
@@ -23,7 +25,7 @@ export function SlashHint({ input, selectedIdx, commands }: SlashHintProps) {
             <Text bold={i === selectedIdx} color={i === selectedIdx ? 'green' : 'cyan'}>
               {highlightMatch(cmd.name, query)}
             </Text>
-            <Text dimColor> — {cmd.description}</Text>
+            <Text color={theme.muted}> — {cmd.description}</Text>
           </Text>
         </Box>
       ))}

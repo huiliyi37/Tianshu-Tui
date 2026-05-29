@@ -48,7 +48,7 @@ export const McpPanel = memo(function McpPanel({ servers, totalTools, connectedS
           {s.lastErrorClass && <Text color={theme.warning}> · {s.lastErrorClass}</Text>}
         </Text>
       ))}
-      {servers.length === 0 && <Text dimColor>No MCP servers configured</Text>}
+      {servers.length === 0 && <Text color={theme.muted}>No MCP servers configured</Text>}
     </Box>
   )
 })

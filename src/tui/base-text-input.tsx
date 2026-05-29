@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef } from 'react'
 import { VimState as VimStateClass, processVimKey } from './vim-mode.js'
 import { Text } from 'ink'
 import { useInput } from 'ink'
+import { getTheme } from './theme.js'
 
 // Bracketed paste markers (after Ink strips leading \x1b)
 const PASTE_START = '[200~'
@@ -322,7 +323,7 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
           )}
         </>
       ) : (
-        <Text dimColor>{placeholder ?? ''}{cursorShown ? '█' : ' '}</Text>
+        <Text color={getTheme().muted}>{placeholder ?? ''}{cursorShown ? '█' : ' '}</Text>
       )}
     </Text>
   )

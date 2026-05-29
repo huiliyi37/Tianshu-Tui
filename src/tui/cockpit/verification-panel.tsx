@@ -76,7 +76,7 @@ export const VerificationPanel = memo(function VerificationPanel({
           <Text>{v.tool} │ {v.summary}</Text>
         </Text>
       ))}
-      {verifications.length === 0 && !deliveryStatus && <Text dimColor>No verification data</Text>}
+      {verifications.length === 0 && !deliveryStatus && <Text color={theme.muted}>No verification data</Text>}
     </Box>
   )
 })

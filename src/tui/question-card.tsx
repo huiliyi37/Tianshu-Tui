@@ -24,7 +24,7 @@ export const QuestionCard = memo(function QuestionCard({ question }: QuestionCar
         flexDirection="column"
       >
         <Text bold color={theme.primary}>{question}</Text>
-        <Text dimColor>⏳ Type your response below</Text>
+        <Text color={theme.muted}>⏳ Type your response below</Text>
       </Box>
     </Box>
   )

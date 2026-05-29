@@ -53,15 +53,15 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
     <Box flexDirection="column" paddingX={1} marginBottom={0}>
       <Text bold color={borderColor}>
         {family.glyph} {family.verb}{isStreaming ? ' …' : ''}
-        {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text dimColor> {totalLines} lines</Text>}
-        {focused && totalLines > MAX_COLLAPSED_LINES ? <Text dimColor> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
+        {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text color={theme.muted}> {totalLines} lines</Text>}
+        {focused && totalLines > MAX_COLLAPSED_LINES ? <Text color={theme.muted}> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
       </Text>
       <Markdown text={displayText} />
       {truncated > 0 && (
-        <Text dimColor>  {truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
+        <Text color={theme.muted}>  {truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
       )}
       {truncated === 0 && rawPath && (
-        <Text dimColor>  raw: {compactPath(rawPath)}</Text>
+        <Text color={theme.muted}>  raw: {compactPath(rawPath)}</Text>
       )}
     </Box>
   )

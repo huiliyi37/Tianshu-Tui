@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Box, Text, useInput } from 'ink'
+import { getTheme } from './theme.js'
 
 interface ThinkingStatusOptions {
   isStreaming: boolean
@@ -163,9 +164,10 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
   const statusLabel = thinkingStatusLabel({ isStreaming, elapsedMs: elapsed, completedDurationMs, stale })
 
   if (!expanded) {
+    const theme = getTheme()
     return (
       <Box flexDirection="column" paddingX={2}>
-        <Text dimColor>
+        <Text color={theme.muted}>
           {'▸'} {spinner} Thinking {statusLabel}
           {` (${formatThinkingSize(thinking.length)})`}
           {focused ? ' (Tab to expand)' : ''}
@@ -174,6 +176,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
     )
   }
 
+  const theme = getTheme()
   const MAX_VISIBLE_LINES = 8
   const thinkingLines = truncateThinking(thinking).split('\n')
   const visibleThinking = thinkingLines.length > MAX_VISIBLE_LINES
@@ -182,13 +185,13 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
 
   return (
     <Box flexDirection="column" paddingX={2}>
-      <Text dimColor>
+      <Text color={theme.muted}>
         {'▾'} {spinner} Thinking {statusLabel}
         {` (${formatThinkingSize(thinking.length)})`}
         {focused ? ' (Tab to collapse)' : ''}
       </Text>
-      <Box paddingLeft={2} borderStyle="single" borderColor="gray">
-        <Text dimColor>{visibleThinking}</Text>
+      <Box paddingLeft={2} borderStyle="single" borderColor={theme.dim}>
+        <Text color={theme.muted}>{visibleThinking}</Text>
       </Box>
     </Box>
   )

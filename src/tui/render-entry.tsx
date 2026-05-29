@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink'
 import type { LogEntry } from './log-state.js'
+import { getTheme } from './theme.js'
 import { ToolCard } from './tool-card.js'
 import { ToolGroup } from './tool-group.js'
 import { UserMessage } from './user-message.js'
@@ -22,7 +23,7 @@ const RENDER_MAP: Record<string, EntryRenderer> = {
     return <ToolCard key={e.id} name={e.toolName ?? ''} result={e.content} isError={e.isError} verbose={verbose} rawPath={e.rawPath} />
   },
   tool_group: (e, verbose) => <ToolGroup key={e.id} tools={e.children ?? []} verbose={verbose} />,
-  checkpoint: (e) => <Box key={e.id} paddingX={2}><Text dimColor color="yellow">⚑ {e.content}</Text></Box>,
+  checkpoint: (e) => <Box key={e.id} paddingX={2}><Text color={getTheme().muted} bold>⚑ {e.content}</Text></Box>,
   evidence: (e) => <Box key={e.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{e.content}</Text></Box>,
   system: (e) => <SystemMessage key={e.id} content={e.content} isError={e.isError} />,
 }

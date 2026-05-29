@@ -64,7 +64,7 @@ export const DiffRender = memo(function DiffRender({ text, maxLines = 50 }: Diff
     <Box flexDirection="column">
       <Text bold color={theme.primary}>
         ── diff ({stats.added}<Text color="green">+</Text> {stats.removed}<Text color="red">-</Text>) ──
-        {truncated > 0 && <Text dimColor> {truncated} lines hidden</Text>}
+        {truncated > 0 && <Text color={theme.muted}> {truncated} lines hidden</Text>}
       </Text>
       {visibleLines.map((line, i) => {
         const kind = classifyLine(line)
@@ -74,15 +74,15 @@ export const DiffRender = memo(function DiffRender({ text, maxLines = 50 }: Diff
           case 'del':
             return <Text key={i} color="red">{line}</Text>
           case 'hunk':
-            return <Text key={i} color="gray">{trimHunkLabel(line)}</Text>
+            return <Text key={i} color={theme.muted}>{trimHunkLabel(line)}</Text>
           case 'header':
             return <Text key={i} color={theme.warning}>{line}</Text>
           case 'meta':
-            return <Text key={i} dimColor>{line}</Text>
+            return <Text key={i} color={theme.muted}>{line}</Text>
           case 'no-newline':
-            return <Text key={i} dimColor>{line}</Text>
+            return <Text key={i} color={theme.muted}>{line}</Text>
           default:
-            return <Text key={i} dimColor>{line}</Text>
+            return <Text key={i} color={theme.muted}>{line}</Text>
         }
       })}
     </Box>

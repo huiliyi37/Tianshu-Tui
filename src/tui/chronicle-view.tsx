@@ -22,7 +22,7 @@ export const ChronicleView = memo(function ChronicleView({ segments, elapsedMs }
       <Box height={1} />
 
       {segments.length === 0 && (
-        <Text dimColor>暂无记录。agent 执行中…</Text>
+        <Text color={theme.muted}>暂无记录。agent 执行中…</Text>
       )}
 
       {segments.map((seg, i) => {
@@ -36,18 +36,18 @@ export const ChronicleView = memo(function ChronicleView({ segments, elapsedMs }
           <Box key={i} flexDirection="column" marginBottom={1}>
             <Text>
               <Text bold>{glyph} {label}</Text>
-              <Text dimColor> (T{seg.startTurn}{seg.endTurn !== undefined ? `─${seg.endTurn}` : '+'} │ {duration})</Text>
+              <Text color={theme.muted}> (T{seg.startTurn}{seg.endTurn !== undefined ? `─${seg.endTurn}` : '+'} │ {duration})</Text>
             </Text>
             {seg.entries.map((entry, j) => (
               <Box key={j} paddingLeft={2}>
-                <Text color={entry.type === 'milestone' ? theme.warning : 'cyan'} dimColor>
+                <Text color={entry.type === 'milestone' ? theme.warning : 'cyan'}>
                   {entry.summary}
                 </Text>
               </Box>
             ))}
             {seg.entries.some(e => e.files && e.files.length > 0) && (
               <Box paddingLeft={2}>
-                <Text dimColor>
+                <Text color={theme.muted}>
                   📁 {[...new Set(seg.entries.flatMap(e => e.files ?? []))].join(', ')}
                 </Text>
               </Box>
@@ -57,7 +57,7 @@ export const ChronicleView = memo(function ChronicleView({ segments, elapsedMs }
       })}
 
       <Box height={1} />
-      <Text dimColor>总用时: {formatElapsed(elapsedMs)} │ 按 1 返回对话 │ 按 2 星图 │ 按 4 驾驶舱</Text>
+      <Text color={theme.muted}>总用时: {formatElapsed(elapsedMs)} │ 按 1 返回对话 │ 按 2 星图 │ 按 4 驾驶舱</Text>
     </Box>
   )
 })

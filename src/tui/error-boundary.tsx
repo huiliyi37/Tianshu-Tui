@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react'
 import { Box, Text } from 'ink'
+import { getTheme } from './theme.js'
 
 interface Props {
   children: ReactNode
@@ -29,7 +30,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <Box flexDirection="column" padding={1}>
           <Text bold color="red">Runtime error: {this.state.error.message}</Text>
-          <Text dimColor>Session is preserved. Press Ctrl+C to restart.</Text>
+          <Text color={getTheme().muted}>Session is preserved. Press Ctrl+C to restart.</Text>
         </Box>
       )
     }
