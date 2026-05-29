@@ -157,16 +157,40 @@ export class AnthropicClient implements StreamClient {
       }
     }
 
-    // BP4: last assistant message before the final user message (recent-raw-turns boundary)
-    if (lastUserIdx > 0) {
-      for (let i = lastUserIdx - 1; i >= 0; i--) {
-        if (messages[i]!.role === 'assistant') {
-          const blocks = messages[i]!.content
-          if (blocks.length > 0) {
-            blocks[blocks.length - 1]!.cache_control = { type: 'ephemeral' }
-          }
-          break
+    // BP4: rolling breakpoint — farthest assistant message whose last content
+    // block is within MAX_LOOKBACK blocks of the end of messages.
+    //
+    // Anthropic's prompt cache has a hard 20-block lookback window. We use
+    // a 15-block placement threshold to leave ~5 blocks of safety margin for
+    // conversation growth between requests. In long multi-turn conversations
+    // with many tool_use/tool_result blocks (each tool call = 2 blocks), this
+    // rolling strategy re-evaluates BP4 on every request, picking the
+    // farthest-back assistant that's still safely within the window.
+    // Excludes the BP3 target message to avoid wasting a breakpoint on overlap.
+    const MAX_LOOKBACK = 15
+
+    let totalBlocks = 0
+    for (const msg of messages) {
+      totalBlocks += msg.content.length
+    }
+
+    let bp4Idx = -1
+    let blockPos = 0
+    for (let i = 0; i < messages.length; i++) {
+      blockPos += messages[i]!.content.length
+      if (messages[i]!.role === 'assistant' && i !== firstUserIdx) {
+        const fromEnd = totalBlocks - blockPos
+        if (fromEnd < MAX_LOOKBACK) {
+          bp4Idx = i
+          break // first qualifying = farthest from end within window
         }
+      }
+    }
+
+    if (bp4Idx >= 0) {
+      const bp4Blocks = messages[bp4Idx]!.content
+      if (bp4Blocks.length > 0) {
+        bp4Blocks[bp4Blocks.length - 1]!.cache_control = { type: 'ephemeral' }
       }
     }
 

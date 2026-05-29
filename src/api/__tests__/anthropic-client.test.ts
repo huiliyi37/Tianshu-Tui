@@ -254,7 +254,7 @@ describe('cache_control breakpoint injection', () => {
     assert.deepEqual(lastBlock.cache_control, { type: 'ephemeral' })
   })
 
-  it('injects BP4 on last completed assistant turn before final user (5m TTL)', () => {
+  it('injects BP4 on farthest assistant within 15-block lookback window', () => {
     const client = makeClient()
     const body = client.buildRequestBodyForTest({
       model: 'claude-opus-4-7',
@@ -268,16 +268,74 @@ describe('cache_control breakpoint injection', () => {
       ],
       max_tokens: 4096,
     })
-    // messages: [user("first msg"), assistant("first"), user("second"), assistant("second"), user("third")]
-    // BP4 on assistant("second response") — index 3
-    const bp4Msg = body.messages[3]!
+    // 5 messages, each 1 block. assistant("first") last block at pos 2 → fromEnd = 3 < 15
+    // → bp4Idx=1 (first qualifying = farthest from end, maximizing cached prefix)
+    const bp4Msg = body.messages[1]!
     assert.equal(bp4Msg.role, 'assistant')
-    const blocks = bp4Msg.content
-    const lastBlock = blocks[blocks.length - 1]!
-    assert.deepEqual(lastBlock.cache_control, { type: 'ephemeral' })
+    assert.deepEqual(bp4Msg.content[bp4Msg.content.length - 1]!.cache_control, { type: 'ephemeral' })
   })
 
-  it('handles single turn — BP3 on only user, no BP4', () => {
+  it('places BP4 on farthest assistant within window when earlier ones are out of range', () => {
+    const client = makeClient()
+    const messages: Array<{ role: string; content: string; tool_call_id?: string }> = [
+      { role: 'user', content: 'msg0' },
+      { role: 'assistant', content: 'resp0' },
+    ]
+    // Add enough tool-call pairs to push resp0 and early tc assistants beyond 15-block window
+    for (let i = 0; i < 10; i++) {
+      messages.push({ role: 'assistant', content: `tc${i}` })
+      messages.push({ role: 'tool', content: `result${i}`, tool_call_id: `call_${i}` })
+    }
+    messages.push({ role: 'user', content: 'final' })
+
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: messages as any,
+      max_tokens: 4096,
+    })
+
+    // 23 messages, each 1 block → 23 blocks. MAX_LOOKBACK=15.
+    // resp0 at blockPos=2 → fromEnd=21 >= 15 → skip
+    // tc0 at blockPos=3 → fromEnd=20 >= 15 → skip
+    // tc1 at blockPos=5 → fromEnd=18 >= 15 → skip
+    // tc2 at blockPos=7 → fromEnd=16 >= 15 → skip
+    // tc3 at blockPos=9 → fromEnd=14 < 15 → bp4Idx=8 (messages[8] = assistant tc3)
+    const bp4Msg = body.messages[8]!
+    assert.equal(bp4Msg.role, 'assistant')
+    assert.deepEqual(bp4Msg.content[bp4Msg.content.length - 1]!.cache_control, { type: 'ephemeral' })
+  })
+
+  it('skips BP4 when all assistants are beyond lookback window', () => {
+    const client = makeClient()
+    // Build a conversation where ALL assistants are >15 blocks back
+    const messages: Array<{ role: string; content: string }> = [
+      { role: 'user', content: 'msg0' },
+      { role: 'assistant', content: 'resp0' },
+    ]
+    // Add enough filler user messages to push resp0 beyond 15-block window
+    for (let i = 0; i < 15; i++) {
+      messages.push({ role: 'user', content: `filler${i}` })
+    }
+    messages.push({ role: 'user', content: 'final' })
+
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: messages as any,
+      max_tokens: 4096,
+    })
+
+    // 2 + 15 + 1 = 18 messages, 18 blocks
+    // resp0 at blockPos=2 → fromEnd=16 >= 15 → skipped, no BP4
+    for (const msg of body.messages) {
+      if (msg.role === 'assistant') {
+        for (const block of msg.content) {
+          assert.equal(block.cache_control, undefined)
+        }
+      }
+    }
+  })
+
+  it('skips BP4 when the only candidate is the BP3 target (overlap)', () => {
     const client = makeClient()
     const body = client.buildRequestBodyForTest({
       model: 'claude-opus-4-7',
@@ -287,10 +345,9 @@ describe('cache_control breakpoint injection', () => {
       ],
       max_tokens: 4096,
     })
-    // BP3 on first (only) user message
-    const msg = body.messages[0]!
-    assert.deepEqual(msg.content[0]!.cache_control, { type: 'ephemeral' })
-    // No assistant before final user → no BP4
+    // BP3 on messages[0] (first user)
+    assert.deepEqual(body.messages[0]!.content[0]!.cache_control, { type: 'ephemeral' })
+    // BP4 should NOT be placed — no assistant exists, nothing to do
   })
 
   it('handles no tools — no BP1, but BP2+BP3 still injected', () => {
