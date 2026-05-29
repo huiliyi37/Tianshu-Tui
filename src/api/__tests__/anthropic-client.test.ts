@@ -216,7 +216,7 @@ describe('cache_control breakpoint injection', () => {
     const tools = body.tools!
     assert.equal(tools.length, 2)
     const lastTool = tools[tools.length - 1]!
-    assert.deepEqual(lastTool.cache_control, { type: 'ephemeral' })
+    assert.deepEqual(lastTool.cache_control, { type: 'ephemeral', ttl: '1h' })
     assert.equal(tools[0]!.cache_control, undefined)
   })
 
@@ -232,7 +232,7 @@ describe('cache_control breakpoint injection', () => {
     })
     const sys = body.system!
     const lastSystemBlock = sys[sys.length - 1]!
-    assert.deepEqual(lastSystemBlock.cache_control, { type: 'ephemeral' })
+    assert.deepEqual(lastSystemBlock.cache_control, { type: 'ephemeral', ttl: '1h' })
   })
 
   it('injects BP3 on first user message last content block (5m TTL)', () => {
@@ -363,7 +363,7 @@ describe('cache_control breakpoint injection', () => {
     assert.equal(body.tools, undefined)
     // BP2 still present
     const sys = body.system!
-    assert.deepEqual(sys[sys.length - 1]!.cache_control, { type: 'ephemeral' })
+    assert.deepEqual(sys[sys.length - 1]!.cache_control, { type: 'ephemeral', ttl: '1h' })
     // BP3 still present
     assert.deepEqual(body.messages[0]!.content[0]!.cache_control, { type: 'ephemeral' })
   })

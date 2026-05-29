@@ -19,7 +19,7 @@ interface AnthropicContentBlock {
   input?: Record<string, unknown>
   tool_use_id?: string
   content?: string
-  cache_control?: { type: 'ephemeral' }
+  cache_control?: { type: 'ephemeral'; ttl?: '1h' }
 }
 
 interface AnthropicMessage {
@@ -35,7 +35,7 @@ interface AnthropicRequestBody {
     name: string
     description?: string
     input_schema: Record<string, unknown>
-    cache_control?: { type: 'ephemeral' }
+    cache_control?: { type: 'ephemeral'; ttl?: '1h' }
   }>
   messages: AnthropicMessage[]
   stream: boolean
@@ -129,14 +129,14 @@ export class AnthropicClient implements StreamClient {
     }
 
     // ── Four cache_control breakpoints ──────────────────────────────
-    // BP1: last tool definition (1h TTL via ephemeral + system position)
+    // BP1: last tool definition (1h TTL — tools rarely change)
     if (tools && tools.length > 0) {
-      tools[tools.length - 1]!.cache_control = { type: 'ephemeral' }
+      tools[tools.length - 1]!.cache_control = { type: 'ephemeral', ttl: '1h' }
     }
 
-    // BP2: last system content block (1h TTL via ephemeral + system position)
+    // BP2: last system content block (1h TTL — system prompt is static)
     if (system.length > 0) {
-      system[system.length - 1]!.cache_control = { type: 'ephemeral' }
+      system[system.length - 1]!.cache_control = { type: 'ephemeral', ttl: '1h' }
     }
 
     // BP3 & BP4: locate target positions in messages
@@ -160,12 +160,16 @@ export class AnthropicClient implements StreamClient {
     // BP4: rolling breakpoint — farthest assistant message whose last content
     // block is within MAX_LOOKBACK blocks of the end of messages.
     //
-    // Anthropic's prompt cache has a hard 20-block lookback window. We use
-    // a 15-block placement threshold to leave ~5 blocks of safety margin for
-    // conversation growth between requests. In long multi-turn conversations
-    // with many tool_use/tool_result blocks (each tool call = 2 blocks), this
-    // rolling strategy re-evaluates BP4 on every request, picking the
-    // farthest-back assistant that's still safely within the window.
+    // Anthropic's prompt cache has a hard 20-block lookback window: a cached
+    // prefix is only reachable if its last block is within 20 blocks of the
+    // current request end. We use a 15-block placement threshold (rather than
+    // the full 20) because BP4 is re-evaluated on every request — the next
+    // request may grow the message array, and a breakpoint placed at the
+    // boundary (fromEnd=20) would immediately fall out of the window.
+    //
+    // In long multi-turn conversations with many tool_use/tool_result blocks
+    // (each tool call = 2 blocks), this rolling strategy picks the farthest
+    // assistant still safely within the window, maximizing cached prefix.
     // Excludes the BP3 target message to avoid wasting a breakpoint on overlap.
     const MAX_LOOKBACK = 15
 
@@ -241,8 +245,10 @@ export class AnthropicClient implements StreamClient {
       return { role: 'assistant', content: blocks }
     }
 
-    // Fallback (should not reach here — types are exhaustive)
-    return { role: 'user', content: [{ type: 'text', text: '' }] }
+    // Fallback — types are exhaustive, this path should be unreachable.
+    // Throw explicitly so new role types added to OaiMessage are caught
+    // at development time rather than silently producing empty messages.
+    throw new Error(`Unsupported message role in AnthropicClient: ${JSON.stringify(msg)}`)
   }
 
   private async processSSEStream(
@@ -266,6 +272,10 @@ export class AnthropicClient implements StreamClient {
     // Accumulators for content blocks
     const textBlocks: string[] = []
     const thinkingBlocks: string[] = []
+    // Tool use buffering: Anthropic streams tool_use parameters as
+    // incremental input_json_delta chunks. We accumulate by block index
+    // and emit the complete tool_use only on content_block_stop.
+    const toolUseBuffer = new Map<number, { id: string; name: string; partialJson: string }>()
 
     // SSE idle timeout — same pattern as OpenAIClient and CodexClient
     const FIRST_BYTE_TIMEOUT_MS = 45_000
@@ -327,20 +337,21 @@ export class AnthropicClient implements StreamClient {
             }
 
             case 'content_block_start': {
+              const index = parsed.index as number | undefined
               const block = parsed.content_block as Record<string, unknown> | undefined
               if (!block) break
-              if (block.type === 'tool_use') {
+              if (block.type === 'tool_use' && index !== undefined) {
                 const id = block.id as string
                 const name = block.name as string
-                const input = block.input as Record<string, unknown> ?? {}
                 if (id && name) {
-                  callbacks.onContentBlock({ type: 'tool_use', id, name, input })
+                  toolUseBuffer.set(index, { id, name, partialJson: '' })
                 }
               }
               break
             }
 
             case 'content_block_delta': {
+              const index = parsed.index as number | undefined
               const delta = parsed.delta as Record<string, unknown> | undefined
               if (!delta) break
               if (delta.type === 'text_delta' && typeof delta.text === 'string') {
@@ -349,12 +360,28 @@ export class AnthropicClient implements StreamClient {
               } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
                 thinkingBlocks.push(delta.thinking)
                 callbacks.onThinkingDelta(delta.thinking)
+              } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string' && index !== undefined) {
+                const buf = toolUseBuffer.get(index)
+                if (buf) {
+                  buf.partialJson += delta.partial_json
+                }
               }
-              // input_json_delta handled via content_block_start for full tool_use
               break
             }
 
             case 'content_block_stop': {
+              const index = parsed.index as number | undefined
+              if (index !== undefined) {
+                const buf = toolUseBuffer.get(index)
+                if (buf) {
+                  let input: Record<string, unknown> = {}
+                  try {
+                    input = JSON.parse(buf.partialJson || '{}')
+                  } catch { /* keep empty */ }
+                  callbacks.onContentBlock({ type: 'tool_use', id: buf.id, name: buf.name, input })
+                  toolUseBuffer.delete(index)
+                }
+              }
               break
             }
 
