@@ -128,6 +128,48 @@ export class AnthropicClient implements StreamClient {
       body.thinking = { type: 'enabled', budget_tokens: this.config.thinkingBudget }
     }
 
+    // ── Four cache_control breakpoints ──────────────────────────────
+    // BP1: last tool definition (1h TTL via ephemeral + system position)
+    if (tools && tools.length > 0) {
+      tools[tools.length - 1]!.cache_control = { type: 'ephemeral' }
+    }
+
+    // BP2: last system content block (1h TTL via ephemeral + system position)
+    if (system.length > 0) {
+      system[system.length - 1]!.cache_control = { type: 'ephemeral' }
+    }
+
+    // BP3 & BP4: locate target positions in messages
+    let firstUserIdx = -1
+    let lastUserIdx = -1
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i]!.role === 'user') {
+        if (firstUserIdx === -1) firstUserIdx = i
+        lastUserIdx = i
+      }
+    }
+
+    // BP3: last content block of first user message (project-instructions + session-memory)
+    if (firstUserIdx >= 0) {
+      const blocks = messages[firstUserIdx]!.content
+      if (blocks.length > 0) {
+        blocks[blocks.length - 1]!.cache_control = { type: 'ephemeral' }
+      }
+    }
+
+    // BP4: last assistant message before the final user message (recent-raw-turns boundary)
+    if (lastUserIdx > 0) {
+      for (let i = lastUserIdx - 1; i >= 0; i--) {
+        if (messages[i]!.role === 'assistant') {
+          const blocks = messages[i]!.content
+          if (blocks.length > 0) {
+            blocks[blocks.length - 1]!.cache_control = { type: 'ephemeral' }
+          }
+          break
+        }
+      }
+    }
+
     return body
   }
 

@@ -197,3 +197,154 @@ describe('AnthropicClient message conversion', () => {
     assert.equal(body.messages.length, 1)
   })
 })
+
+describe('cache_control breakpoint injection', () => {
+  it('injects BP1 on last tool definition (1h TTL)', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'test' },
+      ],
+      max_tokens: 4096,
+      tools: [
+        { type: 'function', function: { name: 'tool_a', description: '', parameters: { type: 'object', properties: {} } } },
+        { type: 'function', function: { name: 'tool_b', description: '', parameters: { type: 'object', properties: {} } } },
+      ],
+    })
+    const tools = body.tools!
+    assert.equal(tools.length, 2)
+    const lastTool = tools[tools.length - 1]!
+    assert.deepEqual(lastTool.cache_control, { type: 'ephemeral' })
+    assert.equal(tools[0]!.cache_control, undefined)
+  })
+
+  it('injects BP2 on last system content block (1h TTL)', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [
+        { role: 'system', content: 'You are helpful.' },
+        { role: 'user', content: 'test' },
+      ],
+      max_tokens: 4096,
+    })
+    const sys = body.system!
+    const lastSystemBlock = sys[sys.length - 1]!
+    assert.deepEqual(lastSystemBlock.cache_control, { type: 'ephemeral' })
+  })
+
+  it('injects BP3 on first user message last content block (5m TTL)', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'project instructions + memory + first message' },
+        { role: 'assistant', content: 'response' },
+        { role: 'user', content: 'second message' },
+      ],
+      max_tokens: 4096,
+    })
+    const firstUserMsg = body.messages[0]!
+    assert.equal(firstUserMsg.role, 'user')
+    const blocks = firstUserMsg.content
+    const lastBlock = blocks[blocks.length - 1]!
+    assert.deepEqual(lastBlock.cache_control, { type: 'ephemeral' })
+  })
+
+  it('injects BP4 on last completed assistant turn before final user (5m TTL)', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'first message' },
+        { role: 'assistant', content: 'first response' },
+        { role: 'user', content: 'second message' },
+        { role: 'assistant', content: 'second response' },
+        { role: 'user', content: 'third message' },
+      ],
+      max_tokens: 4096,
+    })
+    // messages: [user("first msg"), assistant("first"), user("second"), assistant("second"), user("third")]
+    // BP4 on assistant("second response") — index 3
+    const bp4Msg = body.messages[3]!
+    assert.equal(bp4Msg.role, 'assistant')
+    const blocks = bp4Msg.content
+    const lastBlock = blocks[blocks.length - 1]!
+    assert.deepEqual(lastBlock.cache_control, { type: 'ephemeral' })
+  })
+
+  it('handles single turn — BP3 on only user, no BP4', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'only message' },
+      ],
+      max_tokens: 4096,
+    })
+    // BP3 on first (only) user message
+    const msg = body.messages[0]!
+    assert.deepEqual(msg.content[0]!.cache_control, { type: 'ephemeral' })
+    // No assistant before final user → no BP4
+  })
+
+  it('handles no tools — no BP1, but BP2+BP3 still injected', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'test' },
+      ],
+      max_tokens: 4096,
+    })
+    assert.equal(body.tools, undefined)
+    // BP2 still present
+    const sys = body.system!
+    assert.deepEqual(sys[sys.length - 1]!.cache_control, { type: 'ephemeral' })
+    // BP3 still present
+    assert.deepEqual(body.messages[0]!.content[0]!.cache_control, { type: 'ephemeral' })
+  })
+
+  it('handles no system — BP2 skipped, other breakpoints still present', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [
+        { role: 'user', content: 'only user message' },
+      ],
+      max_tokens: 4096,
+    })
+    assert.equal(body.system, undefined)
+    // BP3 still present on first user
+    assert.deepEqual(body.messages[0]!.content[0]!.cache_control, { type: 'ephemeral' })
+  })
+
+  it('does not duplicate cache_control on blocks that already have it from BP3', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [
+        { role: 'user', content: 'single user' },
+        { role: 'assistant', content: 'single assistant' },
+        { role: 'user', content: 'final user' },
+      ],
+      max_tokens: 4096,
+    })
+    // BP3 on first user (index 0), BP4 on assistant (index 1)
+    // Each should have exactly one cache_control
+    const bp3Msg = body.messages[0]!
+    const bp3Block = bp3Msg.content[bp3Msg.content.length - 1]!
+    assert.deepEqual(bp3Block.cache_control, { type: 'ephemeral' })
+
+    const bp4Msg = body.messages[1]!
+    assert.equal(bp4Msg.role, 'assistant')
+    const bp4Block = bp4Msg.content[bp4Msg.content.length - 1]!
+    assert.deepEqual(bp4Block.cache_control, { type: 'ephemeral' })
+  })
+})
