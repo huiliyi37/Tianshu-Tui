@@ -7,6 +7,7 @@ export interface RivetTheme {
   warning: string
   error: string
   dim: string
+  muted: string
   pulseQuiet: string
   pulseActive: string
   pulseAlert: string
@@ -112,12 +113,12 @@ const OBSERVATORY_FALLBACK: ColorSet = {
 // Three-layer gray (fg / muted / subtle) + single accent blue + semantic colors
 const MIDNIGHT_TRUECOLOR: ColorSet = {
   primary: '#58a6ff',   // accent blue — links, selection, active
-  secondary: '#8b949e', // muted gray — labels, secondary text
+  secondary: '#b0b8c4', // medium gray — labels, data values (bumped from #8b949e)
   success: '#3fb950',   // green — pass, active pulse
   warning: '#d29922',   // gold — attention, delegation
   error: '#f85149',     // red — errors, alerts
-  dim: '#6e7681',       // subtle gray — borders, inactive (lighter for better contrast)
-  pulseQuiet: '#3d4450', // dark border gray — quiet pulse (slightly brighter)
+  dim: '#6e7681',       // subtle gray — separators, decoration only
+  pulseQuiet: '#3d4450', // dark border gray — quiet pulse
   pulseActive: '#58a6ff', // accent blue — active pulse
   pulseAlert: '#f85149',  // red — alert pulse
 }
@@ -157,9 +158,10 @@ function makeContextColor(c: Pick<ColorSet, 'primary' | 'warning' | 'error'>) {
 function buildTheme(colors: ColorSet, overrides?: { userColor?: string; assistantColor?: string }): RivetTheme {
   return {
     ...colors,
+    muted: '#9aa2b1',
     userColor: overrides?.userColor ?? colors.primary,
     assistantColor: overrides?.assistantColor ?? colors.secondary,
-    systemColor: colors.dim,
+    systemColor: '#9aa2b1',
     toolColor: makeToolColor(colors),
     contextColor: makeContextColor(colors),
   }

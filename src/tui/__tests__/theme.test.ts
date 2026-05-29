@@ -33,6 +33,13 @@ describe('getTheme', () => {
     assert.equal(theme.contextColor(0.7), theme.warning)
     assert.equal(theme.contextColor(0.85), theme.error)
   })
+
+  it('exposes muted color for secondary readable text', () => {
+    const theme = getTheme(3)
+    assert.equal(typeof theme.muted, 'string')
+    assert.ok(theme.muted.length > 0)
+    assert.notEqual(theme.muted, theme.dim)
+  })
 })
 
 describe('theme switching', () => {
