@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { RUN_TESTS_TOOL } from '../run-tests.js'
+import { RUN_TESTS_TOOL, parseOutput } from '../run-tests.js'
 
 function makeParams(input: Record<string, unknown>, cwd: string) {
   return {

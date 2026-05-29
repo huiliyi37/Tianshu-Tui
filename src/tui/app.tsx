@@ -528,10 +528,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const handleSubmit = useCallback((_userInput: string) => {
     let userInput = _userInput
-    const run = async () => {
     // Bump generation so any in-flight onAbort from a previous run can detect staleness.
     streamGenRef.current++
     const myGen = streamGenRef.current
+    const run = async () => {
     setIsStreaming(true)
     setIsThinkingActive(false)
     setStreamingText('')

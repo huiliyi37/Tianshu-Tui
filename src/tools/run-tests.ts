@@ -78,12 +78,12 @@ function asNum(s: string | undefined, fallback = 0): number {
 }
 
 /** Strip ANSI escape sequences (colors, cursor moves, etc.) from raw output. */
-function stripAnsi(input: string): string {
+export function stripAnsi(input: string): string {
   // eslint-disable-next-line no-control-regex
   return input.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
-function parseOutput(raw: string, runner: string): ParsedResult {
+export function parseOutput(raw: string, runner: string): ParsedResult {
   const clean = stripAnsi(raw)
   const result: ParsedResult = {
     exitCode: 0,

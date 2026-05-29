@@ -44,7 +44,8 @@ export function countPhysicalLines(text: string, columns: number): number {
  */
 export const ThinkingMessage = memo(function ThinkingMessage({ content }: ThinkingMessageProps) {
   const theme = getTheme()
-  const { columns } = useTerminalSize()
+  const { columns: rawColumns } = useTerminalSize()
+  const columns = rawColumns > 0 ? rawColumns : 80
   const maxPhysicalLines = useViewportLines(0.4, 3)
   const lines = content.split('\n')
   const totalPhysicalLines = countPhysicalLines(content, columns)
