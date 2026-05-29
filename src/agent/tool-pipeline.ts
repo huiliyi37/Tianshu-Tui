@@ -604,7 +604,17 @@ ${check.formatted}`
       endedAt: Date.now(),
       summary: harnessResult.content.slice(0, 100),
     })
-    deps.recordPrediction?.(!harnessResult.isError)
+    // Record prediction outcome for the cerebellar prediction loop.
+    // In verify phase (kaiyang-testing), run_tests returning RED is expected
+    // TDD behavior — an information gain, not a cognitive prediction failure.
+    // Skipping prediction recording here prevents the phasic penalty feedback
+    // loop that causes "信心 0%" self-fulfilling doubt during TDD cycles.
+    const isTestRun = tu.name === 'run_tests'
+    const isVerifyPhase = (deps.phaseHint ?? 'execute') === 'verify'
+    const isTddRed = isTestRun && isVerifyPhase && harnessResult.isError
+    if (!isTddRed) {
+      deps.recordPrediction?.(!harnessResult.isError)
+    }
     const fp = fingerprintToolCall(tu.name, tu.input, harnessResult.isError ? 'error' : 'success')
     traceStore = recordToolFingerprint(traceStore, fp)
 

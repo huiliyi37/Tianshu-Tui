@@ -860,3 +860,164 @@ describe('artifactIntercept in tool pipeline', () => {
     }
   })
 })
+
+// ─── Phase-aware prediction recording (TDD RED fix) ──
+
+describe('phase-aware prediction recording', () => {
+  function makeDeps(overrides?: Partial<ToolPipelineDeps>): ToolPipelineDeps {
+    return {
+      config: {
+        toolRegistry: {
+          execute: async () => ({ content: 'test output', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+        hooks: null,
+        lspEnabled: false,
+        fileHistory: undefined,
+        contextClaimStore: undefined,
+        sessionId: 'test-session',
+        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {} },
+      } as any,
+      cwd: '/tmp/test',
+      harness: {
+        executeTool: async ({ execute }: any) => {
+          const r = await execute()
+          return { content: r.content, isError: r.isError ?? false, retried: false }
+        },
+      } as any,
+      prewarm: { get: () => null, invalidate: () => {} } as any,
+      evidence: mockEvidence,
+      traceStore: { events: [], toolFingerprints: [] } as any,
+      repairHintTracker: { recordSuccess: () => {}, recordFailure: () => {} } as any,
+      repairPipeline: { run: (input: any) => ({ output: input, telemetry: [] }) } as any,
+      importGraph: null,
+      lastConflictCheckCount: 0,
+      trajectory: { getEntries: () => [] } as any,
+      getDoomLoopLevel: () => 'none' as const,
+      latestRisk: { level: 'none' as const, reasons: [], suggestedAction: '' },
+      sessionTurnCount: 1,
+      sessionId: 'test-session',
+      recordToolHistory: () => {},
+      turnBudget: createTurnBudget(0),
+      ...overrides,
+    }
+  }
+
+  const noopCallbacks = { onWrite: () => {}, onRead: () => {}, onBash: () => {}, onEdit: () => {}, onToolResult: () => {}, onApprovalRequired: async () => true }
+
+  it('does NOT record prediction for run_tests failure in verify phase (TDD RED)', async () => {
+    let recorded: boolean | undefined = undefined
+    const deps = makeDeps({
+      phaseHint: 'verify',
+      recordPrediction: (correct: boolean) => { recorded = correct },
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: '1 test failed', isError: true }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-tdd-red', name: 'run_tests', input: {} },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(recorded, undefined, 'TDD RED in verify phase should NOT record prediction')
+  })
+
+  it('DOES record prediction for run_tests failure in execute phase (real bug)', async () => {
+    let recorded: boolean | undefined = undefined
+    const deps = makeDeps({
+      phaseHint: 'execute',
+      recordPrediction: (correct: boolean) => { recorded = correct },
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: '1 test failed', isError: true }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-bug-red', name: 'run_tests', input: {} },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(recorded, false, 'run_tests failure in execute phase should record as prediction error')
+  })
+
+  it('DOES record prediction for non-run_tests failure regardless of phase', async () => {
+    let recorded: boolean | undefined = undefined
+    const deps = makeDeps({
+      phaseHint: 'verify',
+      recordPrediction: (correct: boolean) => { recorded = correct },
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'file not found', isError: true }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-read-fail', name: 'read_file', input: { file_path: '/nonexistent' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(recorded, false, 'non-run_tests failures always record prediction')
+  })
+
+  it('DOES record prediction for run_tests success in verify phase (TDD GREEN)', async () => {
+    let recorded: boolean | undefined = undefined
+    const deps = makeDeps({
+      phaseHint: 'verify',
+      recordPrediction: (correct: boolean) => { recorded = correct },
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'all tests passed', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-tdd-green', name: 'run_tests', input: {} },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(recorded, true, 'run_tests success in verify phase should record as correct prediction')
+  })
+
+  it('phaseHint defaults to execute — verify exemption does NOT trigger', async () => {
+    let recorded: boolean | undefined = undefined
+    const deps = makeDeps({
+      // phaseHint NOT set — should default to 'execute'
+      recordPrediction: (correct: boolean) => { recorded = correct },
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: '1 test failed', isError: true }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-no-phase', name: 'run_tests', input: {} },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(recorded, false, 'without phaseHint, run_tests failure records as prediction error')
+  })
+})

@@ -70,6 +70,9 @@ export interface ToolExecutionDeps {
   p3?: P3Integration
   /** Immune system hook (forwarded to tool-pipeline for adaptive learning) */
   immuneHook?: ImmuneHook
+  /** Current StarPhase mapped to phaseClass. Used by tool-pipeline for phase-aware
+   *  prediction recording — e.g., TDD RED in verify phase is NOT a prediction error. */
+  getPhaseHint?: () => string
 }
 
 export interface ToolExecBatchInput {
@@ -156,6 +159,7 @@ export class ToolExecutionController {
           ownershipLedger: this.deps.config.ownershipLedger,
           p3: this.deps.p3,
           immuneHook: this.deps.immuneHook,
+          phaseHint: this.deps.getPhaseHint?.(),
           artifactIdsEvicted,
           artifactIdsAccessed,
         })
@@ -209,6 +213,7 @@ export class ToolExecutionController {
           ownershipLedger: this.deps.config.ownershipLedger,
           p3: this.deps.p3,
           immuneHook: this.deps.immuneHook,
+          phaseHint: this.deps.getPhaseHint?.(),
           artifactIdsEvicted,
           artifactIdsAccessed,
         }
