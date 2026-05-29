@@ -23,7 +23,19 @@ export interface TaskContract {
 const FILE_PATTERN = /(?:^|\s)((?:src|lib|test|tests|pkg|cmd|internal|docs|scripts)\/[\w./-]+\.\w+)/g
 const CONSTRAINT_MARKER_PATTERN = /\b(?:don'?t|must(?:n'?t)?|never)\b|不要|禁止|必须|不可以|不能/i
 const CLAUSE_SPLIT_PATTERN = /[。.!?！？]+|[\n\r]+/g
-const NON_ACTIONABLE_PATTERN = /^(?:hi|hello|hey|你好|您好|谢谢|多谢|ok|okay|了解|收到|辛苦了|thanks|thank you)[。.!！\s]*$/i
+
+/** Shared word list for greeting / non-actionable detection. Single source of truth. */
+const GREETING_WORDS = 'hi|hello|hey|你好|您好|谢谢|多谢|谢谢你|ok|okay|了解|收到|辛苦了|thanks|thank you'
+
+/** Matches a message that is *entirely* a greeting or polite ack (no substantive content). */
+const NON_ACTIONABLE_PATTERN = new RegExp('^(?:' + GREETING_WORDS + ')[\u3002.!\uff01\uff1f?\s]*$', 'i')
+
+/**
+ * Matches a greeting *prefix* followed by substantive content on the next line.
+ * Used by stripGreetingPrefix to peel off greeting lines before real instructions.
+ */
+const GREETING_PREFIX_RE = new RegExp('^(?:' + GREETING_WORDS + ')[\u3002.,!\uff01\uff1f?\s]*(?:\n|$)', 'i')
+
 const STATUS_RANK: Record<Exclude<ContractStatus, 'blocked'>, number> = {
   exploring: 0,
   planning: 1,
@@ -39,8 +51,6 @@ function escapeXml(value: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
 }
-
-const GREETING_PREFIX_RE = /^(?:hi|hello|hey|你好|您好|谢谢|多谢|ok|okay|了解|收到|辛苦了|thanks|thank you)[。.!!！？?\s]*(?:\n|$)/i
 
 function stripGreetingPrefix(userMessage: string): string {
   return userMessage.replace(GREETING_PREFIX_RE, '').trim()
@@ -65,13 +75,15 @@ function makeContractId(objective: string, turn: number): string {
 
 function isActionableObjective(objective: string, mentionedFiles: string[], constraints: string[]): boolean {
   if (mentionedFiles.length > 0 || constraints.length > 0) return true
-  // CJK-aware length: 1 CJK char ≈ 2 Latin chars in semantic density.
-  // "修复bug" (4 chars, weight 2+2+2+1+1+1=9) should pass; "hi" (2 chars, weight 2) should not.
+  // CJK-aware length: 1 CJK char counts as 2, Latin as 1.
+  // "修复bug" (weight 2+2+1+1+1=7) should pass; "hi" (1+1=2) should not.
+  // Threshold 6 lets 3-char CJK imperatives through while blocking 2-char greetings.
+  // Gate 2 (NON_ACTIONABLE_PATTERN) then catches polite phrases like "辛苦了"(6).
   const cjkWeight = [...objective].reduce((sum, ch) => {
     const cp = ch.codePointAt(0) ?? 0
     return sum + ((cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0x3400 && cp <= 0x4DBF) ? 2 : 1)
   }, 0)
-  if (cjkWeight < 8) return false
+  if (cjkWeight < 6) return false
   return !NON_ACTIONABLE_PATTERN.test(objective)
 }
 

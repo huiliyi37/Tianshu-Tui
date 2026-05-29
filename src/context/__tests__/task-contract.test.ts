@@ -106,15 +106,35 @@ describe('advanceContractStatus', () => {
   // ── isActionable fixes: CJK weight + greeting prefix ──
 
   it('classifies short Chinese task as actionable via CJK weight', () => {
-    // "优化性能" = 4 CJK chars = weight 8 (threshold) → actionable
+    // "优化性能" = 4 CJK chars = weight 8 ≥ 6 → actionable
     const c = extractTaskContract('优化性能', 1)
     assert.equal(c.isActionable, true, '"优化性能" (CJK weight 8) should be actionable')
   })
 
   it('classifies ambiguous 2-char Chinese as non-actionable (insufficient weight)', () => {
-    // "修复" alone = 2 CJK chars = weight 4 < 8 → non-actionable
+    // "修复" alone = 2 CJK chars = weight 4 < 6 → non-actionable
     const c = extractTaskContract('修复', 1)
     assert.equal(c.isActionable, false, '"修复" alone (weight 4) is too ambiguous')
+  })
+
+  it('classifies "修复bug" (CJK+Latin mix, weight 7) as actionable', () => {
+    const c = extractTaskContract('修复bug', 1)
+    assert.equal(c.isActionable, true, '"修复bug" (weight 7 ≥ 6) should be actionable')
+  })
+
+  it('classifies "下一步" (weight 6) as actionable', () => {
+    const c = extractTaskContract('下一步', 1)
+    assert.equal(c.isActionable, true, '"下一步" (weight 6) should be actionable')
+  })
+
+  it('classifies "辛苦了" (weight 6) as non-actionable via pattern gate', () => {
+    const c = extractTaskContract('辛苦了', 1)
+    assert.equal(c.isActionable, false, '"辛苦了" passes weight gate but matches greeting pattern')
+  })
+
+  it('classifies "谢谢你" as non-actionable via expanded pattern', () => {
+    const c = extractTaskContract('谢谢你', 1)
+    assert.equal(c.isActionable, false, '"谢谢你" should match expanded greeting pattern')
   })
 
   it('classifies short Chinese with file as actionable', () => {
