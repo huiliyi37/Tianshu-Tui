@@ -72,7 +72,7 @@ export interface ToolExecutionDeps {
   immuneHook?: ImmuneHook
   /** Current StarPhase mapped to phaseClass. Used by tool-pipeline for phase-aware
    *  prediction recording — e.g., TDD RED in verify phase is NOT a prediction error. */
-  getPhaseHint?: () => string
+  getPhaseHint?: () => string | undefined
 }
 
 export interface ToolExecBatchInput {

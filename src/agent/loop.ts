@@ -559,6 +559,7 @@ export class AgentLoop {
       getVigorState: () => this.vigorState,
       setVigorState: v => { this.vigorState = v },
       getDoomLoopLevel: () => this.getDoomLoopLevel(),
+      getPhaseHint: () => this.config.promptEngine.getPhaseHint(),
       getSessionTurnCount: () => this.session.getTurnCount(),
       getSessionId: () => this.config.sessionId,
       addToolResults: results => { this.session.addToolResults(results) },
@@ -1050,7 +1051,15 @@ export class AgentLoop {
     this.session.addUserMessage(userInput)
     const actionable = isActionableTurn(userInput)
     this.config.promptEngine.setActionableTurn(actionable)
-    this.taskContract = actionable ? extractTaskContract(userInput, this.session.getTurnCount()) : undefined
+
+    if (actionable) {
+      // Explicit actionable message → extract fresh contract (may supersede old)
+      this.taskContract = extractTaskContract(userInput, this.session.getTurnCount())
+    } else if (!this.taskContract || this.taskContract.status === 'ready_to_deliver') {
+      // No active contract to inherit, or previous task already delivered → skip
+      this.taskContract = undefined
+    }
+    // else: non-actionable follow-up to active task → inherit existing contract
 
     if (this.config.autoReasoning && actionable) {
       this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)

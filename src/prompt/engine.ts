@@ -421,6 +421,10 @@ export class PromptEngine {
     this.phaseHint = hint
   }
 
+  getPhaseHint(): string | undefined {
+    return this.phaseHint
+  }
+
   /**
    * Update cognitive projection. Does NOT invalidate the fresh cache:
    * within the same user message, all tool-call turns reuse the cached fresh
