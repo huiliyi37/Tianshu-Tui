@@ -4,6 +4,7 @@ import type { OaiChatRequest } from './oai-types.js'
 import type { ProviderProfile } from './provider-profile.js'
 import { shouldInjectPrefix, buildPrefixMessage } from './prefix-completion.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
+import { withStructuredRetry } from './retry-engine.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
 
 export interface OpenAIClientConfig {
@@ -41,8 +42,6 @@ interface ToolCallChunk {
   function?: { name?: string; arguments?: string }
 }
 
-const MAX_RETRIES = 3
-const BASE_DELAY_MS = 1000
 const FIRST_BYTE_TIMEOUT_MS = 45_000
 const REASONING_FIRST_BYTE_TIMEOUT_MS = 90_000
 const READ_TIMEOUT_MS = 120_000
@@ -52,18 +51,20 @@ const REASONING_READ_TIMEOUT_MS = 180_000
 const GLM_FIRST_BYTE_TIMEOUT_MS = 180_000
 const GLM_READ_TIMEOUT_MS = 300_000
 
-function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    return Promise.reject(new DOMException('Aborted', 'AbortError'))
+/** Parse Retry-After header: numeric (seconds) → ms, HTTP-date → parsed delta ms, unparseable → undefined. */
+function parseRetryAfterMs(value: string): number | undefined {
+  const parsed = parseFloat(value)
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed * 1000 // seconds → milliseconds
   }
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    const onAbort = () => {
-      clearTimeout(timer)
-      reject(new DOMException('Aborted', 'AbortError'))
-    }
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
+  // HTTP-date format (e.g. "Fri, 30 May 2026 12:00:00 GMT") —
+  // parse with Date.parse and compute delta from now.
+  const dateMs = Date.parse(value)
+  if (Number.isFinite(dateMs)) {
+    const delta = dateMs - Date.now()
+    return delta > 0 ? delta : undefined
+  }
+  return undefined
 }
 
 export class OpenAIClient implements StreamClient {
@@ -196,91 +197,57 @@ export class OpenAIClient implements StreamClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
-    // Reset instance state to prevent stale data from previous calls/retries
-    this.toolCallBuffer.clear()
-    this.toolCallHintFired.clear()
-    this.pendingStopReason = null
-
-    let lastError: Error | null = null
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      // Clear per-attempt state on retry
+    await withStructuredRetry(async () => {
+      // Reset instance state for each attempt
       this.toolCallBuffer.clear()
       this.toolCallHintFired.clear()
       this.pendingStopReason = null
-      try {
-        // Resolve auth headers: AuthProvider takes precedence over static apiKey
-        const authHeaders = this.config.auth
-          ? await this.config.auth.getHeaders()
-          : { 'Authorization': `Bearer ${this.config.apiKey}` }
 
-        // Pre-first-byte timeout prevents fetch from hanging forever
-        // when server accepts connection but never sends response headers.
-        const fetchTimeout = this.config.thinking === 'enabled'
-          ? (this.config.providerName === 'glm' ? GLM_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
-          : FIRST_BYTE_TIMEOUT_MS
-        const response = await fetchWithTimeout(`${this.config.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Connection': 'keep-alive',
-            ...(this.config.userAgent ? { 'User-Agent': this.config.userAgent } : {}),
-            ...authHeaders,
-            ...(this.config.sessionId ? { 'X-Request-Session': this.config.sessionId } : {}),
-          },
-          body: JSON.stringify(body),
-          signal,
-        }, fetchTimeout)
+      // Resolve auth headers: AuthProvider takes precedence over static apiKey
+      const authHeaders = this.config.auth
+        ? await this.config.auth.getHeaders()
+        : { 'Authorization': `Bearer ${this.config.apiKey}` }
 
-        if (!response.ok) {
-          const errorBody = await response.text().catch(() => '')
-          const status = response.status
+      // Pre-first-byte timeout prevents fetch from hanging forever
+      // when server accepts connection but never sends response headers.
+      const fetchTimeout = this.config.thinking === 'enabled'
+        ? (this.config.providerName === 'glm' ? GLM_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
+        : FIRST_BYTE_TIMEOUT_MS
+      const response = await fetchWithTimeout(`${this.config.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Connection': 'keep-alive',
+          ...(this.config.userAgent ? { 'User-Agent': this.config.userAgent } : {}),
+          ...authHeaders,
+          ...(this.config.sessionId ? { 'X-Request-Session': this.config.sessionId } : {}),
+        },
+        body: JSON.stringify(body),
+        signal,
+      }, fetchTimeout)
 
-          // Don't retry on 4xx (except 429)
-          if (status >= 400 && status < 500 && status !== 429) {
-            throw new Error(parseOpenAIError(status, errorBody))
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '')
+        const err = Object.assign(
+          new Error(parseOpenAIError(response.status, errorBody)),
+          { status: response.status },
+        )
+        // Attach parsed retry-after for the error classifier to use
+        const retryAfter = response.headers.get('retry-after')
+        if (retryAfter) {
+          const retryAfterMs = parseRetryAfterMs(retryAfter)
+          if (retryAfterMs !== undefined) {
+            ;(err as Error & { retryAfterMs?: number }).retryAfterMs = retryAfterMs
           }
-
-          lastError = new Error(parseOpenAIError(status, errorBody))
-
-          if (attempt < MAX_RETRIES) {
-            const retryAfter = response.headers.get('retry-after')
-            let delay: number
-            if (retryAfter) {
-              const parsed = parseFloat(retryAfter)
-              // parseFloat returns NaN for HTTP-date format (e.g. "Fri, 30 May 2026 12:00:00 GMT").
-              // retry-after header is in seconds when numeric; convert to ms.
-              // When NaN (HTTP-date), fall back to exponential backoff instead of stalling.
-              delay = Number.isNaN(parsed)
-                ? BASE_DELAY_MS * Math.pow(2, attempt - 1)
-                : parsed * 1000
-            } else {
-              delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
-            }
-            await abortableDelay(delay, signal)
-            continue
-          }
-          throw lastError
         }
-
-        const reader = response.body?.getReader()
-        if (!reader) throw new Error('Response body is not readable')
-
-        await this.parseStreamFromReader(reader, callbacks, signal)
-        return // success — exit retry loop
-      } catch (err) {
-        if (signal?.aborted) throw err
-        lastError = err as Error
-
-        // Don't retry if it's an API error (already parsed above)
-        if (lastError.message.startsWith('OpenAI API error')) throw lastError
-
-        if (attempt < MAX_RETRIES) {
-          await abortableDelay(BASE_DELAY_MS * Math.pow(2, attempt - 1), signal)
-          continue
-        }
-        throw lastError
+        throw err
       }
-    }
+
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('Response body is not readable')
+
+      await this.parseStreamFromReader(reader, callbacks, signal)
+    }, signal)
   }
 
   /** Parse SSE stream from a reader — exposed for testing */

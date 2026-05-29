@@ -844,6 +844,12 @@ ${check.formatted}`
 
     return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
   } catch (err) {
+    // AbortError: user cancelled — not a tool failure.
+    // Skip failure recording so immune/doom-loop signals aren't polluted.
+    if ((err as Error).name === 'AbortError') {
+      callbacks.onToolResult(tu.id, tu.name, '', false)
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: '', is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    }
     const msg = err instanceof Error ? err.message : String(err)
     deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
     callbacks.onToolResult(tu.id, tu.name, msg, true)
