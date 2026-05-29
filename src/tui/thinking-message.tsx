@@ -1,7 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { formatThinkingSize } from './thinking.js'
-import { useTerminalSize } from './use-terminal-size.js'
+import { useViewportLines } from './viewport.js'
 
 interface ThinkingMessageProps {
   content: string
@@ -19,9 +19,7 @@ interface ThinkingMessageProps {
  * bordered box 内，各自独立渲染，高度各自受限，避免总高度溢出终端。
  */
 export const ThinkingMessage = memo(function ThinkingMessage({ content }: ThinkingMessageProps) {
-  const { rows } = useTerminalSize()
-  // Use at most 40% of terminal rows for thinking display
-  const maxLines = Math.max(3, Math.floor(rows * 0.4))
+  const maxLines = useViewportLines(0.4, 3)
   const lines = content.split('\n')
   const totalLines = lines.length
 

@@ -2,7 +2,7 @@ import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { Markdown } from './markdown-render.js'
 import { getTheme } from './theme.js'
-import { useTerminalSize } from './use-terminal-size.js'
+import { useViewportLines } from './viewport.js'
 
 /**
  * StreamOutput — live streaming content during model generation.
@@ -12,9 +12,7 @@ import { useTerminalSize } from './use-terminal-size.js'
  */
 export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: StreamOutputProps) {
   const theme = getTheme()
-  const { rows } = useTerminalSize()
-  // Use at most 60% of terminal rows, minimum 8
-  const maxLines = Math.max(8, Math.floor(rows * 0.6))
+  const maxLines = useViewportLines(0.6, 8)
 
   if (!text) {
     if (!isStreaming) return null

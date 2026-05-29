@@ -2,7 +2,7 @@ import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { getTheme } from './theme.js'
 import { Markdown } from './markdown-render.js'
-import { useTerminalSize } from './use-terminal-size.js'
+import { useViewportLines } from './viewport.js'
 
 interface AssistantMessageProps {
   content: string
@@ -17,9 +17,7 @@ interface AssistantMessageProps {
  */
 export const AssistantMessage = memo(function AssistantMessage({ content }: AssistantMessageProps) {
   const theme = getTheme()
-  const { rows } = useTerminalSize()
-  // Use at most 60% of terminal rows for content display
-  const maxLines = Math.max(10, Math.floor(rows * 0.6))
+  const maxLines = useViewportLines(0.6, 10)
 
   if (!content) return null
 
