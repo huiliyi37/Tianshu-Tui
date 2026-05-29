@@ -17,6 +17,7 @@ interface ThinkingMessageProps {
  */
 export function countPhysicalLines(text: string, columns: number): number {
   if (text.length === 0) return 0
+  if (columns <= 0) columns = 80 // fallback for unreported terminal size
   const lines = text.split('\n')
   let total = 0
   for (const line of lines) {
