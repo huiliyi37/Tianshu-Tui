@@ -167,8 +167,14 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
   },
 
   requiresApproval(params: ToolCallParams): boolean {
-    const command = params.input.command as string
-    return DANGEROUS_BASH_PATTERNS.some(pattern => pattern.test(command))
+    const rawCommand = params.input.command as string
+    const rewrittenCommand = rtkRewrite(rawCommand)
+    // Check BOTH raw and rewritten commands.
+    // rtkRewrite may expand aliases/macros into dangerous commands
+    // that the raw form does not match.
+    return DANGEROUS_BASH_PATTERNS.some(
+      pattern => pattern.test(rawCommand) || pattern.test(rewrittenCommand),
+    )
   },
 
   isConcurrencySafe: () => false,
