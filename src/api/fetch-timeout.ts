@@ -7,8 +7,8 @@
  * within `timeoutMs`.
  *
  * Error routing — critical for retry logic:
- * - User abort (signal.aborted) → re-throws original AbortError (non-retryable)
- * - Timeout → throws Error with "timed out" in message (retryable via error-classifier)
+ * - TimeoutError (any AbortSignal.timeout) → throws descriptive Error (retryable)
+ * - AbortError (user-initiated AbortController.abort) → re-throws as-is (non-retryable)
  * - Other → re-throws original error
  */
 
@@ -28,14 +28,16 @@ export async function fetchWithTimeout(
   try {
     return await fetch(url, { ...init, signal: combinedSignal })
   } catch (err) {
-    // User abort — propagate as-is (retry engines treat AbortError as non-retryable)
-    if (userSignal?.aborted) throw err
-    // Timeout — throw descriptive error so error-classifier detects it
-    if (timeoutSignal.aborted) {
+    const name = (err as Error).name
+    // TimeoutError: any AbortSignal.timeout fired (ours or caller's).
+    // Always wrap with a descriptive message so error-classifier detects it.
+    if (name === 'TimeoutError' || timeoutSignal.aborted) {
       throw new Error(
         `Request timed out: server did not respond within ${Math.round(timeoutMs / 1000)} seconds`,
       )
     }
+    // AbortError: user-initiated cancellation — propagate as-is (non-retryable)
+    if (name === 'AbortError' || userSignal?.aborted) throw err
     throw err
   }
 }

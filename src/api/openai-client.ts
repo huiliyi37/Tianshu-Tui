@@ -47,6 +47,10 @@ const FIRST_BYTE_TIMEOUT_MS = 45_000
 const REASONING_FIRST_BYTE_TIMEOUT_MS = 90_000
 const READ_TIMEOUT_MS = 120_000
 const REASONING_READ_TIMEOUT_MS = 180_000
+// GLM-5.1 mandatory thinking can take 2-3 minutes before first token.
+// Use generous timeouts to avoid false-positive timeout errors.
+const GLM_FIRST_BYTE_TIMEOUT_MS = 180_000
+const GLM_READ_TIMEOUT_MS = 300_000
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -212,7 +216,7 @@ export class OpenAIClient implements StreamClient {
         // Pre-first-byte timeout prevents fetch from hanging forever
         // when server accepts connection but never sends response headers.
         const fetchTimeout = this.config.thinking === 'enabled'
-          ? REASONING_FIRST_BYTE_TIMEOUT_MS
+          ? (this.config.providerName === 'glm' ? GLM_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
           : FIRST_BYTE_TIMEOUT_MS
         const response = await fetchWithTimeout(`${this.config.baseUrl}/chat/completions`, {
           method: 'POST',
@@ -292,8 +296,11 @@ export class OpenAIClient implements StreamClient {
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
       const isReasoning = this.config.thinking === 'enabled'
-      const firstByteMs = isReasoning ? REASONING_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
-      const readMs = isReasoning ? REASONING_READ_TIMEOUT_MS : READ_TIMEOUT_MS
+      const isGlm = this.config.providerName === 'glm'
+      const firstByteMs = isGlm ? GLM_FIRST_BYTE_TIMEOUT_MS
+        : isReasoning ? REASONING_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
+      const readMs = isGlm ? GLM_READ_TIMEOUT_MS
+        : isReasoning ? REASONING_READ_TIMEOUT_MS : READ_TIMEOUT_MS
       const timeout = receivedFirstChunk ? readMs : firstByteMs
       idleTimer = setTimeout(() => {
         streamTimedOut = true
