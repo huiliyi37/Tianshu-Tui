@@ -1,0 +1,340 @@
+import type { StreamClient, StreamCallbacks } from './stream-client.js'
+import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from './oai-types.js'
+import { withStructuredRetry } from './retry-engine.js'
+
+export interface AnthropicClientConfig {
+  baseUrl: string
+  apiKey: string
+  model: string
+  maxTokens: number
+  thinkingBudget?: number
+}
+
+interface AnthropicContentBlock {
+  type: 'text' | 'thinking' | 'tool_use' | 'tool_result'
+  text?: string
+  thinking?: string
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+  tool_use_id?: string
+  content?: string
+  cache_control?: { type: 'ephemeral' }
+}
+
+interface AnthropicMessage {
+  role: 'user' | 'assistant'
+  content: AnthropicContentBlock[]
+}
+
+interface AnthropicRequestBody {
+  model: string
+  max_tokens: number
+  system?: AnthropicContentBlock[]
+  tools?: Array<{
+    name: string
+    description?: string
+    input_schema: Record<string, unknown>
+    cache_control?: { type: 'ephemeral' }
+  }>
+  messages: AnthropicMessage[]
+  stream: boolean
+  thinking?: { type: 'enabled'; budget_tokens: number }
+}
+
+export class AnthropicClient implements StreamClient {
+  constructor(private config: AnthropicClientConfig) {}
+
+  setReasoningEffort(_effort: string): void {
+    // Anthropic doesn't use reasoning_effort — thinking budget is set at construction
+  }
+
+  async stream(
+    request: OaiChatRequest,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const body = this.buildRequestBody(request)
+
+    await withStructuredRetry(async () => {
+      const response = await fetch(`${this.config.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.config.apiKey,
+          'anthropic-version': '2023-06-01',
+          'Accept': 'text/event-stream',
+        },
+        body: JSON.stringify(body),
+        signal,
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '')
+        throw Object.assign(
+          new Error(`Anthropic API error (${response.status}): ${errorBody}`),
+          { status: response.status },
+        )
+      }
+
+      await this.processSSEStream(response, callbacks, signal)
+    }, signal)
+  }
+
+  /** Exposed for testing. */
+  buildRequestBodyForTest(request: OaiChatRequest): AnthropicRequestBody {
+    return this.buildRequestBody(request)
+  }
+
+  private buildRequestBody(request: OaiChatRequest): AnthropicRequestBody {
+    // Extract system messages to top-level system array
+    let systemText = ''
+    const nonSystemMessages = request.messages.filter(m => {
+      if (m.role === 'system') {
+        systemText += (systemText ? '\n\n' : '') + m.content
+        return false
+      }
+      return true
+    })
+
+    const system: AnthropicContentBlock[] = systemText
+      ? [{ type: 'text', text: systemText }]
+      : []
+
+    // Convert messages
+    const messages = nonSystemMessages.map(m => this.convertMessage(m))
+
+    // Convert tools — sorted by name for deterministic cache
+    const tools: AnthropicRequestBody['tools'] = request.tools && request.tools.length > 0
+      ? [...request.tools]
+          .sort((a, b) => a.function.name.localeCompare(b.function.name))
+          .map(t => ({
+            name: t.function.name,
+            description: t.function.description,
+            input_schema: t.function.parameters,
+          }))
+      : undefined
+
+    const body: AnthropicRequestBody = {
+      model: request.model,
+      max_tokens: request.max_tokens ?? this.config.maxTokens,
+      messages,
+      stream: true,
+    }
+
+    if (system.length > 0) body.system = system
+    if (tools) body.tools = tools
+    if (this.config.thinkingBudget && this.config.thinkingBudget > 0) {
+      body.thinking = { type: 'enabled', budget_tokens: this.config.thinkingBudget }
+    }
+
+    return body
+  }
+
+  private convertMessage(msg: OaiMessage): AnthropicMessage {
+    if (msg.role === 'user') {
+      return {
+        role: 'user',
+        content: [{ type: 'text', text: msg.content }],
+      }
+    }
+
+    if (msg.role === 'tool') {
+      return {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: msg.tool_call_id, content: msg.content }],
+      }
+    }
+
+    if (msg.role === 'assistant') {
+      const blocks: AnthropicContentBlock[] = []
+
+      if (msg.reasoning_content) {
+        blocks.push({ type: 'thinking', thinking: msg.reasoning_content })
+      }
+
+      if (msg.content) {
+        blocks.push({ type: 'text', text: msg.content })
+      }
+
+      if (msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          let input: Record<string, unknown> = {}
+          try {
+            input = JSON.parse(tc.function.arguments)
+          } catch { /* keep empty */ }
+          blocks.push({
+            type: 'tool_use',
+            id: tc.id,
+            name: tc.function.name,
+            input,
+          })
+        }
+      }
+
+      return { role: 'assistant', content: blocks }
+    }
+
+    // Fallback (should not reach here — types are exhaustive)
+    return { role: 'user', content: [{ type: 'text', text: '' }] }
+  }
+
+  private async processSSEStream(
+    response: Response,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let stopReason: string | null = null
+    let usage: {
+      input_tokens?: number
+      output_tokens?: number
+      cache_read_input_tokens?: number
+      cache_creation_input_tokens?: number
+    } = {}
+
+    // Accumulators for content blocks
+    const textBlocks: string[] = []
+    const thinkingBlocks: string[] = []
+
+    // SSE idle timeout — same pattern as OpenAIClient and CodexClient
+    const FIRST_BYTE_TIMEOUT_MS = 45_000
+    const READ_TIMEOUT_MS = 180_000
+    let streamTimedOut = false
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    let receivedFirstChunk = false
+
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      const timeout = receivedFirstChunk ? READ_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
+      idleTimer = setTimeout(() => {
+        streamTimedOut = true
+        reader.cancel().catch(() => {})
+      }, timeout)
+    }
+
+    try {
+      resetIdleTimer()
+      while (true) {
+        if (signal?.aborted) break
+        if (streamTimedOut) throw new Error('Anthropic SSE stream idle timeout (180s)')
+
+        const { done, value } = await reader.read()
+        if (done) break
+        receivedFirstChunk = true
+        resetIdleTimer()
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+
+          // Skip event: lines — type is in the JSON body
+          if (trimmed.startsWith('event: ')) continue
+
+          if (!trimmed.startsWith('data: ')) continue
+          const data = trimmed.slice(6)
+
+          let parsed: Record<string, unknown>
+          try { parsed = JSON.parse(data) } catch { continue }
+
+          const type = parsed.type as string
+
+          switch (type) {
+            case 'message_start': {
+              const msg = parsed.message as Record<string, unknown> | undefined
+              if (msg?.usage) {
+                const u = msg.usage as Record<string, unknown>
+                usage = {
+                  input_tokens: u.input_tokens as number,
+                  cache_read_input_tokens: u.cache_read_input_tokens as number,
+                  cache_creation_input_tokens: u.cache_creation_input_tokens as number,
+                }
+              }
+              break
+            }
+
+            case 'content_block_start': {
+              const block = parsed.content_block as Record<string, unknown> | undefined
+              if (!block) break
+              if (block.type === 'tool_use') {
+                const id = block.id as string
+                const name = block.name as string
+                const input = block.input as Record<string, unknown> ?? {}
+                if (id && name) {
+                  callbacks.onContentBlock({ type: 'tool_use', id, name, input })
+                }
+              }
+              break
+            }
+
+            case 'content_block_delta': {
+              const delta = parsed.delta as Record<string, unknown> | undefined
+              if (!delta) break
+              if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+                textBlocks.push(delta.text)
+                callbacks.onTextDelta(delta.text)
+              } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+                thinkingBlocks.push(delta.thinking)
+                callbacks.onThinkingDelta(delta.thinking)
+              }
+              // input_json_delta handled via content_block_start for full tool_use
+              break
+            }
+
+            case 'content_block_stop': {
+              break
+            }
+
+            case 'message_delta': {
+              const d = parsed.delta as Record<string, unknown> | undefined
+              if (d?.stop_reason) {
+                stopReason = d.stop_reason as string
+              }
+              if (parsed.usage) {
+                const u = parsed.usage as Record<string, unknown>
+                usage.output_tokens = u.output_tokens as number
+              }
+              break
+            }
+
+            case 'message_stop': {
+              break
+            }
+
+            case 'error': {
+              const err = parsed.error as Record<string, unknown> | undefined
+              throw new Error(`Anthropic stream error: ${err?.message ?? 'Unknown error'}`)
+            }
+          }
+        }
+      }
+    } finally {
+      if (idleTimer) clearTimeout(idleTimer)
+      reader.releaseLock()
+    }
+
+    // Emit text content block
+    if (textBlocks.length > 0) {
+      callbacks.onContentBlock({ type: 'text', text: textBlocks.join('') })
+    }
+
+    // Emit thinking content block
+    if (thinkingBlocks.length > 0) {
+      callbacks.onContentBlock({ type: 'thinking', thinking: thinkingBlocks.join('') })
+    }
+
+    callbacks.onStopReason(stopReason ?? 'end_turn', {
+      input_tokens: usage.input_tokens ?? 0,
+      output_tokens: usage.output_tokens ?? 0,
+      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+    })
+  }
+}
