@@ -103,7 +103,12 @@ export class SessionContext {
       // Decrement turnCount only for user messages — assistant / tool messages
       // do not advance the turn counter.
       if (msg.role === 'user') this.state.turnCount--
-      // Notify listeners so durable storage mirrors the removal.
+      // Emit a replace mutation so the persistence layer rewrites the file
+      // without the removed message. We use 'replace' (full rewrite) rather
+      // than a hypothetical 'remove' type because the persistence listener
+      // already handles 'replace' → compactOai(), and removals only happen
+      // on abort/error (rare, not performance-sensitive).
+      this.onMutation?.({ type: 'replace', messages: this.state.oaiMessages.slice() })
     }
     return msg
   }

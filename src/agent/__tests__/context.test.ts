@@ -402,4 +402,45 @@ describe('SessionContext removeLastMessage', () => {
     assert.equal(ctx.getMessages().length, 0)
     assert.equal(ctx.getTurnCount(), 0)
   })
+
+  it('emits replace mutation so persistence layer can rewrite the file', () => {
+    const ctx = new SessionContext()
+    const events: Array<{ type: string; messages?: OaiMessage[] }> = []
+    ctx.setMutationListener(m => {
+      if (m.type === 'replace') events.push({ type: 'replace', messages: m.messages.slice() })
+      else events.push({ type: 'append' })
+    })
+
+    ctx.addUserMessage('hello')
+    ctx.addAssistantBlocks([{ type: 'text', text: 'world' }])
+    assert.deepEqual(events, [
+      { type: 'append' },
+      { type: 'append' },
+    ])
+
+    // Remove the assistant message — should emit replace with the remaining user message
+    events.length = 0
+    ctx.removeLastMessage()
+    assert.equal(events.length, 1)
+    assert.equal(events[0]!.type, 'replace')
+    assert.equal(events[0]!.messages!.length, 1)
+    assert.equal(events[0]!.messages![0]!.role, 'user')
+
+    // Remove the user message — should emit replace with empty array
+    events.length = 0
+    ctx.removeLastMessage()
+    assert.equal(events.length, 1)
+    assert.equal(events[0]!.type, 'replace')
+    assert.equal(events[0]!.messages!.length, 0)
+  })
+
+  it('does not emit mutation when session is empty (nothing to remove)', () => {
+    const ctx = new SessionContext()
+    let called = false
+    ctx.setMutationListener(() => { called = true })
+
+    const result = ctx.removeLastMessage()
+    assert.equal(result, undefined)
+    assert.equal(called, false, 'should not emit mutation when nothing was removed')
+  })
 })

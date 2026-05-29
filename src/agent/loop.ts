@@ -1415,7 +1415,9 @@ export class AgentLoop {
           if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
           if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
           if (!assistantResponded) this.session.removeLastMessage()
-          await this.runPostSession(callbacks)
+          // runPostSession is best-effort cleanup — its failure must not cause
+          // the outer catch to double-delete an unrelated message.
+          try { await this.runPostSession(callbacks) } catch { /* best-effort */ }
           callbacks.onAbort()
           return
         }

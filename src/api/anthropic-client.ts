@@ -68,7 +68,7 @@ export class AnthropicClient implements StreamClient {
         },
         body: JSON.stringify(body),
         signal,
-      }, 90_000)
+      }, this.config.thinkingBudget && this.config.thinkingBudget > 0 ? 90_000 : 45_000)
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
@@ -282,10 +282,12 @@ export class AnthropicClient implements StreamClient {
     // and emit the complete tool_use only on content_block_stop.
     const toolUseBuffer = new Map<number, { id: string; name: string; partialJson: string }>()
 
-    // SSE idle timeout — same pattern as OpenAIClient and CodexClient
-    // Anthropic with extended thinking can have long first-byte delays.
-    const FIRST_BYTE_TIMEOUT_MS = 90_000
-    const READ_TIMEOUT_MS = 180_000
+    // SSE idle timeout — same pattern as OpenAIClient and CodexClient.
+    // Non-thinking requests use shorter timeouts (45s/120s) for faster
+    // failure detection; extended-thinking requests use 90s/180s to
+    // accommodate long first-byte delays from reasoning.
+    const FIRST_BYTE_TIMEOUT_MS = (this.config.thinkingBudget && this.config.thinkingBudget > 0) ? 90_000 : 45_000
+    const READ_TIMEOUT_MS = (this.config.thinkingBudget && this.config.thinkingBudget > 0) ? 180_000 : 120_000
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
