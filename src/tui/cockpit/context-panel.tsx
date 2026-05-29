@@ -54,12 +54,12 @@ export const ContextPanel = memo(function ContextPanel({
         <Text color={theme.dim}> {Math.round(estimatedTokens / 1000)}k/{Math.round(maxTokens / 1000)}k ({Math.round(pct * 100)}%)</Text>
       </Text>
       <Text>
-        <Text color={theme.dim}>Rounds: </Text>
+        <Text color={theme.muted}>Rounds: </Text>
         <Text>{rounds}</Text>
         {brokenRounds > 0 && <Text color={theme.warning}> ({brokenRounds} broken)</Text>}
       </Text>
       <Text>
-        <Text color={theme.dim}>Compaction: </Text>
+        <Text color={theme.muted}>Compaction: </Text>
         <Text color={compactionColor(compactionState, theme)}>{compactionState}</Text>
       </Text>
       {claimCounts && (

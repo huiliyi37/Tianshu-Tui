@@ -32,13 +32,13 @@ export const SafetyPanel = memo(function SafetyPanel({
     <Box flexDirection="column" paddingX={1}>
       <Text bold color={theme.primary}>Safety</Text>
       <Text>
-        <Text color={theme.dim}>Doom loop: </Text>
+        <Text color={theme.muted}>Doom loop: </Text>
         <Text color={doomColor(doomLoopLevel, theme)} bold={doomLoopLevel !== 'none'}>
           {doomLoopLevel}
         </Text>
       </Text>
       <Text>
-        <Text color={theme.dim}>Risk: </Text>
+        <Text color={theme.muted}>Risk: </Text>
         <Text color={riskColor(riskLevel, theme)} bold={riskLevel === 'high'}>
           {riskLevel}
         </Text>
@@ -50,7 +50,7 @@ export const SafetyPanel = memo(function SafetyPanel({
         <Text color={theme.dim} italic>{suggestedAction}</Text>
       )}
       <Text>
-        <Text color={theme.dim}>Fingerprint diversity: </Text>
+        <Text color={theme.muted}>Fingerprint diversity: </Text>
         <Text color={theme.secondary}>{recentFingerprints} unique</Text>
       </Text>
     </Box>

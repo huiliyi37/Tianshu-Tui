@@ -31,16 +31,16 @@ export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, 
 
   return (
     <Box paddingX={narrow ? 0 : 1}>
-      {!narrow && <Text color={theme.dim}>{model.slice(0, 20)}</Text>}
+      {!narrow && <Text color={theme.muted}>{model.slice(0, 20)}</Text>}
       {!narrow && <Text color={theme.dim}> · </Text>}
       {phaseGlyph && <Text color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
       {!phaseGlyph && <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>}
       <Text color={theme.dim}> · </Text>
       <Text color={cacheColor}>{cachePct}%</Text>
       <Text color={theme.dim}> · </Text>
-      <Text color={theme.dim}>${cost.toFixed(2)}</Text>
+      <Text color={theme.muted}>${cost.toFixed(2)}</Text>
       {historyCount !== undefined && !narrow && (
-        <><Text color={theme.dim}> · </Text><Text color={theme.dim}>{historyCount} msgs</Text></>
+        <><Text color={theme.dim}> · </Text><Text color={theme.muted}>{historyCount} msgs</Text></>
       )}
       {isStreaming && <Text color={theme.primary}> ●</Text>}
       {alertPulse?.hint && <Text color={theme.error}> {alertPulse.hint}</Text>}

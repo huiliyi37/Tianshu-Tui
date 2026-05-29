@@ -34,9 +34,9 @@ export const McpPanel = memo(function McpPanel({ servers, totalTools, connectedS
     <Box flexDirection="column" paddingX={1}>
       <Text bold color={theme.primary}>MCP</Text>
       <Text>
-        <Text color={theme.dim}>Servers: </Text>
+        <Text color={theme.muted}>Servers: </Text>
         <Text color={theme.secondary}>{connectedServers}/{servers.length}</Text>
-        <Text color={theme.dim}> │ Tools: </Text>
+        <Text color={theme.muted}> │ Tools: </Text>
         <Text color={theme.secondary}>{totalTools}</Text>
       </Text>
       {servers.map(s => (

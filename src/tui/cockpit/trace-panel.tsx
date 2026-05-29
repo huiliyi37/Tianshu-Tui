@@ -34,7 +34,7 @@ export const TracePanel = memo(function TracePanel({ events }: TracePanelProps) 
       <Text bold color={theme.primary}>Trace ({events.length} events)</Text>
       {visible.map(e => (
         <Text key={e.id}>
-          <Text color={theme.dim}>turn {e.turn} │ </Text>
+          <Text color={theme.muted}>turn {e.turn} │ </Text>
           <Text color={theme.secondary}>{e.kind} │ </Text>
           <Text>{e.name} │ </Text>
           <Text color={statusColor(e.status, theme)}>{e.status}</Text>

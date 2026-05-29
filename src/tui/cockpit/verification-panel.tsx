@@ -46,20 +46,20 @@ export const VerificationPanel = memo(function VerificationPanel({
     <Box flexDirection="column" paddingX={1}>
       <Text bold color={theme.primary}>Evidence</Text>
       <Text>
-        <Text color={theme.dim}>Files read: </Text>
+        <Text color={theme.muted}>Files read: </Text>
         <Text color={theme.secondary}>{filesRead}</Text>
-        <Text color={theme.dim}> │ Modified: </Text>
+        <Text color={theme.muted}> │ Modified: </Text>
         <Text color={theme.secondary}>{filesModified}</Text>
       </Text>
       {deliveryStatus && (
         <Text>
-          <Text color={theme.dim}>Delivery: </Text>
+          <Text color={theme.muted}>Delivery: </Text>
           <Text color={deliveryColor(deliveryStatus, theme)} bold>{deliveryStatus}</Text>
         </Text>
       )}
       {(impactedFiles ?? 0) > 0 && (
         <Text>
-          <Text color={theme.dim}>Impacts: </Text>
+          <Text color={theme.muted}>Impacts: </Text>
           <Text color={theme.secondary}>{impactedFiles} files</Text>
           {(impactedTests ?? 0) > 0 && (
             <>
