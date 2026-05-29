@@ -38,7 +38,7 @@ export const AssistantMessage = memo(function AssistantMessage({ content }: Assi
         </Box>
         <Box flexDirection="column" paddingLeft={2}>
           {omittedLines > 0 && (
-            <Text dimColor>… {omittedLines} earlier lines omitted</Text>
+            <Text color={theme.muted}>… {omittedLines} earlier lines omitted</Text>
           )}
           <Markdown text={displayText} />
         </Box>

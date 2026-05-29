@@ -18,7 +18,7 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
     if (!isStreaming) return null
     return (
       <Box paddingX={1} marginBottom={1}>
-        <Text color={theme.dim}>◌ Waiting for model…</Text>
+        <Text color={theme.muted}>◌ Waiting for model…</Text>
       </Box>
     )
   }
@@ -42,7 +42,7 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
           <Text color={theme.assistantColor} bold>{'●'}</Text>
           <Text color={theme.assistantColor} bold>Assistant</Text>
           {isStreaming && omittedLines > 0 && (
-            <Text dimColor>(… {omittedLines} earlier lines)</Text>
+            <Text color={theme.muted}>(… {omittedLines} earlier lines)</Text>
           )}
         </Box>
         <Box flexDirection="column" paddingLeft={2}>
