@@ -217,7 +217,6 @@ export class CodexClient implements StreamClient {
       resetIdleTimer()
       while (true) {
         if (signal?.aborted) break
-        if (streamTimedOut) throw new Error('Codex SSE stream idle timeout (180s)')
 
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes

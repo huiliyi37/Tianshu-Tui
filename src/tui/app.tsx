@@ -175,6 +175,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [streamingThinking, setStreamingThinking] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [isThinkingActive, setIsThinkingActive] = useState(false)
+  /** Generation counter: incremented on each new stream start, used to prevent stale onAbort from killing a new run. */
+  const streamGenRef = useRef(0)
+  /** Generation at the time of last abort initiation; compared with streamGenRef in onAbort. */
+  const abortedAtGenRef = useRef(-1)
   const [fluencyStale, setFluencyStale] = useState<string | null>(null)
   const [heartbeatStatus, setHeartbeatStatus] = useState<string | null>(null)
   const [cost, setCost] = useState(0)
@@ -419,6 +423,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
       if (isStreaming) {
         agent.abort()
+        abortedAtGenRef.current = streamGenRef.current
         steerBuffer.current.clear()
         setIsStreaming(false)
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
@@ -451,6 +456,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const now = Date.now()
         if (lastEscRef.current && now - lastEscRef.current < 1000) {
           agent.abort()
+          abortedAtGenRef.current = streamGenRef.current
           steerBuffer.current.clear()
           setIsStreaming(false)
           pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
@@ -523,6 +529,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const handleSubmit = useCallback((_userInput: string) => {
     let userInput = _userInput
     const run = async () => {
+    // Bump generation so any in-flight onAbort from a previous run can detect staleness.
+    streamGenRef.current++
+    const myGen = streamGenRef.current
     setIsStreaming(true)
     setIsThinkingActive(false)
     setStreamingText('')
@@ -1054,7 +1063,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         streamBuf.current = ''
         // Stop streaming FIRST, then clear text — prevents flash frame on error.
-        setIsStreaming(false)
+        if (abortedAtGenRef.current === streamGenRef.current) {
+          setIsStreaming(false)
+        }
         setStreamingText('')
         thinkBuf.current = ''
         setStreamingThinking('')
@@ -1090,7 +1101,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         streamBuf.current = ''
         // Stop streaming FIRST, then clear text — prevents flash frame on abort.
-        setIsStreaming(false)
+        // Guard: only flip if this abort belongs to the current generation.
+        if (abortedAtGenRef.current === streamGenRef.current) {
+          setIsStreaming(false)
+        }
         setStreamingText('')
         thinkBuf.current = ''
         setStreamingThinking('')
@@ -1144,7 +1158,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     promptQueueRef.current.running = true
     run().catch((err: Error) => {
       pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
-      setIsStreaming(false)
+      // Only flip if no newer run has started since this one
+      if (streamGenRef.current === myGen) {
+        setIsStreaming(false)
+      }
     }).finally(() => {
       promptQueueRef.current.running = false
     })
