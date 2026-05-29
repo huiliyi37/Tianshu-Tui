@@ -12,6 +12,7 @@ export interface CockpitSnapshotSources {
   cost?: number
   mcpManager?: McpManager | null
   claimCounts?: import('../../context/promotion.js').ClaimStatusCounts
+  reasoningEffort?: string
 }
 
 function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>): Record<Panel, PanelStatus> {
@@ -57,7 +58,7 @@ function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>):
 }
 
 export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSnapshot {
-  const { agent, session, claimCounts } = sources
+  const { agent, session, claimCounts, reasoningEffort } = sources
   const model = sources.model ?? 'unknown'
   const cacheHitRate = sources.cacheHitRate ?? session.getCacheHitRate()
   const cost = sources.cost ?? 0
@@ -147,6 +148,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       prewarmMisses: prewarmStats.misses,
       prewarmHitRate: prewarmStats.hitRate,
       cacheDiagnostic,
+      reasoningEffort: reasoningEffort ?? 'medium',
     },
     mcp: {
       servers: mcpStates.map(s => ({

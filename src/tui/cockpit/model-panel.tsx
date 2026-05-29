@@ -18,11 +18,29 @@ export interface ModelPanelProps {
   prewarmMisses?: number
   prewarmHitRate?: number
   cacheDiagnostic?: string | null
+  reasoningEffort?: string
+}
+
+const EFFORT_BAR: Record<string, string> = {
+  off: '○',
+  low: '◔',
+  medium: '◑',
+  high: '◕',
+  max: '●',
+}
+
+const EFFORT_COLOR: Record<string, string> = {
+  off: 'gray',
+  low: 'blue',
+  medium: 'cyan',
+  high: 'yellow',
+  max: 'magenta',
 }
 
 export const ModelPanel = memo(function ModelPanel({
   model, cacheHitRate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost, routingReason,
   perTurnHitRate = null, recentTurnHitRate = null, prewarmHits = 0, prewarmMisses = 0, prewarmHitRate = 0, cacheDiagnostic = null,
+  reasoningEffort = 'medium',
 }: ModelPanelProps) {
   const theme = getTheme()
 
@@ -38,6 +56,10 @@ export const ModelPanel = memo(function ModelPanel({
           <Text color={theme.secondary}>{routingReason}</Text>
         </Text>
       )}
+      <Text>
+        <Text color={theme.muted}>Effort:  </Text>
+        <Text color={EFFORT_COLOR[reasoningEffort] ?? 'white'}>{EFFORT_BAR[reasoningEffort] ?? '◑'} {reasoningEffort}</Text>
+      </Text>
       <Text>
         <Text color={theme.muted}>Cache: </Text>
         <Text color={theme.contextColor(1 - cacheHitRate)}>{contextBar(cacheHitRate, 8)}</Text>

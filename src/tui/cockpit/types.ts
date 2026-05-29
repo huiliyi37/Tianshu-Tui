@@ -97,6 +97,7 @@ export interface CockpitSnapshot {
     prewarmMisses: number
     prewarmHitRate: number
     cacheDiagnostic: string | null
+    reasoningEffort: string
   }
   mcp: {
     servers: Array<{
