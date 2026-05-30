@@ -335,6 +335,20 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       return true
     }
 
+    case '/plan-mode': {
+      ctx.agent.enterPlanMode()
+      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked. Explore the codebase and produce a plan. Use /plan-approve to exit.' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/plan-approve': {
+      ctx.agent.exitPlanMode()
+      pushStatic(createLogEntry({ type: 'system', content: '✅ Plan Mode exited. All operations are now allowed.' }))
+      setIsStreaming(false)
+      return true
+    }
+
     case '/theme': {
       const raw = parts[1]?.toLowerCase()
       const validThemes: ThemeName[] = ['midnight', 'pastel', 'cyberpunk', 'observatory']
