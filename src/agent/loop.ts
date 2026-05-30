@@ -204,6 +204,7 @@ export class AgentLoop {
   private lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
+  private planModeState: PlanModeState = 'off'
   private decisions: string[] = []
   private trajectory = new TrajectoryRecorder()
   private repairPipeline = new RepairPipeline([ctclSanitizerPass, fourHorsemenPass, semanticRepairPass])
@@ -716,6 +717,12 @@ export class AgentLoop {
     this.config.approvalMode = mode
   }
 
+  /** Sync plan-mode state into config so tool-pipeline reads it */
+  private syncPlanModeToConfig(): void {
+    this.config.planModeState = this.planModeState
+    this.config.promptEngine.setPlanModeState(this.planModeState)
+  }
+
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort): void {
     const floor = this.config.reasoningFloor
     const rank: Record<string, number> = { off: 0, low: 1, medium: 2, high: 3, max: 4 }
@@ -867,6 +874,15 @@ export class AgentLoop {
   }
 
   getLatestRisk(): import('./approval-risk.js').RiskAssessment { return this.latestRisk }
+
+  /** Enter plan mode — only read-only tools allowed */
+  enterPlanMode(): void { this.planModeState = 'planning' }
+
+  /** Exit plan mode — user approved, all tools allowed */
+  exitPlanMode(): void { this.planModeState = 'off' }
+
+  /** Get current plan mode state */
+  getPlanModeState(): PlanModeState { return this.planModeState }
 
   getPrewarmStats(): { hits: number; misses: number; hitRate: number } { return this.prewarm.stats() }
 
@@ -1087,6 +1103,8 @@ export class AgentLoop {
 
     try {
       for (let turn = 0; turn < this.config.maxTurns; turn++) {
+        // Sync plan-mode state into config so tool-pipeline gate reads it
+        this.syncPlanModeToConfig()
         if (this.abortController.signal.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onAbort()

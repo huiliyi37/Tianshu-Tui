@@ -55,6 +55,8 @@ export interface VolatileContext {
   worktreeReality?: WorktreeReality
   /** Cross-session heuristic rules — session-level stable, rendered into frozen base */
   heuristicRules?: string
+  /** Plan Mode state — when 'planning', injects a block reminding the agent it may only read */
+  planModeState?: 'off' | 'planning' | 'approved'
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -369,6 +371,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
       .map(r => `  ${escapeXml(r)}`)
       .join('\n')
     parts.push(`<worktree-warning severity="${escapeXml(ctx.worktreeReality.severity)}">\n${reasons}\n</worktree-warning>`)
+  }
+
+  if (ctx.planModeState === 'planning') {
+    parts.push(`<plan-mode>
+You are in PLAN MODE. You may ONLY read files and explore the codebase — do NOT write, edit, or execute commands that modify state. Produce a detailed plan first. The user will approve before execution begins.
+</plan-mode>`)
   }
 
   return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''
