@@ -7,6 +7,7 @@ export type LogEntryType =
   | 'checkpoint'
   | 'evidence'
   | 'system'
+  | 'turn_summary'
 
 export interface LogEntry {
   type: LogEntryType

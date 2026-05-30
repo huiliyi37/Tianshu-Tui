@@ -26,4 +26,10 @@ describe('renderMemoKey', () => {
     const a = createLogEntry({ type: 'system', content: '' })
     assert.ok(typeof renderMemoKey(a) === 'string')
   })
+
+  it('supports turn_summary entries', () => {
+    const a = createLogEntry({ type: 'turn_summary', content: '⭐ → 🔨 · 读5 改3 · 2m14s' })
+    assert.ok(typeof renderMemoKey(a) === 'string')
+    assert.match(renderMemoKey(a), /^turn_summary:/)
+  })
 })

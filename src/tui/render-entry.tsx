@@ -26,6 +26,7 @@ const RENDER_MAP: Record<string, EntryRenderer> = {
   checkpoint: (e) => <Box key={e.id} paddingX={2}><Text color={getTheme().muted} bold>⚑ {e.content}</Text></Box>,
   evidence: (e) => <Box key={e.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{e.content}</Text></Box>,
   system: (e) => <SystemMessage key={e.id} content={e.content} isError={e.isError} />,
+  turn_summary: (e) => <Box key={e.id} paddingX={2}><Text color={getTheme().dim} bold>⎯ {e.content}</Text></Box>,
 }
 
 export function renderStaticEntry(entry: LogEntry, verbose: boolean) {
