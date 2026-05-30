@@ -1420,6 +1420,9 @@ export class AgentLoop {
             },
             onThinkingDelta: callbacks.onThinkingDelta,
             onToolUse: callbacks.onToolUse,
+            onToolHint: (name) => {
+              callbacks.onPhaseChange?.('tool-hint', { tool: name, reason: `preparing ${name}…` })
+            },
             onError: callbacks.onError,
           },
         })

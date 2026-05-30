@@ -8,6 +8,7 @@ export interface TurnStreamCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
   onToolUse: (id: string, name: string, input: Record<string, unknown>) => void
+  onToolHint?: (name: string) => void
   onError: (error: Error) => void
 }
 
@@ -110,6 +111,7 @@ export class TurnStreamController {
         input.callbacks.onError(error)
       },
       onToolCallHint: (toolName, partialArgs) => {
+        input.callbacks.onToolHint?.(toolName)
         if (toolName === 'read_file' && typeof partialArgs.file_path === 'string') {
           const fp = partialArgs.file_path
           setImmediate(() => this.deps.prewarmFile?.(fp))
