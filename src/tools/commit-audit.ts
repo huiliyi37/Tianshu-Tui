@@ -4,7 +4,7 @@ export interface CommitAuditResult {
   message: string
 }
 
-const TASK_TAG_RE = /\b([A-Z]\d+[a-z]?)\b/g
+const TASK_TAG_RE = /\b([SBCML]\d+[a-z]?)\b/g
 
 /** Extract task tags (S14, M1, C2a etc.) from commit message. */
 export function extractTaskTags(message: string): string[] {

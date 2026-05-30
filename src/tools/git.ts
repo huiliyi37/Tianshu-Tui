@@ -144,7 +144,9 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
 
           // Post-commit truth readback: show actual landed changes + audit tag scope
           const changed = runGit(['show', '--stat', '--format=', 'HEAD'], cwd).trim()
-          const changedFiles = changed.split('\n').map(l => l.split('|')[0]!.trim()).filter(f => f && f.includes('/'))
+          const changedFiles = changed.split('\n')
+            .map(l => l.split('|')[0]!.trim())
+            .filter(f => f.length > 0 && !f.includes('file changed') && !f.includes('files changed'))
           const audit = auditCommitTagScope(message, changedFiles)
           const body = `${result.stdout.trim()}\n\n--- actual changes (git show --stat) ---\n${changed}`
           return { content: audit.ok ? body : `${body}\n\n${audit.message}` }
