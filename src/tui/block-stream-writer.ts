@@ -8,7 +8,7 @@ export interface BlockStreamConfig {
 const DEFAULT_CONFIG: BlockStreamConfig = {
   minChars: 100,
   maxChars: 200,
-  idleMs: 500,
+  idleMs: 180,
   maxBufferSize: 64 * 1024,
 }
 

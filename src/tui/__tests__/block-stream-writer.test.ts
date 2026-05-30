@@ -50,19 +50,31 @@ describe('BlockStreamWriter', () => {
   })
 
   it('emits at a sentence-ending punctuation before reaching maxChars', () => {
-    const sentenceWriter = new BlockStreamWriter({}, (text) => { emitted.push(text) })
+    const localEmitted: string[] = []
+    const sentenceWriter = new BlockStreamWriter({}, (text) => { localEmitted.push(text) })
     const first = '这是一段连续不断的中文叙述用来验证句末标点切块行为正确无误啊'
     sentenceWriter.push(first + '。' + '后面还有更多内容继续追加进来填充缓冲区')
-    assert.ok(emitted.length >= 1, 'should emit on sentence punctuation')
-    assert.ok(emitted[0]!.endsWith('。'), `block should end at 。 but got: ${emitted[0]}`)
-    assert.ok(!emitted[0]!.includes('后面还有'), 'should not include post-punctuation tail')
+    assert.ok(localEmitted.length >= 1, 'should emit on sentence punctuation')
+    assert.ok(localEmitted[0]!.endsWith('。'), `block should end at 。 but got: ${localEmitted[0]}`)
+    assert.ok(!localEmitted[0]!.includes('后面还有'), 'should not include post-punctuation tail')
   })
 
   it('default maxChars is lowered to 200', () => {
-    const big = new BlockStreamWriter({}, (text) => { emitted.push(text) })
+    const localEmitted: string[] = []
+    const big = new BlockStreamWriter({}, (text) => { localEmitted.push(text) })
     big.push('字'.repeat(650))
-    assert.ok(emitted.length >= 2, 'long unbroken text must be chunked, not held to 600')
-    assert.ok(emitted.every(b => b.length <= 200), `each block <= 200, got: ${emitted.map(b => b.length)}`)
+    assert.ok(localEmitted.length >= 2, 'long unbroken text must be chunked, not held to 600')
+    assert.ok(localEmitted.every(b => b.length <= 200), `each block <= 200, got: ${localEmitted.map(b => b.length)}`)
+  })
+
+  it('flushes a short buffer after the idle window (<=200ms)', async () => {
+    const localEmitted: string[] = []
+    const w = new BlockStreamWriter({}, (text) => { localEmitted.push(text) })
+    w.push('短句无标点也无换行')
+    assert.equal(localEmitted.length, 0, 'nothing emitted synchronously below minChars')
+    await new Promise(r => setTimeout(r, 220))
+    assert.equal(localEmitted.length, 1, 'idle flush must fire within ~200ms')
+    assert.equal(localEmitted[0], '短句无标点也无换行')
   })
 
   it('serializes blocks in order', async () => {
