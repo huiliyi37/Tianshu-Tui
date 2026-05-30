@@ -10,8 +10,10 @@ interface AssistantMessageProps {
 
 /**
  * Assistant content message — rendered in <Static> list (print-and-forget to
- * terminal scrollback). Full content is rendered without line-count truncation;
- * long replies stay readable via native terminal scrolling.
+ * terminal scrollback). No border box: a bordered box welds the whole reply into
+ * one indivisible render unit the terminal can't paginate, so long replies stack
+ * and overflow. claude-code style — gutter glyph + plain text rows that flow into
+ * native terminal scrollback.
  */
 export const AssistantMessage = memo(function AssistantMessage({ content }: AssistantMessageProps) {
   const theme = getTheme()
@@ -20,12 +22,9 @@ export const AssistantMessage = memo(function AssistantMessage({ content }: Assi
 
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={1}>
-      <Box borderStyle="round" borderColor={theme.assistantColor} paddingX={1} flexDirection="column">
-        <Box flexDirection="row" gap={1} marginBottom={1}>
-          <Text color={theme.assistantColor} bold>{gutterGlyph('assistant')}</Text>
-          <Text color={theme.assistantColor} bold>Assistant</Text>
-        </Box>
-        <Box flexDirection="column" paddingLeft={2}>
+      <Box flexDirection="row" gap={1}>
+        <Text color={theme.assistantColor} bold>{gutterGlyph('assistant')}</Text>
+        <Box flexDirection="column" flexGrow={1}>
           <Markdown text={content} />
         </Box>
       </Box>
