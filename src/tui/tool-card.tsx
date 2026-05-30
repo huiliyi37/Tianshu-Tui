@@ -4,8 +4,16 @@ import { getTheme } from './theme.js'
 import { getToolFamily } from './tool-family.js'
 import { Markdown } from './markdown-render.js'
 import { formatToolElapsed } from './tool-elapsed.js'
+import { useTerminalSize } from './use-terminal-size.js'
 
 const MAX_COLLAPSED_LINES = 15
+
+/** Maximum lines a collapsed ToolCard can use — adapts to terminal size */
+function cappedCollapsedLines(termRows: number): number {
+  // On small terminals, cap at ~half the terminal height to prevent overflow
+  const maxForTerminal = Math.max(3, Math.floor(termRows / 2) - 2)
+  return Math.min(MAX_COLLAPSED_LINES, maxForTerminal)
+}
 
 interface ToolCardProps {
   name: string
@@ -26,6 +34,7 @@ function compactPath(rawPath: string | undefined): string {
 
 export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs }: ToolCardProps) {
   const theme = getTheme()
+  const { rows } = useTerminalSize()
   const [localExpanded, setLocalExpanded] = useState(false)
 
   useInput((_input, key) => {
@@ -35,7 +44,8 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
   })
 
   const expanded = verbose || localExpanded
-  const limit = expanded ? 200 : MAX_COLLAPSED_LINES
+  const collapsedLimit = cappedCollapsedLines(rows)
+  const limit = expanded ? 200 : collapsedLimit
   const { displayText, truncated, totalLines } = useMemo(() => {
     const lines = result.split('\n')
     const isLong = lines.length > limit

@@ -2,8 +2,22 @@ import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { Markdown } from './markdown-render.js'
 import { getTheme } from './theme.js'
+import { useTerminalSize } from './use-terminal-size.js'
 import { useViewportLines } from './viewport.js'
 import { gutterGlyph } from './gutter.js'
+
+/**
+ * Reserve lines for other dynamic-zone components.
+ * Computes from cappedCollapsedLines(terminalRows) + thinking(1) + chrome(5).
+ * This prevents the dynamic zone from exceeding terminal height and
+ * triggering Ink differential-rendering flicker.
+ */
+const DYNAMIC_CHROME = 6  // ThinkingCollapser(1) + GlanceBar(1) + InputBar(2) + margins(2)
+
+function computeMaxStreamLines(termRows: number): number {
+  const toolCardLines = Math.min(15, Math.max(3, Math.floor(termRows / 2) - 2))
+  return Math.max(8, termRows - toolCardLines - DYNAMIC_CHROME)
+}
 
 /**
  * StreamOutput — live streaming content during model generation.
@@ -15,7 +29,8 @@ import { gutterGlyph } from './gutter.js'
  */
 export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: StreamOutputProps) {
   const theme = getTheme()
-  const maxLines = useViewportLines(0.6, 8)
+  const { rows } = useTerminalSize()
+  const maxLines = useViewportLines(0.6, 8, computeMaxStreamLines(rows))
 
   if (!text) return null
 
