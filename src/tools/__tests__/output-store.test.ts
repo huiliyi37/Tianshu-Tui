@@ -63,6 +63,49 @@ describe('output-store', () => {
       const result = buildModelOutput('', meta)
       assert.ok(result.includes('lines=0'))
     })
+
+    // --- Success folding (Phase 1: deterministic output trimming) ---
+    const SUCCESS_INLINE_LINES = 20
+
+    it('success + ≤20 lines: returns full output inline', () => {
+      const lines = Array.from({ length: 5 }, (_, i) => `line ${i}`).join('\n')
+      const result = buildModelOutput(lines, { ...meta, exitCode: 0 })
+      assert.ok(result.includes('line 0'), 'short success output should be inline')
+      assert.ok(result.includes('line 4'), 'short success output should be inline')
+      assert.ok(!result.includes('suppressed'), 'short success should not be folded')
+    })
+
+    it('success + exactly 20 lines: returns full output (boundary)', () => {
+      const lines = Array.from({ length: SUCCESS_INLINE_LINES }, (_, i) => `line ${i}`).join('\n')
+      const result = buildModelOutput(lines, { ...meta, exitCode: 0 })
+      assert.ok(result.includes('line 0'), 'boundary success should be inline')
+      assert.ok(!result.includes('suppressed'), 'boundary success should not be folded')
+    })
+
+    it('success + >20 lines: folds to header summary only', () => {
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n')
+      const result = buildModelOutput(lines, { ...meta, exitCode: 0 })
+      assert.ok(result.startsWith('[npm test] exit=0'), 'should have header')
+      assert.ok(result.includes('suppressed'), 'should indicate output was suppressed')
+      assert.ok(result.includes('50 lines'), 'should report line count')
+      assert.ok(!result.includes('line 0'), 'body should be folded away')
+      assert.ok(!result.includes('line 49'), 'body should be folded away')
+    })
+
+    it('failure + >20 lines: never folds, returns full/truncated output', () => {
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n')
+      const result = buildModelOutput(lines, { ...meta, exitCode: 1 })
+      assert.ok(result.includes('line 0'), 'failure output should include body')
+      assert.ok(!result.includes('suppressed'), 'failure should never be folded')
+    })
+
+    it('failure + >200 lines: still applies existing head/tail truncation', () => {
+      const lines = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n')
+      const result = buildModelOutput(lines, { ...meta, exitCode: 1 })
+      assert.ok(result.includes('lines omitted'), 'large failure should be truncated')
+      assert.ok(result.startsWith('[npm test] exit=1'))
+      assert.ok(!result.includes('suppressed'), 'failure should never be folded')
+    })
   })
 
   describe('buildUiOutput', () => {

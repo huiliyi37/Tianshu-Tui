@@ -55,7 +55,7 @@ describe('mixed', () => {
   it('detects test command from package.json', async () => {
     const result = await RUN_TESTS_TOOL.execute(makeParams({}, passingDir))
     assert.equal(result.isError, false)
-    assert.ok(result.content.includes('passed'))
+    assert.ok(result.content.startsWith('✓'), `expected one-liner ✓, got: ${result.content.slice(0, 50)}`)
     assert.ok(result.verification)
     assert.equal(result.verification!.status, 'passed')
     assert.equal(result.verification!.scope, 'full')
@@ -64,8 +64,11 @@ describe('mixed', () => {
   it('runs and reports success for passing tests', async () => {
     const result = await RUN_TESTS_TOOL.execute(makeParams({}, passingDir))
     assert.equal(result.isError, false)
-    assert.ok(result.content.includes('passed'))
+    // Phase 1 deterministic trimming: success output is a one-liner summary
+    assert.ok(result.content.startsWith('✓'), `expected one-liner ✓ for success, got: ${result.content.slice(0, 50)}`)
+    assert.ok(result.content.includes('passed'), 'should include passed count')
     assert.ok(!result.content.includes('FAILURES'))
+    assert.ok(!result.content.includes('Exit code'), 'success should be one-liner, not multi-line format')
   })
 
   it('reports failure output for failing tests', async () => {
@@ -82,7 +85,7 @@ describe('mixed', () => {
       makeParams({ filter: 'src/example.test.ts' }, passingDir),
     )
     assert.equal(result.isError, false)
-    assert.ok(result.content.includes('passed'))
+    assert.ok(result.content.startsWith('✓'), `expected one-liner ✓ for filtered run, got: ${result.content.slice(0, 50)}`)
     assert.ok(result.verification)
     assert.equal(result.verification!.scope, 'targeted')
     assert.equal(result.verification!.command, 'tsx --test src/example.test.ts')

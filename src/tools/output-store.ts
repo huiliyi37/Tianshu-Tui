@@ -59,6 +59,11 @@ const MODEL_MAX_LINES = 200
 const MODEL_HEAD_LINES = 100
 const MODEL_TAIL_LINES = 80
 
+/** Success output inline threshold: commands that succeed with ≤ this many lines
+ *  return full output to the model. Beyond this, only a header summary is returned
+ *  (raw output persists on disk via persistRawOutput → read_section). */
+const SUCCESS_INLINE_LINES = 20
+
 function countLines(raw: string): number {
   if (raw.length === 0) return 0
   const parts = raw.split('\n')
@@ -70,9 +75,18 @@ export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
   // Only apply filter when exitCode !== 0 (failure) to avoid hiding useful info
   const filtered = meta.exitCode !== 0 ? applyCommandFilter(meta.command, raw, meta.exitCode) : null
   const effectiveRaw = filtered ?? raw
-  const lines = effectiveRaw.split('\n')
   const lineCount = countLines(effectiveRaw)
   const header = `[${meta.command}] exit=${meta.exitCode} time=${(meta.durationMs / 1000).toFixed(1)}s lines=${lineCount}`
+
+  // Success folding: for successful commands with > SUCCESS_INLINE_LINES lines,
+  // return only the header summary. Raw output persists on disk and can be
+  // retrieved via read_section. This saves prefix-cache payload for noisy
+  // success output (large test suites, long build logs) without losing failure detail.
+  if (meta.exitCode === 0 && lineCount > SUCCESS_INLINE_LINES) {
+    return `${header}\n(output suppressed — ${lineCount} lines, read full via artifact if needed)`
+  }
+
+  const lines = effectiveRaw.split('\n')
 
   if (lines.length <= MODEL_MAX_LINES) {
     return `${header}\n${effectiveRaw}`

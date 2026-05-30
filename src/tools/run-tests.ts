@@ -315,7 +315,9 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         }
 
         resolve({
-          content: truncated,
+          content: exitCode === 0
+            ? `✓ ${parsed.passed} passed${parsed.skipped ? `, ${parsed.skipped} skipped` : ''}${parsed.duration ? ` (${parsed.duration})` : ''}`
+            : truncated,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
           verification,
