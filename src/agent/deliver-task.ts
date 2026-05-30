@@ -237,6 +237,12 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         lines.push('', `✅ Scoped commit created with message: "${message}"`)
         lines.push(`   Files: ${report.ownedFiles.join(', ') || '(none)'}`)
         if (commitResult.output) lines.push(`   ${commitResult.output}`)
+        // Post-commit truth readback: verify actual landed changes + surface hash
+        const readback = spawnSync('git', ['show', '--stat', '--format=%h%d', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 10_000 })
+        if (readback.status === 0 && readback.stdout.trim()) {
+          lines.push('', '--- actual changes (git show --stat) ---')
+          lines.push(readback.stdout.trim())
+        }
       }
 
       return { content: lines.join('\n') }
