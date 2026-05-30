@@ -116,6 +116,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
     if (isStreaming && thinking && startRef.current === 0) {
       startRef.current = Date.now()
       setElapsed(0)
+      elapsedRef.current = 0
       // Don't auto-expand during streaming — keep compact status line
       // to prevent layout instability and scroll jumping.
       // User can Tab to expand manually.
