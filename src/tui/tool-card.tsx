@@ -8,6 +8,9 @@ import { useTerminalSize } from './use-terminal-size.js'
 
 const MAX_COLLAPSED_LINES = 15
 
+/** Chrome lines that must always remain visible (GlanceBar + InputBar + margins) */
+const DYNAMIC_CHROME = 6
+
 /** Maximum lines a collapsed ToolCard can use — adapts to terminal size */
 function cappedCollapsedLines(termRows: number): number {
   // On small terminals, cap at ~half the terminal height to prevent overflow
@@ -45,7 +48,9 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
 
   const expanded = verbose || localExpanded
   const collapsedLimit = cappedCollapsedLines(rows)
-  const limit = expanded ? 200 : collapsedLimit
+  // Expanded cap: allow more detail but never exceed terminal height minus chrome
+  const expandedLimit = Math.min(200, Math.max(collapsedLimit, rows - DYNAMIC_CHROME))
+  const limit = expanded ? expandedLimit : collapsedLimit
   const { displayText, truncated, totalLines } = useMemo(() => {
     const lines = result.split('\n')
     const isLong = lines.length > limit

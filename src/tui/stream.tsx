@@ -14,9 +14,21 @@ import { gutterGlyph } from './gutter.js'
  */
 const DYNAMIC_CHROME = 6  // ThinkingCollapser(1) + GlanceBar(1) + InputBar(2) + margins(2)
 
+/**
+ * Compute max stream lines accounting for multiple live ToolCards.
+ * Each live ToolCard can take up to cappedCollapsedLines(termRows).
+ * During delegate_batch, up to 5 tools can be live simultaneously.
+ * We reserve for up to MAX_LIVE_TOOLS cards; if more exist, they overflow
+ * but this is rare and bounded by the progressive task cap.
+ */
+const MAX_LIVE_TOOLS = 3
+
 function computeMaxStreamLines(termRows: number): number {
-  const toolCardLines = Math.min(15, Math.max(3, Math.floor(termRows / 2) - 2))
-  return Math.max(8, termRows - toolCardLines - DYNAMIC_CHROME)
+  const singleToolCard = Math.min(15, Math.max(3, Math.floor(termRows / 2) - 2))
+  // For small terminals, cap per-tool lines so N cards still fit
+  const perToolBudget = Math.min(singleToolCard, Math.max(3, Math.floor((termRows - DYNAMIC_CHROME) / (MAX_LIVE_TOOLS + 1))))
+  const totalToolCards = perToolBudget * MAX_LIVE_TOOLS
+  return Math.max(8, termRows - totalToolCards - DYNAMIC_CHROME)
 }
 
 /**
