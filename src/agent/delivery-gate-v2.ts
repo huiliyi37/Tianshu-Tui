@@ -110,7 +110,7 @@ export function createDeliveryGateV2(opts: {
   } {
     const allOwnedFiles = ownership.getOwnedFiles()
     const allCoOwnedFiles = ownership.getCoOwnedFiles()
-    const allExternalFiles = ownership.getExternalFiles()
+    const allExternalFiles = ownership.getExternalFiles(currentDirtyFiles)
     if (!currentDirtyFiles) {
       return {
         ownedFilesForGate: allOwnedFiles,

@@ -107,6 +107,7 @@ let _fileHistoryRef: FileHistory | null = null
 // Module-level claim store reference — created in Root, read by delegate_task tool
 let _claimStoreRef: import('./context/claim-store.js').ContextClaimStore | null = null
 let _sessionIdRef: string | null = null
+let _sessionRegistryRef: import('./agent/session-registry.js').SessionRegistry | null = null
 // Module-level TaskLedger reference — created in tool registry, read by AgentLoop config
 let _taskLedgerRef: import('./agent/task-ledger.js').TaskLedger | null = null
 let _ownershipLedgerRef: import('./agent/ownership-ledger.js').OwnershipLedger | null = null
@@ -186,6 +187,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       taskLedger: _b1TaskLedger,
       ownership: _b1Ownership,
       gate: _b1Gate,
+      sessionRegistry: _sessionRegistryRef ?? undefined,
+      sessionId: _sessionIdRef ?? undefined,
     })))
 
     return reg
@@ -828,6 +831,7 @@ async function main() {
   const stateDir = join(homedir(), '.rivet', 'state')
   const { SessionRegistry } = await import('./agent/session-registry.js')
   const registry = await SessionRegistry.create(stateDir)
+  _sessionRegistryRef = registry
 
   // 清理崩溃会话 + stale claims
   const crashedSessions = registry.detectCrashedSessions()

@@ -41,7 +41,10 @@ export interface OwnershipLedger {
   isCoOwned(filePath: string): boolean
   getOwnedFiles(): string[]
   getCoOwnedFiles(): string[]
-  getExternalFiles(): string[]
+  /** Get external files, optionally enriched with dynamic externals from current dirty files.
+   *  When currentDirtyFiles is provided, files not classified as owned/co-owned/external
+   *  are lazily classified as dynamic externals (created by other sessions after baseline). */
+  getExternalFiles(currentDirtyFiles?: string[]): string[]
   /** Filter a file list to only owned files */
   scopeToOwned(files: string[]): string[]
   getOwnershipReport(): OwnershipReport
@@ -114,8 +117,20 @@ export function createOwnershipLedger(opts: {
     return [...coOwnedSet].sort()
   }
 
-  function getExternalFiles(): string[] {
-    return baseline.getExternalFiles()
+  function getExternalFiles(currentDirtyFiles?: string[]): string[] {
+    const base = baseline.getExternalFiles()
+    if (!currentDirtyFiles || currentDirtyFiles.length === 0) return base
+
+    // Lazy reclassification: dirty files not owned, co-owned, or baseline-external
+    // are dynamic externals — created by other sessions after baseline was taken.
+    const dynamic: string[] = []
+    for (const f of currentDirtyFiles) {
+      if (!ownedSet.has(f) && !coOwnedSet.has(f) && !baseline.isExternal(f)) {
+        dynamic.push(f)
+      }
+    }
+    if (dynamic.length === 0) return base
+    return [...new Set([...base, ...dynamic])].sort()
   }
 
   function scopeToOwned(files: string[]): string[] {

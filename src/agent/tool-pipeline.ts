@@ -115,6 +115,8 @@ export interface ToolPipelineDeps {
   taskLedger?: TaskLedger
   /** Optional OwnershipLedger for real-time file ownership registration */
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
+  /** Optional SessionRegistry for cross-session file claim coordination */
+  sessionRegistry?: import('./session-registry.js').SessionRegistry
   /** P3 integration facade for speculative execution + mistake hints */
   p3?: P3Integration
   /** Turn-scoped accumulator: artifact IDs evicted (created by artifactIntercept) */
@@ -669,16 +671,28 @@ ${check.formatted}`
 
     // B1 归属星轨：record tool events into TaskLedger
     if (deps.taskLedger) {
-      const filePath = (tu.input.file_path ?? tu.input.path) as string | undefined
+      let filePath = (tu.input.file_path ?? tu.input.path) as string | undefined
+      // Normalize: if absolute path under cwd, convert to relative so it
+      // matches git-reported paths in collectCurrentDirtyFiles.
+      if (filePath && (filePath.startsWith(deps.cwd + '/') || filePath.startsWith(deps.cwd + '\\'))) {
+        filePath = filePath.slice(deps.cwd.length + 1)
+      }
       if (tu.name === 'read_file' && filePath) {
         deps.taskLedger.record({ type: 'file_read', path: filePath })
       } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && filePath) {
         deps.taskLedger.record({ type: 'file_write', path: filePath })
         deps.ownershipLedger?.registerOwned(filePath)
+        // P2 cross-session signal: auto-acquire exclusive claim on written file
+        if (deps.sessionRegistry && deps.sessionId) {
+          deps.sessionRegistry.acquireClaim(deps.sessionId, filePath, 'exclusive')
+        }
       } else if (tu.name === 'plan_close' && filePath) {
         if (tu.input.apply === true && !harnessResult.isError) {
           deps.taskLedger.record({ type: 'file_write', path: filePath })
           deps.ownershipLedger?.registerOwned(filePath)
+          if (deps.sessionRegistry && deps.sessionId) {
+            deps.sessionRegistry.acquireClaim(deps.sessionId, filePath, 'exclusive')
+          }
         } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
         }

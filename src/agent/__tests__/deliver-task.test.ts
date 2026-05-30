@@ -637,11 +637,12 @@ Do not declare a streamed response duplicate in the middle of the stream.
     })
   })
 
-  describe('unclassified dirty files → YELLOW', () => {
-    it('reports YELLOW when dirty files include files with no ledger trace', async () => {
-      // With the ledger-trace guard in autoOwnFromBaseline (guard against
-      // auto-owning files from other sessions), dirty files that lack a
-      // file_write/git_action ledger trace remain unclassified → YELLOW.
+  describe('unclassified dirty files → dynamic external reclassification', () => {
+    it('reports GREEN when dirty unclassified files are lazily reclassified as dynamic externals', async () => {
+      // P1 living baseline: files with no ledger trace that are NOT in the baseline
+      // external set are now lazily reclassified as "dynamic externals" —
+      // created by other sessions after our baseline was taken.
+      // This eliminates false YELLOWs from stale baseline information.
       const ctx = makeContext({
         taskId: 't1',
         ownedFiles: ['src/owned.ts'],
@@ -651,12 +652,16 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
       const result = await ctx.tool.execute(ctx.params)
 
-      // src/new-session-file.ts has no ledger trace → not auto-owned → unclassified → YELLOW
-      assert.match(result.content, /Delivery Gate: YELLOW/)
-      assert.match(result.content, /no ownership classification.*src\/new-session-file\.ts/)
+      // src/new-session-file.ts is dynamically reclassified as external → GREEN
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      // It appears in the external files section, not as an "unclassified" warning
+      assert.match(result.content, /External files \(1\)/)
+      assert.match(result.content, /src\/new-session-file\.ts/)
+      // No ownership health warning for unclassified files
+      assert.doesNotMatch(result.content, /no ownership classification/)
     })
 
-    it('allows commit=true when YELLOW due to unclassified dirty files (only owned committed)', async () => {
+    it('allows commit=true when dirty unclassified files are reclassified as external (only owned committed)', async () => {
       const calls: Array<{ files: string[]; message: string }> = []
       const ctx = makeContext({
         taskId: 't1',

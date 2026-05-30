@@ -21,7 +21,7 @@
 
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
@@ -34,6 +34,10 @@ export interface B1Context {
   taskLedger: TaskLedger
   ownership: OwnershipLedger
   gate: DeliveryGateV2
+  /** Optional SessionRegistry for cross-session claim conflict detection */
+  sessionRegistry?: import('./session-registry.js').SessionRegistry
+  /** Current session ID for claim management */
+  sessionId?: string
   /** Test hook / alternate runtime source for current dirty files. */
   getCurrentDirtyFiles?: (cwd: string) => string[] | undefined
   /** Test hook / alternate runtime source for project memory markdown. */
@@ -88,9 +92,6 @@ export function collectCurrentDirtyFiles(cwd: string): string[] | undefined {
   const files = new Set<string>()
   for (const file of [...unstaged, ...staged, ...untracked]) {
     files.add(file)
-    // Tool inputs are often absolute paths, while git reports project-relative
-    // paths. Keep both forms so DeliveryGate can match either ledger encoding.
-    files.add(resolve(cwd, file))
   }
   return [...files].sort()
 }
@@ -208,6 +209,25 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
 
       if (report.blockingReason) {
         lines.push('', `⚠️  Blocking: ${report.blockingReason}`)
+      }
+
+      // P2 cross-session signal: detect claim conflicts with other sessions
+      if (ctx.sessionRegistry && ctx.sessionId && report.ownedFiles.length > 0) {
+        const conflicts: Array<{ file: string; holder: string; claimType: string }> = []
+        for (const f of report.ownedFiles) {
+          const claim = ctx.sessionRegistry.checkClaim(f)
+          if (claim && claim.sessionId !== ctx.sessionId) {
+            conflicts.push({ file: f, holder: claim.sessionId, claimType: claim.claimType })
+          }
+        }
+        if (conflicts.length > 0) {
+          lines.push('', '⚠️  Cross-session claim conflicts:')
+          for (const c of conflicts) {
+            const claimKind = c.claimType === 'exclusive' ? 'exclusive lock' : 'shared read'
+            lines.push(`  ${c.file} — ${claimKind} held by session ${c.holder}`)
+          }
+          lines.push('', '  (Continue only if you have verified this conflict is safe to override.)')
+        }
       }
 
       lines.push('', `Attribution: ${report.attributionSummary}`)
