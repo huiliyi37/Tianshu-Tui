@@ -10,6 +10,20 @@ import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 
 /**
+ * 退出码 → 是否真执行失败。
+ *
+ * 非零退出码不等于失败：grep(1=无匹配)、diff(1=有差异)、test runner(非零=有失败用例)、
+ * lint/build 工具(非零=有告警)都用非零码表达正常语义结果。把这些一律打成 isError
+ * 会让环境性非零码被下游(immune/dead-end/doom-loop)放大成 error 风暴，进而把模型推入退化态。
+ *
+ * 只把"命令无法执行"判为真 error：127(命令未找到)、126(不可执行)、>128(被信号杀死，如段错误)、
+ * 以及 timeout(-1)。其余非零码视为"有结果但非执行失败"，由模型自行从输出判断语义。
+ */
+export function isExecFailure(exitCode: number): boolean {
+  return exitCode === -1 || exitCode === 126 || exitCode === 127 || exitCode > 128
+}
+
+/**
  * Single-entry cache to avoid calling rtkRewrite twice for the same command.
  *
  * Intentionally trades freshness for gate/execute consistency: the cached
@@ -96,6 +110,10 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
         const meta = { command: rawCommand, exitCode, durationMs }
+        // 非零退出码 ≠ 失败：grep/diff/test 等用退出码表达"有差异/无匹配/有失败用例"，
+        // build/lint 工具也常以非零码报告非致命问题。只把"无法执行/被信号杀死"判为真 error，
+        // 避免环境性非零码被无条件打成 error 并被下游放大成 error 风暴（天枢退化的根因）。
+        const isError = isExecFailure(exitCode)
 
         // Use ArtifactStore if available (preferred); otherwise fall back to output-store.
         // Skip persistRawOutput in artifact mode — ArtifactStore owns raw persistence,
@@ -117,7 +135,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
               content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
               uiContent: buildUiOutput(raw, meta),
               rawPath,
-              isError: exitCode !== 0,
+              isError,
             }
           }
 
@@ -139,7 +157,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
             content: `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`,
             uiContent: buildUiOutput(raw, meta),
             rawPath: artifact?.rawPath,
-            isError: exitCode !== 0,
+            isError,
           }
         }
 
@@ -148,7 +166,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
           uiContent: buildUiOutput(raw, meta),
           rawPath,
-          isError: exitCode !== 0,
+          isError,
         }
       }
 

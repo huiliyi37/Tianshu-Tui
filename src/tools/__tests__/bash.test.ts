@@ -3,7 +3,21 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { BASH_TOOL } from '../bash.js'
+import { BASH_TOOL, isExecFailure } from '../bash.js'
+
+describe('isExecFailure: 非零退出码 ≠ 真失败', () => {
+  it('把 0 和"非零非致命码"判为非失败(grep 1/diff 1/test 失败码)', () => {
+    assert.equal(isExecFailure(0), false)
+    assert.equal(isExecFailure(1), false)   // grep 无匹配 / diff 有差异 / test 有失败用例
+    assert.equal(isExecFailure(2), false)   // build/lint 非致命告警
+  })
+  it('只把"无法执行/被信号杀死/timeout"判为真失败', () => {
+    assert.equal(isExecFailure(-1), true)   // timeout
+    assert.equal(isExecFailure(126), true)  // 不可执行
+    assert.equal(isExecFailure(127), true)  // 命令未找到
+    assert.equal(isExecFailure(139), true)  // 段错误 (128+SIGSEGV)
+  })
+})
 
 function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
