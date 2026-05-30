@@ -9,7 +9,15 @@ import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 
-/** Single-entry cache to avoid calling rtkRewrite twice for the same command. */
+/**
+ * Single-entry cache to avoid calling rtkRewrite twice for the same command.
+ *
+ * Intentionally trades freshness for gate/execute consistency: the cached
+ * result guarantees requiresApproval() and execute() see the identical
+ * rewrite, closing a TOCTOU window.  If rtk isn't installed or errors,
+ * the fallback (result === command) is also cached — acceptable because
+ * gate→execute runs within milliseconds on the same command.
+ */
 let _cachedCommand: string | undefined
 let _cachedResult: string | undefined
 
