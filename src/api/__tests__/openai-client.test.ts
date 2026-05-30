@@ -271,37 +271,15 @@ describe('error handling', () => {
 })
 
 describe('retry-after parsing (parseRetryAfterMs)', () => {
-  it('parses numeric retry-after value (seconds) to milliseconds', async () => {
-    const { OpenAIClient: _OC } = await import('../openai-client.js')
-    // Contract: numeric "30" → 30s = 30000ms
-    assert.equal(parseFloat('30') * 1000, 30_000)
-  })
-
-  it('parseFloat returns NaN for HTTP-date retry-after', () => {
-    const httpDate = 'Fri, 30 May 2026 12:00:00 GMT'
-    const parsed = parseFloat(httpDate)
-    assert.ok(Number.isNaN(parsed), 'parseFloat on HTTP-date must return NaN')
-  })
-
-  it('bug demonstration: NaN fallback * 1000 causes 16.7 min stall', () => {
-    const httpDate = 'Fri, 30 May 2026 12:00:00 GMT'
-    const BASE_DELAY_MS = 1000
-    const parsed = parseFloat(httpDate)
-    // The buggy formula: (NaN || BASE_DELAY_MS) * 1000
-    const buggyDelay = (parsed || BASE_DELAY_MS) * 1000
-    assert.equal(buggyDelay, 1_000_000, 'bug produces 1M ms = 16.7 min stall')
-    // The fixed formula should NOT produce this
-    const fixedDelay = Number.isNaN(parsed) ? BASE_DELAY_MS : parsed * 1000
-    assert.ok(fixedDelay < 10_000, 'fixed delay should be reasonable (< 10s)')
-  })
-
-  it('parseRetryAfterMs handles HTTP-date via Date.parse', async () => {
-    // Verify that the fix handles HTTP-date by falling back to Date.parse
-    // We import the module to confirm it loads, but parseRetryAfterMs is
-    // a module-level function not exported. Test via error classifier behavior.
+  it('parseRetryAfterMs is imported from error-classifier, not a private local', async () => {
     const mod = await import('../openai-client.js')
-    assert.ok(mod.OpenAIClient, 'module loads successfully with parseRetryAfterMs')
-    // Direct contract: Date.parse on valid HTTP-date returns a number
+    assert.ok(mod.OpenAIClient, 'OpenAIClient loads successfully with shared parseRetryAfterMs')
+    // parseRetryAfterMs was removed from this module in 119dd49
+    assert.equal(typeof (mod as Record<string, unknown>).parseRetryAfterMs, 'undefined',
+      'parseRetryAfterMs must not exist on openai-client exports — it lives in error-classifier')
+  })
+
+  it('HTTP-date via Date.parse works for future timestamp', () => {
     const futureDate = new Date(Date.now() + 30_000).toUTCString()
     const parsed = Date.parse(futureDate)
     assert.ok(Number.isFinite(parsed), 'Date.parse handles HTTP-date format')
