@@ -7,9 +7,32 @@ export interface TerminalSizeSnapshot {
 
 let cachedSnapshot: TerminalSizeSnapshot | undefined
 
+type ThrottledHandler = (() => void) & { cancel: () => void }
+
+export function createThrottledResizeHandler(cb: () => void, delayMs: number): ThrottledHandler {
+  let last = 0
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const handler = (() => {
+    const now = Date.now()
+    if (now - last >= delayMs) {
+      last = now
+      cb()
+    } else if (timer === null) {
+      timer = setTimeout(() => {
+        timer = null
+        last = Date.now()
+        cb()
+      }, delayMs - (now - last))
+    }
+  }) as ThrottledHandler
+  handler.cancel = () => { if (timer !== null) { clearTimeout(timer); timer = null } }
+  return handler
+}
+
 function subscribe(cb: () => void) {
-  process.stdout.on('resize', cb)
-  return () => { process.stdout.off('resize', cb) }
+  const throttled = createThrottledResizeHandler(cb, 32)
+  process.stdout.on('resize', throttled)
+  return () => { throttled.cancel(); process.stdout.off('resize', throttled) }
 }
 
 export function getTerminalSizeSnapshot(): TerminalSizeSnapshot {

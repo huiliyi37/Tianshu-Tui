@@ -464,7 +464,7 @@ export class AgentLoop {
               console.error('[session-persist] append failed:', err)
             })
         } else {
-          // replace is rare (compaction/reset); do it synchronously after the
+          // replace is rare (compaction/reset); do it asynchronously after the
           // current append queue drains so the rewrite reflects the latest state.
           writeChain = writeChain
             .then(() => persist.compactOaiAsync(m.messages))

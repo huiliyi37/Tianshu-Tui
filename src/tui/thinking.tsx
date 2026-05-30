@@ -108,6 +108,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
   const [frame, setFrame] = useState(0)
   const [stale, setStale] = useState(false)
   const startRef = useRef(0)
+  const elapsedRef = useRef(0)
   const thinkingRef = useRef(thinking)
   const staleCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -150,13 +151,14 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
       setFrame(f => f + 1)
       if (startRef.current > 0) {
         const newElapsed = Date.now() - startRef.current
-        if (Math.floor(newElapsed / 1000) !== Math.floor(elapsed / 1000)) {
+        if (Math.floor(newElapsed / 1000) !== Math.floor(elapsedRef.current / 1000)) {
+          elapsedRef.current = newElapsed
           setElapsed(newElapsed)
         }
       }
     }, 120)
     return () => clearInterval(id)
-  }, [isStreaming, elapsed])
+  }, [isStreaming])
 
   useInput((_input, key) => {
     if (focused && key.tab) {
