@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { MeridianDb } from '../meridian-db.js'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -104,6 +104,20 @@ describe('meridian db', () => {
     assert.equal(first.consolidated, true)
     assert.equal(first.activationCount, 7)
     assert.equal(first.direction, 0.4)
+  })
+
+  it('does not create meridian.db on construction (lazy open)', () => {
+    const lazyDir = mkdtempSync(join(tmpdir(), 'meridian-lazy-'))
+    try {
+      const lazyDb = new MeridianDb(lazyDir)
+      assert.equal(existsSync(join(lazyDir, 'meridian.db')), false, 'db file should NOT exist after construction')
+      // First actual query triggers lazy open
+      assert.deepEqual(lazyDb.getSymbolsForFile('src/none.ts'), [])
+      assert.equal(existsSync(join(lazyDir, 'meridian.db')), true, 'db file SHOULD exist after first query')
+      lazyDb.close()
+    } finally {
+      rmSync(lazyDir, { recursive: true, force: true })
+    }
   })
 
   it('savePhysarumEdges replaces previous state', () => {

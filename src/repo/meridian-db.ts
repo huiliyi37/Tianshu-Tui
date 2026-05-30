@@ -86,15 +86,23 @@ CREATE INDEX IF NOT EXISTS idx_mistake_error ON mistake_entries(error);
 `
 
 export class MeridianDb {
-  private db: Database.Database
+  private conn: Database.Database | null = null
+  private readonly stateDir: string
 
   constructor(stateDir: string) {
-    if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
-    const dbPath = join(stateDir, 'meridian.db')
-    this.db = new Database(dbPath)
-    this.db.pragma('journal_mode = WAL')
-    this.db.pragma('busy_timeout = 3000')
-    this.db.exec(SCHEMA)
+    this.stateDir = stateDir
+  }
+
+  private get db(): Database.Database {
+    if (!this.conn) {
+      if (!existsSync(this.stateDir)) mkdirSync(this.stateDir, { recursive: true })
+      const dbPath = join(this.stateDir, 'meridian.db')
+      this.conn = new Database(dbPath)
+      this.conn.pragma('journal_mode = WAL')
+      this.conn.pragma('busy_timeout = 3000')
+      this.conn.exec(SCHEMA)
+    }
+    return this.conn
   }
 
   needsParse(filePath: string, contentHash: string): boolean {
@@ -379,6 +387,6 @@ export class MeridianDb {
   }
 
   close(): void {
-    this.db.close()
+    if (this.conn) { this.conn.close(); this.conn = null }
   }
 }
