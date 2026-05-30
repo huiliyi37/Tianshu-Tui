@@ -3,6 +3,7 @@ import { memo, useMemo, useState } from 'react'
 import { getTheme } from './theme.js'
 import { getToolFamily } from './tool-family.js'
 import { Markdown } from './markdown-render.js'
+import { formatToolElapsed } from './tool-elapsed.js'
 
 const MAX_COLLAPSED_LINES = 15
 
@@ -14,6 +15,7 @@ interface ToolCardProps {
   verbose?: boolean
   rawPath?: string
   focused?: boolean
+  elapsedMs?: number
 }
 
 function compactPath(rawPath: string | undefined): string {
@@ -22,7 +24,7 @@ function compactPath(rawPath: string | undefined): string {
   return filename
 }
 
-export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused }: ToolCardProps) {
+export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs }: ToolCardProps) {
   const theme = getTheme()
   const [localExpanded, setLocalExpanded] = useState(false)
 
@@ -53,6 +55,9 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
     <Box flexDirection="column" paddingX={1} marginBottom={0}>
       <Text bold color={borderColor}>
         {family.glyph} {family.verb}{isStreaming ? ' …' : ''}
+        {isStreaming && formatToolElapsed(elapsedMs ?? 0) && (
+          <Text color={theme.muted}> {formatToolElapsed(elapsedMs ?? 0)}</Text>
+        )}
         {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text color={theme.muted}> {totalLines} lines</Text>}
         {focused && totalLines > MAX_COLLAPSED_LINES ? <Text color={theme.muted}> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
       </Text>

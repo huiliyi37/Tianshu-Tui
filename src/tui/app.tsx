@@ -293,6 +293,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   // Tool target tracking for GlanceBar and phase summaries
   const toolTargetMap = useRef<Map<string, string>>(new Map())
+  const toolStartMap = useRef<Map<string, number>>(new Map())
   const recentToolLabels = useRef<string[]>([])
   const restorableRef = useRef<string[]>([])
 
@@ -566,8 +567,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     dirtyTools.current.clear()
     toolNames.current.clear()
     toolTargetMap.current.clear()
-
-    // Reset activity projection state
+    toolStartMap.current.clear()
     activityRef.current = clearActivity(activityRef.current, Date.now())
     activityTextRef.current = undefined
     activityProjectedAtRef.current = 0
@@ -762,7 +762,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       onToolUse: (id, name, input) => {
         setHeartbeatStatus(null)
         toolNames.current.set(id, name)
-        setIsThinkingActive(false)
+        toolStartMap.current.set(id, Date.now())
 
         const target = typeof input?.file_path === 'string' ? input.file_path
           : typeof input?.path === 'string' ? input.path
@@ -832,6 +832,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         dirtyTools.current.delete(id)
         toolAccum.current.delete(id)
         toolNames.current.delete(id)
+        toolStartMap.current.delete(id)
 
         const finalContent = uiContent ?? result
         liveToolsRef.current = liveToolsRef.current.filter(e => e.id !== id)
@@ -1093,6 +1094,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolNames.current.clear()
         dirtyTools.current.clear()
         toolTargetMap.current.clear()
+        toolStartMap.current.clear()
         toolCallTracker.current.clear()
         steerBuffer.current.clear()
         liveToolsRef.current = []
@@ -1132,6 +1134,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolNames.current.clear()
         dirtyTools.current.clear()
         toolTargetMap.current.clear()
+        toolStartMap.current.clear()
         toolCallTracker.current.clear()
         steerBuffer.current.clear()
         liveToolsRef.current = []
@@ -1229,7 +1232,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {liveTools.map(log => (
           log.toolName === 'ask_user_question'
             ? <QuestionCard key={log.id} question={log.content} />
-            : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} />
+            : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} />
         ))}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
