@@ -165,4 +165,56 @@ describe('claim-extractor', () => {
     assert.equal(proposals.length, 1)
     assert.equal(proposals[0]!.kind, 'failure_pattern')
   })
+
+  // ── Commit fact extraction ──
+
+  it('extracts decision claim from git commit result', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'git',
+      input: { command: 'commit', message: 'fix: restore hash in show-stat readback' },
+      result: '[feat/knowledge-manifest-minimal abc1234] fix: restore hash in show-stat readback\n 2 files changed, 10 insertions(+), 2 deletions(-)\n\n--- actual changes (git show --stat) ---\nabc1234 (HEAD -> feat/knowledge-manifest-minimal)\n src/tools/git.ts | 3 ++-\n 1 file changed, 3 insertions(+), 2 deletions(-)',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 1)
+    assert.equal(proposals[0]!.kind, 'decision')
+    assert.match(proposals[0]!.text, /abc1234/)
+    assert.match(proposals[0]!.text, /restore hash/)
+    assert.equal(proposals[0]!.expiresAt, undefined) // Infinity TTL via decision kind
+  })
+
+  it('extracts decision claim from deliver_task commit result', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'deliver_task',
+      input: { commit: true, message: 'fix: scoped commit' },
+      result: 'Delivery Gate: GREEN\n\n✅ Scoped commit created with message: "fix: scoped commit"\n   Files: src/a.ts, src/b.ts\n   [main def5678] fix: scoped commit\n 2 files changed, 5 insertions(+)\n\n--- actual changes (git show --stat) ---\ndef5678 (HEAD -> main)\n src/a.ts | 3 ++-\n src/b.ts | 2 +-\n 2 files changed, 5 insertions(+), 2 deletions(-)',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 1)
+    assert.equal(proposals[0]!.kind, 'decision')
+    assert.match(proposals[0]!.text, /def5678/)
+  })
+
+  it('does not extract claim from failed commit', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'git',
+      input: { command: 'commit', message: 'test' },
+      result: 'git commit failed: nothing to commit',
+      isError: true,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 0)
+  })
+
+  it('does not extract claim from non-commit git commands', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'git',
+      input: { command: 'log', maxCount: 5 },
+      result: 'abc1234 fix: something\ndef5678 feat: other',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 0)
+  })
 })

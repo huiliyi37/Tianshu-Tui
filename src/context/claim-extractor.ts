@@ -52,6 +52,13 @@ export function extractClaimsFromToolResult(ctx: ToolResultContext, meta: ClaimE
     return [securityFinding(ctx, meta, now)]
   }
 
+  // Commit fact: extract hash + message as a decision claim (Infinity TTL via decision kind)
+  const isCommitResult = (ctx.toolName === 'git' && String(ctx.input.command ?? '') === 'commit')
+    || (ctx.toolName === 'deliver_task' && ctx.input.commit === true)
+  if (isCommitResult && !ctx.isError) {
+    return [commitFact(ctx, meta, now)]
+  }
+
   return []
 }
 
@@ -143,5 +150,31 @@ function securityFinding(ctx: ToolResultContext, meta: ClaimExtractionMeta, now:
     createdAt: now,
     expiresAt: now + TTL.security_finding,
     tags: ['tool', 'security'],
+  }
+}
+
+const COMMIT_HASH_RE = /\b([0-9a-f]{7,40})\b/
+
+function commitFact(ctx: ToolResultContext, meta: ClaimExtractionMeta, now: number): ClaimProposal {
+  const hashMatch = ctx.result.match(COMMIT_HASH_RE)
+  const hash = hashMatch?.[1] ?? 'unknown'
+  const message = String(ctx.input.message ?? '').slice(0, 80)
+  // Extract file list from stat lines (lines with |)
+  const statLines = ctx.result.split('\n')
+    .map(l => l.split('|')[0]?.trim() ?? '')
+    .filter(f => f.length > 0 && !f.includes('file changed') && !f.includes('files changed') && !f.startsWith('('))
+  const files = statLines.length > 0 ? statLines.slice(0, 5).join(', ') : 'unknown files'
+  const text = `Commit ${hash}: "${message}" (${files})`
+  return {
+    kind: 'decision',
+    scope: 'session',
+    text,
+    confidence: 0.95,
+    fitness: 8,
+    source: { actor: 'tool', sessionId: meta.sessionId, turn: meta.turn, eventId: meta.eventId },
+    evidence: [{ id: `${meta.eventId}:commit`, kind: 'tool_result' as EvidenceKind, summary: text, createdAt: now }],
+    createdAt: now,
+    // decision kind has TTL=Infinity in the TTL table — no expiresAt needed
+    tags: ['tool', 'commit', 'git'],
   }
 }
