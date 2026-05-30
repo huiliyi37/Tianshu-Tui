@@ -2,19 +2,19 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { SessionPersist } from '../session-persist.js'
 
-describe('SessionPersist.loadOaiAsync (S10)', () => {
-  it('returns same messages as loadOai but via a Promise', async () => {
-    const sessionId = `async-test-${Date.now()}`
+describe('SessionPersist load round-trip (S10)', () => {
+  it('loadOai returns messages previously written via appendOaiWithChecksum', async () => {
+    const sessionId = `roundtrip-test-${Date.now()}`
     const p = new SessionPersist(sessionId)
     await p.appendOaiWithChecksum({ role: 'user', content: 'hello' } as any)
-    const sync = p.loadOai()
-    const asyncResult = await p.loadOaiAsync()
-    assert.deepEqual(asyncResult, sync)
+    const loaded = p.loadOai()
+    assert.equal(loaded.length, 1)
+    assert.equal(loaded[0]!.content, 'hello')
     p.delete()
   })
 
-  it('resolves to [] for a non-existent session file', async () => {
-    const p = new SessionPersist(`missing-${Date.now()}`)
-    assert.deepEqual(await p.loadOaiAsync(), [])
+  it('loadOai returns [] for a session with no prior messages', () => {
+    const p = new SessionPersist(`empty-test-${Date.now()}`)
+    assert.deepEqual(p.loadOai(), [])
   })
 })

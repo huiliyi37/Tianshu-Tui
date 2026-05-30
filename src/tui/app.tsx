@@ -487,8 +487,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const id = sessions[0]!
         setSessionPrompt('done')
         pushStatic(createLogEntry({ type: 'system', content: `Restoring session ${id.slice(0, 8)}...` }))
-        const p = new SessionPersist(id)
-        p.loadOaiAsync().then(messages => {
+        // Defer restore to next tick so the "Restoring..." message renders first
+        void Promise.resolve().then(() => {
+          const p = new SessionPersist(id)
+          const messages = p.loadOai()
           session.replaceMessages(messages)
           const { entries, toolCount, turnCount } = replayMessagesToLogEntries(session.getMessages())
           pushStaticBatch(entries)

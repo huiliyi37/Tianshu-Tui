@@ -325,9 +325,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
   // Load prior messages off the first-frame path (S10)
   useEffect(() => {
     let cancelled = false
-    persist.loadOaiAsync().then(existingMessages => {
-      if (!cancelled && existingMessages.length > 0) session.replaceMessages(existingMessages)
-    })
+    const existingMessages = persist.loadOai()
+    if (!cancelled && existingMessages.length > 0) session.replaceMessages(existingMessages)
     return () => { cancelled = true }
   }, [persist, session])
 
