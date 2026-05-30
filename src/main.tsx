@@ -366,6 +366,16 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     _meridianIndexerRef = new MeridianIndexer(cwd)
   }
 
+  // Load user-defined agent profiles from .rivet/agents/
+  const agentsDir = join(cwd, '.rivet', 'agents')
+  const agentLoadResult = profileRegistry.loadFromDirectory(agentsDir)
+  if (agentLoadResult.loaded.length > 0 || agentLoadResult.errors.length > 0) {
+    // Will be surfaced to user via console if needed
+    for (const err of agentLoadResult.errors) {
+      console.warn(`[agents] ${err}`)
+    }
+  }
+
   // Register recall tool once (depends on claimStore existing)
   const recallRef = useRef(false)
   if (!recallRef.current) {

@@ -3,6 +3,7 @@ import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
+import { profileRegistry } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
@@ -10,10 +11,16 @@ export interface DelegateBatchCoordinator {
   delegateBatch(requests: DelegationRequest[], policy?: AggregationPolicy): Promise<CoordinatorRun>
 }
 
+/** Dynamic profile validation — accepts built-in + user-loaded profiles */
+const profileStringSchema = z.string().refine(
+  (val) => profileRegistry.getProfileNames().includes(val),
+  (val) => ({ message: `Unknown profile "${val}". Available: ${profileRegistry.getProfileNames().join(', ')}` }),
+)
+
 const taskSchema = z.object({
   objective: z.string().min(1),
   kind: z.enum(['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal']).optional(),
-  profile: z.enum(['code_scout', 'doc_scout', 'planner', 'reviewer', 'verifier', 'patcher']).optional(),
+  profile: profileStringSchema.optional(),
   files: z.array(z.string()).optional(),
   symbols: z.array(z.string()).optional(),
 })
@@ -147,7 +154,7 @@ export function createDelegateBatchTool(
         parentTurnId: `${params.toolUseId}:${i}`,
         objective: t.objective,
         kind: t.kind ?? 'code_search',
-        profile: t.profile ?? 'code_scout',
+        profile: (t.profile ?? 'code_scout') as import('../agent/work-order.js').WorkerProfile,
         scope: { files: t.files, symbols: t.symbols },
       }))
 

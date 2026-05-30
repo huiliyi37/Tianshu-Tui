@@ -170,7 +170,8 @@ function parseAgentMarkdown(content: string): ProfileDefinition {
         try {
           fm[key] = JSON.parse(val.replace(/'/g, '"'))
         } catch {
-          fm[key] = [val]
+          // Array parsing failed — report error instead of silently corrupting
+          throw new Error(`Failed to parse array for field "${key}": "${val}". Use JSON array syntax: ["item1", "item2"]`)
         }
       } else {
         fm[key] = val
@@ -193,7 +194,9 @@ function parseAgentMarkdown(content: string): ProfileDefinition {
     allowedTools: fm.tools as string[],
     expertisePrompt,
     defaultKind: typeof fm.defaultKind === 'string' ? fm.defaultKind : undefined,
-    defaultMaxTokens: typeof fm.maxTokens === 'number' ? fm.maxTokens : undefined,
+    defaultMaxTokens: typeof fm.maxTokens === 'number' ? fm.maxTokens
+      : typeof fm.maxTokens === 'string' ? (Number(fm.maxTokens) > 0 ? Number(fm.maxTokens) : undefined)
+      : undefined,
   }
 }
 
