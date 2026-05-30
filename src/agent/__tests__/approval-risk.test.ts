@@ -441,3 +441,77 @@ describe('assessToolRisk — protection mode (destructive git + blocked)', () =>
     assert.ok(result.reasons.some(r => r.includes('保护模式')))
   })
 })
+
+describe('INJECTION_PATTERNS', () => {
+  it('detects process substitution', () => {
+    const result = assessToolRisk('bash', { command: 'cat <(ls)' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')), `Expected injection detection, got: ${result.reasons.join(', ')}`)
+    assert.equal(result.level, 'high')
+  })
+
+  it('detects zsh zmodload', () => {
+    const result = assessToolRisk('bash', { command: 'zmodload zsh/net/tcp' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')))
+    assert.equal(result.level, 'high')
+  })
+
+  it('detects zsh sysopen', () => {
+    const result = assessToolRisk('bash', { command: 'sysopen -w /tmp/x' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')))
+  })
+
+  it('detects PowerShell encoded command', () => {
+    const result = assessToolRisk('bash', { command: 'powershell -enc xyz' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')))
+  })
+})
+
+describe('DESTRUCTIVE_EXTENDED_PATTERNS', () => {
+  it('detects docker rm', () => {
+    const result = assessToolRisk('bash', { command: 'docker rm -f $(docker ps -aq)' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects kubectl delete', () => {
+    const result = assessToolRisk('bash', { command: 'kubectl delete namespace production' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects docker system prune', () => {
+    const result = assessToolRisk('bash', { command: 'docker system prune -af' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects truncate to zero', () => {
+    const result = assessToolRisk('bash', { command: 'truncate -s 0 important.log' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects dd to device', () => {
+    const result = assessToolRisk('bash', { command: 'dd if=/dev/zero of=/dev/sda' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects mkfs', () => {
+    const result = assessToolRisk('bash', { command: 'mkfs.ext4 /dev/sda1' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+})
+
+describe('SED_BYPASS_PATTERNS', () => {
+  it('detects sed on /etc/passwd', () => {
+    const result = assessToolRisk('bash', { command: "sed -i 's/x/y/' /etc/passwd" }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('sed bypass')))
+    assert.equal(result.level, 'high')
+  })
+
+  it('detects sed on .ssh/authorized_keys', () => {
+    const result = assessToolRisk('bash', { command: "sed -i '/key/d' .ssh/authorized_keys" }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('sed bypass')))
+  })
+
+  it('does not flag sed on regular project files', () => {
+    const result = assessToolRisk('bash', { command: "sed -i 's/foo/bar/' src/main.ts" }, 'none', [], undefined)
+    assert.ok(!result.reasons.some(r => r.includes('sed bypass')))
+  })
+})
