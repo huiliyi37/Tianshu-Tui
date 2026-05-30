@@ -54,6 +54,28 @@ const SLOW_READ_TIMEOUT_MS = 300_000
 /** Providers whose thinking mode can exceed 90s before first token. */
 const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek'])
 
+/**
+ * Wire an external AbortSignal to a ReadableStream reader so that aborting
+ * the signal immediately cancels the reader.  This unblocks any pending
+ * reader.read() call, preventing the deadlock where signal.aborted is true
+ * but the stream loop is stuck waiting for the next SSE chunk.
+ *
+ * Returns a cleanup function that removes the event listener.
+ */
+function wireAbortToReaderCancel(
+  signal: AbortSignal,
+  reader: ReadableStreamDefaultReader<unknown>,
+): () => void {
+  const onAbort = () => reader.cancel().catch(() => {})
+  if (signal.aborted) {
+    // Already aborted — cancel immediately (don't add listener for a past event)
+    reader.cancel().catch(() => {})
+    return () => {}
+  }
+  signal.addEventListener('abort', onAbort, { once: true })
+  return () => signal.removeEventListener('abort', onAbort)
+}
+
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
   private toolCallHintFired = new Set<number>()
@@ -256,6 +278,13 @@ export class OpenAIClient implements StreamClient {
     let textReceived = false
     let promotionFired = false
 
+    // Wire external abort signal to reader.cancel() so that agent.abort()
+    // (from worker budget timeout, tool pipeline timeout, or user Ctrl+C)
+    // can interrupt a blocking reader.read() call. Without this, signal.aborted
+    // is set but reader.read() remains blocked waiting for the next SSE chunk,
+    // creating a deadlock when the provider is slow (e.g. GLM thinking, 180s).
+    const abortCleanup = signal ? wireAbortToReaderCancel(signal, reader) : null
+
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
       const isReasoning = this.config.thinking === 'enabled'
@@ -352,6 +381,7 @@ export class OpenAIClient implements StreamClient {
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
+      if (abortCleanup) abortCleanup()
 
       // Promote reasoning to text even on stream error — prevents GLM "stuck" when
       // stream breaks after receiving reasoning_content but before normal completion.
