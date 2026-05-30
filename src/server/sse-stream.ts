@@ -14,13 +14,14 @@ export class SseStream {
   }
 
   send(event: string, data: unknown): void {
+    if (this._closed) return
     this.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
   }
 
   close(): void {
     if (this._closed) return
-    this._closed = true
     this.send('done', {})
+    this._closed = true
     this.res.end()
   }
 }

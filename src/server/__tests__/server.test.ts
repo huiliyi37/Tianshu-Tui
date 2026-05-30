@@ -48,6 +48,15 @@ describe('SseStream', () => {
     assert.equal(res.chunks.length, chunkCountAfterFirst, 'second close() must not write more data')
     assert.ok(res.ended)
   })
+
+  it('send is a no-op after close', () => {
+    const res = mockRes()
+    const sse = new SseStream(res)
+    sse.close()
+    const chunkCount = res.chunks.length
+    sse.send('text_delta', { text: 'late' })
+    assert.equal(res.chunks.length, chunkCount, 'send after close must not write')
+  })
 })
 
 // ── createRouter ───────────────────────────────────────────
