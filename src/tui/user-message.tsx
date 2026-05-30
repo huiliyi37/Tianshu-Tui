@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { getTheme } from './theme.js'
+import { gutterGlyph } from './gutter.js'
 
 interface UserMessageProps {
   content: string
@@ -12,7 +13,7 @@ export const UserMessage = memo(function UserMessage({ content }: UserMessagePro
     <Box flexDirection="column" paddingX={1} marginTop={1} marginBottom={1}>
       <Box borderStyle="round" borderColor={theme.userColor} paddingX={1} flexDirection="column">
         <Box flexDirection="row" gap={1} marginBottom={1}>
-          <Text color={theme.userColor} bold>{'❯'}</Text>
+          <Text color={theme.userColor} bold>{gutterGlyph('user')}</Text>
           <Text color={theme.userColor} bold>You</Text>
         </Box>
         <Box flexDirection="column" paddingLeft={2}>

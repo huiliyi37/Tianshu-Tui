@@ -3,6 +3,7 @@ import { memo } from 'react'
 import { Markdown } from './markdown-render.js'
 import { getTheme } from './theme.js'
 import { useViewportLines } from './viewport.js'
+import { gutterGlyph } from './gutter.js'
 
 /**
  * StreamOutput — live streaming content during model generation.
@@ -32,7 +33,7 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
     <Box flexDirection="column" paddingX={1} marginBottom={1}>
       <Box borderStyle="round" borderColor={theme.assistantColor} paddingX={1} flexDirection="column">
         <Box flexDirection="row" gap={1} marginBottom={1}>
-          <Text color={theme.assistantColor} bold>{'●'}</Text>
+          <Text color={theme.assistantColor} bold>{gutterGlyph('assistant')}</Text>
           <Text color={theme.assistantColor} bold>Assistant</Text>
           {isStreaming && omittedLines > 0 && (
             <Text color={theme.muted}>(… {omittedLines} earlier lines)</Text>

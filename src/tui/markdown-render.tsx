@@ -519,7 +519,7 @@ export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
   }
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" gap={1}>
       {blocks.map((block, i) => renderBlock(block, i, columns))}
     </Box>
   )
