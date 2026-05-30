@@ -1,0 +1,214 @@
+# 多智能体协作信任体系演进
+
+## 背景
+
+**事实：** 今天（2026-05-30）凌晨到深夜，60 个 commit 全部落在同一条分支上，由多个智能体会话并行完成。跨 `src/agent/`、`src/tools/`、`src/tui/`、`src/prompt/` 四个子系统，零崩溃、零返工。
+
+这不是一个 toy demo。这是真实工程中多智能体并行的成功交付。
+
+### 为什么这件事值得记录
+
+市面上的 agent 终端（Claude Code、Cursor、Windsurf 等）默认一个会话绑一个分支或一个 worktree。开新任务 = 开新隔离区。这很安全，但也意味着：
+
+- 分支越多，合并成本越高
+- 隔离越严，协作越难
+- 上下文越碎片化，人类调度负担越重
+
+我们的方案反其道而行：**多会话共享一条分支**，靠 runtime 归属追踪 + 验证归因 + 交付门禁来保证安全。今天 60 个 commit 证明这条路走得通。
+
+但"走得通"和"走得毫无负担"之间，还有一段距离。本文探查的就是这段距离。
+
+---
+
+## 当前信任体系（已建成）
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      多智能体协作信任体系 v1                         │
+│                                                                     │
+│  WorktreeBaseline ──── 任务启动时拍摄 git 快照                       │
+│       │                                                              │
+│       ▼                                                              │
+│  TaskLedger ──────── 记录 file_write / git_action / verification     │
+│       │                                                              │
+│       ▼                                                              │
+│  OwnershipLedger ──── owned / external / co-owned 三级分类           │
+│       │                                                              │
+│       ▼                                                              │
+│  VerificationAttribution ── 验证失败归因（我的/外部的/模糊的）         │
+│       │                                                              │
+│       ▼                                                              │
+│  DeliveryGateV2 ──── GREEN / YELLOW / RED 三态门禁                   │
+│       │                                                              │
+│       ▼                                                              │
+│  scoped commit ───── 只提交 owned + verified 的文件                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**这套体系解决了什么？**
+
+- Agent 不再需要"小心翼翼地猜测哪些文件是自己的"
+- 验证失败时能区分"我的锅"和"别人的锅"
+- 交付时自动追踪归属，GREEN 即可放心提交
+- Stash / undo / reset 只影响 owned 文件
+
+**今天 60 个 commit 的成功依赖的就是这套体系。**
+
+---
+
+## 当前体系的盲区（信任债务）
+
+### 盲区 1：基线陈化
+
+WorktreeBaseline 在任务启动时拍摄一次快照。但另一个会话在运行过程中会持续提交——你启动时的 "external dirty" 可能在 10 分钟后已经变成 "committed by session B"。
+
+**现状影响：** OwnershipLedger 会把"已经被其他会话提交的文件"仍然标记为 external。deliver_task 多数时候仍然能正确工作（因为 scoped commit 只看 owned），但 ownership report 会膨胀为过时的信息。
+
+**信任感受：** Agent 看到 external files 列表很长，会变得谨慎。这不是真风险，是信息陈化造成的虚假风险感知。
+
+### 盲区 2：无跨会话信号
+
+每个会话都是一座孤岛。Session A 不知道 Session B 正在改哪些文件，Session B 不知道 Session A 刚提交了什么。
+
+**现状影响：** 两个会话理论上可能同时修改同一个文件。scoped commit 会发现冲突（因为 git add 只暂存自己的改动），但这个发现来得太晚——在冲突已经发生之后。
+
+**信任感受：** Agent 经常问"这个文件是别的会话在改吗？"。它无法自己回答这个问题。
+
+### 盲区 3：验证失败的全局归因不完整
+
+VerificationAttribution 能区分 "targeted failure = 我的" 和 "full-suite failure = 归因不明"。但它不知道另一个会话是否已经知道这个失败、是否正在修。
+
+**现状影响：** 两个会话可能同时响应同一个 full-suite test failure，形成重复修复。
+
+### 盲区 4：交付信心依赖人类判断
+
+YELLOW 状态的含义是"owned files verified，但存在外部阻塞"。Agent 看到 YELLOW 会犹豫，因为不知道外部阻塞是否严重。实际上大多数 YELLOW 都可以直接交付。
+
+---
+
+## 信任体系演进方向
+
+不是一次性大重构。而是一点一点加。每一步都让 agent 的信任更精准一点、犹豫更少一点。
+
+### 方向 1：活体基线（Living Baseline）
+
+**核心思想：** 基线不是任务启动时拍的照片，是一条随 git 状态自动更新的活线。
+
+```
+当前：baseline = snapshot(t=0)  →  永不更新
+演进：baseline = snapshot(t=0) + auto_refresh(git state)
+
+当 git status 从 dirty → clean（其他会话提交了），
+external files 列表自动收缩。
+当新的 untracked 文件出现，如果不在 my ledger 中，自动标记 external。
+```
+
+**实现路径：** 在 `deliver_task` 和 `git commit` 的 pre-flight 检查中，重新采集 `git status --porcelain`，与 baseline 对比，更新 external set。
+
+**信任收益：** Agent 看到的 external files 列表始终是当下的，不是历史的。减少虚假谨慎。
+
+### 方向 2：轻量级会话信号（Session Beacon）
+
+**核心思想：** 不需要完整的进程间通信。只需要一个文件。
+
+```
+.beacon/<session-id>.json
+{
+  "taskId": "task-5-fix-bash-timeout",
+  "starDomain": "tianliang",
+  "activeFiles": ["src/tools/bash.ts", "src/tools/__tests__/bash.test.ts"],
+  "heartbeat": 1717048800000,
+  "status": "executing"
+}
+```
+
+**规则：**
+- 每次文件写入时更新 beacon
+- `deliver_task` 前 read 其他 session 的 beacon，检查文件交集
+- 交集文件 → YELLOW with precise warning："Session B (tianliang) 可能也在改 src/tools/bash.ts"
+- 心跳超过 10 分钟 → 标记 stale，不再作为阻塞依据
+
+**实现路径：** 新建 `src/agent/session-beacon.ts`。文件写入工具（edit_file、write_file）的 post-hook 中更新 beacon。deliver_task 读取并检查交集。
+
+**信任收益：** Agent 第一次能回答"这个文件有别人在改吗？"。不是猜，是读信号。
+
+### 方向 3：验证结果共享（Verification Pool）
+
+**核心思想：** `tsc --noEmit` 和全量测试是所有会话共享的全局资源。跑一遍就够了。
+
+```
+.verification-pool/<hash>.json
+{
+  "command": "npx tsc --noEmit",
+  "status": "passed",
+  "timestamp": 1717048800000,
+  "sessionId": "session-A",
+  "headCommit": "abc1234"
+}
+```
+
+**规则：**
+- deliver_task 检查验证时，先查 pool
+- 如果 pool 中有同 command + 同 head commit + 5 分钟内的结果 → 直接复用
+- 不再重复跑 `tsc --noEmit`
+
+**实现路径：** `src/agent/verification-pool.ts`。TaskLedger 的 verification 事件写入 pool。deliver_task 优先查 pool。
+
+**信任收益：** 多会话不再重复验证，节省 token 和时间。更重要的是，一个会话的验证结果可被其他会话信任。
+
+### 方向 4：信任等级校准（Trust Calibration）
+
+**核心思想：** 不是所有外部文件都一样。来自已知活跃会话的改动 vs 来自未知来源的改动，信任度应该不同。
+
+```
+TrustLevel:
+  - OWNED        → 全权信任，直接提交
+  - CO_OWNED     → 信任但注意，beacon 检查
+  - ALLY_ACTIVE  → 已知活跃会话的文件，可 co-commit
+  - ALLY_STALE   → 已知但不再活跃的会话，小心
+  - UNKNOWN      → 来源不明，最谨慎
+```
+
+**实现路径：** 扩展 OwnershipLedger 的分类，结合 Session Beacon 的状态。
+
+**信任收益：** Agent 的谨慎程度与真实风险匹配，而不是"一律最谨慎"。
+
+---
+
+## 实现优先级
+
+按信任收益 / 实现成本排序：
+
+| 方向 | 信任收益 | 实现成本 | 优先级 |
+|------|---------|---------|--------|
+| 活体基线 | 高（消除虚假谨慎） | 低（git status 重采） | P1 |
+| 会话信号 | 高（首次跨会话感知） | 中（新文件 + hook） | P2 |
+| 验证共享 | 中（减少重复劳动） | 低（文件 + 查询） | P3 |
+| 信任等级 | 中（精细化） | 中（扩展分类） | P4 |
+
+P1 和 P2 是下一个迭代的核心。P3 和 P4 可以在 P1/P2 验证后再做。
+
+---
+
+## 为什么这不是过度工程
+
+60 个 commit / 天，跨 4 个子系统，零返工。这个数据说明：
+
+1. **需求是真实的** — 多智能体并行不是假设场景，是日常
+2. **当前方案是够用的** — v1 信任体系撑住了
+3. **但摩擦是存在的** — agent 的谨慎、重复验证、过时信息，都是真实发生的
+4. **收益是可量化的** — 每减少一次"帮我看看这个文件是不是有人在改"，就省一轮工具调用
+
+我们不是在建一个理论上的分布式系统。我们在让"今天已经发生的事"变得更丝滑。
+
+---
+
+## 哲学
+
+其他 agent 终端选择**隔离**——每个会话一个 worktree，安全但孤独。
+
+我们选择**共存**——多会话共享一条分支，需要信任但更强大。
+
+信任不是假设。信任是建立在归属追踪、验证归因、交付门禁之上的工程事实。
+
+今天的 60 个 commit 就是证明。明天的演进会让这个证明更不可辩驳。
