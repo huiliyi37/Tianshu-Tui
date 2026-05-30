@@ -191,6 +191,9 @@ export class AgentLoop {
   private recentToolHistory: ToolHistoryEntry[] = []
   private prewarm = new PrewarmCache(60_000, 50)
   private _running = false
+  private physarumForWarmup?: any
+  private meridianDbForWarmup?: any
+  private memoriesWarmed = false
   private streamedText = ''
   private thinkingOnlyRetries = 0
   private lastThinkingContent = ''
@@ -315,25 +318,12 @@ export class AgentLoop {
 
     this.heuristicStore = new HeuristicStore(join(sessionDir, 'heuristics.jsonl'))
 
-    // Physarum + Immune system
+    // Physarum + Immune system — construction only, DB reads deferred to warmupMemories() (S9)
     const meridianDb = this.config.meridianIndexer?.getDb()
     const physarum = new PhysarumEngine(meridianDb as any)
-    if (meridianDb) physarum.loadFromDb()
     this.immuneHook = new ImmuneHook({ physarum, stigmergy: this.stigmergyStore, notebook: this.p3?.notebook })
-
-    // Load persisted immune memories from previous sessions (cross-session secondary response)
-    if (meridianDb) {
-      try {
-        this.immuneHook.importMemories(meridianDb.loadImmuneMemories())
-      } catch { /* non-critical: missing table or corrupt data */ }
-    }
-
-    // Load persisted mistake entries from previous sessions
-    if (meridianDb) {
-      try {
-        this.p3.notebook.importEntries(meridianDb.loadMistakeEntries())
-      } catch { /* non-critical: missing table or corrupt data */ }
-    }
+    this.physarumForWarmup = physarum
+    this.meridianDbForWarmup = meridianDb
 
     this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
       stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
@@ -971,7 +961,19 @@ export class AgentLoop {
     }
   }
 
+  /** Load cross-session history off the construction path (S9). Idempotent. */
+  async warmupMemories(): Promise<void> {
+    if (this.memoriesWarmed) return
+    this.memoriesWarmed = true
+    const db = this.meridianDbForWarmup
+    if (!db) return
+    this.physarumForWarmup?.loadFromDb()
+    try { this.immuneHook.importMemories(db.loadImmuneMemories()) } catch { /* non-critical */ }
+    try { this.p3?.notebook.importEntries(db.loadMistakeEntries()) } catch { /* non-critical */ }
+  }
+
   private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {
+    await this.warmupMemories()
     this.abortController = new AbortController()
     await this.startFsWatcher()
     // P7: heartbeat watchdog — surfaces "still working" signal during long
