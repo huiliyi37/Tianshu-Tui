@@ -24,6 +24,18 @@ function formatUiContent(run: CoordinatorRun): string {
   return `delegate_task completed: ${passed} passed, ${blocked} blocked, model=${run.selectedModel ?? 'unknown'}`
 }
 
+/** Progressive timeout: single-task workers start fast and grow with session maturity.
+ *    turn 0-1 (cold open)  → 30 s
+ *    turn 2-4 (warming)    → 75 s
+ *    turn 5+  (mature)     → 150 s
+ */
+function progressiveTaskTimeout(sessionTurnCount?: number): number {
+  const turn = sessionTurnCount ?? 10
+  if (turn <= 1) return 30_000
+  if (turn <= 4) return 75_000
+  return 150_000
+}
+
 export function createDelegateTaskTool(
   coordinator: DelegateTaskCoordinator,
   getClaimStore?: () => ContextClaimStore | undefined,
@@ -132,5 +144,6 @@ export function createDelegateTaskTool(
     requiresApproval: () => false,
     isConcurrencySafe: () => true,
     isEnabled: () => true,
+    timeoutMs: (params) => progressiveTaskTimeout(params?.sessionTurnCount),
   }
 }

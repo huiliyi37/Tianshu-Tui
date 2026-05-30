@@ -87,4 +87,32 @@ describe('delegate_batch tool', () => {
     assert.equal(new Set(proposals.map(p => p.source.eventId)).size, 4)
     assert.equal(new Set(proposals.map(p => p.evidence[0]!.id)).size, 4)
   })
+
+  describe('progressive timeout', () => {
+    const base = { input: {}, toolUseId: 'tu', cwd: '/tmp' }
+
+    it('returns 45s for turn 0-1 (cold open)', () => {
+      const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 45_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 45_000)
+    })
+
+    it('returns 90s for turn 2-4 (warming)', () => {
+      const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 90_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 90_000)
+    })
+
+    it('returns 180s for turn 5+ (mature)', () => {
+      const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 180_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 20 }), 180_000)
+    })
+
+    it('defaults to mature (180s) when sessionTurnCount is undefined', () => {
+      const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
+      assert.equal(tool.timeoutMs?.(base), 180_000)
+      assert.equal(tool.timeoutMs?.(), 180_000)
+    })
+  })
 })

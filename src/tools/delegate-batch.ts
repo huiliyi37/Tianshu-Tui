@@ -57,6 +57,20 @@ function extractClaimsFromRun(run: CoordinatorRun, toolUseId: string, claimStore
   }
 }
 
+/** Progressive timeout: early turns get short budget so the first user
+ *  response isn't blocked for 2 minutes.  As the session matures, workers
+ *  get more time for deeper analysis.
+ *    turn 0-1 (cold open)  → 45 s  — quick scout only
+ *    turn 2-4 (warming)    → 90 s  — 2-3 focused tasks
+ *    turn 5+  (mature)     → 180 s — full parallel depth
+ */
+function progressiveBatchTimeout(sessionTurnCount?: number): number {
+  const turn = sessionTurnCount ?? 10 // default to mature when unknown
+  if (turn <= 1) return 45_000
+  if (turn <= 4) return 90_000
+  return 180_000
+}
+
 export function createDelegateBatchTool(
   coordinator: DelegateBatchCoordinator,
   getClaimStore?: () => ContextClaimStore | undefined,
@@ -146,5 +160,6 @@ export function createDelegateBatchTool(
     requiresApproval: () => false,
     isConcurrencySafe: () => true,
     isEnabled: () => true,
+    timeoutMs: (params) => progressiveBatchTimeout(params?.sessionTurnCount),
   }
 }

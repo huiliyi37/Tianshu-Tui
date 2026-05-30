@@ -21,6 +21,8 @@ export interface ToolCallParams {
   contextWindow?: number
   /** P0-2: Provider profile — read caps relax for cache-preserving providers. */
   providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
+  /** Current session turn count — enables progressive timeout strategies. */
+  sessionTurnCount?: number
 }
 
 export type VerificationFailureKind = 'test_failure' | 'tool_invocation_failure'
@@ -57,4 +59,8 @@ export interface Tool {
   requiresApproval(params: ToolCallParams): boolean
   isConcurrencySafe(): boolean
   isEnabled(): boolean
+  /** Maximum execution time in ms before the tool-pipeline aborts.
+   *  Override for long-running orchestrator tools (delegate, batch).
+   *  Default: 120 000 (2 minutes). */
+  timeoutMs?(params?: ToolCallParams): number
 }

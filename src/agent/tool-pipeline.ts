@@ -51,17 +51,18 @@ const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
   'permission_denied',
 ])
 
-const TOOL_TIMEOUT_MS = 120_000 // 2 minutes
+const DEFAULT_TOOL_TIMEOUT_MS = 120_000 // 2 minutes
 
 function withToolTimeout<T>(
   promise: Promise<T>,
   toolName: string,
+  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<T> {
   if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
 
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Tool ${toolName} timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)
+    const timer = setTimeout(() => reject(new Error(`Tool ${toolName} timed out after ${timeoutMs / 1000}s`)), timeoutMs)
     const onAbort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')) }
     signal?.addEventListener('abort', onAbort, { once: true })
 
@@ -337,6 +338,7 @@ export async function executeToolUse(
     artifactStore: deps.artifactStore,
     contextWindow: deps.config.contextWindow,
     providerProfile: deps.config.providerProfile,
+    sessionTurnCount: deps.sessionTurnCount,
   }
 
   // Star signature: counter training-mode regression at token level (思路 E)
@@ -523,9 +525,11 @@ export async function executeToolUse(
         // P3 speculative reads which may have been populated under a different
         // (smaller) cap; serving cached content here would re-introduce the
         // truncation regression. fs.readFile + OS page cache is fast enough.
+        const toolTimeout = toolDef?.timeoutMs?.(params) ?? DEFAULT_TOOL_TIMEOUT_MS
         const r = await withToolTimeout(
           deps.config.toolRegistry.execute(tu.name, params),
           tu.name,
+          toolTimeout,
           deps.abortSignal,
         )
         rawToolResult = r
