@@ -1,3 +1,29 @@
+## 已知不可行的测试路径（经验教训）
+
+写复杂测试前先做 30 秒探针验证。以下是踩过的坑和对应替代方案：
+
+| 死胡同 | 为什么不可行 | 替代方案 |
+|--------|-------------|---------|
+| `React.createElement(memoComponent)` 拿内部 JSX | createElement 不调用 render 函数，返回的 element tree 没有子节点 | `readFileSync` 做源码级结构断言（见 `stream.test.tsx` S7 contract） |
+| 依赖 hooks（useViewportLines 等）的 Ink 组件在框架外渲染 | hooks 需要 React reconciler 上下文，脱离 Ink runtime 必崩 | 提取纯逻辑函数测试（如 `viewportLines()`），或源码级契约测试 |
+| 需要第三方库（ink-testing-library）才能 render | 项目未安装该库，不能假设可用 | 先用 `node -e` 验证库是否可用；不可用时退回源码断言或纯函数测试 |
+
+### 源码断言模式示例
+
+```typescript
+import { readFileSync } from 'node:fs'
+const source = readFileSync(resolve(__dirname, '../stream.tsx'), 'utf-8')
+
+it('cursor is sibling of Markdown, not inlined', () => {
+  const lines = source.split('\n')
+  const cursorLine = lines.find(l => l.includes('▊'))
+  assert.ok(cursorLine?.includes('<Text'), 'cursor must be a <Text> element')
+  assert.ok(!cursorLine?.includes('<Markdown'), 'cursor must NOT be inside Markdown')
+})
+```
+
+---
+
 ### 2026-05-21 — session c50ca31c
 
 **Modified** (1): /Users/banxia/app/deepseek-tui/opencode-tui/src/agent/__tests__/aggregation-profile.test.ts
