@@ -16,6 +16,20 @@ export interface CodexClientConfig {
 const CODEX_USER_AGENT = 'codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9'
 const CODEX_ORIGINATOR = 'codex_cli_rs'
 
+/** No export needed — only used within this module. */
+function wireAbortToReaderCancel(
+  signal: AbortSignal,
+  reader: ReadableStreamDefaultReader<unknown>,
+): () => void {
+  const onAbort = () => reader.cancel().catch(() => {})
+  if (signal.aborted) {
+    reader.cancel().catch(() => {})
+    return () => {}
+  }
+  signal.addEventListener('abort', onAbort, { once: true })
+  return () => signal.removeEventListener('abort', onAbort)
+}
+
 export class CodexClient implements StreamClient {
   constructor(private config: CodexClientConfig) {}
 
@@ -214,6 +228,9 @@ export class CodexClient implements StreamClient {
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
 
+    // Wire external abort signal to reader.cancel() (same fix as OpenAIClient).
+    const abortCleanup = signal ? wireAbortToReaderCancel(signal, reader) : null
+
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
       const timeout = receivedFirstChunk ? READ_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
@@ -383,6 +400,7 @@ export class CodexClient implements StreamClient {
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
+      if (abortCleanup) abortCleanup()
       reader.releaseLock()
     }
 

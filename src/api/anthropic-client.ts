@@ -44,6 +44,20 @@ interface AnthropicRequestBody {
   thinking?: { type: 'enabled'; budget_tokens: number }
 }
 
+/** No export needed — only used within this module. */
+function wireAbortToReaderCancel(
+  signal: AbortSignal,
+  reader: ReadableStreamDefaultReader<unknown>,
+): () => void {
+  const onAbort = () => reader.cancel().catch(() => {})
+  if (signal.aborted) {
+    reader.cancel().catch(() => {})
+    return () => {}
+  }
+  signal.addEventListener('abort', onAbort, { once: true })
+  return () => signal.removeEventListener('abort', onAbort)
+}
+
 export class AnthropicClient implements StreamClient {
   constructor(private config: AnthropicClientConfig) {}
 
@@ -301,6 +315,10 @@ export class AnthropicClient implements StreamClient {
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
 
+    // Wire external abort signal to reader.cancel() so that agent.abort()
+    // can interrupt a blocking reader.read() call (same fix as OpenAIClient).
+    const abortCleanup = signal ? wireAbortToReaderCancel(signal, reader) : null
+
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
       const timeout = receivedFirstChunk ? READ_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
@@ -429,6 +447,7 @@ export class AnthropicClient implements StreamClient {
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
+      if (abortCleanup) abortCleanup()
       reader.releaseLock()
     }
 
