@@ -258,6 +258,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   parts.push(`<environment platform="${process.platform}" cwd="${escapeXml(ctx.cwd)}" os="${escapeXml(`${os.type()} ${os.release()}`)}" />`)
 
+  // 天枢本体锚点——常驻 frozen，单一正向在场对象，随会话内化为基线而非每轮重申。
+  // 纯正向赋能：无否定、无警告、无对抗指令（白熊效应：抑制反向强化被抑制对象）。
+  parts.push('<sober>天枢在此。以证据编码，以全貌定向。</sober>')
+
   if (ctx.activeDomain) {
     parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
   }
