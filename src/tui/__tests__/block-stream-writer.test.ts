@@ -49,6 +49,22 @@ describe('BlockStreamWriter', () => {
     assert.equal(emitted.length, 0)
   })
 
+  it('emits at a sentence-ending punctuation before reaching maxChars', () => {
+    const sentenceWriter = new BlockStreamWriter({}, (text) => { emitted.push(text) })
+    const first = '这是一段连续不断的中文叙述用来验证句末标点切块行为正确无误啊'
+    sentenceWriter.push(first + '。' + '后面还有更多内容继续追加进来填充缓冲区')
+    assert.ok(emitted.length >= 1, 'should emit on sentence punctuation')
+    assert.ok(emitted[0]!.endsWith('。'), `block should end at 。 but got: ${emitted[0]}`)
+    assert.ok(!emitted[0]!.includes('后面还有'), 'should not include post-punctuation tail')
+  })
+
+  it('default maxChars is lowered to 200', () => {
+    const big = new BlockStreamWriter({}, (text) => { emitted.push(text) })
+    big.push('字'.repeat(650))
+    assert.ok(emitted.length >= 2, 'long unbroken text must be chunked, not held to 600')
+    assert.ok(emitted.every(b => b.length <= 200), `each block <= 200, got: ${emitted.map(b => b.length)}`)
+  })
+
   it('serializes blocks in order', async () => {
     const order: string[] = []
     const slowWriter = new BlockStreamWriter(

@@ -7,7 +7,7 @@ export interface BlockStreamConfig {
 
 const DEFAULT_CONFIG: BlockStreamConfig = {
   minChars: 100,
-  maxChars: 600,
+  maxChars: 200,
   idleMs: 500,
   maxBufferSize: 64 * 1024,
 }
@@ -75,6 +75,14 @@ export class BlockStreamWriter {
       const block = this.buffer.slice(0, paraIdx + 2)
       this.buffer = this.buffer.slice(paraIdx + 2)
       this.enqueue(block)
+      return
+    }
+
+    const sentIdx = this.findSentenceEnd(this.buffer)
+    if (sentIdx !== -1) {
+      const block = this.buffer.slice(0, sentIdx + 1)
+      this.buffer = this.buffer.slice(sentIdx + 1)
+      this.enqueue(block)
     }
   }
 
@@ -97,6 +105,15 @@ export class BlockStreamWriter {
     const sp = text.lastIndexOf(' ', maxPos)
     if (sp !== -1 && sp > Math.floor(maxPos * 0.3)) return sp + 1
     return maxPos
+  }
+
+  private findSentenceEnd(text: string): number {
+    // 句末标点（中英文）：。！？.!?；; 取最后一个出现位置作为切点
+    let last = -1
+    for (let i = 0; i < text.length; i++) {
+      if ('。！？.!?；;'.includes(text[i]!)) last = i
+    }
+    return last
   }
 
   private enqueue(text: string): void {
