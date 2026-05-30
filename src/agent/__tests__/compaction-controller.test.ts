@@ -510,8 +510,8 @@ describe('CompactionController', () => {
     const tokens = session.getEstimatedTokens()
 
     const entries = [
-      { turn: 1, tool: 'read_file', target: 'src/a.ts', status: 'success' as const, resultSummary: 'ok' },
-      { turn: 2, tool: 'edit_file', target: 'src/a.ts', status: 'success' as const, resultSummary: 'ok' },
+      { turn: 1, tool: 'read_file', target: 'src/a.ts', status: 'success' as const, durationMs: 0, inputSummary: '', resultSummary: 'ok' },
+      { turn: 2, tool: 'edit_file', target: 'src/a.ts', status: 'success' as const, durationMs: 0, inputSummary: '', resultSummary: 'ok' },
     ]
 
     let refreshed = false
