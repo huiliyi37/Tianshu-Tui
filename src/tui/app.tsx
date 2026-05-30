@@ -763,6 +763,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setHeartbeatStatus(null)
         toolNames.current.set(id, name)
         toolStartMap.current.set(id, Date.now())
+        setIsThinkingActive(false)
 
         const target = typeof input?.file_path === 'string' ? input.file_path
           : typeof input?.path === 'string' ? input.path
@@ -1229,6 +1230,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             <Text> Press <Text bold>r</Text> to restore, any other key to start fresh </Text>
           </Box>
         )}
+        {/* liveTools elapsedMs relies on the 1s activity tick (activityIntervalRef) for re-render — see app.tsx:398 */}
         {liveTools.map(log => (
           log.toolName === 'ask_user_question'
             ? <QuestionCard key={log.id} question={log.content} />
