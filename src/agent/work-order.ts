@@ -4,7 +4,7 @@ import type { CapabilityTask } from '../model/capability.js'
 import type { VerificationMetadata } from '../tools/types.js'
 import { profileRegistry } from './profile-registry.js'
 
-export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests'] as const
+export const READ_ONLY_WORKER_TOOLS = ['read_file', 'read_section', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'repo_graph', 'related_tests'] as const
 
 /**
  * Write-capable worker tools. Patcher/verifier profiles are classified as
@@ -15,7 +15,7 @@ export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'ins
  * host agent framework's subagent sandbox — that is a host-layer constraint,
  * not a Rivet permission issue.
  */
-export const WRITE_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
+export const WRITE_WORKER_TOOLS = ['read_file', 'read_section', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'repo_graph', 'related_tests', 'edit_file', 'write_file', 'bash', 'run_tests'] as const
 export const PHASE1_DISALLOWED_WORKER_TOOLS = ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'] as const
 
 /** 领域轴 — 代码区域，团队协同的天然边界 */
@@ -214,7 +214,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     budget: {
       maxTurns: input.budget?.maxTurns ?? 8,
       maxTokens: input.budget?.maxTokens ?? 4096,
-      timeoutMs: input.budget?.timeoutMs ?? 120_000,
+      timeoutMs: input.budget?.timeoutMs ?? 180_000,
       maxRetries: input.budget?.maxRetries ?? 2,
     },
     domain: input.domain,
