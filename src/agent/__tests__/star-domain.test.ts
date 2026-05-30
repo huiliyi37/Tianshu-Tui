@@ -89,7 +89,10 @@ describe('buildActiveDomain', () => {
     assert.ok(result.motto)
   })
 
-  it('returns null for ambiguous task', () => {
-    assert.equal(buildActiveDomain('帮我看看'), null)
+  it('defaults to 天枢 for ambiguous task (no keyword match)', () => {
+    const result = buildActiveDomain('帮我看看')
+    assert.ok(result)
+    assert.equal(result.id, 'tianshu')
+    assert.equal(result.name, '天枢')
   })
 })
