@@ -320,7 +320,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     thinkTimer.current = null
     if (thinkBuf.current !== lastFlushedThink.current) {
       lastFlushedThink.current = thinkBuf.current
-      setStreamingThinking(thinkBuf.current)
+      // 推理流可无界增长（GLM/MiMo 长 thinking）。渲染全量会让主线程随长度线性变慢，
+      // 卡住输入框与对话框。复用 text 流的滑动窗口：只把尾部窗口塞进 state，渲染成本封顶。
+      // thinkBuf 仍保留全量，供完成时归档。
+      setStreamingThinking(appendStreamWindow('', thinkBuf.current, LIVE_STREAM_MAX_CHARS))
     }
   }, [])
 
