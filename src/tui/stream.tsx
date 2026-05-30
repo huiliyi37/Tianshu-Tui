@@ -5,30 +5,26 @@ import { getTheme } from './theme.js'
 import { useTerminalSize } from './use-terminal-size.js'
 import { useViewportLines } from './viewport.js'
 import { gutterGlyph } from './gutter.js'
+import { computeBudget } from './dynamic-budget.js'
 
 /**
- * Reserve lines for other dynamic-zone components.
- * Computes from cappedCollapsedLines(terminalRows) + thinking(1) + chrome(5).
- * This prevents the dynamic zone from exceeding terminal height and
- * triggering Ink differential-rendering flicker.
+ * StreamOutput needs to know how many ToolCards are live so it can
+ * allocate its portion of the dynamic-zone budget. When multiple
+ * ToolCards are active, StreamOutput shrinks to leave room.
  */
-const DYNAMIC_CHROME = 6  // ThinkingCollapser(1) + GlanceBar(1) + InputBar(2) + margins(2)
+interface StreamOutputProps {
+  text: string
+  isStreaming: boolean
+  liveToolCount?: number
+}
 
 /**
- * Compute max stream lines accounting for multiple live ToolCards.
- * Each live ToolCard can take up to cappedCollapsedLines(termRows).
- * During delegate_batch, up to 5 tools can be live simultaneously.
- * We reserve for up to MAX_LIVE_TOOLS cards; if more exist, they overflow
- * but this is rare and bounded by the progressive task cap.
+ * Compute max stream lines using the unified budget allocator.
+ * Falls back to single-card budget when liveToolCount is not provided.
  */
-const MAX_LIVE_TOOLS = 3
-
-function computeMaxStreamLines(termRows: number): number {
-  const singleToolCard = Math.min(15, Math.max(3, Math.floor(termRows / 2) - 2))
-  // For small terminals, cap per-tool lines so N cards still fit
-  const perToolBudget = Math.min(singleToolCard, Math.max(3, Math.floor((termRows - DYNAMIC_CHROME) / (MAX_LIVE_TOOLS + 1))))
-  const totalToolCards = perToolBudget * MAX_LIVE_TOOLS
-  return Math.max(8, termRows - totalToolCards - DYNAMIC_CHROME)
+function computeMaxStreamLines(termRows: number, liveToolCount: number): number {
+  const { streamLines } = computeBudget(termRows, liveToolCount)
+  return streamLines
 }
 
 /**
@@ -39,10 +35,10 @@ function computeMaxStreamLines(termRows: number): number {
  * + plain rows flowing down. Tail window caps the active region height; when the
  * turn ends the full content moves to <Static> and this unmounts.
  */
-export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: StreamOutputProps) {
+export const StreamOutput = memo(function StreamOutput({ text, isStreaming, liveToolCount = 0 }: StreamOutputProps) {
   const theme = getTheme()
   const { rows } = useTerminalSize()
-  const maxLines = useViewportLines(0.6, 8, computeMaxStreamLines(rows))
+  const maxLines = useViewportLines(0.6, 8, computeMaxStreamLines(rows, liveToolCount))
 
   if (!text) return null
 
@@ -75,4 +71,5 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
 interface StreamOutputProps {
   text: string
   isStreaming: boolean
+  liveToolCount?: number
 }

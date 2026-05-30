@@ -1243,11 +1243,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {liveTools.map(log => (
           log.toolName === 'ask_user_question'
             ? <QuestionCard key={log.id} question={log.content} />
-            : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} />
+            : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} liveToolCount={liveTools.length} />
         ))}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
-          <StreamOutput text={streamingText} isStreaming={isStreaming} />
+          <StreamOutput text={streamingText} isStreaming={isStreaming} liveToolCount={liveTools.length} />
         )}
         {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
           <Box paddingX={2}>

@@ -5,18 +5,9 @@ import { getToolFamily } from './tool-family.js'
 import { Markdown } from './markdown-render.js'
 import { formatToolElapsed } from './tool-elapsed.js'
 import { useTerminalSize } from './use-terminal-size.js'
+import { computeBudget } from './dynamic-budget.js'
 
 const MAX_COLLAPSED_LINES = 15
-
-/** Chrome lines that must always remain visible (GlanceBar + InputBar + margins) */
-const DYNAMIC_CHROME = 6
-
-/** Maximum lines a collapsed ToolCard can use — adapts to terminal size */
-function cappedCollapsedLines(termRows: number): number {
-  // On small terminals, cap at ~half the terminal height to prevent overflow
-  const maxForTerminal = Math.max(3, Math.floor(termRows / 2) - 2)
-  return Math.min(MAX_COLLAPSED_LINES, maxForTerminal)
-}
 
 interface ToolCardProps {
   name: string
@@ -27,6 +18,8 @@ interface ToolCardProps {
   rawPath?: string
   focused?: boolean
   elapsedMs?: number
+  /** Number of live tools currently rendered — used for budget allocation */
+  liveToolCount?: number
 }
 
 function compactPath(rawPath: string | undefined): string {
@@ -35,7 +28,7 @@ function compactPath(rawPath: string | undefined): string {
   return filename
 }
 
-export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs }: ToolCardProps) {
+export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs, liveToolCount = 1 }: ToolCardProps) {
   const theme = getTheme()
   const { rows } = useTerminalSize()
   const [localExpanded, setLocalExpanded] = useState(false)
@@ -47,9 +40,9 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
   })
 
   const expanded = verbose || localExpanded
-  const collapsedLimit = cappedCollapsedLines(rows)
-  // Expanded cap: allow more detail but never exceed terminal height minus chrome
-  const expandedLimit = Math.min(200, Math.max(collapsedLimit, rows - DYNAMIC_CHROME))
+  const budget = computeBudget(rows, liveToolCount)
+  const collapsedLimit = budget.cardLines
+  const expandedLimit = budget.expandedLines
   const limit = expanded ? expandedLimit : collapsedLimit
   const { displayText, truncated, totalLines } = useMemo(() => {
     const lines = result.split('\n')
