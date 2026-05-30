@@ -25,6 +25,7 @@ import { AgentLoop } from '../agent/loop.js'
 import { formatIntentPreview, type IntentPreview, type IntentPreviewAction } from '../agent/intent-preview.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
+import { selectRestorableSessions } from './restore-session.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { parseSensoriumLog, generateRetrospect } from '../agent/retrospect.js'
 import { readFileSync, existsSync } from 'node:fs'
@@ -292,6 +293,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   // Tool target tracking for GlanceBar and phase summaries
   const toolTargetMap = useRef<Map<string, string>>(new Map())
   const recentToolLabels = useRef<string[]>([])
+  const restorableRef = useRef<string[]>([])
 
   // Braille sparkline token history
   const tokenHistoryRef = useRef<number[]>([])
@@ -358,7 +360,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, [])
 
   useEffect(() => {
-    const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
+    const sessions = selectRestorableSessions(SessionPersist.listSessions(), currentSessionId)
+    restorableRef.current = sessions
     if (sessions.length > 0) {
       setSessionPrompt('waiting')
     }
@@ -479,18 +482,22 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     if (isStreaming && !pendingApproval && !pendingIntent) {
     }
     if (sessionPrompt === 'waiting') {
-      const sessions = SessionPersist.listSessions().filter(id => id !== currentSessionId)
+      const sessions = restorableRef.current
       if (_input === 'r' && sessions.length > 0) {
         const id = sessions[0]!
+        setSessionPrompt('done')
+        pushStatic(createLogEntry({ type: 'system', content: `Restoring session ${id.slice(0, 8)}...` }))
         const p = new SessionPersist(id)
-        const messages = p.loadOai()
-        session.replaceMessages(messages)
-        const { entries, toolCount, turnCount } = replayMessagesToLogEntries(session.getMessages())
-        pushStaticBatch(entries)
-        const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
-        setCacheHitRate(session.getCacheHitRate())
-        setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
-        pushStatic(createLogEntry({ type: 'system', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools)` }))
+        p.loadOaiAsync().then(messages => {
+          session.replaceMessages(messages)
+          const { entries, toolCount, turnCount } = replayMessagesToLogEntries(session.getMessages())
+          pushStaticBatch(entries)
+          const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
+          setCacheHitRate(session.getCacheHitRate())
+          setSummaryState(prev => ({ ...prev, contextPct: tcPct, tokenHistory: pushTokenHistory(tcPct) }))
+          pushStatic(createLogEntry({ type: 'system', content: `Restored session ${id.slice(0, 8)}... (${turnCount} turns, ${toolCount} tools)` }))
+        })
+        return
       }
       setSessionPrompt('done')
       return
