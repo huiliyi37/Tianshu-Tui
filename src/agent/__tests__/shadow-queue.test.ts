@@ -57,4 +57,13 @@ describe('ShadowQueue', () => {
 
     process.off('unhandledRejection', handler)
   })
+
+  it('enqueue returns void (fire-and-forget) — no floating promise returned', () => {
+    const queue = new ShadowQueue({
+      execute: async () => 'result',
+    })
+    // enqueue returns void, not Promise — caller cannot accidentally float it
+    const result = queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'src/foo.ts' })
+    assert.equal(result, undefined, 'enqueue must return void')
+  })
 })

@@ -27,7 +27,7 @@ export function handlePromptSSE(deps: PromptRouteDeps, res: ServerResponse, prom
   const sse = new SseStream(res)
   const agent = deps.createAgent()
 
-  agent.run(prompt, {
+  void agent.run(prompt, {
     onTextDelta: (delta: string) => {
       sse.send('text_delta', { text: delta })
     },

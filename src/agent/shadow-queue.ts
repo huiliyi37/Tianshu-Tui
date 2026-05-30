@@ -25,7 +25,7 @@ export class ShadowQueue {
     if (!prediction.likelyTarget) return
     this.inflight++
     const target = prediction.likelyTarget
-    this.deps.execute(prediction.tool, target).then(result => {
+    void this.deps.execute(prediction.tool, target).then(result => {
       this.cache.push({ tool: prediction.tool, target, result })
     }).catch(() => {
       // Speculative execution failed — silently absorb.
