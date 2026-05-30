@@ -17,6 +17,7 @@ import { AssistantMessage } from './assistant-message.js'
 import { groupLogs } from './group-logs.js'
 import { toolLabel, type ToolCallItem } from './tool-status.js'
 import { phaseFromSummary, type SummaryState } from './summary-state.js'
+import { formatTurnSummary } from './turn-summary.js'
 import type { InterviewState } from './status-types.js'
 import { PhaseTracker } from './phase-tracker.js'
 import { phaseStatusLabel } from './phase-status.js'
@@ -1035,7 +1036,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const estimatedCost = (normalInput * 1 + usage.cache_read_input_tokens * 0.1 + usage.output_tokens * 4) / 1_000_000
         setCost(estimatedCost)
 
-
+        const evidence = agent.getEvidenceState()
+        const turnSummary = formatTurnSummary({
+          segments: chronicleRef.current.getPhaseSegments(),
+          filesRead: evidence.filesRead.size,
+          filesModified: evidence.filesModified.size,
+          verifiedCount: evidence.verifications.filter(v => v.status === 'passed').length,
+          elapsedMs: Date.now() - streamStartRef.current,
+        })
+        pushStatic(createLogEntry({ type: 'turn_summary', content: turnSummary }))
       },
       onPhaseChange: (phase, detail) => {
         // Phase → heartbeat status label (preparing, working, tool-hint, heartbeat)
