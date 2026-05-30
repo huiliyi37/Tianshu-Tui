@@ -66,7 +66,8 @@ export class TurnStreamController {
         this.deps.appendStreamedText(text)
         if (this.deps.getStreamedTextLength() - this.deps.getLastPrewarmAt() >= 500) {
           this.deps.setLastPrewarmAt(this.deps.getStreamedTextLength())
-          this.deps.maybePrewarm(text)
+          const t = text
+          setImmediate(() => this.deps.maybePrewarm(t))
         }
         turnDisplayBuffer += text
         // Real-time push with duplicate-chunk guard (DeepSeek repeats 50+ char chunks)
@@ -110,7 +111,8 @@ export class TurnStreamController {
       },
       onToolCallHint: (toolName, partialArgs) => {
         if (toolName === 'read_file' && typeof partialArgs.file_path === 'string') {
-          this.deps.prewarmFile?.(partialArgs.file_path)
+          const fp = partialArgs.file_path
+          setImmediate(() => this.deps.prewarmFile?.(fp))
         }
       },
     }

@@ -338,4 +338,53 @@ describe('TurnStreamController', () => {
     assert.equal(result2.lastTurnTextFingerprint, identicalText)
     assert.equal(callCount, 2)
   })
+
+  it('defers prewarmFile off the streaming callback via setImmediate (S12)', async () => {
+    const order: string[] = []
+    const stubClient: StreamClient = {
+      async stream(_req: OaiChatRequest, cb: StreamCallbacks) {
+        cb.onToolCallHint?.('read_file', { file_path: 'src/a.ts' })
+        order.push('after-hint-sync')
+      },
+    } as unknown as StreamClient
+    const controller = new TurnStreamController({
+      client: stubClient, abortSignal: new AbortController().signal,
+      getStreamedTextLength: () => 0, appendStreamedText: () => {},
+      getLastPrewarmAt: () => 0, setLastPrewarmAt: () => {}, maybePrewarm: () => {},
+      prewarmFile: () => { order.push('prewarm-ran') },
+      addUsage: () => {}, recordTurnCache: () => {},
+    })
+    await controller.streamTurn({
+      request: {} as OaiChatRequest, turn: 1, lastTurnTextFingerprint: '',
+      callbacks: { onTextDelta: () => {}, onThinkingDelta: () => {}, onToolUse: () => {}, onError: () => {} },
+    })
+    // setImmediate callback runs after await streamTurn resolves
+    await new Promise(r => setImmediate(r))
+    assert.equal(order[0], 'after-hint-sync')
+    assert.ok(order.includes('prewarm-ran'), 'prewarm should still eventually run')
+    assert.ok(order.indexOf('after-hint-sync') < order.indexOf('prewarm-ran'))
+  })
+
+  it('S1: forwards tool hint via onToolHint before onToolUse', async () => {
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        cb.onToolCallHint?.('read_file', { file_path: '/tmp/x.ts' })
+        cb.onContentBlock({ type: 'tool_use', id: 'tu_1', name: 'read_file', input: { file_path: '/tmp/x.ts' } })
+        cb.onStopReason('tool_use', {})
+      }),
+    }
+    const { controller } = makeController(client)
+    const events: string[] = []
+    await controller.streamTurn({
+      request, turn: 1, lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: () => {},
+        onThinkingDelta: () => {},
+        onToolUse: () => { events.push('tool_use') },
+        onToolHint: (name) => { events.push(`hint:${name}`) },
+        onError: () => {},
+      },
+    })
+    assert.deepEqual(events, ['hint:read_file', 'tool_use'])
+  })
 })
