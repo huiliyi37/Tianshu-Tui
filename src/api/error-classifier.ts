@@ -277,3 +277,22 @@ export function classifyApiError(error: unknown): ClassifiedError {
   // 2. Fall back to name / message pattern classification
   return classifyByPattern(error)
 }
+
+/**
+ * Parse Retry-After header value (RFC 7231 §7.1.3).
+ * Numeric string → seconds × 1000.
+ * HTTP-date string → delta from now in ms.
+ * Unparseable → undefined.
+ */
+export function parseRetryAfterMs(value: string): number | undefined {
+  const parsed = parseFloat(value)
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed * 1000
+  }
+  const dateMs = Date.parse(value)
+  if (Number.isFinite(dateMs)) {
+    const delta = dateMs - Date.now()
+    return delta > 0 ? delta : undefined
+  }
+  return undefined
+}

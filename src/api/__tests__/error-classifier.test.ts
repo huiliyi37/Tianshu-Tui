@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyApiError } from '../error-classifier.js'
+import { classifyApiError, parseRetryAfterMs } from '../error-classifier.js'
 import type { ErrorCategory } from '../error-classifier.js'
 
 // ---------------------------------------------------------------------------
@@ -260,5 +260,45 @@ describe('classifyApiError', () => {
       assert.ok(covered.has(cat), `Category "${cat}" not covered`)
     }
     assert.equal(covered.size, categories.length, 'All categories covered')
+  })
+})
+
+describe('parseRetryAfterMs', () => {
+  it('parses numeric seconds to milliseconds', () => {
+    const result = parseRetryAfterMs('30')
+    assert.equal(result, 30_000)
+  })
+
+  it('parses decimal seconds to milliseconds', () => {
+    const result = parseRetryAfterMs('2.5')
+    assert.equal(result, 2_500)
+  })
+
+  it('parses HTTP-date format by computing delta from now', () => {
+    const futureDate = new Date(Date.now() + 30_000).toUTCString()
+    const result = parseRetryAfterMs(futureDate)
+    assert.ok(typeof result === 'number', 'should return a number for HTTP-date')
+    assert.ok(result! > 20_000 && result! < 40_000, `delta should be ~30s, got ${result}`)
+  })
+
+  it('returns undefined for past HTTP-date', () => {
+    const pastDate = new Date(Date.now() - 30_000).toUTCString()
+    const result = parseRetryAfterMs(pastDate)
+    assert.equal(result, undefined)
+  })
+
+  it('returns undefined for non-numeric non-date string', () => {
+    const result = parseRetryAfterMs('not-a-number')
+    assert.equal(result, undefined)
+  })
+
+  it('returns undefined for empty string', () => {
+    const result = parseRetryAfterMs('')
+    assert.equal(result, undefined)
+  })
+
+  it('handles zero as zero milliseconds', () => {
+    const result = parseRetryAfterMs('0')
+    assert.equal(result, 0)
   })
 })

@@ -5,6 +5,7 @@ import type { ProviderProfile } from './provider-profile.js'
 import { shouldInjectPrefix, buildPrefixMessage } from './prefix-completion.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
 import { withStructuredRetry } from './retry-engine.js'
+import { parseRetryAfterMs } from './error-classifier.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
 
 export interface OpenAIClientConfig {
@@ -50,22 +51,6 @@ const REASONING_READ_TIMEOUT_MS = 180_000
 // Use generous timeouts to avoid false-positive timeout errors.
 const GLM_FIRST_BYTE_TIMEOUT_MS = 180_000
 const GLM_READ_TIMEOUT_MS = 300_000
-
-/** Parse Retry-After header: numeric (seconds) → ms, HTTP-date → parsed delta ms, unparseable → undefined. */
-function parseRetryAfterMs(value: string): number | undefined {
-  const parsed = parseFloat(value)
-  if (Number.isFinite(parsed) && parsed >= 0) {
-    return parsed * 1000 // seconds → milliseconds
-  }
-  // HTTP-date format (e.g. "Fri, 30 May 2026 12:00:00 GMT") —
-  // parse with Date.parse and compute delta from now.
-  const dateMs = Date.parse(value)
-  if (Number.isFinite(dateMs)) {
-    const delta = dateMs - Date.now()
-    return delta > 0 ? delta : undefined
-  }
-  return undefined
-}
 
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
