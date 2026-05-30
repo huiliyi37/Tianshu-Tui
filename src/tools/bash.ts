@@ -9,6 +9,27 @@ import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 
+/** Environment variable prefixes that should be preserved for child processes. */
+const SAFE_ENV_PREFIXES = ['PATH', 'HOME', 'PWD', 'NODE_ENV', 'TERM', 'LANG', 'LC_', 'XDG_', 'EDITOR', 'VISUAL', 'PAGER', 'SHELL', 'USER', 'LOGNAME', 'TMPDIR', 'TEMP', 'TMP', 'COLOR', 'COLORTERM', 'NO_COLOR', 'FORCE_COLOR'] as const
+
+/** Keywords that indicate a sensitive env var — vars containing these substrings are stripped. */
+const SENSITIVE_ENV_KEYWORDS = ['KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'CREDENTIAL', 'AUTH', 'PRIVATE'] as const
+
+/** Strip sensitive environment variables before passing to child processes. */
+export function sanitizeEnv(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
+  const clean: Record<string, string | undefined> = {}
+  for (const [key, value] of Object.entries(env)) {
+    const upper = key.toUpperCase()
+    const isSensitive = SENSITIVE_ENV_KEYWORDS.some(kw => upper.includes(kw))
+    if (isSensitive) continue
+    const isSafe = SAFE_ENV_PREFIXES.some(prefix => upper.startsWith(prefix))
+    if (isSafe) {
+      clean[key] = value
+    }
+  }
+  return clean
+}
+
 /**
  * 退出码 → 是否真执行失败。
  *
@@ -78,7 +99,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
     return new Promise((resolve) => {
       const child = track(spawn('sh', ['-c', command], {
         cwd: params.cwd,
-        env: { ...process.env },
+        env: sanitizeEnv(process.env),
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       }))

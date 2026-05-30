@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { BASH_TOOL, isExecFailure } from '../bash.js'
+import { BASH_TOOL, isExecFailure, sanitizeEnv } from '../bash.js'
 
 describe('isExecFailure: 非零退出码 ≠ 真失败', () => {
   it('把 0 和"非零非致命码"判为非失败(grep 1/diff 1/test 失败码)', () => {
@@ -98,5 +98,48 @@ describe('rtkRewrite cache behavior', () => {
 
     // Second call to requiresApproval with same command should use cache
     assert.equal(BASH_TOOL.requiresApproval(params), false)
+  })
+})
+
+describe('sanitizeEnv', () => {
+  it('strips API keys', () => {
+    const env = { ...process.env, OPENAI_API_KEY: 'sk-xxx', MY_SECRET_TOKEN: 'abc123' }
+    const result = sanitizeEnv(env)
+    assert.equal(result.OPENAI_API_KEY, undefined)
+    assert.equal(result.MY_SECRET_TOKEN, undefined)
+  })
+
+  it('preserves PATH and HOME', () => {
+    const result = sanitizeEnv(process.env)
+    assert.ok(result.PATH, 'PATH should be preserved')
+    assert.ok(result.HOME, 'HOME should be preserved')
+  })
+
+  it('strips vars with TOKEN in name', () => {
+    const env = { ...process.env, GITHUB_TOKEN: 'ghp_xxx', DEEPSEEK_TOKEN: 'abc' }
+    const result = sanitizeEnv(env)
+    assert.equal(result.GITHUB_TOKEN, undefined)
+    assert.equal(result.DEEPSEEK_TOKEN, undefined)
+  })
+
+  it('strips vars with SECRET in name', () => {
+    const env = { ...process.env, APP_SECRET: 'sss', JWT_SECRET: 'jjj' }
+    const result = sanitizeEnv(env)
+    assert.equal(result.APP_SECRET, undefined)
+    assert.equal(result.JWT_SECRET, undefined)
+  })
+
+  it('preserves NODE_ENV and TERM', () => {
+    const env = { ...process.env, NODE_ENV: 'test', TERM: 'xterm-256color' }
+    const result = sanitizeEnv(env)
+    assert.equal(result.NODE_ENV, 'test')
+    assert.equal(result.TERM, 'xterm-256color')
+  })
+
+  it('preserves LANG and LC_ prefixed vars', () => {
+    const env = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' }
+    const result = sanitizeEnv(env)
+    assert.equal(result.LANG, 'en_US.UTF-8')
+    assert.equal(result.LC_ALL, 'en_US.UTF-8')
   })
 })
