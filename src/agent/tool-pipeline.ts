@@ -19,7 +19,7 @@ import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, recordTraceEvent } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
-import { assessToolRisk, CONFIDENCE_THRESHOLDS, requiresBashWriteApproval } from './approval-risk.js'
+import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed } from './permissions.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
@@ -446,7 +446,13 @@ export async function executeToolUse(
 
     const allowlisted = isToolAllowed(tu.name, tu.input, deps.config.permissions?.allow)
     const bashWriteRequiresApproval = requiresBashWriteApproval(tu.name, tu.input) && !allowlisted
-    const shouldAsk = bashWriteRequiresApproval
+
+    // Protection mode: during doom-loop, destructive git actions always require approval
+    const protectionMode = deps.getDoomLoopLevel() === 'blocked' && isDestructiveGitAction(tu.name, tu.input)
+
+    const shouldAsk = protectionMode
+      ? true
+      : bashWriteRequiresApproval
       ? true
       : allowlisted
         ? false

@@ -69,6 +69,20 @@ export function bashGitBypassesScope(command: string): boolean {
   return GIT_BYPASS_PATTERNS.some(p => p.test(command.trim()))
 }
 
+/** Destructive git actions that can wipe working-tree changes — the panic targets. */
+export function isDestructiveGitAction(toolName: string, input: Record<string, unknown>): boolean {
+  if (toolName === 'git') {
+    const action = input.action as string
+    return action === 'stash' || action === 'stash_pop'
+  }
+  // bash path already caught by BASH_WRITE_PATTERNS; listed here for explicit protection-mode gating
+  if (toolName === 'bash') {
+    const cmd = typeof input.command === 'string' ? input.command : ''
+    return /\bgit\s+(?:stash\b|checkout\s|restore\b|reset\b|rm\s)/.test(cmd)
+  }
+  return false
+}
+
 export function requiresBashWriteApproval(toolName: string, input: Record<string, unknown>): boolean {
   if (toolName !== 'bash') return false
   const command = typeof input.command === 'string' ? input.command : ''
@@ -93,10 +107,16 @@ export function assessToolRisk(
   const reasons: string[] = []
   let level: RiskLevel = 'none'
 
-  // Doom loop check
+  // Doom loop check — only escalate destructive git to 'high'; others stay at
+  // their natural risk level so read-only tools aren't blocked.
   if (doomLoopLevel === 'blocked') {
-    reasons.push('Agent is in doom loop (repeated identical tool calls)')
-    level = 'high'
+    if (isDestructiveGitAction(toolName, input)) {
+      reasons.push('保护模式：工具失败率高，破坏性动作需确认')
+      level = 'high'
+    } else {
+      reasons.push('Agent is in doom loop (repeated identical tool calls)')
+      if (level === 'none') level = 'medium'
+    }
   } else if (doomLoopLevel === 'warn') {
     reasons.push('Agent may be entering doom loop')
     level = 'medium'

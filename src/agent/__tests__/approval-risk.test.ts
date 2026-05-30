@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { bashGitBypassesScope } from '../approval-risk.js'
+import { bashGitBypassesScope, isDestructiveGitAction } from '../approval-risk.js'
 import { assessToolRisk, DANGEROUS_BASH_PATTERNS, BASH_WRITE_PATTERNS, bashCommandMayWrite, requiresBashWriteApproval, CONFIDENCE_THRESHOLDS } from '../approval-risk.js'
 import type { ContextClaim } from '../../context/claims.js'
 import type { Sensorium } from '../sensorium.js'
@@ -38,11 +38,10 @@ describe('assessToolRisk', () => {
     assert.ok(result.reasons.some(r => r.includes('doom loop')))
   })
 
-  it('returns high when doom loop level is blocked', () => {
+  it('read_file stays medium (not blocked) during doom-loop — only destructive git gets blocked', () => {
     const result = assessToolRisk('read_file', { file_path: 'src/a.ts' }, 'blocked')
-    assert.equal(result.level, 'high')
+    assert.equal(result.level, 'medium')
     assert.ok(result.reasons.some(r => r.includes('doom loop')))
-    assert.match(result.suggestedAction, /approval/i)
   })
 
   it('flags destructive shell commands with reason and suggested action', () => {
@@ -126,9 +125,9 @@ describe('assessToolRisk', () => {
     assert.equal(result.level, 'medium')
   })
 
-  it('elevates write_file to high when combined with doom loop blocked', () => {
+  it('elevates write_file to medium when combined with doom loop blocked (not destructive git)', () => {
     const result = assessToolRisk('write_file', { file_path: 'src/a.ts', content: 'x' }, 'blocked')
-    assert.equal(result.level, 'high')
+    assert.equal(result.level, 'medium')
   })
 
   it('returns high for destructive command even with doom loop warn', () => {
@@ -187,9 +186,9 @@ describe('MCP tool risk', () => {
     assert.ok(result.reasons.some(r => r.includes('MCP')))
   })
 
-  it('elevates MCP tool to high risk under doom-loop blocked', () => {
+  it('MCP tool with doom-loop blocked stays at its policy-derived level (not auto-high)', () => {
     const result = assessToolRisk('mcp__myserver__update_resource', { id: '123' }, 'blocked')
-    assert.equal(result.level, 'high')
+    assert.ok(result.level === 'high' || result.level === 'medium', `unexpected level: ${result.level}`)
   })
 
   it('extracts server ID from MCP tool name', () => {
@@ -217,12 +216,12 @@ describe('assessToolRisk — antibody boost', () => {
     assert.ok(!result.reasons.some(r => r.includes('antibody')))
   })
 
-  it('preserves higher risk level when antibody matches but doom loop is blocked', () => {
+  it('preserves doom-loop medium when antibody matches non-destructive bash during blocked', () => {
     const antibodies = [antibodyClaim('[type_error] Fix type.', 'bash: type_error')]
 
     const result = assessToolRisk('bash', { command: 'echo hi' }, 'blocked', antibodies)
 
-    assert.equal(result.level, 'high')
+    assert.equal(result.level, 'medium')
     assert.ok(result.reasons.some(r => r.includes('doom loop')))
     assert.ok(result.reasons.some(r => r.includes('antibody')))
   })
@@ -389,5 +388,51 @@ describe('bashGitBypassesScope', () => {
   })
   it('does NOT flag git stash pop (not a scope bypass)', () => {
     assert.equal(bashGitBypassesScope('git stash pop'), false)
+  })
+})
+
+describe('isDestructiveGitAction — protection mode targets', () => {
+  it('detects git tool stash', () => {
+    assert.equal(isDestructiveGitAction('git', { action: 'stash' }), true)
+  })
+  it('detects git tool stash_pop', () => {
+    assert.equal(isDestructiveGitAction('git', { action: 'stash_pop' }), true)
+  })
+  it('does not flag git tool status/commit/log', () => {
+    assert.equal(isDestructiveGitAction('git', { action: 'status' }), false)
+    assert.equal(isDestructiveGitAction('git', { action: 'commit' }), false)
+    assert.equal(isDestructiveGitAction('git', { action: 'log' }), false)
+  })
+  it('detects bash git stash', () => {
+    assert.equal(isDestructiveGitAction('bash', { command: 'git stash' }), true)
+  })
+  it('detects bash git checkout', () => {
+    assert.equal(isDestructiveGitAction('bash', { command: 'git checkout -- src/a.ts' }), true)
+  })
+  it('detects bash git restore', () => {
+    assert.equal(isDestructiveGitAction('bash', { command: 'git restore .' }), true)
+  })
+  it('detects bash git reset', () => {
+    assert.equal(isDestructiveGitAction('bash', { command: 'git reset HEAD~1' }), true)
+  })
+  it('does not flag bash git status/log', () => {
+    assert.equal(isDestructiveGitAction('bash', { command: 'git status' }), false)
+    assert.equal(isDestructiveGitAction('bash', { command: 'git log' }), false)
+  })
+  it('does not flag non-git tools', () => {
+    assert.equal(isDestructiveGitAction('read_file', { file_path: 'src/a.ts' }), false)
+  })
+})
+
+describe('assessToolRisk — protection mode (destructive git + blocked)', () => {
+  it('escalates git stash to high and shows protection mode message when doom-loop blocked', () => {
+    const result = assessToolRisk('git', { action: 'stash' }, 'blocked')
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('保护模式')))
+  })
+  it('escalates bash git checkout to high during doom-loop blocked', () => {
+    const result = assessToolRisk('bash', { command: 'git checkout -- src/a.ts' }, 'blocked')
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('保护模式')))
   })
 })
