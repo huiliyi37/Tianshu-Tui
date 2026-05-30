@@ -12,6 +12,7 @@ import {
 } from '../coordinator.js'
 import { READ_ONLY_WORKER_TOOLS, WRITE_WORKER_TOOLS, type WorkerResult } from '../work-order.js'
 import { CollaborationProtocol } from '../collaboration-protocol.js'
+import { profileRegistry } from '../profile-registry.js'
 
 function fakeTool(name: string): Tool {
   return {
@@ -31,11 +32,14 @@ function makeRegistry() {
   const registry = new ToolRegistry()
   for (const name of READ_ONLY_WORKER_TOOLS) registry.register(fakeTool(name))
   for (const name of ['edit_file', 'write_file', 'bash', 'run_tests']) registry.register(fakeTool(name))
+  // Register profile-registry tools that READ_ONLY_WORKER_TOOLS doesn't include
+  for (const name of ['read_section', 'repo_graph']) registry.register(fakeTool(name))
   return registry
 }
 
 function sortedReadOnlyToolNames(): string[] {
-  return [...READ_ONLY_WORKER_TOOLS].sort()
+  // ProfileRegistry provides tools for readonly profiles — includes read_section, repo_graph
+  return [...READ_ONLY_WORKER_TOOLS, 'read_section', 'repo_graph'].sort()
 }
 
 const cards: ModelCapabilityCard[] = [
@@ -193,7 +197,7 @@ describe('DelegationCoordinator', () => {
     assert.equal(run.status, 'completed')
     assert.equal(run.results.length, 1)
     assert.deepEqual(selectedModels, ['large-cache'])
-    assert.deepEqual(seenToolNames[0], sortedReadOnlyToolNames())
+    assert.deepEqual(seenToolNames[0], [...profileRegistry.get('code_scout')!.allowedTools].sort())
   })
 
   it('returns skipped when the objective does not pass the budget gate', async () => {

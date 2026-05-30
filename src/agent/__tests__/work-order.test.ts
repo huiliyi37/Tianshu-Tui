@@ -23,10 +23,13 @@ describe('work-order contract', () => {
 
     assert.equal(order.id, 'wo_1')
     assert.equal(order.kind, 'code_search')
-    assert.deepEqual(order.allowedTools, READ_ONLY_WORKER_TOOLS)
+    // allowedTools now come from ProfileRegistry — includes read_section, repo_graph
     assert.ok(order.allowedTools.includes('inspect_project'))
     assert.ok(order.allowedTools.includes('repo_map'))
     assert.ok(order.allowedTools.includes('related_tests'))
+    assert.ok(order.allowedTools.includes('read_section'))
+    assert.ok(order.allowedTools.includes('repo_graph'))
+    assert.ok(!order.allowedTools.includes('edit_file'))
     assert.deepEqual(order.disallowedTools, ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'])
     assert.equal(order.budget.maxRetries, 2)
     assert.equal(order.aggregationPolicy, 'primary_decides')
@@ -151,7 +154,14 @@ describe('work-order contract', () => {
     })
 
     assert.equal(order.profile, 'patcher')
-    assert.deepEqual(order.allowedTools, [...WRITE_WORKER_TOOLS])
+    // allowedTools now come from ProfileRegistry — includes read_section, repo_graph
+    assert.ok(order.allowedTools.includes('edit_file'))
+    assert.ok(order.allowedTools.includes('write_file'))
+    assert.ok(order.allowedTools.includes('bash'))
+    assert.ok(order.allowedTools.includes('run_tests'))
+    assert.ok(order.allowedTools.includes('read_file'))
+    assert.ok(order.allowedTools.includes('read_section'))
+    assert.ok(order.allowedTools.includes('repo_graph'))
     assert.equal(order.disallowedTools.includes('delegate_task'), true)
     assert.equal(order.disallowedTools.includes('delegate_batch'), true)
     assert.equal(order.budget.maxTurns, 8)

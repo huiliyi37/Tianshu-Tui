@@ -6,6 +6,7 @@ import type { WorkOrderKind, WorkerProfile } from '../work-order.js'
 import type { DomainArea } from '../work-order.js'
 import { decomposeByDataContract } from '../dispatcher.js'
 import { matchDomain } from '../star-domain.js'
+import { profileRegistry } from '../profile-registry.js'
 
 export interface DispatcherHookDeps {
   coordinator: DelegationCoordinator
@@ -68,6 +69,11 @@ function inferWorkOrderKind(domain: DomainArea): WorkOrderKind {
 }
 
 function inferWorkerProfile(domain: DomainArea): WorkerProfile {
+  // Try registry first — user-defined profiles may declare defaultKind
+  for (const p of profileRegistry.list()) {
+    if (p.defaultKind === domain) return p.name as WorkerProfile
+  }
+  // Built-in fallbacks
   if (domain === 'tests') return 'verifier'
   if (domain === 'docs') return 'doc_scout'
   return 'code_scout'

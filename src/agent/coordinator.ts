@@ -169,7 +169,7 @@ export class DelegationCoordinator {
 
   private async delegateOrder(order: WorkOrder): Promise<CoordinatorRun> {
     const role = classifyProfile(order.profile)
-    const isWrite = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
+    const isWrite = role === 'hands'
     this.state.recordEvent({ type: 'queued', workOrderId: order.id, timestamp: Date.now() })
 
     // Acquire semantic lock via CollaborationProtocol if configured
@@ -225,8 +225,8 @@ export class DelegationCoordinator {
     }
 
     const selected = this.selectModelForTask(task)
-    const toolSet = isWrite ? WRITE_WORKER_TOOLS : READ_ONLY_WORKER_TOOLS
-    const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, toolSet)
+    // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
+    const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })

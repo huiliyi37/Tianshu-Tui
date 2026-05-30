@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { CapabilityTask } from '../model/capability.js'
 import type { VerificationMetadata } from '../tools/types.js'
+import { profileRegistry } from './profile-registry.js'
 
 export const READ_ONLY_WORKER_TOOLS = ['read_file', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'related_tests'] as const
 
@@ -202,7 +203,10 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
       'Do not suggest edits as completed changes.',
       'Do not request write, edit, bash, or test execution tools.',
     ],
-    allowedTools: [...READ_ONLY_WORKER_TOOLS],
+    allowedTools: (() => {
+      const profileDef = profileRegistry.get(input.profile)
+      return profileDef?.allowedTools ?? [...READ_ONLY_WORKER_TOOLS]
+    })(),
     disallowedTools: [...PHASE1_DISALLOWED_WORKER_TOOLS],
     dedupeKey: `${input.kind}:${input.scope.files?.join(',') || input.objective}`,
     dependencies: input.dependencies ?? [],
@@ -235,7 +239,11 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
       'List every changed file in changedFiles.',
       'Include verification results if tests were run.',
     ],
-    allowedTools: [...WRITE_WORKER_TOOLS],
+    allowedTools: (() => {
+      const writeProfile = input.profile ?? 'patcher'
+      const profileDef = profileRegistry.get(writeProfile)
+      return profileDef?.allowedTools ?? [...WRITE_WORKER_TOOLS]
+    })(),
     disallowedTools: ['delegate_task', 'delegate_batch'],
     dedupeKey: `write:${input.scope.files?.join(',') || input.objective}`,
     dependencies: input.dependencies ?? [],

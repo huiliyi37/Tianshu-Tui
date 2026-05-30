@@ -37,6 +37,7 @@ import type { AuthProvider } from './auth/types.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
+import { profileRegistry } from './agent/profile-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 import { killAll } from './tools/process-tracker.js'
@@ -120,10 +121,19 @@ let _mcpManager: any = null
 
 let isShuttingDown = false
 
+// Module-level handles so gracefulShutdown can release everything that keeps
+// the libuv event loop alive (timers, MCP stdio pipes). Without this, a closed
+// terminal (SIGHUP) leaves the process running as an orphan.
+let _heartbeatInterval: ReturnType<typeof setInterval> | null = null
+let _perfCleanup: ReturnType<typeof setInterval> | null = null
+
 function gracefulShutdown() {
   if (isShuttingDown) return
   isShuttingDown = true
   shutdownCallback?.()
+  if (_heartbeatInterval) clearInterval(_heartbeatInterval)
+  if (_perfCleanup) clearInterval(_perfCleanup)
+  void _mcpManager?.shutdown?.()
   if (process.stdin.isTTY && process.stdin.setRawMode) {
     process.stdin.setRawMode(false)
   }
@@ -431,7 +441,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       : undefined
 
     const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
-      const writeProfiles = ['patcher', 'verifier']
+      const writeProfiles = profileRegistry.listWriteProfiles()
       const isWrite = writeProfiles.includes(_order.profile)
 
       // Resolve worker provider: routing config → fallback to active provider.
@@ -864,6 +874,7 @@ async function main() {
   const heartbeatInterval = setInterval(() => {
     try { registry.heartbeat(sessionId) } catch { /* ignore */ }
   }, 10_000)
+  _heartbeatInterval = heartbeatInterval
 
   // 退出时清理
   process.on('exit', () => {
@@ -933,6 +944,7 @@ async function main() {
   const perfCleanup = setInterval(() => {
     try { performance.clearMeasures() } catch { /* noop */ }
   }, 60_000)
+  _perfCleanup = perfCleanup
 
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),
@@ -941,9 +953,13 @@ async function main() {
 
   process.on('SIGINT', gracefulShutdown)
   process.on('SIGTERM', gracefulShutdown)
+  process.on('SIGHUP', gracefulShutdown)
 
   await waitUntilExit()
   clearInterval(perfCleanup)
+  // Force-exit: lingering handles (MCP stdio, libuv pool) otherwise keep the
+  // event loop alive and leave an orphaned process after the TUI unmounts.
+  gracefulShutdown()
 }
 
 main().catch((err) => {
