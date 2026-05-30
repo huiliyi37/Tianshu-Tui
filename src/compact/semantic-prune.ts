@@ -7,23 +7,7 @@
  * - Edit echo (edit_file output that duplicates prior read_file)
  * - Repeated grep (same pattern multiple times → keep latest)
  */
-import type { OaiMessage, OaiAssistantMessage, OaiToolCall } from '../api/oai-types.js'
-
-/** Resolve tool name for a tool result message by scanning preceding assistant tool_calls. */
-function resolveToolName(messages: OaiMessage[], toolIdx: number): string | undefined {
-  const msg = messages[toolIdx]!
-  if (msg.role !== 'tool') return undefined
-  for (let i = toolIdx - 1; i >= 0; i--) {
-    const prev = messages[i]!
-    if (prev.role === 'assistant' && (prev as OaiAssistantMessage).tool_calls) {
-      const tc = (prev as OaiAssistantMessage).tool_calls!.find(
-        (t: OaiToolCall) => t.id === msg.tool_call_id,
-      )
-      return tc?.function.name
-    }
-  }
-  return undefined
-}
+import type { OaiMessage, OaiAssistantMessage } from '../api/oai-types.js'
 
 /** Junk path patterns — directory listings containing these are low-value. */
 const JUNK_DIR_RE = /(?:__pycache__|node_modules|\.git\/|\.venv|\.mypy_cache|\.pytest_cache|\.next\/|dist\/|build\/|\.tox)/
@@ -78,6 +62,20 @@ export function semanticPruneLayer1(
   let prunedCount = 0
   let savedChars = 0
 
+  // Pre-build toolCallId → { name, args } index (O(n) replaces O(n²) resolveToolName)
+  const toolCallIndex = new Map<string, { name: string; args: string }>()
+  for (let i = anchorCount; i < messages.length; i++) {
+    const msg = messages[i]!
+    if (msg.role === 'assistant') {
+      const aMsg = msg as OaiAssistantMessage
+      if (aMsg.tool_calls) {
+        for (const tc of aMsg.tool_calls) {
+          toolCallIndex.set(tc.id, { name: tc.function.name, args: tc.function.arguments })
+        }
+      }
+    }
+  }
+
   // Build grep dedup map: pattern|path|glob → latest index
   // Uses composite key to avoid incorrectly deduplicating greps with the
   // same pattern but different search paths or file filters.
@@ -85,30 +83,19 @@ export function semanticPruneLayer1(
   for (let i = messages.length - 1; i >= anchorCount; i--) {
     const msg = messages[i]!
     if (msg.role !== 'tool') continue
-    const toolName = resolveToolName(messages, i)
-    if (toolName === 'grep' || toolName === 'search') {
-      // Extract search pattern from preceding tool_call args
-      for (let j = i - 1; j >= 0; j--) {
-        const prev = messages[j]!
-        if (prev.role === 'assistant' && (prev as OaiAssistantMessage).tool_calls) {
-          const tc = (prev as OaiAssistantMessage).tool_calls!.find(
-            (t: OaiToolCall) => t.id === msg.tool_call_id,
-          )
-          if (tc) {
-            try {
-              const args = JSON.parse(tc.function.arguments)
-              const pattern = args.pattern || args.query || args.regex || ''
-              if (pattern) {
-                const key = [pattern, args.path ?? '', args.glob ?? ''].join('|')
-                if (!grepPatterns.has(key)) {
-                  grepPatterns.set(key, i)
-                }
-              }
-            } catch { /* ignore */ }
+    const info = toolCallIndex.get(msg.tool_call_id)
+    if (!info) continue
+    if (info.name === 'grep' || info.name === 'search') {
+      try {
+        const args = JSON.parse(info.args)
+        const pattern = args.pattern || args.query || args.regex || ''
+        if (pattern) {
+          const key = [pattern, args.path ?? '', args.glob ?? ''].join('|')
+          if (!grepPatterns.has(key)) {
+            grepPatterns.set(key, i)
           }
-          break
         }
-      }
+      } catch { /* ignore */ }
     }
   }
 
@@ -117,33 +104,23 @@ export function semanticPruneLayer1(
     if (msg.role !== 'tool') return msg
     if (msg.content.startsWith('[')) return msg // already processed
 
-    const toolName = resolveToolName(messages, idx)
+    const toolInfo = toolCallIndex.get(msg.tool_call_id)
+    const toolName = toolInfo?.name
     let newContent = msg.content
     const origLen = newContent.length
 
-    // Rule 3 applies even to short content (grep dedup)
-    if ((toolName === 'grep' || toolName === 'search') && grepPatterns.size > 0) {
-      for (let j = idx - 1; j >= 0; j--) {
-        const prev = messages[j]!
-        if (prev.role === 'assistant' && (prev as OaiAssistantMessage).tool_calls) {
-          const tc = (prev as OaiAssistantMessage).tool_calls!.find(
-            (t: OaiToolCall) => t.id === msg.tool_call_id,
-          )
-          if (tc) {
-            try {
-              const args = JSON.parse(tc.function.arguments)
-              const pattern = args.pattern || args.query || args.regex || ''
-              if (pattern) {
-                const key = [pattern, args.path ?? '', args.glob ?? ''].join('|')
-                if (grepPatterns.get(key) !== idx) {
-                  newContent = `[outdated grep for "${pattern.slice(0, 40)}", see later result]`
-                }
-              }
-            } catch { /* ignore */ }
-            break
+    // Rule 3: grep dedup — replace older grep results with reference to latest
+    if ((toolName === 'grep' || toolName === 'search') && toolInfo && grepPatterns.size > 0) {
+      try {
+        const args = JSON.parse(toolInfo.args)
+        const pattern = args.pattern || args.query || args.regex || ''
+        if (pattern) {
+          const key = [pattern, args.path ?? '', args.glob ?? ''].join('|')
+          if (grepPatterns.get(key) !== idx) {
+            newContent = `[outdated grep for "${pattern.slice(0, 40)}", see later result]`
           }
         }
-      }
+      } catch { /* ignore */ }
     }
 
     // Skip further processing for short content

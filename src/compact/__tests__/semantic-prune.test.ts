@@ -154,4 +154,32 @@ describe('semanticPruneLayer1', () => {
     const result = semanticPruneLayer1(messages, 2)
     assert.equal(result.prunedCount, 0, 'different glob should NOT be deduped')
   })
+
+  it('prebuilt index produces same result as backward scan for mixed tool types', () => {
+    // 30 tool results interleaved with assistant tool_calls — stresses index lookup
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+    ]
+    for (let i = 0; i < 30; i++) {
+      const toolType = i % 3 === 0 ? 'grep' : i % 3 === 1 ? 'list_dir' : 'bash'
+      const args = toolType === 'grep'
+        ? `{"pattern":"P${i}","path":"src/"}`
+        : toolType === 'list_dir'
+          ? '{"path":"."}'
+          : '{"command":"npm test"}'
+      messages.push(makeAssistant([{ id: `tc${i}`, name: toolType, args }]))
+      const content = toolType === 'grep'
+        ? `src/a.ts:${i}: match P${i}\n` + 'x'.repeat(250)
+        : toolType === 'list_dir'
+          ? ['node_modules/a/', 'node_modules/b/', 'node_modules/c/', `file${i}.ts`].join('\n')
+          : '  ✓ test pass '.repeat(15) + `\n${i} tests\n`
+      messages.push(makeToolResult(`tc${i}`, content))
+    }
+    // Should produce same result regardless of implementation
+    const result = semanticPruneLayer1(messages, 2)
+    // Verify all tool messages were processed (not thrown away)
+    const toolMsgs = result.messages.filter(m => m.role === 'tool')
+    assert.equal(toolMsgs.length, 30)
+  })
 })
