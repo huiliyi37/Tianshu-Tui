@@ -1,7 +1,7 @@
 # TUI: Assistant Message "Flashes" After Streaming Completes
 
-**Status:** Identified, fix not yet applied  
-**Date:** 2026-05-17  
+**Status:** ✅ Fixed (2026-05-30) — Options A + B applied  
+**Date:** 2026-05-17 (identified), 2026-05-30 (fixed)  
 **Files involved:** `src/tui/stream.tsx`, `src/tui/app.tsx`
 
 ---
@@ -46,7 +46,7 @@ If Ink's `<Static>` `AssistantMessage` renders one frame later than the `StreamO
 
 ## Fix Options
 
-### Option A — Modify `src/tui/stream.tsx` (recommended, minimal)
+### Option A — Modify `src/tui/stream.tsx` (recommended, minimal) ✅ APPLIED
 
 Change `StreamOutput` so it returns `null` when `text` is empty, regardless of `isStreaming`:
 
@@ -64,7 +64,7 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
 
 This removes the blank-cursor frame entirely. The message stays visible until `isStreaming` is set to `false`, at which point `StreamOutput` disappears cleanly and the static `AssistantMessage` takes over.
 
-### Option B — Reverse state-clear order in `src/tui/app.tsx`
+### Option B — Reverse state-clear order in `src/tui/app.tsx` ✅ APPLIED
 
 In `onTurnComplete`, set `isStreaming` to `false` **before** clearing `streamingText`:
 

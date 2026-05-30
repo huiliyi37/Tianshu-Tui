@@ -14,14 +14,7 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
   const theme = getTheme()
   const maxLines = useViewportLines(0.6, 8)
 
-  if (!text) {
-    if (!isStreaming) return null
-    return (
-      <Box paddingX={1} marginBottom={1}>
-        <Text color={theme.muted}>◌ Waiting for model…</Text>
-      </Box>
-    )
-  }
+  if (!text) return null
 
   let displayText = text
   let omittedLines = 0
