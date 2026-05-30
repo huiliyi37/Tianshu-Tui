@@ -111,7 +111,7 @@ export function parseOutput(raw: string, runner: string): ParsedResult {
     const failMatch = clean.match(/[ℹ#]\s+fail\s+(\d+)/)
     const skipMatch = clean.match(/[ℹ#]\s+skip\s+(\d+)/)
     const passMatch = clean.match(/[ℹ#]\s+pass\s+(\d+)/)
-    const durMatch = clean.match(/[ℹ#]\s+duration\s+([\d.]+m?s)/)
+    const durMatch = clean.match(/[ℹ#]\s+duration_ms\s+([\d.]+)/)
     const total = asNum(totalMatch?.[1])
     const fails = asNum(failMatch?.[1])
     const skips = asNum(skipMatch?.[1])
@@ -316,7 +316,9 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
 
         resolve({
           content: exitCode === 0
-            ? `✓ ${parsed.passed} passed${parsed.skipped ? `, ${parsed.skipped} skipped` : ''}${parsed.duration ? ` (${parsed.duration})` : ''}`
+            ? (parsed.passed === 0 && !parsed.duration
+              ? truncated  // parse likely failed — fall back to full formatted output
+              : `✓ ${parsed.passed} passed${parsed.skipped ? `, ${parsed.skipped} skipped` : ''}${parsed.duration ? ` (${parsed.duration})` : ''}`)
             : truncated,
           uiContent: buildUiOutput(raw, meta),
           rawPath,

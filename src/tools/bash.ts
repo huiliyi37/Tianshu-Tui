@@ -9,6 +9,11 @@ import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 
+/** Success output inline threshold: commands that succeed with ≤ this many lines
+ *  return full output to the model. Beyond this, only a header summary is returned
+ *  (recoverable via the artifact reference in the same message). */
+const SUCCESS_INLINE_LINES = 20
+
 /** Environment variable prefixes that should be preserved for child processes. */
 const SAFE_ENV_PREFIXES = ['PATH', 'HOME', 'PWD', 'NODE_ENV', 'TERM', 'LANG', 'LC_', 'XDG_', 'EDITOR', 'VISUAL', 'PAGER', 'SHELL', 'USER', 'LOGNAME', 'TMPDIR', 'TEMP', 'TMP', 'COLOR', 'COLORTERM', 'NO_COLOR', 'FORCE_COLOR'] as const
 
@@ -173,7 +178,11 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           // Even when wrapping, prepend the model-formatted output so the model
           // sees the head/tail directly — the [artifact:X] marker is a back-up
           // recovery path, not the only way to access content.
-          const modelOutput = buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
+          const lineCount = raw.split('\n').length
+          const successFold = exitCode === 0 && lineCount > SUCCESS_INLINE_LINES
+          const modelOutput = successFold
+            ? `[${rawCommand}] exit=0 (${lineCount} lines) — success output folded, full output recoverable below`
+            : buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
           return {
             content: `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`,
             uiContent: buildUiOutput(raw, meta),
