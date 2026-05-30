@@ -23,6 +23,7 @@ import { getDoomLoopLevel } from './trace-store.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { ModelCapabilityCard } from '../model/capability.js'
 import type { ImportGraph } from './import-graph.js'
+import type { PlanModeState } from './plan-mode.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
 import { ctclSanitizerPass } from './ctcl-sanitizer.js'
@@ -165,6 +166,8 @@ export interface AgentConfig {
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
   /** Optional Meridian code graph indexer for structural context. */
   meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
+  /** Plan Mode state — when 'planning', write tools are blocked in tool-pipeline. */
+  planModeState?: PlanModeState
 }
 
 export interface AgentCallbacks {

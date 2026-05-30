@@ -38,6 +38,7 @@ import type { CacheAdvisor } from '../cache/advisor.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
+import { checkPlanMode } from './plan-mode.js'
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -434,6 +435,14 @@ export async function executeToolUse(
       ].join('\n')
       callbacks.onToolResult(tu.id, tu.name, msg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    }
+
+    // Plan-mode gate — block write tools during planning phase
+    const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name)
+    if (!planModeResult.allowed) {
+      const planMsg = planModeResult.reason ?? 'Plan Mode: write operations blocked'
+      callbacks.onToolResult(tu.id, tu.name, planMsg, true)
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? planMsg + starSig : planMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
     }
 
     // Approval gate — with sensorium-driven adaptive confidence
