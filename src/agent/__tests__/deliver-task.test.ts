@@ -851,4 +851,213 @@ Do not declare a streamed response duplicate in the middle of the stream.
       assert.match(result.content, /Delivery Gate: GREEN/)
     })
   })
+
+  describe('files parameter — subset commit', () => {
+    it('commits only specified subset of owned files when files param provided', async () => {
+      const calls: Array<{ files: string[]; message: string }> = []
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/agent/a.ts', 'src/agent/b.ts', 'src/tools/c.ts'],
+        dirtyFiles: ['src/agent/a.ts', 'src/agent/b.ts', 'src/tools/c.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: (_cwd, files, message) => {
+          calls.push({ files, message })
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'feat: P1 only', files: ['src/agent/a.ts', 'src/agent/b.ts'] },
+      })
+
+      assert.equal(result.isError ?? false, false)
+      assert.deepEqual(calls, [{ files: ['src/agent/a.ts', 'src/agent/b.ts'], message: 'feat: P1 only' }])
+      assert.match(result.content, /Scoped commit created/)
+    })
+
+    it('rejects files param containing non-owned file', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/agent/a.ts'],
+        dirtyFiles: ['src/agent/a.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => {
+          throw new Error('should not be called')
+        },
+      })
+
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'feat: test', files: ['src/agent/a.ts', 'src/tools/NOT-OWNED.ts'] },
+      })
+
+      assert.equal(result.isError, true)
+      assert.match(result.content, /not in owned files/)
+    })
+
+    it('rejects empty files array', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/agent/a.ts'],
+        dirtyFiles: ['src/agent/a.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => {
+          throw new Error('should not be called')
+        },
+      })
+
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'feat: test', files: [] },
+      })
+
+      assert.equal(result.isError, true)
+      assert.match(result.content, /No files specified/)
+    })
+
+    it('ignores files param when commit is false (status-only)', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/agent/a.ts'],
+        dirtyFiles: ['src/agent/a.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      const result = await tool.execute({
+        ...params,
+        input: { files: ['src/agent/a.ts'] },
+      })
+
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      assert.doesNotMatch(result.content, /Scoped commit/)
+    })
+  })
+
+  describe('cohesion RED gate on commit', () => {
+    it('BLOCKS commit when files span 3+ areas without force', async () => {
+      const files = [
+        'src/agent/a.ts', 'src/agent/b.ts',
+        'src/tools/c.ts',
+        'src/tui/d.ts',
+      ]
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: files,
+        dirtyFiles: files,
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => {
+          throw new Error('commit executor should NOT be called when cohesion gate blocks')
+        },
+      })
+
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'feat: big batch' },
+      })
+
+      assert.equal(result.isError, true)
+      assert.match(result.content, /Commit cohesion gate/)
+      assert.match(result.content, /Split strategy/)
+    })
+
+    it('allows commit with force=true when cohesion gate triggers', async () => {
+      const files = [
+        'src/agent/a.ts', 'src/agent/b.ts',
+        'src/tools/c.ts',
+        'src/tui/d.ts',
+      ]
+      const calls: Array<{ files: string[]; message: string }> = []
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: files,
+        dirtyFiles: files,
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: (_cwd, f, msg) => {
+          calls.push({ files: f, message: msg })
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'feat: truly one unit', force: true },
+      })
+
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /Cohesion gate overridden/)
+      assert.match(result.content, /Scoped commit created/)
+      assert.deepEqual(calls, [{ files, message: 'feat: truly one unit' }])
+    })
+
+    it('does not block small focused commit (≤2 areas, ≤5 files)', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/agent/a.ts', 'src/agent/b.ts'],
+        dirtyFiles: ['src/agent/a.ts', 'src/agent/b.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+      })
+
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'fix: focused' },
+      })
+
+      assert.equal(result.isError ?? false, false)
+      assert.doesNotMatch(result.content, /Commit cohesion gate/)
+      assert.match(result.content, /Scoped commit created/)
+    })
+
+    it('applies cohesion gate to files subset too', async () => {
+      const allFiles = ['src/agent/a.ts', 'src/agent/b.ts', 'src/tools/c.ts', 'src/tui/d.ts', 'src/config/e.ts']
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: allFiles,
+        dirtyFiles: allFiles,
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => {
+          throw new Error('should not be called')
+        },
+      })
+
+      // Request a subset that still spans 3 areas
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'feat: subset', files: ['src/agent/a.ts', 'src/tools/c.ts', 'src/tui/d.ts'] },
+      })
+
+      assert.equal(result.isError, true)
+      assert.match(result.content, /Commit cohesion gate/)
+    })
+
+    it('allows small subset commit even when total owned files are large', async () => {
+      const allFiles = [
+        'src/agent/a.ts', 'src/agent/b.ts', 'src/agent/c.ts',
+        'src/tools/d.ts', 'src/tui/e.ts', 'src/config/f.ts',
+      ]
+      const calls: Array<{ files: string[]; message: string }> = []
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: allFiles,
+        dirtyFiles: allFiles,
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: (_cwd, f, msg) => {
+          calls.push({ files: f, message: msg })
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      // Request a focused subset (1 area, 2 files) — should pass
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'feat: P1', files: ['src/agent/a.ts', 'src/agent/b.ts'] },
+      })
+
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /Scoped commit created/)
+      assert.deepEqual(calls, [{ files: ['src/agent/a.ts', 'src/agent/b.ts'], message: 'feat: P1' }])
+    })
+  })
 })

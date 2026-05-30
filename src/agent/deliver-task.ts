@@ -29,6 +29,7 @@ import type { DeliveryGateV2 } from './delivery-gate-v2.js'
 import { summarizeOwnershipHealth } from './ownership-health.js'
 import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
+import { checkCommitCohesion } from './commit-cohesion.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -111,12 +112,23 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
 
 ### Parameters
 - commit: set to true to request approval for scoped commit (default: false)
-- message: commit message (required if commit=true)`,
+- message: commit message (required if commit=true)
+- files: optional array of owned file paths to commit (subset). When omitted, commits all owned files. Use this to commit logical units separately.
+- force: set to true to override the cohesion gate when committing many files across multiple areas. Use sparingly.`,
       input_schema: {
         type: 'object',
         properties: {
           commit: { type: 'boolean', description: 'Request scoped commit of owned files' },
           message: { type: 'string', description: 'Commit message (required if commit=true)' },
+          files: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset of owned files to commit. When omitted, commits all owned files. Use this to split work into separate logical commits.',
+          },
+          force: {
+            type: 'boolean',
+            description: 'Override cohesion gate. Only use when the commit truly is one logical unit despite spanning multiple areas.',
+          },
         },
       },
     },
@@ -248,14 +260,42 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
           lines.push('', '❌ Commit requires a "message" parameter.')
           return { content: lines.join('\n'), isError: true }
         }
+        // Resolve files to commit: subset from `files` param, or all owned
+        const requestedFiles = params.input.files as string[] | undefined
+        let filesToCommit = report.ownedFiles
+
+        if (requestedFiles && Array.isArray(requestedFiles) && requestedFiles.length > 0) {
+          const ownedSet = new Set(report.ownedFiles)
+          const notOwned = requestedFiles.filter(f => !ownedSet.has(f))
+          if (notOwned.length > 0) {
+            lines.push('', `❌ File(s) not in owned files: ${notOwned.join(', ')}. Cannot commit non-owned files.`)
+            return { content: lines.join('\n'), isError: true }
+          }
+          filesToCommit = requestedFiles
+        } else if (requestedFiles && Array.isArray(requestedFiles) && requestedFiles.length === 0) {
+          lines.push('', '❌ No files specified for commit. Provide non-empty files array or omit to commit all owned files.')
+          return { content: lines.join('\n'), isError: true }
+        }
+
+        // Cohesion gate: RED if files span too many areas (unless force=true)
+        const forceOverride = params.input.force === true
+        const cohesion = checkCommitCohesion(filesToCommit)
+        if (cohesion.needsWarning && !forceOverride) {
+          lines.push('', ...cohesion.warningLines.map(l => `  ${l}`))
+          return { content: lines.join('\n'), isError: true }
+        }
+        if (cohesion.needsWarning && forceOverride) {
+          lines.push('', '  ⚠️ Cohesion gate overridden with force=true. Verify this is truly one logical unit.')
+        }
+
         const executor = ctx.commitOwnedFiles ?? ((cwd, files, msg) => commitScopedFiles({ cwd, files, message: msg }))
-        const commitResult = executor(params.cwd, report.ownedFiles, message)
+        const commitResult = executor(params.cwd, filesToCommit, message)
         if (!commitResult.ok) {
           lines.push('', `❌ Scoped commit failed: ${commitResult.output}`)
           return { content: lines.join('\n'), isError: true }
         }
         lines.push('', `✅ Scoped commit created with message: "${message}"`)
-        lines.push(`   Files: ${report.ownedFiles.join(', ') || '(none)'}`)
+        lines.push(`   Files: ${filesToCommit.join(', ') || '(none)'}`)
         if (commitResult.output) lines.push(`   ${commitResult.output}`)
         // Post-commit truth readback: verify actual landed changes + surface hash
         const readback = spawnSync('git', ['show', '--stat', '--format=%h%d', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 10_000 })
