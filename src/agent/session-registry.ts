@@ -301,6 +301,22 @@ export class SessionRegistry {
     return row ?? null
   }
 
+  // ── Cross-session claims snapshot for prompt injection ──
+
+  /**
+   * Return all active claims grouped by file, excluding claims held by `mySessionId`.
+   * Used for prompt injection so the LLM can see which files other sessions are working on.
+   */
+  getActiveClaims(excludeSessionId: string): Array<{ sessionId: string; filePath: string; claimType: string }> {
+    const rows = this.db.prepare(`
+      SELECT c.session_id AS sessionId, c.file_path AS filePath, c.claim_type AS claimType
+      FROM claims c
+      JOIN sessions s ON s.id = c.session_id
+      WHERE c.session_id != ?
+    `).all(excludeSessionId) as Array<{ sessionId: string; filePath: string; claimType: string }>
+    return rows
+  }
+
   private isProcessRunning(pid: number): boolean {
     try {
       process.kill(pid, 0)

@@ -67,6 +67,88 @@ describe('ownership-ledger — file ownership tracking', () => {
     assert.deepEqual(external, ['src/external-dirty.ts', 'temp.log'])
   })
 
+  // ── P1 living baseline: getExternalFiles(currentDirtyFiles) dynamic reclassification ──
+
+  it('getExternalFiles(currentDirtyFiles) includes unclassified dirty file as dynamic external', () => {
+    // Scenario: another session created src/new-session-file.ts after our baseline.
+    // It's dirty but not owned, not co-owned, not in baseline external.
+    // P1 lazy reclassification: it should appear in getExternalFiles.
+    const baseline = createWorktreeBaseline(baselineSnap)
+    const ledger = createTaskLedger({ taskId: 't1' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+
+    // owned: none registered, so src/new-session-file.ts is unclassified
+    const result = ownership.getExternalFiles(['src/new-session-file.ts'])
+    // baseline externals + dynamic external
+    assert.ok(result.includes('src/external-dirty.ts'))
+    assert.ok(result.includes('temp.log'))
+    assert.ok(result.includes('src/new-session-file.ts'))
+  })
+
+  it('getExternalFiles(currentDirtyFiles) does NOT reclassify owned files as external', () => {
+    // Owned files should stay owned, not leak into external set
+    const baseline = createWorktreeBaseline(baselineSnap)
+    const ledger = createTaskLedger({ taskId: 't1' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+
+    ownership.registerOwned('src/my-file.ts')
+    const result = ownership.getExternalFiles(['src/my-file.ts'])
+    // src/my-file.ts is owned → NOT in external
+    assert.ok(!result.includes('src/my-file.ts'))
+  })
+
+  it('getExternalFiles(currentDirtyFiles) does NOT reclassify co-owned files as dynamic external', () => {
+    // Co-owned files (external registered via registerOwned) appear in result from baseline,
+    // but NOT from dynamic reclassification — the coOwnedSet guard prevents double-counting.
+    const baseline = createWorktreeBaseline(baselineSnap)
+    const ledger = createTaskLedger({ taskId: 't1' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+
+    ownership.registerOwned('src/external-dirty.ts') // baseline external → co-owned
+    const result = ownership.getExternalFiles(['src/external-dirty.ts'])
+    // Still present via baseline external set, just not duplicated via dynamic path
+    assert.ok(result.includes('src/external-dirty.ts'))
+    // Verify no duplication
+    assert.equal(result.filter(f => f === 'src/external-dirty.ts').length, 1)
+  })
+
+  it('getExternalFiles(currentDirtyFiles) with empty array returns baseline only', () => {
+    const baseline = createWorktreeBaseline(baselineSnap)
+    const ledger = createTaskLedger({ taskId: 't1' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+
+    const result = ownership.getExternalFiles([])
+    assert.deepEqual(result, ['src/external-dirty.ts', 'temp.log'])
+  })
+
+  it('getExternalFiles(undefined) backward compatible — returns baseline only', () => {
+    const baseline = createWorktreeBaseline(baselineSnap)
+    const ledger = createTaskLedger({ taskId: 't1' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+
+    const result = ownership.getExternalFiles()
+    assert.deepEqual(result, ['src/external-dirty.ts', 'temp.log'])
+  })
+
+  it('getExternalFiles(currentDirtyFiles) with mix of owned and unowned files', () => {
+    const baseline = createWorktreeBaseline({
+      branch: 'feat/b1',
+      head: 'abc123',
+      preExistingDirty: [],
+      preExistingUntracked: [],
+      capturedAt: Date.now(),
+    })
+    const ledger = createTaskLedger({ taskId: 't1' })
+    ledger.record({ type: 'file_write', path: 'src/owned.ts' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+    ownership.autoOwnFromLedger()
+
+    // src/owned.ts is owned, src/other-session.ts is unclassified
+    const result = ownership.getExternalFiles(['src/owned.ts', 'src/other-session.ts'])
+    assert.ok(!result.includes('src/owned.ts'), 'owned file must not leak into external')
+    assert.ok(result.includes('src/other-session.ts'), 'unclassified file must be dynamic external')
+  })
+
   it('isExternal delegates to baseline', () => {
     const baseline = createWorktreeBaseline(baselineSnap)
     const ledger = createTaskLedger({ taskId: 't1' })

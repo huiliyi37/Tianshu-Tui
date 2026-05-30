@@ -1370,12 +1370,26 @@ export class AgentLoop {
         // Read events from other sessions (cache-safe: injected into dynamic appendix only)
         if (this.config.sessionRegistry && this.config.sessionId) {
           const events = this.config.sessionRegistry.consumeEvents(this.config.sessionId, this.lastSeenEventId)
+          let appendix = ''
           if (events.length > 0) {
             this.lastSeenEventId = Math.max(...events.map(e => e.id))
-            this.config.promptEngine.setCrossSessionEvents(formatEventsForAppendix(events))
-          } else {
-            this.config.promptEngine.setCrossSessionEvents(null)
+            appendix = formatEventsForAppendix(events)
           }
+          // P2b: inject active cross-session claims so the LLM can proactively avoid conflicts
+          const claims = this.config.sessionRegistry.getActiveClaims(this.config.sessionId)
+          if (claims.length > 0) {
+            const grouped = new Map<string, string[]>()
+            for (const c of claims) {
+              const key = c.filePath
+              if (!grouped.has(key)) grouped.set(key, [])
+              grouped.get(key)!.push(`${c.sessionId}(${c.claimType})`)
+            }
+            const lines = [...grouped.entries()].map(([file, holders]) =>
+              `  ${file} — claimed by ${holders.join(', ')}`)
+            appendix = (appendix ? appendix + '\n' : '') +
+              `<cross-session-claims count="${claims.length}">\n${lines.join('\n')}\n</cross-session-claims>`
+          }
+          this.config.promptEngine.setCrossSessionEvents(appendix || null)
         }
         // Inject session state snapshot into volatile block before building request
         if (this.sessionStateManager) {

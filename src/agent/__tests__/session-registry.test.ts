@@ -191,4 +191,38 @@ describe('SessionRegistry', () => {
       assert.equal(registry.checkClaim('src/b.ts'), null)
     })
   })
+
+  describe('getActiveClaims', () => {
+    it('returns claims from other sessions, excluding the given session', () => {
+      registry.register('sess-1', '/project')
+      registry.register('sess-2', '/project')
+      registry.acquireClaim('sess-1', 'src/a.ts', 'exclusive')
+      registry.acquireClaim('sess-2', 'src/b.ts', 'shared_read')
+
+      const claims = registry.getActiveClaims('sess-1')
+      // Should only include sess-2's claim, not sess-1's
+      assert.equal(claims.length, 1)
+      assert.equal(claims[0]!.sessionId, 'sess-2')
+      assert.equal(claims[0]!.filePath, 'src/b.ts')
+      assert.equal(claims[0]!.claimType, 'shared_read')
+    })
+
+    it('returns empty array when no other sessions have claims', () => {
+      registry.register('sess-1', '/project')
+      registry.acquireClaim('sess-1', 'src/a.ts', 'exclusive')
+
+      const claims = registry.getActiveClaims('sess-1')
+      assert.equal(claims.length, 0)
+    })
+
+    it('includes all claim types from other sessions', () => {
+      registry.register('sess-1', '/project')
+      registry.register('sess-2', '/project')
+      registry.acquireClaim('sess-2', 'src/a.ts', 'exclusive')
+      registry.acquireClaim('sess-2', 'src/b.ts', 'shared_read')
+
+      const claims = registry.getActiveClaims('sess-1')
+      assert.equal(claims.length, 2)
+    })
+  })
 })

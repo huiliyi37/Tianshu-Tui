@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -11,6 +11,7 @@ import { createWorktreeBaseline } from '../worktree-baseline.js'
 import { createDeliveryGateV2 } from '../delivery-gate-v2.js'
 import { createVerificationAttribution } from '../verification-attribution.js'
 import type { ToolCallParams, ToolResult } from '../../tools/types.js'
+import type { SessionRegistry } from '../session-registry.js'
 
 function makeContext(opts: {
   taskId: string
@@ -21,6 +22,8 @@ function makeContext(opts: {
   verifications?: Array<{ command: string; status: 'passed' | 'failed' | 'blocked'; meta?: Record<string, unknown> }>
   projectMemory?: string
   commitOwnedFiles?: (cwd: string, files: string[], message: string) => { ok: boolean; output: string }
+  sessionRegistry?: SessionRegistry
+  sessionId?: string
 }) {
   const baseline = createWorktreeBaseline({
     branch: 'feat/b1',
@@ -41,6 +44,8 @@ function makeContext(opts: {
     taskLedger: ledger,
     ownership,
     gate,
+    sessionRegistry: opts.sessionRegistry,
+    sessionId: opts.sessionId,
     getCurrentDirtyFiles: () => opts.dirtyFiles,
     getProjectMemoryContent: () => opts.projectMemory,
     commitOwnedFiles: opts.commitOwnedFiles,
@@ -718,6 +723,132 @@ Do not declare a streamed response duplicate in the middle of the stream.
     it('ignores a multi-line structural change', () => {
       const dir = tmpRepo('a.ts', 'const x = 1\n', 'const a = 1\nconst b = 2\nconst c = 3\n')
       assert.equal(detectSymptomPatch(dir), null)
+    })
+  })
+
+  // ── P2 cross-session claim conflicts ──
+
+  describe('cross-session claim conflict detection', () => {
+    it('reports conflict when other session holds exclusive claim on owned file', async () => {
+      const { SessionRegistry: SR } = await import('../session-registry.js')
+      const tmpDir = mkdtempSync(join(tmpdir(), 'p2-claims-'))
+      const otherRegistry = await SR.create(tmpDir)
+      otherRegistry.register('other-session', '/fake/project')
+      otherRegistry.acquireClaim('other-session', 'src/owned.ts', 'exclusive')
+
+      try {
+        const ctx = makeContext({
+          taskId: 't1',
+          ownedFiles: ['src/owned.ts'],
+          dirtyFiles: ['src/owned.ts'],
+          verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+          sessionRegistry: otherRegistry,
+          sessionId: 'my-session',
+        })
+
+        const result = await ctx.tool.execute(ctx.params)
+
+        assert.match(result.content, /Cross-session claim conflicts:/)
+        assert.match(result.content, /src\/owned\.ts.*exclusive lock held by session other-session/)
+      } finally {
+        otherRegistry.close()
+        try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    })
+
+    it('does NOT report conflict when own session holds the claim', async () => {
+      const { SessionRegistry: SR } = await import('../session-registry.js')
+      const tmpDir = mkdtempSync(join(tmpdir(), 'p2-claims-self-'))
+      const registry = await SR.create(tmpDir)
+      registry.register('my-session', '/fake/project')
+      // My own session holds the claim — no conflict
+      registry.acquireClaim('my-session', 'src/owned.ts', 'exclusive')
+
+      try {
+        const ctx = makeContext({
+          taskId: 't1',
+          ownedFiles: ['src/owned.ts'],
+          dirtyFiles: ['src/owned.ts'],
+          verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+          sessionRegistry: registry,
+          sessionId: 'my-session',
+        })
+
+        const result = await ctx.tool.execute(ctx.params)
+
+        assert.doesNotMatch(result.content, /Cross-session claim conflicts:/)
+        assert.match(result.content, /Delivery Gate: GREEN/)
+      } finally {
+        registry.close()
+        try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    })
+
+    it('does NOT report conflict when no session holds claims', async () => {
+      const { SessionRegistry: SR } = await import('../session-registry.js')
+      const tmpDir = mkdtempSync(join(tmpdir(), 'p2-claims-none-'))
+      const registry = await SR.create(tmpDir)
+
+      try {
+        const ctx = makeContext({
+          taskId: 't1',
+          ownedFiles: ['src/owned.ts'],
+          dirtyFiles: ['src/owned.ts'],
+          verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+          sessionRegistry: registry,
+          sessionId: 'my-session',
+        })
+
+        const result = await ctx.tool.execute(ctx.params)
+
+        assert.doesNotMatch(result.content, /Cross-session claim conflicts:/)
+        assert.match(result.content, /Delivery Gate: GREEN/)
+      } finally {
+        registry.close()
+        try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    })
+
+    it('reports conflict for shared_read claim from other session too', async () => {
+      const { SessionRegistry: SR } = await import('../session-registry.js')
+      const tmpDir = mkdtempSync(join(tmpdir(), 'p2-claims-read-'))
+      const otherRegistry = await SR.create(tmpDir)
+      otherRegistry.register('other-session', '/fake/project')
+      otherRegistry.acquireClaim('other-session', 'src/owned.ts', 'shared_read')
+
+      try {
+        const ctx = makeContext({
+          taskId: 't1',
+          ownedFiles: ['src/owned.ts'],
+          dirtyFiles: ['src/owned.ts'],
+          verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+          sessionRegistry: otherRegistry,
+          sessionId: 'my-session',
+        })
+
+        const result = await ctx.tool.execute(ctx.params)
+
+        assert.match(result.content, /Cross-session claim conflicts:/)
+        assert.match(result.content, /shared read held by session other-session/)
+      } finally {
+        otherRegistry.close()
+        try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    })
+
+    it('no crash when sessionRegistry is absent (backward compatible)', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/owned.ts'],
+        dirtyFiles: ['src/owned.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        // sessionRegistry not provided
+      })
+
+      const result = await ctx.tool.execute(ctx.params)
+
+      assert.doesNotMatch(result.content, /Cross-session claim conflicts:/)
+      assert.match(result.content, /Delivery Gate: GREEN/)
     })
   })
 })
