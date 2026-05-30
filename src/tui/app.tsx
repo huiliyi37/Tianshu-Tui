@@ -752,7 +752,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         thinkBuf.current += thinking
         projectActivity(now)
-        if (!thinkTimer.current) {
+        // First chunk: flush immediately so the thinking box appears at once
+        // (GLM reasoning can finish within the 1s throttle window otherwise).
+        if (lastFlushedThink.current === '') {
+          flushThink()
+        } else if (!thinkTimer.current) {
           thinkTimer.current = setTimeout(flushThink, THINKING_FLUSH_MS)
         }
       },
