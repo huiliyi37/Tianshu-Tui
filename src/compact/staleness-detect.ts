@@ -129,7 +129,7 @@ export function detectStaleness(
     // Check superseded: was the same file read again later with a range
     // that fully contains this read's range?
     if (info.name === 'read_file' || info.name === 'grep') {
-      const fileInfo = info.fileInfo ?? extractFileInfo(info.args)
+      const fileInfo = info.fileInfo
       if (fileInfo) {
         const reads = fileReads.get(fileInfo.path) ?? []
         const laterReads = reads.filter(r => r.index > idx)

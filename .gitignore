@@ -17,6 +17,7 @@ docs/sessions/
 # Local agent runtime state
 .claude/worktrees/
 .claude/skills/**/*.bak
+.claude/*.lock
 .wolf/
 .omc/
 .github/workflows/
