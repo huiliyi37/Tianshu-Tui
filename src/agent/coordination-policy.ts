@@ -1,5 +1,7 @@
 import type { WorkerProfile } from './work-order.js'
+import { profileRegistry } from './profile-registry.js'
 
+// Re-export AgentRole from profile-registry for backward compatibility
 export type AgentRole = 'brain' | 'hands' | 'readonly'
 
 /** Brain: thinks, plans, delegates. No concrete file/code tools. */
@@ -19,16 +21,11 @@ export const HANDS_WRITE_TOOLS = [
 /** Full Hands tool set: read + write. No delegation. */
 export const HANDS_ALL_TOOLS = [...HANDS_READ_TOOLS, ...HANDS_WRITE_TOOLS] as const
 
-export function classifyProfile(profile: WorkerProfile): AgentRole {
-  switch (profile) {
-    case 'planner':
-      return 'brain'
-    case 'patcher':
-    case 'verifier':
-      return 'hands'
-    default:
-      return 'readonly'
-  }
+export function classifyProfile(profile: WorkerProfile | string): AgentRole {
+  const def = profileRegistry.get(profile)
+  if (def) return def.role
+  // Fallback for unknown profiles
+  return 'readonly'
 }
 
 const BRAIN_TOOL_SET = new Set<string>(BRAIN_TOOLS)
