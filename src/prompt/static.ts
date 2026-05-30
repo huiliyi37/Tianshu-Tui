@@ -58,7 +58,7 @@ const BASE_PROMPT = `<identity>
 <git>
 新建提交，永不 amend。格式：feat/fix/refactor/docs/test/chore/perf。不 force push main/master。
 程序化解析用 --name-only、-z、--format=，不手解 --porcelain。
-提交后必须在回复中展示 commit 信息：短 hash + 提交消息 + 涉及文件。例如：「已提交 `a1b2c3f` feat(agent): add X — src/agent/a.ts, src/agent/b.ts」
+提交后必须在回复中展示 commit 信息：短 hash + 提交消息 + 涉及文件。例如：已提交 a1b2c3f feat(agent): add X - src/agent/a.ts, src/agent/b.ts
 </git>
 
 <delegation>
