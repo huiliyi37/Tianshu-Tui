@@ -191,8 +191,8 @@ export class AgentLoop {
   private recentToolHistory: ToolHistoryEntry[] = []
   private prewarm = new PrewarmCache(60_000, 50)
   private _running = false
-  private physarumForWarmup?: any
-  private meridianDbForWarmup?: any
+  private physarumForWarmup?: PhysarumEngine
+  private meridianDbForWarmup?: import('../repo/meridian-db.js').MeridianDb
   private memoriesWarmed = false
   private streamedText = ''
   private thinkingOnlyRetries = 0
@@ -467,7 +467,7 @@ export class AgentLoop {
           // replace is rare (compaction/reset); do it synchronously after the
           // current append queue drains so the rewrite reflects the latest state.
           writeChain = writeChain
-            .then(() => { persist.compactOai(m.messages) })
+            .then(() => persist.compactOaiAsync(m.messages))
             .catch(err => {
               // eslint-disable-next-line no-console
               console.error('[session-persist] compact failed:', err)
@@ -1422,6 +1422,9 @@ export class AgentLoop {
             onToolUse: callbacks.onToolUse,
             onToolHint: (name) => {
               callbacks.onPhaseChange?.('tool-hint', { tool: name, reason: `preparing ${name}…` })
+            },
+            onStreamStart: () => {
+              callbacks.onPhaseChange?.('working', { reason: 'waiting for first token' })
             },
             onError: callbacks.onError,
           },

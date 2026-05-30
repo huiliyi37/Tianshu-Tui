@@ -1,6 +1,7 @@
 import { writeFileSync, renameSync, unlinkSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
+import { mkdir, writeFile, rename, unlink } from 'node:fs/promises'
 
 /**
  * Atomically write a file: write to a temp file in the same directory,
@@ -18,6 +19,24 @@ export function writeFileAtomicSync(filePath: string, data: string): void {
     renameSync(tmpPath, filePath)
   } catch (err) {
     try { unlinkSync(tmpPath) } catch { /* ignore cleanup failure */ }
+    throw err
+  }
+}
+
+/**
+ * Async version of writeFileAtomicSync — avoids blocking the event loop
+ * during large session rewrites (compaction/reset).
+ */
+export async function writeFileAtomicAsync(filePath: string, data: string): Promise<void> {
+  const dir = dirname(filePath)
+  if (!existsSync(dir)) await mkdir(dir, { recursive: true })
+  const suffix = randomUUID().slice(0, 8)
+  const tmpPath = filePath + '.' + suffix + '.tmp'
+  try {
+    await writeFile(tmpPath, data, 'utf-8')
+    await rename(tmpPath, filePath)
+  } catch (err) {
+    try { await unlink(tmpPath) } catch { /* ignore cleanup failure */ }
     throw err
   }
 }

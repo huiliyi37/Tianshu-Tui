@@ -9,6 +9,7 @@ export interface TurnStreamCallbacks {
   onThinkingDelta: (thinking: string) => void
   onToolUse: (id: string, name: string, input: Record<string, unknown>) => void
   onToolHint?: (name: string) => void
+  onStreamStart?: () => void
   onError: (error: Error) => void
 }
 
@@ -121,6 +122,7 @@ export class TurnStreamController {
 
     let streamError: Error | null = null
     try {
+      input.callbacks.onStreamStart?.()
       await this.deps.client.stream(input.request, streamCallbacks, this.deps.abortSignal)
     } catch (err) {
       const estimatedOut = this.deps.getStreamedTextLength() + collectedBlocks.reduce((sum, block) => (

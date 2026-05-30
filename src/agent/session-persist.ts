@@ -1,6 +1,6 @@
 import { appendFile } from 'fs/promises'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync, statSync } from 'fs'
-import { writeFileAtomicSync } from '../fs-atomic.js'
+import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { ContentBlock, Message } from '../api/types.js'
@@ -214,6 +214,12 @@ export class SessionPersist {
   compactOai(messages: OaiMessage[]): void {
     const content = messages.map(m => appendChecksum(serializeOaiSessionMessage(m))).join('\n') + '\n'
     writeFileAtomicSync(this.filePath, content)
+  }
+
+  /** Async atomic compaction — avoids blocking the agent loop on full rewrites (S13). */
+  async compactOaiAsync(messages: OaiMessage[]): Promise<void> {
+    const content = messages.map(m => appendChecksum(serializeOaiSessionMessage(m))).join('\n') + '\n'
+    await writeFileAtomicAsync(this.filePath, content)
   }
 
   /** Delete the session file */

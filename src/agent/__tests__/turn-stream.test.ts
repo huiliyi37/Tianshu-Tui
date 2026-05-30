@@ -387,4 +387,30 @@ describe('TurnStreamController', () => {
     })
     assert.deepEqual(events, ['hint:read_file', 'tool_use'])
   })
+
+  it('S2: calls onStreamStart before any text/thinking delta', async () => {
+    const order: string[] = []
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        order.push('stream-called')
+        cb.onThinkingDelta('t')
+        cb.onTextDelta('hi')
+        cb.onStopReason('end_turn', {})
+      }),
+    }
+    const { controller } = makeController(client)
+    await controller.streamTurn({
+      request, turn: 0, lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: () => { order.push('text') },
+        onThinkingDelta: () => { order.push('thinking') },
+        onToolUse: () => {},
+        onStreamStart: () => { order.push('stream-start') },
+        onError: () => {},
+      },
+    })
+    assert.equal(order[0], 'stream-start', `stream-start must be first, got: ${order.join(',')}`)
+    assert.ok(order.indexOf('stream-start') < order.indexOf('thinking'), 'stream-start before thinking')
+    assert.ok(order.indexOf('stream-start') < order.indexOf('text'), 'stream-start before text')
+  })
 })
