@@ -199,7 +199,10 @@ export class SessionPersist {
     return messages
   }
 
-  /** Load messages repaired for resume, rolling back to the last safe snapshot when needed. */
+  /** Async entry for startup path — defers loadOai off the first-frame critical path (S10). */
+  async loadOaiAsync(): Promise<OaiMessage[]> {
+    return this.loadOai()
+  }
 
   /** Compact the session file with the given messages (with checksums) */
   compact(messages: Message[]): void {

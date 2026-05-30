@@ -291,37 +291,45 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
 
   const [sessionId] = useState(() => getOrCreateSessionId())
 
-  // Evict old session files to stay within the session limit
-  useState(() => { evictOldSessions(sessionId) })
+  // Evict old session files — deferred to post-first-frame (S10)
+  useEffect(() => {
+    const t = setImmediate(() => evictOldSessions(sessionId))
+    return () => clearImmediate(t)
+  }, [sessionId])
 
-  // Clean up orphaned .tmp files from crashed atomic writes and old artifact sessions
-  useState(() => {
-    const cwd = process.cwd()
-    const rivetDir = join(cwd, '.rivet')
-    const dirsToScan = [
-      rivetDir,
-      join(rivetDir, 'sessions'),
-      join(rivetDir, 'artifacts'),
-      join(rivetDir, 'checkpoints'),
-    ]
-    const tmpCleaned = cleanupOrphanedTmpFiles(dirsToScan)
-    if (tmpCleaned > 0) {
-      console.error(`[startup] Cleaned ${tmpCleaned} orphaned .tmp file(s)`)
-    }
-    const artifactCleaned = cleanupOldArtifactSessions(join(rivetDir, 'artifacts'), sessionId)
-    if (artifactCleaned > 0) {
-      console.error(`[startup] Cleaned ${artifactCleaned} old artifact session(s)`)
-    }
-  })
+  // Clean up orphaned .tmp files + old artifact sessions — deferred (S10)
+  useEffect(() => {
+    const t = setImmediate(() => {
+      const cwd = process.cwd()
+      const rivetDir = join(cwd, '.rivet')
+      const dirsToScan = [
+        rivetDir,
+        join(rivetDir, 'sessions'),
+        join(rivetDir, 'artifacts'),
+        join(rivetDir, 'checkpoints'),
+      ]
+      const tmpCleaned = cleanupOrphanedTmpFiles(dirsToScan)
+      if (tmpCleaned > 0) {
+        console.error(`[startup] Cleaned ${tmpCleaned} orphaned .tmp file(s)`)
+      }
+      const artifactCleaned = cleanupOldArtifactSessions(join(rivetDir, 'artifacts'), sessionId)
+      if (artifactCleaned > 0) {
+        console.error(`[startup] Cleaned ${artifactCleaned} old artifact session(s)`)
+      }
+    })
+    return () => clearImmediate(t)
+  }, [sessionId])
 
-  const [persist] = useState(() => {
-    const p = new SessionPersist(sessionId)
-    const existingMessages = p.loadOai()
-    if (existingMessages.length > 0) {
-      session.replaceMessages(existingMessages)
-    }
-    return p
-  })
+  const [persist] = useState(() => new SessionPersist(sessionId))
+
+  // Load prior messages off the first-frame path (S10)
+  useEffect(() => {
+    let cancelled = false
+    persist.loadOaiAsync().then(existingMessages => {
+      if (!cancelled && existingMessages.length > 0) session.replaceMessages(existingMessages)
+    })
+    return () => { cancelled = true }
+  }, [persist, session])
 
   const [fileHistory] = useState(() => {
     const fh = new FileHistory(persist.getBackupDir(), sessionId)
