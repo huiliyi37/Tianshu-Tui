@@ -2,7 +2,7 @@ import type { StreamClient } from '../api/stream-client.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
-import { pruneStaleToolResults } from '../compact/prune.js'
+
 import { debugLog } from '../utils/debug.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import type { CompactCircuitBreakerState, CompactTier } from '../context/types.js'
@@ -170,19 +170,9 @@ export class CompactionController {
   async maybeCompact(input: MaybeCompactInput): Promise<MaybeCompactResult> {
     const messages = this.deps.session.getMessages()
 
-    // Lightweight prune: clear stale tool results before checking compact thresholds.
-    // Free (no LLM call) and stabilizes the prefix for cache hits.
-    // Pass contextWindow so prune scales its protectRecent/minChars to the
-    // window — prevents the 1M-window-but-still-pruning-after-4-turns regression.
-    const beforePruneTokens = this.deps.session.getEstimatedTokens()
-    const pruneResult = pruneStaleToolResults(messages, { contextWindow: this.deps.contextWindow })
-    if (pruneResult.prunedCount > 0) {
-      // Prune is now a request-time mask (applied in PromptEngine.buildOaiRequest).
-      // We compute prune stats here for logging but do NOT mutate storage via
-      // replaceMessages. Immutable history = stable byte prefix = higher cache hit.
-      const afterPruneTokens = this.deps.session.getEstimatedTokens()
-      debugLog(`[prune] (request-time mask) would-prune=${pruneResult.prunedCount} freedChars=${pruneResult.freedChars} ctxWindow=${this.deps.contextWindow} tokens=${beforePruneTokens}->${afterPruneTokens}`)
-    }
+    // Prune removed (C4): pruneStaleToolResults was called here solely for debugLog
+    // stats — it never mutated storage. The actual request-time pruning happens in
+    // PromptEngine.buildOaiRequest via semanticPruneLayer1 + detectStaleness.
 
     // Phase 2: On 1M+ context windows, skip micro compact but allow LLM
     // compact at 75% as a graceful degradation before the 86% session split.
