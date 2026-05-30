@@ -171,7 +171,7 @@ describe('claim-extractor', () => {
   it('extracts decision claim from git commit result', () => {
     const ctx: ToolResultContext = {
       toolName: 'git',
-      input: { command: 'commit', message: 'fix: restore hash in show-stat readback' },
+      input: { action: 'commit', message: 'fix: restore hash in show-stat readback' },
       result: '[feat/knowledge-manifest-minimal abc1234] fix: restore hash in show-stat readback\n 2 files changed, 10 insertions(+), 2 deletions(-)\n\n--- actual changes (git show --stat) ---\nabc1234 (HEAD -> feat/knowledge-manifest-minimal)\n src/tools/git.ts | 3 ++-\n 1 file changed, 3 insertions(+), 2 deletions(-)',
       isError: false,
     }
@@ -199,7 +199,7 @@ describe('claim-extractor', () => {
   it('does not extract claim from failed commit', () => {
     const ctx: ToolResultContext = {
       toolName: 'git',
-      input: { command: 'commit', message: 'test' },
+      input: { action: 'commit', message: 'test' },
       result: 'git commit failed: nothing to commit',
       isError: true,
     }
@@ -210,7 +210,7 @@ describe('claim-extractor', () => {
   it('does not extract claim from non-commit git commands', () => {
     const ctx: ToolResultContext = {
       toolName: 'git',
-      input: { command: 'log', maxCount: 5 },
+      input: { action: 'log', maxCount: 5 },
       result: 'abc1234 fix: something\ndef5678 feat: other',
       isError: false,
     }

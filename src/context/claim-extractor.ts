@@ -53,7 +53,7 @@ export function extractClaimsFromToolResult(ctx: ToolResultContext, meta: ClaimE
   }
 
   // Commit fact: extract hash + message as a decision claim (Infinity TTL via decision kind)
-  const isCommitResult = (ctx.toolName === 'git' && String(ctx.input.command ?? '') === 'commit')
+  const isCommitResult = (ctx.toolName === 'git' && String(ctx.input.action ?? '') === 'commit')
     || (ctx.toolName === 'deliver_task' && ctx.input.commit === true)
   if (isCommitResult && !ctx.isError) {
     return [commitFact(ctx, meta, now)]
@@ -159,10 +159,11 @@ function commitFact(ctx: ToolResultContext, meta: ClaimExtractionMeta, now: numb
   const hashMatch = ctx.result.match(COMMIT_HASH_RE)
   const hash = hashMatch?.[1] ?? 'unknown'
   const message = String(ctx.input.message ?? '').slice(0, 80)
-  // Extract file list from stat lines (lines with |)
+  // Extract file list from stat lines (--stat file rows contain '|'; excludes %h%d header + summary)
   const statLines = ctx.result.split('\n')
-    .map(l => l.split('|')[0]?.trim() ?? '')
-    .filter(f => f.length > 0 && !f.includes('file changed') && !f.includes('files changed') && !f.startsWith('('))
+    .filter(l => l.includes('|'))
+    .map(l => l.split('|')[0]!.trim())
+    .filter(f => f.length > 0)
   const files = statLines.length > 0 ? statLines.slice(0, 5).join(', ') : 'unknown files'
   const text = `Commit ${hash}: "${message}" (${files})`
   return {
