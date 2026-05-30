@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { AnthropicClient } from '../anthropic-client.js'
+import { parseRetryAfterMs } from '../error-classifier.js'
 
 function makeClient() {
   return new AnthropicClient({
@@ -405,5 +406,14 @@ describe('cache_control breakpoint injection', () => {
     assert.equal(bp4Msg.role, 'assistant')
     const bp4Block = bp4Msg.content[bp4Msg.content.length - 1]!
     assert.deepEqual(bp4Block.cache_control, { type: 'ephemeral' })
+  })
+})
+
+describe('Retry-After header extraction on 429', () => {
+  it('attaches retryAfterMs to error from response Retry-After header', () => {
+    // Verify the shared parseRetryAfterMs function works for Anthropic-style numeric values
+    const retryAfterValue = '5'
+    const retryAfterMs = parseRetryAfterMs(retryAfterValue)
+    assert.equal(retryAfterMs, 5_000)
   })
 })

@@ -1,6 +1,7 @@
 import type { StreamClient, StreamCallbacks } from './stream-client.js'
 import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from './oai-types.js'
 import { withStructuredRetry } from './retry-engine.js'
+import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
 
 export interface AnthropicClientConfig {
@@ -72,10 +73,18 @@ export class AnthropicClient implements StreamClient {
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
-        throw Object.assign(
+        const err = Object.assign(
           new Error(`Anthropic API error (${response.status}): ${errorBody}`),
           { status: response.status },
         )
+        const retryAfter = response.headers.get('retry-after')
+        if (retryAfter) {
+          const retryAfterMs = parseRetryAfterMs(retryAfter)
+          if (retryAfterMs !== undefined) {
+            ;(err as Error & { retryAfterMs?: number }).retryAfterMs = retryAfterMs
+          }
+        }
+        throw err
       }
 
       await this.processSSEStream(response, callbacks, signal)

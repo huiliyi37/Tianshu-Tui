@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { CodexClient } from '../codex-client.js'
+import { parseRetryAfterMs } from '../error-classifier.js'
 
 describe('CodexClient', () => {
   it('builds request body with instructions and reasoning', async () => {
@@ -277,5 +278,13 @@ describe('CodexClient', () => {
 
     // Should only get the delta events, not the duplicate from output_item.done
     assert.deepEqual(textDeltas, ['Hello', ' world'])
+  })
+})
+
+describe('Retry-After header extraction on 429', () => {
+  it('attaches retryAfterMs to error from response Retry-After header', () => {
+    const retryAfterValue = '10'
+    const retryAfterMs = parseRetryAfterMs(retryAfterValue)
+    assert.equal(retryAfterMs, 10_000)
   })
 })

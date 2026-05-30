@@ -3,6 +3,7 @@ import type { OaiChatRequest } from './oai-types.js'
 import type { ContentBlock } from './types.js'
 import type { StreamCallbacks } from './stream-client.js'
 import { withStructuredRetry } from './retry-engine.js'
+import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
 
 export interface CodexClientConfig {
@@ -49,10 +50,18 @@ export class CodexClient implements StreamClient {
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
-        throw Object.assign(
+        const err = Object.assign(
           new Error(`Codex API error (${response.status}): ${errorBody}`),
           { status: response.status },
         )
+        const retryAfter = response.headers.get('retry-after')
+        if (retryAfter) {
+          const retryAfterMs = parseRetryAfterMs(retryAfter)
+          if (retryAfterMs !== undefined) {
+            ;(err as Error & { retryAfterMs?: number }).retryAfterMs = retryAfterMs
+          }
+        }
+        throw err
       }
 
       await this.processSSEStream(response, callbacks, signal)
