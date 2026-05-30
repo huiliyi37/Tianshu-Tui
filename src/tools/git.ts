@@ -2,8 +2,9 @@ import { spawnSync } from 'node:child_process'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { auditCommitTagScope } from './commit-audit.js'
+import { createWorkspaceGuard } from '../agent/workspace-guard.js'
 
-const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash'] as const
+const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash', 'stash_pop'] as const
 type GitAction = (typeof ACTIONS)[number]
 
 const MAX_OUTPUT = 50_000
@@ -176,6 +177,16 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
 
           runGit(['stash'], cwd)
           return { content: 'Saved working directory and index state.' }
+        }
+
+        case 'stash_pop': {
+          const stashRef = (params.input.stashRef as string) || 'stash@{0}'
+          const safety = await createWorkspaceGuard(cwd).checkStashSafety(stashRef)
+          if (safety.blocked) {
+            return { content: safety.reasons.join('\n'), isError: true }
+          }
+          runGit(['stash', 'pop', stashRef], cwd)
+          return { content: `Popped ${stashRef} (safety-checked: no overwriting conflicts).` }
         }
 
         default:
