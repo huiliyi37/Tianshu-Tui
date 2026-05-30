@@ -53,6 +53,30 @@ export const BASH_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /<<[-']?\w*['"]?/,                                // heredoc start (cat > file <<'EOF')
 ]
 
+/** Command injection patterns — heredoc abuse, process substitution, shell exploits */
+export const INJECTION_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  /[<>]\s*\(/,                              // process substitution <(...) or >(...)
+  /\bzmodload\b/,                           // zsh module loading
+  /\bsysopen\b/,                            // zsh sysopen
+  /\bpowershell\s+-enc/i,                   // PowerShell encoded execution
+  /\beval\b.*\bexec\b/,                     // eval + exec chain
+]
+
+/** Extended destructive commands beyond the base DANGEROUS_BASH_PATTERNS */
+export const DESTRUCTIVE_EXTENDED_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  /\bdocker\s+(?:rm|rmi)\b/,                // docker container/image removal
+  /\bdocker\s+system\s+prune\b/,            // docker system cleanup
+  /\bkubectl\s+delete\b/,                   // k8s resource deletion
+  /\btruncate\s+-s\s+0\b/,                  // truncate file to zero
+  /\bdd\s+if=.*of=\/dev\//,                 // dd writing to device
+  /\bmkfs\b/,                               // filesystem formatting
+]
+
+/** Sed bypass detection — sed modifying security-critical files */
+export const SED_BYPASS_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  /\bsed\b.*\b(?:\/etc\/|\.ssh\/|authorized_keys|shadow|passwd)\b/,
+]
+
 export function bashCommandMayWrite(command: string): boolean {
   return BASH_WRITE_PATTERNS.some(pattern => pattern.test(command))
 }
@@ -152,6 +176,30 @@ export function assessToolRisk(
     if (bashGitBypassesScope(cmd)) {
       reasons.push('unscoped git command bypasses scope — use deliver_task or git tool with ownedFiles instead')
       level = 'high'
+    }
+    // Command injection detection
+    for (const p of INJECTION_PATTERNS) {
+      if (p.test(cmd)) {
+        reasons.push(`command injection pattern: ${p.source}`)
+        level = 'high'
+        break
+      }
+    }
+    // Extended destructive command detection
+    for (const p of DESTRUCTIVE_EXTENDED_PATTERNS) {
+      if (p.test(cmd)) {
+        reasons.push(`extended destructive command: ${p.source}`)
+        level = level === 'high' ? 'high' : 'medium'
+        break
+      }
+    }
+    // Sed bypass on security-critical files
+    for (const p of SED_BYPASS_PATTERNS) {
+      if (p.test(cmd)) {
+        reasons.push('sed bypass on security-critical file')
+        level = 'high'
+        break
+      }
     }
   }
 
