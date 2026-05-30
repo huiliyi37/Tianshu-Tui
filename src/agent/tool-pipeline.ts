@@ -37,6 +37,7 @@ import type { ArtifactStore } from '../artifact/store.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { P3Integration } from './p3-integration.js'
+import { buildCommitNudge } from './commit-nudge.js'
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -686,6 +687,9 @@ ${check.formatted}`
         if (deps.sessionRegistry && deps.sessionId) {
           deps.sessionRegistry.acquireClaim(deps.sessionId, filePath, 'exclusive')
         }
+        // Commit nudge: warn when uncommitted files accumulate
+        const nudge = buildCommitNudge({ ownedFiles: deps.taskLedger.getOwnedFiles() })
+        if (nudge) finalContent += nudge
       } else if (tu.name === 'plan_close' && filePath) {
         if (tu.input.apply === true && !harnessResult.isError) {
           deps.taskLedger.record({ type: 'file_write', path: filePath })
