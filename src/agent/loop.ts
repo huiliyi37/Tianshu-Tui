@@ -1219,6 +1219,7 @@ export class AgentLoop {
           this.config.promptEngine.setCognitiveProjection(null)
           this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
         }
+        callbacks.onPhaseChange?.('preparing', { reason: 'preparing next turn' })
         const perceptionResult = await this.perception.perceive({
           turn: this.session.getTurnCount(),
           estimatedTokens: estTokens,

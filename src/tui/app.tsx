@@ -19,6 +19,7 @@ import { toolLabel, type ToolCallItem } from './tool-status.js'
 import { phaseFromSummary, type SummaryState } from './summary-state.js'
 import type { InterviewState } from './status-types.js'
 import { PhaseTracker } from './phase-tracker.js'
+import { phaseStatusLabel } from './phase-status.js'
 import { FluencyTracker } from './fluency-hook.js'
 import { getTheme } from './theme.js'
 import { AgentLoop } from '../agent/loop.js'
@@ -1035,9 +1036,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
       },
       onPhaseChange: (phase, detail) => {
-        if (phase === 'heartbeat') {
-          setHeartbeatStatus(detail?.reason ?? 'still working')
-          return
+        // Phase → heartbeat status label (preparing, working, tool-hint, heartbeat)
+        const statusLabel = phaseStatusLabel(phase, detail)
+        if (statusLabel !== null) {
+          setHeartbeatStatus(statusLabel)
+          if (phase === 'heartbeat') return
         }
         if (phase === 'tianshu-radio' && detail?.reason) {
           chronicleRef.current.addRadio(detail.reason, turnCountRef.current)
