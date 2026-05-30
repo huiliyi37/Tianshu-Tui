@@ -1,4 +1,5 @@
 import { READ_ONLY_WORKER_TOOLS, type WorkOrder, type WorkerResult, type WorkerProfile } from './work-order.js'
+import { profileRegistry } from './profile-registry.js'
 
 // ─── Profile-specific expertise prompts ────────────────────────────
 // Each profile gets targeted guidance on HOW to do its job,
@@ -189,8 +190,9 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
     `Profile: ${order.profile}`,
   ]
 
-  // Inject profile-specific expertise
-  const profilePrompt = PROFILE_PROMPTS[order.profile]
+  // Inject profile-specific expertise (prefer registry, fallback to hardcoded PROFILE_PROMPTS)
+  const profileDef = profileRegistry.get(order.profile)
+  const profilePrompt = profileDef?.expertisePrompt ?? PROFILE_PROMPTS[order.profile]
   if (profilePrompt) {
     parts.push('', profilePrompt)
   }
