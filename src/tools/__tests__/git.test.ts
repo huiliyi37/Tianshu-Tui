@@ -202,6 +202,25 @@ describe('GIT_TOOL', () => {
     assert.ok(result.content.includes('Saved'))
   })
 
+  it('creates safety ref before stash for reversible recovery (P2)', async () => {
+    writeFileSync(join(TMP, 'a.txt'), 'hello')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "init"', { cwd: TMP })
+    writeFileSync(join(TMP, 'a.txt'), 'dirty')
+
+    await GIT_TOOL.execute({
+      input: { action: 'stash' },
+      toolUseId: 'tu_safety',
+      cwd: TMP,
+    })
+
+    const refResult = execSync('git show-ref refs/kiro-safety/last-stash', { cwd: TMP, encoding: 'utf-8' }).trim()
+    assert.ok(refResult.length > 0, 'safety ref should exist')
+    // Verify it points to a valid commit
+    const [sha] = refResult.split(' ')
+    assert.ok(sha && sha.length === 40, `expected 40-char sha, got: ${sha?.length ?? 0}`)
+  })
+
   it('does not require approval for log action', () => {
     assert.equal(GIT_TOOL.requiresApproval({ input: { action: 'log' }, toolUseId: 't', cwd: '/' }), false)
   })

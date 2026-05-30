@@ -47,6 +47,16 @@ function hasStagedChanges(cwd: string, pathspecs?: string[]): boolean {
   throw new Error((result.stderr ?? '').trim() || `git diff exited with status ${result.status}`)
 }
 
+/** Best-effort: create a safety ref before stash so changes are recoverable (P2). */
+function createSafetyRef(cwd: string): void {
+  try {
+    const create = spawnSync('git', ['stash', 'create'], { cwd, encoding: 'utf-8', timeout: 10_000 })
+    if (create.status !== 0 || !create.stdout.trim()) return
+    const sha = create.stdout.trim()
+    spawnSync('git', ['update-ref', 'refs/kiro-safety/last-stash', sha], { cwd, encoding: 'utf-8', timeout: 10_000 })
+  } catch { /* best-effort, never block stash */ }
+}
+
 export const GIT_TOOL: Tool = {
   definition: {
     name: 'git',
@@ -175,10 +185,12 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
                 isError: true,
               }
             }
+            createSafetyRef(cwd)
             runGit(['stash', 'push', '--', ...scoped], cwd)
             return { content: `Stashed ${scoped.length} owned file(s): ${scoped.join(', ')}` }
           }
 
+          createSafetyRef(cwd)
           runGit(['stash'], cwd)
           return { content: 'Saved working directory and index state.' }
         }
