@@ -47,10 +47,12 @@ const FIRST_BYTE_TIMEOUT_MS = 45_000
 const REASONING_FIRST_BYTE_TIMEOUT_MS = 90_000
 const READ_TIMEOUT_MS = 120_000
 const REASONING_READ_TIMEOUT_MS = 180_000
-// GLM-5.1 and Mimo mandatory thinking can take 2-3 minutes before first token.
-// Use generous timeouts to avoid false-positive timeout errors.
+// GLM-5.1, Mimo, and DeepSeek (max reasoning) mandatory thinking can take 2-3
+// minutes before first token. Use generous timeouts to avoid false-positive errors.
 const SLOW_FIRST_BYTE_TIMEOUT_MS = 180_000
 const SLOW_READ_TIMEOUT_MS = 300_000
+/** Providers whose thinking mode can exceed 90s before first token. */
+const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek'])
 
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
@@ -196,7 +198,7 @@ export class OpenAIClient implements StreamClient {
       // Pre-first-byte timeout prevents fetch from hanging forever
       // when server accepts connection but never sends response headers.
       const fetchTimeout = this.config.thinking === 'enabled'
-        ? (this.config.providerName === 'glm' || this.config.providerName === 'mimo' ? SLOW_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
+        ? (SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '') ? SLOW_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
         : FIRST_BYTE_TIMEOUT_MS
       const response = await fetchWithTimeout(`${this.config.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -257,7 +259,7 @@ export class OpenAIClient implements StreamClient {
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
       const isReasoning = this.config.thinking === 'enabled'
-      const isSlowProvider = this.config.providerName === 'glm' || this.config.providerName === 'mimo'
+      const isSlowProvider = SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '')
       const firstByteMs = isSlowProvider ? SLOW_FIRST_BYTE_TIMEOUT_MS
         : isReasoning ? REASONING_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
       const readMs = isSlowProvider ? SLOW_READ_TIMEOUT_MS
