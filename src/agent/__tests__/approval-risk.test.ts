@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { bashGitBypassesScope } from '../approval-risk.js'
 import { assessToolRisk, DANGEROUS_BASH_PATTERNS, BASH_WRITE_PATTERNS, bashCommandMayWrite, requiresBashWriteApproval, CONFIDENCE_THRESHOLDS } from '../approval-risk.js'
 import type { ContextClaim } from '../../context/claims.js'
 import type { Sensorium } from '../sensorium.js'
@@ -353,5 +354,29 @@ describe('DANGEROUS_BASH_PATTERNS — shared pattern coverage', () => {
   it('does not match safe commands', () => {
     const safe = 'ls -la src/'
     assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test(safe)) )
+  })
+})
+
+describe('bashGitBypassesScope', () => {
+  it('flags git add -A', () => {
+    assert.equal(bashGitBypassesScope('git add -A && git commit -m x'), true)
+  })
+  it('flags git add .', () => {
+    assert.equal(bashGitBypassesScope('git add .'), true)
+  })
+  it('flags git commit -am', () => {
+    assert.equal(bashGitBypassesScope('git commit -am "msg"'), true)
+  })
+  it('flags bare git stash (no pathspec)', () => {
+    assert.equal(bashGitBypassesScope('git stash'), true)
+  })
+  it('does NOT flag scoped git add -- <file>', () => {
+    assert.equal(bashGitBypassesScope('git add -- src/a.ts'), false)
+  })
+  it('does NOT flag git status', () => {
+    assert.equal(bashGitBypassesScope('git status'), false)
+  })
+  it('does NOT flag git stash pop (not a scope bypass)', () => {
+    assert.equal(bashGitBypassesScope('git stash pop'), false)
   })
 })

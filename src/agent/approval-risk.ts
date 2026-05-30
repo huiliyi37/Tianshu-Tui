@@ -57,6 +57,18 @@ export function bashCommandMayWrite(command: string): boolean {
   return BASH_WRITE_PATTERNS.some(pattern => pattern.test(command))
 }
 
+/** Detect scope-bypassing bash git commands (unscoped add/commit/stash). */
+const GIT_BYPASS_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bgit\s+add\s+(?:-A\b|--all\b|\.(?:\s|$))/,        // git add -A / --all / .
+  /\bgit\s+commit\s+[^\n]*-[a-z]*a/,                  // git commit -a / -am
+  /\bgit\s+stash\s*$/,                                 // bare git stash (no pathspec)
+  /\bgit\s+stash\s+(?:push\s*)?$/,                     // git stash push (no --)
+]
+
+export function bashGitBypassesScope(command: string): boolean {
+  return GIT_BYPASS_PATTERNS.some(p => p.test(command.trim()))
+}
+
 export function requiresBashWriteApproval(toolName: string, input: Record<string, unknown>): boolean {
   if (toolName !== 'bash') return false
   const command = typeof input.command === 'string' ? input.command : ''
