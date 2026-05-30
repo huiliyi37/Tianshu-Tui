@@ -59,6 +59,10 @@ function withToolTimeout<T>(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<T> {
+  // Guard against NaN/Infinity/negative timeout (e.g. parameter misplacement bugs)
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    timeoutMs = DEFAULT_TOOL_TIMEOUT_MS
+  }
   if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
 
   return new Promise<T>((resolve, reject) => {
