@@ -135,6 +135,53 @@ export function buildStructuredHandoff(input: StructuredHandoffInput): string {
   return lines.join('\n')
 }
 
+/**
+ * Build a compact 4-field summary for injection into the message list after
+ * compaction.  Deterministic (zero LLM cost) — all fields sourced from
+ * extractTaskState / trajectory.
+ *
+ * Fields: Goals (current + remaining), Progress (completed), Active Files, Errors.
+ */
+export function buildCompactSummary(input: StructuredHandoffInput): string {
+  const taskState = input.taskState
+  const parts: string[] = []
+
+  // Goals
+  parts.push('## Goals')
+  parts.push(`- Current: ${taskState.current || '(none)'}`)
+  if (taskState.remaining.length > 0) {
+    for (const item of taskState.remaining.slice(0, 5)) parts.push(`- [ ] ${item}`)
+  }
+
+  // Progress
+  parts.push('', '## Progress')
+  if (taskState.completed.length > 0) {
+    for (const item of taskState.completed.slice(-5)) parts.push(`- [x] ${item}`)
+  } else {
+    parts.push('- (none)')
+  }
+
+  // Active files
+  parts.push('', '## Active Files')
+  if (input.filesSeen.length > 0) {
+    for (const file of input.filesSeen.slice(0, 10)) parts.push(`- ${file}`)
+  } else {
+    parts.push('- (none)')
+  }
+
+  // Errors
+  parts.push('', '## Errors')
+  if (input.errors.length > 0) {
+    for (const error of input.errors.slice(0, 5)) {
+      parts.push(`- [Turn ${error.turn}] ${error.tool} ${error.target}: ${error.summary}`)
+    }
+  } else {
+    parts.push('- (none)')
+  }
+
+  return `<compact-summary>\n${parts.join('\n')}\n</compact-summary>`
+}
+
 export interface CompactionControllerDeps {
   session: SessionContext
   promptEngine: PromptEngine
@@ -217,6 +264,48 @@ export class CompactionController {
 
     try {
       const { messages: compacted } = this.compactMessages(messages, estimatedTokens)
+
+      // Tier 2+: inject a deterministic 4-field summary so the model retains
+      // goals/progress/active-files/errors across compaction boundaries.
+      // Only inject when compaction actually reduced message count (otherwise
+      // the summary adds noise without reclaiming context).
+      if (compactDecision.tier >= 2 && compacted.length < messages.length) {
+        const taskState = extractTaskState(
+          this.deps.getTrajectoryEntries(),
+          this.deps.getStreamedText(),
+        )
+        const filePattern = /(?:\/[^\s\n"'`{}()[\]]+\.[a-z]{1,6})\b/g
+        const filesSeen = new Set<string>()
+        for (const m of compacted) {
+          if (m.role !== 'tool') continue
+          for (const match of m.content.matchAll(filePattern)) filesSeen.add(match[0])
+        }
+        const failures = this.deps.getTrajectoryEntries().filter(
+          t => t.status === 'failed' || t.status === 'retried-failed',
+        )
+        const summaryText = buildCompactSummary({
+          taskState: {
+            current: taskState.current,
+            completed: taskState.completed,
+            remaining: taskState.remaining,
+            decisions: taskState.decisions,
+          },
+          turnCount: this.deps.session.getTurnCount(),
+          filesSeen: [...filesSeen],
+          reasoningSnippet: '',
+          errorCount: failures.length,
+          errors: failures.slice(0, 5).map(f => ({
+            turn: f.turn,
+            tool: f.tool,
+            target: f.target,
+            errorClass: f.errorClass ?? 'unknown',
+            summary: f.resultSummary || `${f.tool} in ${f.target} failed`,
+          })),
+          toolHistory: [],
+        })
+        compacted.push({ role: 'user', content: summaryText })
+      }
+
       this.deps.session.replaceMessages(compacted)
       this.deps.session.markCompacted(input.loopTurn)
       this.deps.pressureMonitor.recordCompaction(this.deps.session.getTurnCount())
