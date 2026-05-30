@@ -78,22 +78,26 @@ export function detectStaleness(
   // Build a map of file paths → later read entries with range info (for superseded detection)
   // Keyed by file_path; stores all later reads of that file with their index and range.
   const fileReads = new Map<string, Array<{ index: number; offset?: number; limit?: number }>>()
-  // Build tool_call_id → tool name + args mapping
-  const toolCallInfo = new Map<string, { name: string; args: string }>()
+  // Build tool_call_id → tool name + args + cached fileInfo mapping
+  const toolCallInfo = new Map<string, { name: string; args: string; fileInfo?: { path: string; offset?: number; limit?: number } }>()
 
   for (let i = messages.length - 1; i >= anchorCount; i--) {
     const msg = messages[i]!
     if (msg.role === 'assistant' && (msg as OaiAssistantMessage).tool_calls) {
       for (const tc of (msg as OaiAssistantMessage).tool_calls!) {
-        toolCallInfo.set(tc.id, { name: tc.function.name, args: tc.function.arguments })
+        const info: { name: string; args: string; fileInfo?: { path: string; offset?: number; limit?: number } } = {
+          name: tc.function.name,
+          args: tc.function.arguments,
+        }
         if (tc.function.name === 'read_file' || tc.function.name === 'grep') {
-          const info = extractFileInfo(tc.function.arguments)
-          if (info) {
-            const reads = fileReads.get(info.path) ?? []
-            reads.push({ index: i + 1, offset: info.offset, limit: info.limit })
-            fileReads.set(info.path, reads)
+          info.fileInfo = extractFileInfo(tc.function.arguments)
+          if (info.fileInfo) {
+            const reads = fileReads.get(info.fileInfo.path) ?? []
+            reads.push({ index: i + 1, offset: info.fileInfo.offset, limit: info.fileInfo.limit })
+            fileReads.set(info.fileInfo.path, reads)
           }
         }
+        toolCallInfo.set(tc.id, info)
       }
     }
   }
@@ -125,7 +129,7 @@ export function detectStaleness(
     // Check superseded: was the same file read again later with a range
     // that fully contains this read's range?
     if (info.name === 'read_file' || info.name === 'grep') {
-      const fileInfo = extractFileInfo(info.args)
+      const fileInfo = info.fileInfo ?? extractFileInfo(info.args)
       if (fileInfo) {
         const reads = fileReads.get(fileInfo.path) ?? []
         const laterReads = reads.filter(r => r.index > idx)

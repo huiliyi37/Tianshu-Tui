@@ -188,4 +188,24 @@ describe('detectStaleness', () => {
     assert.equal(result.supersededCount, 1, 'larger range should contain smaller range')
     assert.ok(result.messages[3]!.content!.includes('superseded'))
   })
+
+  it('handles many file reads without excessive parse overhead', () => {
+    // 20 file reads of different files — should all be handled correctly
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+    ]
+    for (let i = 0; i < 20; i++) {
+      messages.push(assistant([{ id: `tc${i}`, name: 'read_file', args: `{"file_path":"src/file${i}.ts"}` }]))
+      messages.push(tool(`tc${i}`, `content of file${i} `.repeat(30)))
+      messages.push(assistantText(`thinking about file${i}`))
+    }
+    // Read file0.ts again at the end — should supersede the first read
+    messages.push(assistant([{ id: 'tc_sup', name: 'read_file', args: '{"file_path":"src/file0.ts"}' }]))
+    messages.push(tool('tc_sup', 'updated content of file0 '.repeat(30)))
+    messages.push(assistantText('done'))
+
+    const result = detectStaleness(messages, 2)
+    assert.equal(result.supersededCount, 1, 'first read_file of file0 should be superseded by later read')
+  })
 })
