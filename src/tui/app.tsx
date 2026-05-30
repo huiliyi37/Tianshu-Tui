@@ -316,13 +316,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const flushThink = useCallback(() => {
     thinkTimer.current = null
     if (thinkBuf.current !== lastFlushedThink.current) {
-      // Skip update if new content is <500 chars — avoids thrashing during slow thinks
-      const delta = thinkBuf.current.length - lastFlushedThink.current.length
-      if (delta < 500 && lastFlushedThink.current.length > 0) {
-        // Re-schedule to accumulate more
-        thinkTimer.current = setTimeout(flushThink, THINKING_FLUSH_MS)
-        return
-      }
       lastFlushedThink.current = thinkBuf.current
       setStreamingThinking(thinkBuf.current)
     }
