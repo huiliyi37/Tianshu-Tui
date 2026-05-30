@@ -247,7 +247,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
    *  Each entry has independent viewport-aware height limit — prevents total overflow. */
   const pushAssistantEntry = useCallback((content: string, thinking?: string) => {
     if (thinking) {
-      pushStatic(createLogEntry({ type: 'thinking_message', content: thinking }))
+      // Cap archived thinking to the tail window. GLM/MiMo mandatory thinking is
+      // unbounded; pushing the full buffer into <Static> renders it synchronously
+      // (countPhysicalLines/stringWidth over every char + Yoga layout), freezing
+      // the event loop so hard that even SIGINT can't land. Matches the live
+      // sliding window (cc20a20) — the full buffer has no consumer past display.
+      const capped = appendStreamWindow('', thinking, LIVE_STREAM_MAX_CHARS)
+      pushStatic(createLogEntry({ type: 'thinking_message', content: capped }))
     }
     if (content) {
       pushStatic(createLogEntry({ type: 'assistant_message', content }))
