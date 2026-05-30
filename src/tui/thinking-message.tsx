@@ -5,6 +5,7 @@ import { formatThinkingSize } from './thinking.js'
 import { useViewportLines } from './viewport.js'
 import { useTerminalSize } from './use-terminal-size.js'
 import { getTheme } from './theme.js'
+import { gutterGlyph } from './gutter.js'
 
 interface ThinkingMessageProps {
   content: string
@@ -54,7 +55,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({ content }: Thinki
   if (totalPhysicalLines <= maxPhysicalLines) {
     return (
       <Box flexDirection="column" paddingX={2}>
-        <Text color={theme.muted}>▸ Thinking ({formatThinkingSize(content.length)})</Text>
+        <Text color={theme.muted}>{gutterGlyph('thinking')} Thinking ({formatThinkingSize(content.length)})</Text>
         <Box paddingLeft={2} flexDirection="column">
           {lines.map((line, i) => (
             <Text key={i} color={theme.muted}>{line}</Text>
@@ -79,7 +80,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({ content }: Thinki
   const visibleLines = lines.slice(cutoffIndex)
   return (
     <Box flexDirection="column" paddingX={2}>
-      <Text color={theme.muted}>▸ Thinking ({formatThinkingSize(content.length)}, {omitted} earlier lines omitted)</Text>
+      <Text color={theme.muted}>{gutterGlyph('thinking')} Thinking ({formatThinkingSize(content.length)}, {omitted} earlier lines omitted)</Text>
       <Box paddingLeft={2} flexDirection="column">
         <Text color={theme.muted}>…</Text>
         {visibleLines.map((line, i) => (
