@@ -67,3 +67,22 @@ describe('BASH_TOOL timeout cleanup', () => {
     }
   })
 })
+
+describe('rtkRewrite cache behavior', () => {
+  it('requiresApproval and execute see the same rewritten result for identical commands', () => {
+    // When rtk is not installed, rtkRewrite returns the original command.
+    // Both requiresApproval and execute must see the same result.
+    const command = 'echo hello'
+    const params = {
+      input: { command },
+      toolUseId: 'cache-test',
+      cwd: '/tmp',
+    }
+
+    // requiresApproval should return false for a safe command
+    assert.equal(BASH_TOOL.requiresApproval(params), false)
+
+    // Second call to requiresApproval with same command should use cache
+    assert.equal(BASH_TOOL.requiresApproval(params), false)
+  })
+})

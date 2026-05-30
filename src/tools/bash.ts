@@ -9,12 +9,23 @@ import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 
+/** Single-entry cache to avoid calling rtkRewrite twice for the same command. */
+let _cachedCommand: string | undefined
+let _cachedResult: string | undefined
+
 function rtkRewrite(command: string): string {
-  try {
-    return execFileSync('rtk', ['rewrite', command], { timeout: 500, encoding: 'utf-8' }).trim()
-  } catch {
-    return command
+  if (command === _cachedCommand && _cachedResult !== undefined) {
+    return _cachedResult
   }
+  let result: string
+  try {
+    result = execFileSync('rtk', ['rewrite', command], { timeout: 500, encoding: 'utf-8' }).trim()
+  } catch {
+    result = command
+  }
+  _cachedCommand = command
+  _cachedResult = result
+  return result
 }
 
 export const BASH_TOOL: Tool = {
