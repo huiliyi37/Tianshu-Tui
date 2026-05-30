@@ -159,4 +159,54 @@ describe('ownership-ledger — file ownership tracking', () => {
     assert.equal(ownership.isOwned('src/external.ts'), false)
     assert.equal(ownership.isOwned('src/owned.ts'), true)
   })
+
+  // ── autoOwnFromBaseline ledger trace guard ──
+
+  it('does not auto-own dirty file without ledger trace', () => {
+    const baseline = createWorktreeBaseline({
+      branch: 'main',
+      head: 'abc',
+      preExistingDirty: ['src/old.ts'],
+      preExistingUntracked: [],
+      capturedAt: Date.now(),
+    })
+    const ledger = createTaskLedger({ taskId: 'test' })
+    // ledger has NO events for 'src/new-from-other.ts'
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+    ownership.autoOwnFromLedger()
+    ownership.autoOwnFromBaseline(['src/new-from-other.ts'])
+    assert.equal(ownership.isOwned('src/new-from-other.ts'), false)
+  })
+
+  it('auto-owns dirty file that has a ledger file_write trace', () => {
+    const baseline = createWorktreeBaseline({
+      branch: 'main',
+      head: 'abc',
+      preExistingDirty: ['src/old.ts'],
+      preExistingUntracked: [],
+      capturedAt: Date.now(),
+    })
+    const ledger = createTaskLedger({ taskId: 'test' })
+    ledger.record({ type: 'file_write', path: 'src/new-ours.ts' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+    ownership.autoOwnFromLedger()
+    ownership.autoOwnFromBaseline(['src/new-ours.ts'])
+    assert.equal(ownership.isOwned('src/new-ours.ts'), true)
+  })
+
+  it('auto-owns dirty file that has a ledger git_action trace', () => {
+    const baseline = createWorktreeBaseline({
+      branch: 'main',
+      head: 'abc',
+      preExistingDirty: ['src/old.ts'],
+      preExistingUntracked: [],
+      capturedAt: Date.now(),
+    })
+    const ledger = createTaskLedger({ taskId: 'test' })
+    ledger.record({ type: 'git_action', path: 'src/staged.ts' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+    ownership.autoOwnFromLedger()
+    ownership.autoOwnFromBaseline(['src/staged.ts'])
+    assert.equal(ownership.isOwned('src/staged.ts'), true)
+  })
 })

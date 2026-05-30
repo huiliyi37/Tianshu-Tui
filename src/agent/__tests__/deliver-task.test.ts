@@ -638,22 +638,10 @@ Do not declare a streamed response duplicate in the middle of the stream.
   })
 
   describe('unclassified dirty files → YELLOW', () => {
-    it('reports YELLOW when dirty files include pre-existing baseline files not classified as external', async () => {
-      // After autoOwnFromBaseline (commit 505533e), new files NOT in the baseline
-      // are auto-owned. To get YELLOW, the dirty file must be pre-existing (in baseline)
-      // but not classified. Using externalFiles puts it in the external set → GREEN.
-      // Instead, simulate a file that is in the dirty set but somehow not classified.
-      //
-      // Real scenario: a file that was dirty before the task started (preExistingDirty)
-      // but the agent also wrote to it — making it both external AND in the ledger.
-      // The ownership health check sees it as classified (external), so no warning.
-      //
-      // The remaining YELLOW path for unclassified files requires a dirty file that
-      // is neither owned, co-owned, nor external. With autoOwnFromBaseline, this
-      // can only happen if the file is in the baseline but not in externalFiles —
-      // which is a baseline construction error, not a normal scenario.
-      //
-      // Test the actual behavior: new session files auto-owned → GREEN.
+    it('reports YELLOW when dirty files include files with no ledger trace', async () => {
+      // With the ledger-trace guard in autoOwnFromBaseline (guard against
+      // auto-owning files from other sessions), dirty files that lack a
+      // file_write/git_action ledger trace remain unclassified → YELLOW.
       const ctx = makeContext({
         taskId: 't1',
         ownedFiles: ['src/owned.ts'],
@@ -663,12 +651,12 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
       const result = await ctx.tool.execute(ctx.params)
 
-      // autoOwnFromBaseline classifies src/new-session-file.ts as owned
-      assert.match(result.content, /Delivery Gate: GREEN/)
-      assert.doesNotMatch(result.content, /Ownership health warnings:/)
+      // src/new-session-file.ts has no ledger trace → not auto-owned → unclassified → YELLOW
+      assert.match(result.content, /Delivery Gate: YELLOW/)
+      assert.match(result.content, /no ownership classification.*src\/new-session-file\.ts/)
     })
 
-    it('allows commit=true when YELLOW due to unclassified dirty files', async () => {
+    it('allows commit=true when YELLOW due to unclassified dirty files (only owned committed)', async () => {
       const calls: Array<{ files: string[]; message: string }> = []
       const ctx = makeContext({
         taskId: 't1',
@@ -684,8 +672,8 @@ Do not declare a streamed response duplicate in the middle of the stream.
       const result = await ctx.tool.execute({ ...ctx.params, input: { commit: true, message: 'feat: test' } })
 
       assert.equal(result.isError ?? false, false)
-      // Both files are now owned (autoOwnFromBaseline), so both are committed
-      assert.deepEqual(calls, [{ files: ['src/new-session-file.ts', 'src/owned.ts'], message: 'feat: test' }])
+      // Only src/owned.ts has a ledger trace → only it is owned and committed
+      assert.deepEqual(calls, [{ files: ['src/owned.ts'], message: 'feat: test' }])
       assert.match(result.content, /Scoped commit created/)
     })
 

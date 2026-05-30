@@ -73,12 +73,21 @@ export function createOwnershipLedger(opts: {
   }
 
   function autoOwnFromBaseline(dirtyFiles: string[]): void {
+    // Collect paths that have ledger traces for fast lookup
+    const ledgerPaths = new Set<string>()
+    for (const event of taskLedger.getEvents()) {
+      if ((event.type === 'file_write' || event.type === 'git_action') && event.path) {
+        ledgerPaths.add(event.path)
+      }
+    }
     for (const f of dirtyFiles) {
       // Already classified — skip
       if (ownedSet.has(f) || coOwnedSet.has(f)) continue
       // Pre-existing in baseline — not ours to auto-own
       if (baseline.isExternal(f)) continue
-      // New file created this session → auto-own
+      // Must have a ledger trace (file_write/git_action) to auto-own.
+      // Files modified by other sessions without our ledger record are not ours.
+      if (!ledgerPaths.has(f)) continue
       ownedSet.add(f)
     }
   }
