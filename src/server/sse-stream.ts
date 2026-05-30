@@ -2,6 +2,7 @@ import type { ServerResponse } from 'node:http'
 
 export class SseStream {
   private res: ServerResponse
+  private _closed = false
 
   constructor(res: ServerResponse) {
     this.res = res
@@ -17,6 +18,8 @@ export class SseStream {
   }
 
   close(): void {
+    if (this._closed) return
+    this._closed = true
     this.send('done', {})
     this.res.end()
   }

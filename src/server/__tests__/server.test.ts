@@ -38,6 +38,16 @@ describe('SseStream', () => {
     assert.ok(res.ended)
     assert.ok(res.chunks[0]!.includes('event: done'))
   })
+
+  it('close is idempotent — second call is a no-op', () => {
+    const res = mockRes()
+    const sse = new SseStream(res)
+    sse.close()
+    const chunkCountAfterFirst = res.chunks.length
+    sse.close()
+    assert.equal(res.chunks.length, chunkCountAfterFirst, 'second close() must not write more data')
+    assert.ok(res.ended)
+  })
 })
 
 // ── createRouter ───────────────────────────────────────────
