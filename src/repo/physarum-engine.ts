@@ -21,7 +21,7 @@ export class PhysarumEngine {
   private currentTurn = 0
 
   constructor(
-    private db: MeridianDb,
+    private db: MeridianDb | undefined,
     private config: PhysarumConfig = DEFAULT_PHYSARUM_CONFIG,
   ) {}
 

@@ -320,7 +320,7 @@ export class AgentLoop {
 
     // Physarum + Immune system — construction only, DB reads deferred to warmupMemories() (S9)
     const meridianDb = this.config.meridianIndexer?.getDb()
-    const physarum = new PhysarumEngine(meridianDb as any)
+    const physarum = new PhysarumEngine(meridianDb)
     this.immuneHook = new ImmuneHook({ physarum, stigmergy: this.stigmergyStore, notebook: this.p3?.notebook })
     this.physarumForWarmup = physarum
     this.meridianDbForWarmup = meridianDb
