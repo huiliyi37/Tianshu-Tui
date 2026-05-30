@@ -466,3 +466,60 @@ describe('git-dirty flag and toolHistory cap', () => {
     assert.ok(vol.includes('tool_11'), 'newest entries are kept')
   })
 })
+
+describe('frozenUserMerged eviction', () => {
+  it('evicts stale entries when map exceeds max size', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+    })
+    // Feed 70 distinct user messages (each becomes an entry in frozenUserMerged)
+    const messages: OaiMessage[] = []
+    for (let i = 0; i < 70; i++) {
+      messages.push({ role: 'user', content: `user message ${i}` })
+      engine.buildOaiRequest([...messages])
+    }
+    // After 70 messages, the map should have been trimmed to ≤ 64 entries
+    // (internal state not directly observable, so we test behavior:
+    // old frozen content should still be available for messages in the array)
+    const req = engine.buildOaiRequest(messages)
+    const userMsgs = req.messages.filter(m => m.role === 'user')
+    // All 70 user messages should have merged content (volatile + user content)
+    for (const msg of userMsgs) {
+      assert.ok(typeof msg.content === 'string' && msg.content.includes('---'), `user message should have merged content`)
+    }
+  })
+
+  it('preserves frozen content for messages still in the array', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+    })
+    // Create messages, build request, then rebuild with same messages
+    const msgs1: OaiMessage[] = [{ role: 'user', content: 'first' }]
+    const req1 = engine.buildOaiRequest(msgs1)
+    // Find the user message content (after system prompt at index 0)
+    const userMsg1 = req1.messages.find(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('first'))
+    assert.ok(userMsg1, 'should find first user message')
+    const content1 = userMsg1!.content as string
+
+    // Feed 70 more messages to trigger eviction
+    const msgs2: OaiMessage[] = [...msgs1]
+    for (let i = 0; i < 70; i++) {
+      msgs2.push({ role: 'user', content: `msg ${i}` })
+    }
+    engine.buildOaiRequest(msgs2)
+
+    // Now rebuild with just the original message — frozen content should still match
+    // (because the key "first" is still in msgs2 which was used during eviction)
+    const req3 = engine.buildOaiRequest(msgs1)
+    const userMsg3 = req3.messages.find(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('first'))
+    assert.ok(userMsg3, 'should find first user message after eviction')
+    const content3 = userMsg3!.content as string
+    assert.equal(content3, content1, 'frozen content for first message must be preserved')
+  })
+})

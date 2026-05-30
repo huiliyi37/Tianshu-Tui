@@ -50,6 +50,8 @@ export class PromptEngine {
   private cachedFreshForUser: string = ''
   /** Frozen merged content for historical user messages (preserves prefix stability) */
   private frozenUserMerged: Map<string, string> = new Map()
+  /** Maximum entries in frozenUserMerged before eviction kicks in. */
+  private static readonly MAX_FROZEN_USER_MERGED = 64
   private taskProgress?: TaskState
   private behaviorMirror?: string | null
   private strategyShift?: string | null
@@ -292,6 +294,21 @@ export class PromptEngine {
         if (msg.role === 'tool' && msg.content.length > DISK_BUDGET_CHARS) {
           const preview = msg.content.slice(0, PREVIEW_CHARS)
           result[i] = { ...msg, content: `${preview}\n\n[output truncated: ${msg.content.length} chars total, showing first ${PREVIEW_CHARS}]` }
+        }
+      }
+    }
+
+    // Evict stale frozenUserMerged entries when map exceeds size limit
+    if (this.frozenUserMerged.size > PromptEngine.MAX_FROZEN_USER_MERGED) {
+      const activeKeys = new Set<string>()
+      for (const msg of oaiMessages) {
+        if (msg.role === 'user' && typeof msg.content === 'string') {
+          activeKeys.add(msg.content)
+        }
+      }
+      for (const key of this.frozenUserMerged.keys()) {
+        if (!activeKeys.has(key)) {
+          this.frozenUserMerged.delete(key)
         }
       }
     }
