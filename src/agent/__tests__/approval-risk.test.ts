@@ -435,4 +435,9 @@ describe('assessToolRisk — protection mode (destructive git + blocked)', () =>
     assert.equal(result.level, 'high')
     assert.ok(result.reasons.some(r => r.includes('保护模式')))
   })
+  it('escalates git stash to high in warn window (the live gate before blocked early-return)', () => {
+    const result = assessToolRisk('git', { action: 'stash' }, 'warn')
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('保护模式')))
+  })
 })

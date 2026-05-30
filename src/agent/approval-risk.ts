@@ -107,19 +107,16 @@ export function assessToolRisk(
   const reasons: string[] = []
   let level: RiskLevel = 'none'
 
-  // Doom loop check — only escalate destructive git to 'high'; others stay at
-  // their natural risk level so read-only tools aren't blocked.
-  if (doomLoopLevel === 'blocked') {
+  // Doom loop check. blocked is short-circuited by the pipeline early-return,
+  // so destructive-git protection must trigger in the warn window too.
+  if (doomLoopLevel === 'warn' || doomLoopLevel === 'blocked') {
     if (isDestructiveGitAction(toolName, input)) {
       reasons.push('保护模式：工具失败率高，破坏性动作需确认')
       level = 'high'
     } else {
-      reasons.push('Agent is in doom loop (repeated identical tool calls)')
+      reasons.push(doomLoopLevel === 'blocked' ? 'Agent is in doom loop (repeated identical tool calls)' : 'Agent may be entering doom loop')
       if (level === 'none') level = 'medium'
     }
-  } else if (doomLoopLevel === 'warn') {
-    reasons.push('Agent may be entering doom loop')
-    level = 'medium'
   }
 
   // Path traversal

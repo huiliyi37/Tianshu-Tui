@@ -451,8 +451,9 @@ export async function executeToolUse(
     const allowlisted = isToolAllowed(tu.name, tu.input, deps.config.permissions?.allow)
     const bashWriteRequiresApproval = requiresBashWriteApproval(tu.name, tu.input) && !allowlisted
 
-    // Protection mode: during doom-loop, destructive git actions always require approval
-    const protectionMode = deps.getDoomLoopLevel() === 'blocked' && isDestructiveGitAction(tu.name, tu.input)
+    // Protection mode: during doom-loop, destructive git actions always require
+    // approval. warn is the live window (blocked is short-circuited earlier).
+    const protectionMode = deps.getDoomLoopLevel() !== 'none' && isDestructiveGitAction(tu.name, tu.input)
 
     const shouldAsk = protectionMode
       ? true
