@@ -212,3 +212,54 @@ P1 和 P2 是下一个迭代的核心。P3 和 P4 可以在 P1/P2 验证后再�
 信任不是假设。信任是建立在归属追踪、验证归因、交付门禁之上的工程事实。
 
 今天的 60 个 commit 就是证明。明天的演进会让这个证明更不可辩驳。
+
+---
+
+## 评审修正（2026-05-30，基于真实代码核实）
+
+> 方向（共存而非隔离）是对的。但四个方向逐一对照代码后，优先级与实现方式需修正：
+> **核心原则——复用已有机制，而非新建并行机制。**
+
+### 修正后的演进序
+
+| 顺序 | 方向 | 修正 |
+|---|---|---|
+| 1 | P1 活体基线 | 做，但用惰性再分类层（改 ownership-ledger，**不 mutate baseline**），约 30 行 |
+| 2 | P2 会话信号 | **不新建 beacon**，复用 SessionRegistry.claims 表，约 60 行 |
+| 3 暂缓 | P3 验证共享 | 当前设计有数据正确性 bug，降级为**会话内去重** |
+| 4 砍/推迟 | P4 五级信任 | 依赖 P2 且与退行协议冲突，**保留三级** |
+
+### P1 活体基线 — 可做，但问题被高估，有语义陷阱
+
+- **spec 高估**：`delivery-gate-v2.ts:127` 出报告时已 `filter(f => currentDirty.has(f))`，已提交的陈旧 external 已被排除；deliver_task 主路径每次重采 git status。"report 膨胀"在主路径并不严重。
+- **真实 gap**：别的会话**新建**的文件（不在 baseline 快照）无法分类 → 未分类脏文件 → 强制 YELLOW。spec 未强调。
+- **最高风险**：勿 mutate `WorktreeBaseline`。`coOwnedSet` 语义（ownership-ledger.ts:58-65）依赖 baseline 不变，中途刷新会让同一文件二次注册时错分类；`baselineHash` 是 HEARTH cycle_open 预留输入，刷新埋雷。
+- **修正做法**：不动 baseline，在 ownership-ledger 加**惰性再分类层**——`getExternalFiles(currentDirtyFiles)` 求交集 + `_dynamicExternalSet` 收新外部文件。约 30 行，不碰 HEARTH/prefix-cache。
+
+### P2 会话信号 — 严重重复造轮子，勿新建 .beacon/
+
+- **已有三套机制覆盖 90%**：
+  1. `SessionRegistry.claims` 表（SQLite，exclusive 锁 + heartbeat + PID 僵尸清理）= 精确的"我在改这些文件且还活着"
+  2. `events` 流 + `cross-session-hook` = 已自动注入 `<cross-session-events>`，LLM 已能感知
+  3. `SemanticLock` = 内存级文件冲突检测
+- **真实缺口**：claims 没在文件写入时自动获取、deliver_task 没查 claims、claims 没注入 prompt。
+- **修正做法**：P2 重定义为"**补齐 claims 自动化 + deliver_task 集成 + 注入 prompt**"（约 4 文件 60 行），而非新建 `session-beacon.ts` + `.beacon/`。避免第四套同构机制造成"查 claims 还是 beacon？"的困惑。成本降 ~60%，收益不变。
+
+### P3 验证共享池 — 有数据正确性 bug，当前设计不能做
+
+- **致命缺陷**：缓存键 `command + headCommit + 5分钟` 在本方案前提场景（共享分支 + 脏工作区）下会产生**错误 pass**。会话 A 脏改动通过 tsc → 写池；会话 B 同 HEAD 但脏改动不同（会编译失败）→ 命中缓存拿 "passed" → `delivery-gate-v2.ts:191` 走 GREEN → **把坏代码提交到共享分支**。
+- 5 分钟窗口救不了——问题是工作树内容分歧，与时间无关。
+- **修正做法**：跨会话复用本质不安全（除非对所有脏文件内容 hash，成本≈重跑）。降级为**会话内去重**（同会话 + 同命令 + 无新文件改动 = 确定性，安全）；`verification-attribution.ts:146` 已有雏形。跨会话共享暂缓。
+
+### P4 五级信任 — 不独立 + 与退行协议冲突，应砍/推迟
+
+- **不独立**：ALLY_ACTIVE/ALLY_STALE 完全依赖 P2；无 P2 则 P4 退化成现有三级（收益为零）。spec 未声明此依赖。
+- **认知负担 + 锚点坍缩风险**：ALLY_ACTIVE/ALLY_STALE/UNKNOWN 在 agent **行动层面都映射到同一动作"不是我的，别碰"**，区别只是"为什么"——agent 不需关心。给五个标签是**替 agent 做信任判断**，与退行协议 §0「个体差异不被文档标签压扁」直接冲突。三级直接对应行动权限，更优。
+- **ALLY_STALE 制造新虚假谨慎**：跑 11 分钟长测试的会话 beacon 超时变 stale，但文件正在被改——反而引入 spec 想消除的虚假谨慎。
+- **修正做法**：保留三级（owned/co-owned/external）。P2 落地后实测 agent 谨慎度，若已合理则不做 P4。
+
+### 落地建议
+
+P1 的惰性再分类层是最小、最安全、零依赖的第一步。其余按修正序推进。
+
+
