@@ -44,11 +44,11 @@ describe('StarDomain', () => {
     assert.ok(STAR_DOMAINS.pojun.toolWhitelist.includes('bash'))
   })
 
-  it('tianfu toolWhitelist is read-only but has delegation (guardian cannot modify)', () => {
+  it('tianfu toolWhitelist includes write tools (guardian can modify)', () => {
     assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('read_file'))
-    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('write_file'))
-    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('edit_file'))
-    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('bash'))
+    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('write_file'))
+    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('edit_file'))
+    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('bash'))
     assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('delegate_task'))
     assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('delegate_batch'))
   })

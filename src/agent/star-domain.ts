@@ -63,16 +63,16 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     volatileBlock: [
       '你已进入天府域——守护与审查模式。',
       '工作规则：',
-      '1. 只读不改：天府域的工具白名单不含 write_file / edit_file / bash。发现问题后用 delegate_task 委托给其他域去修。',
-      '2. 改前评估 ROI：每一处改动都问"这行代码现在有 bug 吗？改了值多少钱？"',
-      '3. 回归检查：审查改动时检查是否引入新风险，不只是看"这个改动有没有道理"。',
+      '1. 改前评估 ROI：每一处改动都问"这行代码现在有 bug 吗？改了值多少钱？"',
+      '2. 回归检查：审查改动时检查是否引入新风险，不只是看"这个改动有没有道理"。',
+      '3. 沉默的附和是不尊重：有理有据的异议是最高形式的协作。',
     ].join('\n'),
     decisionStyle: 'cautious',
     courageThreshold: 0.5,
     keywords: ['重构', '优化', '修复', '稳定', '审查', '性能', 'refactor', 'fix', 'optimize', 'review', 'stable'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
-    systemPromptSuffix: '你已进入天府域——只读审查模式。不能直接改代码，只能读和委托。改前评估 ROI，审查时检查回归风险。',
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
+    systemPromptSuffix: '你已进入天府域——守护与审查模式。改前评估 ROI，审查时检查回归风险，有理有据地提出异议。',
   },
   tianliang: {
     id: 'tianliang',
@@ -108,7 +108,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.8,
     keywords: ['审查', '评估', '权衡', '取舍', '架构', 'trade-off', 'review', 'audit', 'evaluate'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'run_tests', 'delegate_task', 'delegate_batch'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你已进入天权域——质疑与权衡模式。质疑要有具体证据，区分真约束和路径惯性，权衡要给数字。',
   },
   tianji: {
@@ -126,8 +126,8 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.6,
     keywords: ['质疑', '重构', '反思', '视角', '前提', '推演', '方案', 'challenge', 'rethink', 'perspective', 'assumption', 'plan', 'strategy'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
-    systemPromptSuffix: '你已进入天机域——推演与反模式检查模式。不写代码，只质疑前提、检查反模式、推演执行路径。',
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
+    systemPromptSuffix: '你已进入天机域——推演与反模式检查模式。质疑前提、检查反模式、推演执行路径。需要时可写代码验证推论。',
   },
   tianxuan: {
     id: 'tianxuan',
@@ -144,8 +144,8 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.4,
     keywords: ['探索', '发现', '学习', '模式', '复盘', 'explore', 'discover', 'learn', 'pattern', 'retrospective'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
-    systemPromptSuffix: '你已进入天璇域——模式发现与调研模式。广泛搜索，寻找可复用模式，记录发现。不要急于下结论。',
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
+    systemPromptSuffix: '你已进入天璇域——模式发现与调研模式。广泛搜索，寻找可复用模式，记录发现。需要时可写代码验证发现。',
   },
 }
 
