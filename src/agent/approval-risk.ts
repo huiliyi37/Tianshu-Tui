@@ -132,6 +132,10 @@ export function assessToolRisk(
       reasons.push('bash command may write to filesystem, package state, or git state')
       if (level === 'none') level = 'medium'
     }
+    if (bashGitBypassesScope(cmd)) {
+      reasons.push('unscoped git command bypasses scope — use deliver_task or git tool with ownedFiles instead')
+      level = 'high'
+    }
   }
 
   // Write operations

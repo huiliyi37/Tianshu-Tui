@@ -110,6 +110,17 @@ describe('assessToolRisk', () => {
     assert.ok(result.reasons.some(r => r.includes('rollback')))
   })
 
+  it('elevates unscoped git add -A to high with deliver_task redirect', () => {
+    const result = assessToolRisk('bash', { command: 'git add -A && git commit -m x' }, 'none')
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => /deliver_task|scope/i.test(r)))
+  })
+
+  it('does NOT elevate scoped git add -- <file>', () => {
+    const result = assessToolRisk('bash', { command: 'git add -- src/a.ts' }, 'none')
+    assert.ok(!result.reasons.some(r => /bypasses scope/i.test(r)))
+  })
+
   it('elevates write_file to medium when combined with doom loop warn', () => {
     const result = assessToolRisk('write_file', { file_path: 'src/a.ts', content: 'x' }, 'warn')
     assert.equal(result.level, 'medium')
