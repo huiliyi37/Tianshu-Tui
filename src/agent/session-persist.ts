@@ -199,11 +199,6 @@ export class SessionPersist {
     return messages
   }
 
-  /** Async entry for startup path — defers loadOai off the first-frame critical path (S10). */
-  async loadOaiAsync(): Promise<OaiMessage[]> {
-    return this.loadOai()
-  }
-
   /** Compact the session file with the given messages (with checksums) */
   compact(messages: Message[]): void {
     const content = messages.map(m => appendChecksum(serializeSessionMessage(m))).join('\n') + '\n'
