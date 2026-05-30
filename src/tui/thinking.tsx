@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { getTheme } from './theme.js'
+import { brailleSpinnerFrame } from './braille-spinner.js'
 
 interface ThinkingStatusOptions {
   isStreaming: boolean
@@ -104,6 +105,7 @@ function truncateThinking(text: string): string {
 export function ThinkingCollapser({ thinking, isStreaming, focused = false, completedDurationMs }: ThinkingCollapserProps) {
   const [expanded, setExpanded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  const [frame, setFrame] = useState(0)
   const [stale, setStale] = useState(false)
   const startRef = useRef(0)
   const thinkingRef = useRef(thinking)
@@ -145,12 +147,16 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
   useEffect(() => {
     if (!isStreaming) return
     const id = setInterval(() => {
+      setFrame(f => f + 1)
       if (startRef.current > 0) {
-        setElapsed(Date.now() - startRef.current)
+        const newElapsed = Date.now() - startRef.current
+        if (Math.floor(newElapsed / 1000) !== Math.floor(elapsed / 1000)) {
+          setElapsed(newElapsed)
+        }
       }
-    }, 2000)
+    }, 120)
     return () => clearInterval(id)
-  }, [isStreaming])
+  }, [isStreaming, elapsed])
 
   useInput((_input, key) => {
     if (focused && key.tab) {
@@ -160,7 +166,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
 
   if (!thinking || !isStreaming) return null
 
-  const spinner = elapsed % 2000 < 1000 ? '⠋' : '⠙'
+  const spinner = brailleSpinnerFrame(frame)
   const statusLabel = thinkingStatusLabel({ isStreaming, elapsedMs: elapsed, completedDurationMs, stale })
 
   if (!expanded) {
