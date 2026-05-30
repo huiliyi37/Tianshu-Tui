@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink'
 import { memo } from 'react'
 import { getTheme } from './theme.js'
+import { gutterGlyph } from './gutter.js'
 
 interface SystemMessageProps {
   content: string
@@ -12,7 +13,7 @@ export const SystemMessage = memo(function SystemMessage({ content, isError }: S
   const color = isError ? theme.error : theme.systemColor
   return (
     <Box paddingX={2}>
-      <Text color={!isError ? theme.muted : color}>{'⌁'} {content}</Text>
+      <Text color={!isError ? theme.muted : color}>{gutterGlyph('system')} {content}</Text>
     </Box>
   )
 })
