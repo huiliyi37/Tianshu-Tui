@@ -91,16 +91,16 @@ describe('DELEGATE_TASK_TOOL', () => {
       assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 75_000)
     })
 
-    it('returns 150s for turn 5+ (mature)', () => {
+    it('returns 180s for turn 5+ (mature)', () => {
       const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 150_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 30 }), 150_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 180_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 30 }), 180_000)
     })
 
-    it('defaults to mature (150s) when sessionTurnCount is undefined', () => {
+    it('defaults to mature (180s) when sessionTurnCount is undefined', () => {
       const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-      assert.equal(tool.timeoutMs?.(base), 150_000)
-      assert.equal(tool.timeoutMs?.(), 150_000)
+      assert.equal(tool.timeoutMs?.(base), 180_000)
+      assert.equal(tool.timeoutMs?.(), 180_000)
     })
   })
 })

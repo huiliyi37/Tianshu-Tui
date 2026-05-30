@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
+import { profileRegistry } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
@@ -9,10 +10,16 @@ export interface DelegateTaskCoordinator {
   delegate(request: DelegationRequest): Promise<CoordinatorRun>
 }
 
+/** Dynamic profile validation — accepts built-in + user-loaded profiles */
+const profileStringSchema = z.string().refine(
+  (val) => profileRegistry.getProfileNames().includes(val),
+  (val) => ({ message: `Unknown profile "${val}". Available: ${profileRegistry.getProfileNames().join(', ')}` }),
+)
+
 const delegateTaskInputSchema = z.object({
   objective: z.string().min(1),
   kind: z.enum(['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal']).optional(),
-  profile: z.enum(['code_scout', 'doc_scout', 'planner', 'reviewer', 'verifier', 'patcher']).optional(),
+  profile: profileStringSchema.optional(),
   files: z.array(z.string()).optional(),
   symbols: z.array(z.string()).optional(),
 })
@@ -27,13 +34,13 @@ function formatUiContent(run: CoordinatorRun): string {
 /** Progressive timeout: single-task workers start fast and grow with session maturity.
  *    turn 0-1 (cold open)  → 30 s
  *    turn 2-4 (warming)    → 75 s
- *    turn 5+  (mature)     → 150 s
+ *    turn 5+  (mature)     → 180 s
  */
 function progressiveTaskTimeout(sessionTurnCount?: number): number {
   const turn = sessionTurnCount ?? 10
   if (turn <= 1) return 30_000
   if (turn <= 4) return 75_000
-  return 150_000
+  return 180_000
 }
 
 export function createDelegateTaskTool(
@@ -90,7 +97,7 @@ export function createDelegateTaskTool(
         parentTurnId: params.toolUseId,
         objective: parsed.data.objective,
         kind: parsed.data.kind ?? 'code_search',
-        profile: parsed.data.profile ?? 'code_scout',
+        profile: (parsed.data.profile ?? 'code_scout') as import('../agent/work-order.js').WorkerProfile,
         scope: {
           files: parsed.data.files,
           symbols: parsed.data.symbols,
