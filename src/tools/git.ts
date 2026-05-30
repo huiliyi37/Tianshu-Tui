@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
+import { auditCommitTagScope } from './commit-audit.js'
 
 const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash'] as const
 type GitAction = (typeof ACTIONS)[number]
@@ -139,7 +140,13 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           if (result.status !== 0) {
             return { content: `git commit failed: ${(result.stderr ?? '').trim()}`, isError: true }
           }
-          return { content: result.stdout.trim() }
+
+          // Post-commit truth readback: show actual landed changes + audit tag scope
+          const changed = runGit(['show', '--stat', '--format=', 'HEAD'], cwd).trim()
+          const changedFiles = changed.split('\n').map(l => l.split('|')[0]!.trim()).filter(f => f && f.includes('/'))
+          const audit = auditCommitTagScope(message, changedFiles)
+          const body = `${result.stdout.trim()}\n\n--- actual changes (git show --stat) ---\n${changed}`
+          return { content: audit.ok ? body : `${body}\n\n${audit.message}` }
         }
 
         case 'log': {
