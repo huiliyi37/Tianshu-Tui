@@ -23,6 +23,7 @@ import { PhaseTracker } from './phase-tracker.js'
 import { phaseStatusLabel } from './phase-status.js'
 import { FluencyTracker } from './fluency-hook.js'
 import { getTheme } from './theme.js'
+import { useTerminalSize } from './use-terminal-size.js'
 import { AgentLoop } from '../agent/loop.js'
 import { formatIntentPreview, type IntentPreview, type IntentPreviewAction } from '../agent/intent-preview.js'
 import { SessionContext } from '../agent/context.js'
@@ -190,7 +191,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [isThinkingActive, setIsThinkingActive] = useState(false)
   /** Generation counter: incremented on each new stream start. A run's onAbort/onError/catch only flips isStreaming when its captured generation still matches — prevents a stale run from killing a newer one. */
   const streamGenRef = useRef(0)
-  const [fluencyStale, setFluencyStale] = useState<string | null>(null)
+  const [fluencyStale, setFluencyStale] = useState<{ message: string; level: 'info' | 'warn' | 'action' } | null>(null)
+  const { rows: termRows } = useTerminalSize()
+  const theme = getTheme()
   const [heartbeatStatus, setHeartbeatStatus] = useState<string | null>(null)
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
@@ -412,7 +415,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     if (!isStreaming) { setFluencyStale(null); return }
     const id = setInterval(() => {
       const policy = fluencyRef.current.getPolicy()
-      setFluencyStale(policy.staleMessage ?? null)
+      setFluencyStale(policy.staleMessage ? { message: policy.staleMessage, level: policy.staleLevel ?? 'info' } : null)
     }, 2000)
     return () => clearInterval(id)
   }, [isStreaming])
@@ -1201,15 +1204,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
       </Static>
       <Box flexDirection="column">
-        <GlanceBar
-          pulses={glancePulses}
-          phase={phaseFromSummary(summaryState)}
-          cacheHitRate={cacheHitRate}
-          cost={cost}
-          model={model}
-          isStreaming={isStreaming}
-          historyCount={historyItems.length}
-        />
         {activeOverlay === 'starmap' && (
           <StarmapView
             activePhase={phaseFromSummary(summaryState)}
@@ -1242,14 +1236,26 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {(streamingText || isStreaming) && (
           <StreamOutput text={streamingText} isStreaming={isStreaming} />
         )}
-        {fluencyStale && !streamingText && (
-          <Box paddingX={2}>
-            <Text color="yellow">⚠ {fluencyStale}</Text>
-          </Box>
-        )}
         {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
           <Box paddingX={2}>
             <Text>◌ {heartbeatStatus}</Text>
+          </Box>
+        )}
+        {/* Status base: GlanceBar + contextual footer stay adjacent to InputBar so long stream output above never separates them */}
+        <GlanceBar
+          pulses={glancePulses}
+          phase={phaseFromSummary(summaryState)}
+          cacheHitRate={cacheHitRate}
+          cost={cost}
+          model={model}
+          isStreaming={isStreaming}
+          historyCount={historyItems.length}
+        />
+        {fluencyStale && termRows >= 24 && (
+          <Box paddingX={1}>
+            <Text color={fluencyStale.level === 'action' ? theme.error : fluencyStale.level === 'warn' ? theme.warning : theme.dim}>
+              {fluencyStale.level === 'action' ? '⚠ ' : fluencyStale.level === 'warn' ? '› ' : '· '}{fluencyStale.message}
+            </Text>
           </Box>
         )}
         {pendingIntent && (

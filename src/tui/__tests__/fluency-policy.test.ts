@@ -69,18 +69,21 @@ describe('computeFluencyPolicy', () => {
     assert.equal(policy.foldRoutine, false)
     assert.equal(policy.coalesceMs, 0)
     assert.equal(policy.staleMessage, 'Thinking deeply... 35s')
+    assert.equal(policy.staleLevel, 'info')
   })
 
   it('returns inspect with warn stale message when silentMs >= 90_000 (thinking)', () => {
     const policy = computeFluencyPolicy({ ...baseline, silentMs: 95_000 })
     assert.equal(policy.visibility, 'inspect')
     assert.equal(policy.staleMessage, 'Collecting context... 2m')
+    assert.equal(policy.staleLevel, 'warn')
   })
 
   it('returns inspect with actionable stale message when silentMs >= 180_000 (thinking)', () => {
     const policy = computeFluencyPolicy({ ...baseline, silentMs: 190_000 })
     assert.equal(policy.visibility, 'inspect')
     assert.equal(policy.staleMessage, 'Long think — Ctrl+C to stop (3m)')
+    assert.equal(policy.staleLevel, 'action')
   })
 
   it('returns inspect with coalescing for large results', () => {

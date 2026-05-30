@@ -20,6 +20,7 @@ export interface FluencyPolicy {
   foldRoutine: boolean
   coalesceMs: number
   staleMessage?: string
+  staleLevel?: 'info' | 'warn' | 'action'
 }
 
 const HIGH_VOLUME_RESULT_LENGTH = 50_000
@@ -38,29 +39,29 @@ const PHASE_STALE_TIERS: Record<ActivityPhase, [number, number, number]> = {
   preflight:  [15_000,  60_000, 120_000],
 }
 
-function getPhaseStaleMessage(phase: ActivityPhase, silentMs: number): string | null {
+function getPhaseStaleMessage(phase: ActivityPhase, silentMs: number): { message: string; level: 'info' | 'warn' | 'action' } | null {
   const tiers = PHASE_STALE_TIERS[phase] ?? PHASE_STALE_TIERS.streaming
   const [info, warn, action] = tiers
   const sec = Math.round(silentMs / 1000)
   const min = Math.round(silentMs / 60_000)
 
   if (silentMs >= action) {
-    if (phase === 'thinking') return `Long think — Ctrl+C to stop (${min}m)`
-    if (phase === 'tool') return `Tool may be stuck — Ctrl+C (${min}m)`
-    if (phase === 'compacting') return `Compaction very slow (${min}m)`
-    return `No response — Ctrl+C to interrupt (${min}m)`
+    if (phase === 'thinking') return { message: `Long think — Ctrl+C to stop (${min}m)`, level: 'action' }
+    if (phase === 'tool') return { message: `Tool may be stuck — Ctrl+C (${min}m)`, level: 'action' }
+    if (phase === 'compacting') return { message: `Compaction very slow (${min}m)`, level: 'action' }
+    return { message: `No response — Ctrl+C to interrupt (${min}m)`, level: 'action' }
   }
   if (silentMs >= warn) {
-    if (phase === 'thinking') return `Collecting context... ${min}m`
-    if (phase === 'tool') return `Tool running long... ${min}m`
-    if (phase === 'compacting') return `Compacting... ${min}m`
-    return `Still waiting... ${min}m`
+    if (phase === 'thinking') return { message: `Collecting context... ${min}m`, level: 'warn' }
+    if (phase === 'tool') return { message: `Tool running long... ${min}m`, level: 'warn' }
+    if (phase === 'compacting') return { message: `Compacting... ${min}m`, level: 'warn' }
+    return { message: `Still waiting... ${min}m`, level: 'warn' }
   }
   if (silentMs >= info) {
-    if (phase === 'thinking') return `Thinking deeply... ${sec}s`
-    if (phase === 'tool') return `Executing tools... ${sec}s`
-    if (phase === 'compacting') return `Compacting... ${sec}s`
-    return `Waiting for response... ${sec}s`
+    if (phase === 'thinking') return { message: `Thinking deeply... ${sec}s`, level: 'info' }
+    if (phase === 'tool') return { message: `Executing tools... ${sec}s`, level: 'info' }
+    if (phase === 'compacting') return { message: `Compacting... ${sec}s`, level: 'info' }
+    return { message: `Waiting for response... ${sec}s`, level: 'info' }
   }
   return null
 }
@@ -81,13 +82,14 @@ export function computeFluencyPolicy(signals: FluencySignals): FluencyPolicy {
 
   // Silent too long → stale inspection (phase-aware thresholds)
   if (signals.silentMs >= 15_000) {
-    const staleMessage = getPhaseStaleMessage(signals.phase, signals.silentMs)
-    if (staleMessage) {
+    const stale = getPhaseStaleMessage(signals.phase, signals.silentMs)
+    if (stale) {
       return {
         visibility: 'inspect',
         foldRoutine: false,
         coalesceMs: 0,
-        staleMessage,
+        staleMessage: stale.message,
+        staleLevel: stale.level,
       }
     }
   }
