@@ -71,6 +71,18 @@ function progressiveBatchTimeout(sessionTurnCount?: number): number {
   return 180_000
 }
 
+/** Progressive task cap: don't fan out 5 workers on a cold session.
+ *    turn 0-1 (cold open)  → 1 task  — single focused scout
+ *    turn 2-4 (warming)    → 3 tasks — moderate parallelism
+ *    turn 5+  (mature)     → 5 tasks — full batch
+ */
+export function progressiveTaskCap(sessionTurnCount?: number): number {
+  const turn = sessionTurnCount ?? 10
+  if (turn <= 1) return 1
+  if (turn <= 4) return 3
+  return 5
+}
+
 export function createDelegateBatchTool(
   coordinator: DelegateBatchCoordinator,
   getClaimStore?: () => ContextClaimStore | undefined,
@@ -139,7 +151,17 @@ export function createDelegateBatchTool(
         scope: { files: t.files, symbols: t.symbols },
       }))
 
-      const run = await coordinator.delegateBatch(requests, parsed.data.policy ?? 'primary_decides')
+      // Progressive task cap: trim to the allowed slice on early turns
+      const cap = progressiveTaskCap(params.sessionTurnCount)
+      let trimmedNote = ''
+      let dispatched = requests
+      if (requests.length > cap) {
+        const dropped = requests.slice(cap).map(r => r.objective)
+        dispatched = requests.slice(0, cap)
+        trimmedNote = `\n\n[batch trimmed] Session is early (turn ${params.sessionTurnCount ?? '?'}). Dispatched ${cap}/${requests.length} tasks. Deferred: ${dropped.map(o => `"${o.slice(0, 60)}"`).join(', ')}. Re-dispatch later tasks in a subsequent turn if needed.`
+      }
+
+      const run = await coordinator.delegateBatch(dispatched, parsed.data.policy ?? 'primary_decides')
 
       // Extract worker findings into claim store
       if (run.status === 'completed') {
@@ -152,7 +174,7 @@ export function createDelegateBatchTool(
 
       const passed = run.results.filter(r => r.status === 'passed').length
       return {
-        content: run.packet,
+        content: run.packet + trimmedNote,
         uiContent: `delegate_batch: ${passed}/${run.results.length} passed`,
         isError: false,
       }

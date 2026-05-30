@@ -1,8 +1,18 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDelegateBatchTool } from '../tools/delegate-batch.js'
+import { createDelegateBatchTool, progressiveTaskCap } from '../tools/delegate-batch.js'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { ClaimProposal } from '../context/claims.js'
+
+function makeFiveTasks(): Array<{ objective: string; kind: string; profile: string }> {
+  return [
+    { objective: 'search for auth patterns in src/agent', kind: 'code_search', profile: 'code_scout' },
+    { objective: 'review error handling in src/tools', kind: 'review', profile: 'reviewer' },
+    { objective: 'find test coverage gaps', kind: 'code_search', profile: 'code_scout' },
+    { objective: 'plan API refactor approach', kind: 'plan', profile: 'planner' },
+    { objective: 'verify import graph integrity', kind: 'verify', profile: 'verifier' },
+  ]
+}
 
 describe('delegate_batch tool', () => {
   it('delegates multiple tasks and returns combined packet', async () => {
@@ -113,6 +123,102 @@ describe('delegate_batch tool', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
       assert.equal(tool.timeoutMs?.(base), 180_000)
       assert.equal(tool.timeoutMs?.(), 180_000)
+    })
+  })
+
+  describe('progressive task cap', () => {
+    it('limits to 1 task on turn 0-1 (cold open)', async () => {
+      let dispatchedCount = -1
+      const tool = createDelegateBatchTool({
+        delegateBatch: async (reqs) => {
+          dispatchedCount = reqs.length
+          return {
+            status: 'completed' as const,
+            results: reqs.map((_, i) => ({
+              workOrderId: `wo-${i}`, status: 'passed' as const, summary: 'ok',
+              findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [],
+              evidenceStatus: 'verified' as const,
+            })),
+            packet: '<results/>',
+          } as CoordinatorRun
+        },
+      })
+
+      const result = await tool.execute({
+        toolUseId: 'tu-cap-0',
+        cwd: '/tmp',
+        sessionTurnCount: 0,
+        input: { tasks: makeFiveTasks() },
+      })
+
+      assert.equal(dispatchedCount, 1)
+      assert.ok(result.content.includes('[batch trimmed]'))
+      assert.ok(result.content.includes('Dispatched 1/5'))
+    })
+
+    it('limits to 3 tasks on turn 2-4 (warming)', async () => {
+      let dispatchedCount = -1
+      const tool = createDelegateBatchTool({
+        delegateBatch: async (reqs) => {
+          dispatchedCount = reqs.length
+          return {
+            status: 'completed' as const,
+            results: reqs.map((_, i) => ({
+              workOrderId: `wo-${i}`, status: 'passed' as const, summary: 'ok',
+              findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [],
+              evidenceStatus: 'verified' as const,
+            })),
+            packet: '<results/>',
+          } as CoordinatorRun
+        },
+      })
+
+      await tool.execute({
+        toolUseId: 'tu-cap-3',
+        cwd: '/tmp',
+        sessionTurnCount: 3,
+        input: { tasks: makeFiveTasks() },
+      })
+
+      assert.equal(dispatchedCount, 3)
+    })
+
+    it('dispatches all 5 tasks on turn 5+ (mature)', async () => {
+      let dispatchedCount = -1
+      const tool = createDelegateBatchTool({
+        delegateBatch: async (reqs) => {
+          dispatchedCount = reqs.length
+          return {
+            status: 'completed' as const,
+            results: reqs.map((_, i) => ({
+              workOrderId: `wo-${i}`, status: 'passed' as const, summary: 'ok',
+              findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [],
+              evidenceStatus: 'verified' as const,
+            })),
+            packet: '<results/>',
+          } as CoordinatorRun
+        },
+      })
+
+      const result = await tool.execute({
+        toolUseId: 'tu-cap-5',
+        cwd: '/tmp',
+        sessionTurnCount: 6,
+        input: { tasks: makeFiveTasks() },
+      })
+
+      assert.equal(dispatchedCount, 5)
+      assert.ok(!result.content.includes('[batch trimmed]'))
+    })
+
+    it('progressiveTaskCap unit: 1→3→5 by turn tier', () => {
+      assert.equal(progressiveTaskCap(0), 1)
+      assert.equal(progressiveTaskCap(1), 1)
+      assert.equal(progressiveTaskCap(2), 3)
+      assert.equal(progressiveTaskCap(4), 3)
+      assert.equal(progressiveTaskCap(5), 5)
+      assert.equal(progressiveTaskCap(100), 5)
+      assert.equal(progressiveTaskCap(), 5) // undefined → mature
     })
   })
 })
