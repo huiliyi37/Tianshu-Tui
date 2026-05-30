@@ -33,7 +33,7 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
     }
   }
 
-  const textWithCursor = isStreaming ? displayText + '▊' : displayText
+  const displayWithCursor = displayText
 
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={1}>
@@ -46,11 +46,8 @@ export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: St
           )}
         </Box>
         <Box flexDirection="column" paddingLeft={2}>
-          {isStreaming ? (
-            <Text>{textWithCursor}</Text>
-          ) : (
-            <Markdown text={textWithCursor} />
-          )}
+          <Markdown text={isStreaming ? displayWithCursor : displayText} />
+          {isStreaming && <Text>{'▊'}</Text>}
         </Box>
       </Box>
     </Box>

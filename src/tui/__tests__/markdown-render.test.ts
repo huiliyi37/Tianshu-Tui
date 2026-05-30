@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseBlocks, parseInline, keywordsForLang } from '../markdown-render.js'
+import { parseBlocks, parseInline, keywordsForLang, hasMarkdown } from '../markdown-render.js'
 
 describe('parseInline', () => {
   it('parses bold text', () => {
@@ -171,5 +171,18 @@ describe('keywordsForLang', () => {
   it('returns null for unknown language', () => {
     const config = keywordsForLang('unknown')
     assert.equal(config, null)
+  })
+})
+
+describe('hasMarkdown fast-path (S7 stream/final parity)', () => {
+  it('plain prose has no markdown so streaming renders as plain Text', () => {
+    assert.equal(hasMarkdown('这是一段没有任何标记的普通中文叙述'), false)
+    assert.equal(hasMarkdown('plain english line with no markup'), false)
+  })
+
+  it('detects code fences so code blocks render identically while streaming and final', () => {
+    assert.equal(hasMarkdown('text\n```ts\nconst x = 1\n```'), true)
+    assert.equal(hasMarkdown('inline `code` here'), true)
+    assert.equal(hasMarkdown('# heading'), true)
   })
 })

@@ -501,6 +501,11 @@ function renderBlock(block: Block, key: number, columns: number): ReactNode {
   }
 }
 
+export function hasMarkdown(text: string): boolean {
+  return text.includes('**') || text.includes('`') || text.includes('```')
+    || /^#{1,6}\s/m.test(text) || /^[-*]\s/m.test(text) || /^>\s/m.test(text)
+}
+
 export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
   const blocks = useMemo(() => parseBlocks(text), [text])
   const { columns } = useTerminalSize()
@@ -508,7 +513,7 @@ export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
   if (!text) return null
 
   // Fast path: no markdown detected, render as plain text
-  const hasMd = text.includes('**') || text.includes('`') || text.includes('```') || /^#{1,6}\s/m.test(text) || /^[-*]\s/m.test(text) || /^>\s/m.test(text)
+  const hasMd = hasMarkdown(text)
   if (!hasMd) {
     return <Text>{text}</Text>
   }
