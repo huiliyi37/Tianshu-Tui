@@ -31,26 +31,20 @@ const NUDGE_AREA_THRESHOLD = 2
 /**
  * Build a commit nudge string to append to tool results after file writes.
  * Returns empty string when no nudge is needed.
+ *
+ * Output includes exact commands for weak models to copy-paste.
  */
 export function buildCommitNudge(input: NudgeInput): string {
   const { ownedFiles } = input
   if (ownedFiles.length <= NUDGE_FILE_THRESHOLD) return ''
 
   const topDirs = new Set(ownedFiles.map(extractTopDir))
-  if (ownedFiles.length <= NUDGE_FILE_THRESHOLD && topDirs.size <= NUDGE_AREA_THRESHOLD) return ''
 
   const lines: string[] = [
     '',
     '💡 Uncommitted files accumulating: ' + ownedFiles.length + ' owned files across ' + topDirs.size + ' areas.',
+    '   Next step: deliver_task commit=true message="your message" files=[your completed files]',
   ]
-
-  if (topDirs.size > NUDGE_AREA_THRESHOLD) {
-    lines.push('   Consider committing completed logical units before starting new ones.')
-    lines.push('   Call deliver_task commit=true files=[subset] to commit per logical unit.')
-  } else {
-    lines.push('   Consider committing what you have so far before continuing.')
-    lines.push('   Call deliver_task commit=true to commit, or deliver_task to check readiness.')
-  }
 
   return lines.join('\n')
 }

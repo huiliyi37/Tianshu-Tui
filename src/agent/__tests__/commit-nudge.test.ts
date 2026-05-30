@@ -43,6 +43,6 @@ describe('buildCommitNudge', () => {
     const nudge = buildCommitNudge({
       ownedFiles: ['src/agent/a.ts', 'src/tools/b.ts', 'src/tui/c.ts', 'src/config/d.ts', 'src/api/e.ts'],
     })
-    assert.match(nudge, /files=\[/)
+    assert.match(nudge, /files=/)
   })
 })

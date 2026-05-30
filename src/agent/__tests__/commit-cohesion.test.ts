@@ -39,7 +39,8 @@ describe('checkCommitCohesion', () => {
     const report = checkCommitCohesion(files)
     assert.equal(report.needsWarning, true)
     assert.equal(report.topDirCount, 1)
-    assert.ok(report.warningLines.some(l => /Split strategy/.test(l)))
+    assert.ok(report.warningLines.some(l => /force=true/.test(l)))
+    assert.ok(report.splitSuggestion.length > 0)
   })
 
   it('extracts top-level directory as first two segments', () => {

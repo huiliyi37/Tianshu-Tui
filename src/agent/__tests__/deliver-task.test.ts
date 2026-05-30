@@ -959,7 +959,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
       assert.equal(result.isError, true)
       assert.match(result.content, /Commit cohesion gate/)
-      assert.match(result.content, /Split strategy/)
+      assert.match(result.content, /Suggested split by area/)
     })
 
     it('allows commit with force=true when cohesion gate triggers', async () => {

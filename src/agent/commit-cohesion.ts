@@ -18,6 +18,8 @@ export interface CohesionReport {
   needsWarning: boolean
   /** 人类可读的警告行 */
   warningLines: string[]
+  /** 按区域分好的拆分方案，可直接执行 */
+  splitSuggestion: string[]
 }
 
 export interface CohesionThresholds {
@@ -54,6 +56,7 @@ export function checkCommitCohesion(
   const needsWarning = overFileLimit || overDirLimit
 
   const warningLines: string[] = []
+  const splitSuggestion: string[] = []
   if (needsWarning) {
     const areaSummary = topDirs.join(', ')
     if (overDirLimit) {
@@ -66,12 +69,31 @@ export function checkCommitCohesion(
       )
     }
     warningLines.push(
-      'Split strategy: call deliver_task commit=true files=[subset1] for each logical unit.',
-    )
-    warningLines.push(
       'If this truly is one logical unit, re-run with force=true to override.',
     )
+
+    // Generate concrete split suggestion by area — weak models need exact commands
+    const filesByArea = new Map<string, string[]>()
+    for (const f of files) {
+      const dir = extractTopDir(f)
+      const existing = filesByArea.get(dir)
+      if (existing) existing.push(f)
+      else filesByArea.set(dir, [f])
+    }
+    const sortedAreas = [...filesByArea.entries()].sort(([a], [b]) => a.localeCompare(b))
+    for (const [area, areaFiles] of sortedAreas) {
+      const fileList = areaFiles.map(f => `"${f}"`).join(', ')
+      splitSuggestion.push(
+        `deliver_task commit=true message="描述" files=[${fileList}]`,
+      )
+    }
+    warningLines.push(
+      'Suggested split by area:',
+    )
+    for (const cmd of splitSuggestion) {
+      warningLines.push(`  ${cmd}`)
+    }
   }
 
-  return { topDirs, topDirCount, fileCount, needsWarning, warningLines }
+  return { topDirs, topDirCount, fileCount, needsWarning, warningLines, splitSuggestion }
 }
