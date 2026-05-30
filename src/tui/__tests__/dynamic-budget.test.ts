@@ -34,6 +34,22 @@ describe('computeBudget invariant', () => {
       )
     })
   }
+
+  // Expanded invariant with multiple cards:
+  // 1(min stream) + expandedLines + (N-1)*cardLines + CHROME_ROWS ≤ termRows
+  for (const rows of termSizes) {
+    for (const nCards of [1, 2, 3, 5]) {
+      it(`term=${rows} cards=${nCards}: 1 + expanded + (N-1)×card + chrome ≤ termRows`, () => {
+        const { cardLines, expandedLines } = computeBudget(rows, nCards)
+        const othersCollapsed = Math.max(0, nCards - 1) * cardLines
+        const total = 1 + expandedLines + othersCollapsed + CHROME_ROWS
+        assert.ok(
+          total <= rows,
+          `expanded+multi overflow: 1 + ${expandedLines} + ${Math.max(0, nCards - 1)}×${cardLines}(${othersCollapsed}) + ${CHROME_ROWS} = ${total} > ${rows}`,
+        )
+      })
+    }
+  }
 })
 
 describe('computeBudget sanity', () => {

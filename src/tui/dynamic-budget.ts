@@ -9,7 +9,8 @@
  * across StreamOutput, ToolCard(s), ThinkingCollapser, and chrome
  * (GlanceBar + InputBar + margins).
  *
- * Invariant: streamLines + N × cardLines + CHROME_ROWS ≤ termRows
+ * Invariant (collapsed): streamLines + N × cardLines + CHROME_ROWS ≤ termRows
+ * Invariant (expanded):  1(min stream) + expandedLines + (N-1) × cardLines + CHROME_ROWS ≤ termRows
  */
 
 /** Fixed chrome: ThinkingCollapser(1) + GlanceBar(1) + InputBar(2) + margins(2) */
@@ -34,8 +35,8 @@ export interface DynamicBudget {
  * (liveToolCount + 1) slots — one slot for StreamOutput, one per ToolCard.
  * Each slot is capped at MAX_CARD_LINES=15.
  *
- * Expanded mode: a single expanded ToolCard gets (termRows - chrome - 1)
- * where -1 reserves a minimum 1-line stream preview.
+ * Expanded mode: one ToolCard expands while (N-1) remain collapsed and
+ * stream shrinks to 1 line. The expanded card gets the remaining space.
  */
 export function computeBudget(termRows: number, liveToolCount: number): DynamicBudget {
   const available = termRows - CHROME_ROWS
@@ -51,8 +52,11 @@ export function computeBudget(termRows: number, liveToolCount: number): DynamicB
   // Stream gets the remainder after cards take their share
   const streamLines = Math.max(1, available - liveToolCount * cardLines)
 
-  // Expanded: single card gets almost everything, stream gets min 1 line
-  const expandedLines = Math.min(MAX_CARD_LINES, Math.max(cardLines, available - 1))
+  // Expanded: one card expands, (N-1) stay collapsed, stream shrinks to 1 line.
+  // Expanded card gets: available - 1(stream) - (N-1)*cardLines
+  const othersCollapsed = Math.max(0, liveToolCount - 1) * cardLines
+  const expandedMax = available - 1 - othersCollapsed
+  const expandedLines = Math.min(MAX_CARD_LINES, Math.max(cardLines, Math.max(1, expandedMax)))
 
   return { streamLines, cardLines, expandedLines }
 }
