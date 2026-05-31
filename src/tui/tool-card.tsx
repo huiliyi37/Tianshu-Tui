@@ -4,8 +4,7 @@ import { getTheme } from './theme.js'
 import { getToolFamily } from './tool-family.js'
 import { Markdown } from './markdown-render.js'
 import { formatToolElapsed } from './tool-elapsed.js'
-import { useTerminalSize } from './use-terminal-size.js'
-import { computeBudget } from './dynamic-budget.js'
+import { useViewportLines } from './viewport.js'
 
 const MAX_COLLAPSED_LINES = 15
 
@@ -18,8 +17,6 @@ interface ToolCardProps {
   rawPath?: string
   focused?: boolean
   elapsedMs?: number
-  /** Number of live tools currently rendered — used for budget allocation */
-  liveToolCount?: number
 }
 
 function compactPath(rawPath: string | undefined): string {
@@ -28,9 +25,8 @@ function compactPath(rawPath: string | undefined): string {
   return filename
 }
 
-export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs, liveToolCount = 1 }: ToolCardProps) {
+export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs }: ToolCardProps) {
   const theme = getTheme()
-  const { rows } = useTerminalSize()
   const [localExpanded, setLocalExpanded] = useState(false)
 
   useInput((_input, key) => {
@@ -40,10 +36,8 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
   })
 
   const expanded = verbose || localExpanded
-  const budget = computeBudget(rows, liveToolCount)
-  const collapsedLimit = budget.cardLines
-  const expandedLimit = budget.expandedLines
-  const limit = expanded ? expandedLimit : collapsedLimit
+  const expandedLimit = useViewportLines(0.6, 8)
+  const limit = expanded ? expandedLimit : MAX_COLLAPSED_LINES
   const { displayText, truncated, totalLines } = useMemo(() => {
     const lines = result.split('\n')
     const isLong = lines.length > limit
