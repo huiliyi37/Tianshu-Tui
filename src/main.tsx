@@ -40,7 +40,7 @@ import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { profileRegistry } from './agent/profile-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
-import { killAll } from './tools/process-tracker.js'
+import { killAll, killAllSync } from './tools/process-tracker.js'
 import { runConfigCLI, loadConfig as loadLayeredConfig } from './config/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
@@ -138,6 +138,7 @@ function gracefulShutdown() {
   if (process.stdin.isTTY && process.stdin.setRawMode) {
     process.stdin.setRawMode(false)
   }
+  killAllSync()
   process.exit(0)
 }
 
