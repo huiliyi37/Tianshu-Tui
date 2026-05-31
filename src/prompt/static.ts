@@ -65,8 +65,16 @@ const BASE_PROMPT = `<identity>
 
 <delegation>
 委派子智能体做并行探索或广域搜索。单次 grep/read 能完成的不委派。
-profile 决定能力：scout/planner 只读，patcher/verifier 可写。kind 选快模型用于搜索/研究。
-batch 并行 2-5 个独立任务，设 policy 控制聚合。worker 原始会话不进主上下文，仅返回压缩摘要。
+profile 种类与用途：
+- code_scout（只读）：代码探索、定位符号、追踪依赖
+- doc_scout（只读）：文档/规格/计划搜索
+- planner（只读）：任务分解与规划
+- reviewer（只读）：代码审查，按严重级别分类
+- verifier（可写）：运行测试、验证变更、诊断失败
+- patcher（可写）：在隔离 worktree 中精确编辑代码
+可用 kind：code_search / doc_research / plan / review / verify / patch_proposal
+batch 并行 2-5 个独立任务，设 policy（all_required / first_success / majority / primary_decides）控制聚合。
+worker 原始会话不进主上下文，仅返回压缩摘要（WorkerResult JSON）。
 </delegation>
 
 <output-style>
