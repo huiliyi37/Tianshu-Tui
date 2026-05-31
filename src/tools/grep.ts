@@ -13,6 +13,7 @@ import { computeModelReadCap, type ModelReadCap } from './model-read-cap.js'
 import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
+import { track } from './process-tracker.js'
 
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
@@ -177,11 +178,11 @@ async function tryRipgrep(
 
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn('rg', args, {
+      child = track(spawn('rg', args, {
         cwd,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
-      })
+      }))
     } catch {
       resolve(null)
       return

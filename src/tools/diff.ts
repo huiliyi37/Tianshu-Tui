@@ -3,6 +3,7 @@ import { relative, resolve } from 'path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { validatePathSafe } from './path-validate.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
+import { track } from './process-tracker.js'
 
 const MAX_LINES_PER_FILE = 200
 const MAX_TOTAL_CHARS = 8000
@@ -62,11 +63,11 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
     }
 
     return new Promise((resolve) => {
-      const child = spawn('git', args, {
+      const child = track(spawn('git', args, {
         cwd: params.cwd,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
-      })
+      }))
 
       let stdout = ''
       let stderr = ''

@@ -10,6 +10,7 @@ import { writeFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { track } from './process-tracker.js'
 
 export interface SandboxOptions {
   timeoutMs?: number
@@ -56,7 +57,7 @@ export async function sandboxExec(
   await writeFile(scriptPath, wrapper, 'utf-8')
 
   return new Promise<SandboxResult>((resolve) => {
-    const child = execFile('node', [scriptPath], {
+    const child = track(execFile('node', [scriptPath], {
       timeout: timeoutMs,
       maxBuffer: maxOutputChars * 2,
       cwd,
@@ -84,6 +85,6 @@ export async function sandboxExec(
       }
 
       resolve({ stdout: finalStdout, stderr: stderr || '', exitCode })
-    })
+    }))
   })
 }
