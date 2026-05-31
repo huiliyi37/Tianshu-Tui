@@ -291,4 +291,73 @@ describe('ownership-ledger — file ownership tracking', () => {
     ownership.autoOwnFromBaseline(['src/staged.ts'])
     assert.equal(ownership.isOwned('src/staged.ts'), true)
   })
+
+  // ── adoptFiles — cross-session takeover ──
+
+  describe('adoptFiles — cross-session takeover', () => {
+    it('adopts external files into owned set', () => {
+      const baseline = createWorktreeBaseline({
+        branch: 'main',
+        head: 'abc',
+        preExistingDirty: ['src/other-session-a.ts', 'src/other-session-b.ts'],
+        preExistingUntracked: [],
+        capturedAt: Date.now(),
+      })
+      const ledger = createTaskLedger({ taskId: 'takeover' })
+      const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+
+      // Before: these are external
+      assert.equal(ownership.isOwned('src/other-session-a.ts'), false)
+      assert.equal(ownership.isOwned('src/other-session-b.ts'), false)
+
+      const adopted = ownership.adoptFiles(['src/other-session-a.ts', 'src/other-session-b.ts'])
+
+      assert.deepEqual(adopted, ['src/other-session-a.ts', 'src/other-session-b.ts'])
+      assert.equal(ownership.isOwned('src/other-session-a.ts'), true)
+      assert.equal(ownership.isOwned('src/other-session-b.ts'), true)
+      assert.deepEqual(ownership.getOwnedFiles(), ['src/other-session-a.ts', 'src/other-session-b.ts'])
+    })
+
+    it('returns only newly adopted files (skips already-owned)', () => {
+      const baseline = createWorktreeBaseline({
+        branch: 'main',
+        head: 'abc',
+        preExistingDirty: ['src/external.ts'],
+        preExistingUntracked: [],
+        capturedAt: Date.now(),
+      })
+      const ledger = createTaskLedger({ taskId: 'takeover' })
+      ledger.record({ type: 'file_write', path: 'src/already-mine.ts' })
+      const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+      ownership.autoOwnFromLedger()
+
+      const adopted = ownership.adoptFiles(['src/external.ts', 'src/already-mine.ts'])
+
+      // Only the external file was newly adopted
+      assert.deepEqual(adopted, ['src/external.ts'])
+      assert.equal(ownership.isOwned('src/external.ts'), true)
+      assert.equal(ownership.isOwned('src/already-mine.ts'), true)
+    })
+
+    it('returns empty array when all files are already owned', () => {
+      const baseline = createWorktreeBaseline(baselineSnap)
+      const ledger = createTaskLedger({ taskId: 'takeover' })
+      const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+      ownership.registerOwned('src/mine.ts')
+
+      const adopted = ownership.adoptFiles(['src/mine.ts'])
+
+      assert.deepEqual(adopted, [])
+    })
+
+    it('returns empty array for empty input', () => {
+      const baseline = createWorktreeBaseline(baselineSnap)
+      const ledger = createTaskLedger({ taskId: 'takeover' })
+      const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+
+      const adopted = ownership.adoptFiles([])
+
+      assert.deepEqual(adopted, [])
+    })
+  })
 })

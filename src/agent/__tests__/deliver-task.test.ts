@@ -1060,4 +1060,134 @@ Do not declare a streamed response duplicate in the middle of the stream.
       assert.deepEqual(calls, [{ files: ['src/agent/a.ts', 'src/agent/b.ts'], message: 'feat: P1' }])
     })
   })
+
+  describe('adopt — cross-session takeover', () => {
+    it('adopts external files and commits them alongside owned files', async () => {
+      const calls: Array<{ files: string[]; message: string }> = []
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/mine.ts'],
+        externalFiles: ['src/other-session-a.ts', 'src/other-session-b.ts'],
+        dirtyFiles: ['src/mine.ts', 'src/other-session-a.ts', 'src/other-session-b.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: (_cwd, files, message) => {
+          calls.push({ files, message })
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      const result = await ctx.tool.execute({
+        ...ctx.params,
+        input: {
+          commit: true,
+          message: 'fix: take over crashed session work',
+          adopt: ['src/other-session-a.ts', 'src/other-session-b.ts'],
+        },
+      })
+
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /Adopted 2 external file/)
+      assert.match(result.content, /src\/other-session-a\.ts/)
+      assert.match(result.content, /src\/other-session-b\.ts/)
+      assert.match(result.content, /Scoped commit created/)
+      // All 3 files should be committed (1 owned + 2 adopted)
+      assert.deepEqual(calls, [{
+        files: ['src/mine.ts', 'src/other-session-a.ts', 'src/other-session-b.ts'],
+        message: 'fix: take over crashed session work',
+      }])
+    })
+
+    it('adopts external files even when no owned files exist', async () => {
+      const calls: Array<{ files: string[]; message: string }> = []
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: [],
+        externalFiles: ['src/crashed-work.ts'],
+        dirtyFiles: ['src/crashed-work.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: (_cwd, files, message) => {
+          calls.push({ files, message })
+          return { ok: true, output: 'commit def456' }
+        },
+      })
+
+      const result = await ctx.tool.execute({
+        ...ctx.params,
+        input: {
+          commit: true,
+          message: 'fix: adopt orphaned work',
+          adopt: ['src/crashed-work.ts'],
+        },
+      })
+
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /Adopted 1 external file/)
+      assert.match(result.content, /Scoped commit created/)
+      assert.deepEqual(calls, [{ files: ['src/crashed-work.ts'], message: 'fix: adopt orphaned work' }])
+    })
+
+    it('rejects adopt for file not in external list', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/mine.ts'],
+        externalFiles: ['src/external.ts'],
+        dirtyFiles: ['src/mine.ts', 'src/external.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => { throw new Error('should not be called') },
+      })
+
+      const result = await ctx.tool.execute({
+        ...ctx.params,
+        input: {
+          commit: true,
+          message: 'fix: try adopt non-external',
+          adopt: ['src/nonexistent.ts'],
+        },
+      })
+
+      assert.equal(result.isError, true)
+      assert.match(result.content, /not in external files/)
+    })
+
+    it('rejects empty adopt array', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/mine.ts'],
+        dirtyFiles: ['src/mine.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => { throw new Error('should not be called') },
+      })
+
+      const result = await ctx.tool.execute({
+        ...ctx.params,
+        input: {
+          commit: true,
+          message: 'fix: empty adopt',
+          adopt: [],
+        },
+      })
+
+      assert.equal(result.isError, true)
+      assert.match(result.content, /Adopt array is empty/)
+    })
+
+    it('ignores adopt when commit is false (status-only)', async () => {
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/mine.ts'],
+        externalFiles: ['src/external.ts'],
+        dirtyFiles: ['src/mine.ts', 'src/external.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+
+      const result = await ctx.tool.execute({
+        ...ctx.params,
+        input: { adopt: ['src/external.ts'] },
+      })
+
+      // adopt is ignored in status-only mode — no adoption log
+      assert.match(result.content, /Delivery Gate: GREEN/)
+      assert.doesNotMatch(result.content, /Adopted/)
+    })
+  })
 })

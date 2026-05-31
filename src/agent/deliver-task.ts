@@ -114,6 +114,7 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
 - commit: set to true to request approval for scoped commit (default: false)
 - message: commit message (required if commit=true)
 - files: optional array of owned file paths to commit (subset). When omitted, commits all owned files. Use this to commit logical units separately.
+- adopt: array of external file paths to claim ownership of before committing. Use when taking over work from a crashed/frozen session. Requires commit=true. The adopted files are force-added to the owned set and included in the commit scope.
 - force: set to true to override the cohesion gate when committing many files across multiple areas. Use sparingly.`,
       input_schema: {
         type: 'object',
@@ -124,6 +125,11 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
             type: 'array',
             items: { type: 'string' },
             description: 'Optional subset of owned files to commit. When omitted, commits all owned files. Use this to split work into separate logical commits.',
+          },
+          adopt: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'External file paths to adopt into owned set before committing. For cross-session takeover when another session crashed. Requires commit=true.',
           },
           force: {
             type: 'boolean',
@@ -260,12 +266,37 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
           lines.push('', '❌ Commit requires a "message" parameter.')
           return { content: lines.join('\n'), isError: true }
         }
+
+        // Adopt external files into owned set (cross-session takeover)
+        const adoptFiles = params.input.adopt as string[] | undefined
+        if (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length > 0) {
+          // Validate: adopted files must exist in the external files list
+          const externalSet = new Set(report.externalFiles)
+          const notExternal = adoptFiles.filter(f => !externalSet.has(f))
+          if (notExternal.length > 0) {
+            lines.push('', `❌ Adopt: file(s) not in external files: ${notExternal.join(', ')}. Only external files can be adopted.`)
+            return { content: lines.join('\n'), isError: true }
+          }
+          const adopted = ctx.ownership.adoptFiles(adoptFiles)
+          if (adopted.length > 0) {
+            lines.push('', `🔓 Adopted ${adopted.length} external file(s) into owned set:`)
+            for (const f of adopted) lines.push(`   ${f}`)
+            lines.push('', '  ⚠️ These files were modified by another session. Verify the changes are correct before committing.')
+            // Refresh report after adoption — the gate may change
+          }
+        } else if (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length === 0) {
+          lines.push('', '❌ Adopt array is empty. Provide file paths to adopt, or omit the parameter.')
+          return { content: lines.join('\n'), isError: true }
+        }
+
         // Resolve files to commit: subset from `files` param, or all owned
+        // Note: after adoption, use refreshed owned set from ledger (not stale report)
         const requestedFiles = params.input.files as string[] | undefined
-        let filesToCommit = report.ownedFiles
+        const currentOwnedFiles = ctx.ownership.getOwnedFiles()
+        let filesToCommit = currentOwnedFiles
 
         if (requestedFiles && Array.isArray(requestedFiles) && requestedFiles.length > 0) {
-          const ownedSet = new Set(report.ownedFiles)
+          const ownedSet = new Set(currentOwnedFiles)
           const notOwned = requestedFiles.filter(f => !ownedSet.has(f))
           if (notOwned.length > 0) {
             lines.push('', `❌ File(s) not in owned files: ${notOwned.join(', ')}. Cannot commit non-owned files.`)
@@ -278,7 +309,10 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         }
 
         // Cohesion gate: RED if files span too many areas (unless force=true)
+        // When files were adopted (cross-session takeover), auto-override cohesion
+        // since the adoption scope is intentional.
         const forceOverride = params.input.force === true
+          || (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length > 0)
         const cohesion = checkCommitCohesion(filesToCommit)
         if (cohesion.needsWarning && !forceOverride) {
           lines.push('', ...cohesion.warningLines.map(l => `  ${l}`))

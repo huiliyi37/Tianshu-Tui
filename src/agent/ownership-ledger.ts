@@ -36,6 +36,12 @@ export interface OwnershipLedger {
    *  Files NOT in the baseline (pre-existing sets) are new → auto-owned.
    *  Call after autoOwnFromLedger to catch files from external writes. */
   autoOwnFromBaseline(dirtyFiles: string[]): void
+  /** Adopt external files into owned set — for cross-session takeover scenarios.
+   *  When another session crashes and the current session needs to commit its
+   *  leftover changes, adoptFiles bypasses the normal ownership classification
+   *  and forcefully adds files to the owned set.
+   *  Returns the list of files that were actually adopted (were external before). */
+  adoptFiles(files: string[]): string[]
   isOwned(filePath: string | null | undefined): boolean
   isExternal(filePath: string): boolean
   isCoOwned(filePath: string): boolean
@@ -57,6 +63,8 @@ export function createOwnershipLedger(opts: {
   const { baseline, taskLedger } = opts
   const ownedSet = new Set<string>()
   const coOwnedSet = new Set<string>()
+  /** Adopted files — external files force-claimed via adoptFiles (cross-session takeover). */
+  const adoptedSet = new Set<string>()
 
   function registerOwned(filePath: string): void {
     // External files can be co-owned (shared worktree scenario)
@@ -97,6 +105,8 @@ export function createOwnershipLedger(opts: {
 
   function isOwned(filePath: string | null | undefined): boolean {
     if (!filePath) return false
+    // Adopted files (cross-session takeover) are always considered owned
+    if (adoptedSet.has(filePath)) return true
     if (baseline.isExternal(filePath)) return false
     return ownedSet.has(filePath)
   }
@@ -110,7 +120,7 @@ export function createOwnershipLedger(opts: {
   }
 
   function getOwnedFiles(): string[] {
-    return [...ownedSet].sort()
+    return [...ownedSet, ...adoptedSet].sort()
   }
 
   function getCoOwnedFiles(): string[] {
@@ -121,11 +131,11 @@ export function createOwnershipLedger(opts: {
     const base = baseline.getExternalFiles()
     if (!currentDirtyFiles || currentDirtyFiles.length === 0) return base
 
-    // Lazy reclassification: dirty files not owned, co-owned, or baseline-external
+    // Lazy reclassification: dirty files not owned, co-owned, adopted, or baseline-external
     // are dynamic externals — created by other sessions after baseline was taken.
     const dynamic: string[] = []
     for (const f of currentDirtyFiles) {
-      if (!ownedSet.has(f) && !coOwnedSet.has(f) && !baseline.isExternal(f)) {
+      if (!ownedSet.has(f) && !coOwnedSet.has(f) && !adoptedSet.has(f) && !baseline.isExternal(f)) {
         dynamic.push(f)
       }
     }
@@ -135,6 +145,17 @@ export function createOwnershipLedger(opts: {
 
   function scopeToOwned(files: string[]): string[] {
     return files.filter(f => isOwned(f)).sort()
+  }
+
+  function adoptFiles(files: string[]): string[] {
+    const adopted: string[] = []
+    for (const f of files) {
+      if (!ownedSet.has(f) && !coOwnedSet.has(f) && !adoptedSet.has(f)) {
+        adoptedSet.add(f)
+        adopted.push(f)
+      }
+    }
+    return adopted.sort()
   }
 
   function getOwnershipReport(): OwnershipReport {
@@ -156,6 +177,7 @@ export function createOwnershipLedger(opts: {
     registerOwned,
     autoOwnFromLedger,
     autoOwnFromBaseline,
+    adoptFiles,
     isOwned,
     isExternal,
     isCoOwned,
