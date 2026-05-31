@@ -426,10 +426,14 @@ function renderCodeBlock(language: string | undefined, content: string): ReactNo
   const keywords = langConfig?.keywords ?? null
   const caseInsensitive = langConfig?.caseInsensitive ?? false
 
+  const MAX_CODE_LINES = 60
+  const truncated = lines.length > MAX_CODE_LINES
+  const visible = truncated ? lines.slice(0, MAX_CODE_LINES) : lines
+
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={theme.dim} paddingX={1}>
-      {language && <Text color={theme.muted}>{language}</Text>}
-      {lines.map((line, i) => {
+    <Box flexDirection="column" paddingLeft={1}>
+      {language && <Text color={theme.muted}>{'```'}{language}</Text>}
+      {visible.map((line, i) => {
         const segs = highlightLine(line, keywords, caseInsensitive)
         const isComment = segs.length === 1 && segs[0]!.text === line && (line.trimStart().startsWith('//') || line.trimStart().startsWith('#'))
         return (
@@ -438,6 +442,7 @@ function renderCodeBlock(language: string | undefined, content: string): ReactNo
           </Text>
         )
       })}
+      {truncated && <Text color={theme.muted}>… ({lines.length - MAX_CODE_LINES} more lines)</Text>}
     </Box>
   )
 }
@@ -487,8 +492,8 @@ function renderBlock(block: Block, key: number, columns: number): ReactNode {
     }
     case 'blockquote':
       return (
-        <Box key={key} paddingLeft={2} borderStyle="single" borderColor={theme.dim}>
-          <Text color={theme.muted}>{block.content}</Text>
+        <Box key={key} paddingLeft={2}>
+          <Text color={theme.muted}>│ {block.content}</Text>
         </Box>
       )
     case 'hr':
