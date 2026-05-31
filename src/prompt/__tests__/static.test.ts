@@ -61,10 +61,10 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('</git>'))
   })
 
-  it('preserves all original content semantics', () => {
+  it('preserves core prompt semantics', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    // Key phrases from original prompt must survive
-    assert.ok(prompt.includes('想象力'))
+    // Key phrases from the current prompt contract must survive
+    assert.ok(prompt.includes('有理有据'))
     assert.ok(prompt.includes('verify-first'))
     assert.ok(prompt.includes('read_file'))
     assert.ok(prompt.includes('edit_file'))
