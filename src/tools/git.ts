@@ -52,7 +52,10 @@ async function runGit(args: string[], cwd: string): Promise<string> {
     child.on('close', (code) => {
       if (settled) return
       if (code !== 0) {
-        finish('', new Error((stderr || '').trim() || `git exited with status ${code}`))
+        const err = new Error((stderr || '').trim() || `git exited with status ${code}`)
+        const gitErr = err as GitExitError
+        gitErr.exitCode = code ?? 1
+        finish('', err)
       } else {
         let output = stdout
         if (output.length > MAX_OUTPUT) {
@@ -76,6 +79,20 @@ async function runGit(args: string[], cwd: string): Promise<string> {
       }, FORCE_KILL_DELAY)
     }, GIT_TIMEOUT)
   })
+}
+
+interface GitExitError extends Error { exitCode: number }
+
+/** runGit variant that returns exit code instead of throwing — for callers that need to distinguish exit codes. */
+async function runGitExitCode(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  try {
+    const stdout = await runGit(args, cwd)
+    return { code: 0, stdout, stderr: '' }
+  } catch (err) {
+    const exitCode = (err as GitExitError).exitCode
+    if (exitCode !== undefined) return { code: exitCode, stdout: '', stderr: (err as Error).message }
+    throw err // non-exit errors (spawn failure, timeout) still throw
+  }
 }
 
 /** runGit that returns {ok, output} instead of throwing — for callers that need error detail. */
@@ -109,16 +126,10 @@ function getScopedCommitFiles(cwd: string, ownedFiles: string[] | undefined, ses
 async function hasStagedChanges(cwd: string, pathspecs?: string[]): Promise<boolean> {
   const args = ['diff', '--cached', '--quiet']
   if (pathspecs?.length) args.push('--', ...pathspecs)
-  try {
-    await runGit(args, cwd)
-    return false // exit 0 = no staged changes
-  } catch {
-    // runGit throws on any non-zero exit; exit 1 specifically means "has staged changes"
-    // We can't easily distinguish exit codes from the error message, so we rely on
-    // the fact that `git diff --cached --quiet` only exits 0 (no changes) or 1 (has changes)
-    // Other exit codes (2+) indicate real errors and will be re-thrown by runGit
-    return true
-  }
+  const { code } = await runGitExitCode(args, cwd)
+  if (code === 0) return false // no staged changes
+  if (code === 1) return true  // has staged changes
+  throw new Error(`git diff --cached failed with exit code ${code}`)
 }
 
 /** Best-effort: create a safety ref before stash so changes are recoverable (P2). */
