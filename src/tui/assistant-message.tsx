@@ -3,10 +3,22 @@ import { memo } from 'react'
 import { getTheme } from './theme.js'
 import { Markdown } from './markdown-render.js'
 import { gutterGlyph } from './gutter.js'
+import { useViewportLines } from './viewport.js'
 
 interface AssistantMessageProps {
   content: string
 }
+
+/**
+ * Maximum number of logical lines passed to <Markdown> for a Static entry.
+ * Without this cap, long model responses (5–10k+ chars of analysis) create
+ * hundreds of React elements + Yoga layout nodes synchronously inside <Static>,
+ * which blocks the Node event loop so hard that even SIGINT can't land — the
+ * same symptom already documented in pushAssistantEntry's thinking cap.
+ * The streaming viewport (StreamOutput) already limits live display; this
+ * cap limits the archival Static render.
+ */
+const MAX_STATIC_LINES = 120
 
 /**
  * Assistant content message — rendered in <Static> list (print-and-forget to
@@ -17,15 +29,24 @@ interface AssistantMessageProps {
  */
 export const AssistantMessage = memo(function AssistantMessage({ content }: AssistantMessageProps) {
   const theme = getTheme()
+  const maxLines = useViewportLines(0.8, MAX_STATIC_LINES)
 
   if (!content) return null
+
+  const lines = content.split('\n')
+  const isLong = lines.length > maxLines
+  const omittedLines = isLong ? lines.length - maxLines : 0
+  const displayContent = isLong ? lines.slice(-maxLines).join('\n') : content
 
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={1}>
       <Box flexDirection="row" gap={1}>
         <Text color={theme.assistantColor} bold>{gutterGlyph('assistant')}</Text>
         <Box flexDirection="column" flexGrow={1}>
-          <Markdown text={content} />
+          {omittedLines > 0 && (
+            <Text color={theme.muted}>(… {omittedLines} earlier lines omitted)</Text>
+          )}
+          <Markdown text={displayContent} />
         </Box>
       </Box>
     </Box>
