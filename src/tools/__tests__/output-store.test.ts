@@ -46,13 +46,33 @@ describe('output-store', () => {
       assert.ok(result.includes('line2'))
     })
 
-    it('passes through small output unchanged', () => {
-      const small = 'hello world'
+    it('passes through small success output unchanged', () => {
+      const small = Array.from({ length: 5 }, (_, i) => `line ${i}`).join('\n')
       const result = buildModelOutput(small, meta)
-      assert.ok(result.includes(small))
+      assert.ok(result.includes('line 0'))
+      assert.ok(result.includes('line 4'))
+      assert.ok(!result.includes('success output suppressed'))
     })
 
-    it('truncates large output with head/tail by lines', () => {
+    it('suppresses long success output deterministically', () => {
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n')
+      const result = buildModelOutput(lines, meta)
+      assert.ok(result.startsWith('[npm test] exit=0 time=1.5s lines=50'))
+      assert.ok(result.includes('success output suppressed'))
+      assert.ok(!result.includes('line 0'))
+      assert.ok(!result.includes('line 49'))
+    })
+
+    it('preserves failed output instead of success-suppressing it', () => {
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n')
+      const result = buildModelOutput(lines, { ...meta, exitCode: 1 })
+      assert.ok(result.startsWith('[npm test] exit=1'))
+      assert.ok(result.includes('line 0'))
+      assert.ok(result.includes('line 49'))
+      assert.ok(!result.includes('success output suppressed'))
+    })
+
+    it('truncates very large failed output with head/tail by lines', () => {
       const lines = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n')
       const result = buildModelOutput(lines, { ...meta, exitCode: 1 })
       assert.ok(result.includes('lines omitted'))
