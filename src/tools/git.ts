@@ -1,29 +1,81 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { isAbsolute, relative, resolve } from 'node:path'
-import { promisify } from 'node:util'
 import type { Tool, ToolCallParams } from './types.js'
 import { auditCommitTagScope } from './commit-audit.js'
 import { createWorkspaceGuard } from '../agent/workspace-guard.js'
-
-const execFileP = promisify(execFile)
+import { killProcessTree } from './process-kill.js'
 
 const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash', 'stash_pop'] as const
 type GitAction = (typeof ACTIONS)[number]
 
 const MAX_OUTPUT = 50_000
 const GIT_TIMEOUT = 10_000
+const FORCE_KILL_DELAY = 3_000
 
+/**
+ * Run a git command asynchronously with proper process cleanup on timeout.
+ *
+ * Uses spawn with detached:true + process-group kill (-pid) to ensure
+ * the entire git process tree is killed on timeout — prevents zombie
+ * processes that would otherwise accumulate and eventually freeze the TUI.
+ */
 async function runGit(args: string[], cwd: string): Promise<string> {
-  const { stdout, stderr } = await execFileP('git', args, {
-    cwd,
-    encoding: 'utf-8',
-    timeout: GIT_TIMEOUT,
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true, // create process group for clean kill
+    })
+
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let forceKillTimer: ReturnType<typeof setTimeout> | null = null
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer)
+      if (forceKillTimer) clearTimeout(forceKillTimer)
+    }
+
+    const finish = (output: string, error?: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (error) reject(error)
+      else resolve(output)
+    }
+
+    child.stdout!.on('data', (data: Buffer) => { stdout += data.toString() })
+    child.stderr!.on('data', (data: Buffer) => { stderr += data.toString() })
+
+    child.on('close', (code) => {
+      if (settled) return
+      if (code !== 0) {
+        finish('', new Error((stderr || '').trim() || `git exited with status ${code}`))
+      } else {
+        let output = stdout
+        if (output.length > MAX_OUTPUT) {
+          output = output.slice(0, MAX_OUTPUT) + `\n\n[... truncated at ${MAX_OUTPUT} chars, total ${output.length}]`
+        }
+        finish(output)
+      }
+    })
+
+    child.on('error', (err) => {
+      if (settled) return
+      finish('', err)
+    })
+
+    // Timeout: SIGTERM first, then SIGKILL after FORCE_KILL_DELAY
+    timer = setTimeout(() => {
+      killProcessTree(child, 'SIGTERM')
+      forceKillTimer = setTimeout(() => {
+        killProcessTree(child, 'SIGKILL')
+        finish('', new Error('git command timed out'))
+      }, FORCE_KILL_DELAY)
+    }, GIT_TIMEOUT)
   })
-  const output = stdout as string
-  if (output.length > MAX_OUTPUT) {
-    return output.slice(0, MAX_OUTPUT) + `\n\n[... truncated at ${MAX_OUTPUT} chars, total ${output.length}]`
-  }
-  return output
 }
 
 /** runGit that returns {ok, output} instead of throwing — for callers that need error detail. */
@@ -58,22 +110,23 @@ async function hasStagedChanges(cwd: string, pathspecs?: string[]): Promise<bool
   const args = ['diff', '--cached', '--quiet']
   if (pathspecs?.length) args.push('--', ...pathspecs)
   try {
-    await execFileP('git', args, { cwd, encoding: 'utf-8', timeout: GIT_TIMEOUT })
+    await runGit(args, cwd)
     return false // exit 0 = no staged changes
-  } catch (err: unknown) {
-    const code = (err as { code?: number }).code
-    if (code === 1) return true // exit 1 = has staged changes
-    throw err
+  } catch {
+    // runGit throws on any non-zero exit; exit 1 specifically means "has staged changes"
+    // We can't easily distinguish exit codes from the error message, so we rely on
+    // the fact that `git diff --cached --quiet` only exits 0 (no changes) or 1 (has changes)
+    // Other exit codes (2+) indicate real errors and will be re-thrown by runGit
+    return true
   }
 }
 
 /** Best-effort: create a safety ref before stash so changes are recoverable (P2). */
 async function createSafetyRef(cwd: string): Promise<void> {
   try {
-    const { stdout } = await execFileP('git', ['stash', 'create'], { cwd, encoding: 'utf-8', timeout: GIT_TIMEOUT })
-    const sha = (stdout as string).trim()
+    const sha = (await runGit(['stash', 'create'], cwd)).trim()
     if (!sha) return
-    await execFileP('git', ['update-ref', 'refs/kiro-safety/last-stash', sha], { cwd, encoding: 'utf-8', timeout: GIT_TIMEOUT })
+    await runGit(['update-ref', 'refs/kiro-safety/last-stash', sha], cwd)
   } catch { /* best-effort, never block stash */ }
 }
 
