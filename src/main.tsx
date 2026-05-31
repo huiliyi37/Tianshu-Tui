@@ -387,6 +387,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     toolRegistry.register(createRememberTool(claimStore, {
       sessionId,
       getTurn: () => session.getTurnCount(),
+      cwd,
     }))
     recallRef.current = true
   }
