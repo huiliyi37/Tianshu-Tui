@@ -92,8 +92,6 @@ import type { PlaybookStore } from './playbook-store.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
-import { HeuristicStore } from '../compact/heuristic-store.js'
-import { formatHeuristicsForInjection } from '../compact/heuristic-injector.js'
 
 /** Map StarPhase values to PromptEngine phaseClass strings. */
 const PHASE_CLASS_MAP: Record<string, string> = {
@@ -266,7 +264,6 @@ export class AgentLoop {
   private lastCompactTurn: number | null = null
   private cacheAdvisor: CacheAdvisor
   private p3: P3Integration
-  private heuristicStore: HeuristicStore
   private immuneHook: ImmuneHook
   private _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
 
@@ -320,7 +317,6 @@ export class AgentLoop {
       },
     })
 
-    this.heuristicStore = new HeuristicStore(join(sessionDir, 'heuristics.jsonl'))
 
     // Physarum + Immune system — construction only, DB reads deferred to warmupMemories() (S9)
     const meridianDb = this.config.meridianIndexer?.getDb()
@@ -923,17 +919,6 @@ export class AgentLoop {
     if (this.config.sessionRegistry) {
       try { this.config.sessionRegistry.cleanupOldEvents(2 * 60 * 60 * 1000) } catch { /* ignore */ }
     }
-    // Heuristic validation: update confidence based on session outcome
-    try {
-      const hadErrors = this.trajectory.getEntries().some(e => e.status === 'failed')
-      const topRules = this.heuristicStore.getTopK(5)
-      for (const rule of topRules) {
-        this.heuristicStore.recordHit(rule.id)
-        this.heuristicStore.updateConfidence(rule.id, !hadErrors)
-      }
-      this.heuristicStore.prune()
-      await this.heuristicStore.save()
-    } catch { /* non-critical */ }
 
     // Persist Physarum edge state to MeridianDb
     try { this.immuneHook.getPhysarum().save() } catch { /* non-critical */ }
@@ -1052,15 +1037,6 @@ export class AgentLoop {
     } catch {
       // Detection failure must not crash AgentLoop — clear stale warning
       this.config.promptEngine.setWorktreeReality(null)
-    }
-
-    // Load cross-session heuristic rules for injection
-    try {
-      await this.heuristicStore.load()
-      const topRules = this.heuristicStore.getTopK(5)
-      this.config.promptEngine.setHeuristicRules(formatHeuristicsForInjection(topRules) || null)
-    } catch {
-      this.config.promptEngine.setHeuristicRules(null)
     }
 
     this.bindSessionDomain(userInput)

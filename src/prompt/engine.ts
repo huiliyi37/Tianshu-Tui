@@ -69,7 +69,6 @@ export class PromptEngine {
   private cognitiveProjection?: string
   private crossSessionEvents?: string
   private sessionStateText?: string
-  private heuristicRulesText?: string
   private worktreeReality?: WorktreeReality
   /** Plan Mode state — when 'planning', rendered into volatile block */
   private planModeState?: 'off' | 'planning' | 'approved'
@@ -138,7 +137,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, heuristicRules: this.heuristicRulesText, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -409,11 +408,6 @@ export class PromptEngine {
 
   setCrossSessionEvents(events: string | null): void {
     this.crossSessionEvents = events ?? undefined
-  }
-
-  /** Inject cross-session heuristic rules into dynamic appendix. Cache-safe. */
-  setHeuristicRules(rules: string | null): void {
-    this.heuristicRulesText = rules ?? undefined
   }
 
   /**

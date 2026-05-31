@@ -53,8 +53,6 @@ export interface VolatileContext {
    * MUST stay out of buildVolatileBlockInternal to preserve prefix cache stability.
    */
   worktreeReality?: WorktreeReality
-  /** Cross-session heuristic rules — session-level stable, rendered into frozen base */
-  heuristicRules?: string
   /** Plan Mode state — when 'planning', injects a block reminding the agent it may only read */
   planModeState?: 'off' | 'planning' | 'approved'
   /** Project memory loaded from .rivet/knowledge/memory.jsonl (frozen: changes only on file update) */
@@ -133,7 +131,6 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     impactHint: undefined,
     routingReason: undefined,
     cerebellarHint: undefined,
-    // heuristicRules is session-level stable — belongs in frozen base
     // gitStatus moved to dynamic appendix — changes every turn, breaks prefix cache
     gitStatus: undefined,
     // Session snapshot fields — KEEP in FROZEN:
@@ -217,8 +214,6 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
   if (ctx.crossSessionEvents) {
     parts.push(ctx.crossSessionEvents)
   }
-
-  // heuristicRules moved to frozen base (session-level stable)
 
   if (ctx.sessionState) {
     parts.push(ctx.sessionState)
@@ -365,11 +360,6 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
   }
 
-  // heuristicRules is session-level stable — rendered into frozen base
-  // so it doesn't consume Turn 0 uncached delta tokens.
-  if (ctx.heuristicRules) {
-    parts.push(ctx.heuristicRules)
-  }
 
   if (ctx.worktreeReality && ctx.worktreeReality.severity !== 'green') {
     const reasons = ctx.worktreeReality.mismatchReasons
