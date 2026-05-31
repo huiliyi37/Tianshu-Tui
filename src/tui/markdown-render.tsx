@@ -9,6 +9,8 @@ interface Segment {
   italic?: boolean
   code?: boolean
   underline?: boolean
+  color?: string
+  dimmed?: boolean
 }
 
 type BlockType = 'paragraph' | 'code' | 'header' | 'list' | 'blockquote' | 'hr' | 'table'
@@ -23,6 +25,7 @@ interface Block {
 
 interface MarkdownProps {
   text: string
+  language?: string
 }
 
 // --- Inline tokenizer ---
@@ -107,7 +110,7 @@ function parseInline(text: string): Segment[] {
 
 function renderSegments(segments: Segment[]): ReactNode[] {
   return segments.map((seg, idx) => (
-    <Text key={idx} bold={seg.bold} italic={seg.italic} underline={seg.underline} color={seg.code ? 'cyan' : undefined}>
+    <Text key={idx} bold={seg.bold} italic={seg.italic} underline={seg.underline} dimColor={seg.dimmed} color={seg.color ?? (seg.code ? 'cyan' : undefined)}>
       {seg.code ? ` ${seg.text} ` : seg.text}
     </Text>
   ))
@@ -371,12 +374,23 @@ function keywordsForLang(lang: string): LangConfig | null {
   return null
 }
 
+// Syntax token colors — muted pastels that layer well on dark backgrounds
+const SYN = {
+  keyword: '#c792ea',  // soft purple — control flow, declarations
+  string: '#c3e88d',   // muted green — string literals
+  number: '#f78c6c',   // warm orange — numeric literals
+  comment: '#546e7a',  // blue-gray — comments
+  type: '#ffcb6b',     // gold — capitalized identifiers (types/classes)
+  punct: '#89ddff',    // ice blue — operators, brackets, punctuation
+  func: '#82aaff',     // periwinkle — function calls (word followed by `(`)
+}
+
 function highlightLine(line: string, keywords: Set<string> | null, caseInsensitive = false): Segment[] {
   if (!keywords) return [{ text: line }]
 
   const segments: Segment[] = []
 
-  // Comment
+  // Comment detection
   const commentIdx = line.indexOf('//')
   const hashCommentIdx = line.indexOf('#')
   let effectiveCommentIdx = -1
@@ -397,13 +411,22 @@ function highlightLine(line: string, keywords: Set<string> | null, caseInsensiti
     if (/^\s+$/.test(token)) {
       segments.push({ text: token })
     } else if (/^["'`]/.test(token)) {
-      segments.push({ text: token, code: true }) // green via code=true
+      segments.push({ text: token, color: SYN.string })
+    } else if (/^[^\s\w]+$/.test(token)) {
+      // Punctuation / operators
+      segments.push({ text: token, color: SYN.punct })
     } else {
       const matchToken = caseInsensitive ? token.toLowerCase() : token
       if (keywords.has(matchToken)) {
-        segments.push({ text: token, bold: true }) // yellow-ish via bold
-      } else if (/^\d+$/.test(token)) {
-        segments.push({ text: token, italic: true }) // numbers in italic
+        segments.push({ text: token, color: SYN.keyword })
+      } else if (/^\d[\d._]*$/.test(token)) {
+        segments.push({ text: token, color: SYN.number })
+      } else if (/^[A-Z][a-zA-Z0-9]*$/.test(token)) {
+        // PascalCase → type/class
+        segments.push({ text: token, color: SYN.type })
+      } else if (effectiveLine[match.index + token.length] === '(') {
+        // Followed by `(` → function call
+        segments.push({ text: token, color: SYN.func })
       } else {
         segments.push({ text: token })
       }
@@ -411,7 +434,7 @@ function highlightLine(line: string, keywords: Set<string> | null, caseInsensiti
   }
 
   if (commentPart) {
-    segments.push({ text: commentPart }) // dim via caller
+    segments.push({ text: commentPart, color: SYN.comment })
   }
 
   return segments
@@ -435,12 +458,7 @@ function renderCodeBlock(language: string | undefined, content: string): ReactNo
       {language && <Text color={theme.muted}>{'```'}{language}</Text>}
       {visible.map((line, i) => {
         const segs = highlightLine(line, keywords, caseInsensitive)
-        const isComment = segs.length === 1 && segs[0]!.text === line && (line.trimStart().startsWith('//') || line.trimStart().startsWith('#'))
-        return (
-          <Text key={i} color={isComment ? theme.muted : undefined}>
-            {isComment ? line : renderSegments(segs)}
-          </Text>
-        )
+        return <Text key={i}>{renderSegments(segs)}</Text>
       })}
       {truncated && <Text color={theme.muted}>… ({lines.length - MAX_CODE_LINES} more lines)</Text>}
     </Box>
@@ -511,6 +529,20 @@ export function hasMarkdown(text: string): boolean {
     || /^#{1,6}\s/m.test(text) || /^[-*]\s/m.test(text) || /^>\s/m.test(text)
 }
 
+/** Detect `  N│ ` numbered-line format from read_file tool output */
+const NUMBERED_LINE_RE = /^\s*\d+│/
+
+/** Guess language from content heuristics */
+function guessLang(text: string): string | undefined {
+  const sample = text.slice(0, 500)
+  if (/\bimport\b.*\bfrom\b|export\s+(default|const|function)|=>\s*[{(]|:\s*(string|number|boolean)\b/.test(sample)) return 'typescript'
+  if (/\bdef\b|\bclass\b.*:$|import\s+\w+/m.test(sample)) return 'python'
+  if (/\bfunc\b|\bpackage\b\s+\w+|:=/.test(sample)) return 'go'
+  if (/\bfn\b|\blet\s+mut\b|\bimpl\b/.test(sample)) return 'rust'
+  if (/^#!/.test(sample) || /\bfi\b|\bdone\b|\besac\b/.test(sample)) return 'bash'
+  return undefined
+}
+
 /**
  * Markdown — outer shell with fast-path for plain text.
  *
@@ -518,10 +550,42 @@ export function hasMarkdown(text: string): boolean {
  * without ever calling parseBlocks or useTerminalSize.
  * Only markdown-bearing text enters the heavier MarkdownBlocks path.
  */
-export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
+export const Markdown = memo(function Markdown({ text, language }: MarkdownProps) {
   if (!text) return null
+  // Detect numbered-line tool output (e.g. "   1│ import ...")
+  if (!hasMarkdown(text) && NUMBERED_LINE_RE.test(text)) {
+    return <NumberedCodeBlock text={text} language={language} />
+  }
   if (!hasMarkdown(text)) return <Text>{text}</Text>
   return <MarkdownBlocks text={text} />
+})
+
+/** Renders numbered-line tool output with gutter dimming + syntax highlighting */
+const NumberedCodeBlock = memo(function NumberedCodeBlock({ text, language }: { text: string; language?: string }) {
+  const theme = getTheme()
+  const lang = language ?? guessLang(text)
+  const langConfig = lang ? keywordsForLang(lang) : null
+  const keywords = langConfig?.keywords ?? null
+  const caseInsensitive = langConfig?.caseInsensitive ?? false
+  const lines = useMemo(() => text.split('\n'), [text])
+
+  return (
+    <Box flexDirection="column">
+      {lines.map((line, i) => {
+        const pipeIdx = line.indexOf('│')
+        if (pipeIdx === -1) return <Text key={i}>{line}</Text>
+        const gutter = line.slice(0, pipeIdx + 1)
+        const code = line.slice(pipeIdx + 1)
+        const segs = keywords ? highlightLine(code, keywords, caseInsensitive) : [{ text: code }]
+        return (
+          <Text key={i}>
+            <Text color={theme.dim}>{gutter}</Text>
+            {renderSegments(segs)}
+          </Text>
+        )
+      })}
+    </Box>
+  )
 })
 
 const MarkdownBlocks = memo(function MarkdownBlocks({ text }: MarkdownProps) {

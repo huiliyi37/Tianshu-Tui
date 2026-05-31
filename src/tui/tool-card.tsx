@@ -25,6 +25,27 @@ function compactPath(rawPath: string | undefined): string {
   return filename
 }
 
+/** Map file extension to language hint for syntax highlighting */
+function extToLang(rawPath: string | undefined): string | undefined {
+  if (!rawPath) return undefined
+  const ext = rawPath.split('.').pop()?.toLowerCase()
+  switch (ext) {
+    case 'ts': case 'tsx': case 'js': case 'jsx': case 'mjs': case 'mts': return 'typescript'
+    case 'py': return 'python'
+    case 'go': return 'go'
+    case 'rs': return 'rust'
+    case 'sh': case 'bash': case 'zsh': return 'bash'
+    case 'java': return 'java'
+    case 'cpp': case 'cc': case 'cxx': case 'c': case 'h': case 'hpp': return 'cpp'
+    case 'sql': return 'sql'
+    case 'rb': return 'ruby'
+    case 'php': return 'php'
+    case 'swift': return 'swift'
+    case 'kt': case 'kts': return 'kotlin'
+    default: return undefined
+  }
+}
+
 export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs }: ToolCardProps) {
   const theme = getTheme()
   const [localExpanded, setLocalExpanded] = useState(false)
@@ -63,7 +84,7 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
         {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text color={theme.muted}> {totalLines} lines</Text>}
         {focused && totalLines > MAX_COLLAPSED_LINES ? <Text color={theme.muted}> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
       </Text>
-      <Markdown text={displayText} />
+      <Markdown text={displayText} language={extToLang(rawPath)} />
       {truncated > 0 && (
         <Text color={theme.muted}>  {truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
       )}
