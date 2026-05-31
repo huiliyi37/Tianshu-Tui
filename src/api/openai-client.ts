@@ -7,6 +7,7 @@ import { fetchWithTimeout } from './fetch-timeout.js'
 import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
+import { wireAbortToReaderCancel } from './abort-reader.js'
 
 export interface OpenAIClientConfig {
   baseUrl: string
@@ -53,28 +54,6 @@ const SLOW_FIRST_BYTE_TIMEOUT_MS = 180_000
 const SLOW_READ_TIMEOUT_MS = 300_000
 /** Providers whose thinking mode can exceed 90s before first token. */
 const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek'])
-
-/**
- * Wire an external AbortSignal to a ReadableStream reader so that aborting
- * the signal immediately cancels the reader.  This unblocks any pending
- * reader.read() call, preventing the deadlock where signal.aborted is true
- * but the stream loop is stuck waiting for the next SSE chunk.
- *
- * Returns a cleanup function that removes the event listener.
- */
-function wireAbortToReaderCancel(
-  signal: AbortSignal,
-  reader: ReadableStreamDefaultReader<unknown>,
-): () => void {
-  const onAbort = () => reader.cancel().catch(() => {})
-  if (signal.aborted) {
-    // Already aborted — cancel immediately (don't add listener for a past event)
-    reader.cancel().catch(() => {})
-    return () => {}
-  }
-  signal.addEventListener('abort', onAbort, { once: true })
-  return () => signal.removeEventListener('abort', onAbort)
-}
 
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()

@@ -5,6 +5,7 @@ import type { StreamCallbacks } from './stream-client.js'
 import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
+import { wireAbortToReaderCancel } from './abort-reader.js'
 
 export interface CodexClientConfig {
   baseUrl: string
@@ -15,20 +16,6 @@ export interface CodexClientConfig {
 
 const CODEX_USER_AGENT = 'codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9'
 const CODEX_ORIGINATOR = 'codex_cli_rs'
-
-/** No export needed — only used within this module. */
-function wireAbortToReaderCancel(
-  signal: AbortSignal,
-  reader: ReadableStreamDefaultReader<unknown>,
-): () => void {
-  const onAbort = () => reader.cancel().catch(() => {})
-  if (signal.aborted) {
-    reader.cancel().catch(() => {})
-    return () => {}
-  }
-  signal.addEventListener('abort', onAbort, { once: true })
-  return () => signal.removeEventListener('abort', onAbort)
-}
 
 export class CodexClient implements StreamClient {
   constructor(private config: CodexClientConfig) {}

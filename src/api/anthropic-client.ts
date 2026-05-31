@@ -3,6 +3,7 @@ import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from './oai-types.
 import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
+import { wireAbortToReaderCancel } from './abort-reader.js'
 
 export interface AnthropicClientConfig {
   baseUrl: string
@@ -42,20 +43,6 @@ interface AnthropicRequestBody {
   messages: AnthropicMessage[]
   stream: boolean
   thinking?: { type: 'enabled'; budget_tokens: number }
-}
-
-/** No export needed — only used within this module. */
-function wireAbortToReaderCancel(
-  signal: AbortSignal,
-  reader: ReadableStreamDefaultReader<unknown>,
-): () => void {
-  const onAbort = () => reader.cancel().catch(() => {})
-  if (signal.aborted) {
-    reader.cancel().catch(() => {})
-    return () => {}
-  }
-  signal.addEventListener('abort', onAbort, { once: true })
-  return () => signal.removeEventListener('abort', onAbort)
 }
 
 export class AnthropicClient implements StreamClient {
