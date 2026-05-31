@@ -1,6 +1,6 @@
 # Project Memory System — 设计方案
 
-> 状态：**P1-P3 已实施，待补测试 + 修复已知问题** | 作者：天枢 | 日期：2026-06-01
+> 状态：**P1-P3 已实施，P4-P6 待实施** | 作者：天枢 | 日期：2026-06-01
 >
 > 本文档面向多用户场景（开源/闭源、团队协作），不假设单人使用。
 
@@ -11,6 +11,9 @@
 | P1：存储层 | ✅ 已实施 | `project-memory-writer.ts` + `project-memory-loader.ts`（commit 079a05d） |
 | P2：注入层 | ✅ 已实施 | `volatile-snapshot.ts` + `volatile.ts`（commit 079a05d） |
 | P3：写入接入 | ✅ 已实施 + 已修复 | tool-pipeline.ts batch compact（commit f86305f）+ remember.ts cwd 传递（commit e1407b3） |
+| P4：maybeCompact 持久化 | ❌ 待实施 | 压缩前调用 persistExtractedMemories，防止信息静默丢失 |
+| P5：commit fact 升级 | ❌ 待实施 | commitFact scope 从 session → project，所有提交自动进入 project memory |
+| P6：session memory 升级门控 | ❌ 待实施 | 高置信度 decision/failure_pattern 自动升级为 project scope |
 | 测试 | ❌ 未补 | `project-memory-writer.test.ts` + `project-memory-loader.test.ts` 未写 |
 | 并发安全 | ❌ 未验证 | 多会话并发写同一个 memory.jsonl 未处理 |
 | claim-extractor 升级 | ❌ 未做 | commit fact / user_constraint 仍为 session scope，未升级为 project |
@@ -442,19 +445,159 @@ if ((input.scope ?? 'session') === 'project') {
 - 团队共享知识通过 `AGENTS.md` + `.rivet/rules/*.md`（版本控制的静态知识）
 - 未来可加 `~/.config/rivet/knowledge/` 作为用户级全局 memory
 
-## 8. 已知待办（下个会话）
+## 8. 记忆保全与跨会话升级（P4-P6）
+
+> 核心问题：当前压缩路径会丢弃大量上下文，而 project memory 是跨会话唯一的持久存储。
+> 但 project memory 的写入只靠模型主动调 remember 或 scope=project 的 claim（当前 claim-extractor
+> 从不产生 project scope）——导致有价值的信息在压缩时静默丢失。
+>
+> 以下三项改进建立了"压缩前自动保全 → 跨会话持久化"的桥梁，同时通过门控条件防止噪声膨胀。
+
+### P4 — maybeCompact 压缩前持久化（解决 200K 窗口信息丢失）
+
+**现状**：`persistExtractedMemories` 只在 emergency 路径（enforceContextCeiling 95%、trySessionSplit 86%）调用。标准 Tier 1/2 压缩路径 `maybeCompact` 不做任何持久化——信息直接被 `microCompactOai` 截断或轮次移除丢弃。
+
+**改动**：在 `maybeCompact` 的 `replaceMessages` 之前调用 `persistExtractedMemories`。
+
+```
+修改文件：src/agent/compaction-controller.ts — maybeCompact 方法
+位置：this.deps.session.replaceMessages(compacted) 之前
+
+新增逻辑：
+  this.persistExtractedMemories(this.deps.getTrajectoryEntries())
+```
+
+**门控条件（防止过度写入）**：
+
+| 条件 | 说明 |
+|------|------|
+| `compacted.length < messages.length` | 只在压缩实际减少了消息数时才持久化（避免无效写入） |
+| `compactDecision.tier >= 2` | Tier 1（watch）只标记不压缩，无需持久化 |
+| 提取的记忆上限 20 条 | `extractSessionMemories` 已有 `slice(-20)` 上限 |
+
+**成本分析**：
+- `extractSessionMemories` 是纯同步正则提取，无 LLM 调用
+- `SessionPersist.appendMemory` 是追加 JSON 到 `.memory.json`，I/O < 1ms
+- 对 200K 窗口，Tier 2 压缩通常在 60-70% 时触发，会话内约有 30-50 轮对话，可提取约 10-20 条记忆
+
+**平衡考量**：
+- ❌ 不对 Tier 1 持久化 — Tier 1 只是标记 watch，不做任何消息修改
+- ❌ 不在每次工具调用后持久化 — 频率太高，且信息未经过压缩筛选
+- ✅ 只在压缩实际发生时持久化 — 信息正要被丢弃，此时挽救最高效
+
+### P5 — commit fact 自动升级为 project scope
+
+**现状**：`claim-extractor.ts` 的 `commitFact()` 生成 `kind='decision', scope='session'` 的 claim。commit 是架构决策的最佳载体（hash + message + files），但它们随会话结束而消亡。
+
+**改动**：`commitFact()` 的 scope 从 `'session'` 改为 `'project'`。
+
+```
+修改文件：src/context/claim-extractor.ts — commitFact 函数
+改动：scope: 'session' → scope: 'project'
+```
+
+**为什么所有 commit 都升级，而不只升级"大提交"**：
+
+| 考量 | 理由 |
+|------|------|
+| 提交本身就是门控 | 提交意味着代码通过了 typecheck + 测试 + 交付门禁，已经是高价值信号 |
+| 16KB 上限保护 | `memory.jsonl` 有 200 条上限 + 16KB 大小限制，满后按 confidence 排序淘汰最弱条目 |
+| 小提交不可怕 | `fix: typo` 这种提交在 memory 中占一行，confidence=0.95，不会挤掉重要决策 |
+| 模型可覆盖 | 高置信度的架构决策自然排在小修复前面 |
+
+**实际写入流程**：
+1. `commitFact()` → scope='project' → `claim-store.propose()`
+2. `tool-pipeline.ts` 检测到 `proposal.scope === 'project'` → `appendProjectMemory()`
+3. 每次 append 后检查条目数 → 超过 200 条触发 `compactProjectMemory()` 去重 + 裁剪
+4. 加载时按 confidence 排序，4K token 预算内只渲染最高价值条目
+
+**token 膨胀估算**：
+- 每条 commit fact 约 80-120 字符（~30 tokens）
+- 一个长会话约 10-20 次提交 = 300-600 tokens 新增
+- 加载时 4K token 渲染上限会自然淘汰早期低价值提交
+
+### P6 — extractSessionMemories 高置信度自动升级
+
+**现状**：`extractSessionMemories` 提取 5 种记忆（user_preference, decision, file_observation, failure_pattern, task_state），全部写入 session memory（`.memory.json`），会话结束后不再可用。
+
+**改动**：在 `persistExtractedMemories` 中，对提取的记忆做二次筛选，高价值条目同时写入 project memory。
+
+```
+修改文件：src/agent/compaction-controller.ts — persistExtractedMemories 方法
+
+新增逻辑（在 appendMemory 之后）：
+  const memories = extractSessionMemories(messages, { recentToolTargets })
+  for (const m of memories) {
+    if (shouldPromoteToProject(m)) {
+      appendProjectMemory(cwd, claimFromMemory(m))
+    }
+  }
+```
+
+**升级门控（`shouldPromoteToProject`）**：
+
+| kind | 升级条件 | 理由 |
+|------|---------|------|
+| `decision` | **全部升级** | 架构决策是 project memory 最核心的内容 |
+| `failure_pattern` | 出现 ≥ 2 次去重后仍存在 | 重复出现的错误模式才是项目级问题，一次性 typo 不值得 |
+| `user_preference` | 长度 ≥ 20 字符 | 短偏好（"用 tabs"）可能是上下文相关的；长偏好（"本项目使用 node:test + node:assert/strict，禁止 jest/vitest"）是项目规则 |
+| `file_observation` | **不升级** | 文件观察太细碎，数量太多，会快速填满 200 条上限 |
+| `task_state` | **不升级** | 任务状态是会话级临时信息 |
+
+**平衡考量**：
+- decision 全升级：一个会话中模型通常只做 3-5 个显著决策，不会膨胀
+- failure_pattern 要求 ≥ 2 次：一次性 CI 跑挂不值得持久化，但反复出现的错误模式（如"TypeScript strict 不允许隐式 any"）是宝贵知识
+- file_observation 不升级：一个会话可读 50+ 文件，全部升级会淹没真正重要的决策
+- 200 条上限是最终安全网：即使门控不够严格，物理上限防止无限增长
+
+### P4-P6 整体数据流
+
+```
+工具调用 → claim-extractor → scope=project (P5: commit fact)
+                           ↓
+                    claim-store.propose()
+                           ↓
+              tool-pipeline 检测 scope=project → appendProjectMemory()
+                           ↓
+                   .rivet/knowledge/memory.jsonl
+                           ↓
+              loadProjectMemory → frozen volatile block → prefix cache
+
+压缩触发（Tier 2+）:
+  maybeCompact → persistExtractedMemories (P4: 压缩前保全)
+                     ↓
+              session memory (.memory.json) — 会话级
+                     ↓
+              extractSessionMemories → shouldPromoteToProject (P6: 升级门控)
+                     ↓
+              appendProjectMemory → .rivet/knowledge/memory.jsonl — 项目级
+```
+
+### 成本汇总
+
+| 改动 | 新增 token/turn | 新增 I/O | 新增 LLM 调用 |
+|------|----------------|----------|---------------|
+| P4 | 0（写入不增加 prompt） | +1 次 JSON append | 0 |
+| P5 | +0-30 tokens/commit（prefix cache 覆盖后为 0） | +1 次 JSONL append/commit | 0 |
+| P6 | +0-100 tokens/session（prefix cache 覆盖后为 0） | +1-3 次 JSONL append/session | 0 |
+
+**结论**：三项改动的边际 token 成本均为零（进入 frozen block 后由 prefix cache 覆盖），I/O 开销可忽略不计。
+
+## 9. 已知待办（下个会话）
 
 | 优先级 | 项目 | 说明 |
 |--------|------|------|
 | **P0** | 补测试 | `project-memory-writer.test.ts` + `project-memory-loader.test.ts` |
-| **P1** | claim-extractor 升级 | `commitFact` scope 从 `session` → `project`；`user_constraint` 检测逻辑升级 |
+| **P1** | P4: maybeCompact 持久化 | `compaction-controller.ts` 在 replaceMessages 前调 `persistExtractedMemories` |
+| **P1** | P5: commit fact 升级 | `claim-extractor.ts` commitFact scope → 'project' |
+| **P1** | P6: session memory 升级门控 | `compaction-controller.ts` 在 persistExtractedMemories 中加 shouldPromoteToProject |
 | **P1** | 并发安全验证 | 实测两个进程并发 append + compact 的行为 |
 | **P2** | .gitignore | 将 `.rivet/knowledge/memory.jsonl` 加入默认 gitignore |
 | **P2** | 用户级全局 memory | `~/.config/rivet/knowledge/` 支持 |
 | **P3** | Memory 膨胀监控 | 在 TUI 中显示当前 memory 条目数 + token 估算 |
 | **P3** | 记忆去噪 | 定期清理过时/低置信度条目（类似 gbrain 的 decay 机制） |
 
-## 9. 不做什么
+## 10. 不做什么
 
 1. **不做向量检索** — 当前子串匹配够用，4K token 注入量不需要语义搜索
 2. **不做 LLM 自动提取** — 保持现有 extractClaimsFromToolResult 的规则提取
@@ -462,7 +605,7 @@ if ((input.scope ?? 'session') === 'project') {
 4. **不改 Dream** — Dream 保持独立，继续做它的 curated 归档
 5. **不做知识图谱** — 当前项目不需要实体关系推理
 
-## 10. gbrain 参考架构摘要
+## 11. gbrain 参考架构摘要
 
 > gbrain (github.com/garrytan/gbrain) 是一个 645 文件的个人知识库系统，使用 PGLite 数据库。
 > 以下是我们参考过的核心机制，以及为什么 Rivet 选择了不同的路径。
