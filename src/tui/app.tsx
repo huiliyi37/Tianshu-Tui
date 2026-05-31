@@ -741,6 +741,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         type: 'system',
         content: `⚠️  Unknown command: ${cmdName}\n\nType /help to see available commands.`,
       }))
+      setIsStreaming(false)
       return
     }
 

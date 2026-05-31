@@ -19,7 +19,22 @@ interface StreamOutputProps {
 export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: StreamOutputProps) {
   const theme = getTheme()
 
-  if (!text) return null
+  if (!text) {
+    // When the stream is active but no visible text has arrived yet
+    // (model thinking, between tool turns, slow network), show a subtle
+    // indicator so the UI doesn't appear frozen.
+    if (isStreaming) {
+      return (
+        <Box flexDirection="column" paddingX={1} marginBottom={1}>
+          <Box flexDirection="row" gap={1}>
+            <Text color={theme.assistantColor} bold>{gutterGlyph('assistant')}</Text>
+            <Text dimColor>◌ Waiting for model…</Text>
+          </Box>
+        </Box>
+      )
+    }
+    return null
+  }
 
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={1}>

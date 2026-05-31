@@ -31,14 +31,20 @@ export function createDreamHook(deps: DreamHookDeps): PostSessionRuntimeHook {
       const hasEnoughFiles = evidenceState.filesModified.size >= 3
       if (!hasPassedTests && !hasEnoughFiles) return
 
-      persistDream(deps.cwd, {
+      // Defer sync I/O off the critical path so onTurnComplete fires without
+      // blocking on readFileSync + writeFileAtomicSync (~1-50ms depending on
+      // knowledge file size and filesystem). persistDream is fire-and-forget;
+      // failures are logged by writeFileAtomicSync internally.
+      const cwd = deps.cwd
+      const input = {
         filesModified: [...evidenceState.filesModified],
         filesRead: [...evidenceState.filesRead],
         verifications: evidenceState.verifications,
         decisions: deps.getDecisions(),
         trajectoryEntries: deps.getTrajectory().map(toDreamTrajectoryEntry),
         sessionId: deps.sessionId,
-      })
+      }
+      setImmediate(() => persistDream(cwd, input))
     },
   }
 }
