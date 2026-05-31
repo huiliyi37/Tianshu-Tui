@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, type RefObject } from 'react'
+import { spawnSync } from 'node:child_process'
 import { Box, Text, useInput, Static } from 'ink'
 import { WelcomeScreen } from './onboarding.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
@@ -185,6 +186,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const liveToolsRef = useRef<LogEntry[]>([])
 
+  // Identity markers for GlanceBar: git branch (read once — stable per session) + active star domain
+  const gitBranch = useMemo(() => {
+    try {
+      return spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: process.cwd(), encoding: 'utf-8', timeout: 5000 }).stdout.trim() || undefined
+    } catch { return undefined }
+  }, [])
+  const [starDomain, setStarDomain] = useState<string | undefined>(() => agent.getSessionDomain()?.name)
+
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -247,12 +256,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
    *  Each entry has independent viewport-aware height limit — prevents total overflow. */
   const pushAssistantEntry = useCallback((content: string, thinking?: string) => {
     if (thinking) {
-      // Cap archived thinking to the tail window. GLM/MiMo mandatory thinking is
+      // Cap archived thinking to the tail window. GLM/MiMo/GPT mandatory thinking is
       // unbounded; pushing the full buffer into <Static> renders it synchronously
       // (countPhysicalLines/stringWidth over every char + Yoga layout), freezing
-      // the event loop so hard that even SIGINT can't land. Matches the live
-      // sliding window (cc20a20) — the full buffer has no consumer past display.
-      const capped = appendStreamWindow('', thinking, LIVE_STREAM_MAX_CHARS)
+      // the event loop so hard that even SIGINT can't land.
+      // Use a much smaller cap than live streaming (10k vs 50k): the Static render
+      // only needs enough for the viewport-limited display; the full buffer has no
+      // consumer past display. 10k chars ≈ 300–500 lines → countPhysicalLines over
+      // ~500 short lines is <5ms; 50k was ~50ms with CJK stringWidth.
+      const STATIC_THINKING_CAP = 10_000
+      const capped = appendStreamWindow('', thinking, STATIC_THINKING_CAP)
       pushStatic(createLogEntry({ type: 'thinking_message', content: capped }))
     }
     if (content) {
@@ -410,6 +423,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (prev.phaseDurationMs === phaseMs && prev.turnCount === turnCountRef.current) return prev
         return { ...prev, phaseDurationMs: phaseMs, turnCount: turnCountRef.current, maxTurns: maxTurnsRef.current }
       })
+      // Sync active star domain (bound on first run during streaming)
+      const dn = agent.getSessionDomain()?.name
+      setStarDomain(prev => (prev === dn ? prev : dn))
     }, 1000)
     return () => {
       if (activityIntervalRef.current) {
@@ -1243,11 +1259,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {liveTools.map(log => (
           log.toolName === 'ask_user_question'
             ? <QuestionCard key={log.id} question={log.content} />
-            : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} liveToolCount={liveTools.length} />
+            : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} />
         ))}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
-          <StreamOutput text={streamingText} isStreaming={isStreaming} liveToolCount={liveTools.length} />
+          <StreamOutput text={streamingText} isStreaming={isStreaming} />
         )}
         {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
           <Box paddingX={2}>
@@ -1263,6 +1279,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           model={model}
           isStreaming={isStreaming}
           historyCount={historyItems.length}
+          domain={starDomain}
+          branch={gitBranch}
         />
         {fluencyStale && termRows >= 24 && (
           <Box paddingX={1}>
