@@ -29,14 +29,27 @@ describe('PressureMonitor', () => {
     assert.equal(result.thrashing, true)
   })
 
-  it('suggests task decomposition when thrashing', () => {
+  it('suggests task decomposition when thrashing AND context is under pressure', () => {
     const pm = new PressureMonitor(100_000)
     pm.recordCompaction(1)
     pm.recordCompaction(2)
     pm.recordCompaction(3)
     const result = pm.check(70_000, 4)
 
+    assert.equal(result.thrashing, true)
     assert.equal(result.suggestion, 'task_decomposition')
+  })
+
+  it('does NOT suggest task decomposition when thrashing but context is small', () => {
+    const pm = new PressureMonitor(100_000)
+    pm.recordCompaction(1)
+    pm.recordCompaction(2)
+    pm.recordCompaction(3)
+    // After compaction context dropped to 30% — well below watch threshold
+    const result = pm.check(30_000, 4)
+
+    assert.equal(result.thrashing, true)
+    assert.equal(result.suggestion, undefined)
   })
 
   // ── fastGrowth detection (原则⑥ 速率比阈值) ─────────────────
@@ -78,7 +91,8 @@ describe('PressureMonitor', () => {
     pm.recordCompaction(1)
     pm.recordCompaction(2)
     pm.recordCompaction(3)
-    const result = pm.check(50_000, 5)
+    // Use 70k so tier > 0 → suggestion should fire
+    const result = pm.check(70_000, 5)
     assert.equal(result.thrashing, true)
     assert.equal(result.suggestion, 'task_decomposition')
   })

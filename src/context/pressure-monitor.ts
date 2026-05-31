@@ -51,12 +51,14 @@ export class PressureMonitor {
       ? this.cvmTokenAccumulator / this.contextWindow
       : 0
 
+    const shouldCompact = tier > 0
+
     return {
       tier,
-      shouldCompact: tier > 0,
+      shouldCompact,
       thrashing,
       fastGrowth,
-      suggestion: thrashing ? 'task_decomposition' : undefined,
+      suggestion: thrashing && shouldCompact ? 'task_decomposition' : undefined,
       ratio,
       growthRate,
       cvmOverheadRatio,
