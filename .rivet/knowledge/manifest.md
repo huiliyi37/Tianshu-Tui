@@ -49,6 +49,17 @@ Its purpose is to help agents find the right documents before modifying sensitiv
 
 ## Prompt and memory hygiene
 
+### .rivet/knowledge/guardrails.md
+- kind: agent-behavior-guardrails
+- contents: read-loop detection rules, strategy-switching rules, anti-pattern prevention
+- load_when:
+  - modifying agent behavior or prompt rules
+  - discussing agent looping or wasted tokens
+  - reviewing tool usage patterns
+- guardrail:
+  - these rules describe *why* patterns are bad, not just *what* to avoid
+  - update when new anti-patterns are observed in session telemetry
+
 ### .rivet/knowledge/prompt.md
 - kind: prompt-history-reference
 - contents: historical session records about prompt modifications
