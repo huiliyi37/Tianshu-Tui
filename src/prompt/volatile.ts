@@ -57,6 +57,8 @@ export interface VolatileContext {
   heuristicRules?: string
   /** Plan Mode state — when 'planning', injects a block reminding the agent it may only read */
   planModeState?: 'off' | 'planning' | 'approved'
+  /** Project memory loaded from .rivet/knowledge/memory.jsonl (frozen: changes only on file update) */
+  projectMemoryBlock?: string
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -273,8 +275,11 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<project-instructions>\n${escapeXml(md)}\n</project-instructions>`)
   }
 
-  // Project knowledge is intentionally not injected into the prompt.
-  // Use the recall tool to search .rivet/knowledge/*.md on demand.
+  // Project memory — auto-loaded from .rivet/knowledge/memory.jsonl.
+  // Rendered into frozen base so it benefits from prefix cache (turn 2+ cost = 0).
+  if (ctx.projectMemoryBlock) {
+    parts.push(ctx.projectMemoryBlock)
+  }
 
   // Only render git status if explicitly provided — no cache fallback here.
   // buildStableVolatileBlock passes gitStatus: undefined to keep FROZEN prefix stable;

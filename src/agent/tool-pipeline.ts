@@ -11,6 +11,7 @@ import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
 import { validatePath } from '../tools/path-validate.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
+import { appendProjectMemory, compactProjectMemory } from '../context/project-memory-writer.js'
 import { detectConflicts } from '../context/conflict-detect.js'
 import { createAntibodyProposal } from '../context/antibody.js'
 import { buildImportGraph, invalidateFile } from './import-graph.js'
@@ -762,6 +763,16 @@ ${check.formatted}`
       )
       for (const proposal of proposals) {
         deps.config.contextClaimStore.propose(proposal)
+        // Auto-write project-scoped claims to .rivet/knowledge/memory.jsonl
+        // so they survive across sessions and auto-inject into every prompt.
+        if (proposal.scope === 'project') {
+          const claim = deps.config.contextClaimStore.listClaims()
+            .find(c => c.text.trim().toLowerCase() === proposal.text.trim().toLowerCase())
+          if (claim) {
+            appendProjectMemory(deps.cwd, claim)
+            compactProjectMemory(deps.cwd)
+          }
+        }
       }
       if (proposals.some(p => p.kind === 'file_observation')) {
         const allClaims = deps.config.contextClaimStore.listClaims()

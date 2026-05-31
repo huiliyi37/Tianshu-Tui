@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { gitStatusCache } from './volatile-git.js'
 import { summarizeGitStatus } from './git-status-summary.js'
+import { loadProjectMemory } from '../context/project-memory-loader.js'
 import type { VolatileContext } from './volatile.js'
 
 export interface SnapshotInput {
@@ -11,6 +12,7 @@ export interface SnapshotInput {
   sessionMemoryBlock?: string
   workingSet?: string[]
   activeDomain?: VolatileContext['activeDomain']
+  projectMemoryBlock?: string
 }
 
 function readRivetMdOnce(cwd: string): string | undefined {
@@ -39,6 +41,8 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
     ? Object.freeze([...input.workingSet])
     : undefined
 
+  const projectMemoryBlock = input.projectMemoryBlock ?? loadProjectMemory(input.cwd).content
+
   return Object.freeze({
     cwd: input.cwd,
     rivetMd,
@@ -46,5 +50,6 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
     workingSet,
     activeDomain: input.activeDomain ?? undefined,
     sessionMemoryBlock: input.sessionMemoryBlock,
+    projectMemoryBlock,
   }) as VolatileContext
 }

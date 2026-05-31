@@ -1,6 +1,7 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimKind, ContextClaimScope } from '../context/claims.js'
+import { appendProjectMemory, compactProjectMemory } from '../context/project-memory-writer.js'
 
 interface RememberInput {
   kind: ContextClaimKind
@@ -13,6 +14,7 @@ interface RememberInput {
 export interface RememberContext {
   sessionId: string
   getTurn: () => number
+  cwd?: string
 }
 
 const KINDS: ContextClaimKind[] = [
@@ -78,6 +80,12 @@ Claims stored with scope='project' survive across sessions.`,
         createdAt: Date.now(),
         tags: input.tags ?? [],
       })
+
+      // Auto-write project-scoped claims to .rivet/knowledge/memory.jsonl
+      if ((input.scope ?? 'session') === 'project' && ctx?.cwd) {
+        appendProjectMemory(ctx.cwd, claim)
+        compactProjectMemory(ctx.cwd)
+      }
 
       return {
         content: `Claim stored [${claim.id.slice(0, 8)}] (${claim.kind}, ${claim.scope}, c=${claim.confidence.toFixed(2)})\n  ${claim.text.slice(0, 200)}`,
