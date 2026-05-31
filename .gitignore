@@ -18,6 +18,7 @@ docs/sessions/
 .claude/worktrees/
 .claude/skills/**/*.bak
 .claude/*.lock
+.claude/PRPs/reviews/
 .wolf/
 .omc/
 .github/workflows/
