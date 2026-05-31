@@ -34,6 +34,12 @@ export class TurnIntentController {
       return 'continue'
     }
 
+    // vigor < 0.3 时自动适应，不弹确认框
+    // 策略已在 vigor-hook 中自动调整（提高 reasoning effort、commit threshold 等）
+    if (input.vigor && input.vigor.vigor < 0.3) {
+      return 'continue'
+    }
+
     const preview = buildIntentPreview({
       strategy: input.strategy,
       vigor: input.vigor,

@@ -42,11 +42,14 @@ describe('intent preview core', () => {
     }), false)
   })
 
-  it('shows intent for high commit threshold, negative phasic, dead-end, or thrashing', () => {
+  it('shows intent for high commit threshold, dead-end, or thrashing', () => {
     assert.equal(shouldShowIntent({ strategy: strategy({ commitThreshold: 0.9 }), vigor: null, sensorium: null, pheromones: [] }), true)
-    assert.equal(shouldShowIntent({ strategy: null, vigor: createVigorState({ phasic: -0.7 }), sensorium: null, pheromones: [] }), true)
     assert.equal(shouldShowIntent({ strategy: null, vigor: null, sensorium: null, pheromones: [deadEnd('src/a.ts')] }), true)
     assert.equal(shouldShowIntent({ strategy: null, vigor: null, sensorium: null, pheromones: [], thrashingSuggestion: 'task_decomposition' }), true)
+  })
+
+  it('does NOT show intent for low vigor — auto-adapted by vigor-hook', () => {
+    assert.equal(shouldShowIntent({ strategy: null, vigor: createVigorState({ phasic: -0.7, vigor: 0.2 }), sensorium: null, pheromones: [] }), false)
   })
 
   it('builds a concise preview with warnings and alternatives', () => {
@@ -63,6 +66,8 @@ describe('intent preview core', () => {
     assert.equal(intent.summary, '处理 src/api/client.ts')
     assert.ok(intent.confidence < 0.7)
     assert.ok(intent.warnings!.some(w => w.includes('dead-end')))
+    // phasic 警告已移除——vigor-hook 自动适应
+    assert.ok(!intent.warnings!.some(w => w.includes('警觉模式')))
     assert.ok(intent.alternatives!.length > 0)
   })
 

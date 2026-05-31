@@ -21,7 +21,7 @@ export interface BuildIntentPreviewInput {
 
 export function shouldShowIntent(input: BuildIntentPreviewInput): boolean {
   if (input.strategy && input.strategy.commitThreshold > 0.8) return true
-  if (input.vigor && input.vigor.phasic < -0.5) return true
+  // vigor < 0.3 → 触发自动适应（策略已在 vigor-hook 中调整），不再弹确认框
   if (input.pheromones.some(p => p.signal === 'dead-end' && p.strength > 0)) return true
   if (input.thrashingSuggestion === 'task_decomposition') return true
   return false
@@ -51,7 +51,7 @@ export function buildIntentPreview(input: BuildIntentPreviewInput): IntentPrevie
   const warnings: string[] = []
   const deadEnds = unique(input.pheromones.filter(p => p.signal === 'dead-end' && p.strength > 0).map(p => p.path))
   if (input.strategy && input.strategy.commitThreshold > 0.8) warnings.push('high commit threshold')
-  if (input.vigor && input.vigor.phasic < -0.5) warnings.push('警觉模式：最近反馈显著低于预期')
+  // vigor 低时不再弹警告——策略已在 vigor-hook 中自动调整
   if (input.thrashingSuggestion === 'task_decomposition') warnings.push('检测到上下文/压缩抖动，建议拆分任务')
   if (deadEnds.length > 0) warnings.push(`历史 dead-end: ${deadEnds.slice(0, 3).join(', ')}`)
 
