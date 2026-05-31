@@ -761,19 +761,18 @@ ${check.formatted}`
         { sessionId: deps.sessionId, turn: deps.sessionTurnCount, eventId: `turn-${deps.sessionTurnCount}:${tu.name}:${tu.id}` },
         existingPaths,
       )
+      let projectMemoryDirty = false
       for (const proposal of proposals) {
-        deps.config.contextClaimStore.propose(proposal)
+        const claim = deps.config.contextClaimStore.propose(proposal)
         // Auto-write project-scoped claims to .rivet/knowledge/memory.jsonl
         // so they survive across sessions and auto-inject into every prompt.
         if (proposal.scope === 'project') {
-          const claim = deps.config.contextClaimStore.listClaims()
-            .find(c => c.text.trim().toLowerCase() === proposal.text.trim().toLowerCase())
-          if (claim) {
-            appendProjectMemory(deps.cwd, claim)
-            compactProjectMemory(deps.cwd)
-          }
+          appendProjectMemory(deps.cwd, claim)
+          projectMemoryDirty = true
         }
       }
+      // Compact once after the batch, not per-claim.
+      if (projectMemoryDirty) compactProjectMemory(deps.cwd)
       if (proposals.some(p => p.kind === 'file_observation')) {
         const allClaims = deps.config.contextClaimStore.listClaims()
         if (allClaims.length !== lastConflictCheckCount) {
