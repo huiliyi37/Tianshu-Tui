@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { track } from '../tools/process-tracker.js'
 
 export interface ThetaCheckResult {
   errors: string[]
@@ -26,11 +27,11 @@ export function runThetaCheck(cwd: string, timeoutMs = 3000): Promise<ThetaCheck
   const start = Date.now()
 
   return new Promise(resolve => {
-    const child = spawn('npx', ['tsc', '--noEmit', '--skipLibCheck'], {
+    const child = track(spawn('npx', ['tsc', '--noEmit', '--skipLibCheck'], {
       cwd,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    }))
 
     let stdout = ''
     let stderr = ''

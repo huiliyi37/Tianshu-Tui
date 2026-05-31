@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SessionRegistry, EventInput } from './session-registry.js'
+import { track } from '../tools/process-tracker.js'
 
 export interface StartupHealthCheckOptions {
   cwd: string
@@ -50,7 +51,7 @@ export function runStartupHealthCheck(options: StartupHealthCheckOptions): void 
     ? [localTsc, ['--noEmit', '--pretty', 'false']]
     : ['npx', ['tsc', '--noEmit', '--pretty', 'false']]
 
-  execFile(cmd, args, {
+  track(execFile(cmd, args, {
     cwd,
     timeout: timeoutMs,
     maxBuffer: 1024 * 1024, // 1MB
@@ -77,5 +78,5 @@ export function runStartupHealthCheck(options: StartupHealthCheckOptions): void 
         // SQLite might be busy; skip silently
       }
     }
-  })
+  }))
 }

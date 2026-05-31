@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { track } from '../tools/process-tracker.js'
 
 /**
  * Execute a short-lived git command and capture its stdout.
@@ -10,11 +11,11 @@ function gitSpawn(
   timeoutMs = 100,
 ): Promise<string> {
   return new Promise(resolve => {
-    const child = spawn('git', args, {
+    const child = track(spawn('git', args, {
       cwd,
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: timeoutMs,
-    })
+    }))
 
     let stdout = ''
     child.stdout?.on('data', (chunk: Buffer) => {

@@ -16,6 +16,7 @@
 
 import { spawn } from 'node:child_process'
 import { writeFileSync, unlinkSync } from 'node:fs'
+import { track } from '../tools/process-tracker.js'
 
 // ─── Types ────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ export interface DiffHunk {
 
 async function git(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = track(spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }))
     const chunks: Buffer[] = []
     const errChunks: Buffer[] = []
 
