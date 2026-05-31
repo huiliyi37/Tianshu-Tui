@@ -23,7 +23,7 @@ describe('MCTSPlanningHook', () => {
     let capturedResult: MCTSPlanResult | undefined
 
     const hook = createMCTSPlanningHook({
-      explore: async (_prompt, idx) => `independent approach ${idx} for system design`,
+      callSeedModel: async (prompt) => `independent approach based on ${prompt.slice(0, 10)}`,
       branches: 3,
       planningTurn: 1,
       getUserMessage: () => 'refactor auth module',
@@ -47,7 +47,7 @@ describe('MCTSPlanningHook', () => {
   it('does not run on non-planning turns', async () => {
     const injected: string[] = []
     const hook = createMCTSPlanningHook({
-      explore: async () => 'path',
+      callSeedModel: async () => 'path',
       planningTurn: 1,
       getUserMessage: () => 'task',
     })
@@ -63,7 +63,7 @@ describe('MCTSPlanningHook', () => {
   it('warns when all paths are junk', async () => {
     const injected: string[] = []
     const hook = createMCTSPlanningHook({
-      explore: async () => 'auth auth auth OAuth2 auth auth OAuth2 auth',
+      callSeedModel: async () => 'auth auth auth OAuth2 auth auth OAuth2 auth',
       branches: 2,
       planningTurn: 1,
       getUserMessage: () => 'auth OAuth2',

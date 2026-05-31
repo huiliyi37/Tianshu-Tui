@@ -1,10 +1,11 @@
 import type { PreTurnRuntimeHook, RuntimeHookContext } from '../runtime-hooks.js'
 import { AnchorVault, type SealedAnchor } from '../anchor-vault.js'
 import { MCTSPlanner, type MCTSPlanResult, type MCTSPlannerOpts } from '../mcts-planner.js'
+import { buildSeedPrompt } from '../seed-prompt-builder.js'
 
 export interface MCTSPlanningHookOpts {
-  /** The explore function — calls a lightweight LLM with a divergent prompt */
-  explore: MCTSPlannerOpts['explore']
+  /** Calls a lightweight LLM with the given prompt, returns its response */
+  callSeedModel: (prompt: string) => Promise<string>
   /** Number of branches to explore (default: 3) */
   branches?: number
   /** Which turn to activate MCTS planning (default: 1) */
@@ -16,19 +17,24 @@ export interface MCTSPlanningHookOpts {
 }
 
 /**
- * MCTS Planning Hook — on the configured turn, explores multiple candidate
- * approaches via lightweight model, filters junk, injects all surviving
- * seeds as inspiration for the main model.
+ * MCTS Planning Hook — on the configured turn, sends de-anchored prompts
+ * to a lightweight seed model, filters junk, injects all surviving seeds
+ * as inspiration for the main model.
  */
 export function createMCTSPlanningHook(opts: MCTSPlanningHookOpts): PreTurnRuntimeHook {
   const vault = new AnchorVault()
+  let sealed: SealedAnchor | null = null
+  let hasRun = false
+
+  const explore: MCTSPlannerOpts['explore'] = async (_task, idx) => {
+    return opts.callSeedModel(buildSeedPrompt(sealed!, idx))
+  }
+
   const planner = new MCTSPlanner({
-    explore: opts.explore,
+    explore,
     branches: opts.branches ?? 3,
   })
   const planningTurn = opts.planningTurn ?? 1
-  let sealed: SealedAnchor | null = null
-  let hasRun = false
 
   return {
     phase: 'preTurn',
