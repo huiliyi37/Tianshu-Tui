@@ -173,6 +173,48 @@ function isBashReadOnly(input: Record<string, unknown>): boolean {
   return /^(cat|head|tail|grep|rg|find|ls|tree|wc|git\s+(log|diff|status|show|blame|rev-parse|branch)|echo|printf|type|which|file)\b/.test(cmd)
 }
 
+function isDietNoInfoReadResult(content: string): boolean {
+  return content.includes('[diet:redundant]') || content.includes('[diet:useless]')
+}
+
+function toolTargetFromInput(toolName: string, input: Record<string, unknown>): string {
+  if (typeof input.file_path === 'string') return input.file_path
+  if (typeof input.path === 'string') return input.path
+  if (typeof input.command === 'string') return input.command.slice(0, 50)
+  return toolName
+}
+
+function countRecentReadLoopPlaceholders(
+  entries: { tool: string; target: string; status: string; errorClass?: string; resultSummary?: string }[],
+  target: string,
+): number {
+  return entries
+    .slice(-8)
+    .filter(entry =>
+      entry.tool === 'read_file'
+      && entry.target === target
+      && isDietNoInfoReadResult(entry.resultSummary ?? ''),
+    ).length
+}
+
+function buildReadLoopStrategySignal(
+  toolName: string,
+  target: string,
+  content: string,
+  priorNoInfoReads: number,
+): string | null {
+  if (toolName !== 'read_file') return null
+  if (!isDietNoInfoReadResult(content)) return null
+  if (priorNoInfoReads < 1) return null
+
+  const targetLabel = target.length > 80 ? `${target.slice(0, 77)}...` : target
+  return [
+    '',
+    '[策略信号：读取循环]',
+    `这次 read_file 没有提供新信息。不要继续立刻读取 ${targetLabel}；请切换到 grep / repo_graph / ask_user_question，或说明为什么必须再次读取。`,
+  ].join('\n')
+}
+
 async function artifactIntercept(
   content: string,
   toolName: string,
@@ -516,7 +558,8 @@ export async function executeToolUse(
 
     // Execute via TurnHarness
     // P3-C: trigger speculative pre-execution for next likely tool
-    const toolTarget = (tu.input.file_path ?? tu.input.path ?? tu.input.command ?? '') as string
+    const toolTarget = toolTargetFromInput(tu.name, tu.input)
+    const priorReadLoopPlaceholders = countRecentReadLoopPlaceholders(deps.trajectory.getEntries(), toolTarget)
     deps.p3?.onToolStart(tu.name)
 
     // P3-C: check if we already have a speculative result for this tool call
@@ -625,6 +668,9 @@ ${check.formatted}`
         if (hints) finalContent = finalContent + '\n' + hints
       }
     }
+
+    const readLoopSignal = buildReadLoopStrategySignal(tu.name, toolTarget, finalContent, priorReadLoopPlaceholders)
+    if (readLoopSignal) finalContent = `${finalContent}${readLoopSignal}`
 
     // Trace recording
     traceStore = finishTraceEvent(traceStore, traceId, {

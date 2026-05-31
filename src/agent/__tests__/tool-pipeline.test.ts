@@ -67,6 +67,62 @@ describe('executeToolUse', () => {
     }
   }
 
+  it('adds read-loop strategy signal after repeated diet no-info read_file results', async () => {
+    const deps = makeDeps({
+      trajectory: {
+        getEntries: () => [
+          {
+            turn: 1,
+            tool: 'read_file',
+            target: 'src/agent/loop.ts',
+            durationMs: 10,
+            status: 'success',
+            inputSummary: '',
+            resultSummary: '[diet:redundant] re-read later',
+          },
+        ],
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: '[diet:useless] retried successfully', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-read-loop', name: 'read_file', input: { file_path: 'src/agent/loop.ts' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const content = (result.toolResult as any).content as string
+    assert.ok(content.includes('[策略信号：读取循环]'))
+    assert.ok(content.includes('grep / repo_graph / ask_user_question'))
+  })
+
+  it('does not add read-loop strategy signal for first diet placeholder', async () => {
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: '[diet:redundant] re-read later', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-read-loop-first', name: 'read_file', input: { file_path: 'src/agent/loop.ts' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const content = (result.toolResult as any).content as string
+    assert.ok(!content.includes('[策略信号：读取循环]'))
+  })
+
   it('records applied plan_close as file_write in task ledger', async () => {
     const events: any[] = []
     const owned: string[] = []
