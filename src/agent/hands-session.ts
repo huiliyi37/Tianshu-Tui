@@ -97,7 +97,7 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
     } catch (parseError) {
       const message = parseError instanceof Error ? parseError.message : String(parseError)
       // Retry: send repair prompt and re-parse (mirrors worker-session.ts retry loop)
-      let repaired = false
+      result = buildBlockedWorkerResult(config.order, message) // default — overwritten on success
       for (let attempt = 0; attempt < config.maxTurns && attempt < 2; attempt++) {
         try {
           const repairPrompt = buildWorkerRepairPrompt(config.order, text, message)
@@ -115,15 +115,11 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
           if (apiError) break // API error during repair — fall through to blocked
 
           result = parseWorkerResult(text, config.order.id)
-          repaired = true
           break
         } catch {
           // Repair attempt failed — try again
           continue
         }
-      }
-      if (!repaired) {
-        result = buildBlockedWorkerResult(config.order, message)
       }
     }
 
