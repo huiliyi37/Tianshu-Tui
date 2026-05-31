@@ -14,9 +14,13 @@ interface GlanceBarProps {
   model: string
   isStreaming: boolean
   historyCount?: number
+  /** Active star domain name (e.g. 天枢) — identity marker */
+  domain?: string
+  /** Current git branch — identity marker */
+  branch?: string
 }
 
-export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount }: GlanceBarProps) {
+export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch }: GlanceBarProps) {
   const theme = getTheme()
   const { columns } = useTerminalSize()
   const phaseGlyph = PHASE_GLYPHS[phase] ?? ''
@@ -28,22 +32,27 @@ export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, 
 
   // Adaptive layout: narrow terminal → compact mode
   const narrow = columns < 60
+  // Branch names can be long (e.g. feat/...); cap to keep GlanceBar single-line (flicker budget)
+  const branchLabel = branch && branch.length > 24 ? branch.slice(0, 23) + '…' : branch
 
   return (
     <Box paddingX={narrow ? 0 : 1}>
-      {!narrow && <Text color={theme.muted}>{model.slice(0, 20)}</Text>}
-      {!narrow && <Text color={theme.dim}> · </Text>}
-      {phaseGlyph && <Text color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
+      {domain && <Text bold color={theme.primary}>☆ {domain}</Text>}
+      {domain && branchLabel && !narrow && <Text color={theme.dim}> · </Text>}
+      {branchLabel && !narrow && <Text color={theme.secondary}>⎇ {branchLabel}</Text>}
+      {(domain || (branchLabel && !narrow)) && <Text color={theme.dim}> · </Text>}
+      {phaseGlyph && <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
       {!phaseGlyph && <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>}
-      <Text color={theme.dim}> · </Text>
+      {isStreaming && <Text color={theme.primary}> ●</Text>}
+      <Text color={theme.dim}>   ·   </Text>
       <Text color={cacheColor}>{cachePct}%</Text>
       <Text color={theme.dim}> · </Text>
       <Text color={theme.muted}>${cost.toFixed(2)}</Text>
+      {!narrow && <Text color={theme.muted}> · {model.slice(0, 20)}</Text>}
       {historyCount !== undefined && !narrow && (
-        <><Text color={theme.dim}> · </Text><Text color={theme.muted}>{historyCount} msgs</Text></>
+        <Text color={theme.muted}> · {historyCount} msgs</Text>
       )}
-      {isStreaming && <Text color={theme.primary}> ●</Text>}
-      {alertPulse?.hint && <Text color={theme.error}> {alertPulse.hint}</Text>}
+      {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
     </Box>
   )
 })
