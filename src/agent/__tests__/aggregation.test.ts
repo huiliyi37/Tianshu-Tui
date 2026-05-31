@@ -29,6 +29,9 @@ describe('aggregateResults', () => {
     const aggregated = aggregateResults(results, 'all_required')
     assert.equal(aggregated.length, 2)
     assert.ok(aggregated.some(r => r.status === 'failed'))
+    // Blocked result should preserve the 'blocked' context in its risk message
+    const blockedFailed = aggregated.find(r => r.workOrderId === 'b')
+    assert.ok(blockedFailed!.risks.some(r => r.includes('blocked') && r.includes('unparseable or connectivity')))
   })
 
   it('all_required: passes when all pass', () => {
@@ -50,6 +53,18 @@ describe('aggregateResults', () => {
     assert.equal(aggregated.length, 2)
   })
 
+  it('first_success: falls back to blocked result with findings when all blocked', () => {
+    const results = [
+      result('a', 'blocked'),
+      { ...result('b', 'blocked'), findings: [{ claim: 'found X', evidence: 'grep', confidence: 'high' as const }] },
+    ]
+    const aggregated = aggregateResults(results, 'first_success')
+    assert.equal(aggregated.length, 1)
+    assert.equal(aggregated[0]!.workOrderId, 'b')
+    assert.equal(aggregated[0]!.status, 'blocked')
+    assert.ok(aggregated[0]!.risks.some(r => r.includes('best-effort')))
+  })
+
   it('majority: returns the majority status', () => {
     const results = [
       result('a', 'passed'),
@@ -64,6 +79,21 @@ describe('aggregateResults', () => {
     const results = [result('a', 'passed'), result('b', 'failed')]
     const aggregated = aggregateResults(results, 'majority')
     assert.equal(aggregated.length, 2)
+  })
+
+  it('majority: when majority is blocked, includes passed results as degraded signal', () => {
+    const results = [
+      result('a', 'blocked'),
+      result('b', 'blocked'),
+      result('c', 'passed'),
+    ]
+    const aggregated = aggregateResults(results, 'majority')
+    // Should include both blocked (majority) and passed (degraded signal)
+    assert.ok(aggregated.some(r => r.status === 'blocked'))
+    assert.ok(aggregated.some(r => r.status === 'passed'))
+    // Blocked results should have a caveat about passed results being available
+    const blocked = aggregated.find(r => r.status === 'blocked')
+    assert.ok(blocked!.risks.some(r => r.includes('passed results available')))
   })
 
   it('blocks implementation result that changed files without verified evidence', () => {

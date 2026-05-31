@@ -8,7 +8,7 @@ import {
   type WorkOrder,
   type WorkerResult,
 } from './work-order.js'
-import { buildWorkerPrompt } from './worker-prompts.js'
+import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
 import { materializeScope } from './worktree-scope.js'
 import type { AgentCallbacks } from './loop.js'
 import type { Usage } from '../api/types.js'
@@ -94,8 +94,37 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
     let result: WorkerResult
     try {
       result = parseWorkerResult(text, config.order.id)
-    } catch {
-      result = buildBlockedWorkerResult(config.order, 'Worker result unparseable')
+    } catch (parseError) {
+      const message = parseError instanceof Error ? parseError.message : String(parseError)
+      // Retry: send repair prompt and re-parse (mirrors worker-session.ts retry loop)
+      let repaired = false
+      for (let attempt = 0; attempt < config.maxTurns && attempt < 2; attempt++) {
+        try {
+          const repairPrompt = buildWorkerRepairPrompt(config.order, text, message)
+          text = await config.runAgent(repairPrompt, {
+            onTextDelta: (delta) => { text += delta },
+            onThinkingDelta: () => {},
+            onToolUse: () => {},
+            onToolResult: () => {},
+            onTurnComplete: (usage) => { turnUsage = usage },
+            onError: (err) => { apiError = err.message },
+            onAbort: () => { apiError = 'aborted' },
+            onApprovalRequired: async () => false,
+          }, wt.path)
+
+          if (apiError) break // API error during repair — fall through to blocked
+
+          result = parseWorkerResult(text, config.order.id)
+          repaired = true
+          break
+        } catch {
+          // Repair attempt failed — try again
+          continue
+        }
+      }
+      if (!repaired) {
+        result = buildBlockedWorkerResult(config.order, message)
+      }
     }
 
     if (diff) {
