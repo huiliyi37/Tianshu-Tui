@@ -9,5 +9,6 @@ export function createSurfaceDefinitions(): SurfaceDefinition[] {
     { id: 'command-palette', layer: 'popup', discoverable: false, render: () => null },
     { id: 'approval', layer: 'popup', discoverable: false, render: () => null },
     { id: 'intent', layer: 'popup', discoverable: false, render: () => null },
+    { id: 'rewind', layer: 'popup', discoverable: false, render: () => null },
   ]
 }

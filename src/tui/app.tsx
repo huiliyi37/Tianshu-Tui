@@ -40,6 +40,7 @@ import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, 
 import { buildCockpitSnapshot } from './cockpit/state.js'
 import type { Panel } from './cockpit/types.js'
 import { CommandPalette, getPaletteCommands } from './command-palette.js'
+import { RewindList, type RewindEntry } from './rewind-list.js'
 import { openInEditor } from './external-editor.js'
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from './slash-commands.js'
 import { BlockStreamWriter } from './block-stream-writer.js'
@@ -357,7 +358,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const promptQueueRef = useRef({ running: false })
   const steerBuffer = useRef(new SteerBuffer())
   const [steerPending, setSteerPending] = useState(false)
-  const inputBarRef = useRef<{ clear: () => void; hasContent: () => boolean }>({ clear() {}, hasContent() { return false } })
+  const inputBarRef = useRef<{ clear: () => void; hasContent: () => boolean; setValue: (v: string) => void }>({ clear() {}, hasContent() { return false }, setValue() {} })
 
   const flushThink = useCallback(() => {
     thinkTimer.current = null
@@ -504,25 +505,33 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       return
     }
 
-    // Escape — close surface overlay/popup or double-press to interrupt streaming
+    // Escape — close surface overlay/popup, double-press to interrupt streaming or open rewind
     if (_key.escape) {
       if (activeOverlay || surfaceRouter.activeOf('popup')) {
         surfacePop()
         return
       }
+      const now = Date.now()
       if (isStreaming) {
-        const now = Date.now()
         if (lastEscRef.current && now - lastEscRef.current < 1000) {
           agent.abort()
           steerBuffer.current.clear()
           setIsStreaming(false)
           pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
           lastEscRef.current = 0
+          surfacePush('rewind')
         } else {
           lastEscRef.current = now
-          pushStatic(createLogEntry({ type: 'system', content: '(Esc again to interrupt)' }))
+          pushStatic(createLogEntry({ type: 'system', content: '(Esc again to rewind)' }))
         }
         return
+      }
+      // Idle: double-ESC opens rewind
+      if (lastEscRef.current && now - lastEscRef.current < 1000) {
+        lastEscRef.current = 0
+        surfacePush('rewind')
+      } else {
+        lastEscRef.current = now
       }
       return
     }
@@ -588,6 +597,45 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       setPendingApproval(null)
     }
   })
+
+  // --- Rewind ---
+  const getRewindEntries = useCallback((): RewindEntry[] => {
+    const msgs = session.getMessages()
+    const entries: RewindEntry[] = []
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]!
+      if (m.role === 'user' && typeof m.content === 'string') {
+        entries.push({ index: i, content: m.content })
+      }
+    }
+    return entries
+  }, [session])
+
+  const handleRewind = useCallback((entry: RewindEntry) => {
+    // Truncate messages to before the selected user message
+    const msgs = session.getMessages()
+    session.replaceMessages(msgs.slice(0, entry.index))
+
+    // Truncate log history: remove entries from the corresponding user_message onward
+    const items = historyBufferRef.current.items()
+    // Find the log entry matching this user message (search from the end)
+    let cutIdx = items.length
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i]!.type === 'user_message' && items[i]!.content === entry.content) {
+        cutIdx = i
+        break
+      }
+    }
+    historyBufferRef.current.clear()
+    for (let i = 0; i < cutIdx; i++) {
+      historyBufferRef.current.push(items[i]!)
+    }
+    setHistoryVersion(v => v + 1)
+
+    // Restore text to input bar
+    inputBarRef.current.setValue(entry.content)
+    pushStatic(createLogEntry({ type: 'system', content: `⏪ Rewound — message restored to input.` }))
+  }, [session, pushStatic])
 
   const handleSubmit = useCallback((_userInput: string) => {
     let userInput = _userInput
@@ -1343,6 +1391,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
                 return
               }
               handleSubmit(name)
+            }}
+            onCancel={() => surfacePop()}
+          />
+        )}
+        {isSurfaceVisible('rewind') && (
+          <RewindList
+            entries={getRewindEntries()}
+            onSelect={(entry) => {
+              surfacePop()
+              handleRewind(entry)
             }}
             onCancel={() => surfacePop()}
           />

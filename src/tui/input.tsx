@@ -12,7 +12,7 @@ interface InputBarProps {
   disabled?: boolean
   vimEnabled?: boolean
   steerMode?: boolean
-  inputRef?: React.MutableRefObject<{ clear: () => void; hasContent: () => boolean }>
+  inputRef?: React.MutableRefObject<{ clear: () => void; hasContent: () => boolean; setValue: (v: string) => void }>
 }
 
 export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }: InputBarProps) {
@@ -25,6 +25,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
       inputRef.current = {
         clear: () => setValue(''),
         hasContent: () => value.length > 0,
+        setValue: (v: string) => setValue(v),
       }
     }
   })
