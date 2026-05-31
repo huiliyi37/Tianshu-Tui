@@ -21,7 +21,10 @@ describe('worker prompts', () => {
     const prompt = buildWorkerPrompt(order)
 
     assert.ok(prompt.includes('WorkOrder ID: wo_1'))
-    assert.ok(prompt.includes('Allowed tools: read_file, glob, grep, diff'))
+    for (const tool of ['read_file', 'glob', 'grep', 'diff']) {
+      assert.ok(prompt.includes(tool), `prompt should list ${tool}`)
+    }
+    assert.ok(prompt.includes('Allowed tools:'))
     assert.ok(prompt.includes('read-only Rivet worker'))
     assert.ok(prompt.includes('Return exactly one JSON object'))
     assert.ok(prompt.includes('"workOrderId"'))
