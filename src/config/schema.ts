@@ -52,6 +52,16 @@ export const permissionsSchema = z.object({
   allow: z.array(permissionAllowRuleSchema).default([]),
 })
 
+export const antiAnchoringSchema = z.object({
+  enabled: z.boolean().default(false),
+  blindExploration: z.boolean().default(true),
+  mctsPlanning: z.boolean().default(true),
+  branches: z.number().int().positive().default(3),
+  planningTurn: z.number().int().positive().default(1),
+  projectionThreshold: z.number().min(0).max(1).default(0.4),
+  seedMaxTokens: z.number().int().positive().default(512),
+}).default({})
+
 export const agentSchema = z.object({
   approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),
@@ -61,6 +71,8 @@ export const agentSchema = z.object({
   songlineEnabled: z.boolean().default(false),
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). */
   hearthObserveEnabled: z.boolean().default(false),
+  /** Explicit opt-in for anti-anchoring harness hooks (prompt-flow intervention). */
+  antiAnchoring: antiAnchoringSchema,
   permissions: permissionsSchema.default({}),
 })
 

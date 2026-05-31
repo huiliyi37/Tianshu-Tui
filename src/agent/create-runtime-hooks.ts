@@ -14,6 +14,9 @@ import { createConsistencyCheckHook } from './hooks/consistency-check-hook.js'
 import { createMeridianHook, type MeridianHookDeps } from './hooks/meridian-hook.js'
 import { createSonglineRuntimeHook } from './hooks/songline-hook.js'
 import { createHearthObserveHook } from './hooks/hearth-observe-hook.js'
+import { createBlindExplorationHook } from './hooks/blind-exploration-hook.js'
+import { createMCTSPlanningHook } from './hooks/mcts-planning-hook.js'
+import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import type { PlaybookStore } from './playbook-store.js'
@@ -64,6 +67,16 @@ export interface RuntimeHookDeps {
   /** Optional cycle relay bridge for Songline substrate. */
   setCycleClose?: (sessionId: string, closeHash: string) => void
 
+  // ── Anti-anchoring (explicit opt-in, prompt-flow intervention) ──
+  /** Explicit opt-in for anti-anchoring harness hooks. Default: disabled. */
+  antiAnchoring?: AntiAnchoringConfig
+  /** Returns the original user task for MCTS planning. */
+  getInitialUserMessage?: () => string | null
+  /** Lightweight seed model call for MCTS planning branches. */
+  callAntiAnchoringSeedModel?: (prompt: string) => Promise<string>
+  /** Observe MCTS planning result for diagnostics/tests. */
+  onAntiAnchoringMCTSResult?: Parameters<typeof createMCTSPlanningHook>[0]['onResult']
+
   // ── HEARTH observe (pure diagnostic, no intervention) ──
   /** Explicit opt-in for HEARTH anchor invariant observation. Default: false. */
   hearthObserveEnabled?: boolean
@@ -101,6 +114,19 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     }),
     ...(deps.getFileObservations
       ? [createConsistencyCheckHook({ getFileObservations: deps.getFileObservations })]
+      : []),
+    ...(deps.antiAnchoring?.enabled && deps.antiAnchoring.blindExploration
+      ? [createBlindExplorationHook({ activeTurns: [deps.antiAnchoring.planningTurn] })]
+      : []),
+    ...(deps.antiAnchoring?.enabled && deps.antiAnchoring.mctsPlanning && deps.callAntiAnchoringSeedModel && deps.getInitialUserMessage
+      ? [createMCTSPlanningHook({
+        callSeedModel: deps.callAntiAnchoringSeedModel,
+        branches: deps.antiAnchoring.branches,
+        planningTurn: deps.antiAnchoring.planningTurn,
+        threshold: deps.antiAnchoring.projectionThreshold,
+        getUserMessage: deps.getInitialUserMessage,
+        onResult: deps.onAntiAnchoringMCTSResult,
+      })]
       : []),
     createVigorPostToolHook({
       getPredictionAccumulator: deps.getPredictionAccumulator,

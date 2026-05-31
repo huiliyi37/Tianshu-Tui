@@ -10,6 +10,8 @@ export interface MCTSPlanningHookOpts {
   branches?: number
   /** Which turn to activate MCTS planning (default: 1) */
   planningTurn?: number
+  /** Projection threshold — candidates above this are filtered as junk */
+  threshold?: number
   /** Getter for the user's original message (task anchor) */
   getUserMessage: () => string | null
   /** Callback to receive the planning result */
@@ -33,6 +35,7 @@ export function createMCTSPlanningHook(opts: MCTSPlanningHookOpts): PreTurnRunti
   const planner = new MCTSPlanner({
     explore,
     branches: opts.branches ?? 3,
+    threshold: opts.threshold,
   })
   const planningTurn = opts.planningTurn ?? 1
 

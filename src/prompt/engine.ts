@@ -325,6 +325,10 @@ export class PromptEngine {
     }
   }
 
+  getModel(): string {
+    return this.config.model
+  }
+
   getFingerprint(): PrefixFingerprint {
     return this.fingerprint
   }

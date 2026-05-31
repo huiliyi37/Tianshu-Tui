@@ -83,12 +83,23 @@ describe('config permissions schema', () => {
 
     assert.equal(agent.songlineEnabled, false)
     assert.equal(parsed.agent.songlineEnabled, false)
+    assert.equal(agent.antiAnchoring.enabled, false)
+    assert.equal(parsed.agent.antiAnchoring.enabled, false)
   })
 
   it('parses explicit Songline runtime opt-in', () => {
     const agent = agentSchema.parse({ songlineEnabled: true })
 
     assert.equal(agent.songlineEnabled, true)
+  })
+
+  it('parses explicit anti-anchoring runtime opt-in with defaults', () => {
+    const agent = agentSchema.parse({ antiAnchoring: { enabled: true } })
+
+    assert.equal(agent.antiAnchoring.enabled, true)
+    assert.equal(agent.antiAnchoring.blindExploration, true)
+    assert.equal(agent.antiAnchoring.mctsPlanning, true)
+    assert.equal(agent.antiAnchoring.branches, 3)
   })
 
   it('routes repo summarization workers to V4 Flash by default', () => {

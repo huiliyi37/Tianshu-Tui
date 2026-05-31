@@ -6,6 +6,7 @@ import type { AgentConfig } from './loop.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
 import type { ProviderConfig, Config } from '../config/schema.js'
+import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AuthProvider } from '../auth/types.js'
 import { getProviderProfile } from '../api/provider-profile.js'
 
@@ -28,6 +29,7 @@ export interface AgentConfigInput {
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual'
   songlineEnabled?: boolean
   hearthObserveEnabled?: boolean
+  antiAnchoring?: AntiAnchoringConfig
   auth?: AuthProvider
   habituationThreshold?: number
 }
@@ -58,6 +60,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
     songlineEnabled: params.config.agent.songlineEnabled,
     hearthObserveEnabled: params.config.agent.hearthObserveEnabled,
+    antiAnchoring: params.config.agent.antiAnchoring,
     auth: params.auth,
     habituationThreshold: params.habituationThreshold,
   }
@@ -65,7 +68,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'songlineEnabled' | 'hearthObserveEnabled'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -105,6 +108,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     approvalMode: input.approvalMode,
     songlineEnabled: input.songlineEnabled,
     hearthObserveEnabled: input.hearthObserveEnabled,
+    antiAnchoring: input.antiAnchoring,
     autoReasoning: true,
     reasoningFloor: model.reasoningEffort,
   }

@@ -91,6 +91,15 @@ export const DEFAULT_CONFIG: Config = {
     autoReasoning: false,
     songlineEnabled: false,
     hearthObserveEnabled: false,
+    antiAnchoring: {
+      enabled: false,
+      blindExploration: true,
+      mctsPlanning: true,
+      branches: 3,
+      planningTurn: 1,
+      projectionThreshold: 0.4,
+      seedMaxTokens: 512,
+    },
     permissions: {
       allow: [],
     },

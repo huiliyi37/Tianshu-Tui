@@ -1,5 +1,6 @@
 import type { StreamClient } from '../api/stream-client.js'
 import type { Usage } from '../api/types.js'
+import type { OaiChatRequest } from '../api/oai-types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
@@ -89,6 +90,8 @@ import { ProviderHealthTracker } from './provider-health.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { PlaybookStore } from './playbook-store.js'
+import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
+import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
@@ -160,6 +163,8 @@ export interface AgentConfig {
   songlineEnabled?: boolean
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). Disabled by default. */
   hearthObserveEnabled?: boolean
+  /** Explicit opt-in for anti-anchoring harness hooks. Disabled by default. */
+  antiAnchoring?: AntiAnchoringConfig
   /** Optional OwnershipLedger for real-time file ownership — updated on every file_write. */
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
   /** Optional Meridian code graph indexer for structural context. */
@@ -266,6 +271,7 @@ export class AgentLoop {
   private p3: P3Integration
   private immuneHook: ImmuneHook
   private _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
+  private initialUserMessage: string | null = null
 
   constructor(
     private config: AgentConfig,
@@ -352,6 +358,9 @@ export class AgentLoop {
       telemetryWriter: this.telemetryWriter,
       getDomainId: () => this.sessionDomain?.id ?? null,
       getFileObservations: () => this.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
+      antiAnchoring: normalizeAntiAnchoringConfig(this.config.antiAnchoring),
+      getInitialUserMessage: () => this.initialUserMessage,
+      callAntiAnchoringSeedModel: prompt => this.callAntiAnchoringSeedModel(prompt),
       songlineEnabled: this.config.songlineEnabled,
       getTaskSummary: this.config.taskLedger ? () => this.config.taskLedger!.getSummary() : undefined,
       setCycleClose: this.config.sessionRegistry
@@ -685,6 +694,29 @@ export class AgentLoop {
     })
   }
 
+  private async callAntiAnchoringSeedModel(prompt: string): Promise<string> {
+    const antiAnchoring = normalizeAntiAnchoringConfig(this.config.antiAnchoring)
+    const request: OaiChatRequest = {
+      model: this.config.promptEngine.getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: antiAnchoring.seedMaxTokens,
+      stream: true,
+      temperature: 0.9,
+      tool_choice: 'none',
+    }
+    let text = ''
+    await this.config.client.stream(request, {
+      onTextDelta: delta => { text += delta },
+      onThinkingDelta: () => {},
+      onContentBlock: block => {
+        if (block.type === 'text') text += block.text
+      },
+      onStopReason: () => {},
+      onError: error => { throw error },
+    }, this.abortController?.signal)
+    return text.trim()
+  }
+
   private maybePrewarm(text: string): void {
     const intents = extractIntents(text)
     for (const intent of intents) {
@@ -1001,6 +1033,7 @@ export class AgentLoop {
     this.decisions = []
     this.traceStore = createTraceStore()
     this.predictionAccumulator = createPredictionAccumulator()
+    this.initialUserMessage = userInput
     // Reset accumulations from previous run
     this.thinkingOnlyRetries = 0
     this.lastThinkingContent = ''

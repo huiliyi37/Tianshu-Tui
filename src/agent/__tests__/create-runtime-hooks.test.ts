@@ -174,4 +174,40 @@ describe('createDefaultRuntimeHooks', () => {
     assert.equal(hearthHooks.length, 1)
     assert.equal(hearthHooks[0]!.phase, 'postTurn')
   })
+
+  it('does not register anti-anchoring hooks unless explicitly enabled', () => {
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      getInitialUserMessage: () => 'refactor auth module',
+      callAntiAnchoringSeedModel: async () => 'independent path',
+    })
+
+    assert.equal(hooks.some(h => h.name === 'blind-exploration'), false)
+    assert.equal(hooks.some(h => h.name === 'mcts-planning'), false)
+  })
+
+  it('registers anti-anchoring hooks when explicitly enabled', () => {
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 512 },
+      getInitialUserMessage: () => 'refactor auth module',
+      callAntiAnchoringSeedModel: async () => 'independent path',
+    })
+
+    assert.equal(hooks.some(h => h.name === 'blind-exploration'), true)
+    assert.equal(hooks.some(h => h.name === 'mcts-planning'), true)
+    assert.equal(hooks.filter(h => h.phase === 'preTurn').some(h => h.name === 'mcts-planning'), true)
+  })
 })
