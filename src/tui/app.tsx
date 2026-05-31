@@ -104,6 +104,12 @@ const THINKING_FLUSH_MS = 1000
 const TOOL_FLUSH_MS = 120
 const LIVE_STREAM_MAX_CHARS = 50_000
 const HISTORY_MAX_ITEMS = 1000
+/**
+ * Max items passed to <Static> for React reconciliation. Earlier items are
+ * already printed to terminal scrollback — user scrolls up to see them.
+ * Keeps React/Yoga work bounded regardless of session length.
+ */
+const MAX_STATIC_RENDER_ITEMS = 200
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
 import { renderStaticEntry, renderMemoKey } from './render-entry.js'
@@ -182,7 +188,10 @@ export function isCurrentGeneration(runGen: number, currentGen: number): boolean
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode }: AppProps) {
   const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
   const [historyVersion, setHistoryVersion] = useState(0)
-  const historyItems = useMemo(() => historyBufferRef.current.items(), [historyVersion])
+  const historyItems = useMemo(() => {
+    const all = historyBufferRef.current.items()
+    return all.length > MAX_STATIC_RENDER_ITEMS ? all.slice(-MAX_STATIC_RENDER_ITEMS) : all
+  }, [historyVersion])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const liveToolsRef = useRef<LogEntry[]>([])
 
@@ -1229,7 +1238,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       {historyItems.length === 0 && !isStreaming && (
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
-      <Static items={historyItems}>
+      <Static items={historyItems} key={historyItems.length > 0 ? historyItems[0]!.id : 'empty'}>
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
       </Static>
       <Box flexDirection="column">
