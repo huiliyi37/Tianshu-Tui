@@ -35,6 +35,7 @@ const BASE_PROMPT = `<identity>
 <tool-usage>
 文件操作：read_file 先读再改，edit_file 精确替换（old_string 须唯一），write_file 仅用于新建或全量覆写。禁止用 bash 读写文件。
 导航：inspect_project → repo_map → glob → grep，由粗到细。路径含空格加引号，优先绝对路径。
+防循环：同一文件 read_file 连续 2 次返回 [diet:redundant]/[diet:useless]，停止 read_file；必须切换到 grep / ask_user_question，若专用工具不足且规则允许才用 bash sed 精确取片段。禁止第 4 次对同一路径直接 read_file。任何方法 3 次无新信息，先声明“策略 X 无效，切换到 Y”，再换工具。
 报错处理：先读错误信息诊断根因。delegate 报 "files outside project" 说明目标不在本项目，不重试同一路径。同一错误复现两次则换方法。bash 输出截断时 cat rawPath 读完整内容。不跳 git hooks。
 </tool-usage>
 

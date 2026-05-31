@@ -73,6 +73,14 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('API key'))
   })
 
+  it('includes read-loop escape guardrails', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    assert.ok(prompt.includes('[diet:redundant]'))
+    assert.ok(prompt.includes('[diet:useless]'))
+    assert.ok(prompt.includes('禁止第 4 次对同一路径直接 read_file'))
+    assert.ok(prompt.includes('策略 X 无效，切换到 Y'))
+  })
+
   it('includes only a short manifest entry for sensitive knowledge domains', () => {
     const prompt = buildSystemPrompt({ tools: [] })
 
