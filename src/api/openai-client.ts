@@ -53,7 +53,7 @@ const REASONING_READ_TIMEOUT_MS = 180_000
 const SLOW_FIRST_BYTE_TIMEOUT_MS = 180_000
 const SLOW_READ_TIMEOUT_MS = 300_000
 /** Providers whose thinking mode can exceed 90s before first token. */
-const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek'])
+const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex'])
 
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
