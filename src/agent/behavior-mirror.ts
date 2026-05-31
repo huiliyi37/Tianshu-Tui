@@ -1,6 +1,29 @@
 import type { TrajectoryEntry } from './trajectory.js'
 
+function isDietNoInfoReadResult(content: string): boolean {
+  return content.includes('[diet:redundant]') || content.includes('[diet:useless]')
+}
+
+function detectReadLoop(entries: TrajectoryEntry[]): string | null {
+  const readNoInfo = entries.filter(e =>
+    e.tool === 'read_file'
+    && isDietNoInfoReadResult(e.resultSummary),
+  )
+  const counts = new Map<string, number>()
+  for (const e of readNoInfo) counts.set(e.target, (counts.get(e.target) ?? 0) + 1)
+  for (const [target, count] of counts) {
+    if (count >= 2) {
+      const name = target.split('/').pop() ?? target
+      return `read_loop: warn — read_file for ${name} returned diet no-info placeholders ${count} times. Stop rereading this path; switch to grep, repo_graph, or ask_user_question.`
+    }
+  }
+  return null
+}
+
 export function detectMirror(entries: TrajectoryEntry[]): string | null {
+  const readLoop = detectReadLoop(entries)
+  if (readLoop) return readLoop
+
   if (entries.length < 3) return null
 
   // Priority 1: repeated error class (2+ same errorClass)

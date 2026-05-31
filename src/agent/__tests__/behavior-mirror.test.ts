@@ -4,6 +4,18 @@ import { detectMirror } from '../behavior-mirror.js'
 import type { TrajectoryEntry } from '../trajectory.js'
 
 describe('detectMirror', () => {
+  it('detects read-loop diet placeholders before generic patterns', () => {
+    const entries: TrajectoryEntry[] = [
+      { turn: 1, tool: 'read_file', target: 'src/agent/loop.ts', durationMs: 10, status: 'success', inputSummary: '', resultSummary: '[diet:redundant] re-read later' },
+      { turn: 2, tool: 'read_file', target: 'src/agent/loop.ts', durationMs: 10, status: 'success', inputSummary: '', resultSummary: '[diet:useless] retried successfully' },
+    ]
+    const mirror = detectMirror(entries)
+    assert.ok(mirror)
+    assert.ok(mirror.includes('read_loop: warn'))
+    assert.ok(mirror.includes('loop.ts'))
+    assert.ok(mirror.includes('grep'))
+  })
+
   it('detects repeated edits to same file', () => {
     const entries: TrajectoryEntry[] = [
       { turn: 1, tool: 'edit_file', target: 'src/auth.ts', durationMs: 50, status: 'success', inputSummary: '', resultSummary: '' },
