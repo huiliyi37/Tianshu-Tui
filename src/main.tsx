@@ -44,6 +44,7 @@ import { killAll } from './tools/process-tracker.js'
 import { runConfigCLI, loadConfig as loadLayeredConfig } from './config/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
+import { createRememberTool } from './tools/remember.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
 import { MeridianIndexer } from './repo/meridian-indexer.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
@@ -380,6 +381,10 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
   const recallRef = useRef(false)
   if (!recallRef.current) {
     toolRegistry.register(createRecallTool(claimStore, {
+      sessionId,
+      getTurn: () => session.getTurnCount(),
+    }))
+    toolRegistry.register(createRememberTool(claimStore, {
       sessionId,
       getTurn: () => session.getTurnCount(),
     }))
