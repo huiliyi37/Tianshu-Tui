@@ -155,7 +155,7 @@
 | `project-memory-loader.ts` 分层过滤 | ✅ 已完成 | Tier 1: kind ∈ {decision, project_rule, user_constraint} AND confidence ≥ 0.9；渲染预算从 4K → 2K chars |
 | `manifest.md` 修正 | ✅ 已完成 | 区分 `.md`（curated, recall-only）和 `.jsonl`（structured, tiered injection） |
 | `volatile-snapshot.ts` 无需改动 | ✅ | 已使用 `loadProjectMemory()`，该函数现在只返回 Tier 1 |
-| P4-P6 方案更新 | 待做 | 需要在 plan 中反映分层注入 |
+| P4-P6 方案更新 | ✅ 已完成 | `docs/superpowers/plans/2026-06-01-project-memory-system.md` 已补 Path C 分层注入、置信度审计、P4-P6 数据流 |
 | 补测试 | 待做 | `project-memory-loader.test.ts` 未写 |
 
 ## 8. 置信度审计：哪些规则触发 Tier 1 注入
