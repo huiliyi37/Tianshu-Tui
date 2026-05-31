@@ -1,24 +1,40 @@
-import { spawnSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { isAbsolute, relative, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import type { Tool, ToolCallParams } from './types.js'
 import { auditCommitTagScope } from './commit-audit.js'
 import { createWorkspaceGuard } from '../agent/workspace-guard.js'
+
+const execFileP = promisify(execFile)
 
 const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash', 'stash_pop'] as const
 type GitAction = (typeof ACTIONS)[number]
 
 const MAX_OUTPUT = 50_000
+const GIT_TIMEOUT = 10_000
 
-function runGit(args: string[], cwd: string): string {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
-  if (result.status !== 0) {
-    throw new Error((result.stderr ?? '').trim() || `git exited with status ${result.status}`)
-  }
-  const output = result.stdout
+async function runGit(args: string[], cwd: string): Promise<string> {
+  const { stdout, stderr } = await execFileP('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    timeout: GIT_TIMEOUT,
+  })
+  const output = stdout as string
   if (output.length > MAX_OUTPUT) {
     return output.slice(0, MAX_OUTPUT) + `\n\n[... truncated at ${MAX_OUTPUT} chars, total ${output.length}]`
   }
   return output
+}
+
+/** runGit that returns {ok, output} instead of throwing — for callers that need error detail. */
+async function runGitSafe(args: string[], cwd: string): Promise<{ ok: boolean; output: string }> {
+  try {
+    const output = await runGit(args, cwd)
+    return { ok: true, output }
+  } catch (err) {
+    const output = err instanceof Error ? err.message : String(err)
+    return { ok: false, output }
+  }
 }
 
 function normalizeProjectRelativePath(cwd: string, filePath: string): string | null {
@@ -38,22 +54,26 @@ function getScopedCommitFiles(cwd: string, ownedFiles: string[] | undefined, ses
   return [...new Set(files)].sort((a, b) => a.localeCompare(b))
 }
 
-function hasStagedChanges(cwd: string, pathspecs?: string[]): boolean {
+async function hasStagedChanges(cwd: string, pathspecs?: string[]): Promise<boolean> {
   const args = ['diff', '--cached', '--quiet']
   if (pathspecs?.length) args.push('--', ...pathspecs)
-  const result = spawnSync('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
-  if (result.status === 0) return false
-  if (result.status === 1) return true
-  throw new Error((result.stderr ?? '').trim() || `git diff exited with status ${result.status}`)
+  try {
+    await execFileP('git', args, { cwd, encoding: 'utf-8', timeout: GIT_TIMEOUT })
+    return false // exit 0 = no staged changes
+  } catch (err: unknown) {
+    const code = (err as { code?: number }).code
+    if (code === 1) return true // exit 1 = has staged changes
+    throw err
+  }
 }
 
 /** Best-effort: create a safety ref before stash so changes are recoverable (P2). */
-function createSafetyRef(cwd: string): void {
+async function createSafetyRef(cwd: string): Promise<void> {
   try {
-    const create = spawnSync('git', ['stash', 'create'], { cwd, encoding: 'utf-8', timeout: 10_000 })
-    if (create.status !== 0 || !create.stdout.trim()) return
-    const sha = create.stdout.trim()
-    spawnSync('git', ['update-ref', 'refs/kiro-safety/last-stash', sha], { cwd, encoding: 'utf-8', timeout: 10_000 })
+    const { stdout } = await execFileP('git', ['stash', 'create'], { cwd, encoding: 'utf-8', timeout: GIT_TIMEOUT })
+    const sha = (stdout as string).trim()
+    if (!sha) return
+    await execFileP('git', ['update-ref', 'refs/kiro-safety/last-stash', sha], { cwd, encoding: 'utf-8', timeout: GIT_TIMEOUT })
   } catch { /* best-effort, never block stash */ }
 }
 
@@ -100,28 +120,36 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
     try {
       switch (action) {
         case 'status': {
-          const branch = runGit(['branch', '--show-current'], cwd).trim()
-          const porcelain = runGit(['status', '--porcelain'], cwd).trim()
-          const untracked = runGit(['ls-files', '--others', '--exclude-standard'], cwd).trim()
-          const lines = [`Branch: ${branch}`]
-          if (!porcelain) {
+          const [branch, porcelain, untracked] = await Promise.all([
+            runGit(['branch', '--show-current'], cwd),
+            runGit(['status', '--porcelain'], cwd),
+            runGit(['ls-files', '--others', '--exclude-standard'], cwd),
+          ])
+          const lines = [`Branch: ${branch.trim()}`]
+          const porcelainTrimmed = porcelain.trim()
+          if (!porcelainTrimmed) {
             lines.push('Status: clean')
           } else {
-            lines.push('Changes:', porcelain)
+            lines.push('Changes:', porcelainTrimmed)
           }
-          if (untracked) {
-            lines.push('Untracked:', untracked)
+          const untrackedTrimmed = untracked.trim()
+          if (untrackedTrimmed) {
+            lines.push('Untracked:', untrackedTrimmed)
           }
           return { content: lines.join('\n') }
         }
 
         case 'diff_summary': {
-          const staged = runGit(['diff', '--cached', '--stat'], cwd).trim()
-          const unstaged = runGit(['diff', '--stat'], cwd).trim()
+          const [staged, unstaged] = await Promise.all([
+            runGit(['diff', '--cached', '--stat'], cwd),
+            runGit(['diff', '--stat'], cwd),
+          ])
           const lines: string[] = []
-          if (staged) lines.push('Staged:', staged)
-          if (unstaged) lines.push('Unstaged:', unstaged)
-          if (!staged && !unstaged) lines.push('No changes.')
+          const stagedTrimmed = staged.trim()
+          const unstagedTrimmed = unstaged.trim()
+          if (stagedTrimmed) lines.push('Staged:', stagedTrimmed)
+          if (unstagedTrimmed) lines.push('Unstaged:', unstagedTrimmed)
+          if (!stagedTrimmed && !unstagedTrimmed) lines.push('No changes.')
           return { content: lines.join('\n') }
         }
 
@@ -134,44 +162,40 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           const scopedFiles = getScopedCommitFiles(cwd, params.ownedFiles, params.sessionModifiedFiles)
           const commitArgs = ['commit', '-m', message]
           if (scopedFiles.length > 0) {
-            runGit(['add', '--', ...scopedFiles], cwd)
+            await runGit(['add', '--', ...scopedFiles], cwd)
             commitArgs.push('--only', '--', ...scopedFiles)
-          } else if (!hasStagedChanges(cwd)) {
+          } else if (!(await hasStagedChanges(cwd))) {
             return {
               content: 'No session-owned files were provided to git commit and no staged changes exist. Use deliver_task with commit=true for ownership-scoped delivery, or stage explicit files if you intentionally manage git manually.',
               isError: true,
             }
           }
 
-          const result = spawnSync('git', commitArgs, {
-            cwd,
-            encoding: 'utf-8',
-            timeout: 10_000,
-          })
-          if (result.status !== 0) {
-            return { content: `git commit failed: ${(result.stderr ?? '').trim()}`, isError: true }
+          const commitResult = await runGitSafe(commitArgs, cwd)
+          if (!commitResult.ok) {
+            return { content: `git commit failed: ${commitResult.output}`, isError: true }
           }
 
           // Post-commit truth readback: show actual landed changes + audit tag scope
-          const changed = runGit(['show', '--stat', '--format=%h%d', 'HEAD'], cwd).trim()
+          const changed = (await runGit(['show', '--stat', '--format=%h%d', 'HEAD'], cwd)).trim()
           // --stat file rows contain '|'; this excludes the %h%d header line and the summary line
           const changedFiles = changed.split('\n')
             .filter(l => l.includes('|'))
             .map(l => l.split('|')[0]!.trim())
             .filter(f => f.length > 0)
           const audit = auditCommitTagScope(message, changedFiles)
-          const body = `${result.stdout.trim()}\n\n--- actual changes (git show --stat) ---\n${changed}`
+          const body = `${commitResult.output.trim()}\n\n--- actual changes (git show --stat) ---\n${changed}`
           return { content: audit.ok ? body : `${body}\n\n${audit.message}` }
         }
 
         case 'log': {
           const maxCount = Math.max(1, Math.min((params.input.maxCount as number) ?? 20, 100))
-          const log = runGit(['log', `--max-count=${maxCount}`, '--oneline', '--decorate'], cwd).trim()
+          const log = (await runGit(['log', `--max-count=${maxCount}`, '--oneline', '--decorate'], cwd)).trim()
           return { content: log || 'No commits yet.' }
         }
 
         case 'stash': {
-          const stashStatus = runGit(['status', '--porcelain'], cwd).trim()
+          const stashStatus = (await runGit(['status', '--porcelain'], cwd)).trim()
           if (!stashStatus) {
             return { content: 'No changes to stash.' }
           }
@@ -185,13 +209,13 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
                 isError: true,
               }
             }
-            createSafetyRef(cwd)
-            runGit(['stash', 'push', '--', ...scoped], cwd)
+            await createSafetyRef(cwd)
+            await runGit(['stash', 'push', '--', ...scoped], cwd)
             return { content: `Stashed ${scoped.length} owned file(s): ${scoped.join(', ')}` }
           }
 
-          createSafetyRef(cwd)
-          runGit(['stash'], cwd)
+          await createSafetyRef(cwd)
+          await runGit(['stash'], cwd)
           return { content: 'Saved working directory and index state.' }
         }
 
@@ -201,7 +225,7 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           if (safety.blocked) {
             return { content: safety.reasons.join('\n'), isError: true }
           }
-          runGit(['stash', 'pop', stashRef], cwd)
+          await runGit(['stash', 'pop', stashRef], cwd)
           return { content: `Popped ${stashRef} (safety-checked: no overwriting conflicts).` }
         }
 
