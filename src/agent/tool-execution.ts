@@ -22,6 +22,7 @@ import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import type { P3Integration } from './p3-integration.js'
 import type { ImmuneHook } from './immune-hook.js'
+import { classifyFailure } from './failure-classifier.js'
 import {
   getInterventionLevel,
   recordPrediction,
@@ -291,6 +292,11 @@ export class ToolExecutionController {
           success: !(result && 'is_error' in result && result.is_error === true),
           isError: result && 'is_error' in result ? result.is_error === true : false,
           target,
+          // Classify failure for vigor: environment issues (timeout, api_error)
+          // get reduced phasic penalty vs semantic failures (type_error, assertion).
+          failureClass: result && 'is_error' in result && result.is_error === true
+            ? classifyFailure(typeof result.content === 'string' ? result.content : '').class
+            : undefined,
         },
       )
     }

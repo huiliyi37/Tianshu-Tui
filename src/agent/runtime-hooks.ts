@@ -1,5 +1,6 @@
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import type { CognitiveSeason } from './cognitive-season.js'
+import type { FailureClass } from './failure-classifier.js'
 import type { Sensorium, SensoriumInput, StrategyProfile } from './sensorium.js'
 import type { VigorState } from './vigor.js'
 
@@ -10,6 +11,9 @@ export interface RuntimeToolEvent {
   success: boolean
   target?: string
   isError?: boolean
+  /** Failure classification from failure-classifier.ts — enables vigor to distinguish
+   *  semantic failures (type_error, assertion) from environment issues (timeout, api_error). */
+  failureClass?: FailureClass
 }
 
 export interface RuntimeHookSnapshot {

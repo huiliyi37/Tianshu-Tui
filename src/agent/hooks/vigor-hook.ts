@@ -24,6 +24,10 @@ export function createVigorPostToolHook(deps: VigorPostToolHookDeps): PostToolRu
         toolSuccess: tool.success,
         sensorium,
         predictionAcc: deps.getPredictionAccumulator(),
+        // Pass failure class so vigor can distinguish semantic failures
+        // (type_error, assertion → full penalty) from environment issues
+        // (timeout, api_error → reduced penalty).
+        failureClass: tool.failureClass,
       })
 
       ctx.effects.setVigor(next)
