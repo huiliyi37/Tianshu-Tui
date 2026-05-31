@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url'
 /**
  * Source-level contract tests for StreamOutput.
  *
- * Ink components use hooks (useViewportLines, useTerminalSize) which prevent
- * direct render testing without ink-testing-library. Instead we verify the
- * source-code structure that the S7 cursor-on-own-line change established.
+ * StreamOutput uses memo + Markdown (which uses hooks internally),
+ * so direct render testing requires ink-testing-library. Instead we
+ * verify source-code structural invariants.
  *
- * This catches accidental regression to the pre-S7 inline cursor pattern.
+ * Catches accidental regression to the pre-S7 inline cursor pattern.
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url))

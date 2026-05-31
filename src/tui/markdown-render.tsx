@@ -511,18 +511,22 @@ export function hasMarkdown(text: string): boolean {
     || /^#{1,6}\s/m.test(text) || /^[-*]\s/m.test(text) || /^>\s/m.test(text)
 }
 
+/**
+ * Markdown — outer shell with fast-path for plain text.
+ *
+ * When text has no markdown syntax, returns a simple <Text> node
+ * without ever calling parseBlocks or useTerminalSize.
+ * Only markdown-bearing text enters the heavier MarkdownBlocks path.
+ */
 export const Markdown = memo(function Markdown({ text }: MarkdownProps) {
+  if (!text) return null
+  if (!hasMarkdown(text)) return <Text>{text}</Text>
+  return <MarkdownBlocks text={text} />
+})
+
+const MarkdownBlocks = memo(function MarkdownBlocks({ text }: MarkdownProps) {
   const blocks = useMemo(() => parseBlocks(text), [text])
   const { columns } = useTerminalSize()
-
-  if (!text) return null
-
-  // Fast path: no markdown detected, render as plain text
-  const hasMd = hasMarkdown(text)
-  if (!hasMd) {
-    return <Text>{text}</Text>
-  }
-
   return (
     <Box flexDirection="column" gap={1}>
       {blocks.map((block, i) => renderBlock(block, i, columns))}
