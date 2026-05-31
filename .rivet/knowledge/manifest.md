@@ -66,8 +66,21 @@ Its purpose is to help agents find the right documents before modifying sensitiv
   - modifying `.rivet/knowledge/` files
   - discussing prompt weight
 - contract:
-  - project memory does not enter volatile prompt
-  - recall is the access path, not prompt injection
+  - project-memory.md (curated Markdown) does not enter volatile prompt
+  - recall is the access path for .md content, not prompt injection
+
+### .rivet/knowledge/memory.jsonl
+- kind: project-memory-structured
+- contents: machine-extracted decisions, project rules, user constraints, commit facts
+- load_when:
+  - modifying project-memory-loader.ts
+  - modifying claim-extractor.ts
+  - modifying volatile prompt injection
+  - discussing memory tiering
+- contract:
+  - Tier 1 (high-signal): kind ∈ {decision, project_rule, user_constraint} AND confidence ≥ 0.9 → injected into frozen volatile block (2K char budget)
+  - Tier 2 (everything else): available via recall tool search only, not injected into prompt
+  - The separation follows the Memory Selection Principle: only entries that "will change how a future agent decides" are injected
 
 ### docs/superpowers/plans/2026-05-27-项目记忆按需召回.md
 - kind: prompt-hygiene-plan

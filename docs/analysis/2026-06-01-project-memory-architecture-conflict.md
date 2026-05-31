@@ -148,20 +148,87 @@
 
 4. **200K 窗口有足够空间**——300-900 tokens 的高价值 Tier 1 注入，对 200K 窗口来说影响微乎其微。
 
-## 7. 落地清单
+## 7. 落地清单（已执行）
 
-如果采纳路径 C，需要以下改动：
+| 改动 | 状态 | 说明 |
+|------|------|------|
+| `project-memory-loader.ts` 分层过滤 | ✅ 已完成 | Tier 1: kind ∈ {decision, project_rule, user_constraint} AND confidence ≥ 0.9；渲染预算从 4K → 2K chars |
+| `manifest.md` 修正 | ✅ 已完成 | 区分 `.md`（curated, recall-only）和 `.jsonl`（structured, tiered injection） |
+| `volatile-snapshot.ts` 无需改动 | ✅ | 已使用 `loadProjectMemory()`，该函数现在只返回 Tier 1 |
+| P4-P6 方案更新 | 待做 | 需要在 plan 中反映分层注入 |
+| 补测试 | 待做 | `project-memory-loader.test.ts` 未写 |
 
-| 优先级 | 改动 | 说明 |
-|--------|------|------|
-| **P0** | 修正 `.rivet/knowledge/manifest.md` | 区分 `.md`（curated, recall-only）和 `.jsonl`（structured, tiered injection） |
-| **P0** | 修正 `2026-06-01-project-memory-system.md` P4-P6 | 注入路径从全量改为分层 |
-| **P1** | `project-memory-loader.ts` 增加 `loadTier1ProjectMemory` | 只返回 confidence ≥ 0.9 且 kind ∈ {decision, project_rule, user_constraint} |
-| **P1** | `volatile-snapshot.ts` 用 Tier 1 loader 替代全量 loader | 减少注入量和 prefix cache 失效频率 |
-| **P1** | P4-P6 实施 | 写入逻辑不变，读取路径用分层 loader |
-| **P2** | 补测试 | memory-writer + memory-loader + volatile tier 分层 |
+## 8. 置信度审计：哪些规则触发 Tier 1 注入
 
-## 8. 天权的秤
+### 8.1 全部 claim 来源及置信度
+
+| 来源 | kind | confidence | scope | Tier 1 资格 | 触发条件 |
+|------|------|-----------|-------|------------|---------|
+| `claim-extractor.ts` commitFact | decision | **0.95** | session→project(P5) | ✅ 达标 | git commit 或 deliver_task commit 成功 |
+| `rules-loader.ts` | project_rule | **1.0** | project | ✅ 达标 | `.rivet/rules/*.md` 文件存在 |
+| `remember.ts` 模型主动调用 | 用户指定 | 默认 **0.9** | 用户指定 | ✅ 达标（默认） | 模型调 remember 工具，kind 可选 |
+| `claim-extractor.ts` verificationFact | verification_fact | 0.9 | session | ❌ kind 不在 Tier 1 | run_tests 或 bash test 通过 |
+| `claim-extractor.ts` failurePattern | failure_pattern | 0.8 | session | ❌ 信心不足 | run_tests 或 bash test 失败 |
+| `claim-extractor.ts` securityFinding | security_finding | 0.75 | session | ❌ 信心不足 | bash 命令输出含 vulnerability/CVE 且出错 |
+| `claim-extractor.ts` fileObservation | file_observation | 0.6 | session | ❌ 信心不足 | read_file 成功（且有导出符号） |
+| `session-memory-extract.ts` | decision/user_preference/… | N/A | session | ❌ 不走 claim 路径 | 压缩前从消息正则提取（P6 待实现） |
+
+### 8.2 Tier 1 注入的三种来源
+
+**当前已生效（P1-P3 已实现）**：
+
+1. **project_rule（confidence=1.0）** — `.rivet/rules/*.md` 中的规则，由用户/代理手动编写
+   - 数量：通常 0-3 个规则文件
+   - Token 成本：每个规则约 50-100 tokens
+   - 信号质量：最高（人工策展）
+
+2. **remember 工具（confidence ≥ 0.9）** — 模型主动调 remember，scope=project
+   - 数量：每个会话 0-5 条
+   - Token 成本：每条约 20-40 tokens
+   - 信号质量：高（模型判断值得记忆）
+
+3. **commitFact（confidence=0.95）** — P5 实施后自动触发
+   - 数量：每个会话 5-20 条
+   - Token 成本：每条约 30 tokens
+   - 信号质量：中高（通过了 typecheck + 测试 + 交付门禁）
+
+### 8.3 Tier 1 注入量估算
+
+```
+典型会话（10 次提交，2 条 remember，1 个规则文件）：
+  10 × commitFact (30 tokens each) = 300 tokens
+   2 × remember    (40 tokens each) =  80 tokens
+   1 × project_rule                = 100 tokens
+  ─────────────────────────────────────────
+  Total Tier 1 ≈ 480 tokens ≈ 0.24% of 200K context
+
+激进的会话（25 次提交，5 条 remember，3 个规则文件）：
+  25 × commitFact = 750 tokens
+   5 × remember   = 200 tokens
+   3 × project_rule = 300 tokens
+  ─────────────────────────────────────────
+  Total Tier 1 ≈ 1250 tokens ≈ 0.63% of 200K context
+
+2K char 渲染预算上限 ≈ 500 tokens — 超出部分被截断，按 confidence 排序淘汰最弱条目
+```
+
+### 8.4 关键判断标准
+
+**"这条记忆会改变未来模型的决定吗？"**
+
+| Tier 1 入选 | 理由 |
+|-------------|------|
+| commit decision | "用 node:test 而非 jest" — 下次写测试时模型直接知道用什么框架 |
+| project_rule | "TypeScript strict, noUncheckedIndexedAccess" — 每次写代码都受影响 |
+| user_constraint | "永远不暴露 API key" — 每次涉及密钥处理都受影响 |
+
+| Tier 2（recall-only） | 理由 |
+|----------------------|------|
+| file_observation | "config.ts 有 50 行" — 只在读该文件时有用，不需要每轮都知道 |
+| failure_pattern | "CI 跑挂：网络超时" — 一次性问题，不值得占每轮 prompt 空间 |
+| verification_fact | "797 tests pass" — 一次性验证结果，下次跑测试自然知道 |
+
+## 9. 天权的秤
 
 > "被推翻不是失败，是秤变得更精确的唯一方式。"
 
