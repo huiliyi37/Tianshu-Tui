@@ -24,6 +24,38 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 
+const HELP_TEXT = `Available commands:
+/help — Show this help
+/exit — Exit Rivet
+/quit — Exit
+/compact [status|llm] — Micro-compact context (/compact status for stats)
+/model [name|list] — Show or switch model
+/domain [list|<name>|auto|off] — Show or switch star domain personality
+/verbose — Toggle verbose tool output
+/auto — Toggle auto-approve
+/theme [midnight|pastel|cyberpunk|observatory] — Switch color theme
+/effort [off|low|medium|high|max] — Set reasoning effort
+/undo [<number>|preview <number>] — Undo file changes with preview
+/clear — Clear screen
+/sessions — List all saved sessions
+/resume <number> — Restore a saved session
+/memory [text|add|search|forget] — Session memory entries
+/mission — Show current task contract
+/context [pin|claims|antibodies|conflicts|reload|export|import] — Context ledger
+/verify — Show verification status
+/evidence — Show last turn evidence summary
+/debug [prompt|fingerprint|cache|context-payload|mcp] — Debug info
+/mcp — Show MCP server status
+/cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
+/scroll — Browse session history in pager
+/skill [list|<name>] — List or load Claude skills
+/interview <topic> — Deep interview before coding
+/plan <feature> — Create implementation plan
+/plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
+/sensorium — Show 天枢 3D self-awareness state
+/dream — Distill session decisions into project memory
+Ctrl+C — Interrupt current turn (press twice to exit)`
+
 export interface SlashHandlerContext {
   parts: string[]
   agent: AgentLoop
@@ -153,35 +185,7 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 
   switch (cmd) {
     case '/help':
-      pushStatic(createLogEntry({ type: 'system', content: `Available commands:
-/help — Show this help
-/exit — Exit Rivet
-/quit — Exit
-/compact [status|llm] — Micro-compact context (/compact status for stats)
-/model [name|list] — Show or switch model
-/domain [list|<name>|auto|off] — Show or switch star domain personality
-/verbose — Toggle verbose tool output
-/auto — Toggle auto-approve
-/theme [midnight|pastel|cyberpunk|observatory] — Switch color theme
-/effort [off|low|medium|high|max] — Set reasoning effort
-/undo [<number>|preview <number>] — Undo file changes with preview
-/clear — Clear screen
-/sessions — List all saved sessions
-/resume <number> — Restore a saved session
-/memory [text|add|search|forget] — Session memory entries
-/mission — Show current task contract
-/context [pin|claims|antibodies|conflicts|reload|export|import] — Context ledger
-/verify — Show verification status
-/evidence — Show last turn evidence summary
-/debug [prompt|fingerprint|cache|context-payload|mcp] — Debug info
-/mcp — Show MCP server status
-/cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
-/skill [list|<name>] — List or load Claude skills
-/interview <topic> — Deep interview before coding
-/plan <feature> — Create implementation plan
-/sensorium — Show 天枢 3D self-awareness state
-/dream — Distill session decisions into project memory
-Ctrl+C — Interrupt current turn (press twice to exit)` }))
+      pushStatic(createLogEntry({ type: 'system', content: HELP_TEXT }))
       setIsStreaming(false)
       return true
 
@@ -190,6 +194,7 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
       ctx.persist.compactOai(ctx.session.getMessages())
       pushStatic(createLogEntry({ type: 'system', content: 'Session saved. Goodbye!' }))
       process.emit('SIGINT')
+      return true
 
     case '/compact': {
       const sub = parts[1]?.toLowerCase()
@@ -740,6 +745,13 @@ Ctrl+C — Interrupt current turn (press twice to exit)` }))
         }
         pushStatic(createLogEntry({ type: 'system', content: wasOpen ? 'Cockpit panel collapsed.' : `Cockpit: ${PANEL_LABELS['summary']} panel. /cockpit off to collapse.` }))
       }
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/scroll': {
+      ctx.surfacePush?.('pager')
+      pushStatic(createLogEntry({ type: 'system', content: 'Scrollback pager opened. Press q or Esc to close.' }))
       setIsStreaming(false)
       return true
     }

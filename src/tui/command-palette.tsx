@@ -101,6 +101,7 @@ export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteP
 export function getPaletteCommands(): PaletteCommand[] {
   return [
     { name: '__surface:cockpit', description: 'Cockpit — trace / verify / context', category: 'surface', hotkey: 'c' },
+    { name: '__surface:pager', description: 'Scrollback — browse session history', category: 'surface', hotkey: 'p' },
     { name: '__surface:starmap', description: 'Starmap — 星图总览', category: 'surface', hotkey: 's' },
     { name: '__surface:chronicle', description: 'Chronicle — 阶段传说', category: 'surface', hotkey: 'h' },
     { name: '/help', description: 'Show all commands', category: 'command' },

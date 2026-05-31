@@ -36,6 +36,7 @@ describe('filterCommands', () => {
       surfaces.map(c => [c.name, c.hotkey]),
       [
         ['__surface:cockpit', 'c'],
+        ['__surface:pager', 'p'],
         ['__surface:starmap', 's'],
         ['__surface:chronicle', 'h'],
       ]

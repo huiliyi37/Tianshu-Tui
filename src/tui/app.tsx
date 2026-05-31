@@ -24,6 +24,7 @@ import { PhaseTracker } from './phase-tracker.js'
 import { phaseStatusLabel } from './phase-status.js'
 import { FluencyTracker } from './fluency-hook.js'
 import { getTheme } from './theme.js'
+import { viewportLines, latestHistoryItems } from './viewport.js'
 import { useTerminalSize } from './use-terminal-size.js'
 import { AgentLoop } from '../agent/loop.js'
 import { formatIntentPreview, type IntentPreview, type IntentPreviewAction } from '../agent/intent-preview.js'
@@ -105,15 +106,10 @@ const THINKING_FLUSH_MS = 1000
 const TOOL_FLUSH_MS = 120
 const LIVE_STREAM_MAX_CHARS = 50_000
 const HISTORY_MAX_ITEMS = 1000
-/**
- * Max items passed to <Static> for React reconciliation. Earlier items are
- * already printed to terminal scrollback — user scrolls up to see them.
- * Keeps React/Yoga work bounded regardless of session length.
- */
-const MAX_STATIC_RENDER_ITEMS = 200
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
 import { renderStaticEntry, renderMemoKey } from './render-entry.js'
+import { Pager } from './pager.js'
 
 // --- Cockpit panel view ---
 
@@ -187,12 +183,14 @@ export function isCurrentGeneration(runGen: number, currentGen: number): boolean
 // --- Main App ---
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode }: AppProps) {
+  const { rows: termRows } = useTerminalSize()
   const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
   const [historyVersion, setHistoryVersion] = useState(0)
-  const historyItems = useMemo(() => {
-    const all = historyBufferRef.current.items()
-    return all.length > MAX_STATIC_RENDER_ITEMS ? all.slice(-MAX_STATIC_RENDER_ITEMS) : all
-  }, [historyVersion])
+  const historyItems = useMemo(() => historyBufferRef.current.items(), [historyVersion])
+  const staticHistoryItems = useMemo(
+    () => latestHistoryItems(historyItems, Math.max(1, viewportLines(termRows, 0.75, 40, 200))),
+    [historyItems, termRows],
+  )
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const liveToolsRef = useRef<LogEntry[]>([])
 
@@ -211,7 +209,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   /** Generation counter: incremented on each new stream start. A run's onAbort/onError/catch only flips isStreaming when its captured generation still matches — prevents a stale run from killing a newer one. */
   const streamGenRef = useRef(0)
   const [fluencyStale, setFluencyStale] = useState<{ message: string; level: 'info' | 'warn' | 'action' } | null>(null)
-  const { rows: termRows } = useTerminalSize()
   const theme = getTheme()
   const [heartbeatStatus, setHeartbeatStatus] = useState<string | null>(null)
   const [cost, setCost] = useState(0)
@@ -564,6 +561,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     if (_key.ctrl && _input === '\x0b') {
       isSurfaceVisible('command-palette') ? surfacePop() : surfacePush('command-palette')
+      return
+    }
+    if (_key.ctrl && _input === '\x10') {
+      isSurfaceVisible('pager') ? surfacePop() : surfacePush('pager')
       return
     }
     if (_key.ctrl && _input === '\x0f') {
@@ -1310,7 +1311,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       {historyItems.length === 0 && !isStreaming && (
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
-      <Static items={historyItems} key={historyItems.length > 0 ? historyItems[0]!.id : 'empty'}>
+      <Static items={staticHistoryItems} key={staticHistoryItems.length > 0 ? staticHistoryItems[0]!.id : 'empty'}>
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
       </Static>
       <Box flexDirection="column">
@@ -1330,6 +1331,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           />
         )}
         {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
+        {activeOverlay === 'pager' && <Pager entries={historyItems} verbose={verbose} onExit={() => { surfacePop() }} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
             <Text bold color="cyan">Previous session found.</Text>

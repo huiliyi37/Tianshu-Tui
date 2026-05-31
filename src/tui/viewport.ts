@@ -19,6 +19,11 @@ export function viewportLines(
   return maxLines !== undefined ? Math.min(raw, maxLines) : raw
 }
 
+export function latestHistoryItems<T>(items: readonly T[], maxItems: number): T[] {
+  if (maxItems <= 0) return []
+  return items.length > maxItems ? items.slice(-maxItems) : [...items]
+}
+
 /**
  * React hook：从当前终端尺寸计算视口可用行数。
  *

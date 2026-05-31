@@ -246,6 +246,23 @@ describe('handleSlashCommand', () => {
     assert.equal(popped, true)
   })
 
+  it('/scroll opens the pager overlay through SurfaceRouter', () => {
+    let pushed = ''
+    const entries: LogEntry[] = []
+    const streaming: boolean[] = []
+    const handled = handleSlashCommand(makeCtx({
+      parts: ['/scroll'],
+      surfacePush: id => { pushed = id },
+      pushStatic: entry => { entries.push(entry) },
+      setIsStreaming: value => { streaming.push(value) },
+    }))
+
+    assert.equal(handled, true)
+    assert.equal(pushed, 'pager')
+    assert.deepEqual(streaming, [false])
+    assert.ok(entries[0]?.content.includes('Scrollback pager opened'))
+  })
+
   it('/mission shows the current task contract from the cognitive snapshot', () => {
     const entries: LogEntry[] = []
     const handled = handleSlashCommand(makeCtx({

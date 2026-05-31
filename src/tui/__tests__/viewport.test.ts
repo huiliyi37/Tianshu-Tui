@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { viewportLines } from '../viewport.js'
+import { viewportLines, latestHistoryItems } from '../viewport.js'
 
 describe('viewportLines', () => {
   it('returns minLines when rows * ratio < minLines', () => {
@@ -28,5 +28,20 @@ describe('viewportLines', () => {
     assert.equal(viewportLines(40, 0.4, 3), 16)
     // stream: 60%, min 8
     assert.equal(viewportLines(40, 0.6, 8), 24)
+  })
+})
+
+describe('latestHistoryItems', () => {
+  it('keeps all items when under the render cap', () => {
+    assert.deepEqual(latestHistoryItems(['a', 'b'], 3), ['a', 'b'])
+  })
+
+  it('keeps only the latest items when over the render cap', () => {
+    assert.deepEqual(latestHistoryItems(['a', 'b', 'c', 'd'], 2), ['c', 'd'])
+  })
+
+  it('returns empty for non-positive caps', () => {
+    assert.deepEqual(latestHistoryItems(['a'], 0), [])
+    assert.deepEqual(latestHistoryItems(['a'], -1), [])
   })
 })
