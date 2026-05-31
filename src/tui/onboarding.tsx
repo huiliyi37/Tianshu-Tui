@@ -18,13 +18,15 @@ interface WelcomeScreenProps {
   cwd: string
 }
 
-// ASCII art — 7 lines tall, fits 80-col terminals
+// ASCII robot — WALL-E inspired, 7 lines tall
 const LOGO = [
-  '┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓',
-  '┃                                    ┃',
-  '┃     ⬡  R I V E T                  ┃',
-  '┃                                    ┃',
-  '┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛',
+  '       ╭─┤▪├─╮       ',
+  '    ┌──┴──────┴──┐    ',
+  '    │  ◉      ◉  │    ',
+  '    │    ╭──╮    │    ',
+  '    └──┬─┴──┴─┬──┘    ',
+  '     ╭─┴──────┴─╮     ',
+  '     ╰──╯    ╰──╯     ',
 ]
 
 const STAGGER_MS = 150
@@ -41,17 +43,18 @@ export function WelcomeScreen({ model, cwd }: WelcomeScreenProps) {
   }, [])
 
   // Vertical padding to center content in terminal
-  // Logo(5) + gap(1) + meta(1) + gap(2) + shortcuts(4) + gap(1) + hint(1) = ~15 lines
-  const contentHeight = 15
+  // Robot(7) + brand(1) + gap(1) + meta(1) + gap(2) + shortcuts(2) + gap(1) + hint(1) = ~16 lines
+  const contentHeight = 16
   const topPad = Math.max(1, Math.floor((rows - contentHeight) / 2) - 2)
 
   return (
     <Box flexDirection="column" paddingTop={topPad} alignItems="center">
-      {/* Phase 0: Logo box */}
+      {/* Phase 0: Robot + brand */}
       <Box flexDirection="column" alignItems="center">
         {LOGO.map((line, i) => (
-          <Text key={i} color={theme.primary} bold>{line}</Text>
+          <Text key={i} color={theme.primary}>{line}</Text>
         ))}
+        <Text color={theme.primary} bold>{'R I V E T'}</Text>
       </Box>
 
       {/* Phase 1: Model + directory */}
