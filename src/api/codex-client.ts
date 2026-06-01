@@ -47,7 +47,7 @@ export class CodexClient implements StreamClient {
         },
         body: JSON.stringify(body),
         signal,
-      }, 90_000)
+      }, 180_000)
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
@@ -209,8 +209,9 @@ export class CodexClient implements StreamClient {
 
     // SSE idle timeout — same pattern as ApiClient and OpenAIClient
     // Codex always uses reasoning (effort: high), so first-byte can be slow.
-    const FIRST_BYTE_TIMEOUT_MS = 90_000
-    const READ_TIMEOUT_MS = 180_000
+    // GPT-5.5 thinking can exceed 3 min; match OpenAIClient slow-provider caps.
+    const FIRST_BYTE_TIMEOUT_MS = 180_000
+    const READ_TIMEOUT_MS = 300_000
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
@@ -235,7 +236,7 @@ export class CodexClient implements StreamClient {
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
         // read() to return done=true, but we must throw, not silently break.
-        if (streamTimedOut) throw new Error('Codex SSE stream idle timeout (180s)')
+        if (streamTimedOut) throw new Error('Codex SSE stream idle timeout (300s)')
         if (done) break
         receivedFirstChunk = true
         resetIdleTimer()
