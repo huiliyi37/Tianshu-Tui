@@ -55,7 +55,10 @@ export function createProviderClient(
     })
   }
 
-  // Anthropic native protocol — uses explicit cache_control breakpoints
+  // Anthropic native protocol — uses explicit cache_control breakpoints.
+  // Protocol is determined by provider config, NOT by model name.
+  // Example: Qwen via OpenCode Go uses Anthropic /v1/messages, but direct
+  // Qwen API (dashscope) is OpenAI-compatible. The provider config knows which.
   if (provider.name === 'anthropic' || capabilities.prefixCacheStrategy === 'anthropic-cache-control') {
     const budgetMap: Record<string, number> = {
       max: params.maxTokens,
