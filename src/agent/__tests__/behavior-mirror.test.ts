@@ -13,7 +13,9 @@ describe('detectMirror', () => {
     assert.ok(mirror)
     assert.ok(mirror.includes('read_loop: warn'))
     assert.ok(mirror.includes('loop.ts'))
+    assert.ok(mirror.includes('read_section'), 'should suggest read_section for precise re-read')
     assert.ok(mirror.includes('grep'))
+    assert.ok(!mirror.includes('Stop rereading'), 'should not hard-stop at 2nd occurrence')
   })
 
   it('detects repeated edits to same file', () => {

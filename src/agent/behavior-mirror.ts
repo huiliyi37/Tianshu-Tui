@@ -14,7 +14,7 @@ function detectReadLoop(entries: TrajectoryEntry[]): string | null {
   for (const [target, count] of counts) {
     if (count >= 2) {
       const name = target.split('/').pop() ?? target
-      return `read_loop: warn — read_file for ${name} returned diet no-info placeholders ${count} times. Stop rereading this path; switch to grep, repo_graph, or ask_user_question.`
+      return `read_loop: warn — read_file for ${name} returned diet no-info placeholders ${count} times. If you still need this file's content, use read_section with a precise line range instead of re-reading the whole file. grep or repo_graph may also work.`
     }
   }
   return null
