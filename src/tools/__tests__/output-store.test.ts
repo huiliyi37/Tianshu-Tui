@@ -54,13 +54,15 @@ describe('output-store', () => {
       assert.ok(!result.includes('success output suppressed'))
     })
 
-    it('suppresses long success output deterministically', () => {
+    it('shows tail of long success output instead of suppressing', () => {
       const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n')
       const result = buildModelOutput(lines, meta)
       assert.ok(result.startsWith('[npm test] exit=0 time=1.5s lines=50'))
-      assert.ok(result.includes('success output suppressed'))
-      assert.ok(!result.includes('line 0'))
-      assert.ok(!result.includes('line 49'))
+      assert.ok(result.includes('truncated'), 'should show truncation marker')
+      assert.ok(result.includes('30 lines omitted'), 'should show omitted count')
+      assert.ok(result.includes('line 49'), 'should show tail line')
+      assert.ok(!result.includes('line 0'), 'should omit head line')
+      assert.ok(!result.includes('success output suppressed'), 'should NOT suppress')
     })
 
     it('preserves failed output instead of success-suppressing it', () => {

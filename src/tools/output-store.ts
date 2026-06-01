@@ -59,6 +59,7 @@ const MODEL_MAX_LINES = 200
 const MODEL_HEAD_LINES = 100
 const MODEL_TAIL_LINES = 80
 const SUCCESS_INLINE_LINES = 20
+const SUCCESS_TAIL_LINES = 20
 
 function countLines(raw: string): number {
   if (raw.length === 0) return 0
@@ -76,7 +77,9 @@ export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
   const header = `[${meta.command}] exit=${meta.exitCode} time=${(meta.durationMs / 1000).toFixed(1)}s lines=${lineCount}`
 
   if (meta.exitCode === 0 && lineCount > SUCCESS_INLINE_LINES) {
-    return `${header} (success output suppressed; read raw output if needed)`
+    const tail = lines.slice(-SUCCESS_TAIL_LINES)
+    const omitted = lineCount - SUCCESS_TAIL_LINES
+    return `${header}\n... ${omitted} lines omitted ...\n${tail.join('\n')}\n[truncated: ${lineCount} lines → ${SUCCESS_TAIL_LINES} shown]`
   }
 
   if (lines.length <= MODEL_MAX_LINES) {
