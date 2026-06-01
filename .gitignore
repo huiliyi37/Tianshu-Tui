@@ -30,6 +30,7 @@ docs/sessions/
 .rivet/cache-log.jsonl
 .rivet/meridian.db*
 .rivet/playbook.jsonl
+.rivet/knowledge/memory.jsonl
 .gitlog_temp.txt
 .rivet/runtime/
 .rivet/tmp/

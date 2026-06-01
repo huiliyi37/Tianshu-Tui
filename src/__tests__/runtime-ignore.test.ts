@@ -9,6 +9,7 @@ describe('runtime ignore rules', () => {
     assert.match(content, /^\.rivet\/runtime\/$/m)
     assert.match(content, /^\.rivet\/tmp\/$/m)
     assert.match(content, /^\.rivet\/prefix-diag\.jsonl$/m)
+    assert.match(content, /^\.rivet\/knowledge\/memory\.jsonl$/m)
     assert.doesNotMatch(content, /^\.rivet\/knowledge\/$/m)
     assert.doesNotMatch(content, /^\.rivet\/knowledge\/project-memory\.md$/m)
   })
