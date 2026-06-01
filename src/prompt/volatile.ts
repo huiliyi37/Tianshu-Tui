@@ -188,13 +188,17 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     }).join('\n')
     parts.push(`<tool-history recent="${recent.length}" total="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
     
-    // P3: 添加去重提示，避免模型重复读取已读文件
+    // P3: 列出已读取的文件路径，模型据此跳过冗余 read_file 调用。
+    // 仅统计成功读取，去重后取最近 8 个（更多用计数替代，控制 prompt 长度）。
     const readFiles = ctx.toolHistory
       .filter(e => e.tool === 'read_file' && e.status === 'success')
       .map(e => e.target)
-      .filter((v, i, a) => a.indexOf(v) === i) // deduplicate
+      .filter((v, i, a) => a.indexOf(v) === i)
     if (readFiles.length > 0) {
-      parts.push(`<read-file-dedup-hint>\n已读取 ${readFiles.length} 个文件。除非内容已变更，否则不要重复读取上述文件。\n</read-file-dedup-hint>`)
+      const MAX_LIST = 8
+      const listed = readFiles.slice(0, MAX_LIST).map(f => escapeXml(f)).join(', ')
+      const tail = readFiles.length > MAX_LIST ? ` …及另外 ${readFiles.length - MAX_LIST} 个文件` : ''
+      parts.push(`<read-file-dedup-hint>\n已读取：${listed}${tail}\n上述文件无需重复读取，除非磁盘内容已变更。\n</read-file-dedup-hint>`)
     }
   }
 
