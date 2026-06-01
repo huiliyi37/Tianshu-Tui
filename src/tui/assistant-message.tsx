@@ -3,12 +3,9 @@ import { memo } from 'react'
 import { getTheme } from './theme.js'
 import { Markdown } from './markdown-render.js'
 import { gutterGlyph } from './gutter.js'
-import { useViewportLines } from './viewport.js'
 
 interface AssistantMessageProps {
   content: string
-  /** When false, render the full content without viewport-based truncation. Default: true */
-  truncate?: boolean
 }
 
 /**
@@ -32,16 +29,15 @@ const MAX_STATIC_LINES = 200
  * and overflow. claude-code style — gutter glyph + plain text rows that flow into
  * native terminal scrollback.
  */
-export const AssistantMessage = memo(function AssistantMessage({ content, truncate = true }: AssistantMessageProps) {
+export const AssistantMessage = memo(function AssistantMessage({ content }: AssistantMessageProps) {
   const theme = getTheme()
-  const maxLines = useViewportLines(0.6, 20, MAX_STATIC_LINES)
 
   if (!content) return null
 
   const lines = content.split('\n')
-  const isLong = truncate && lines.length > maxLines
-  const omittedLines = isLong ? lines.length - maxLines : 0
-  const displayContent = isLong ? lines.slice(-maxLines).join('\n') : content
+  const isLong = lines.length > MAX_STATIC_LINES
+  const omittedLines = isLong ? lines.length - MAX_STATIC_LINES : 0
+  const displayContent = isLong ? lines.slice(-MAX_STATIC_LINES).join('\n') : content
 
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={1}>
