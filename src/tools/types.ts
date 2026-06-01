@@ -23,6 +23,10 @@ export interface ToolCallParams {
   providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
   /** Current session turn count — enables progressive timeout strategies. */
   sessionTurnCount?: number
+  /** AbortSignal from the tool pipeline — fires when the tool-level timeout
+   *  rejects. Delegate tools propagate this to the coordinator so zombie
+   *  workers are cleaned up immediately. */
+  abortSignal?: AbortSignal
 }
 
 export type VerificationFailureKind = 'test_failure' | 'tool_invocation_failure'

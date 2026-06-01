@@ -75,6 +75,10 @@ export interface DelegationCoordinatorConfig {
   sessionId?: string
   /** Optional collaboration protocol for semantic locking and merge coordination. */
   collaboration?: CollaborationConfig
+  /** AbortSignal to propagate to workers — fires when the tool-level timeout
+   *  rejects the outer promise, so zombie workers are cleaned up immediately
+   *  instead of waiting for their internal 180s timeout. */
+  abortSignal?: AbortSignal
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -137,37 +141,57 @@ export class DelegationCoordinator {
     return recommendModelForTask(task, this.config.modelCards)
   }
 
-  async delegate(request: DelegationRequest): Promise<CoordinatorRun> {
-    if (!shouldDelegateObjective(request.objective, request.scope)) {
+  async delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun> {
+    // Per-call abort signal override — allows the tool pipeline to propagate
+    // its timeout signal to the coordinator without mutating config.
+    const savedSignal = this.config.abortSignal
+    if (abortSignal) this.config.abortSignal = abortSignal
+    try {
+      if (!shouldDelegateObjective(request.objective, request.scope)) {
+        return {
+          status: 'skipped',
+          results: [],
+          packet: buildPrimaryWorkerPacket([]),
+        }
+      }
+
+      const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
+      const isWrite = writeProfiles.includes(request.profile)
+      const order = isWrite
+        ? createWriteWorkOrder({
+            parentTurnId: request.parentTurnId,
+            kind: request.kind,
+            profile: request.profile,
+            objective: request.objective,
+            scope: request.scope,
+          })
+        : createReadOnlyWorkOrder({
+            parentTurnId: request.parentTurnId,
+            kind: request.kind,
+            profile: request.profile,
+            objective: request.objective,
+            scope: request.scope,
+          })
+
+      return await this.delegateOrder(order)
+    } finally {
+      this.config.abortSignal = savedSignal
+    }
+  }
+
+  private async delegateOrder(order: WorkOrder): Promise<CoordinatorRun> {
+    // Abort guard: if the caller's abort signal fires (e.g. tool-level timeout),
+    // reject immediately instead of waiting for the worker's internal 180s timeout.
+    // This prevents zombie workers from blocking the main agent loop.
+    if (this.config.abortSignal?.aborted) {
       return {
-        status: 'skipped',
-        results: [],
+        status: 'completed',
+        order,
+        results: [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'))],
         packet: buildPrimaryWorkerPacket([]),
       }
     }
 
-    const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
-    const isWrite = writeProfiles.includes(request.profile)
-    const order = isWrite
-      ? createWriteWorkOrder({
-          parentTurnId: request.parentTurnId,
-          kind: request.kind,
-          profile: request.profile,
-          objective: request.objective,
-          scope: request.scope,
-        })
-      : createReadOnlyWorkOrder({
-          parentTurnId: request.parentTurnId,
-          kind: request.kind,
-          profile: request.profile,
-          objective: request.objective,
-          scope: request.scope,
-        })
-
-    return this.delegateOrder(order)
-  }
-
-  private async delegateOrder(order: WorkOrder): Promise<CoordinatorRun> {
     const role = classifyProfile(order.profile)
     const isWrite = role === 'hands'
     this.state.recordEvent({ type: 'queued', workOrderId: order.id, timestamp: Date.now() })
@@ -232,6 +256,22 @@ export class DelegationCoordinator {
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
     let run: { result: WorkerResult }
+
+    // Wrap worker execution with abort signal so the caller unblocks immediately
+    // when the tool-level timeout fires, instead of waiting for the worker's
+    // internal 180s timeout. The worker's own agent.abort() will fire from its
+    // internal timer, but we don't block on it.
+    const abortPromise = this.config.abortSignal
+      ? new Promise<never>((_resolve, reject) => {
+          this.config.abortSignal!.addEventListener('abort', () => {
+            reject(new Error('Delegation aborted: caller signal fired'))
+          }, { once: true })
+        })
+      : null
+
+    const wrapAbort = <T>(p: Promise<T>): Promise<T> =>
+      abortPromise ? Promise.race([p, abortPromise]) : p
+
     if (role === 'hands') {
       // Check file claims before dispatching write worker
       if (this.config.sessionRegistry && this.config.sessionId && order.scope.files?.length) {
@@ -276,7 +316,7 @@ export class DelegationCoordinator {
       // subagent write operations (edit_file/write_file/bash) even when Rivet
       // correctly provisions write tools and worktree isolation. This is a
       // host-layer constraint, not a Rivet work-order or worktree bug.
-      const handsRun = await this.runHands({
+      const handsRun = await wrapAbort(this.runHands({
         order,
         wtCoordinator: new WorktreeCoordinator(cwd),
         cwd,
@@ -294,10 +334,10 @@ export class DelegationCoordinator {
           callbacks.onTurnComplete(sessionRun.usage, 1, true)
           return JSON.stringify(sessionRun.result)
         },
-      })
+      }))
       run = { result: handsRun.result }
     } else {
-      run = await this.runWorker(workerConfig)
+      run = await wrapAbort(this.runWorker(workerConfig))
     }
 
     // Release semantic lock after worker completes
@@ -330,11 +370,15 @@ export class DelegationCoordinator {
     }
   }
 
-  async delegateBatch(requests: DelegationRequest[], policy: AggregationPolicy = 'primary_decides'): Promise<CoordinatorRun> {
-    const runnables = requests.filter(r => shouldDelegateObjective(r.objective, r.scope))
-    if (runnables.length === 0) {
-      return { status: 'skipped', results: [], packet: buildPrimaryWorkerPacket([]) }
-    }
+  async delegateBatch(requests: DelegationRequest[], policy: AggregationPolicy = 'primary_decides', abortSignal?: AbortSignal): Promise<CoordinatorRun> {
+    // Per-call abort signal override
+    const savedSignal = this.config.abortSignal
+    if (abortSignal) this.config.abortSignal = abortSignal
+    try {
+      const runnables = requests.filter(r => shouldDelegateObjective(r.objective, r.scope))
+      if (runnables.length === 0) {
+        return { status: 'skipped', results: [], packet: buildPrimaryWorkerPacket([]) }
+      }
 
     const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
     const queue = new WorkOrderQueue(this.config.maxWorkers)
@@ -396,6 +440,9 @@ export class DelegationCoordinator {
       results: aggregated,
       packet: buildPrimaryWorkerPacket(aggregated),
       aggregationPolicy: policy,
+    }
+    } finally {
+      this.config.abortSignal = savedSignal
     }
   }
 }

@@ -391,6 +391,7 @@ export async function executeToolUse(
     contextWindow: deps.config.contextWindow,
     providerProfile: deps.config.providerProfile,
     sessionTurnCount: deps.sessionTurnCount,
+    abortSignal: deps.abortSignal,
   }
 
   // Star signature: counter training-mode regression at token level (思路 E)

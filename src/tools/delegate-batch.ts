@@ -8,7 +8,7 @@ import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 export interface DelegateBatchCoordinator {
-  delegateBatch(requests: DelegationRequest[], policy?: AggregationPolicy): Promise<CoordinatorRun>
+  delegateBatch(requests: DelegationRequest[], policy?: AggregationPolicy, abortSignal?: AbortSignal): Promise<CoordinatorRun>
 }
 
 /** Dynamic profile validation — accepts built-in + user-loaded profiles */
@@ -168,7 +168,7 @@ export function createDelegateBatchTool(
         trimmedNote = `\n\n[batch trimmed] Session is early (turn ${params.sessionTurnCount ?? '?'}). Dispatched ${cap}/${requests.length} tasks. Deferred: ${dropped.map(o => `"${o.slice(0, 60)}"`).join(', ')}. Re-dispatch later tasks in a subsequent turn if needed.`
       }
 
-      const run = await coordinator.delegateBatch(dispatched, parsed.data.policy ?? 'primary_decides')
+      const run = await coordinator.delegateBatch(dispatched, parsed.data.policy ?? 'primary_decides', params.abortSignal)
 
       // Extract worker findings into claim store
       if (run.status === 'completed') {

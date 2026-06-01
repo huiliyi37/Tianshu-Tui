@@ -7,7 +7,7 @@ import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 export interface DelegateTaskCoordinator {
-  delegate(request: DelegationRequest): Promise<CoordinatorRun>
+  delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
 }
 
 /** Dynamic profile validation — accepts built-in + user-loaded profiles */
@@ -102,7 +102,7 @@ export function createDelegateTaskTool(
           files: parsed.data.files,
           symbols: parsed.data.symbols,
         },
-      })
+      }, params.abortSignal)
 
       // Extract worker findings into claim store
       if (run.status === 'completed') {
