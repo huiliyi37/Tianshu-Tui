@@ -1402,6 +1402,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
     }).finally(() => {
       promptQueueRef.current.running = false
+      // Safety net: if run() completed without error but isStreamingRef is still true
+      // (e.g., slash command like /model returned early), reset it.
+      // Normal flow resets via onTurnComplete/onError/onAbort, but slash commands
+      // bypass those callbacks.
+      if (isStreamingRef.current && isCurrentGeneration(myGen, streamGenRef.current)) {
+        isStreamingRef.current = false
+      }
     })
   }, [agent, session, pushStatic, pushStaticBatch, flushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
