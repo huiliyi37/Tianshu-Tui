@@ -51,7 +51,7 @@ export function Pager({ entries, verbose, onExit }: PagerProps) {
         ── Scrollback ({total} entries) ── {offset + 1}-{Math.min(offset + PAGE_SIZE, total)}/{total} ({pct}%)
       </Text>
       <Box flexDirection="column">
-        {visible.map(entry => renderStaticEntry(entry, verbose))}
+        {visible.map(entry => renderStaticEntry(entry, verbose, true))}
       </Box>
       <Text color={theme.muted}>
         ↑↓/j/k: scroll · PgUp/PgDn: page · g/G: top/bottom · q/Esc: close

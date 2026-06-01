@@ -10,12 +10,12 @@ import { SystemMessage } from './system-message.js'
 import { StreamOutput } from './stream.js'
 import { QuestionCard } from './question-card.js'
 
-type EntryRenderer = (entry: LogEntry, verbose: boolean) => ReturnType<typeof Box>
+type EntryRenderer = (entry: LogEntry, verbose: boolean, full: boolean) => ReturnType<typeof Box>
 
 const RENDER_MAP: Record<string, EntryRenderer> = {
   user_message: (e) => <UserMessage key={e.id} content={e.content} />,
   thinking_message: (e) => <ThinkingMessage key={e.id} content={e.content} />,
-  assistant_message: (e) => <AssistantMessage key={e.id} content={e.content} />,
+  assistant_message: (e, _verbose, full) => <AssistantMessage key={e.id} content={e.content} truncate={!full} />,
   tool: (e, verbose) => {
     if (e.toolName === 'ask_user_question') {
       return <QuestionCard key={e.id} question={e.content} />
@@ -29,9 +29,9 @@ const RENDER_MAP: Record<string, EntryRenderer> = {
   turn_summary: (e) => <Box key={e.id} paddingX={2}><Text color={getTheme().dim} bold>⎯ {e.content}</Text></Box>,
 }
 
-export function renderStaticEntry(entry: LogEntry, verbose: boolean) {
+export function renderStaticEntry(entry: LogEntry, verbose: boolean, full = false) {
   const renderer = RENDER_MAP[entry.type]
-  if (renderer) return renderer(entry, verbose)
+  if (renderer) return renderer(entry, verbose, full)
   return <StreamOutput key={entry.id} text={entry.content} isStreaming={false} />
 }
 
