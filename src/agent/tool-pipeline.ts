@@ -40,6 +40,7 @@ import type { TaskLedger } from './task-ledger.js'
 import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
 import { checkPlanMode } from './plan-mode.js'
+import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -486,6 +487,16 @@ export async function executeToolUse(
       const planMsg = planModeResult.reason ?? 'Plan Mode: write operations blocked'
       callbacks.onToolResult(tu.id, tu.name, planMsg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? planMsg + starSig : planMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    }
+
+    // Sensitive-area preflight — nudge, don't block. The model must read the
+    // knowledge manifest before editing prompt/memory/recall/verification/ownership
+    // paths, but existing approval and edit gates remain responsible for hard safety.
+    const writePath = (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string'
+      ? tu.input.file_path
+      : undefined
+    if (writePath && deps.taskLedger && shouldRequireSensitivePreflight({ path: writePath, events: deps.taskLedger.getEvents() })) {
+      callbacks.onToolResult(tu.id, tu.name, buildSensitivePreflightMessage(writePath), false)
     }
 
     // Approval gate — with sensorium-driven adaptive confidence

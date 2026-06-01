@@ -189,6 +189,70 @@ describe('executeToolUse', () => {
     assert.deepEqual(owned, [])
   })
 
+  it('warns before editing sensitive paths when manifest was not read', async () => {
+    const events: any[] = []
+    const callbackChunks: string[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        getEvents: () => [],
+        record: (event: any) => { events.push(event) },
+        getOwnedFiles: () => events.filter(e => e.type === 'file_write').map(e => e.path),
+      } as any,
+      ownershipLedger: {
+        registerOwned: () => {},
+        getOwnedFiles: () => [],
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'edited', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onToolResult: (_id: string, _name: string, content: string) => { callbackChunks.push(content) } }
+
+    await executeToolUse(
+      { id: 'tu-sensitive-edit', name: 'edit_file', input: { file_path: 'src/context/project-memory-loader.ts' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.ok(callbackChunks.some(chunk => chunk.includes('Sensitive-area preflight required')))
+    assert.ok(callbackChunks.some(chunk => chunk.includes('.rivet/knowledge/manifest.md')))
+  })
+
+  it('does not warn for sensitive edits after manifest was read', async () => {
+    const callbackChunks: string[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        getEvents: () => [{ type: 'file_read', path: '.rivet/knowledge/manifest.md', timestamp: Date.now() }],
+        record: () => {},
+        getOwnedFiles: () => [],
+      } as any,
+      ownershipLedger: {
+        registerOwned: () => {},
+        getOwnedFiles: () => [],
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'edited', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onToolResult: (_id: string, _name: string, content: string) => { callbackChunks.push(content) } }
+
+    await executeToolUse(
+      { id: 'tu-sensitive-edit-after-read', name: 'edit_file', input: { file_path: 'src/context/project-memory-loader.ts' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.ok(!callbackChunks.some(chunk => chunk.includes('Sensitive-area preflight required')))
+  })
+
   it('records run_tests as verification in task ledger', async () => {
     const events: any[] = []
     const deps = makeDeps({
