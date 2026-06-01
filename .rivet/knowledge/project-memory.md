@@ -1,3 +1,28 @@
+### 2026-06-01 — Seed Capsule Engine 不适合用 heuristicRules 注入
+
+**Kind**: architectural_invariant / selection_rule
+
+**Claim**: 天璇种子胶囊的 L1 核心文本不应通过 `PromptEngine.setHeuristicRules()` 注入——当前 PromptEngine 不存在该方法，也不存在 `heuristicRules` 概念。实际落地方式：通过 `VolatileContext.seedCapsuleBlock` 字段渲染到 `buildVolatileBlockInternal` 的 frozen base 中（与 `projectMemoryBlock` 同级），session 全程稳定，prefix cache safe。
+
+**Applies when**:
+- 后续实现 Phase 2 capsule 触发注入（L2/L3）
+- 天府、破军等星域各自封存胶囊时
+
+**Store**: `src/agent/seed-capsule-store.ts` → `loadTianxuanCapsule()` → `src/prompt/volatile-snapshot.ts` → `VolatileContext.seedCapsuleBlock` → `buildVolatileBlockInternal()` frozen base
+
+### 2026-06-01 — deliver_task 门禁 tool_invocation_failure 不应永久阻塞
+
+**Kind**: architectural_invariant
+
+**Claim**: `tool_invocation_failure`（run_tests 超时等，特征为 `passed === 0 && failed === 0 && skipped === 0`）是基础设施问题而非代码质量问题。代理的唯一正确响应是重跑测试。将其标记为 RED 会导致超时永久阻塞交付，因为不同 filter 字符串生成不同的 `verificationKey` 导致 supersession 失败。
+
+**Fix** (三层):
+1. `delivery-gate-v2.ts`: `tool_invocation_failure` RED → YELLOW（非阻塞）
+2. `run-tests.ts`: 填充 `verification.targetFiles` 使 supersession 基于实际测试文件而非命令字符串
+3. `verification-attribution.ts`: `verificationKey` 优先使用 `meta.targetFiles`
+
+**Store**: `src/agent/delivery-gate-v2.ts:232`, `src/tools/run-tests.ts:306`, `src/agent/verification-attribution.ts:122`
+
 ### 2026-05-27 — session 8f2bcf2d
 
 **Modified** (3): /Users/banxia/app/deepseek-tui/opencode-tui/docs/codebase-index.md, /Users/banxia/app/deepseek-tui/opencode-tui/README.md, /Users/banxia/app/deepseek-tui/opencode-tui/docs/superpowers/specs/2026-05-26-claude-code-feature-gap-analysis.md
