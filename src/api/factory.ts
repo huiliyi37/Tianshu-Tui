@@ -93,7 +93,7 @@ export function createProviderClient(
       ? provider.unsupported
       : capabilities.stripParams,
     prefixCompletion: provider.capabilities.prefixCompletion,
-    useMaxCompletionTokens: provider.name === 'mimo',
+    useMaxCompletionTokens: provider.name === 'mimo' || provider.name === 'minimax',
     userAgent: provider.name === 'kimi' ? 'KimiCLI/1.0' : undefined,
   })
 }

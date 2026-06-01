@@ -93,9 +93,10 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
     'OpenAI-compatible thinking format',
   ]),
   minimax: buildEntry('minimax', 'MiniMax', WELL_KNOWN_DEFAULTS['minimax']!, [
-    'OpenAI-compatible thinking format',
-    'No thinking effort control',
-    'No cache support',
+    'MiniMax-M3: 1M context, multimodal (image/video)',
+    'Uses max_completion_tokens instead of max_tokens',
+    'reasoning_split for separated thinking output',
+    'No prefix cache support',
   ]),
   mimo: buildEntry('mimo', 'Mimo', WELL_KNOWN_DEFAULTS['mimo']!, [
     'OpenAI-compatible thinking format',

@@ -128,10 +128,14 @@ export class OpenAIClient implements StreamClient {
       || this.config.providerName === 'glm'
       || this.config.providerName === 'claude'
       || this.config.providerName === 'mimo'
+      || this.config.providerName === 'minimax'
 
     if (this.config.thinking === 'enabled') {
       if (usesThinkingBlock) {
         body.thinking = { type: this.config.thinking }
+        if (this.config.providerName === 'minimax') {
+          body.thinking = { type: 'adaptive' }
+        }
         if (this.config.providerName === 'glm') {
           (body.thinking as Record<string, unknown>)['clear_thinking'] = true
         }
