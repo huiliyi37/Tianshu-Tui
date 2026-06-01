@@ -2,6 +2,7 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimKind } from '../context/claims.js'
 import type { ToolDefinition } from '../api/types.js'
+import { loadAllProjectMemoryEntries } from '../context/project-memory-loader.js'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -84,9 +85,20 @@ export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext &
         parts.push(`Claims (${matches.length}):\n${formatted}`)
       }
 
-      // Knowledge file search
+      // Structured project memory search (.rivet/knowledge/memory.jsonl)
       const knowledgeCwd = ctx?.cwd ?? params.cwd
       if (knowledgeCwd) {
+        const memoryHits = loadAllProjectMemoryEntries(knowledgeCwd)
+          .filter(e => (!input.kind || e.kind === input.kind) && e.text.toLowerCase().includes(input.query.toLowerCase()))
+          .slice(0, limit)
+
+        if (memoryHits.length > 0) {
+          const memoryFormatted = memoryHits.map(e =>
+            `[memory:${e.id.slice(0, 8)}] (${e.kind}, confidence=${e.confidence.toFixed(2)})\n  ${e.text.slice(0, 200)}`,
+          ).join('\n')
+          parts.push(`Project memory (${memoryHits.length}):\n${memoryFormatted}`)
+        }
+
         const knowledgeHits = searchKnowledgeFiles(knowledgeCwd, input.query)
         if (knowledgeHits.length > 0) {
           const knowledgeFormatted = knowledgeHits.slice(0, 3).map(e => e.slice(0, 300)).join('\n---\n')

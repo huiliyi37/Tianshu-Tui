@@ -118,6 +118,82 @@ describe('recall tool', () => {
     }
   })
 
+  it('searches structured project memory jsonl using tool cwd', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-memory-jsonl-'))
+    try {
+      const knowledgeDir = join(cwd, '.rivet', 'knowledge')
+      mkdirSync(knowledgeDir, { recursive: true })
+      writeFileSync(
+        join(knowledgeDir, 'memory.jsonl'),
+        JSON.stringify({
+          id: 'mem-decision-1',
+          kind: 'decision',
+          text: 'Use guided retrieval instead of pure recall-only memory.',
+          confidence: 0.95,
+          createdAt: 2,
+          source: 'test',
+        }) + '\n' + JSON.stringify({
+          id: 'mem-file-1',
+          kind: 'file_observation',
+          text: 'recall.ts also searches local structured memory.',
+          confidence: 0.6,
+          createdAt: 1,
+          source: 'test',
+        }) + '\n',
+        'utf-8',
+      )
+
+      const store = new ContextClaimStore(dir, 'session-1')
+      const tool = createRecallTool(store)
+      const result = await tool.execute({ toolUseId: 't1', input: { query: 'guided' }, cwd })
+
+      assert.ok(result.content.includes('Project memory'))
+      assert.ok(result.content.includes('Use guided retrieval instead of pure recall-only memory.'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('filters structured project memory by kind', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-memory-jsonl-'))
+    try {
+      const knowledgeDir = join(cwd, '.rivet', 'knowledge')
+      mkdirSync(knowledgeDir, { recursive: true })
+      writeFileSync(
+        join(knowledgeDir, 'memory.jsonl'),
+        JSON.stringify({
+          id: 'mem-decision-1',
+          kind: 'decision',
+          text: 'guided retrieval is a project decision',
+          confidence: 0.95,
+          createdAt: 2,
+          source: 'test',
+        }) + '\n' + JSON.stringify({
+          id: 'mem-file-1',
+          kind: 'file_observation',
+          text: 'guided retrieval implementation detail',
+          confidence: 0.6,
+          createdAt: 1,
+          source: 'test',
+        }) + '\n',
+        'utf-8',
+      )
+
+      const store = new ContextClaimStore(dir, 'session-1')
+      const tool = createRecallTool(store)
+      const result = await tool.execute({ toolUseId: 't1', input: { query: 'guided', kind: 'decision' }, cwd })
+
+      assert.ok(result.content.includes('project decision'))
+      assert.ok(!result.content.includes('implementation detail'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
   it('respects limit parameter', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-recall-'))
     try {
