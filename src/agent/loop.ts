@@ -822,6 +822,8 @@ export class AgentLoop {
 
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }
 
+  getRoutingReason() { return this.config.promptEngine.getRoutingReason() }
+
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
 
   getReliabilityDecision(): ReliabilityDecision | null { return this.latestReliabilityDecision }

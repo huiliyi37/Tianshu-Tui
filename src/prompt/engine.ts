@@ -402,6 +402,10 @@ export class PromptEngine {
     this.routingReason = reason
   }
 
+  getRoutingReason(): string | null {
+    return this.routingReason ?? null
+  }
+
   setCerebellarHint(hint: string | null): void {
     this.cerebellarHint = hint ?? undefined
   }

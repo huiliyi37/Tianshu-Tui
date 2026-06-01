@@ -66,9 +66,11 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
   const agentWithCache = agent as AgentLoop & {
     getPrewarmStats?: () => { hits: number; misses: number; hitRate: number }
     getCacheDiagnostic?: () => string | null
+    getRoutingReason?: () => string | null
   }
   const prewarmStats = agentWithCache.getPrewarmStats?.() ?? { hits: 0, misses: 0, hitRate: 0 }
   const cacheDiagnostic = agentWithCache.getCacheDiagnostic?.() ?? null
+  const routingReason = agentWithCache.getRoutingReason?.() ?? null
 
   const traceStore = agent.getTraceStore()
   const evidence = agent.getEvidenceState()
@@ -141,7 +143,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       cacheReadTokens: usage.cache_read_input_tokens,
       cacheWriteTokens: usage.cache_creation_input_tokens,
       cost,
-      routingReason: null,  // Will be updated from agent state in future
+      routingReason,
       perTurnHitRate: session.getLatestTurnHitRate(),
       recentTurnHitRate: session.getRecentTurnHitRate(3),
       prewarmHits: prewarmStats.hits,
