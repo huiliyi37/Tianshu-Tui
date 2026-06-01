@@ -18,7 +18,7 @@ export function Pager({ entries, verbose, onExit }: PagerProps) {
   const [offset, setOffset] = useState(Math.max(0, total - PAGE_SIZE))
 
   useInput((input, key) => {
-    if (input === 'q' || key.escape) {
+    if (input === 'q' || key.escape || (key.ctrl && input === '\x10')) {
       onExit()
       return
     }
