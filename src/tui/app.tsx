@@ -293,6 +293,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
   }, [])
 
+  /** Intentionally immediate (not microtask-batched): used for turn-end
+   *  assistant/thinking archival where the render must happen before
+   *  isStreaming flips. For streaming intermediate updates, use pushStatic(). */
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     const grouped = groupLogs(entries)
     for (const entry of grouped) {
@@ -872,6 +875,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // First chunk: delay 200ms to batch with early content and avoid
         // layout突变 from ThinkingCollapser suddenly appearing.
         // isThinkingActive (set above) shows a minimal indicator immediately.
+        // Trade-off: GLM can finish thinking in <200ms — user sees the indicator
+        // for the full 200ms before content appears. Acceptable: the indicator
+        // provides immediate feedback, and 200ms is below perception threshold.
         if (lastFlushedThink.current === '' && !thinkTimer.current) {
           thinkTimer.current = setTimeout(flushThink, 200)
         } else if (!thinkTimer.current) {
@@ -1163,6 +1169,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           elapsedMs: Date.now() - streamStartRef.current,
         })
         pushStatic(createLogEntry({ type: 'turn_summary', content: turnSummary }))
+        // Atomically commit all microtask-batched entries before isStreaming flips
+        flushStaticBatch()
       },
       onPhaseChange: (phase, detail) => {
         // Phase → heartbeat status label (preparing, working, tool-hint, heartbeat)
@@ -1229,6 +1237,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: `Error: ${error.message}`, isError: true }))
+        flushStaticBatch()
       },
       onAbort: () => {
         // Mark current activity as failed and project before cleanup
