@@ -41,6 +41,8 @@
     "test": "tsx --test $(find src -name '*.test.ts')",
     "test:unit": "tsx --test $(find src -name '*.test.ts' -not -path '*/integration/*')",
     "test:integration": "tsx --test 'src/**/__tests__/integration/*.test.ts'",
+    "test:fast": "tsx --test $(find src -name '*.test.ts' -not -path '*/tui/__tests__/*')",
+    "test:incremental": "tsx scripts/test-incremental.ts",
     "cache:audit": "tsx src/cache/cache-audit-cli.ts",
     "benchmark": "tsx scripts/run-benchmark.ts"
   },
