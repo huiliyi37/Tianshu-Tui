@@ -47,7 +47,12 @@ export function createVigorAfterPerceptionHook(): AfterPerceptionRuntimeHook {
       ctx.effects.setStrategy(adjusted)
 
       if (shouldTriggerElmRelease(vigor)) {
-        ctx.effects.requestThetaCheck('elm-micro-release')
+        // Suppress elm-micro-release if recent theta checks timed out —
+        // spawning more checks won't help if tsc is unresponsive.
+        const theta = ctx.snapshot.thetaTelemetry
+        if (!theta || !theta.lastTimedOut) {
+          ctx.effects.requestThetaCheck('elm-micro-release')
+        }
       }
     },
   }

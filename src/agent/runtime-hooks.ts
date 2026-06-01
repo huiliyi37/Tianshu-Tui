@@ -27,6 +27,11 @@ export interface RuntimeHookSnapshot {
   vigor: VigorState | null
   gitChangeRate: number
   season: CognitiveSeason | null
+  /** Theta telemetry for elm-micro-release timeout suppression. */
+  thetaTelemetry?: {
+    lastTimedOut: boolean
+    consecutiveTimeouts: number
+  }
 }
 
 export interface RuntimePhaseChangeDetail {

@@ -240,13 +240,30 @@ export class AgentLoop {
   private turnCompletion: TurnCompletionController
   private toolExecution: ToolExecutionController
   private thetaCheckInFlight = false
-  private thetaTelemetry: { lastReason: string | null; lastDurationMs: number | null; lastErrorCount: number; lastTimedOut: boolean; requestedCount: number } = {
+  private thetaTelemetry: {
+    lastReason: string | null
+    lastDurationMs: number | null
+    lastErrorCount: number
+    lastTimedOut: boolean
+    requestedCount: number
+    /** Number of consecutive theta checks that timed out. Reset to 0 on success. */
+    consecutiveTimeouts: number
+    /** Turn number at which backoff expires. 0 = no backoff active. */
+    cooldownUntilTurn: number
+  } = {
     lastReason: null,
     lastDurationMs: null,
     lastErrorCount: 0,
     lastTimedOut: false,
     requestedCount: 0,
+    consecutiveTimeouts: 0,
+    cooldownUntilTurn: 0,
   }
+  /** Max theta checks per session. Prevents runaway tsc spawning. */
+  private static readonly THETA_MAX_SESSION = 40
+  /** Max theta checks per agent turn. */
+  private static readonly THETA_MAX_PER_TURN = 2
+  private thetaRequestsThisTurn = 0
   private thetaState: ThetaState = createThetaState(7)
   private artifactStore: import('../artifact/store.js').ArtifactStore | undefined
   private sessionStateManager: SessionStateManager | undefined
@@ -590,6 +607,10 @@ export class AgentLoop {
       vigor: this.vigorState,
       gitChangeRate: this.gitChangeRate,
       season: this.currentSeason,
+      thetaTelemetry: {
+        lastTimedOut: this.thetaTelemetry.lastTimedOut,
+        consecutiveTimeouts: this.thetaTelemetry.consecutiveTimeouts,
+      },
       ...extra,
     }
   }
@@ -876,7 +897,21 @@ export class AgentLoop {
 
   private requestThetaCheck(reason: string): void {
     if (this.thetaCheckInFlight) return
+
+    // Gate 1: session-level cap
+    if (this.thetaTelemetry.requestedCount >= AgentLoop.THETA_MAX_SESSION) return
+
+    // Gate 2: per-turn cap
+    if (this.thetaRequestsThisTurn >= AgentLoop.THETA_MAX_PER_TURN) return
+
+    // Gate 3: consecutive-timeout backoff
+    if (this.thetaTelemetry.consecutiveTimeouts > 0) {
+      const currentTurn = this.session.getTurnCount()
+      if (currentTurn < this.thetaTelemetry.cooldownUntilTurn) return
+    }
+
     this.thetaCheckInFlight = true
+    this.thetaRequestsThisTurn++
     this.thetaTelemetry = {
       ...this.thetaTelemetry,
       lastReason: reason,
@@ -886,11 +921,21 @@ export class AgentLoop {
       for (const errFile of result.errors) {
         this.repairHintTracker.recordFailure(errFile, 'type_error')
       }
+      const timedOut = result.timedOut
+      const consecutiveTimeouts = timedOut
+        ? this.thetaTelemetry.consecutiveTimeouts + 1
+        : 0
+      const cooldownTurns = consecutiveTimeouts === 0 ? 0
+        : Math.min(4, consecutiveTimeouts)
       this.thetaTelemetry = {
         ...this.thetaTelemetry,
         lastDurationMs: result.durationMs,
         lastErrorCount: result.errors.length,
-        lastTimedOut: result.timedOut,
+        lastTimedOut: timedOut,
+        consecutiveTimeouts,
+        cooldownUntilTurn: cooldownTurns > 0
+          ? this.session.getTurnCount() + cooldownTurns
+          : 0,
       }
     }).catch(() => {
       this.thetaTelemetry = {
@@ -898,6 +943,8 @@ export class AgentLoop {
         lastDurationMs: null,
         lastErrorCount: 0,
         lastTimedOut: false,
+        consecutiveTimeouts: 0,
+        cooldownUntilTurn: 0,
       }
     }).finally(() => {
       this.thetaCheckInFlight = false
@@ -1115,6 +1162,7 @@ export class AgentLoop {
 
     try {
       for (let turn = 0; turn < this.config.maxTurns; turn++) {
+        this.thetaRequestsThisTurn = 0
         // Sync plan-mode state into config so tool-pipeline gate reads it
         this.syncPlanModeToConfig()
         if (this.abortController.signal.aborted) {
