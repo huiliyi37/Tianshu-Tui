@@ -261,16 +261,32 @@ export class DelegationCoordinator {
     // when the tool-level timeout fires, instead of waiting for the worker's
     // internal 180s timeout. The worker's own agent.abort() will fire from its
     // internal timer, but we don't block on it.
-    const abortPromise = this.config.abortSignal
-      ? new Promise<never>((_resolve, reject) => {
-          this.config.abortSignal!.addEventListener('abort', () => {
-            reject(new Error('Delegation aborted: caller signal fired'))
-          }, { once: true })
-        })
-      : null
+    //
+    // IMPORTANT: wrapAbort guarantees listener cleanup. If the worker resolves
+    // before the signal fires, the 'abort' listener is removed to prevent
+    // accumulation across repeated delegate calls in a long session.
+    const abortSignal = this.config.abortSignal
 
-    const wrapAbort = <T>(p: Promise<T>): Promise<T> =>
-      abortPromise ? Promise.race([p, abortPromise]) : p
+    const wrapAbort = <T>(p: Promise<T>): Promise<T> => {
+      if (!abortSignal) return p
+      if (abortSignal.aborted) return Promise.reject(new Error('Delegation aborted: caller signal already fired'))
+
+      return new Promise<T>((resolve, reject) => {
+        const onAbort = () => reject(new Error('Delegation aborted: caller signal fired'))
+        abortSignal.addEventListener('abort', onAbort, { once: true })
+
+        p.then(
+          (result) => {
+            abortSignal.removeEventListener('abort', onAbort)
+            resolve(result)
+          },
+          (err) => {
+            abortSignal.removeEventListener('abort', onAbort)
+            reject(err)
+          },
+        )
+      })
+    }
 
     if (role === 'hands') {
       // Check file claims before dispatching write worker
@@ -441,6 +457,11 @@ export class DelegationCoordinator {
       packet: buildPrimaryWorkerPacket(aggregated),
       aggregationPolicy: policy,
     }
+    // NOTE: If delegateBatch is ever changed from serial (processNext recursion)
+    // to true concurrent execution, the finally-based signal restoration below
+    // will race with in-flight orders — they'll lose access to the signal
+    // mid-flight. In that case, pass abortSignal per-call to delegateOrder
+    // instead of mutating config.abortSignal.
     } finally {
       this.config.abortSignal = savedSignal
     }
