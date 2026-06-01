@@ -21,6 +21,8 @@ import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel } from './trace-store.js'
+import { evaluateConvergence } from './convergence-detector.js'
+import type { PhaseClass } from './convergence-detector.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { ModelCapabilityCard } from '../model/capability.js'
 import type { ImportGraph } from './import-graph.js'
@@ -1385,6 +1387,46 @@ export class AgentLoop {
             })
             if (tddHint) this._lastImmuneHint = tddHint
           }
+        }
+
+        // ── Convergence Detection ──
+        // Multi-signal stagnation check before the API call. Level 2+
+        // injects guidance; Level 3 forces session split or abort.
+        const convergenceCheck = evaluateConvergence({
+          turn,
+          phaseClass: phaseClass as PhaseClass,
+          contextWindow: this.config.contextWindow,
+          recentToolHistory: this.recentToolHistory,
+          evidenceState: this.evidence.getState(),
+        })
+        debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
+
+        if (convergenceCheck.shouldKick && convergenceCheck.injectedMessage) {
+          // Level 2: inject user guidance as a system-visible nudge
+          callbacks.onPhaseChange?.('convergence-warning', {
+            reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段 ${turn} 轮未收敛 (score=${convergenceCheck.score.toFixed(2)})`,
+            suggestion: convergenceCheck.injectedMessage.slice(0, 200),
+          })
+          this.session.addUserMessage(convergenceCheck.injectedMessage)
+        }
+
+        if (convergenceCheck.shouldForceSplit) {
+          // Level 3: force session split to reset context and break the loop
+          debugLog(`[convergence] turn=${turn} force-split score=${convergenceCheck.score.toFixed(2)}`)
+          if (await this.compaction.trySessionSplit()) {
+            // split succeeded — reset turn counter and continue
+            debugLog(`[convergence] turn=${turn} split-succeeded`)
+          }
+        }
+
+        if (convergenceCheck.shouldAbort) {
+          debugLog(`[convergence] turn=${turn} abort score=${convergenceCheck.score.toFixed(2)}`)
+          callbacks.onPhaseChange?.('convergence-abort', {
+            reason: `收敛检测 L3 abort: score=${convergenceCheck.score.toFixed(2)}`,
+          })
+          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
+          callbacks.onAbort()
+          return
         }
 
         _tb = Date.now()
