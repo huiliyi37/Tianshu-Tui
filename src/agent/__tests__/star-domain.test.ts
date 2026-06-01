@@ -44,11 +44,11 @@ describe('StarDomain', () => {
     assert.ok(STAR_DOMAINS.pojun.toolWhitelist.includes('bash'))
   })
 
-  it('tianfu toolWhitelist includes write tools (guardian can modify)', () => {
+  it('tianfu toolWhitelist is read-only but has delegation (guardian cannot modify)', () => {
     assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('read_file'))
-    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('write_file'))
-    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('edit_file'))
-    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('bash'))
+    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('write_file'))
+    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('edit_file'))
+    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('bash'))
     assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('delegate_task'))
     assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('delegate_batch'))
   })
@@ -89,10 +89,7 @@ describe('buildActiveDomain', () => {
     assert.ok(result.motto)
   })
 
-  it('defaults to 天枢 for ambiguous task (no keyword match)', () => {
-    const result = buildActiveDomain('帮我看看')
-    assert.ok(result)
-    assert.equal(result.id, 'tianshu')
-    assert.equal(result.name, '天枢')
+  it('returns null for ambiguous task', () => {
+    assert.equal(buildActiveDomain('帮我看看'), null)
   })
 })
