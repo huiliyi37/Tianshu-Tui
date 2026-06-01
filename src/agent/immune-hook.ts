@@ -59,104 +59,110 @@ export class ImmuneHook {
 
   /** Main entry point — called after each tool execution */
   run(ctx: ImmuneHookContext): ImmuneHookResult {
-    // 0. Feed Physarum flow data
-    if (ctx.targetFile) {
-      this.deps.physarum.recordFlow(ctx.toolName, ctx.targetFile, ctx.turn)
-      // Register as normal behavior for negative selection
-      this.adaptive.registerNormal(ctx.fingerprint)
-    }
-
-    // 1. Innate layer check
-    const innateSignals = this.innate.check({
-      toolName: ctx.toolName,
-      fingerprint: ctx.fingerprint,
-      turn: ctx.turn,
-      tokenUsage: ctx.tokenUsage,
-    })
-
-    // 2. Trajectory health as danger signal
-    if (ctx.trajectoryHealth === 'escalate') {
-      innateSignals.push({
-        kind: 'prediction_error', severity: 0.9,
-        turn: ctx.turn, source: 'atropos',
-      })
-    } else if (ctx.trajectoryHealth === 'degrading') {
-      innateSignals.push({
-        kind: 'prediction_error', severity: 0.5,
-        turn: ctx.turn, source: 'atropos',
-      })
-    }
-
-    // 3. Physarum anomaly detection
-    const graphSignal = this.deps.physarum.detectAnomaly()
-    if (graphSignal) {
-      innateSignals.push({
-        kind: 'graph_anomaly',
-        severity: graphSignal.severity,
-        turn: ctx.turn,
-        source: graphSignal.source,
-      })
-    }
-
-    // 4. Collect all signals into APC
-    for (const signal of innateSignals) {
-      this.apc.collect(signal)
-    }
-
-    // 5. APC dual-signal gating
-    const patternMatch = ctx.doomLevel !== 'none'
-    const mistakeCount = Array.from(this.repairFailCounts.values()).reduce((s, c) => s + c, 0)
-    const activation = this.apc.evaluate(patternMatch, ctx.turn, mistakeCount)
-
-    if (!activation.shouldActivate) {
-      this.maybeRunMaintenance(ctx.turn)
-      return { activated: false, signals: innateSignals }
-    }
-
-    // 6. Adaptive immune response
-    const memory = this.adaptive.lookup(ctx.fingerprint)
-    let response: ImmuneResponse
-
-    // ── Immune → Context: generate hint for model ──
-    let contextHint: ImmuneContextHint | undefined
-    if (this.deps.notebook) {
-      const hint = generateImmuneContext(activation, this.deps.notebook, ctx.turn)
-      if (hint) contextHint = hint
-    }
-
-    if (memory) {
-      // Secondary response: fast repair from memory
-      response = this.adaptive.fastRepair(memory)
-      memory.hitCount++
-      memory.lastHit = ctx.turn
-    } else {
-      // Primary response: deposit warning + learn
-      response = {
-        type: 'deposit_warning',
-        targetFile: ctx.targetFile,
+    try {
+      // 0. Feed Physarum flow data
+      if (ctx.targetFile) {
+        this.deps.physarum.recordFlow(ctx.toolName, ctx.targetFile, ctx.turn)
+        // Register as normal behavior for negative selection
+        this.adaptive.registerNormal(ctx.fingerprint)
       }
+
+      // 1. Innate layer check
+      const innateSignals = this.innate.check({
+        toolName: ctx.toolName,
+        fingerprint: ctx.fingerprint,
+        turn: ctx.turn,
+        tokenUsage: ctx.tokenUsage,
+      })
+
+      // 2. Trajectory health as danger signal
+      if (ctx.trajectoryHealth === 'escalate') {
+        innateSignals.push({
+          kind: 'prediction_error', severity: 0.9,
+          turn: ctx.turn, source: 'atropos',
+        })
+      } else if (ctx.trajectoryHealth === 'degrading') {
+        innateSignals.push({
+          kind: 'prediction_error', severity: 0.5,
+          turn: ctx.turn, source: 'atropos',
+        })
+      }
+
+      // 3. Physarum anomaly detection
+      const graphSignal = this.deps.physarum.detectAnomaly()
+      if (graphSignal) {
+        innateSignals.push({
+          kind: 'graph_anomaly',
+          severity: graphSignal.severity,
+          turn: ctx.turn,
+          source: graphSignal.source,
+        })
+      }
+
+      // 4. Collect all signals into APC
+      for (const signal of innateSignals) {
+        this.apc.collect(signal)
+      }
+
+      // 5. APC dual-signal gating
+      const patternMatch = ctx.doomLevel !== 'none'
+      const mistakeCount = Array.from(this.repairFailCounts.values()).reduce((s, c) => s + c, 0)
+      const activation = this.apc.evaluate(patternMatch, ctx.turn, mistakeCount)
+
+      if (!activation.shouldActivate) {
+        this.maybeRunMaintenance(ctx.turn)
+        return { activated: false, signals: innateSignals }
+      }
+
+      // 6. Adaptive immune response
+      const memory = this.adaptive.lookup(ctx.fingerprint)
+      let response: ImmuneResponse
+
+      // ── Immune → Context: generate hint for model ──
+      let contextHint: ImmuneContextHint | undefined
+      if (this.deps.notebook) {
+        const hint = generateImmuneContext(activation, this.deps.notebook, ctx.turn)
+        if (hint) contextHint = hint
+      }
+
+      if (memory) {
+        // Secondary response: fast repair from memory
+        response = this.adaptive.fastRepair(memory)
+        memory.hitCount++
+        memory.lastHit = ctx.turn
+      } else {
+        // Primary response: deposit warning + learn
+        response = {
+          type: 'deposit_warning',
+          targetFile: ctx.targetFile,
+        }
+      }
+
+      // 7. Apply response to Physarum
+      this.applyResponse(response)
+
+      // 8. Deposit pheromone warning if stigmergy available
+      if (this.deps.stigmergy && ctx.targetFile) {
+        // Fire-and-forget: pheromone persistence failures (e.g. unwritable cwd
+        // in tests) must not break immune response. Without .catch this becomes
+        // an unhandled rejection that surfaces unpredictably depending on
+        // event-loop timing.
+        this.deps.stigmergy.deposit({
+          path: ctx.targetFile,
+          signal: 'fragile',
+          strength: 0.8,
+          halfLifeMs: 3600_000,
+          context: 'immune-response',
+        }).catch(() => { /* deposit is best-effort */ })
+      }
+
+      this.maybeRunMaintenance(ctx.turn)
+      return { activated: true, response, signals: innateSignals, contextHint }
+    } catch {
+      // Immune failure must never crash the agent loop.
+      // Return a silent no-op result — tool results must still be delivered.
+      return { activated: false, signals: [] }
     }
-
-    // 7. Apply response to Physarum
-    this.applyResponse(response)
-
-    // 8. Deposit pheromone warning if stigmergy available
-    if (this.deps.stigmergy && ctx.targetFile) {
-      // Fire-and-forget: pheromone persistence failures (e.g. unwritable cwd
-      // in tests) must not break immune response. Without .catch this becomes
-      // an unhandled rejection that surfaces unpredictably depending on
-      // event-loop timing.
-      this.deps.stigmergy.deposit({
-        path: ctx.targetFile,
-        signal: 'fragile',
-        strength: 0.8,
-        halfLifeMs: 3600_000,
-        context: 'immune-response',
-      }).catch(() => { /* deposit is best-effort */ })
-    }
-
-    this.maybeRunMaintenance(ctx.turn)
-    return { activated: true, response, signals: innateSignals, contextHint }
   }
 
   /** Record successful repair (called externally after repair pipeline succeeds) */
