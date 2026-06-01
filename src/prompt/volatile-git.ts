@@ -79,6 +79,17 @@ export function createGitStatusCache(options: GitStatusCacheOptions) {
       refreshing.set(cwd, work)
       return work
     },
+
+    /**
+     * Awaitable variant: triggers refresh only if the cache is stale.
+     * Call this before building a prompt to eliminate the 30s staleness blind spot
+     * without changing the fire-and-forget get() path used in sync contexts.
+     */
+    async refreshIfStale(cwd: string): Promise<void> {
+      if (!isFresh(cwd)) {
+        await this.refresh(cwd)
+      }
+    },
   }
 }
 

@@ -527,6 +527,16 @@ export class PromptEngine {
     this.gitDirty = true
   }
 
+  /**
+   * Pre-refresh git status cache when stale. Call in async context before
+   * buildOaiRequest() to ensure the model sees fresh git state instead of the
+   * up-to-30s-old cached value returned by the synchronous get() path.
+   */
+  async refreshGitContextIfNeeded(cwd: string): Promise<void> {
+    const { gitStatusCache } = await import('./volatile-git.js')
+    await gitStatusCache.refreshIfStale(cwd)
+  }
+
   setActiveDomain(domain: VolatileContext['activeDomain']): void {
     this.activeDomain = domain
   }

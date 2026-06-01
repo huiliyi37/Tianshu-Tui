@@ -1428,6 +1428,8 @@ export class AgentLoop {
         if (this.sessionStateManager) {
           this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
         }
+        // Pre-refresh git status so buildOaiRequest doesn't return stale cached data
+        await this.config.promptEngine.refreshGitContextIfNeeded(this.cwd)
         const request = this.config.promptEngine.buildOaiRequest(
           this.session.getMessages(),
           this.recentToolHistory,
