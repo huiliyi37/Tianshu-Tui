@@ -1192,15 +1192,13 @@ export class AgentLoop {
           : 0
         this.turnBudget = createTurnBudget(rssRatio)
         
-        
+
         // Phase 2.3: Proactive session split at 86% context.
-        // Replaces message history with cache anchors + handoff,
-        // preserving exact prefix for DeepSeek disk cache hits.
-        // When split succeeds, the session is already pruned to
-        // ~3 messages → all subsequent compaction is a no-op.
+        let _tb = Date.now()
         if (await this.compaction.trySessionSplit()) {
           userMessageConsumed = true
         }
+        debugLog(`[turn-boundary] turn=${turn} trySessionSplit: ${Date.now() - _tb}ms`)
         // A2: user may have aborted during trySessionSplit (which can trigger
         // 60s LLM compact). Bail early instead of continuing into maybeCompact.
         if (this.abortController.signal.aborted) {
@@ -1209,10 +1207,12 @@ export class AgentLoop {
           return
         }
 
+        _tb = Date.now()
         const compactResult = await this.compaction.maybeCompact({
           loopTurn: turn,
           failures: this.compactFailures,
         })
+        debugLog(`[turn-boundary] turn=${turn} maybeCompact: ${Date.now() - _tb}ms compacted=${compactResult.compacted}`)
         if (compactResult.compacted) userMessageConsumed = true
         // A2: bail after maybeCompact (can also trigger LLM compact on 1M windows)
         if (this.abortController.signal.aborted) {
@@ -1297,7 +1297,9 @@ export class AgentLoop {
 
         this.streamedText = ''
         this.lastPrewarmAt = 0
+        _tb = Date.now()
         await this.prewarmRecentReads()
+        debugLog(`[turn-boundary] turn=${turn} prewarmRecentReads: ${Date.now() - _tb}ms`)
 
         // ── Git freshness: file change rate (Zeitgeber signal) ──
         getGitChangeRate(this.cwd).then(rate => {
@@ -1325,6 +1327,7 @@ export class AgentLoop {
           }
         }
 
+        _tb = Date.now()
         const perceptionResult = await this.perception.perceive({
           turn: this.session.getTurnCount(),
           estimatedTokens: estTokens,
@@ -1347,6 +1350,7 @@ export class AgentLoop {
           emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
         })
         this.sensorium = perceptionResult.sensorium
+        debugLog(`[turn-boundary] turn=${turn} perceive: ${Date.now() - _tb}ms`)
         this.strategy = perceptionResult.strategy
         this.vigorState = perceptionResult.vigor
         this.thetaState = perceptionResult.thetaState
@@ -1383,6 +1387,7 @@ export class AgentLoop {
           }
         }
 
+        _tb = Date.now()
         const intentResult = await this.intent.evaluate({
           strategy: currentStrategy,
           vigor: this.vigorState,
@@ -1392,6 +1397,7 @@ export class AgentLoop {
           recentToolHistory: this.recentToolHistory,
           onIntentPreview: callbacks.onIntentPreview,
         })
+        debugLog(`[turn-boundary] turn=${turn} intent: ${Date.now() - _tb}ms`)
         if (intentResult === 'veto') {
           callbacks.onPhaseChange?.('intent-veto', { reason: 'user vetoed intent', suggestion: 're-plan before tool use' })
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
@@ -1403,7 +1409,9 @@ export class AgentLoop {
 
         this.refreshReliabilityDecision()
 
+        _tb = Date.now()
         await this.compaction.enforceContextCeiling()
+        debugLog(`[turn-boundary] turn=${turn} enforceContextCeiling: ${Date.now() - _tb}ms`)
         // A2: enforceContextCeiling can trigger LLM compact (30s timeout).
         if (this.abortController.signal.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
@@ -1501,7 +1509,9 @@ export class AgentLoop {
           this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
         }
         // Pre-refresh git status so buildOaiRequest doesn't return stale cached data
+        _tb = Date.now()
         await this.config.promptEngine.refreshGitContextIfNeeded(this.cwd)
+        debugLog(`[turn-boundary] turn=${turn} refreshGitContext: ${Date.now() - _tb}ms`)
         const request = this.config.promptEngine.buildOaiRequest(
           this.session.getMessages(),
           this.recentToolHistory,
