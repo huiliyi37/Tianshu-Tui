@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, type RefObject } from 'react'
 import { spawnSync } from 'node:child_process'
-import { Box, Text, useInput, Static } from 'ink'
+import { Box, Text, useInput, Static, useStdout } from 'ink'
 import { WelcomeScreen } from './onboarding.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
 import { StarmapView } from './starmap-view.js'
@@ -180,9 +180,15 @@ export function isCurrentGeneration(runGen: number, currentGen: number): boolean
   return runGen === currentGen
 }
 
+export function shouldUseStaticHistory(isStreaming: boolean, supportsAnsiEscapes: boolean): boolean {
+  return !isStreaming || supportsAnsiEscapes
+}
+
 // --- Main App ---
 
 export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode }: AppProps) {
+  const { stdout } = useStdout()
+  const supportsAnsiEscapes = (stdout as NodeJS.WriteStream & { supportsAnsiEscapes?: boolean }).supportsAnsiEscapes ?? process.stdout.isTTY
   const { rows: termRows } = useTerminalSize()
   const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
   const [historyVersion, setHistoryVersion] = useState(0)
@@ -297,25 +303,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const thinkBuf = useRef('')
   const lastFlushedThink = useRef('')
   const streamLiveBuf = useRef('')
-  const streamFlushedToStatic = useRef(false)
   const blockWriterRef = useRef<BlockStreamWriter | null>(null)
-  // Progressive flush: keep live area small, push older content to Static scrollback
-  const STREAM_LIVE_MAX_LINES = 80
   const textBatcher = useRef(new RenderBatcher<string>((texts) => {
     const combined = texts.join('')
     streamBuf.current += combined
-    streamLiveBuf.current += combined
-    const lines = streamLiveBuf.current.split('\n')
-    if (lines.length > STREAM_LIVE_MAX_LINES * 2) {
-      const cutoff = lines.length - STREAM_LIVE_MAX_LINES
-      const flushText = lines.slice(0, cutoff).join('\n')
-      streamLiveBuf.current = lines.slice(cutoff).join('\n')
-      streamFlushedToStatic.current = true
-      pushStatic(createLogEntry({ type: 'assistant_message', content: flushText }))
-      setStreamingText(streamLiveBuf.current)
-    } else {
-      setStreamingText(streamLiveBuf.current)
-    }
+    streamLiveBuf.current = appendStreamWindow(streamLiveBuf.current, combined, LIVE_STREAM_MAX_CHARS)
+    setStreamingText(streamLiveBuf.current)
   }))
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -657,7 +650,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
     streamBuf.current = ''
     streamLiveBuf.current = ''
-    streamFlushedToStatic.current = false
     thinkBuf.current = ''
     lastFlushedThink.current = ''
     toolAccum.current.clear()
@@ -1062,8 +1054,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Flush again — writer.flush() may have pushed new items into the batcher
         textBatcher.current.flushNow()
         const finalText = streamBuf.current
-        // If we progressively flushed content to Static, only push the remaining tail
-        const textToStatic = streamFlushedToStatic.current ? streamLiveBuf.current : finalText
         if (finalText || thinkBuf.current) {
           if (finalText) {
             const parsed = parseInterviewMarker(finalText)
@@ -1074,10 +1064,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
                 setSummaryState(prev => ({ ...prev, phase: 'interview' }))
               }
               if (parsed.cleanText) {
-                pushAssistantEntry(streamFlushedToStatic.current ? streamLiveBuf.current : parsed.cleanText, thinkBuf.current || undefined)
+                pushAssistantEntry(parsed.cleanText, thinkBuf.current || undefined)
               }
             } else {
-              pushAssistantEntry(textToStatic, thinkBuf.current || undefined)
+              pushAssistantEntry(finalText, thinkBuf.current || undefined)
             }
           } else {
             // Only thinking, no visible text — push thinking-only entry
@@ -1191,11 +1181,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setFluencyStale(null)
         // Preserve any partial text/thinking before clearing
         if (streamBuf.current || thinkBuf.current) {
-          pushAssistantEntry(streamFlushedToStatic.current ? streamLiveBuf.current : streamBuf.current, thinkBuf.current || undefined)
+          pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
         }
         streamBuf.current = ''
         streamLiveBuf.current = ''
-        streamFlushedToStatic.current = false
         // Stop streaming FIRST, then clear text — prevents flash frame on error.
         // Guard on myGen (this run): only flip if no newer run has started since.
         if (isCurrentGeneration(myGen, streamGenRef.current)) {
@@ -1233,11 +1222,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setFluencyStale(null)
         // Preserve any partial text/thinking before clearing
         if (streamBuf.current || thinkBuf.current) {
-          pushAssistantEntry(streamFlushedToStatic.current ? streamLiveBuf.current : streamBuf.current, thinkBuf.current || undefined)
+          pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
         }
         streamBuf.current = ''
         streamLiveBuf.current = ''
-        streamFlushedToStatic.current = false
         // Stop streaming FIRST, then clear text — prevents flash frame on abort.
         // Guard on myGen (this run): only flip if no newer run has started since.
         if (isCurrentGeneration(myGen, streamGenRef.current)) {
@@ -1311,9 +1299,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       {historyItems.length === 0 && !isStreaming && (
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
-      <Static items={staticHistoryItems} key={staticHistoryItems.length > 0 ? staticHistoryItems[0]!.id : 'empty'}>
-        {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
-      </Static>
+      {shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) && (
+        <Static items={staticHistoryItems}>
+          {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
+        </Static>
+      )}
       <Box flexDirection="column">
         {activeOverlay === 'starmap' && (
           <StarmapView

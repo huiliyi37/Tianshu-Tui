@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { isCurrentGeneration } from '../app.js'
+import { isCurrentGeneration, shouldUseStaticHistory } from '../app.js'
 
 describe('isCurrentGeneration — stream generation guard', () => {
   it('allows flip when the run is still the current generation', () => {
@@ -18,5 +18,19 @@ describe('isCurrentGeneration — stream generation guard', () => {
     // spontaneous error) against the current gen, so it never flipped and froze
     // the UI in streaming. The current-generation check must reject -1.
     assert.equal(isCurrentGeneration(-1, 1), false)
+  })
+})
+
+describe('shouldUseStaticHistory', () => {
+  it('keeps Static during streaming when terminal diff rendering is supported', () => {
+    assert.equal(shouldUseStaticHistory(true, true), true)
+  })
+
+  it('disables Static during streaming when ANSI cursor diff rendering is unavailable', () => {
+    assert.equal(shouldUseStaticHistory(true, false), false)
+  })
+
+  it('restores Static after streaming even without ANSI cursor diff rendering', () => {
+    assert.equal(shouldUseStaticHistory(false, false), true)
   })
 })
