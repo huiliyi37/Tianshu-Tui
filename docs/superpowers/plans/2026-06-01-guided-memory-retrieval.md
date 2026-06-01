@@ -298,14 +298,18 @@ if objective or files mention memory/recall/prompt:
 
 ### P2：commit fact 策略重审
 
-不要直接把所有 commit fact 升级为 Tier 1。
+状态：**P2 第一阶段已落地**。commit fact 会升级为 project scope 并写入 `memory.jsonl`，但带 `commit_fact` tag，`project-memory-loader.ts` 会把它排除在 Tier 1 prompt 注入之外；因此 commit 历史可被 recall 搜索，但不会因为 `decision + confidence=0.95` 自动污染 prompt。
 
-推荐新策略：
+不要直接把所有 commit fact 注入 Tier 1。
+
+当前策略：
 
 ```text
-commit fact 默认 recall-only
-架构性 commit 由模型/用户显式 remember 为 decision/project_rule
+commit fact → scope=project + tag=commit_fact → memory.jsonl → recall-only
+架构性 commit → 由模型/用户显式 remember 为 decision/project_rule 才进入 Tier 1
 ```
+
+后续第二阶段需要单独设计：如何识别“架构性 commit”并安全提升为 Tier 1，不能仅凭 commit 存在或 confidence 数字判断。
 
 ### P2：verification supersession 另开任务
 
