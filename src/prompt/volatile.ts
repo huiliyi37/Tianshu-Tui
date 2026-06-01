@@ -57,6 +57,10 @@ export interface VolatileContext {
   planModeState?: 'off' | 'planning' | 'approved'
   /** Project memory loaded from .rivet/knowledge/memory.jsonl (frozen: changes only on file update) */
   projectMemoryBlock?: string
+  /** 种子胶囊 L1 核心文本（来自天璇/天府等前辈星域的封存经验）。
+   *  渲染到 frozen base 中，session 全程稳定，prefix cache safe。
+   *  Phase 1: 仅天璇胶囊。后续可扩展为多星域胶囊数组。 */
+  seedCapsuleBlock?: string
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -274,6 +278,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   // Rendered into frozen base so it benefits from prefix cache (turn 2+ cost = 0).
   if (ctx.projectMemoryBlock) {
     parts.push(ctx.projectMemoryBlock)
+  }
+
+  // Seed capsule — 前辈星域封存的经验方法（天璇胶囊等）。
+  // Rendered into frozen base so it benefits from prefix cache (turn 2+ cost = 0).
+  if (ctx.seedCapsuleBlock) {
+    parts.push(ctx.seedCapsuleBlock)
   }
 
   // Only render git status if explicitly provided — no cache fallback here.
