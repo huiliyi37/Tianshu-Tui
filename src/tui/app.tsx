@@ -418,6 +418,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const promptQueueRef = useRef({ running: false })
   const steerBuffer = useRef(new SteerBuffer())
+  const isStreamingRef = useRef(false)
   const [steerPending, setSteerPending] = useState(false)
   const inputBarRef = useRef<{ clear: () => void; hasContent: () => boolean; setValue: (v: string) => void }>({ clear() {}, hasContent() { return false }, setValue() {} })
 
@@ -544,8 +545,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
       if (isStreaming) {
         agent.abort()
-        steerBuffer.current.clear()
-        setIsStreaming(false)
+        const ctrlPreservedSteer = steerBuffer.current.drain()
+        if (ctrlPreservedSteer) {
+          pushStatic(createLogEntry({ type: 'system', content: `📨 ${ctrlPreservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+        }
+        setIsStreaming(false); isStreamingRef.current = false
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
         lastCtrlCRef.current = Date.now()
         return
@@ -576,8 +580,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       if (isStreaming) {
         if (lastEscRef.current && now - lastEscRef.current < 1000) {
           agent.abort()
-          steerBuffer.current.clear()
-          setIsStreaming(false)
+          const escPreservedSteer = steerBuffer.current.drain()
+          if (escPreservedSteer) {
+            pushStatic(createLogEntry({ type: 'system', content: `📨 ${escPreservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+          }
+          setIsStreaming(false); isStreamingRef.current = false
           pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
           lastEscRef.current = 0
           surfacePush('rewind')
@@ -708,7 +715,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     streamGenRef.current++
     const myGen = streamGenRef.current
     const run = async () => {
-    setIsStreaming(true)
+    setIsStreaming(true); isStreamingRef.current = true
     setIsThinkingActive(false)
     setStreamingText('')
     setStreamingThinking('')
@@ -772,7 +779,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const topic = parts.slice(1).join(' ').trim()
         if (!topic) {
           pushStatic(createLogEntry({ type: 'system', content: 'Usage: /interview <topic>' }))
-          setIsStreaming(false)
+          setIsStreaming(false); isStreamingRef.current = false
           return
         }
         pushStatic(createLogEntry({ type: 'system', content: `⚡ Interview mode activated for: ${topic}` }))
@@ -797,7 +804,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             pushStatic(createLogEntry({ type: 'system', content: 'No agent-owned changes to rollback.' }))
           }
         }
-        setIsStreaming(false)
+        setIsStreaming(false); isStreamingRef.current = false
         return
       }
 
@@ -806,14 +813,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const sensoriumPath = join(cwd, '.rivet', 'sensorium.jsonl')
         if (!existsSync(sensoriumPath)) {
           pushStatic(createLogEntry({ type: 'system', content: '无 sensorium 数据。请先运行一个 session。' }))
-          setIsStreaming(false)
+          setIsStreaming(false); isStreamingRef.current = false
           return
         }
         try {
           const raw = readFileSync(sensoriumPath, 'utf-8')
           if (!raw.trim()) {
             pushStatic(createLogEntry({ type: 'system', content: 'Sensorium 日志为空。请先运行一个 session。' }))
-            setIsStreaming(false)
+            setIsStreaming(false); isStreamingRef.current = false
             return
           }
           const entries = parseSensoriumLog(raw)
@@ -839,7 +846,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         } catch (err) {
           pushStatic(createLogEntry({ type: 'system', content: `Retrospect 生成失败: ${err instanceof Error ? err.message : String(err)}` }))
         }
-        setIsStreaming(false)
+        setIsStreaming(false); isStreamingRef.current = false
         return
       }
 
@@ -870,7 +877,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         type: 'system',
         content: `⚠️  Unknown command: ${cmdName}\n\nType /help to see available commands.`,
       }))
-      setIsStreaming(false)
+      setIsStreaming(false); isStreamingRef.current = false
       return
     }
 
@@ -1150,7 +1157,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           : (thinkBuf.current || undefined)
         // Stop streaming FIRST so StreamOutput unmounts before Static entry appears,
         // preventing duplicate content visible simultaneously in terminal.
-        setIsStreaming(false)
+        setIsStreaming(false); isStreamingRef.current = false
         if (finalText || thinkBuf.current) {
           if (finalText) {
             const parsed = parseInterviewMarker(finalText)
@@ -1284,7 +1291,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Stop streaming FIRST, then clear text — prevents flash frame on error.
         // Guard on myGen (this run): only flip if no newer run has started since.
         if (isCurrentGeneration(myGen, streamGenRef.current)) {
-          setIsStreaming(false)
+          setIsStreaming(false); isStreamingRef.current = false
         }
         setStreamingText('')
         thinkBuf.current = ''
@@ -1329,7 +1336,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Stop streaming FIRST, then clear text — prevents flash frame on abort.
         // Guard on myGen (this run): only flip if no newer run has started since.
         if (isCurrentGeneration(myGen, streamGenRef.current)) {
-          setIsStreaming(false)
+          setIsStreaming(false); isStreamingRef.current = false
         }
         setStreamingText('')
         thinkBuf.current = ''
@@ -1341,7 +1348,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolTargetMap.current.clear()
         toolStartMap.current.clear()
         toolCallTracker.current.clear()
-        steerBuffer.current.clear()
+        const preservedSteer = steerBuffer.current.drain()
+        if (preservedSteer) {
+          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+        }
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
@@ -1388,7 +1398,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       pushStatic(createLogEntry({ type: 'system', content: `Queue error: ${err.message}`, isError: true }))
       // Only flip if no newer run has started since this one
       if (isCurrentGeneration(myGen, streamGenRef.current)) {
-        setIsStreaming(false)
+        setIsStreaming(false); isStreamingRef.current = false
       }
     }).finally(() => {
       promptQueueRef.current.running = false
@@ -1501,7 +1511,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             onCancel={() => surfacePop()}
           />
         )}
-        <InputBar onSubmit={isStreaming ? (text: string) => {
+        <InputBar onSubmit={isStreamingRef.current ? (text: string) => {
           steerBuffer.current.push(text)
           pushStatic(createLogEntry({ type: 'system', content: `Guidance queued: "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}" — will be injected at next opportunity` }))
         } : handleSubmit} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} steerMode={isStreaming} inputRef={inputBarRef} />
