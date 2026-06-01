@@ -13,6 +13,8 @@ Provider 是「模型接入点」——你告诉天枢从哪里调用模型、�
 | Provider | 对应模型 | 协议 | 认证方式 | Context Window | 特点 |
 |----------|----------|------|----------|----------------|------|
 | `deepseek` | DeepSeek V4 Pro / Flash | OpenAI-compatible | API Key | 1M tokens | 原生前缀缓存，Cache Hit 可达 90%+ |
+| `opencode-go` | DeepSeek / MiMo / GLM / Kimi 等开源模型 | OpenAI-compatible | API Key | 1M tokens | OpenCode Go 订阅服务，首月 $5，每月 $10 |
+| `opencode-go-anthropic` | Qwen / MiniMax 等开源模型 | Anthropic Messages | API Key | 1M tokens | OpenCode Go 的 Anthropic 协议端点，支持 cache_control |
 | `glm` | 智谱 GLM-5.1 | OpenAI-compatible | API Key | 200K tokens | 支持 thinking |
 | `mimo` | 小米 MiMo-v2.5-Pro | OpenAI-compatible | API Key | 1M tokens | 支持 thinking，prefix cache |
 | `minimax` | MiniMax M2.7 | OpenAI-compatible | API Key | 204.8K tokens | 需过滤 `top_k/metadata/cache_control` 参数 |
@@ -265,6 +267,147 @@ rivet config setup deepseek --key-env DEEPSEEK_API_KEY --default
 - `deepseek-v4-pro`（默认）：完整 thinking，`reasoningEffort: max`
 - `deepseek-v4-flash`：快速响应，`reasoningEffort: high`
 
+### OpenCode Go（开源模型订阅服务）
+
+**推荐场景**：一站式接入多个开源编程模型，无需分别申请各厂商 API Key。
+
+OpenCode Go 是 [OpenCode](https://opencode.ai) 提供的低成本订阅服务（首月 $5，之后每月 $10），提供经过测试和基准评估的开源编程模型的稳定访问。模型托管在美国、欧盟和新加坡。
+
+#### 两个 Provider 条目
+
+由于 OpenCode Go 的不同模型使用不同 API 协议，天枢需要配置两个 Provider 条目：
+
+| Provider Key | 协议 | 端点 | 适用模型 |
+|--------------|------|------|----------|
+| `opencode-go` | OpenAI Chat Completions | `/v1/chat/completions` | DeepSeek V4 Pro/Flash, MiMo-V2.5/V2.5-Pro, GLM-5/5.1, Kimi K2.5/K2.6 |
+| `opencode-go-anthropic` | Anthropic Messages | `/v1/messages` | Qwen3.5/3.6/3.7, MiniMax M2.5/M2.7 |
+
+> **注意**：`opencode-go-anthropic` 的 `name` 字段必须设为 `"anthropic"`，这样天枢的 factory 才会路由到 `AnthropicClient`，使用 `/v1/messages` 端点。
+
+#### 配置方法
+
+**方式一：交互式向导**
+
+```bash
+rivet config setup opencode-go --key sk-xxxx --default
+```
+
+**方式二：手动编辑 `~/.rivet/config.json`**
+
+```json
+{
+  "provider": {
+    "default": "opencode-go",
+    "providers": {
+      "opencode-go": {
+        "name": "opencode-go",
+        "apiKey": "sk-xxxx",
+        "baseUrl": "https://opencode.ai/zen/go/v1",
+        "protocol": "openai",
+        "capabilities": {
+          "cacheControl": false,
+          "stripParams": ["top_k", "metadata", "service_tier", "cache_control"],
+          "prefixCache": "none"
+        },
+        "thinking": "enabled",
+        "maxTokens": 64000,
+        "models": [
+          { "id": "deepseek-v4-pro", "alias": "go-ds4p", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "max" },
+          { "id": "deepseek-v4-flash", "alias": "go-ds4f", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "high" },
+          { "id": "mimo-v2.5-pro", "alias": "go-mimo", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "max" },
+          { "id": "glm-5.1", "alias": "go-glm", "contextWindow": 200000, "maxTokens": 64000, "reasoningEffort": "max" },
+          { "id": "kimi-k2.6", "alias": "go-kimi", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "high" }
+        ],
+        "unsupported": ["stream_options"]
+      },
+      "opencode-go-anthropic": {
+        "name": "anthropic",
+        "apiKey": "sk-xxxx",
+        "baseUrl": "https://opencode.ai/zen/go/v1",
+        "protocol": "openai",
+        "capabilities": {
+          "cacheControl": true,
+          "stripParams": [],
+          "prefixCache": "anthropic-cache-control"
+        },
+        "thinking": "enabled",
+        "maxTokens": 64000,
+        "models": [
+          { "id": "qwen3.7-max", "alias": "go-qwen", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "high" },
+          { "id": "qwen3.6-plus", "alias": "go-qwen36", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "high" },
+          { "id": "minimax-m2.7", "alias": "go-mm27", "contextWindow": 204800, "maxTokens": 64000 },
+          { "id": "minimax-m2.5", "alias": "go-mm25", "contextWindow": 204800, "maxTokens": 64000 }
+        ],
+        "unsupported": []
+      }
+    }
+  }
+}
+```
+
+#### 使用限制
+
+| 周期 | 额度 |
+|------|------|
+| 每 5 小时 | $12 |
+| 每周 | $30 |
+| 每月 | $60 |
+
+额度以美元计价，不同模型消耗不同（如 MiMo-V2.5 便宜，允许更多请求；GLM-5.1 较贵，允许较少请求）。
+
+#### 当前可用模型（2026-06）
+
+| 模型 | 协议 | 模型 ID |
+|------|------|---------|
+| DeepSeek V4 Pro | OpenAI | `deepseek-v4-pro` |
+| DeepSeek V4 Flash | OpenAI | `deepseek-v4-flash` |
+| MiMo-V2.5 | OpenAI | `mimo-v2.5` |
+| MiMo-V2.5-Pro | OpenAI | `mimo-v2.5-pro` |
+| GLM-5 | OpenAI | `glm-5` |
+| GLM-5.1 | OpenAI | `glm-5.1` |
+| Kimi K2.5 | OpenAI | `kimi-k2.5` |
+| Kimi K2.6 | OpenAI | `kimi-k2.6` |
+| Qwen3.7 Max | Anthropic | `qwen3.7-max` |
+| Qwen3.6 Plus | Anthropic | `qwen3.6-plus` |
+| Qwen3.5 Plus | Anthropic | `qwen3.5-plus` |
+| MiniMax M2.7 | Anthropic | `minimax-m2.7` |
+| MiniMax M2.5 | Anthropic | `minimax-m2.5` |
+
+完整模型列表可通过 API 查询：
+
+```bash
+curl https://opencode.ai/zen/go/v1/models \
+  -H "Authorization: Bearer $OPENCODE_GO_KEY"
+```
+
+#### 验证连通性
+
+```bash
+# OpenAI 协议模型
+curl https://opencode.ai/zen/go/v1/chat/completions \
+  -H "Authorization: Bearer $OPENCODE_GO_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-pro","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+
+# Anthropic 协议模型
+curl https://opencode.ai/zen/go/v1/messages \
+  -H "x-api-key: $OPENCODE_GO_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen3.7-max","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+```
+
+#### 路由原理
+
+天枢的 `factory.ts` 根据 Provider 配置决定使用哪个 HTTP Client：
+
+- `name === 'opencode-go'` → `OpenAIClient` → 请求 `/v1/chat/completions`
+- `name === 'anthropic'` 或 `prefixCache === 'anthropic-cache-control'` → `AnthropicClient` → 请求 `/v1/messages`
+
+这就是为什么 `opencode-go-anthropic` 的 `name` 必须是 `"anthropic"` —— 触发 Anthropic 协议路由。
+
+---
+
 ### GLM（智谱）
 
 **推荐场景**：需要中文理解强化的任务。
@@ -336,6 +479,8 @@ node dist/main.js  # 首次运行会弹出浏览器登录
 | Provider | 环境变量 |
 |----------|----------|
 | deepseek | `DEEPSEEK_API_KEY` |
+| opencode-go | `OPENCODE_GO_KEY` |
+| opencode-go-anthropic | `OPENCODE_GO_KEY` |
 | glm | `ZHIPU_API_KEY` |
 | mimo | `MIMO_API_KEY` |
 | minimax | `MINIMAX_API_KEY` |
