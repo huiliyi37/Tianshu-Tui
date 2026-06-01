@@ -504,12 +504,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     activityIntervalRef.current = setInterval(() => {
       const now = Date.now()
       projectActivity(now)
-      // Also feed phase duration + turn count into GlanceBar/Starmap state for live heartbeat
-      const phaseMs = now - activityRef.current.startedAt
-      setSummaryState(prev => {
-        if (prev.phaseDurationMs === phaseMs && prev.turnCount === turnCountRef.current) return prev
-        return { ...prev, phaseDurationMs: phaseMs, turnCount: turnCountRef.current, maxTurns: maxTurnsRef.current }
-      })
       // Sync active star domain (bound on first run during streaming)
       const dn = agent.getSessionDomain()?.name
       setStarDomain(prev => (prev === dn ? prev : dn))
