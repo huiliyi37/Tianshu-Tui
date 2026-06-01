@@ -165,9 +165,9 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     ))
     reg.register(createUndoTool(() => _fileHistoryRef ?? undefined))
     reg.register(createDelegateBatchTool({
-      delegateBatch: async (requests, policy) => {
+      delegateBatch: async (requests, policy, abortSignal, onProgress) => {
         if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
-        return _coordinatorRef.delegateBatch(requests, policy)
+        return _coordinatorRef.delegateBatch(requests, policy, abortSignal, onProgress)
       },
     },
       () => _claimStoreRef ?? undefined,
@@ -815,7 +815,7 @@ async function main() {
           () => sessionId,
         ))
         toolRegistry.register(createDelegateBatchTool(
-          { delegateBatch: async (requests, policy) => goalCoordinator.delegateBatch(requests, policy) },
+          { delegateBatch: async (requests, policy, abortSignal, onProgress) => goalCoordinator.delegateBatch(requests, policy, abortSignal, onProgress) },
           () => claimStore,
           () => sessionId,
         ))

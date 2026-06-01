@@ -386,7 +386,12 @@ export class DelegationCoordinator {
     }
   }
 
-  async delegateBatch(requests: DelegationRequest[], policy: AggregationPolicy = 'primary_decides', abortSignal?: AbortSignal): Promise<CoordinatorRun> {
+  async delegateBatch(
+    requests: DelegationRequest[],
+    policy: AggregationPolicy = 'primary_decides',
+    abortSignal?: AbortSignal,
+    onProgress?: (completed: number, total: number) => void,
+  ): Promise<CoordinatorRun> {
     // Per-call abort signal override
     const savedSignal = this.config.abortSignal
     if (abortSignal) this.config.abortSignal = abortSignal
@@ -426,6 +431,7 @@ export class DelegationCoordinator {
     // Process queue with concurrency control
     const allResults: WorkerResult[] = []
     const inflight: Promise<void>[] = []
+    let completedCount = 0
 
     const processNext = async (): Promise<void> => {
       const order = queue.dequeue()
@@ -439,6 +445,8 @@ export class DelegationCoordinator {
         allResults.push(workerFailureResult(order, error))
         queue.markFailed(order)
       }
+      completedCount++
+      onProgress?.(completedCount, orders.length)
       // Recurse: try to process next pending order (respecting concurrency limit)
       await processNext()
     }
