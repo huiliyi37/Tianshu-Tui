@@ -1002,7 +1002,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             pushStatic(createLogEntry({ type: 'system', content: `… ${foldedCountRef.current} routine tool calls folded` }))
             foldedCountRef.current = 0
           }
-          pushStatic(createLogEntry({ type: 'tool', id, toolName, content: finalContent, isError, rawPath }))
+          // P5: smart summarization for large tool results to prevent screen overflow
+          const resultLines = finalContent.split('\n').length
+          const maxLines = resultLines > 100 ? 30 : resultLines > 50 ? 20 : verboseRef.current ? 200 : 8
+          const displayContent = resultLines > maxLines ? summarizeToolOutput(finalContent, maxLines) : finalContent
+          pushStatic(createLogEntry({ type: 'tool', id, toolName, content: displayContent, isError, rawPath }))
         }
 
         const tcEntry = toolCallTracker.current.get(id)
@@ -1058,6 +1062,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Intermediate turn: update activity, freeze tools, reset thinking — but keep writer alive
         if (isFinal === false) {
           textBatcher.current.flushNow()
+          // Archive intermediate turn text to Static and clear stream buffers
+          // to prevent cross-turn text accumulation in StreamOutput (P2 fix).
+          const midText = streamBuf.current
+          if (midText) {
+            const midThinking = thinkBuf.current || undefined
+            pushAssistantEntry(midText, midThinking)
+          }
+          streamBuf.current = ''
+          streamLiveBuf.current = ''
+          setStreamingText('')
           if (thinkStartRef.current > 0) {
             thinkTimeRef.current = Date.now() - thinkStartRef.current
             thinkStartRef.current = 0
@@ -1117,6 +1131,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const thinkingForArchive = (finalText && thinkBuf.current && isThinkingPromotedToText(thinkBuf.current, finalText))
           ? undefined
           : (thinkBuf.current || undefined)
+        // Stop streaming FIRST so StreamOutput unmounts before Static entry appears,
+        // preventing duplicate content visible simultaneously in terminal.
+        setIsStreaming(false)
         if (finalText || thinkBuf.current) {
           if (finalText) {
             const parsed = parseInterviewMarker(finalText)
@@ -1137,9 +1154,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             pushAssistantEntry('', thinkBuf.current)
           }
         }
-        // Stop streaming FIRST so StreamOutput unmounts while text is still present,
-        // then clear text — prevents blank-cursor flash frame on turn completion.
-        setIsStreaming(false)
         setStreamingText('')
 
         if (thinkTimer.current) {
