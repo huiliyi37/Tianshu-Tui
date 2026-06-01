@@ -1299,11 +1299,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       {historyItems.length === 0 && !isStreaming && (
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
-      {shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) && (
-        <Static items={staticHistoryItems}>
-          {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
-        </Static>
-      )}
+      <Static
+        items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? staticHistoryItems : []}
+        key={staticHistoryItems.length > 0 ? staticHistoryItems[0]!.id : 'empty'}
+      >
+        {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
+      </Static>
       <Box flexDirection="column">
         {activeOverlay === 'starmap' && (
           <StarmapView
