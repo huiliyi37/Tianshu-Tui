@@ -1463,15 +1463,22 @@ export class AgentLoop {
         this.contextInjection.refreshActiveClaims()
 
         // ── Sycophancy Trap: record previous turn agreement ──
-        // 仁者必有勇。连续同意 + confidence 下降 → 质疑注入。
-        // agreedWithUser: 最近是否使用了 ask_user_question（质疑）？
-        // 没质疑就执行 → 过度服从 = agreed；先质疑再执行 → 独立判断。
+        // 仁者必有勇。连续盲从 + confidence 下降 → 质疑注入。
+        // agreedWithUser: 有破坏性操作，但既没有质疑（ask_user_question），
+        // 也没有验证（read_file, grep, typecheck 等）→ 盲从执行。
+        // 先质疑再执行 → 独立判断；先验证再执行 → 尽责执行。
         const recentToolNames = this.recentToolHistory.slice(-8).map(h => h.tool)
         const hadAskTool = recentToolNames.includes('ask_user_question')
+        const verificationTools = new Set([
+          'read_file', 'grep', 'glob', 'run_tests',
+          'lsp_goto_definition', 'lsp_find_references', 'inspect_project',
+        ])
+        const hadVerification = recentToolNames.some(t => verificationTools.has(t))
         const hadDestructive = recentToolNames.some(
           t => t === 'write_file' || t === 'edit_file' || t === 'bash'
         )
-        const agreedWithUser = hadDestructive && !hadAskTool
+        // Blind execution: destructive without question AND without verification
+        const agreedWithUser = hadDestructive && !hadAskTool && !hadVerification
         if (actionable && (hadDestructive || hadAskTool)) {
           this.sycophancyTrap.recordTurn({
             agreedWithUser,
