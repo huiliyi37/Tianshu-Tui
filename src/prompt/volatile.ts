@@ -137,6 +137,11 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     cerebellarHint: undefined,
     // gitStatus moved to dynamic appendix — changes every turn, breaks prefix cache
     gitStatus: undefined,
+    // planModeState and worktreeReality rendered in buildVolatileBlockInternal
+    // but MUST stay out of FROZEN — they can change mid-session and would
+    // break exact-prefix cache if included in the stable block.
+    planModeState: undefined,
+    worktreeReality: undefined,
     // Session snapshot fields — KEEP in FROZEN:
     // rivetMd, workingSet, sessionMemoryBlock
   })
