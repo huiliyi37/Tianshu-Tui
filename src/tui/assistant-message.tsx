@@ -18,7 +18,7 @@ interface AssistantMessageProps {
  * The streaming viewport (StreamOutput) already limits live display; this
  * cap limits the archival Static render.
  */
-const MAX_STATIC_LINES = 120
+const MAX_STATIC_LINES = 80
 
 /**
  * Assistant content message — rendered in <Static> list (print-and-forget to
@@ -29,7 +29,7 @@ const MAX_STATIC_LINES = 120
  */
 export const AssistantMessage = memo(function AssistantMessage({ content }: AssistantMessageProps) {
   const theme = getTheme()
-  const maxLines = useViewportLines(0.8, MAX_STATIC_LINES)
+  const maxLines = useViewportLines(0.6, 20, MAX_STATIC_LINES)
 
   if (!content) return null
 
