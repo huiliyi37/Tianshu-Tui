@@ -365,6 +365,26 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
   }, [pushStaticBatch])
 
+  /** P2: shared flush — archive streaming text to Static and clear live buffers.
+   *  Must be called BEFORE setIsStreaming(false) so StreamOutput hasn't unmounted yet.
+   *  Used by Ctrl+C handler, ESC handler, onAbort, and onError callbacks. */
+  const flushStreamingState = useCallback(() => {
+    blockWriterRef.current?.flush()
+    blockWriterRef.current = null
+    textBatcher.current.flushNow()
+    if (streamBuf.current || thinkBuf.current) {
+      pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
+    }
+    streamBuf.current = ''
+    streamLiveBuf.current = ''
+    setStreamingText('')
+    thinkBuf.current = ''
+    setStreamingThinking('')
+    setIsThinkingActive(false)
+    if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
+    lastFlushedThink.current = ''
+  }, [pushAssistantEntry])
+
   const streamStartRef = useRef(0)
   const thinkStartRef = useRef(0)
   const thinkTimeRef = useRef(0)
@@ -542,20 +562,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Flush and save streaming text BEFORE unmounting StreamOutput.
         // Without this, setIsStreaming(false) causes StreamOutput to unmount
         // and the text vanishes before the async onAbort callback can persist it.
-        blockWriterRef.current?.flush()
-        blockWriterRef.current = null
-        textBatcher.current.flushNow()
-        if (streamBuf.current || thinkBuf.current) {
-          pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
-          streamBuf.current = ''
-          streamLiveBuf.current = ''
-          setStreamingText('')
-          thinkBuf.current = ''
-          setStreamingThinking('')
-          setIsThinkingActive(false)
-          if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
-          lastFlushedThink.current = ''
-        }
+        flushStreamingState()
         flushStaticBatch()
         const ctrlPreservedSteer = steerBuffer.current.drain()
         if (ctrlPreservedSteer) {
@@ -593,20 +600,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (lastEscRef.current && now - lastEscRef.current < 1000) {
           agent.abort()
           // Flush and save streaming text BEFORE unmounting StreamOutput.
-          blockWriterRef.current?.flush()
-          blockWriterRef.current = null
-          textBatcher.current.flushNow()
-          if (streamBuf.current || thinkBuf.current) {
-            pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
-            streamBuf.current = ''
-            streamLiveBuf.current = ''
-            setStreamingText('')
-            thinkBuf.current = ''
-            setStreamingThinking('')
-            setIsThinkingActive(false)
-            if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
-            lastFlushedThink.current = ''
-          }
+          flushStreamingState()
           flushStaticBatch()
           const escPreservedSteer = steerBuffer.current.drain()
           if (escPreservedSteer) {
@@ -1304,26 +1298,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Clean up stale timers and writer on error
         if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
-        blockWriterRef.current?.flush()
-        blockWriterRef.current = null
-        textBatcher.current.flushNow()
+        flushStreamingState()
         foldedCountRef.current = 0
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
-        // Preserve any partial text/thinking before clearing
-        if (streamBuf.current || thinkBuf.current) {
-          pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
-        }
-        streamBuf.current = ''
-        streamLiveBuf.current = ''
         // Stop streaming FIRST, then clear text — prevents flash frame on error.
         // Guard on myGen (this run): only flip if no newer run has started since.
         if (isCurrentGeneration(myGen, streamGenRef.current)) {
           setIsStreaming(false); isStreamingRef.current = false
         }
-        setStreamingText('')
-        thinkBuf.current = ''
-        setStreamingThinking('')
         // Clear tool state from failed run
         toolAccum.current.clear()
         toolNames.current.clear()
@@ -1349,26 +1332,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
-        blockWriterRef.current?.flush()
-        blockWriterRef.current = null
-        textBatcher.current.flushNow()
+        flushStreamingState()
         foldedCountRef.current = 0
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
-        // Preserve any partial text/thinking before clearing
-        if (streamBuf.current || thinkBuf.current) {
-          pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
-        }
-        streamBuf.current = ''
-        streamLiveBuf.current = ''
         // Stop streaming FIRST, then clear text — prevents flash frame on abort.
         // Guard on myGen (this run): only flip if no newer run has started since.
         if (isCurrentGeneration(myGen, streamGenRef.current)) {
           setIsStreaming(false); isStreamingRef.current = false
         }
-        setStreamingText('')
-        thinkBuf.current = ''
-        setStreamingThinking('')
         // Clear tool state from aborted run
         toolAccum.current.clear()
         toolNames.current.clear()
