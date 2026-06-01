@@ -1,6 +1,8 @@
 # 收敛检测机制设计
 
 > 基于天璇方法论：跨领域碎片收敛 → 反证探针 → 温跃层梯度。
+> 
+> **状态：已实现。** `src/agent/convergence-detector.ts` + 集成 `src/agent/loop.ts`。
 
 ## 问题
 
@@ -95,28 +97,40 @@ Session 95708c11：模型在 33 turn 内执行 grep/bash/read_file 循环，98K 
 
 ### ConvergenceScore 计算
 
-```
-ConvergenceScore = Σ(w_i × signal_i)
+5 个正交信号，加权求和。所有信号归一化到 [0, 1]。
 
-signals:
-  edit_ratio        = turns_with_edits / window_size     (w=0.25)
-  target_novelty    = unique_new_targets / total_targets  (w=0.20)
-  tool_entropy      = normalized_shannon(tool_dist)       (w=0.20)
-  error_penalty     = 1.0 - failure_rate                  (w=0.15)
-  token_efficiency  = output_tokens / input_tokens_avg    (w=0.20)
-```
+#### 信号定义
 
-所有信号在滑动窗口（默认 8 turns）上计算，归一化到 [0, 1]。
+| 信号 | 计算 | 含义 |
+|------|------|------|
+| `editRatio` | successful_edits / window | 编辑产出比例 |
+| `targetNovelty` | unique_targets / window | 目标新颖度 |
+| `toolEntropy` | normalized_shannon(tool_distribution) | 工具分布熵 |
+| `errorPenalty` | 1.0 - failure_rate | 错误惩罚 |
+| `tokenEfficiency` | productive_tools / total_tools | 产出效率 |
 
-**相位感知权重调制：** 依据当前 phase class 调整权重矩阵。
+#### 实际权重矩阵（经过校准优化）
 
 | Phase Class | edit_ratio | target_novelty | tool_entropy | error_penalty | token_efficiency |
 |-------------|-----------|---------------|-------------|--------------|-----------------|
 | explore     | 0.05      | 0.35          | 0.30        | 0.15         | 0.15            |
 | plan        | 0.10      | 0.25          | 0.20        | 0.20         | 0.25            |
-| execute     | 0.40      | 0.15          | 0.15        | 0.20         | 0.10            |
+| execute     | **0.50**  | 0.10          | 0.10        | 0.20         | 0.10            |
 | verify      | 0.30      | 0.10          | 0.10        | 0.35         | 0.15            |
-| deliver     | 0.35      | 0.10          | 0.10        | 0.25         | 0.20            |
+| deliver     | **0.45**  | 0.10          | 0.10        | 0.25         | **0.10**        |
+
+> **优化点：** execute 的 editRatio 权重从设计的 0.40 上调到 0.50，deliver 从 0.35 上调到 0.45。原因：在这些阶段没有编辑是根本性的方向错误，其他信号即使正常也不应掩盖。deliver 的 tokenEfficiency 从 0.20 下调到 0.10——交付阶段不应再有大量读取。
+
+#### 相位期望惩罚（实现中新增）
+
+针对 execute、verify、deliver 三个**编辑预期阶段**，当 `editRatio < 0.1` 时，整体得分乘以 0.5：
+
+```
+if (editExpectedPhases.includes(phaseClass) && signals.editRatio < 0.1)
+  penalty = 0.5
+```
+
+这是反证探针的结果：在编辑预期阶段零编辑产出的情况下，不能因为工具多样性高就给高分。
 
 ### 渐进升级阶梯
 
@@ -126,70 +140,105 @@ signals:
 |------|----------|--------|------|
 | maxTurns (硬上限) | 30 | 50 | 超过即 force split |
 | N_low (Level 0→1) | 8 | 12 | 开始注入 immune nudge |
-| N_mid (Level 1→2) | 14 | 22 | 发射 kick + radio |
-| N_high (Level 2→3) | 20 | 35 | 强制 compaction 或 abort |
+| N_mid (Level 1→2) | 14 | 22 | 发射 kick + 注入引导消息 |
+| N_high (Level 2→3) | 20 | 35 | 强制 session split 或 abort |
 | 滑动窗口大小 | 6 | 10 | 信号计算窗口 |
+
+中间窗口大小（如 500K）通过线性插值计算阈值。
 
 ### Level 动作
 
 | Level | 条件 | 动作 |
 |-------|------|------|
 | 0 | turn < N_low 或 score > 0.6 | 正常继续 |
-| 1 | turn ≥ N_low 且 score ≤ 0.6 | 注入 immune signal: `tool_repeat` 或 `trajectory_warning` |
-| 2 | turn ≥ N_mid 且 score ≤ 0.4 | 发射 stuck radio + dissipative kick + 建议 session split |
-| 3 | turn ≥ N_high 且 score ≤ 0.2 | 强制 trySessionSplit + 若失败则 abort（返回 partial result） |
+| 1 | turn ≥ N_low 且 score ≤ 0.6 | 日志记录，不干预（预留给 immune hook） |
+| 2 | turn ≥ N_mid 且 score ≤ 0.4 | 注入 user message 引导 + 发射 convergence-warning phase change |
+| 3 | turn ≥ N_high 且 score ≤ 0.2 | 强制 trySessionSplit；若 score < 0.1 则 abort |
 
 ### 注入点
 
 在 `loop.ts` 的 turn boundary 中，`perceive` 之后、`intent.evaluate` 之前：
 
 ```typescript
-// 现有: perception → intent → enforce → API call
-// 改为: perception → convergence check → intent → enforce → API call
+// perception → convergence check → intent → enforce → API call
 
-const convergenceResult = this.convergenceDetector.evaluate({
+const convergenceCheck = evaluateConvergence({
   turn,
-  sensorium: currentSensorium,
-  phaseClass,
+  phaseClass: phaseClass as PhaseClass,
   contextWindow: this.config.contextWindow,
   recentToolHistory: this.recentToolHistory,
   evidenceState: this.evidence.getState(),
 })
 
-if (convergenceResult.level >= 2) {
-  // inject dissipative kick message
-  this.session.addUserMessage(convergenceResult.injectedMessage)
+if (convergenceCheck.shouldKick && convergenceCheck.injectedMessage) {
+  callbacks.onPhaseChange?.('convergence-warning', { ... })
+  this.session.addUserMessage(convergenceCheck.injectedMessage)
 }
-if (convergenceResult.level >= 3) {
-  // force session split or abort
-  if (await this.compaction.trySessionSplit()) {
-    continue // reset counters
-  }
-  if (convergenceResult.shouldAbort) {
-    callbacks.onConvergenceAbort?.(convergenceResult)
-    return
-  }
+if (convergenceCheck.shouldForceSplit) {
+  await this.compaction.trySessionSplit()
+}
+if (convergenceCheck.shouldAbort) {
+  callbacks.onAbort()
+  return
 }
 ```
 
-## 实现策略
+### 注入消息格式
 
-### Phase 1: 收敛分数计算器（纯函数，无副作用）
-- `src/agent/convergence-detector.ts`
-- 输入：turn, phaseClass, contextWindow, toolHistory, evidenceState
-- 输出：ConvergenceScore + level + injectedMessage?
+Level 2 示例：
+```
+**系统感知：当前任务可能进入低效循环。**
+- 执行阶段进行了 0% 轮次有编辑产出的操作 — 远低于预期 (≥30%)
+- 纯读取无产出，建议立即采取编辑或测试行动验证当前假设
 
-### Phase 2: 集成到 loop.ts
-- 在 perceive → intent 之间插入 convergence check
-- 实现 Level 1-3 的动作
+请选择以下行动之一：
+- 对当前最可能的方案进行编辑或测试
+- 重新阅读用户原始请求，确认方向
+- 缩小范围：只解决一个子问题
+```
 
-### Phase 3: 窗口感知阈值
-- 从 config 读取 contextWindow，映射到 200K/1M 参数集
-- 支持中间窗口大小（线性插值阈值）
+Level 3 示例（追加）：
+```
+**建议：** 提交已完成部分，重新描述需求并开始新一轮对话。
+- 上下文窗口: 200K，当前已使用较多轮次
+```
 
-### Phase 4: 测试
-- 单元测试：各 phase class 的信号计算
-- 集成测试：多轮无进度场景触发 level 升级
+---
+
+## 实现过程中的优化与修复
+
+### Bug Fix 1: Shannon 熵单工具情况
+
+`normalizedShannonEntropy` 在 `distribution.size <= 1` 时本应返回 0.0（重复使用同一工具 = 零多样性），但早期 return 错误地返回了 1.0。修复后正确返回 0.0。
+
+### Bug Fix 2: 移除死代码引入的 undefined 变量
+
+删除重复的 `if (n <= 1) return 0.0` 死代码时，误删了 `const n = distribution.size` 定义，导致 `Math.log(n)` 中 n 为 undefined。修复：保留变量声明。
+
+### 优化 3: tokenEfficiency 纯读取返回值
+
+纯读取（productive=0）从返回 0.1 改为 0.0，更准确地反映"零产出"。
+
+### 优化 4: execute/deliver 权重上调
+
+见上表。execute: editRatio 0.40→0.50, deliver: editRatio 0.35→0.45, tokenEfficiency 0.20→0.10。
+
+### 优化 5: 相位期望惩罚
+
+新增编辑预期阶段的 0.5x 惩罚乘数，解决"工具多样但无编辑产出"挂高分的假阴性。
+
+---
+
+## 测试
+
+16 个单元测试 (`src/agent/__tests__/convergence-detector.test.ts`)，覆盖：
+
+- Level 0-3 各级触发条件
+- 所有 5 个 phase class 的行为差异
+- 200K vs 1M 阈值差异
+- 中间窗口大小的插值
+- 空历史、高错误率等边界情况
+- 信号值范围验证
 
 ## 200K vs 1M 的根本差异
 
@@ -206,8 +255,18 @@ if (convergenceResult.level >= 3) {
 
 **核心洞察：** 200K 的问题是"资源稀缺"，1M 的问题是"缺乏约束"。收敛检测在 200K 下是**预算管理**，在 1M 下是**自律机制**。
 
+## 与现有机制的互补
+
+| 机制 | 覆盖 | 不覆盖 |
+|------|------|--------|
+| doom loop | 相同 fingerprint 重复 | 不同 args 的同工具循环 |
+| dissipative kick | 低 momentum + 低 stability | 正常 sensorium 但无进展 |
+| **convergence detector** | **多信号滑动窗口 + 相位感知 + 渐进升级** | 单轮内的瞬时异常 |
+| stuck radio | 同 phase 8+ turn | 跨 phase 的无进展游荡 |
+
 ## 风险
 
-- **假阳性**：合法的大范围探索被误判为不收敛 → 通过相位感知权重降低
-- **假阴性**：模型在 execute 阶段反复 typecheck→edit→typecheck（合法的 TDD 循环）→ 不应触发收敛检测，因为 edit_ratio 高
-- **注入消息污染上下文**：Level 2+ 注入的 user message 会留在对话中 → 用完后应标记为 ephemeral 或在下一次 compact 时优先清理
+- **假阳性**：合法的大范围探索被误判为不收敛 → 通过相位感知权重 + explore phase 高容忍缓解
+- **假阴性**：模型在 execute 阶段反复 typecheck→edit→typecheck（合法的 TDD 循环）→ editRatio 高，不应触发
+- **注入消息污染上下文**：Level 2+ 注入的 user message 会留在对话中 → 在下一次 compact 时被优先清理
+- **Phase class 抖动**：天枢/天璇/天机/天权之间频繁切换可能导致相位感知权重不稳定 → 信号使用滑动窗口，天然平滑
