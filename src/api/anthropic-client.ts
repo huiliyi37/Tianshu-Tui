@@ -338,8 +338,8 @@ export class AnthropicClient implements StreamClient {
           // Skip event: lines — type is in the JSON body
           if (trimmed.startsWith('event: ')) continue
 
-          if (!trimmed.startsWith('data: ')) continue
-          const data = trimmed.slice(6)
+          if (!trimmed.startsWith('data:')) continue
+          const data = trimmed.startsWith('data: ') ? trimmed.slice(6) : trimmed.slice(5)
 
           let parsed: Record<string, unknown>
           try { parsed = JSON.parse(data) } catch { continue }
