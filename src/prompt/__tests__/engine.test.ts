@@ -339,13 +339,13 @@ describe('PromptEngine active claims projection', () => {
 
     const userMsgs = req.messages.filter(m => m.role === 'user')
 
-    // Should be exactly 3 user messages:
-    // [0] frozenBase (injected at firstUserIdx)
-    // [1] 'first question' (original)
-    // [2] cachedFreshBlock + '\n---\n' + 'second question' (merged)
-    // NOT 4 messages (with cachedFreshBlock as separate msg)
-    assert.equal(userMsgs.length, 3,
-      'cachedFreshBlock should be merged into last user msg, not separate')
+    // Should be exactly 2 user messages (trailer merge for both first and last):
+    // [0] volatileBlock + '\n---\n' + 'first question' (merged at firstUserIdx)
+    // [1] cachedFreshBlock + '\n---\n' + 'second question' (merged at lastUserIdx)
+    // firstUserIdx fallback no longer pushes 2 separate messages — that was the
+    // very bug that caused index shifts and broke suffix prefix cache.
+    assert.equal(userMsgs.length, 2,
+      'trailer merge at both firstUserIdx and lastUserIdx = 2 messages')
 
     const lastUserMsg = userMsgs[userMsgs.length - 1]!
     assert.ok((lastUserMsg.content as string).includes('second question'),

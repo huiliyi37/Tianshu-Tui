@@ -242,8 +242,11 @@ export class PromptEngine {
           if (frozen) {
             result.push({ role: 'user', content: frozen })
           } else {
-            result.push({ role: 'user', content: this.volatileBlock })
-            result.push(msg)
+            // Fallback: trailer-merge volatileBlock to keep message count stable.
+            // A 2-message fallback here would shift all subsequent indices and
+            // break exact-prefix cache for the entire suffix.
+            const fc = typeof msg.content === 'string' ? msg.content : ''
+            result.push({ role: 'user', content: this.volatileBlock + '\n---\n' + fc })
           }
         } else {
           // Historical user message: use frozen merged content if available
@@ -252,7 +255,11 @@ export class PromptEngine {
           if (frozen) {
             result.push({ role: 'user', content: frozen })
           } else {
-            result.push(msg)
+            // Fallback: inject volatileBlock so the message still carries context.
+            // Loses dynamic appendix vs frozen snapshot, causing one cache miss but
+            // doesn't cascade (message count unchanged).
+            const fc = typeof msg.content === 'string' ? msg.content : ''
+            result.push({ role: 'user', content: this.volatileBlock + '\n---\n' + fc })
           }
         }
       } else {
