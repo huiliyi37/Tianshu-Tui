@@ -123,11 +123,18 @@ function verificationKey(event: TaskLedgerEvent): string {
   const command = event.command ?? 'unknown'
   const scope = event.meta?.scope === 'full' ? 'full' : 'targeted'
   const resolvedCommand = asString(event.meta?.resolvedCommand) ?? ''
-  const targetFiles = [
-    ...getMetaTargetFiles(event.meta),
-    ...extractTestFiles(command),
-    ...extractTestFiles(resolvedCommand),
-  ]
+
+  // meta.targetFiles (populated by tools like run_tests) is authoritative:
+  // it contains the actual resolved test file paths, not the raw filter string.
+  // Using it prevents key mismatch when the same tests are run with
+  // different filter syntax (e.g. "volatile-snapshot.test" vs
+  // "src/prompt/__tests__/volatile-snapshot.test.ts").
+  const metaTargetFiles = getMetaTargetFiles(event.meta)
+  const cmdTargetFiles = extractTestFiles(command)
+  const resolvedTargetFiles = extractTestFiles(resolvedCommand)
+  const targetFiles = metaTargetFiles.length > 0
+    ? metaTargetFiles
+    : [...cmdTargetFiles, ...resolvedTargetFiles]
   const uniqueTargetFiles = [...new Set(targetFiles)].sort()
 
   if (uniqueTargetFiles.length > 0) {

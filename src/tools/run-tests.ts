@@ -314,6 +314,21 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
           durationMs,
         }
 
+        // Populate targetFiles for verification supersession key matching.
+        // When filter is a test file pattern, extract the file path so that
+        // later runs with different filter strings targeting the same file
+        // can be matched via meta.targetFiles instead of command string.
+        if (testCommand.scope === 'targeted' && filter) {
+          const args = testCommand.args.join(' ')
+          const display = testCommand.display
+          const testFilePattern = /([^\s"']+\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs))/g
+          const allMatches = [...args.matchAll(testFilePattern), ...display.matchAll(testFilePattern)]
+          const files = [...new Set(allMatches.map(m => m[1]!))]
+          if (files.length > 0) {
+            verification.targetFiles = files
+          }
+        }
+
         resolve({
           content: exitCode === 0
             ? (parsed.passed === 0 && !parsed.duration

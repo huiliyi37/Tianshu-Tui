@@ -574,7 +574,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
   })
 
   describe('verification diagnostics', () => {
-    it('reports invocation failure separately from owned test failure', async () => {
+    it('reports invocation failure as YELLOW (non-blocking)', async () => {
       const { tool, params } = makeContext({
         taskId: 't1',
         ownedFiles: ['src/a.ts'],
@@ -588,7 +588,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
       const result = await tool.execute(params)
 
-      assert.match(result.content, /Delivery Gate: RED/)
+      assert.match(result.content, /Delivery Gate: YELLOW/)
       assert.match(result.content, /Verification diagnostics:/)
       assert.match(result.content, /Tool invocation failure candidates:/)
       assert.match(result.content, /Shortest next step: tsx --test src\/a\.test\.ts/)

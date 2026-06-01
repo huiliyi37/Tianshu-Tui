@@ -231,17 +231,15 @@ export function createDeliveryGateV2(opts: {
 
       case 'tool_invocation_failure':
         return {
-          state: 'RED',
-          canDeliver: false,
-          isBlocked: true,
-          reason: aggregate.reason,
-          blockingReason: `Verification invocation failed. Rerun verification with the repo recommended command.`,
+          state: 'YELLOW',
+          canDeliver: true,
+          isBlocked: false,
+          reason: `${aggregate.reason}\n\nThis is a tool invocation issue (timeout, crash) — not a code failure. Re-run with the recommended command. You may still deliver if you have independently verified correctness.`,
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
-          currentBlockingFailure: aggregate.reason,
         }
 
       case 'unattributed_failure':

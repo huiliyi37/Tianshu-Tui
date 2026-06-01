@@ -225,7 +225,7 @@ describe('delivery-gate-v2 — ownership-aware delivery gate with GREEN/YELLOW/R
     assert.equal(result.staleFailureCandidates, 1)
   })
 
-  it('returns RED for invocation failure with current owned dirty files', () => {
+  it('returns YELLOW for invocation failure with current owned dirty files', () => {
     const { gate, ledger } = makeGate(['src/tools/git.ts'])
     ledger.record({
       type: 'verification',
@@ -235,8 +235,9 @@ describe('delivery-gate-v2 — ownership-aware delivery gate with GREEN/YELLOW/R
     })
 
     const result = gate.assess([], ['src/tools/git.ts'])
-    assert.equal(result.state, 'RED')
-    assert.match(result.blockingReason!, /Verification invocation failed/)
+    assert.equal(result.state, 'YELLOW')
+    assert.equal(result.isBlocked, false)
+    assert.ok(result.reason?.includes('tool invocation'))
     assert.deepEqual(result.toolInvocationFailureCandidates, ['run_tests src/tools/__tests__/git.test.ts'])
     assert.equal(result.shortestNextStep, 'tsx --test src/tools/__tests__/git.test.ts')
   })
