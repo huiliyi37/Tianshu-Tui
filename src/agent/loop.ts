@@ -204,6 +204,7 @@ export class AgentLoop {
   private thinkingOnlyRetries = 0
   private lastThinkingContent = ''
   private lastTurnTextFingerprint = ''
+  private lastTurnThinkingFingerprint = ''
   private lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
@@ -1433,6 +1434,8 @@ export class AgentLoop {
           this.config.contextWindow,
         )
         let turnTextAccum = ''
+        let turnThinkingAccum = ''
+        const prevThinkingFingerprint = this.lastTurnThinkingFingerprint
         let turnDedupState: 'tracking' | 'flushed' = 'tracking'
         let pendingFlush = ''
         const prevFingerprint = this.lastTurnTextFingerprint
@@ -1465,7 +1468,17 @@ export class AgentLoop {
               }
               // else: still equal to or a prefix of prev fingerprint, keep buffering until stream end
             },
-            onThinkingDelta: callbacks.onThinkingDelta,
+            onThinkingDelta: (thinking) => {
+              // Cross-turn thinking fingerprint dedup: if the model repeats
+              // thinking from the previous turn verbatim, suppress display.
+              // Only suppress exact full-match (not prefixes — early reasoning
+              // steps legitimately overlap across turns).
+              turnThinkingAccum += thinking
+              if (prevThinkingFingerprint && turnThinkingAccum === prevThinkingFingerprint) {
+                return // suppress — identical to previous turn's thinking
+              }
+              callbacks.onThinkingDelta(thinking)
+            },
             onToolUse: callbacks.onToolUse,
             onToolHint: (name) => {
               callbacks.onPhaseChange?.('tool-hint', { tool: name, reason: `preparing ${name}…` })
@@ -1486,6 +1499,7 @@ export class AgentLoop {
         }
         const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
         this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
+        this.lastTurnThinkingFingerprint = streamResult.lastTurnThinkingFingerprint
 
         // Feed CacheAdvisor with turn metrics after API call completes
         // Cache read/creation metrics are captured here; artifact eviction/access

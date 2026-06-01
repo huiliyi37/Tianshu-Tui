@@ -41,6 +41,7 @@ export interface TurnStreamResult {
   stopReason: string
   streamError: Error | null
   lastTurnTextFingerprint: string
+  lastTurnThinkingFingerprint: string
 }
 
 function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id: string; name: string } {
@@ -62,6 +63,7 @@ export class TurnStreamController {
     let turnDisplayBuffer = ''
     const CHUNK_DEDUP_HISTORY = 5
     const chunkHistory: string[] = []
+    const thinkingChunkHistory: string[] = []
 
     const streamCallbacks: StreamCallbacks = {
       onTextDelta: (text) => {
@@ -87,6 +89,17 @@ export class TurnStreamController {
       },
       onThinkingDelta: (thinking) => {
         thinkingAccum += thinking
+        // Duplicate-chunk guard for thinking content (mirrors text dedup above).
+        // DeepSeek/MiMo can repeat 50+ char reasoning chunks verbatim.
+        if (thinking.length >= 50 && thinkingChunkHistory.includes(thinking)) {
+          return // skip duplicate — thinkingAccum already updated above
+        }
+        if (thinking.length >= 50) {
+          thinkingChunkHistory.push(thinking)
+          if (thinkingChunkHistory.length > CHUNK_DEDUP_HISTORY) {
+            thinkingChunkHistory.shift()
+          }
+        }
         input.callbacks.onThinkingDelta(thinking)
       },
       onContentBlock: (block) => {
@@ -144,6 +157,7 @@ export class TurnStreamController {
       stopReason,
       streamError,
       lastTurnTextFingerprint: nextFingerprint,
+      lastTurnThinkingFingerprint: displayTextFingerprint(thinkingAccum),
     }
   }
 }
