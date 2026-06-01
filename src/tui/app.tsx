@@ -545,6 +545,24 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       }
       if (isStreaming) {
         agent.abort()
+        // Flush and save streaming text BEFORE unmounting StreamOutput.
+        // Without this, setIsStreaming(false) causes StreamOutput to unmount
+        // and the text vanishes before the async onAbort callback can persist it.
+        blockWriterRef.current?.flush()
+        blockWriterRef.current = null
+        textBatcher.current.flushNow()
+        if (streamBuf.current || thinkBuf.current) {
+          pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
+          streamBuf.current = ''
+          streamLiveBuf.current = ''
+          setStreamingText('')
+          thinkBuf.current = ''
+          setStreamingThinking('')
+          setIsThinkingActive(false)
+          if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
+          lastFlushedThink.current = ''
+        }
+        flushStaticBatch()
         const ctrlPreservedSteer = steerBuffer.current.drain()
         if (ctrlPreservedSteer) {
           pushStatic(createLogEntry({ type: 'system', content: `📨 ${ctrlPreservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
@@ -580,6 +598,22 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       if (isStreaming) {
         if (lastEscRef.current && now - lastEscRef.current < 1000) {
           agent.abort()
+          // Flush and save streaming text BEFORE unmounting StreamOutput.
+          blockWriterRef.current?.flush()
+          blockWriterRef.current = null
+          textBatcher.current.flushNow()
+          if (streamBuf.current || thinkBuf.current) {
+            pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
+            streamBuf.current = ''
+            streamLiveBuf.current = ''
+            setStreamingText('')
+            thinkBuf.current = ''
+            setStreamingThinking('')
+            setIsThinkingActive(false)
+            if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
+            lastFlushedThink.current = ''
+          }
+          flushStaticBatch()
           const escPreservedSteer = steerBuffer.current.drain()
           if (escPreservedSteer) {
             pushStatic(createLogEntry({ type: 'system', content: `📨 ${escPreservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
