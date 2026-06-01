@@ -48,9 +48,15 @@ export class PromptEngine {
   /** Cached FRESH volatile block — only regenerated when a NEW user message arrives */
   private cachedFreshBlock: string = ''
   private cachedFreshForUser: string = ''
-  /** Frozen merged content for historical user messages (preserves prefix stability) */
-  private frozenUserMerged: Map<string, string> = new Map()
-  /** Maximum entries in frozenUserMerged before eviction kicks in. */
+  /**
+   * Frozen merged content for historical user messages (preserves prefix stability).
+   * Maps user-message content → array of frozen snapshots. Array handles duplicate
+   * messages: first "继续" → index 0, second "继续" → index 1, etc.
+   */
+  private frozenUserMerged: Map<string, string[]> = new Map()
+  /** Per-content fetch index — tracks which entry to retrieve next per content key. */
+  private frozenFetchIndex: Map<string, number> = new Map()
+  /** Maximum total entries across all content keys before eviction kicks in. */
   private static readonly MAX_FROZEN_USER_MERGED = 64
   private taskProgress?: TaskState
   private behaviorMirror?: string | null
@@ -76,6 +82,10 @@ export class PromptEngine {
    *  Replaces the old binary chat/task PromptMode — auto-detected from message content. */
   private actionableTurn: boolean = true
   private gitDirty = false
+  /** Tracks message array length to detect true duplicate messages vs tool-call turns. */
+  private lastMessageCount: number = 0
+  /** Hash of last message array to distinguish exact same call from true duplicate. */
+  private lastMessageHash: string = ''
   private userMessagesSinceGitRefresh = 0
 
   constructor(config: PromptEngineConfig) {
@@ -111,8 +121,24 @@ export class PromptEngine {
    * This ensures DeepSeek's exact-prefix cache hits on API calls 2-50 within
    * a single user message's execution, not just across user messages.
    */
+  /**
+   * Retrieve the next frozen snapshot for a given user-message content.
+   * Maintains a per-content fetch index so that duplicate messages ("继续", "ok")
+   * each get their own frozen snapshot in order.
+   */
+  private getNextFrozen(content: string): string | undefined {
+    const arr = this.frozenUserMerged.get(content)
+    if (!arr || arr.length === 0) return undefined
+    const idx = this.frozenFetchIndex.get(content) ?? 0
+    if (idx >= arr.length) return undefined
+    this.frozenFetchIndex.set(content, idx + 1)
+    return arr[idx]
+  }
+
   buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number): OaiChatRequest {
     const result: OaiMessage[] = []
+    // Reset per-call fetch index — each call re-fetches frozen entries in order.
+    this.frozenFetchIndex.clear()
 
     let firstUserIdx = -1
     let lastUserIdx = -1
@@ -129,7 +155,19 @@ export class PromptEngine {
         if (i === lastUserIdx) {
           const userContent = msg.content
 
-          if (userContent !== this.cachedFreshForUser) {
+          // Force rebuild for true duplicate messages — they need their own frozen entry.
+          // A true duplicate: same content, same message count, but different message array
+          // (the user actually sent "继续" again, not just re-calling with the same messages).
+          const msgHash = oaiMessages.length > 0
+            ? `${oaiMessages.length}:${typeof oaiMessages[oaiMessages.length - 1]!.content === 'string' ? oaiMessages[oaiMessages.length - 1]!.content as string : ''}`
+            : ''
+          const isDuplicate = userContent === this.cachedFreshForUser
+            && oaiMessages.length === this.lastMessageCount
+            && msgHash !== this.lastMessageHash
+            && (this.frozenUserMerged.get(typeof userContent === 'string' ? userContent : '')?.length ?? 0) > 0
+          this.lastMessageCount = oaiMessages.length
+          this.lastMessageHash = msgHash
+          if (userContent !== this.cachedFreshForUser || isDuplicate) {
             this.cachedFreshForUser = userContent
             this.userMessagesSinceGitRefresh++
             const refreshGit = this.gitDirty || this.userMessagesSinceGitRefresh >= 3
@@ -191,12 +229,16 @@ export class PromptEngine {
           // preserving DeepSeek exact-prefix cache across user-message boundaries.
           const merged = this.cachedFreshBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
           const key = typeof msg.content === 'string' ? msg.content : ''
-          this.frozenUserMerged.set(key, merged)
+          const arr = this.frozenUserMerged.get(key)
+          if (arr) {
+            arr.push(merged)
+          } else {
+            this.frozenUserMerged.set(key, [merged])
+          }
           result.push({ role: 'user', content: merged })
         } else if (i === firstUserIdx) {
           // Use frozen merged content if available (preserves prefix from when this was lastUserIdx)
-          const key = typeof msg.content === 'string' ? msg.content : ''
-          const frozen = this.frozenUserMerged.get(key)
+          const frozen = this.getNextFrozen(typeof msg.content === 'string' ? msg.content : '')
           if (frozen) {
             result.push({ role: 'user', content: frozen })
           } else {
@@ -206,8 +248,7 @@ export class PromptEngine {
         } else {
           // Historical user message: use frozen merged content if available
           // to preserve prefix stability (avoids content change when msg loses "last" status)
-          const key = typeof msg.content === 'string' ? msg.content : ''
-          const frozen = this.frozenUserMerged.get(key)
+          const frozen = this.getNextFrozen(typeof msg.content === 'string' ? msg.content : '')
           if (frozen) {
             result.push({ role: 'user', content: frozen })
           } else {
@@ -299,19 +340,23 @@ export class PromptEngine {
       }
     }
 
-    // Evict stale frozenUserMerged entries when map exceeds size limit
-    if (this.frozenUserMerged.size > PromptEngine.MAX_FROZEN_USER_MERGED) {
-      const activeKeys = new Set<string>()
-      for (const msg of oaiMessages) {
-        if (msg.role === 'user' && typeof msg.content === 'string') {
-          activeKeys.add(msg.content)
-        }
+    // Evict oldest frozen entries when total count exceeds limit.
+    // Each content key stores an array of snapshots (for duplicate messages).
+    // Total count = sum of all array lengths. Evict by removing oldest entries
+    // from the longest arrays first.
+    let totalFrozen = 0
+    for (const arr of this.frozenUserMerged.values()) totalFrozen += arr.length
+    while (totalFrozen > PromptEngine.MAX_FROZEN_USER_MERGED && this.frozenUserMerged.size > 0) {
+      let maxKey = '', maxLen = 0
+      for (const [k, arr] of this.frozenUserMerged) {
+        if (arr.length > maxLen) { maxKey = k; maxLen = arr.length }
       }
-      for (const key of this.frozenUserMerged.keys()) {
-        if (!activeKeys.has(key)) {
-          this.frozenUserMerged.delete(key)
-        }
+      if (maxLen <= 1) {
+        this.frozenUserMerged.delete(maxKey)
+      } else {
+        this.frozenUserMerged.get(maxKey)!.shift()
       }
+      totalFrozen--
     }
 
     return {

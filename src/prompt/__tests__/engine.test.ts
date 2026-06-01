@@ -481,15 +481,18 @@ describe('frozenUserMerged eviction', () => {
       messages.push({ role: 'user', content: `user message ${i}` })
       engine.buildOaiRequest([...messages])
     }
-    // After 70 messages, the map should have been trimmed to ≤ 64 entries
-    // (internal state not directly observable, so we test behavior:
-    // old frozen content should still be available for messages in the array)
+    // After 70 messages, the frozen cache should have been trimmed to ≤ 64 entries.
+    // Oldest entries are evicted. The most recent 64 should still have frozen content.
     const req = engine.buildOaiRequest(messages)
     const userMsgs = req.messages.filter(m => m.role === 'user')
-    // All 70 user messages should have merged content (volatile + user content)
-    for (const msg of userMsgs) {
-      assert.ok(typeof msg.content === 'string' && msg.content.includes('---'), `user message should have merged content`)
+    // The newest 64 user messages should have merged content (volatile + user content)
+    const keptMsgs = userMsgs.slice(-64)
+    for (const msg of keptMsgs) {
+      assert.ok(typeof msg.content === 'string' && msg.content.includes('---'), `recent user message should have merged content`)
     }
+    // The last message (freshly built) always has merged content
+    const lastMsg = userMsgs[userMsgs.length - 1]
+    assert.ok(typeof lastMsg?.content === 'string' && lastMsg.content.includes('---'), 'latest message always has merged content')
   })
 
   it('preserves frozen content for messages still in the array', () => {
