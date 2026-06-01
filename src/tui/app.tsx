@@ -1511,10 +1511,19 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             onCancel={() => surfacePop()}
           />
         )}
-        <InputBar onSubmit={isStreamingRef.current ? (text: string) => {
-          steerBuffer.current.push(text)
-          pushStatic(createLogEntry({ type: 'system', content: `Guidance queued: "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}" — will be injected at next opportunity` }))
-        } : handleSubmit} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} steerMode={isStreaming} inputRef={inputBarRef} />
+        <InputBar onSubmit={(text: string) => {
+          // Evaluate routing INSIDE the event handler, not at render time.
+          // isStreamingRef is a ref — reading it at render time in JSX prop
+          // gives a stale snapshot if the ref changed without triggering a re-render.
+          // This caused new-session first messages to route to steerBuffer when
+          // the previous session's agent.run() never completed (API timeout/stuck).
+          if (isStreamingRef.current) {
+            steerBuffer.current.push(text)
+            pushStatic(createLogEntry({ type: 'system', content: `Guidance queued: "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}" — will be injected at next opportunity` }))
+          } else {
+            handleSubmit(text)
+          }
+        }} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} steerMode={isStreaming} inputRef={inputBarRef} />
         {steerPending && isStreaming && (
           <Box paddingX={2} borderStyle="round" borderColor="yellow">
             <Text color="yellow">📨 Queued ({steerBuffer.current.getPending().length}): </Text>
