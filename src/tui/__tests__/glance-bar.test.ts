@@ -35,9 +35,43 @@ describe('GlanceBar', () => {
       cost: 0.42,
       model: 'deepseek-chat',
       isStreaming: true,
+      estimatedTokens: 12_000,
+      maxTokens: 128_000,
     })
     assert.ok(el != null)
     assert.equal(el.props.pulses.length, 6)
     assert.equal(el.props.pulses[2]?.hint, 'worker failed')
+  })
+
+  it('renders token count and percentage', () => {
+    const el = render({
+      pulses: [],
+      phase: 'tianshu-planning',
+      cacheHitRate: 0.5,
+      cost: 0.1,
+      model: 'deepseek-chat',
+      isStreaming: false,
+      estimatedTokens: 45_000,
+      maxTokens: 128_000,
+    })
+    assert.ok(el != null)
+    assert.equal(el.props.estimatedTokens, 45_000)
+    assert.equal(el.props.maxTokens, 128_000)
+  })
+
+  it('shows compact hint when ratio >= 78%', () => {
+    const el = render({
+      pulses: [],
+      phase: 'tianshu-planning',
+      cacheHitRate: 0.5,
+      cost: 0.1,
+      model: 'deepseek-chat',
+      isStreaming: false,
+      estimatedTokens: 100_000,
+      maxTokens: 128_000,
+    })
+    assert.ok(el != null)
+    assert.equal(el.props.estimatedTokens, 100_000)
+    assert.equal(el.props.maxTokens, 128_000)
   })
 })

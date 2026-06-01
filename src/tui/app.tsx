@@ -1354,6 +1354,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           historyCount={historyItems.length}
           domain={starDomain}
           branch={gitBranch}
+          estimatedTokens={session.getEstimatedTokens()}
+          maxTokens={maxTokens}
         />
         {fluencyStale && termRows >= 24 && (
           <Box paddingX={1}>

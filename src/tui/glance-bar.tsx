@@ -18,9 +18,13 @@ interface GlanceBarProps {
   domain?: string
   /** Current git branch — identity marker */
   branch?: string
+  /** Estimated tokens currently in the session context */
+  estimatedTokens: number
+  /** Model context window size in tokens */
+  maxTokens: number
 }
 
-export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch }: GlanceBarProps) {
+export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens }: GlanceBarProps) {
   const theme = getTheme()
   const { columns } = useTerminalSize()
   const phaseGlyph = PHASE_GLYPHS[phase] ?? ''
@@ -34,6 +38,16 @@ export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, 
   const narrow = columns < 60
   // Branch names can be long (e.g. feat/...); cap to keep GlanceBar single-line (flicker budget)
   const branchLabel = branch && branch.length > 24 ? branch.slice(0, 23) + '…' : branch
+
+  const ratio = maxTokens > 0 ? estimatedTokens / maxTokens : 0
+  const estimatedK = Math.round(estimatedTokens / 1000)
+  const maxK = Math.round(maxTokens / 1000)
+  const pct = Math.round(ratio * 100)
+
+  const tokenColor = ratio >= 0.88 ? theme.error
+    : ratio >= 0.78 ? theme.warning
+    : ratio >= 0.60 ? theme.warning
+    : theme.success
 
   return (
     <Box paddingX={narrow ? 0 : 1}>
@@ -49,6 +63,10 @@ export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, 
       <Text color={theme.dim}> · </Text>
       <Text color={theme.muted}>${cost.toFixed(2)}</Text>
       {!narrow && <Text color={theme.muted}> · {model.slice(0, 20)}</Text>}
+      {!narrow && <Text color={theme.dim}> · </Text>}
+      {!narrow && <Text color={tokenColor}>{estimatedK}k/{maxK}k ({pct}%)</Text>}
+      {narrow && <Text color={tokenColor}> · {pct}%</Text>}
+      {ratio >= 0.78 && <Text color={theme.error}> · compact</Text>}
       {historyCount !== undefined && !narrow && (
         <Text color={theme.muted}> · {historyCount} msgs</Text>
       )}
