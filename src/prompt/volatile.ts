@@ -187,6 +187,15 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
       return `  <tool-summary ${attrs.join(' ')} />`
     }).join('\n')
     parts.push(`<tool-history recent="${recent.length}" total="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
+    
+    // P3: 添加去重提示，避免模型重复读取已读文件
+    const readFiles = ctx.toolHistory
+      .filter(e => e.tool === 'read_file' && e.status === 'success')
+      .map(e => e.target)
+      .filter((v, i, a) => a.indexOf(v) === i) // deduplicate
+    if (readFiles.length > 0) {
+      parts.push(`<read-file-dedup-hint>\n已读取 ${readFiles.length} 个文件。除非内容已变更，否则不要重复读取上述文件。\n</read-file-dedup-hint>`)
+    }
   }
 
   if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
