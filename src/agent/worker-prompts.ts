@@ -1,4 +1,5 @@
 import { READ_ONLY_WORKER_TOOLS, type WorkOrder, type WorkerResult, type WorkerProfile } from './work-order.js'
+import { buildMemoryKnowledgePacket, needsMemoryKnowledgePacket } from './worker-knowledge-packet.js'
 import { profileRegistry } from './profile-registry.js'
 
 // ─── Profile-specific expertise prompts ────────────────────────────
@@ -200,6 +201,12 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
   // Inject project self-discovery for read-only workers (exploration profiles)
   if (!hasWriteTools) {
     parts.push('', PROJECT_DISCOVERY_PREAMBLE)
+  }
+
+  // Guided retrieval: memory/prompt/recall tasks need a concrete knowledge packet.
+  // Do not rely on workers to guess which memory docs exist.
+  if (needsMemoryKnowledgePacket(order)) {
+    parts.push('', buildMemoryKnowledgePacket())
   }
 
   parts.push(

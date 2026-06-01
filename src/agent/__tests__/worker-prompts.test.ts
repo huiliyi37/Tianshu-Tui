@@ -102,6 +102,41 @@ describe('worker prompts', () => {
     assert.ok(prompt.includes('unverified'))
   })
 
+  it('injects a memory knowledge packet for memory, prompt, and recall work orders', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_memory',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Review project memory recall behavior.',
+      scope: { files: ['src/tools/recall.ts'] },
+    })
+
+    const prompt = buildWorkerPrompt(order)
+
+    assert.ok(prompt.includes('## Required Knowledge Packet: memory / prompt / recall'))
+    assert.ok(prompt.includes('.rivet/knowledge/manifest.md'))
+    assert.ok(prompt.includes('docs/analysis/2026-06-01-project-memory-architecture-conflict.md'))
+    assert.ok(prompt.includes('docs/superpowers/plans/2026-06-01-guided-memory-retrieval.md'))
+    assert.ok(prompt.includes('memory.jsonl is local structured cache'))
+  })
+
+  it('does not inject the memory knowledge packet for unrelated work orders', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_tui',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Find TUI rendering seams.',
+      scope: { files: ['src/tui/app.tsx'] },
+    })
+
+    const prompt = buildWorkerPrompt(order)
+
+    assert.ok(!prompt.includes('## Required Knowledge Packet: memory / prompt / recall'))
+    assert.ok(!prompt.includes('2026-06-01-project-memory-architecture-conflict.md'))
+  })
+
   it('builds a compact primary packet from worker results', () => {
     const packet = buildPrimaryWorkerPacket([
       {
