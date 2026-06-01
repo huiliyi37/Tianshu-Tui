@@ -1301,7 +1301,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       )}
       <Static
         items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? staticHistoryItems : []}
-        key={staticHistoryItems.length > 0 ? staticHistoryItems[0]!.id : 'empty'}
+        key="static-history"
       >
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
       </Static>
