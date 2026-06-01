@@ -1265,7 +1265,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolTargetMap.current.clear()
         toolStartMap.current.clear()
         toolCallTracker.current.clear()
-        steerBuffer.current.clear()
+        const preservedSteer = steerBuffer.current.drain()
+        if (preservedSteer) {
+          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+        }
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: `Error: ${error.message}`, isError: true }))
