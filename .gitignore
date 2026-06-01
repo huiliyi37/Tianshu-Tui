@@ -35,3 +35,6 @@ docs/sessions/
 .rivet/runtime/
 .rivet/tmp/
 .rivet/prefix-diag.jsonl
+
+# AI agent temp files
+.tmp_*
