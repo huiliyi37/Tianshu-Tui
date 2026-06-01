@@ -50,6 +50,26 @@ describe('project-memory-loader', () => {
     }
   })
 
+  it('keeps commit facts recall-only even when they look Tier 1 eligible', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-memory-loader-'))
+    try {
+      writeMemory(dir, [
+        { id: 'commit-1', kind: 'decision', text: 'Commit abc1234: "fix typo" (src/a.ts)', confidence: 0.95, createdAt: 2, source: 'test', tags: ['tool', 'commit_fact'] },
+        { id: 'decision-1', kind: 'decision', text: 'Use guided retrieval for memory.', confidence: 0.95, createdAt: 1, source: 'test' },
+      ])
+
+      const block = loadProjectMemory(dir)
+      const entries = loadAllProjectMemoryEntries(dir)
+
+      assert.equal(block.entryCount, 1)
+      assert.match(block.content, /Use guided retrieval/)
+      assert.doesNotMatch(block.content, /Commit abc1234/)
+      assert.ok(entries.some(e => e.id === 'commit-1'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('escapes XML-sensitive memory text in injected block', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-memory-loader-'))
     try {

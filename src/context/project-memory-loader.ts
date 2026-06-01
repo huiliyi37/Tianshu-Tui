@@ -15,6 +15,7 @@ interface MemoryEntry {
   confidence: number
   createdAt: number
   source: string
+  tags?: string[]
 }
 
 export interface ProjectMemoryBlock {
@@ -52,7 +53,7 @@ export function loadProjectMemory(cwd: string): ProjectMemoryBlock {
 
   // Filter to Tier 1 only: high-signal kinds with high confidence
   const tier1 = entries
-    .filter(e => TIER1_KINDS.has(e.kind) && e.confidence >= TIER1_MIN_CONFIDENCE)
+    .filter(e => TIER1_KINDS.has(e.kind) && e.confidence >= TIER1_MIN_CONFIDENCE && !isCommitFact(e))
     .sort((a, b) => b.confidence - a.confidence || b.createdAt - a.createdAt)
 
   if (tier1.length === 0) return { content: '', entryCount: 0 }
@@ -79,6 +80,10 @@ export function loadProjectMemory(cwd: string): ProjectMemoryBlock {
 export function loadAllProjectMemoryEntries(cwd: string): MemoryEntry[] {
   return readMemoryEntries(cwd)
     .sort((a, b) => b.confidence - a.confidence || b.createdAt - a.createdAt)
+}
+
+function isCommitFact(entry: MemoryEntry): boolean {
+  return entry.tags?.includes('commit_fact') ?? false
 }
 
 function escapeXml(s: string): string {

@@ -168,7 +168,7 @@ function commitFact(ctx: ToolResultContext, meta: ClaimExtractionMeta, now: numb
   const text = `Commit ${hash}: "${message}" (${files})`
   return {
     kind: 'decision',
-    scope: 'session',
+    scope: 'project',
     text,
     confidence: 0.95,
     fitness: 8,
@@ -176,6 +176,8 @@ function commitFact(ctx: ToolResultContext, meta: ClaimExtractionMeta, now: numb
     evidence: [{ id: `${meta.eventId}:commit`, kind: 'tool_result' as EvidenceKind, summary: text, createdAt: now }],
     createdAt: now,
     // decision kind has TTL=Infinity in the TTL table — no expiresAt needed
-    tags: ['tool', 'commit', 'git'],
+    // commit_fact is intentionally recall-only in project-memory-loader: commit history is useful,
+    // but ordinary commits should not auto-enter the Tier 1 prompt block.
+    tags: ['tool', 'commit', 'git', 'commit_fact'],
   }
 }

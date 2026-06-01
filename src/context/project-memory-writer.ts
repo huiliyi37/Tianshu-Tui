@@ -11,11 +11,12 @@ interface MemoryEntry {
   confidence: number
   createdAt: number
   source: string
+  tags?: string[]
 }
 
 export function appendProjectMemory(
   cwd: string,
-  claim: { id: string; kind: string; text: string; confidence: number; createdAt: number; evidence?: Array<{ summary?: string }> },
+  claim: { id: string; kind: string; text: string; confidence: number; createdAt: number; evidence?: Array<{ summary?: string }>; tags?: string[] },
 ): void {
   const dir = join(cwd, '.rivet', 'knowledge')
   mkdirSync(dir, { recursive: true })
@@ -28,6 +29,7 @@ export function appendProjectMemory(
     confidence: claim.confidence,
     createdAt: claim.createdAt,
     source: claim.evidence?.[0]?.summary ?? 'unknown',
+    ...(claim.tags && claim.tags.length > 0 ? { tags: claim.tags } : {}),
   }
 
   appendFileSync(path, JSON.stringify(entry) + '\n', 'utf-8')

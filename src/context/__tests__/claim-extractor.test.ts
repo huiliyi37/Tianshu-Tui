@@ -178,6 +178,8 @@ describe('claim-extractor', () => {
     const proposals = extractClaimsFromToolResult(ctx, meta)
     assert.equal(proposals.length, 1)
     assert.equal(proposals[0]!.kind, 'decision')
+    assert.equal(proposals[0]!.scope, 'project')
+    assert.ok(proposals[0]!.tags.includes('commit_fact'))
     assert.match(proposals[0]!.text, /abc1234/)
     assert.match(proposals[0]!.text, /restore hash/)
     assert.equal(proposals[0]!.expiresAt, undefined) // Infinity TTL via decision kind
@@ -193,6 +195,8 @@ describe('claim-extractor', () => {
     const proposals = extractClaimsFromToolResult(ctx, meta)
     assert.equal(proposals.length, 1)
     assert.equal(proposals[0]!.kind, 'decision')
+    assert.equal(proposals[0]!.scope, 'project')
+    assert.ok(proposals[0]!.tags.includes('commit_fact'))
     assert.match(proposals[0]!.text, /def5678/)
   })
 

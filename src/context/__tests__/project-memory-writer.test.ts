@@ -44,6 +44,25 @@ describe('project-memory-writer', () => {
     }
   })
 
+  it('persists tags so commit facts can remain recall-only', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-memory-writer-'))
+    try {
+      appendProjectMemory(dir, {
+        id: 'commit-1',
+        kind: 'decision',
+        text: 'Commit abc1234: "fix typo" (src/a.ts)',
+        confidence: 0.95,
+        createdAt: 1,
+        tags: ['tool', 'commit_fact'],
+      })
+
+      const entries = readEntries(dir)
+      assert.deepEqual(entries[0]!.tags, ['tool', 'commit_fact'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('uses unknown source when claim has no evidence summary', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-memory-writer-'))
     try {
