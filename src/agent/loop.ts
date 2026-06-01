@@ -289,6 +289,7 @@ export class AgentLoop {
   private p3: P3Integration
   private immuneHook: ImmuneHook
   private _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
+  private lastToolCompleteTime = 0
   private initialUserMessage: string | null = null
 
   constructor(
@@ -683,6 +684,9 @@ export class AgentLoop {
         }
       } catch { /* immune failure is non-critical */ }
     })
+
+    // Record timestamp for event-loop gap detection
+    this.lastToolCompleteTime = Date.now()
   }
 
   private bindSessionDomain(taskDescription: string): void {
@@ -1310,6 +1314,17 @@ export class AgentLoop {
           this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
         }
         callbacks.onPhaseChange?.('preparing', { reason: 'preparing next turn' })
+
+        // ── Event-loop gap detection ──
+        // If >30s elapsed since last tool completion, the event loop may have
+        // been blocked. Log a warning to help diagnose session freeze bugs.
+        if (this.lastToolCompleteTime > 0) {
+          const gapMs = Date.now() - this.lastToolCompleteTime
+          if (gapMs > 30_000) {
+            debugLog(`[event-loop] WARNING: ${(gapMs / 1000).toFixed(1)}s gap since last tool completion (turn ${this.session.getTurnCount()})`)
+          }
+        }
+
         const perceptionResult = await this.perception.perceive({
           turn: this.session.getTurnCount(),
           estimatedTokens: estTokens,
@@ -1593,6 +1608,18 @@ export class AgentLoop {
         }
 
         if (toolUses.length > 0) {
+          // ── Pre-execution diagnostic snapshot ──
+          // Write sensorium before tool execution so freeze analysis can
+          // identify which tools were about to run, even if executeBatch hangs.
+          const toolNames = toolUses.map(tu => tu.name).join(',')
+          this.telemetryWriter.write({
+            ts: Date.now(),
+            turn: this.session.getTurnCount(),
+            phase: 'tool-executing',
+            tools: toolNames,
+            toolCount: toolUses.length,
+          } as any)
+
           const r = await this.toolExecution.executeBatch({
             toolUses, callbacks, turn, checkpointCreatedThisTurn,
             abortSignal: this.abortController.signal,
