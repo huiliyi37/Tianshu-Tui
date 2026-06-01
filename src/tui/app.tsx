@@ -331,9 +331,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setHistoryVersion(v => v + 1)
   }, [])
 
+  /**
+   * Chunk threshold — kept in sync with AssistantMessage.MAX_STATIC_LINES (200).
+   * Replies exceeding this are split into multiple Static entries so each unit
+   * stays under the event-loop safety ceiling while preserving full content
+   * in terminal scrollback.
+   */
+  const ASSISTANT_CHUNK_LINES = 200
+
   /** Push assistant content + thinking as separate LogEntries.
    *  Thinking rendered in its own box (ThinkingMessage), content in AssistantMessage.
-   *  Each entry has independent viewport-aware height limit — prevents total overflow. */
+   *  Long replies are chunked so the user can mouse-wheel through the full response. */
   const pushAssistantEntry = useCallback((content: string, thinking?: string) => {
     const entries: LogEntry[] = []
     if (thinking) {
@@ -341,7 +349,16 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       entries.push(createLogEntry({ type: 'thinking_message', content: capped }))
     }
     if (content) {
-      entries.push(createLogEntry({ type: 'assistant_message', content }))
+      const lines = content.split('\n')
+      if (lines.length > ASSISTANT_CHUNK_LINES) {
+        // Split into multiple assistant_message entries so none exceeds the cap.
+        for (let i = 0; i < lines.length; i += ASSISTANT_CHUNK_LINES) {
+          const chunk = lines.slice(i, i + ASSISTANT_CHUNK_LINES).join('\n')
+          entries.push(createLogEntry({ type: 'assistant_message', content: chunk }))
+        }
+      } else {
+        entries.push(createLogEntry({ type: 'assistant_message', content }))
+      }
     }
     if (entries.length > 0) {
       pushStaticBatch(entries)

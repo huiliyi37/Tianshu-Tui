@@ -18,7 +18,10 @@ interface AssistantMessageProps {
  * The streaming viewport (StreamOutput) already limits live display; this
  * cap limits the archival Static render.
  */
-const MAX_STATIC_LINES = 80
+/** Raised from 80 to 200 so most replies render fully in terminal scrollback.
+ *  Replies >200 lines are chunked by pushAssistantEntry into multiple entries,
+ *  keeping each Static unit under the event-loop safety ceiling. */
+const MAX_STATIC_LINES = 200
 
 /**
  * Assistant content message — rendered in <Static> list (print-and-forget to
