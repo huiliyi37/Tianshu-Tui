@@ -632,16 +632,13 @@ export class AgentLoop {
     })
     if (this.recentToolHistory.length > 5) this.recentToolHistory.shift()
 
-    // P3 integration: pattern mining + speculative pre-execution
-    this.p3.onToolComplete(name, target, isError, isError ? result.slice(0, 200) : undefined)
-
-    // P3-E/H: invalidate plan cache + JIT on file mutations
+    // P3-E/H: invalidate plan cache + JIT on file mutations (sync — needed before next API call)
     if (!isError && (name === 'edit_file' || name === 'write_file')) {
       this.p3.invalidatePlanCache(target)
       this.p3.invalidateJIT(target)
     }
 
-    // P3-D Atropos: assess trajectory health → auto-escalate Flash→Pro on repeated failures
+    // P3-D Atropos: assess trajectory health → auto-escalate Flash→Pro on repeated failures (sync)
     let trajectoryHealth: HealthSignal = 'healthy'
     if (this.config.onModelSwitch && this.config.getCurrentModel) {
       const currentModelId = this.config.getCurrentModel()
@@ -659,21 +656,33 @@ export class AgentLoop {
       }
     }
 
-    // Physarum + Immune: postTool danger signal collection + adaptive response
+    // ── Deferred post-tool processing ──
+    // Immune/Physarum analysis and P3 pattern mining are deferred to
+    // setImmediate so they never block tool result delivery.
     const fp = this.traceStore.toolFingerprints[this.traceStore.toolFingerprints.length - 1] ?? name
-    const immuneResult = this.immuneHook.run({
-      toolName: name,
-      fingerprint: fp,
-      turn: this.session.getTurnCount(),
-      doomLevel: this.getDoomLoopLevel(),
-      targetFile: target,
-      tokenUsage: this.session.getEstimatedTokens(),
-      trajectoryHealth,
+    const capturedTurn = this.session.getTurnCount()
+    const capturedDoom = this.getDoomLoopLevel()
+    const capturedTokens = this.session.getEstimatedTokens()
+    setImmediate(() => {
+      // P3 pattern mining (deferred)
+      try { this.p3.onToolComplete(name, target, isError, isError ? result.slice(0, 200) : undefined) } catch { /* non-critical */ }
+
+      // Physarum + Immune (deferred)
+      try {
+        const immuneResult = this.immuneHook.run({
+          toolName: name,
+          fingerprint: fp,
+          turn: capturedTurn,
+          doomLevel: capturedDoom,
+          targetFile: target,
+          tokenUsage: capturedTokens,
+          trajectoryHealth,
+        })
+        if (immuneResult.contextHint) {
+          this._lastImmuneHint = immuneResult.contextHint
+        }
+      } catch { /* immune failure is non-critical */ }
     })
-    // Store immune context hint for injection into next agent turn
-    if (immuneResult.contextHint) {
-      this._lastImmuneHint = immuneResult.contextHint
-    }
   }
 
   private bindSessionDomain(taskDescription: string): void {
