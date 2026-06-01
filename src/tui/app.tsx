@@ -106,6 +106,7 @@ const THINKING_FLUSH_MS = 1000
 const TOOL_FLUSH_MS = 120
 const LIVE_STREAM_MAX_CHARS = 50_000
 const HISTORY_MAX_ITEMS = 1000
+const STATIC_THINKING_CAP = 10_000
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
 import { renderStaticEntry, renderMemoKey } from './render-entry.js'
@@ -259,32 +260,38 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [glancePulses, setGlancePulses] = useState(glanceBus.snapshot())
   useEffect(() => glanceBus.subscribe(() => setGlancePulses(glanceBus.snapshot())), [glanceBus])
 
+  /** Microtask-batched static updates — coalesces multiple pushStatic calls
+   *  within the same tick into 1 setHistoryVersion bump → 1 Ink render.
+   *  Ring buffer writes are immediate (data never lost); only the setState
+   *  notification is deferred to the next microtask. */
+  const staticBatchRef = useRef<LogEntry[]>([])
+  const staticBatchScheduled = useRef(false)
+
   const pushStatic = useCallback((entry: LogEntry) => {
     historyBufferRef.current.push(entry)
-    setHistoryVersion(v => v + 1)
+    staticBatchRef.current.push(entry)
+    if (!staticBatchScheduled.current) {
+      staticBatchScheduled.current = true
+      queueMicrotask(() => {
+        staticBatchScheduled.current = false
+        if (staticBatchRef.current.length > 0) {
+          staticBatchRef.current = []
+          setHistoryVersion(v => v + 1)
+        }
+      })
+    }
   }, [])
 
-  /** Push assistant content + thinking as separate LogEntries.
-   *  Thinking rendered in its own box (ThinkingMessage), content in AssistantMessage.
-   *  Each entry has independent viewport-aware height limit — prevents total overflow. */
-  const pushAssistantEntry = useCallback((content: string, thinking?: string) => {
-    if (thinking) {
-      // Cap archived thinking to the tail window. GLM/MiMo/GPT mandatory thinking is
-      // unbounded; pushing the full buffer into <Static> renders it synchronously
-      // (countPhysicalLines/stringWidth over every char + Yoga layout), freezing
-      // the event loop so hard that even SIGINT can't land.
-      // Use a much smaller cap than live streaming (10k vs 50k): the Static render
-      // only needs enough for the viewport-limited display; the full buffer has no
-      // consumer past display. 10k chars ≈ 300–500 lines → countPhysicalLines over
-      // ~500 short lines is <5ms; 50k was ~50ms with CJK stringWidth.
-      const STATIC_THINKING_CAP = 10_000
-      const capped = appendStreamWindow('', thinking, STATIC_THINKING_CAP)
-      pushStatic(createLogEntry({ type: 'thinking_message', content: capped }))
+  /** Synchronously flush any pending microtask-batched static entries.
+   *  Called at turn-end / error / abort to ensure all Static updates are
+   *  committed before isStreaming flips. */
+  const flushStaticBatch = useCallback(() => {
+    if (staticBatchScheduled.current) {
+      staticBatchScheduled.current = false
+      staticBatchRef.current = []
+      setHistoryVersion(v => v + 1)
     }
-    if (content) {
-      pushStatic(createLogEntry({ type: 'assistant_message', content }))
-    }
-  }, [pushStatic])
+  }, [])
 
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     const grouped = groupLogs(entries)
@@ -293,6 +300,23 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
     setHistoryVersion(v => v + 1)
   }, [])
+
+  /** Push assistant content + thinking as separate LogEntries.
+   *  Thinking rendered in its own box (ThinkingMessage), content in AssistantMessage.
+   *  Each entry has independent viewport-aware height limit — prevents total overflow. */
+  const pushAssistantEntry = useCallback((content: string, thinking?: string) => {
+    const entries: LogEntry[] = []
+    if (thinking) {
+      const capped = appendStreamWindow('', thinking, STATIC_THINKING_CAP)
+      entries.push(createLogEntry({ type: 'thinking_message', content: capped }))
+    }
+    if (content) {
+      entries.push(createLogEntry({ type: 'assistant_message', content }))
+    }
+    if (entries.length > 0) {
+      pushStaticBatch(entries)
+    }
+  }, [pushStaticBatch])
 
   const streamStartRef = useRef(0)
   const thinkStartRef = useRef(0)
@@ -845,10 +869,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         thinkBuf.current += thinking
         projectActivity(now)
-        // First chunk: flush immediately so the thinking box appears at once
-        // (GLM reasoning can finish within the 1s throttle window otherwise).
-        if (lastFlushedThink.current === '') {
-          flushThink()
+        // First chunk: delay 200ms to batch with early content and avoid
+        // layout突变 from ThinkingCollapser suddenly appearing.
+        // isThinkingActive (set above) shows a minimal indicator immediately.
+        if (lastFlushedThink.current === '' && !thinkTimer.current) {
+          thinkTimer.current = setTimeout(flushThink, 200)
         } else if (!thinkTimer.current) {
           thinkTimer.current = setTimeout(flushThink, THINKING_FLUSH_MS)
         }
@@ -1245,6 +1270,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         liveToolsRef.current = []
         setLiveTools([])
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
+        flushStaticBatch()
       },
       onApprovalRequired: async (id, name, input) => {
         fluencyRef.current.recordApproval()
@@ -1292,7 +1318,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }).finally(() => {
       promptQueueRef.current.running = false
     })
-  }, [agent, session, pushStatic, pushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+  }, [agent, session, pushStatic, pushStaticBatch, flushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   return (
     <>
@@ -1335,7 +1361,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             ? <QuestionCard key={log.id} question={log.content} />
             : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} />
         ))}
-        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && !!streamingThinking} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
+        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && (!!streamingThinking || isThinkingActive)} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
           <StreamOutput text={streamingText} isStreaming={isStreaming} />
         )}

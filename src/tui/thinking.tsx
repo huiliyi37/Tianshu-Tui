@@ -167,13 +167,25 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
     }
   })
 
-  if (!thinking || !isStreaming) return null
+  if (!isStreaming) return null
 
   const spinner = brailleSpinnerFrame(frame)
   const statusLabel = thinkingStatusLabel({ isStreaming, elapsedMs: elapsed, completedDurationMs, stale })
+  const theme = getTheme()
+
+  // Minimal indicator: thinking has started but no content flushed yet
+  // (first chunk is delayed 200ms to avoid layout突变)
+  if (!thinking) {
+    return (
+      <Box flexDirection="column" paddingX={2}>
+        <Text color={theme.muted}>
+          {'▸'} {spinner} Thinking...
+        </Text>
+      </Box>
+    )
+  }
 
   if (!expanded) {
-    const theme = getTheme()
     return (
       <Box flexDirection="column" paddingX={2}>
         <Text color={theme.muted}>
@@ -185,7 +197,6 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
     )
   }
 
-  const theme = getTheme()
   const MAX_VISIBLE_LINES = 8
   const thinkingLines = truncateThinking(thinking).split('\n')
   const visibleThinking = thinkingLines.length > MAX_VISIBLE_LINES
