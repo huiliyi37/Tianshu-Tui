@@ -24,7 +24,7 @@ import { PhaseTracker } from './phase-tracker.js'
 import { phaseStatusLabel } from './phase-status.js'
 import { FluencyTracker } from './fluency-hook.js'
 import { getTheme } from './theme.js'
-import { viewportLines, latestHistoryItems } from './viewport.js'
+import { viewportLines } from './viewport.js'
 import { useTerminalSize } from './use-terminal-size.js'
 import { AgentLoop } from '../agent/loop.js'
 import { formatIntentPreview, type IntentPreview, type IntentPreviewAction } from '../agent/intent-preview.js'
@@ -107,6 +107,21 @@ const TOOL_FLUSH_MS = 120
 const LIVE_STREAM_MAX_CHARS = 50_000
 const HISTORY_MAX_ITEMS = 1000
 const STATIC_THINKING_CAP = 10_000
+
+/** Detect GLM-style promote: reasoning_content promoted verbatim to visible text.
+ *  When thinking and text share >80% content, archiving both is redundant. */
+function isThinkingPromotedToText(thinking: string, text: string): boolean {
+  if (!thinking || !text) return false
+  // Exact prefix: thinking is a prefix of text (or vice versa)
+  if (text.startsWith(thinking.slice(0, 200)) || thinking.startsWith(text.slice(0, 200))) return true
+  // Overlap ratio: check if the shorter string is >80% contained in the longer
+  const shorter = thinking.length < text.length ? thinking : text
+  const longer = thinking.length < text.length ? text : thinking
+  if (shorter.length < 100) return false
+  const windowSize = Math.min(200, shorter.length)
+  const sample = shorter.slice(0, windowSize)
+  return longer.includes(sample)
+}
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
 import { renderStaticEntry, renderMemoKey } from './render-entry.js'
@@ -194,10 +209,20 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
   const [historyVersion, setHistoryVersion] = useState(0)
   const historyItems = useMemo(() => historyBufferRef.current.items(), [historyVersion])
-  const staticHistoryItems = useMemo(
-    () => latestHistoryItems(historyItems, Math.max(1, viewportLines(termRows, 0.75, 40, 200))),
-    [historyItems, termRows],
-  )
+  /**
+   * Monotonically increasing counter of total items ever pushed into the ring buffer.
+   * Used to compute new items for Ink's <Static> component, which tracks an internal
+   * index equal to items.length. If we pass a sliding window (e.g., slice(-200)),
+   * items.length stays constant once the window is full, and Static silently drops
+   * new items because items.slice(index) → []. Using totalItemsPushed ensures we
+   * always pass an array whose length grows, so Static's index advances correctly.
+   */
+  const totalItemsPushedRef = useRef(0)
+  const staticItemsForInk = useMemo(() => {
+    const all = historyItems
+    const start = Math.max(0, totalItemsPushedRef.current - all.length)
+    return all.slice(start)
+  }, [historyItems])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const liveToolsRef = useRef<LogEntry[]>([])
 
@@ -269,6 +294,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const pushStatic = useCallback((entry: LogEntry) => {
     historyBufferRef.current.push(entry)
+    totalItemsPushedRef.current++
     staticBatchRef.current.push(entry)
     if (!staticBatchScheduled.current) {
       staticBatchScheduled.current = true
@@ -300,6 +326,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     const grouped = groupLogs(entries)
     for (const entry of grouped) {
       historyBufferRef.current.push(entry)
+      totalItemsPushedRef.current++
     }
     setHistoryVersion(v => v + 1)
   }, [])
@@ -1085,6 +1112,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Flush again — writer.flush() may have pushed new items into the batcher
         textBatcher.current.flushNow()
         const finalText = streamBuf.current
+        // GLM promote guard: if thinking was promoted verbatim to visible text,
+        // skip archiving thinking to avoid duplicate content in <Static>.
+        const thinkingForArchive = (finalText && thinkBuf.current && isThinkingPromotedToText(thinkBuf.current, finalText))
+          ? undefined
+          : (thinkBuf.current || undefined)
         if (finalText || thinkBuf.current) {
           if (finalText) {
             const parsed = parseInterviewMarker(finalText)
@@ -1095,10 +1127,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
                 setSummaryState(prev => ({ ...prev, phase: 'interview' }))
               }
               if (parsed.cleanText) {
-                pushAssistantEntry(parsed.cleanText, thinkBuf.current || undefined)
+                pushAssistantEntry(parsed.cleanText, thinkingForArchive)
               }
             } else {
-              pushAssistantEntry(finalText, thinkBuf.current || undefined)
+              pushAssistantEntry(finalText, thinkingForArchive)
             }
           } else {
             // Only thinking, no visible text — push thinking-only entry
@@ -1335,7 +1367,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
       <Static
-        items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? staticHistoryItems : []}
+        items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? staticItemsForInk : []}
         key="static-history"
       >
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
