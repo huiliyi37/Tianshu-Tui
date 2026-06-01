@@ -88,6 +88,16 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('prompt/identity/memory/recall/verification/ownership'))
   })
 
+  it('includes delegation discipline guardrails', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+
+    assert.ok(prompt.includes('委派不是默认执行方式'))
+    assert.ok(prompt.includes('当前计划的前置设计'))
+    assert.ok(prompt.includes('3 个以上独立探索前线'))
+    assert.ok(prompt.includes('用户明确说不要委派时'))
+    assert.ok(prompt.includes('继续内联执行'))
+  })
+
   it('does not reintroduce retired long-form warning sections', () => {
     const prompt = buildSystemPrompt({ tools: [] })
 
