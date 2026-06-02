@@ -7,22 +7,22 @@ export interface ToolFamilyInfo {
 }
 
 const TOOL_MAP: Record<string, ToolFamilyInfo> = {
-  read_file:       { family: 'read',  glyph: '▷', verb: 'read'     },
-  glob:            { family: 'find',  glyph: '⌕', verb: 'find'     },
-  grep:            { family: 'find',  glyph: '⌕', verb: 'search'   },
+  read_file:       { family: 'read',  glyph: '◇', verb: 'read'     },
+  glob:            { family: 'find',  glyph: '◎', verb: 'find'     },
+  grep:            { family: 'find',  glyph: '◎', verb: 'search'   },
   bash:            { family: 'run',   glyph: '▶', verb: 'run'      },
-  edit_file:       { family: 'write', glyph: '◆', verb: 'patch'    },
-  write_file:      { family: 'write', glyph: '◆', verb: 'write'    },
+  edit_file:       { family: 'write', glyph: '◈', verb: 'patch'    },
+  write_file:      { family: 'write', glyph: '◈', verb: 'write'    },
   run_tests:       { family: 'run',   glyph: '▶', verb: 'test'     },
   delegate_task:   { family: 'run',   glyph: '▶', verb: 'delegate' },
   delegate_batch:  { family: 'run',   glyph: '▶', verb: 'batch'    },
   git:             { family: 'run',   glyph: '▶', verb: 'git'      },
-  undo:            { family: 'write', glyph: '◆', verb: 'undo'     },
-  web_fetch:       { family: 'read',  glyph: '▷', verb: 'fetch'    },
-  inspect_project: { family: 'find',  glyph: '⌕', verb: 'inspect'  },
-  repo_map:        { family: 'find',  glyph: '⌕', verb: 'map'      },
+  undo:            { family: 'write', glyph: '◈', verb: 'undo'     },
+  web_fetch:       { family: 'read',  glyph: '◇', verb: 'fetch'    },
+  inspect_project: { family: 'find',  glyph: '◎', verb: 'inspect'  },
+  repo_map:        { family: 'find',  glyph: '◎', verb: 'map'      },
   todo:            { family: 'other', glyph: '•', verb: 'todo'     },
-  recall:          { family: 'find',  glyph: '⌕', verb: 'recall'   },
+  recall:          { family: 'find',  glyph: '◎', verb: 'recall'   },
   ask_user_question: { family: 'other', glyph: '?', verb: 'ask'    },
 }
 

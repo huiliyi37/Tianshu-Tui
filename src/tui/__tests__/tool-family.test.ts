@@ -6,14 +6,14 @@ describe('ToolFamily', () => {
   it('classifies read_file as read family', () => {
     const f = getToolFamily('read_file')
     assert.equal(f.family, 'read')
-    assert.equal(f.glyph, '▷')
+    assert.equal(f.glyph, '◇')
     assert.equal(f.verb, 'read')
   })
 
   it('classifies grep as find family', () => {
     const f = getToolFamily('grep')
     assert.equal(f.family, 'find')
-    assert.equal(f.glyph, '⌕')
+    assert.equal(f.glyph, '◎')
   })
 
   it('classifies bash as run family', () => {
@@ -25,7 +25,7 @@ describe('ToolFamily', () => {
   it('classifies edit_file as write family', () => {
     const f = getToolFamily('edit_file')
     assert.equal(f.family, 'write')
-    assert.equal(f.glyph, '◆')
+    assert.equal(f.glyph, '◈')
   })
 
   it('classifies unknown tool as other', () => {
