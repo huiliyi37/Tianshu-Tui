@@ -226,11 +226,15 @@ export class PromptEngine {
               }
             }
           }
-          // Trailer mode: merge volatileBlock (FROZEN only) into last user message.
-          // Dynamic appendix is appended as standalone message after the loop,
-          // keeping this message's bytes identical to historical user messages
-          // and preserving DeepSeek exact-prefix cache across lastUserIdx → firstUserIdx transitions.
-          const merged = this.volatileBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
+          // Trailer mode: merge volatileBlock (FROZEN) into last user message.
+          // Dynamic appendix is appended AFTER user content so the prefix
+          // (volatileBlock + userContent) stays stable across turns.
+          // Frozen snapshot captures the full content (including appendix),
+          // so historical retrieval returns byte-identical content → cache hit.
+          let merged = this.volatileBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
+          if (this.cachedAppendix) {
+            merged += '\n\n' + this.cachedAppendix
+          }
           const key = typeof msg.content === 'string' ? msg.content : ''
           const arr = this.frozenUserMerged.get(key)
           if (arr) {
@@ -367,14 +371,6 @@ export class PromptEngine {
         this.frozenUserMerged.get(maxKey)!.shift()
       }
       totalFrozen--
-    }
-
-    // P1: append dynamic appendix as standalone message at end of result.
-    // This keeps the last user message identical to historical user messages
-    // (volatileBlock + userContent), preventing exact-prefix cache breaks
-    // when dynamic context (toolHistory, taskProgress, etc.) changes between turns.
-    if (this.cachedAppendix) {
-      result.push({ role: 'user', content: this.cachedAppendix })
     }
 
     return {

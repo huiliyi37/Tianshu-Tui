@@ -12,12 +12,11 @@ export function latestUserTrailer(messages: readonly OaiMessage[]): LatestUserTr
     if (msg?.role === 'user' && typeof msg.content === 'string') {
       const sep = '\n---\n'
       const idx = msg.content.indexOf(sep)
-      // Skip standalone appendix messages (no trailer separator)
-      if (idx === -1) continue
+      if (idx === -1) return { fresh: msg.content, user: '', message: msg }
       return { fresh: msg.content.slice(0, idx), user: msg.content.slice(idx + sep.length), message: msg }
     }
   }
-  throw new Error('expected at least one user message with trailer separator')
+  throw new Error('expected at least one user message')
 }
 
 export function userMessages(messages: readonly OaiMessage[]): OaiMessage[] {

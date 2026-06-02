@@ -103,7 +103,7 @@ describe('PromptEngine OpenAI-native request building', () => {
     ])
 
     const { fresh, user } = latestUserTrailer(request.messages)
-    assert.equal(user, 'continue')
+    assert.ok(user.startsWith('continue'), `user should start with 'continue', got '${user.slice(0, 30)}...'`)
     // P1: sessionState is in standalone appendix, not in FROZEN fresh
     const appendix = request.messages[request.messages.length - 1]!
     assert.match(typeof appendix.content === 'string' ? appendix.content : '', /state v2/)

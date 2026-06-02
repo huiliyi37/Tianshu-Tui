@@ -7,11 +7,18 @@ import type { OaiMessage } from '../../api/oai-types.js'
 
 function historicalUserContent(messages: readonly OaiMessage[], userContent: string): string {
   const msg = userMessages(messages)
-    .find(m => typeof m.content === 'string' && m.content.endsWith(`\n---\n${userContent}`))
+    .find(m => typeof m.content === 'string' && m.content.includes(`\n---\n${userContent}`))
   if (!msg || typeof msg.content !== 'string') {
     throw new Error(`expected historical user trailer for ${userContent}`)
   }
   return msg.content
+}
+
+/** Extract user content from trailer: "fresh\n---\nuser\n\nappendix" → "user" */
+function trailerUser(trailer: LatestUserTrailer): string {
+  // appendix is appended after user content with \n\n separator
+  const idx = trailer.user.indexOf('\n\n')
+  return idx >= 0 ? trailer.user.slice(0, idx) : trailer.user
 }
 
 describe('ice-mirror: cache stability', () => {
@@ -177,7 +184,7 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
     const frozenVol = (req.messages[1] as { content: string }).content
 
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
-    assert.equal(user, 'read file')
+    assert.ok(user.startsWith('read file'), `user should start with 'read file', got '${user.slice(0, 30)}...'`)
 
     // P1: FRESH is volatileBlock only (appendix is standalone), so it's a prefix of the frozen snapshot
     assert.ok(frozenVol.startsWith(freshVol),
@@ -277,7 +284,7 @@ describe('habituation: three-zone consolidation', () => {
     const histVol = historicalUserContent(req.messages, 'msg 0').split('\n---\n')[0]!
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
     const frozenBase = (engine as unknown as { frozenBase: string }).frozenBase
-    assert.equal(user, 'msg 1')
+    assert.ok(user.startsWith('msg 1'), `user should start with 'msg 1', got '${user.slice(0, 30)}...'`)
     assert.ok(!histVol.includes('<consolidated>'), 'Historical volatile must stay frozen for prefix cache')
     assert.equal(freshVol, frozenBase, 'Latest trailer must equal frozen base (appendix is standalone)')
     // P1: consolidated block is in standalone appendix
@@ -333,7 +340,7 @@ describe('habituation: three-zone consolidation', () => {
     const histVol = (req.messages[1] as { content: string }).content
 
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
-    assert.equal(user, 'read')
+    assert.ok(user.startsWith('read'), 'user should start with "read"')
 
     // P1: FRESH equals volatileBlock (FROZEN only), appendix is standalone
     assert.ok(histVol.startsWith(freshVol),
@@ -429,7 +436,7 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
       { role: 'user', content: 'read file' },
     ])
     const { fresh: freshVol, user } = latestUserTrailer(req3.messages)
-    assert.equal(user, 'read file')
+    assert.ok(user.startsWith('read file'), `user should start with 'read file', got '${user.slice(0, 30)}...'`)
     // P1: FROZEN volatile is stable; appendix changes, not the volatile block
     assert.equal(freshVol, vol1, 'FROZEN volatile must stay stable — appendix is standalone')
   })
@@ -484,7 +491,7 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     ]
     const withNewUser = engine.buildOaiRequest(messages2)
     const { fresh: freshContext, user } = latestUserTrailer(withNewUser.messages)
-    assert.equal(user, 'now do Y')
+    assert.ok(user.startsWith('now do Y'), 'user should start with "now do Y"')
     // P1: projection is in standalone appendix, not in FROZEN fresh
     assert.doesNotMatch(freshContext, /<task-contract status="executing">/)
     const appendix2 = withNewUser.messages[withNewUser.messages.length - 1]!
@@ -586,7 +593,7 @@ describe('sessionState injection — cache safety + path coverage', () => {
       { role: 'user', content: 'second task' },
     ])
     const { fresh: secondTaskFresh, user } = latestUserTrailer(req2.messages)
-    assert.equal(user, 'second task')
+    assert.ok(user.startsWith('second task'), 'user should start with "second task"')
     // P1: sessionState is in standalone appendix, not in FROZEN fresh
     const app2 = req2.messages[req2.messages.length - 1]!
     assert.match(
@@ -610,9 +617,9 @@ describe('sessionState injection — cache safety + path coverage', () => {
     assert.doesNotMatch(firstVol, /<session-state>/, 'Historical user-msg volatile block must NOT contain sessionState (frozen prefix)')
   })
 
-  // ── P1: standalone dynamic appendix ──
+  // ── P1c: frozen appendix in user message ──
 
-  it('last user message does NOT contain dynamic appendix after tool execution', () => {
+  it('last user message contains dynamic appendix after user content', () => {
     const engine = new PromptEngine({
       model: 'test-model', maxTokens: 4096, staticCtx: { tools: [] },
       volatileCtx: { cwd: '/test/project', gitStatus: 'Current branch: main', rivetMd: '# Test' },
@@ -624,41 +631,39 @@ describe('sessionState injection — cache safety + path coverage', () => {
       [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' }],
     )
 
-    const userMsgs = req.messages.filter(m => m.role === 'user')
-    // Appendix is the last user-role message; the real user message is before it
-    const realLastUser = userMsgs.length >= 2 ? userMsgs[userMsgs.length - 2]! : userMsgs.at(-1)!
-    assert.doesNotMatch(
-      typeof realLastUser.content === 'string' ? realLastUser.content : '',
-      /<tool-history/,
-      'real last user message must not contain <tool-history> — appendix is standalone',
-    )
-    assert.doesNotMatch(
-      typeof realLastUser.content === 'string' ? realLastUser.content : '',
-      /<task-progress/,
-      'real last user message must not contain <task-progress> — appendix is standalone',
-    )
+    const { fresh, user } = latestUserTrailer(req.messages)
+    // fresh = volatileBlock (FROZEN only, stable)
+    assert.ok(!fresh.includes('<tool-history'), 'FROZEN volatile must not contain appendix')
+    // user = userContent + '\n\n' + appendix (appendix is AFTER user content)
+    assert.ok(user.includes('<tool-history'), 'user trailer must contain appendix after user content')
+    assert.ok(user.startsWith('hello'), 'user trailer must start with user content')
   })
 
-  it('dynamic appendix is a standalone message at end of result', () => {
+  it('frozen snapshot preserves appendix for historical retrieval', () => {
     const engine = new PromptEngine({
       model: 'test-model', maxTokens: 4096, staticCtx: { tools: [] },
       volatileCtx: { cwd: '/test/project', gitStatus: 'Current branch: main', rivetMd: '# Test' },
     })
     engine.setTaskProgress({ current: 'working', completed: ['step1'], remaining: ['step2'], decisions: [] })
 
-    const req = engine.buildOaiRequest(
+    // Turn 1: message with appendix
+    const r1 = engine.buildOaiRequest(
       [{ role: 'user', content: 'hello' }],
       [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' }],
     )
 
-    // Last message should be the standalone appendix containing dynamic fields
-    const lastMsg = req.messages[req.messages.length - 1]!
-    assert.equal(lastMsg.role, 'user', 'appendix message role must be user')
-    assert.ok(
-      typeof lastMsg.content === 'string' && (
-        lastMsg.content.includes('<context-update>') || lastMsg.content.includes('<tool-history')
-      ),
-      'last message must be the standalone appendix containing dynamic fields',
-    )
+    // Turn 2: first msg becomes historical
+    engine.setTaskProgress({ current: 'next', completed: ['step1', 'step2'], remaining: [], decisions: [] })
+    const r2 = engine.buildOaiRequest([
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'done' },
+      { role: 'user', content: 'world' },
+    ], [{ tool: 'edit_file', target: 'src/bar.ts', status: 'success' }])
+
+    const t1LastUser = r1.messages.filter(m => m.role === 'user').at(-1)!
+    const t2FirstUser = r2.messages.filter(m => m.role === 'user')[0]!
+    // Frozen snapshot must return byte-identical content
+    assert.equal(t1LastUser.content, t2FirstUser.content,
+      'Historical retrieval must return identical bytes (frozen snapshot)')
   })
 })
