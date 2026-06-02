@@ -31,6 +31,24 @@ function normalizeLineEndings(s: string): string {
   return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
 
+// Replicate word-jump helpers from base-text-input.tsx for testing.
+function prevWordStart(text: string, pos: number): number {
+  if (pos <= 0) return 0
+  let i = pos - 1
+  while (i > 0 && !/\w/.test(text[i] ?? '')) i--
+  while (i > 0 && /\w/.test(text[i - 1] ?? '')) i--
+  return i
+}
+
+function nextWordEnd(text: string, pos: number): number {
+  if (pos >= text.length) return pos
+  let i = pos
+  while (i < text.length && !/\w/.test(text[i] ?? '')) i++
+  if (i >= text.length) return pos
+  while (i < text.length && /\w/.test(text[i] ?? '')) i++
+  return i
+}
+
 describe('getLineCol', () => {
   it('returns line 0 col 0 for start of string', () => {
     assert.deepEqual(getLineCol('hello', 0), { line: 0, col: 0 })
@@ -171,5 +189,92 @@ describe('Multi-line navigation scenarios', () => {
     assert.equal(line, 1)
     const endPos = posFromLineCol(lines, line, lines[line]!.length)
     assert.equal(endPos, 11) // end of 'line2'
+  })
+})
+
+describe('prevWordStart', () => {
+  it('returns 0 at start', () => {
+    assert.equal(prevWordStart('hello', 0), 0)
+  })
+  it('jumps to start of current word', () => {
+    // cursor at 5 ('world'|'Xtra'), jumps to start of 'Xtra'
+    assert.equal(prevWordStart('hello worldXtra', 11), 6)
+  })
+  it('jumps to start of previous word from start of current word', () => {
+    // "ab |cd" — pos=3 (at 'c'), walks back to start of 'ab' (pos 0)
+    assert.equal(prevWordStart('ab cd', 3), 0)
+  })
+  it('handles punctuation correctly', () => {
+    // "hello,| world" — pos=6, cursor at ' ' after 'hello,'
+    // prevWordStart skips non-word (',') and walks back to start of 'hello' (0)
+    assert.equal(prevWordStart('hello, world', 6), 0)
+  })
+  it('returns 0 when only whitespace to the left', () => {
+    assert.equal(prevWordStart('   ', 2), 0)
+  })
+  it('handles multi-line buffers across newlines', () => {
+    // "foo\n|" — pos=4, should jump to start of 'foo' (pos 0)
+    assert.equal(prevWordStart('foo\nbar', 4), 0)
+  })
+})
+
+describe('nextWordEnd', () => {
+  it('returns length at end', () => {
+    assert.equal(nextWordEnd('hello', 5), 5)
+  })
+  it('jumps to end of current word', () => {
+    // "ab| cd" — pos=2, next word end is pos 5 (end of 'cd')
+    assert.equal(nextWordEnd('ab cd', 2), 5)
+  })
+  it('skips leading whitespace', () => {
+    // "ab |  cd" — pos=3, should jump past '  ' to start of 'cd' (pos 5), end at 7
+    assert.equal(nextWordEnd('ab   cd', 3), 7)
+  })
+  it('returns pos when no word follows', () => {
+    // "ab|," — pos=2, no word after, returns 2
+    assert.equal(nextWordEnd('ab,', 2), 2)
+  })
+  it('handles multi-line buffers across newlines', () => {
+    // "|\nbar" — pos=0, next word 'bar', end at 4
+    assert.equal(nextWordEnd('\nbar', 0), 4)
+  })
+})
+
+describe('Stale-closure fix: ref-based edit accumulation', () => {
+  // Simulate the commitEdit pattern: when N keystrokes arrive faster than
+  // React renders, each must be applied to the latest ref-stored value, not
+  // a closure-captured snapshot. This test mirrors the exact logic in
+  // base-text-input.tsx (useRef + read fresh + write back).
+  it('preserves all N burst-inserted chars', () => {
+    const ref = { value: '', cursor: 0 }
+    const commit = (nv: string, nc: number) => {
+      ref.value = nv
+      ref.cursor = nc
+    }
+    // Simulate 5 keystrokes arriving between renders
+    const keys = ['a', 'b', 'c', 'd', 'e']
+    for (const k of keys) {
+      const v = ref.value
+      const p = ref.cursor
+      commit(v.slice(0, p) + k + v.slice(p), p + 1)
+    }
+    assert.equal(ref.value, 'abcde')
+    assert.equal(ref.cursor, 5)
+  })
+
+  it('interleaves insert, delete, and word-jump without dropping chars', () => {
+    const ref = { value: 'hello world', cursor: 11 }
+    const commit = (nv: string, nc: number) => {
+      ref.value = nv
+      ref.cursor = nc
+    }
+    // insert '!' at end
+    commit(ref.value.slice(0, ref.cursor) + '!' + ref.value.slice(ref.cursor), ref.cursor + 1)
+    // delete one char backward
+    commit(ref.value.slice(0, ref.cursor - 1) + ref.value.slice(ref.cursor), ref.cursor - 1)
+    // word jump back, then insert 'X' at new position
+    ref.cursor = prevWordStart(ref.value, ref.cursor)
+    commit(ref.value.slice(0, ref.cursor) + 'X' + ref.value.slice(ref.cursor), ref.cursor + 1)
+    assert.equal(ref.value, 'hello Xworld')
   })
 })

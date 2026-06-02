@@ -23,6 +23,36 @@ interface BaseTextInputProps {
   onSlashNavigate?: (idx: number) => void
 }
 
+/** Find the start position of the word preceding `pos` in `text`.
+ *  Word = maximal run of [a-zA-Z0-9_]. Stops at whitespace or non-word chars.
+ *  Returns `pos` itself if no word boundary exists to the left.
+ */
+function prevWordStart(text: string, pos: number): number {
+  if (pos <= 0) return 0
+  let i = pos - 1
+  // Skip current run of non-word (so "ab |cd" jumps past space to "c")
+  while (i > 0 && !/\w/.test(text[i] ?? '')) i--
+  // Then walk to the start of the word
+  while (i > 0 && /\w/.test(text[i - 1] ?? '')) i--
+  return i
+}
+
+/** Find the end position of the word following `pos` in `text`.
+ *  Returns `pos` itself when no word boundary exists to the right — callers
+ *  (e.g. Option+Delete) use this to detect a no-op and avoid swallowing the
+ *  trailing punctuation.
+ */
+function nextWordEnd(text: string, pos: number): number {
+  if (pos >= text.length) return pos
+  let i = pos
+  // Skip non-word chars
+  while (i < text.length && !/\w/.test(text[i] ?? '')) i++
+  if (i >= text.length) return pos
+  // Walk to end of word
+  while (i < text.length && /\w/.test(text[i] ?? '')) i++
+  return i
+}
+
 /** Get line/column info from a flat cursor position in a multi-line string */
 function getLineCol(text: string, pos: number): { line: number; col: number } {
   let line = 0
@@ -57,6 +87,12 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
   const savedInputRef = useRef('')
   const vimRef = useRef(new VimStateClass())
 
+  // Mirror props/state into refs so the useInput handler always reads the
+  // latest value (avoids stale-closure race that drops keystrokes when the
+  // render thread is busy with stream chunks).
+  const valueRef = useRef(value)
+  const cursorPosRef = useRef(cursorPos)
+
   // Bracketed paste state
   const isPastingRef = useRef(false)
   const pasteBufferRef = useRef('')
@@ -82,35 +118,60 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
     setCursorPos(prev => Math.min(prev, value.length))
   }, [value.length])
 
+  // Sync refs with the latest state/props so useInput handlers see fresh data
+  // on every keystroke, even when multiple arrive between React renders.
+  React.useEffect(() => {
+    valueRef.current = value
+  }, [value])
+  React.useEffect(() => {
+    cursorPosRef.current = cursorPos
+  }, [cursorPos])
+
   const MAX_INPUT_LENGTH = 100_000
+  const MAX_PASTE_LENGTH = 50_000
+
+  /** Atomically update the input buffer + cursor in both refs and state.
+   *  Reading from refs (not closure) keeps multi-keystroke bursts lossless
+   *  when the render thread is busy (e.g. during stream chunk rendering).
+   */
+  const commitEdit = useCallback((newValue: string, newCursor: number) => {
+    valueRef.current = newValue
+    cursorPosRef.current = newCursor
+    onChange(newValue)
+    setCursorPos(newCursor)
+  }, [onChange])
 
   const insertAtCursor = useCallback((insertion: string) => {
     const normalized = insertion.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-    const available = MAX_INPUT_LENGTH - value.length
+    const cur = valueRef.current
+    const pos = cursorPosRef.current
+    const available = MAX_INPUT_LENGTH - cur.length
     if (available <= 0) return
     const truncated = normalized.slice(0, available)
-    onChange(value.slice(0, cursorPos) + truncated + value.slice(cursorPos))
-    setCursorPos(prev => prev + truncated.length)
-  }, [value, cursorPos, onChange])
-
-  const MAX_PASTE_LENGTH = 50_000
+    commitEdit(cur.slice(0, pos) + truncated + cur.slice(pos), pos + truncated.length)
+  }, [commitEdit])
 
   const flushPasteBuffer = useCallback(() => {
     if (pasteBufferRef.current) {
       const normalized = pasteBufferRef.current.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-      const available = MAX_INPUT_LENGTH - value.length
+      const cur = valueRef.current
+      const pos = cursorPosRef.current
+      const available = MAX_INPUT_LENGTH - cur.length
       const truncated = available > 0 ? normalized.slice(0, Math.min(available, MAX_PASTE_LENGTH)) : ''
-      onChange(value.slice(0, cursorPos) + truncated + value.slice(cursorPos))
-      setCursorPos(prev => prev + truncated.length)
+      commitEdit(cur.slice(0, pos) + truncated + cur.slice(pos), pos + truncated.length)
       pasteBufferRef.current = ''
     }
     isPastingRef.current = false
-  }, [value, cursorPos, onChange])
-
-  const hasMultipleLines = value.includes('\n')
+  }, [commitEdit])
 
   useInput((input, key) => {
     if (disabled) return
+
+    // Read fresh value/cursor from refs — closure may be stale when stream
+    // chunks are competing for the render thread.
+    const cur = valueRef.current
+    const pos = cursorPosRef.current
+    const hasNewlines = cur.includes('\n')
 
     // Bracketed paste handling
     if (input === PASTE_START) {
@@ -135,9 +196,9 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         onSlashNavigate(Math.max(0, slashSelectedIdx - 1))
         return
       }
-      if (hasMultipleLines) {
-        const lines = value.split('\n')
-        const { line, col } = getLineCol(value, cursorPos)
+      if (hasNewlines) {
+        const lines = cur.split('\n')
+        const { line, col } = getLineCol(cur, pos)
         if (line > 0) {
           setCursorPos(posFromLineCol(lines, line - 1, col))
           return
@@ -146,11 +207,10 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       }
       if (history && history.length > 0) {
         if (historyIndexRef.current < history.length - 1) {
-          if (historyIndexRef.current === -1) savedInputRef.current = value
+          if (historyIndexRef.current === -1) savedInputRef.current = cur
           historyIndexRef.current++
           const entry = history[historyIndexRef.current]!
-          onChange(entry)
-          setCursorPos(entry.length)
+          commitEdit(entry, entry.length)
         }
         return
       }
@@ -161,9 +221,9 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         onSlashNavigate(Math.min(slashFilteredCount - 1, slashSelectedIdx + 1))
         return
       }
-      if (hasMultipleLines) {
-        const lines = value.split('\n')
-        const { line, col } = getLineCol(value, cursorPos)
+      if (hasNewlines) {
+        const lines = cur.split('\n')
+        const { line, col } = getLineCol(cur, pos)
         if (line < lines.length - 1) {
           setCursorPos(posFromLineCol(lines, line + 1, col))
           return
@@ -175,8 +235,7 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         const restored = historyIndexRef.current === -1
           ? savedInputRef.current
           : history![historyIndexRef.current]!
-        onChange(restored)
-        setCursorPos(restored.length)
+        commitEdit(restored, restored.length)
       }
       return
     }
@@ -201,12 +260,12 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         return
       }
       const now = Date.now()
-      if (now - lastInputTimeRef.current < 50 && hasMultipleLines) {
+      if (now - lastInputTimeRef.current < 50 && hasNewlines) {
         insertAtCursor('\n')
         lastInputTimeRef.current = now
         return
       }
-      onSubmit(value)
+      onSubmit(cur)
       setCursorPos(0)
       return
     }
@@ -226,64 +285,103 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       return
     }
     if (key.rightArrow) {
-      setCursorPos(prev => Math.min(value.length, prev + 1))
+      setCursorPos(prev => Math.min(cur.length, prev + 1))
       return
     }
-    // Home — move to start of current line
+    // Home / Ctrl+A — move to start of current line
     if (key.home || (key.ctrl && input === 'a')) {
-      if (hasMultipleLines) {
-        const { line } = getLineCol(value, cursorPos)
-        const lines = value.split('\n')
+      if (hasNewlines) {
+        const { line } = getLineCol(cur, pos)
+        const lines = cur.split('\n')
         setCursorPos(posFromLineCol(lines, line, 0))
       } else {
         setCursorPos(0)
       }
       return
     }
-    // End — move to end of current line
+    // End / Ctrl+E — move to end of current line
     if (key.end || (key.ctrl && input === 'e')) {
-      if (hasMultipleLines) {
-        const { line } = getLineCol(value, cursorPos)
-        const lines = value.split('\n')
+      if (hasNewlines) {
+        const { line } = getLineCol(cur, pos)
+        const lines = cur.split('\n')
         setCursorPos(posFromLineCol(lines, line, lines[line]!.length))
       } else {
-        setCursorPos(value.length)
+        setCursorPos(cur.length)
       }
+      return
+    }
+    // Option/Alt+Left (meta+b) — word jump backward
+    if ((key.meta && (input === 'b' || input === 'B')) || (key.meta && key.leftArrow)) {
+      setCursorPos(prevWordStart(cur, pos))
+      return
+    }
+    // Option/Alt+Right (meta+f) — word jump forward
+    if ((key.meta && (input === 'f' || input === 'F')) || (key.meta && key.rightArrow)) {
+      setCursorPos(nextWordEnd(cur, pos))
+      return
+    }
+    // Option+Home (meta+home) — jump to buffer start
+    if (key.meta && key.home) {
+      setCursorPos(0)
+      return
+    }
+    // Option+End (meta+end) — jump to buffer end
+    if (key.meta && key.end) {
+      setCursorPos(cur.length)
       return
     }
 
     // Backspace / Delete — macOS backspace sends \x7f which Ink maps to key.delete,
     // so treat both as backward delete.
     if (key.backspace || key.delete) {
-      if (cursorPos > 0) {
-        onChange(value.slice(0, cursorPos - 1) + value.slice(cursorPos))
-        setCursorPos(prev => prev - 1)
+      if (pos > 0) {
+        commitEdit(cur.slice(0, pos - 1) + cur.slice(pos), pos - 1)
       }
+      return
+    }
+    // Option+Backspace (meta+backspace) — delete word backward
+    if (key.meta && key.backspace) {
+      const cut = prevWordStart(cur, pos)
+      if (cut !== pos) commitEdit(cur.slice(0, cut) + cur.slice(pos), cut)
+      return
+    }
+    // Option+Delete / Ctrl+Delete (meta+delete or ctrl+delete) — delete word forward
+    if ((key.meta || key.ctrl) && key.delete) {
+      const cut = nextWordEnd(cur, pos)
+      if (cut !== pos) commitEdit(cur.slice(0, pos) + cur.slice(cut), pos)
       return
     }
 
     // Ctrl+U — clear current line
     if (key.ctrl && (input === 'u' || input === 'U')) {
-      if (hasMultipleLines) {
-        const { line } = getLineCol(value, cursorPos)
-        const lines = value.split('\n')
+      if (hasNewlines) {
+        const { line } = getLineCol(cur, pos)
+        const lines = cur.split('\n')
         const lineStart = posFromLineCol(lines, line, 0)
-        onChange(value.slice(0, lineStart) + value.slice(cursorPos))
-        setCursorPos(lineStart)
+        commitEdit(cur.slice(0, lineStart) + cur.slice(pos), lineStart)
       } else {
-        onChange('')
-        setCursorPos(0)
+        commitEdit('', 0)
       }
       return
     }
 
     // Ctrl+W — delete word backward
     if (key.ctrl && (input === 'w' || input === 'W')) {
-      const before = value.slice(0, cursorPos)
-      const wordEnd = before.search(/\S\s*$/)
-      const cutPos = wordEnd === -1 ? 0 : wordEnd + 1
-      onChange(value.slice(0, cutPos) + value.slice(cursorPos))
-      setCursorPos(cutPos)
+      const cut = prevWordStart(cur, pos)
+      if (cut !== pos) commitEdit(cur.slice(0, cut) + cur.slice(pos), cut)
+      return
+    }
+
+    // Ctrl+K — kill to end of line
+    if (key.ctrl && (input === 'k' || input === 'K')) {
+      if (hasNewlines) {
+        const { line } = getLineCol(cur, pos)
+        const lines = cur.split('\n')
+        const lineEnd = posFromLineCol(lines, line, lines[line]!.length)
+        if (lineEnd !== pos) commitEdit(cur.slice(0, pos) + cur.slice(lineEnd), pos)
+      } else {
+        if (pos !== cur.length) commitEdit(cur.slice(0, pos), pos)
+      }
       return
     }
 
