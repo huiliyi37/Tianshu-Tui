@@ -26,6 +26,8 @@ export interface ConvergenceInput {
   recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target'>>
   /** Evidence state with edit/verification tracking */
   evidenceState: Pick<EvidenceState, 'filesModified' | 'filesRead' | 'deliveryStatus'>
+  /** Optional tool call fingerprints for oscillation detection (A→B→A→B patterns). */
+  toolFingerprints?: ReadonlyArray<string>
 }
 
 export interface ConvergenceResult {
@@ -51,6 +53,8 @@ export interface ConvergenceSignals {
   toolEntropy: number
   errorPenalty: number
   tokenEfficiency: number
+  /** 0-1 penalty for alternating tool patterns (A→B→A→B). 0 = severe oscillation, 1 = no oscillation. */
+  oscillationPenalty: number
 }
 
 // ─── Window-aware Thresholds ────────────────────────────────────────
@@ -114,14 +118,15 @@ interface PhaseWeights {
   toolEntropy: number
   errorPenalty: number
   tokenEfficiency: number
+  oscillationPenalty: number
 }
 
 const PHASE_WEIGHTS: Record<PhaseClass, PhaseWeights> = {
-  explore: { editRatio: 0.05, targetNovelty: 0.35, toolEntropy: 0.30, errorPenalty: 0.15, tokenEfficiency: 0.15 },
-  plan:    { editRatio: 0.10, targetNovelty: 0.25, toolEntropy: 0.20, errorPenalty: 0.20, tokenEfficiency: 0.25 },
-  execute: { editRatio: 0.50, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.20, tokenEfficiency: 0.10 },
-  verify:  { editRatio: 0.30, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.35, tokenEfficiency: 0.15 },
-  deliver: { editRatio: 0.45, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.25, tokenEfficiency: 0.10 },
+  explore: { editRatio: 0.05, targetNovelty: 0.30, toolEntropy: 0.25, errorPenalty: 0.15, tokenEfficiency: 0.15, oscillationPenalty: 0.10 },
+  plan:    { editRatio: 0.10, targetNovelty: 0.22, toolEntropy: 0.18, errorPenalty: 0.20, tokenEfficiency: 0.20, oscillationPenalty: 0.10 },
+  execute: { editRatio: 0.46, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.20, tokenEfficiency: 0.08, oscillationPenalty: 0.06 },
+  verify:  { editRatio: 0.26, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.30, tokenEfficiency: 0.12, oscillationPenalty: 0.12 },
+  deliver: { editRatio: 0.40, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.22, tokenEfficiency: 0.08, oscillationPenalty: 0.10 },
 }
 
 // ─── Signal Computation ─────────────────────────────────────────────
@@ -264,6 +269,37 @@ function computeTokenEfficiency(
   return Math.min(1.0, rawEfficiency + balanceBonus)
 }
 
+/**
+ * oscillationPenalty: detects A→B→A→B alternating patterns in tool fingerprints.
+ * Uses a sliding window of the last 8 fingerprints.
+ * Returns 0.0 (heavy penalty) when perfect oscillation is detected,
+ * 1.0 when no oscillation is present.
+ *
+ * Oscillation defined as: at least 4 alternations among exactly 2 unique
+ * fingerprints in the last 6-8 calls. This catches post-completion verification
+ * loops where the model alternates between two read-only verification commands.
+ */
+function computeOscillationPenalty(fingerprints: ReadonlyArray<string>): number {
+  const window = fingerprints.slice(-8)
+  if (window.length < 6) return 1.0 // not enough data
+
+  // Count unique fingerprints and check for alternation pattern
+  const unique = new Set(window)
+  if (unique.size !== 2) return 1.0 // oscillation requires exactly 2 alternating values
+
+  const [a, b] = [...unique] as [string, string]
+  let alternations = 0
+  for (let i = 1; i < window.length; i++) {
+    if (window[i] !== window[i! - 1]) alternations++
+  }
+
+  // Perfect oscillation: alternates every step (e.g., A,B,A,B,A,B,A,B = 7 alternations)
+  // Severe oscillation: alternates most steps (>= 5 out of 7 possible)
+  if (alternations >= 5) return 0.0  // heavy penalty
+  if (alternations >= 3) return 0.3  // moderate penalty
+  return 1.0
+}
+
 // ─── Score Computation ──────────────────────────────────────────────
 
 function computeConvergenceScore(
@@ -276,7 +312,8 @@ function computeConvergenceScore(
     weights.targetNovelty * signals.targetNovelty +
     weights.toolEntropy * signals.toolEntropy +
     weights.errorPenalty * signals.errorPenalty +
-    weights.tokenEfficiency * signals.tokenEfficiency
+    weights.tokenEfficiency * signals.tokenEfficiency +
+    weights.oscillationPenalty * signals.oscillationPenalty
 
   // Phase expectation penalty: phases that require edits (execute, verify,
   // deliver) are fundamentally off-track if no edits are happening.
@@ -299,8 +336,20 @@ function buildInjectedMessage(
   signals: ConvergenceSignals,
   phaseClass: PhaseClass,
   tier: WindowTier,
+  deliveryStatus?: string,
 ): string {
   const lines: string[] = []
+
+  // Delivery-completion variant: when task is verified and convergence fires,
+  // signal completion instead of asking the model to try harder.
+  if (deliveryStatus === 'verified' && level === 2) {
+    lines.push('**系统感知：所有代码变更已验证通过，任务可能已完成。**')
+    lines.push('')
+    lines.push('如果所有子任务已完成且验证通过，请结束当前回合。')
+    lines.push('- 检查是否有遗漏的 deliver_task 调用')
+    lines.push('- 如果没有，输出最终状态摘要并停止工具调用')
+    return lines.join('\n')
+  }
 
   if (level === 2) {
     lines.push('**系统感知：当前任务可能进入低效循环。**')
@@ -313,6 +362,9 @@ function buildInjectedMessage(
   }
   if (signals.toolEntropy < 0.3) {
     lines.push('- 工具使用模式高度重复，当前探索路径可能已穷尽')
+  }
+  if (signals.oscillationPenalty < 0.3) {
+    lines.push('- 工具调用模式高度震荡 (A→B→A→B)，当前验证路径可能已穷尽')
   }
   if (signals.targetNovelty < 0.2 && phaseClass !== 'execute') {
     lines.push('- 目标文件重复率过高，建议扩大搜索范围或切换策略')
@@ -352,6 +404,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     toolEntropy: computeToolEntropy(windowSize, input.recentToolHistory),
     errorPenalty: computeErrorPenalty(windowSize, input.recentToolHistory),
     tokenEfficiency: computeTokenEfficiency(windowSize, input.recentToolHistory, input.evidenceState),
+    oscillationPenalty: computeOscillationPenalty(input.toolFingerprints ?? []),
   }
 
   const score = computeConvergenceScore(signals, weights, input.phaseClass)
@@ -377,7 +430,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   const shouldForceSplit = level >= 3
   const shouldKick = level >= 2
   const injectedMessage = (level >= 2)
-    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier)
+    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus)
     : null
 
   return {

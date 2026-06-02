@@ -143,8 +143,8 @@ describe('evaluateConvergence', () => {
       recentToolHistory: history,
     }))
     // All same tool + same target → targetNovelty=0.17, toolEntropy=0, tokenEfficiency=0
-    // Score should be very low
-    assert.ok(result.score <= 0.25, `expected score <= 0.25, got ${result.score.toFixed(2)}`)
+    // Score should be low (with oscillationPenalty added, score shifts slightly up)
+    assert.ok(result.score <= 0.35, `expected score <= 0.35, got ${result.score.toFixed(2)}`)
     assert.equal(result.level, 2, `expected level 2, got ${result.level} (score=${result.score.toFixed(2)})`)
     assert.ok(result.injectedMessage!.includes('工具使用模式高度重复'), 'should mention tool repetition')
   })
@@ -424,5 +424,132 @@ describe('evaluateConvergence', () => {
     // Zero edits in deliver → low editRatio component → low overall score
     assert.ok(result.score < 0.5, `expected score < 0.5 in deliver with no edits, got ${result.score.toFixed(2)}`)
     assert.ok(result.level >= 2, `expected level >= 2 in deliver, got ${result.level}`)
+  })
+
+  // ── Oscillation detection ──
+
+  it('oscillation pattern (A→B→A→B→A→B) scores low', () => {
+    // Simulate post-completion verification loop: git log → ls → git log → ls → ...
+    const history = makeHistory([
+      { tool: 'bash', target: 'git log --oneline' },
+      { tool: 'bash', target: 'ls .rivet/sessions/' },
+      { tool: 'bash', target: 'git log --oneline' },
+      { tool: 'bash', target: 'ls .rivet/sessions/' },
+      { tool: 'bash', target: 'git log --oneline' },
+      { tool: 'bash', target: 'ls .rivet/sessions/' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 14,
+      phaseClass: 'verify',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+      toolFingerprints: ['fp-git', 'fp-ls', 'fp-git', 'fp-ls', 'fp-git', 'fp-ls'],
+    }))
+    // Oscillation + no edits + verify phase → score should be low enough for level 2+
+    assert.ok(result.score < 0.45, `expected score < 0.45 for oscillation, got ${result.score.toFixed(2)}`)
+    assert.ok(result.level >= 2, `expected level >= 2 for oscillation, got ${result.level}`)
+    assert.ok(result.signals.oscillationPenalty !== undefined, 'should have oscillationPenalty signal')
+    assert.ok(result.signals.oscillationPenalty < 0.5, `oscillation penalty should be severe, got ${result.signals.oscillationPenalty}`)
+  })
+
+  it('no oscillation penalty when fingerprints are diverse', () => {
+    const history = makeHistory([
+      { tool: 'read_file', target: 'a.ts' },
+      { tool: 'grep', target: 'x' },
+      { tool: 'glob', target: '*.ts' },
+      { tool: 'read_file', target: 'b.ts' },
+      { tool: 'run_tests', target: 'test' },
+      { tool: 'edit_file', target: 'c.ts' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 10,
+      phaseClass: 'explore',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+      toolFingerprints: ['fp1', 'fp2', 'fp3', 'fp4', 'fp5', 'fp6'],
+    }))
+    // All unique fingerprints → no oscillation penalty
+    assert.equal(result.signals.oscillationPenalty, 1.0)
+  })
+
+  it('missing toolFingerprints defaults to no penalty', () => {
+    const history = makeHistory([
+      { tool: 'bash', target: 'git log' },
+      { tool: 'bash', target: 'ls' },
+      { tool: 'bash', target: 'git log' },
+      { tool: 'bash', target: 'ls' },
+      { tool: 'bash', target: 'git log' },
+      { tool: 'bash', target: 'ls' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 14,
+      phaseClass: 'verify',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+      // toolFingerprints intentionally omitted
+    }))
+    // Without fingerprints, oscillation penalty defaults to 1.0 (no penalty)
+    assert.equal(result.signals.oscillationPenalty, 1.0)
+  })
+
+  // ── Delivery-aware completion nudge ──
+
+  it('verified deliveryStatus triggers completion nudge message', () => {
+    const history = makeHistory([
+      { tool: 'bash', target: 'git log' },
+      { tool: 'bash', target: 'git log' },
+      { tool: 'read_file', target: 'a.ts' },
+      { tool: 'read_file', target: 'b.ts' },
+      { tool: 'bash', target: 'git log' },
+      { tool: 'read_file', target: 'c.ts' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 14,
+      phaseClass: 'verify',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+      evidenceState: {
+        filesModified: new Set(['src/x.ts']),
+        filesRead: new Set(['a.ts', 'b.ts', 'c.ts']),
+        deliveryStatus: 'verified',
+      },
+    }))
+    // When verified + level 2, message should be a completion nudge, not "choose an action"
+    if (result.level >= 2 && result.injectedMessage) {
+      assert.ok(result.injectedMessage.includes('任务可能已完成'),
+        `expected completion nudge, got: ${result.injectedMessage.slice(0, 120)}`)
+      assert.ok(!result.injectedMessage.includes('请选择以下行动'),
+        'should not ask to choose actions when task is verified')
+    }
+  })
+
+  it('unverified deliveryStatus does not trigger completion nudge', () => {
+    const history = makeHistory([
+      { tool: 'bash', target: 'git log' },
+      { tool: 'bash', target: 'ls' },
+      { tool: 'read_file', target: 'a.ts' },
+      { tool: 'read_file', target: 'b.ts' },
+      { tool: 'bash', target: 'git log' },
+      { tool: 'read_file', target: 'c.ts' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 14,
+      phaseClass: 'verify',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+      evidenceState: {
+        filesModified: new Set(['src/x.ts']),
+        filesRead: new Set(['a.ts', 'b.ts', 'c.ts']),
+        deliveryStatus: 'unverified',
+      },
+    }))
+    // Should still trigger Level 2 (low score), but NOT the completion message
+    // It uses the standard "请选择以下行动" message
+    if (result.level >= 2 && result.injectedMessage) {
+      assert.ok(result.injectedMessage.includes('请选择以下行动'),
+        `expected standard stuck message, got: ${result.injectedMessage.slice(0, 120)}`)
+      assert.ok(!result.injectedMessage.includes('任务可能已完成'),
+        'should not trigger completion nudge for unverified state')
+    }
   })
 })
