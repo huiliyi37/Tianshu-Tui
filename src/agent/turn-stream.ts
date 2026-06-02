@@ -4,6 +4,15 @@ import type { OaiChatRequest } from '../api/oai-types.js'
 import type { ContentBlock, Usage } from '../api/types.js'
 import { stripIntraTurnRepetition } from './dedup.js'
 
+export interface StreamRule {
+  /** Regex pattern to match against the accumulated text stream.
+   *  When matched, the stream is aborted and the rule's inject message
+   *  is appended as a system reminder before retrying. */
+  pattern: string
+  /** System reminder injected into the conversation when the rule triggers. */
+  inject: string
+}
+
 export interface TurnStreamCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
@@ -32,6 +41,8 @@ export interface TurnStreamInput {
   turn: number
   lastTurnTextFingerprint: string
   callbacks: TurnStreamCallbacks
+  /** Optional stream rules — abort and inject when accumulated text matches a pattern. */
+  streamRules?: StreamRule[]
 }
 
 export interface TurnStreamResult {
@@ -42,6 +53,8 @@ export interface TurnStreamResult {
   streamError: Error | null
   lastTurnTextFingerprint: string
   lastTurnThinkingFingerprint: string
+  /** Set when a stream rule triggered the abort — caller should inject the rule and retry. */
+  triggeredRule?: StreamRule
 }
 
 function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id: string; name: string } {
@@ -50,6 +63,14 @@ function isToolUse(b: ContentBlock): b is ContentBlock & { type: 'tool_use'; id:
 
 function displayTextFingerprint(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
+}
+
+/** Error thrown when a stream rule matches — caught and distinguished from real AbortErrors. */
+class RuleTriggeredError extends Error {
+  constructor(public readonly rule: StreamRule) {
+    super('Stream rule triggered')
+    this.name = 'RuleTriggeredError'
+  }
 }
 
 export class TurnStreamController {
@@ -64,6 +85,11 @@ export class TurnStreamController {
     const CHUNK_DEDUP_HISTORY = 5
     const chunkHistory: string[] = []
     const thinkingChunkHistory: string[] = []
+
+    // TTSR: compile stream rule patterns once
+    const rules = input.streamRules ?? []
+    const compiledRules = rules.map(r => ({ ...r, regex: new RegExp(r.pattern, 's') }))
+    let triggeredRule: StreamRule | undefined
 
     const streamCallbacks: StreamCallbacks = {
       onTextDelta: (text) => {
@@ -86,6 +112,16 @@ export class TurnStreamController {
           }
         }
         input.callbacks.onTextDelta(text)
+
+        // TTSR: check accumulated text against stream rules
+        if (!triggeredRule && compiledRules.length > 0) {
+          for (const rule of compiledRules) {
+            if (rule.regex.test(turnDisplayBuffer)) {
+              triggeredRule = { pattern: rule.pattern, inject: rule.inject }
+              throw new RuleTriggeredError(triggeredRule)
+            }
+          }
+        }
       },
       onThinkingDelta: (thinking) => {
         thinkingAccum += thinking
@@ -138,13 +174,18 @@ export class TurnStreamController {
       input.callbacks.onStreamStart?.()
       await this.deps.client.stream(input.request, streamCallbacks, this.deps.abortSignal)
     } catch (err) {
-      const estimatedOut = this.deps.getStreamedTextLength() + collectedBlocks.reduce((sum, block) => (
-        sum + (block.type === 'text' ? block.text.length : 0)
-      ), 0)
-      if (estimatedOut > 0) {
-        this.deps.addUsage({ output_tokens: Math.ceil(estimatedOut / 4) })
+      // TTSR: extract triggeredRule from RuleTriggeredError, suppress as error
+      if (err instanceof RuleTriggeredError) {
+        triggeredRule = err.rule
+      } else {
+        const estimatedOut = this.deps.getStreamedTextLength() + collectedBlocks.reduce((sum, block) => (
+          sum + (block.type === 'text' ? block.text.length : 0)
+        ), 0)
+        if (estimatedOut > 0) {
+          this.deps.addUsage({ output_tokens: Math.ceil(estimatedOut / 4) })
+        }
+        streamError = err as Error
       }
-      streamError = err as Error
     }
 
     const dedupedBuffer = stripIntraTurnRepetition(turnDisplayBuffer)
@@ -158,6 +199,7 @@ export class TurnStreamController {
       streamError,
       lastTurnTextFingerprint: nextFingerprint,
       lastTurnThinkingFingerprint: displayTextFingerprint(thinkingAccum),
+      triggeredRule,
     }
   }
 }
