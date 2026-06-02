@@ -28,6 +28,11 @@ export interface ConvergenceInput {
   evidenceState: Pick<EvidenceState, 'filesModified' | 'filesRead' | 'deliveryStatus'>
   /** Optional tool call fingerprints for oscillation detection (A→B→A→B patterns). */
   toolFingerprints?: ReadonlyArray<string>
+  /** Number of consecutive turns with no tool calls. Used to detect text-only
+   *  stagnation (model hesitates, repeats itself, or produces thinking without
+   *  action). Tool-based signals can't see these turns since recentToolHistory
+   *  only grows on tool execution. */
+  noToolTurnCount?: number
 }
 
 export interface ConvergenceResult {
@@ -306,6 +311,7 @@ function computeConvergenceScore(
   signals: ConvergenceSignals,
   weights: PhaseWeights,
   phaseClass: PhaseClass,
+  noToolTurnCount: number,
 ): number {
   const raw =
     weights.editRatio * signals.editRatio +
@@ -325,6 +331,18 @@ function computeConvergenceScore(
     penalty = 0.5
   }
 
+  // No-tool-turn penalty: consecutive turns without tool calls signal
+  // hesitation or text-only looping — model is "thinking" but not acting.
+  // Tool-based signals can't detect this because recentToolHistory doesn't
+  // grow on no-tool turns. Aggressively penalize after 2 consecutive empty turns.
+  if (noToolTurnCount >= 3) {
+    penalty = Math.min(penalty, 0.15) // severe: 3+ turns of doing nothing
+  } else if (noToolTurnCount >= 2) {
+    penalty = Math.min(penalty, 0.35) // moderate: 2 turns of hesitation
+  } else if (noToolTurnCount >= 1) {
+    penalty = Math.min(penalty, 0.7)  // mild: 1 turn — may be recovering
+  }
+
   return Math.min(1.0, Math.max(0.0, raw * penalty))
 }
 
@@ -337,8 +355,22 @@ function buildInjectedMessage(
   phaseClass: PhaseClass,
   tier: WindowTier,
   deliveryStatus?: string,
+  noToolTurnCount?: number,
 ): string {
   const lines: string[] = []
+
+  // No-tool stagnation variant: consecutive turns without tool calls signal
+  // hesitation or stuck state — the model is producing text/thinking but not
+  // taking any action. This is a different failure mode from tool oscillation.
+  if (noToolTurnCount && noToolTurnCount >= 2) {
+    lines.push(`**系统感知：连续 ${noToolTurnCount} 轮未执行任何工具调用。**`)
+    lines.push('')
+    lines.push('模型可能陷入犹豫或重复输出文本但未采取实际行动。')
+    lines.push('- 如果你发现了问题但不确定，请直接向用户指出')
+    lines.push('- 如果需要更多信息，请调用 read_file / grep 等工具')
+    lines.push('- 如果任务已完成，请输出摘要并结束回合')
+    return lines.join('\n')
+  }
 
   // Delivery-completion variant: when task is verified and convergence fires,
   // signal completion instead of asking the model to try harder.
@@ -407,13 +439,21 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     oscillationPenalty: computeOscillationPenalty(input.toolFingerprints ?? []),
   }
 
-  const score = computeConvergenceScore(signals, weights, input.phaseClass)
+  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0)
 
   // Determine escalation level
   let level: 0 | 1 | 2 | 3 = 0
   const turn = input.turn
+  const noToolCount = input.noToolTurnCount ?? 0
 
-  if (turn >= tier.nHigh && score <= 0.2) {
+  // No-tool stagnation: fire earlier than normal thresholds. When the model
+  // produces multiple turns with no tool calls, it's clearly stuck — don't
+  // wait for nLow/nMid/nHigh turn counts to accumulate.
+  if (noToolCount >= 3) {
+    level = 2 // immediately kick on 3+ consecutive no-tool turns
+  } else if (noToolCount >= 2 && turn >= 4) {
+    level = 2 // kick after 2 no-tool turns if we're past the very early turns
+  } else if (turn >= tier.nHigh && score <= 0.2) {
     level = 3
   } else if (turn >= tier.nMid && score <= 0.4) {
     level = 2
@@ -430,7 +470,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   const shouldForceSplit = level >= 3
   const shouldKick = level >= 2
   const injectedMessage = (level >= 2)
-    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus)
+    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount)
     : null
 
   return {

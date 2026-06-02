@@ -205,6 +205,7 @@ export class AgentLoop {
   private streamedText = ''
   private thinkingOnlyRetries = 0
   private lastThinkingContent = ''
+  private consecutiveNoToolTurns = 0
   private lastTurnTextFingerprint = ''
   private lastTurnThinkingFingerprint = ''
   private lastPrewarmAt = 0
@@ -1102,6 +1103,7 @@ export class AgentLoop {
     // Reset accumulations from previous run
     this.thinkingOnlyRetries = 0
     this.lastThinkingContent = ''
+    this.consecutiveNoToolTurns = 0
     this.lastTurnTextFingerprint = ''
     this.evidence.reset()
     this.repairHintTracker = new RepairHintTracker()
@@ -1399,6 +1401,7 @@ export class AgentLoop {
           recentToolHistory: this.recentToolHistory,
           evidenceState: this.evidence.getState(),
           toolFingerprints: this.traceStore.toolFingerprints,
+          noToolTurnCount: this.consecutiveNoToolTurns,
         })
         debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
 
@@ -1678,6 +1681,8 @@ export class AgentLoop {
         }
 
         if (toolUses.length > 0) {
+          // Reset no-tool counter — model is taking action
+          this.consecutiveNoToolTurns = 0
           // ── Pre-execution diagnostic snapshot ──
           // Write sensorium before tool execution so freeze analysis can
           // identify which tools were about to run, even if executeBatch hangs.
@@ -1738,6 +1743,9 @@ export class AgentLoop {
           this.session.addUserMessage(thinkingResult.retryMessage)
           continue
         }
+
+        // No tool calls this turn — increment the counter for convergence detection
+        this.consecutiveNoToolTurns++
 
         this.config.meridianIndexer?.flushTurn()
         await this.turnCompletion.complete({
