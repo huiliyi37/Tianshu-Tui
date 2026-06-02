@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { hashLine } from './hash-edit.js'
+import { getFileReadMtime } from './read-file.js'
 
 const MAX_EDIT_FILE_BYTES = 100 * 1024 // 100KB — match read_file guard
 
@@ -46,6 +47,18 @@ Bad: using a too-short old_string that matches multiple locations`,
     }
     if (!existsSync(filePath)) {
       return { content: `Error: File not found: ${filePath}`, isError: true }
+    }
+
+    // Stale file detection: if the file was modified externally since the
+    // model's last read_file, reject the edit to prevent silent corruption.
+    // hash_edit is the safe alternative — its anchor verification catches this.
+    const currentMtime = statSync(filePath).mtimeMs
+    const lastReadMtime = getFileReadMtime(filePath)
+    if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
+      return {
+        content: `Error: File ${filePath} has been modified since your last read_file (mtime changed). Re-read the file to update your view, or use hash_edit with anchors from the current content to safely apply your edit.`,
+        isError: true,
+      }
     }
 
     // OOM guard: reject large files that would blow the heap on readFileSync.

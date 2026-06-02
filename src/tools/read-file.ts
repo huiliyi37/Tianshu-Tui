@@ -83,6 +83,12 @@ export function __resetReadHistoryForTests(): void {
   fileReadHistory.clear()
 }
 
+/** Return the last known mtimeMs for a file from the read history, or null if never read. */
+export function getFileReadMtime(canonicalPath: string): number | null {
+  const entry = fileReadHistory.get(canonicalPath)
+  return entry ? entry.mtimeMs : null
+}
+
 async function sliceFromArtifact(
   store: { readRaw(id: string): Promise<string | null> },
   artifactId: string,
