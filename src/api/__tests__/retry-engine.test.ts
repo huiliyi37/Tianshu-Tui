@@ -237,4 +237,38 @@ describe('withStructuredRetry', () => {
     // 1 initial + 2 retries = 3
     assert.equal(calls, 3)
   })
+
+  it('should enforce maxTotalDurationMs global timeout', async () => {
+    let calls = 0
+    const fn = async (): Promise<string> => {
+      calls++
+      throw new FakeApiError('Server error (500)', 500)
+    }
+    // Set a very short global timeout (50ms) — the function will fail
+    // immediately but the total elapsed time will exceed the budget quickly
+    // because the retry delays accumulate.
+    await assert.rejects(
+      () => withStructuredRetry(fn, undefined, {
+        maxTotalRetries: 100,
+        maxTotalDurationMs: 50,
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof Error)
+        assert.match(err.message, /Retry budget exhausted/)
+        return true
+      },
+    )
+    // Should have called fn at least once before giving up
+    assert.ok(calls >= 1, `expected at least 1 call, got ${calls}`)
+  })
+
+  it('should succeed before maxTotalDurationMs expires', async () => {
+    const fn = flakyFactory('ok', 1)
+    // Generous budget — should succeed before timeout
+    const result = await withStructuredRetry(fn, undefined, {
+      maxTotalRetries: 5,
+      maxTotalDurationMs: 30_000,
+    })
+    assert.equal(result, 'ok')
+  })
 })

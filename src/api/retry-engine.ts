@@ -89,6 +89,10 @@ function applyDelayJitter(delayMs: number): number {
 export interface RetryOptions {
   /** Upper bound on total retry attempts (default: 5). */
   maxTotalRetries?: number
+  /** Upper bound on total elapsed time in ms across all attempts (default: no limit).
+   *  When exceeded, the current attempt is abandoned and an error is thrown.
+   *  Prevents retry loops from running for tens of minutes on unresponsive providers. */
+  maxTotalDurationMs?: number
   /** Called before each retry with diagnostic info. */
   onRetry?: (info: RetryInfo) => void
 }
@@ -120,6 +124,8 @@ export async function withStructuredRetry<T>(
   options?: RetryOptions,
 ): Promise<T> {
   const maxTotal = options?.maxTotalRetries ?? 5
+  const maxDuration = options?.maxTotalDurationMs
+  const startTime = maxDuration ? Date.now() : 0
 
   // attempt is 1-based and counts *retries* (not the initial call)
   for (let attempt = 0; ; attempt++) {
@@ -128,6 +134,15 @@ export async function withStructuredRetry<T>(
       if (signal?.aborted) {
         throw new DOMException('Aborted', 'AbortError')
       }
+
+      // Check global duration budget
+      if (maxDuration && Date.now() - startTime > maxDuration) {
+        throw new Error(
+          `Retry budget exhausted: total retry time exceeded ${Math.round(maxDuration / 1000)}s ` +
+          `across ${attempt} attempt(s). Provider may be unavailable — try again later or switch provider.`,
+        )
+      }
+
       return await fn()
     } catch (err: unknown) {
       const classified = classifyApiError(err)

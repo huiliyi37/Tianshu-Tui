@@ -66,7 +66,7 @@ export class CodexClient implements StreamClient {
       }
 
       await this.processSSEStream(response, callbacks, signal)
-    }, signal)
+    }, signal, { maxTotalDurationMs: 10 * 60_000 })
   }
 
   private buildRequestBody(request: OaiChatRequest): Record<string, unknown> {

@@ -239,7 +239,7 @@ export class OpenAIClient implements StreamClient {
       if (!reader) throw new Error('Response body is not readable')
 
       await this.parseStreamFromReader(reader, callbacks, signal)
-    }, signal)
+    }, signal, { maxTotalDurationMs: 10 * 60_000 })
   }
 
   /** Parse SSE stream from a reader — exposed for testing */

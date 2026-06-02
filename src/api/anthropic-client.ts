@@ -89,7 +89,7 @@ export class AnthropicClient implements StreamClient {
       }
 
       await this.processSSEStream(response, callbacks, signal)
-    }, signal)
+    }, signal, { maxTotalDurationMs: 10 * 60_000 })
   }
 
   /** Exposed for testing. */
