@@ -102,6 +102,7 @@ export const DEFAULT_CONFIG: Config = {
     },
     permissions: {
       allow: [],
+      bash: { allowlist: [] },
     },
   },
   compact: {

@@ -134,7 +134,7 @@ describe('hash_edit', () => {
   })
 
   it('requires approval', () => {
-    assert.equal(HASH_EDIT_TOOL.requiresApproval(), true)
+    assert.equal(HASH_EDIT_TOOL.requiresApproval({} as any), true)
   })
 
   it('is not concurrency safe', () => {
