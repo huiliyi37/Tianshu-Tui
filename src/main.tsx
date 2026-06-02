@@ -969,15 +969,21 @@ async function main() {
   // blocks the event loop. By measuring gaps between interval ticks, we
   // can detect slow renders without needing Ink's internal hooks.
   // Only active in DEV mode to avoid production stderr spam.
+  // Only active in DEV mode to avoid production stderr spam.
   // Threshold 500ms: 200ms was too aggressive — normal Ink renders + React
   // hydration easily exceed it, causing continuous log spam on startup.
-  let slowRenderTick = Date.now()
+  // Grace period: skip the first 3 seconds to avoid false positives from
+  // initial render, module loading, and prompt engine warmup.
   const SLOW_RENDER_MS = 500
+  const SLOW_RENDER_GRACE_MS = 3000
+  const monitorStart = Date.now()
+  let slowRenderTick = monitorStart + SLOW_RENDER_GRACE_MS
   const slowRenderMonitor = process.env.NODE_ENV !== 'production'
     ? setInterval(() => {
         const now = Date.now()
         const gap = now - slowRenderTick
         slowRenderTick = now
+        if (now - monitorStart < SLOW_RENDER_GRACE_MS) return
         if (gap > SLOW_RENDER_MS) {
           const ts = new Date(now).toISOString()
           process.stderr.write(`[slow-render] ${ts} gap=${gap}ms (threshold=${SLOW_RENDER_MS}ms)\n`)
