@@ -220,12 +220,23 @@ export class PromptEngine {
               this.cachedFreshBlock = fullAppendix
                 ? this.volatileBlock + '\n' + fullAppendix
                 : this.volatileBlock
+              this.cachedAppendix = fullAppendix
             } else {
               const base = this.actionableTurn
                 ? buildLatestTurnVolatileBlock(dynamicCtx)
                 : this.frozenBase
               const projection = this.actionableTurn ? this.cognitiveProjection : null
               this.cachedFreshBlock = projection ? base + '\n' + projection : base
+              // P1: compute appendix explicitly for standalone message.
+              // buildLatestTurnVolatileBlock = stableFrozen + '\n' + dynamicAppendix,
+              // but stableFrozen may differ from frozenBase when sessionMemoryOverride is set.
+              // Computing explicitly avoids fragile extraction from cachedFreshBlock.
+              if (this.actionableTurn) {
+                const appendix = buildDynamicAppendix(dynamicCtx)
+                this.cachedAppendix = projection ? [projection, appendix].filter(Boolean).join('\n') : appendix
+              } else {
+                this.cachedAppendix = ''
+              }
             }
           }
           // Trailer mode: merge volatileBlock (FROZEN only) into last user message.
@@ -233,14 +244,6 @@ export class PromptEngine {
           // keeping this message's bytes identical to historical user messages
           // and preserving DeepSeek exact-prefix cache across lastUserIdx → firstUserIdx transitions.
           const merged = this.volatileBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
-          // Extract dynamic appendix from cachedFreshBlock for standalone append.
-          // cachedFreshBlock = volatileBlock + '\n' + fullAppendix (when appendix exists)
-          //                   = volatileBlock (when no appendix)
-          if (this.cachedFreshBlock !== this.volatileBlock) {
-            this.cachedAppendix = this.cachedFreshBlock.slice(this.volatileBlock.length + 1) // +1 for '\n'
-          } else {
-            this.cachedAppendix = ''
-          }
           const key = typeof msg.content === 'string' ? msg.content : ''
           const arr = this.frozenUserMerged.get(key)
           if (arr) {
