@@ -1484,14 +1484,39 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           </Box>
         )}
         {pendingIntent && (
-          <Box paddingX={2} borderStyle="single" borderColor="cyan">
-            <Text bold color="cyan">{formatIntentPreview(pendingIntent.intent)}</Text>
+          <Box
+            flexDirection="column"
+            borderStyle="round"
+            borderColor={theme.primary}
+            paddingX={1}
+            marginX={1}
+          >
+            <Text color={theme.dim}>◇ Intent</Text>
+            <Text bold color={theme.primary}>{formatIntentPreview(pendingIntent.intent)}</Text>
           </Box>
         )}
         {pendingApproval && (
-          <Box paddingX={2} borderStyle="single" borderColor="yellow">
-            <Text bold color="yellow">Approve tool: {pendingApproval.name}?</Text>
-            <Text> [y/n] </Text>
+          <Box
+            flexDirection="column"
+            borderStyle="round"
+            borderColor={theme.warning}
+            paddingX={1}
+            marginX={1}
+          >
+            <Text color={theme.dim}>⚠ Tool Approval</Text>
+            <Text>
+              <Text color={theme.muted}>Approve </Text>
+              <Text bold color={theme.warning}>{pendingApproval.name}</Text>
+              <Text color={theme.muted}>?</Text>
+            </Text>
+            <Box marginTop={1}>
+              <Text>
+                <Text backgroundColor={theme.success} color="black" bold>  y  </Text>
+                <Text color={theme.muted}> approve  </Text>
+                <Text backgroundColor={theme.error} color="black" bold>  n  </Text>
+                <Text color={theme.muted}> deny</Text>
+              </Text>
+            </Box>
           </Box>
         )}
         {isSurfaceVisible('command-palette') && (
