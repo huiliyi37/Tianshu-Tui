@@ -381,7 +381,7 @@ export class OpenAIClient implements StreamClient {
         delta: { content?: string | null; reasoning_content?: string | null; tool_calls?: Array<ToolCallChunk> }
         finish_reason?: string | null
       }>
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } }
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } }
     },
     callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onThinkingDelta' | 'onContentBlock' | 'onStopReason' | 'onToolCallHint'>>,
   ): void {
@@ -392,7 +392,7 @@ export class OpenAIClient implements StreamClient {
       const usage = chunk.usage
       const stopReason = this.pendingStopReason ?? 'end_turn'
       this.pendingStopReason = null
-      const cacheRead = usage.prompt_cache_hit_tokens ?? 0
+      const cacheRead = usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0
       callbacks.onStopReason?.(mapFinishReason(stopReason), {
         input_tokens: usage.prompt_tokens ?? 0,
         output_tokens: usage.completion_tokens ?? 0,
@@ -456,7 +456,7 @@ export class OpenAIClient implements StreamClient {
       const usage = chunk.usage
       const stopReason = this.pendingStopReason
       this.pendingStopReason = null
-      const cacheRead = usage.prompt_cache_hit_tokens ?? 0
+      const cacheRead = usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0
       callbacks.onStopReason?.(mapFinishReason(stopReason), {
         input_tokens: usage.prompt_tokens ?? 0,
         output_tokens: usage.completion_tokens ?? 0,

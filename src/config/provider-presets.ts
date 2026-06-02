@@ -125,7 +125,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         cacheControl: false,
         stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
         toolJsonBug: false,
-        prefixCache: 'none',
+        prefixCache: 'deepseek-native',
         prefixCompletion: false,
       },
       thinking: 'enabled',

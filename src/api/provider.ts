@@ -39,7 +39,7 @@ export function mapDeepSeekUsage(raw: Record<string, unknown>): Usage {
     // Support both DeepSeek native format and Anthropic compatibility format
     input_tokens: (raw.prompt_tokens ?? raw.input_tokens ?? 0) as number,
     output_tokens: (raw.completion_tokens ?? raw.output_tokens ?? 0) as number,
-    cache_read_input_tokens: (raw.prompt_cache_hit_tokens ?? raw.cache_read_input_tokens ?? 0) as number,
+    cache_read_input_tokens: (raw.prompt_cache_hit_tokens ?? raw.cache_read_input_tokens ?? (raw.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens ?? 0) as number,
     cache_creation_input_tokens: (raw.prompt_cache_miss_tokens ?? raw.cache_creation_input_tokens ?? 0) as number,
   }
 }
