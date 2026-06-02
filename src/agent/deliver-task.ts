@@ -194,6 +194,18 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         if (report.shortestNextStep) {
           lines.push(`  Shortest next step: ${report.shortestNextStep}`)
         }
+        // When tool invocation failures are present (timeout, crash), suggest
+        // batch running tests with a longer timeout to increase verification coverage.
+        if (report.toolInvocationFailureCandidates.length > 0) {
+          // Check if the shortest next step looks like a test command
+          const nextStep = report.shortestNextStep ?? ''
+          if (nextStep.includes('--test') || nextStep.includes('test')) {
+            lines.push('', '  💡 Tests timed out or crashed. Try:')
+            lines.push('     - Increase bash timeout: pass timeout=300000 for full suites')
+            lines.push('     - Run in batches: split by directory (src/tui/__tests__/, src/agent/__tests__/, etc.)')
+            lines.push('     - Run only related tests first, then expand scope')
+          }
+        }
       }
 
       // Memory-driven review checklist (non-blocking, informational only)
