@@ -45,12 +45,10 @@ export class PromptEngine {
   private config: PromptEngineConfig
   private tracker: FieldHabituationTracker | null
   private consolidatedBlock: string = ''
-  /** Cached FRESH volatile block — only regenerated when a NEW user message arrives */
-  private cachedFreshBlock: string = ''
+  /** Cache key: last user message content — triggers rebuild when it changes. */
   private cachedFreshForUser: string = ''
-  /** P1: cached dynamic appendix (fullAppendix portion of cachedFreshBlock).
-   *  Appended as standalone message after the last user message to keep
-   *  the last user message's bytes identical to historical user messages. */
+  /** P1: cached dynamic appendix, appended as standalone message at end of result.
+   *  Computed once when a new user message arrives, reused across tool-call turns. */
   private cachedAppendix: string = ''
   /**
    * Frozen merged content for historical user messages (preserves prefix stability).
@@ -217,22 +215,11 @@ export class PromptEngine {
               const activeAppendix = this.actionableTurn ? buildDynamicAppendix(activeCtx) : ''
               const projection = this.actionableTurn ? this.cognitiveProjection : null
               const fullAppendix = [projection, this.consolidatedBlock, activeAppendix].filter(Boolean).join('\n')
-              this.cachedFreshBlock = fullAppendix
-                ? this.volatileBlock + '\n' + fullAppendix
-                : this.volatileBlock
               this.cachedAppendix = fullAppendix
             } else {
-              const base = this.actionableTurn
-                ? buildLatestTurnVolatileBlock(dynamicCtx)
-                : this.frozenBase
-              const projection = this.actionableTurn ? this.cognitiveProjection : null
-              this.cachedFreshBlock = projection ? base + '\n' + projection : base
-              // P1: compute appendix explicitly for standalone message.
-              // buildLatestTurnVolatileBlock = stableFrozen + '\n' + dynamicAppendix,
-              // but stableFrozen may differ from frozenBase when sessionMemoryOverride is set.
-              // Computing explicitly avoids fragile extraction from cachedFreshBlock.
               if (this.actionableTurn) {
                 const appendix = buildDynamicAppendix(dynamicCtx)
+                const projection = this.actionableTurn ? this.cognitiveProjection : null
                 this.cachedAppendix = projection ? [projection, appendix].filter(Boolean).join('\n') : appendix
               } else {
                 this.cachedAppendix = ''
@@ -542,7 +529,6 @@ export class PromptEngine {
 
   private invalidateFreshCache(): void {
     this.cachedFreshForUser = ''
-    this.cachedFreshBlock = ''
     this.cachedAppendix = ''
   }
 
