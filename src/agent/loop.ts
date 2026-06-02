@@ -607,7 +607,7 @@ export class AgentLoop {
   private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
     return {
       cwd: this.cwd,
-      turn: this.session.getTurnCount(),
+      turn,
       recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
       sensorium: this.sensorium,
       strategy: this.strategy,
@@ -880,7 +880,7 @@ export class AgentLoop {
       interrupt: {
         interruptCountThisTurn: 0,
         hasPendingTools: false,
-        turn: this.session.getTurnCount(),
+        turn,
       },
       doomLoop: {
         doomLoopLevel: this.getDoomLoopLevel(),
@@ -1336,7 +1336,7 @@ export class AgentLoop {
 
         _tb = Date.now()
         const perceptionResult = await this.perception.perceive({
-          turn: this.session.getTurnCount(),
+          turn,
           estimatedTokens: estTokens,
           pressureResult,
           evidenceState: this.evidence.getState(),
@@ -1509,7 +1509,7 @@ export class AgentLoop {
             this.immuneHook.injectSignal({
               kind: 'sycophancy_detected',
               severity: 0.7,
-              turn: this.session.getTurnCount(),
+              turn,
               source: 'sycophancy-trap',
             })
           } catch { /* non-critical */ }
@@ -1520,7 +1520,7 @@ export class AgentLoop {
           contract: this.taskContract,
           evidence: this.evidence.getState(),
           trace: this.traceStore,
-          turn: this.session.getTurnCount(),
+          turn,
           // 道常无为而无不为：CVM throttle — skip mirror when overhead > 5%
           sensorium: pressureResult.shouldThrottleCvm ? null : this.sensorium,
           strategy: pressureResult.shouldThrottleCvm ? null : this.strategy,
@@ -1658,7 +1658,7 @@ export class AgentLoop {
         if (toolUses.length > 0) {
           this.telemetryWriter.write({
             ts: streamEndMs,
-            turn: this.session.getTurnCount(),
+            turn,
             phase: 'stream-complete',
             streamDurationMs: streamEndMs - turnStartMs,
             toolCount: toolUses.length,
@@ -1708,7 +1708,7 @@ export class AgentLoop {
           const toolNames = toolUses.map(tu => tu.name).join(',')
           this.telemetryWriter.write({
             ts: Date.now(),
-            turn: this.session.getTurnCount(),
+            turn,
             phase: 'tool-executing',
             tools: toolNames,
             toolCount: toolUses.length,
@@ -1727,7 +1727,7 @@ export class AgentLoop {
           // L0 telemetry: tools duration
           this.telemetryWriter.write({
             ts: Date.now(),
-            turn: this.session.getTurnCount(),
+            turn,
             phase: "tools-complete",
             toolsDurationMs: Date.now() - streamEndMs,
             totalTurnMs: Date.now() - turnStartMs,
