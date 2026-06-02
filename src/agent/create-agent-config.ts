@@ -8,6 +8,7 @@ import type { ToolDefinition } from '../api/types.js'
 import type { ProviderConfig, Config } from '../config/schema.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AuthProvider } from '../auth/types.js'
+import type { PermissionConfig } from './permissions.js'
 import { getProviderProfile } from '../api/provider-profile.js'
 
 export interface ModelSpec {
@@ -32,6 +33,8 @@ export interface AgentConfigInput {
   antiAnchoring?: AntiAnchoringConfig
   auth?: AuthProvider
   habituationThreshold?: number
+  /** Optional permission config — allowlists, bash command prefixes, etc. */
+  permissions?: PermissionConfig
 }
 
 export interface MainAgentConfigInputParams {
@@ -45,6 +48,7 @@ export interface MainAgentConfigInputParams {
   sessionMemoryBlock?: string
   auth?: AuthProvider
   habituationThreshold?: number
+  permissions?: PermissionConfig
 }
 
 export function createMainAgentConfigInput(params: MainAgentConfigInputParams): AgentConfigInput {
@@ -63,12 +67,13 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     antiAnchoring: params.config.agent.antiAnchoring,
     auth: params.auth,
     habituationThreshold: params.habituationThreshold,
+    permissions: params.config.agent.permissions as PermissionConfig,
   }
 }
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'permissions'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -111,5 +116,6 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     antiAnchoring: input.antiAnchoring,
     autoReasoning: true,
     reasoningFloor: model.reasoningEffort,
+    permissions: input.permissions,
   }
 }

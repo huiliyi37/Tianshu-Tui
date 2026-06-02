@@ -48,8 +48,14 @@ export const permissionAllowRuleSchema = z.object({
   params: z.record(z.string()).optional(),
 })
 
+export const bashAllowlistSchema = z.object({
+  /** Command prefixes that bypass bash-write approval. Matched by prefix: "git status" allows "git status --porcelain". */
+  allowlist: z.array(z.string().min(1)).default([]),
+}).default({})
+
 export const permissionsSchema = z.object({
   allow: z.array(permissionAllowRuleSchema).default([]),
+  bash: bashAllowlistSchema,
 })
 
 export const antiAnchoringSchema = z.object({

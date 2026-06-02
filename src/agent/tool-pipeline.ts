@@ -23,7 +23,7 @@ import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
-import { isToolAllowed } from './permissions.js'
+import { isToolAllowed, isBashCommandAllowlisted } from './permissions.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { debugLog } from '../utils/debug.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
@@ -519,7 +519,10 @@ export async function executeToolUse(
       && approvalMode === 'auto-safe'
 
     const allowlisted = isToolAllowed(tu.name, tu.input, deps.config.permissions?.allow)
-    const bashWriteRequiresApproval = requiresBashWriteApproval(tu.name, tu.input) && !allowlisted
+    const bashAllowlisted = tu.name === 'bash' && typeof tu.input.command === 'string'
+      ? isBashCommandAllowlisted(tu.input.command, deps.config.permissions?.bash?.allowlist)
+      : false
+    const bashWriteRequiresApproval = requiresBashWriteApproval(tu.name, tu.input) && !allowlisted && !bashAllowlisted
 
     // Protection mode: during doom-loop, destructive git actions always require
     // approval. warn is the live window (blocked is short-circuited earlier).
