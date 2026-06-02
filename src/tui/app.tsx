@@ -558,12 +558,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         setPendingIntent(null)
       }
       if (isStreaming) {
-        agent.abort()
-        // Flush and save streaming text BEFORE unmounting StreamOutput.
-        // Without this, setIsStreaming(false) causes StreamOutput to unmount
-        // and the text vanishes before the async onAbort callback can persist it.
+        // Flush and save streaming text BEFORE aborting, so the async onAbort
+        // callback (which also calls flushStreamingState) cannot race with us.
         flushStreamingState()
         flushStaticBatch()
+        agent.abort()
         const ctrlPreservedSteer = steerBuffer.current.drain()
         if (ctrlPreservedSteer) {
           pushStatic(createLogEntry({ type: 'system', content: `📨 ${ctrlPreservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
@@ -598,10 +597,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       const now = Date.now()
       if (isStreaming) {
         if (lastEscRef.current && now - lastEscRef.current < 1000) {
-          agent.abort()
-          // Flush and save streaming text BEFORE unmounting StreamOutput.
+          // Flush and save streaming text BEFORE aborting, so the async onAbort
+          // callback (which also calls flushStreamingState) cannot race with us.
+          // Unlike Ctrl+C, Esc also opens the rewind popup — saving first ensures
+          // the text is in Static before any surface transition.
           flushStreamingState()
           flushStaticBatch()
+          agent.abort()
           const escPreservedSteer = steerBuffer.current.drain()
           if (escPreservedSteer) {
             pushStatic(createLogEntry({ type: 'system', content: `📨 ${escPreservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
