@@ -31,13 +31,30 @@ function overlapScore(queryTokens: string[], entryTokens: string[]): number {
 
 export class MistakeNotebook {
   private entries: Map<string, MistakeEntry> = new Map()
+  /** Max entries before eviction. Oldest entries (by insertion order) are evicted first. */
+  private readonly maxEntries: number
+  /** Insertion-order tracking for LRU eviction */
+  private insertOrder: string[] = []
+
+  constructor(maxEntries = 50) {
+    this.maxEntries = maxEntries
+  }
 
   record(input: MistakeInput): MistakeEntry {
     const id = computeId(input.error, input.context)
     if (this.entries.has(id)) return this.entries.get(id)!
     const entry: MistakeEntry = { id, ...input }
     this.entries.set(id, entry)
+    this.insertOrder.push(id)
+    this.evict()
     return entry
+  }
+
+  private evict(): void {
+    while (this.insertOrder.length > this.maxEntries) {
+      const oldest = this.insertOrder.shift()
+      if (oldest) this.entries.delete(oldest)
+    }
   }
 
   query(error: string, context: string, maxResults = 3): MistakeEntry[] {
