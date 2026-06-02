@@ -468,8 +468,9 @@ describe('git-dirty flag and toolHistory cap', () => {
 
     const req = engine.buildOaiRequest([{ role: 'user', content: 'x' }], history)
     const vol = lastUserContent(req)
-    assert.ok(vol.includes('total="12"'), 'total attribute shows full count')
-    assert.ok(vol.includes('recent="8"'), 'recent attribute shows capped count')
+    // P1b: dynamic attributes removed for cache stability; check entry count instead
+    const toolCount = (vol.match(/<tool-summary/g) || []).length
+    assert.equal(toolCount, 8, 'capped at 8 most recent tool entries')
     assert.ok(!vol.includes('tool_0'), 'oldest entries are dropped')
     assert.ok(vol.includes('tool_11'), 'newest entries are kept')
   })

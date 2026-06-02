@@ -166,59 +166,16 @@ export function buildConsolidatedBlock(habituatedContent: Map<string, string>): 
 export function buildDynamicAppendix(ctx: VolatileContext): string {
   const parts: string[] = []
 
+  // ── P1b: cache-friendly ordering — stable sections first, volatile last ──
+  // DeepSeek exact-prefix cache matches byte-for-byte from the start.
+  // Sections that rarely change go first so their bytes stay in cache;
+  // sections that change every turn go last so only the tail is new.
+
   if (ctx.activeDomain) {
     parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
   }
 
-  // Harness-only fields (contextLedger, behaviorMirror, strategyShift,
-  // routingReason, cerebellarHint, activeClaims) are NOT rendered into
-  // the LLM prompt. They remain available for TUI/logging via setters
-  // on PromptEngine and getVolatilePayloadReport(). This reduces volatile
-  // context by ~1,700 tokens/turn — "thorns not leaves" (direction A).
-
-  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
-    const maxRecent = 8
-    const recent = ctx.toolHistory.length > maxRecent
-      ? ctx.toolHistory.slice(-maxRecent)
-      : ctx.toolHistory
-    const entries = recent.map(e => {
-      const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
-      if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
-      return `  <tool-summary ${attrs.join(' ')} />`
-    }).join('\n')
-    parts.push(`<tool-history recent="${recent.length}" total="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
-    
-    // P3: 列出已读取的文件路径，模型据此跳过冗余 read_file 调用。
-    // 仅统计成功读取，去重后取最近 8 个（更多用计数替代，控制 prompt 长度）。
-    const readFiles = ctx.toolHistory
-      .filter(e => e.tool === 'read_file' && e.status === 'success')
-      .map(e => e.target)
-      .filter((v, i, a) => a.indexOf(v) === i)
-    if (readFiles.length > 0) {
-      const MAX_LIST = 8
-      const listed = readFiles.slice(0, MAX_LIST).map(f => escapeXml(f)).join(', ')
-      const tail = readFiles.length > MAX_LIST ? ` …及另外 ${readFiles.length - MAX_LIST} 个文件` : ''
-      parts.push(`<read-file-dedup-hint>\n已读取：${listed}${tail}\n上述文件无需重复读取，除非磁盘内容已变更。\n</read-file-dedup-hint>`)
-    }
-  }
-
-  if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
-    const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
-    const remaining = ctx.taskProgress.remaining.length > 0
-      ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
-      : ''
-    parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
-  }
-
-  if (ctx.repairHint) {
-    parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
-  }
-
-  if (ctx.decisions && ctx.decisions.length > 0) {
-    const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
-    parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
-  }
-
+  // Historical lessons: rarely change after first few turns
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
     const { selected } = scoreLessons(ctx.playbookLessons, {
       recentToolTargets: ctx.toolHistory?.map(t => t.target),
@@ -233,16 +190,49 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
   }
 
-  if (ctx.crossSessionEvents) {
-    parts.push(ctx.crossSessionEvents)
+  // Decisions: only grow (appended), prefix stable
+  if (ctx.decisions && ctx.decisions.length > 0) {
+    const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
+    parts.push(`<decisions>\n${entries}\n</decisions>`)
   }
 
-  if (ctx.sessionState) {
-    parts.push(ctx.sessionState)
+  // Task progress: steps change but completed items stay (prefix stable)
+  if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
+    const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
+    const remaining = ctx.taskProgress.remaining.length > 0
+      ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
+      : ''
+    parts.push(`<task-progress current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
   }
 
-  // git-status + recent-commits: moved from frozen base to dynamic appendix
-  // because they change every turn and break prefix cache continuity.
+  // Tool history: most recent tools appended at end → prefix cacheable
+  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
+    const maxRecent = 8
+    const recent = ctx.toolHistory.length > maxRecent
+      ? ctx.toolHistory.slice(-maxRecent)
+      : ctx.toolHistory
+    const entries = recent.map(e => {
+      const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
+      if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
+      return `  <tool-summary ${attrs.join(' ')} />`
+    }).join('\n')
+    parts.push(`<tool-history>\n${entries}\n</tool-history>`)
+  }
+
+  // Read-file dedup hint: single-line snapshot for cache stability
+  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
+    const readFiles = ctx.toolHistory
+      .filter(e => e.tool === 'read_file' && e.status === 'success')
+      .map(e => e.target)
+      .filter((v, i, a) => a.indexOf(v) === i)
+    if (readFiles.length > 0) {
+      const listed = readFiles.slice(0, 5).map(f => escapeXml(f)).join(', ')
+      const tail = readFiles.length > 5 ? ` …及另外 ${readFiles.length - 5} 个文件` : ''
+      parts.push(`<read-file-dedup-hint>已读取 ${readFiles.length} 个文件：${listed}${tail}。上述文件无需重复读取，除非磁盘内容已变更。</read-file-dedup-hint>`)
+    }
+  }
+
+  // Git status: changes on commit, prefix stable within a turn sequence
   const rawGit = ctx.gitStatus ?? gitStatusCache.get(ctx.cwd)
   const git = rawGit ? summarizeGitStatus(rawGit) : undefined
   if (git) {
@@ -256,6 +246,21 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     } else {
       parts.push(`<git-status>\n${escapeXml(git)}\n</git-status>`)
     }
+  }
+
+  // Session state: may change per-turn — keep at end
+  if (ctx.sessionState) {
+    parts.push(ctx.sessionState)
+  }
+
+  // Cross-session events: rare, keep at end
+  if (ctx.crossSessionEvents) {
+    parts.push(ctx.crossSessionEvents)
+  }
+
+  // Repair hint: ephemeral — keep at very end
+  if (ctx.repairHint) {
+    parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
   }
 
   return parts.length > 0 ? `<context-update>\n${parts.join('\n\n')}\n</context-update>` : ''
