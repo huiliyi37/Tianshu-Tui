@@ -2,9 +2,10 @@ import { Box, Text } from 'ink'
 import { memo } from 'react'
 import type { StarPhase } from '../agent/star-event.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS } from '../agent/star-event.js'
-import { getTheme } from './theme.js'
+import { getTheme, type RivetTheme } from './theme.js'
 import { useTerminalSize } from './use-terminal-size.js'
 import type { GlancePulse } from './surface/types.js'
+import { horizontalRule } from './separator.js'
 
 interface GlanceBarProps {
   pulses: readonly GlancePulse[]
@@ -22,6 +23,35 @@ interface GlanceBarProps {
   estimatedTokens: number
   /** Model context window size in tokens */
   maxTokens: number
+}
+
+function getDomainColor(domainName: string | undefined, theme: RivetTheme): string {
+  if (!domainName) return theme.dim
+  switch (domainName) {
+    case '破军':
+    case 'pojun':
+      return theme.error
+    case '天府':
+    case 'tianfu':
+      return theme.warning
+    case '天梁':
+    case 'tianliang':
+      return theme.success
+    case '天权':
+    case 'tianquan':
+      return theme.secondary
+    case '天机':
+    case 'tianji':
+      return theme.primary
+    case '天璇':
+    case 'tianxuan':
+      return theme.primary
+    case '天枢':
+    case 'tianshu':
+      return theme.primary
+    default:
+      return theme.primary
+  }
 }
 
 export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens }: GlanceBarProps) {
@@ -49,28 +79,35 @@ export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, 
     : ratio >= 0.60 ? theme.warning
     : theme.success
 
+  const domainColor = getDomainColor(domain, theme)
+
   return (
-    <Box paddingX={narrow ? 0 : 1}>
-      {domain && <Text bold color={theme.primary}>☆ {domain}</Text>}
-      {domain && branchLabel && !narrow && <Text color={theme.dim}> · </Text>}
-      {branchLabel && !narrow && <Text color={theme.secondary}>⎇ {branchLabel}</Text>}
-      {(domain || (branchLabel && !narrow)) && <Text color={theme.dim}> · </Text>}
-      {phaseGlyph && <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
-      {!phaseGlyph && <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>}
-      {isStreaming && <Text color={theme.primary}> ●</Text>}
-      <Text color={theme.dim}>   ·   </Text>
-      <Text color={cacheColor}>{cachePct}%</Text>
-      <Text color={theme.dim}> · </Text>
-      <Text color={theme.muted}>${cost.toFixed(2)}</Text>
-      {!narrow && <Text color={theme.muted}> · {model.slice(0, 20)}</Text>}
-      {!narrow && <Text color={theme.dim}> · </Text>}
-      {!narrow && <Text color={tokenColor}>{estimatedK}k/{maxK}k ({pct}%)</Text>}
-      {narrow && <Text color={tokenColor}> · {pct}%</Text>}
-      {ratio >= 0.78 && <Text color={theme.error}> · compact</Text>}
-      {historyCount !== undefined && !narrow && (
-        <Text color={theme.muted}> · {historyCount} msgs</Text>
-      )}
-      {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
+    <Box flexDirection="column" marginTop={1}>
+      <Box paddingX={narrow ? 0 : 1}>
+        <Text color={domainColor}>{horizontalRule(columns, 'thin')}</Text>
+      </Box>
+      <Box paddingX={narrow ? 0 : 1} flexDirection="row">
+        {domain && <Text bold color={domainColor}>☆ {domain}</Text>}
+        {domain && branchLabel && !narrow && <Text color={theme.dim}> · </Text>}
+        {branchLabel && !narrow && <Text color={theme.secondary}>⎇ {branchLabel}</Text>}
+        {(domain || (branchLabel && !narrow)) && <Text color={theme.dim}> │ </Text>}
+        {phaseGlyph && <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
+        {!phaseGlyph && <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>}
+        {isStreaming && <Text color={theme.primary}> ●</Text>}
+        <Text color={theme.dim}> │ </Text>
+        <Text color={cacheColor}>{cachePct}%</Text>
+        <Text color={theme.dim}> · </Text>
+        <Text color={theme.muted}>${cost.toFixed(2)}</Text>
+        {!narrow && <Text color={theme.muted}> · {model.slice(0, 20)}</Text>}
+        {!narrow && <Text color={theme.dim}> · </Text>}
+        {!narrow && <Text color={tokenColor}>{estimatedK}k/{maxK}k ({pct}%)</Text>}
+        {narrow && <Text color={tokenColor}> · {pct}%</Text>}
+        {ratio >= 0.78 && <Text color={theme.error}> · compact</Text>}
+        {historyCount !== undefined && !narrow && (
+          <Text color={theme.muted}> · {historyCount} msgs</Text>
+        )}
+        {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
+      </Box>
     </Box>
   )
 })
