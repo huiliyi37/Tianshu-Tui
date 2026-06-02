@@ -221,12 +221,16 @@ export class CompactionController {
     // stats — it never mutated storage. The actual request-time pruning happens in
     // PromptEngine.buildOaiRequest via semanticPruneLayer1 + detectStaleness.
 
+    const estimatedTokens = this.deps.session.getEstimatedTokens()
+    const contextWindow = this.deps.contextWindow
+    const ratio = contextWindow > 0 ? estimatedTokens / contextWindow : 0
+    debugLog(`[compaction-check] contextWindow=${contextWindow} estimatedTokens=${estimatedTokens} ratio=${(ratio * 100).toFixed(1)}% turn=${this.deps.session.getTurnCount()}`)
+
     // Phase 2: On 1M+ context windows, skip micro compact but allow LLM
     // compact at 75% as a graceful degradation before the 86% session split.
     // This preserves key context via model-generated summary rather than the
     // abrupt "nuke everything" of trySessionSplit.
     if (this.deps.contextWindow >= 1_000_000) {
-      const ratio = this.deps.session.getEstimatedTokens() / this.deps.contextWindow
       if (ratio >= 0.75 && this.deps.primaryClient) {
         debugLog(`[llm-compact] 1M window at ${(ratio * 100).toFixed(0)}% — triggering LLM compact`)
         const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
@@ -244,15 +248,16 @@ export class CompactionController {
       return { failures: input.failures, compacted: false }
     }
 
-    const estimatedTokens = this.deps.session.getEstimatedTokens()
     const compactDecision = decideCompactTier({
       estimatedTokens,
-      maxTokens: this.deps.contextWindow,
+      maxTokens: contextWindow,
       turn: this.deps.session.getTurnCount(),
       failures: input.failures,
       providerProfile: this.deps.providerProfile,
       recentHitRate: this.deps.cacheAdvisor?.getRecentHitRate() ?? null,
     })
+
+    debugLog(`[compaction-decision] tier=${compactDecision.tier} shouldCompact=${compactDecision.shouldCompact} reason="${compactDecision.reason}"`)
 
     if (!compactDecision.shouldCompact) {
       return { failures: input.failures, compacted: false }

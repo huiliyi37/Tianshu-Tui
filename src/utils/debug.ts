@@ -17,7 +17,8 @@ const isDebugEnabled = (): boolean => {
  */
 export const debugLog = (...args: unknown[]): void => {
   if (isDebugEnabled()) {
-    console.warn(...args)
+    const ts = new Date().toISOString().slice(11, 19)
+    console.warn(`[${ts}]`, ...args)
   }
 }
 
