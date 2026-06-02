@@ -48,6 +48,10 @@ export class PromptEngine {
   /** Cached FRESH volatile block — only regenerated when a NEW user message arrives */
   private cachedFreshBlock: string = ''
   private cachedFreshForUser: string = ''
+  /** P1: cached dynamic appendix (fullAppendix portion of cachedFreshBlock).
+   *  Appended as standalone message after the last user message to keep
+   *  the last user message's bytes identical to historical user messages. */
+  private cachedAppendix: string = ''
   /**
    * Frozen merged content for historical user messages (preserves prefix stability).
    * Maps user-message content → array of frozen snapshots. Array handles duplicate
@@ -224,10 +228,19 @@ export class PromptEngine {
               this.cachedFreshBlock = projection ? base + '\n' + projection : base
             }
           }
-          // Trailer mode: merge cachedFreshBlock into last user message content
-          // instead of pushing as separate message. Keeps message array append-only,
-          // preserving DeepSeek exact-prefix cache across user-message boundaries.
-          const merged = this.cachedFreshBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
+          // Trailer mode: merge volatileBlock (FROZEN only) into last user message.
+          // Dynamic appendix is appended as standalone message after the loop,
+          // keeping this message's bytes identical to historical user messages
+          // and preserving DeepSeek exact-prefix cache across lastUserIdx → firstUserIdx transitions.
+          const merged = this.volatileBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
+          // Extract dynamic appendix from cachedFreshBlock for standalone append.
+          // cachedFreshBlock = volatileBlock + '\n' + fullAppendix (when appendix exists)
+          //                   = volatileBlock (when no appendix)
+          if (this.cachedFreshBlock !== this.volatileBlock) {
+            this.cachedAppendix = this.cachedFreshBlock.slice(this.volatileBlock.length + 1) // +1 for '\n'
+          } else {
+            this.cachedAppendix = ''
+          }
           const key = typeof msg.content === 'string' ? msg.content : ''
           const arr = this.frozenUserMerged.get(key)
           if (arr) {
@@ -366,6 +379,14 @@ export class PromptEngine {
       totalFrozen--
     }
 
+    // P1: append dynamic appendix as standalone message at end of result.
+    // This keeps the last user message identical to historical user messages
+    // (volatileBlock + userContent), preventing exact-prefix cache breaks
+    // when dynamic context (toolHistory, taskProgress, etc.) changes between turns.
+    if (this.cachedAppendix) {
+      result.push({ role: 'user', content: this.cachedAppendix })
+    }
+
     return {
       model: this.config.model,
       messages: [{ role: 'system', content: this.systemPrompt }, ...result],
@@ -409,6 +430,9 @@ export class PromptEngine {
     const ctx = { ...this.config.volatileCtx, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock }
     this.frozenBase = buildStableVolatileBlock(ctx)
     this.volatileBlock = this.frozenBase
+    // P1: frozen snapshots store volatileBlock format — clear stale entries
+    // when frozen base is rebuilt so historical messages use consistent format.
+    this.frozenUserMerged.clear()
   }
 
   setActionableTurn(actionable: boolean): void {
@@ -516,6 +540,7 @@ export class PromptEngine {
   private invalidateFreshCache(): void {
     this.cachedFreshForUser = ''
     this.cachedFreshBlock = ''
+    this.cachedAppendix = ''
   }
 
   /**

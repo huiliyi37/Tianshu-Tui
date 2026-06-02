@@ -549,4 +549,56 @@ describe('sessionState injection — cache safety + path coverage', () => {
     const firstVol = (msgs[1] as { content: string }).content
     assert.doesNotMatch(firstVol, /<session-state>/, 'Historical user-msg volatile block must NOT contain sessionState (frozen prefix)')
   })
+
+  // ── P1: standalone dynamic appendix ──
+
+  it('last user message does NOT contain dynamic appendix after tool execution', () => {
+    const engine = new PromptEngine({
+      model: 'test-model', maxTokens: 4096, staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test/project', gitStatus: 'Current branch: main', rivetMd: '# Test' },
+    })
+    engine.setTaskProgress({ current: 'working', completed: ['step1'], remaining: ['step2'], decisions: [] })
+
+    const req = engine.buildOaiRequest(
+      [{ role: 'user', content: 'hello' }],
+      [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' }],
+    )
+
+    const userMsgs = req.messages.filter(m => m.role === 'user')
+    // Appendix is the last user-role message; the real user message is before it
+    const realLastUser = userMsgs.length >= 2 ? userMsgs[userMsgs.length - 2]! : userMsgs.at(-1)!
+    assert.doesNotMatch(
+      typeof realLastUser.content === 'string' ? realLastUser.content : '',
+      /<tool-history/,
+      'real last user message must not contain <tool-history> — appendix is standalone',
+    )
+    assert.doesNotMatch(
+      typeof realLastUser.content === 'string' ? realLastUser.content : '',
+      /<task-progress/,
+      'real last user message must not contain <task-progress> — appendix is standalone',
+    )
+  })
+
+  it('dynamic appendix is a standalone message at end of result', () => {
+    const engine = new PromptEngine({
+      model: 'test-model', maxTokens: 4096, staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test/project', gitStatus: 'Current branch: main', rivetMd: '# Test' },
+    })
+    engine.setTaskProgress({ current: 'working', completed: ['step1'], remaining: ['step2'], decisions: [] })
+
+    const req = engine.buildOaiRequest(
+      [{ role: 'user', content: 'hello' }],
+      [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' }],
+    )
+
+    // Last message should be the standalone appendix containing dynamic fields
+    const lastMsg = req.messages[req.messages.length - 1]!
+    assert.equal(lastMsg.role, 'user', 'appendix message role must be user')
+    assert.ok(
+      typeof lastMsg.content === 'string' && (
+        lastMsg.content.includes('<context-update>') || lastMsg.content.includes('<tool-history')
+      ),
+      'last message must be the standalone appendix containing dynamic fields',
+    )
+  })
 })
