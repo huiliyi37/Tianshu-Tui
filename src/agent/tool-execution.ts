@@ -22,6 +22,7 @@ import { executeToolUse, type ToolPipelineDeps } from './tool-pipeline.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import type { P3Integration } from './p3-integration.js'
 import type { ImmuneHook } from './immune-hook.js'
+import type { LspManager } from '../lsp/manager.js'
 import { classifyFailure } from './failure-classifier.js'
 import {
   getInterventionLevel,
@@ -74,6 +75,8 @@ export interface ToolExecutionDeps {
   /** Current StarPhase mapped to phaseClass. Used by tool-pipeline for phase-aware
    *  prediction recording — e.g., TDD RED in verify phase is NOT a prediction error. */
   getPhaseHint?: () => string | undefined
+  /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
+  lspManager?: LspManager
 }
 
 export interface ToolExecBatchInput {
@@ -164,6 +167,7 @@ export class ToolExecutionController {
           phaseHint: this.deps.getPhaseHint?.(),
           artifactIdsEvicted,
           artifactIdsAccessed,
+          lspManager: this.deps.lspManager,
         })
 
         const results = await Promise.all(
@@ -219,6 +223,7 @@ export class ToolExecutionController {
           phaseHint: this.deps.getPhaseHint?.(),
           artifactIdsEvicted,
           artifactIdsAccessed,
+          lspManager: this.deps.lspManager,
         }
 
         const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)

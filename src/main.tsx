@@ -551,6 +551,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         maxTurns: config.agent.maxTurns,
         getSessionMemoryState: () => persist.getSessionMemoryState(),
         lspEnabled: true,
+        lspManager,
         fileHistory,
         contextClaimStore: claimStore,
         playbookStore,

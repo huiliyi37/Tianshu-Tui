@@ -149,6 +149,8 @@ export interface AgentConfig {
   reasoningEffort?: import('./auto-reasoning.js').ReasoningEffort
   reasoningFloor?: import('./auto-reasoning.js').ReasoningEffort
   lspEnabled?: boolean
+  /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
+  lspManager?: import('../lsp/manager.js').LspManager
   permissions?: PermissionConfig
   contextClaimStore?: ContextClaimStore
   /** Optional provider health tracker for Physarum-style routing.
@@ -598,6 +600,7 @@ export class AgentLoop {
       sessionStateManager: this.sessionStateManager,
       cacheAdvisor: this.cacheAdvisor,
       p3: this.p3,
+      lspManager: this.config.lspManager,
     })
   }
 

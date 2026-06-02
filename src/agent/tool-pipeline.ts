@@ -17,6 +17,7 @@ import { createAntibodyProposal } from '../context/antibody.js'
 import { buildImportGraph, invalidateFile } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
 import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
+import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, recordTraceEvent } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
@@ -127,6 +128,8 @@ export interface ToolPipelineDeps {
   artifactIdsEvicted?: string[]
   /** Turn-scoped accumulator: artifact IDs accessed (read_section calls) */
   artifactIdsAccessed?: string[]
+  /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy */
+  lspManager?: LspManager
 }
 
 export interface ToolExecResult {
@@ -630,6 +633,12 @@ export async function executeToolUse(
     // for DeepSeek exact-prefix cache. Non-deterministic trailing whitespace
     // can cause ~0.5% cache miss from otherwise identical tool results.
     finalContent = finalContent.trimEnd()
+
+    // LSP: notify the language server that a file changed on disk.
+    // Must happen BEFORE tsc diagnostics so the server's view is current.
+    if (!harnessResult.isError && (tu.name === 'edit_file' || tu.name === 'write_file' || tu.name === 'apply_patch')) {
+      deps.lspManager?.changeFile(tu.input.file_path as string)
+    }
 
     // LSP diagnostics
     if (deps.config.lspEnabled && !harnessResult.isError && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
