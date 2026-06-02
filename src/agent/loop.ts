@@ -1398,6 +1398,7 @@ export class AgentLoop {
           contextWindow: this.config.contextWindow,
           recentToolHistory: this.recentToolHistory,
           evidenceState: this.evidence.getState(),
+          toolFingerprints: this.traceStore.toolFingerprints,
         })
         debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
 
@@ -1408,6 +1409,15 @@ export class AgentLoop {
             suggestion: convergenceCheck.injectedMessage.slice(0, 200),
           })
           this.session.addUserMessage(convergenceCheck.injectedMessage)
+
+          // When convergence is detected AND doom loop is blocked, the agent is
+          // likely in a post-completion verification loop. Signal completion
+          // instead of letting the model continue alternating between tools.
+          if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
+            this.session.addUserMessage(
+              '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
+            )
+          }
         }
 
         if (convergenceCheck.shouldForceSplit) {
