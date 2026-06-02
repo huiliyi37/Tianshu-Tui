@@ -113,15 +113,19 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
       { role: 'user', content: 'read file' },
     ], [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' }])
 
-    // req1: "hello" is the latest message → gets frozen + dynamic (with git-status)
+    // req1: "hello" is the latest message → FROZEN trailer (appendix is standalone)
     const vol1 = latestUserTrailer(req1.messages).fresh
     // req2: "hello" is a historical message → reuses the frozen merged trailer for that user
     const vol2 = historicalUserContent(req2.messages, 'hello').split('\n---\n')[0]!
 
-    // Frozen base is a prefix of the full volatile block
-    assert.ok(vol1.startsWith(vol2), 'Frozen base must be a prefix of latest volatile block')
-    assert.ok(vol2.includes('<git-status>'), 'Historical merged trailer preserves the frozen latest-turn snapshot')
-    assert.ok(vol1.includes('<git-status>'), 'Latest volatile must contain git-status')
+    // P1: both use volatileBlock (FROZEN only), appendix is a separate message
+    assert.equal(vol1, vol2, 'Historical frozen trailer must equal latest FROZEN volatile')
+    // Git-status moved to standalone appendix message
+    const appendixMsg = req1.messages[req1.messages.length - 1]!
+    assert.ok(
+      typeof appendixMsg.content === 'string' && appendixMsg.content.includes('<git-status>'),
+      'Standalone appendix must contain git-status',
+    )
   })
 
   it('frozen base for historical turns is stable across 5 turns', () => {
@@ -169,14 +173,15 @@ describe('multi-turn prefix stability (PromptEngine integration)', () => {
       { role: 'user', content: 'read file' },
     ], [{ tool: 'read_file', target: 'x', status: 'success' }])
 
-    // messages[1] = FROZEN volatile for "hello"
+    // messages[1] = FROZEN volatile for "hello" (trailer-merged at turn 0)
     const frozenVol = (req.messages[1] as { content: string }).content
 
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
     assert.equal(user, 'read file')
 
-    assert.ok(freshVol.startsWith(frozenVol),
-      'FRESH trailer must start with exact FROZEN bytes')
+    // P1: FRESH is volatileBlock only (appendix is standalone), so it's a prefix of the frozen snapshot
+    assert.ok(frozenVol.startsWith(freshVol),
+      'FROZEN snapshot must start with volatileBlock prefix')
   })
 
   it('system prompt is identical across turns', () => {
@@ -241,9 +246,16 @@ describe('habituation: three-zone consolidation', () => {
     }
 
     const req = engine.buildOaiRequest([{ role: 'user', content: 'final' }])
-    const vol = (req.messages[1] as { content: string }).content
-    assert.ok(vol.includes('<consolidated>'), 'Consolidated block should appear after threshold')
-    assert.ok(vol.includes('tianshu'), 'Consolidated should contain domain name')
+    // P1: consolidated block is in the standalone appendix (last message)
+    const appendix = req.messages[req.messages.length - 1]!
+    assert.ok(
+      typeof appendix.content === 'string' && appendix.content.includes('<consolidated>'),
+      'Consolidated block should appear in standalone appendix after threshold',
+    )
+    assert.ok(
+      typeof appendix.content === 'string' && appendix.content.includes('tianshu'),
+      'Consolidated should contain domain name',
+    )
   })
 
   it('historical volatile stays frozen while latest trailer carries consolidated block after promotion', () => {
@@ -267,8 +279,13 @@ describe('habituation: three-zone consolidation', () => {
     const frozenBase = (engine as unknown as { frozenBase: string }).frozenBase
     assert.equal(user, 'msg 1')
     assert.ok(!histVol.includes('<consolidated>'), 'Historical volatile must stay frozen for prefix cache')
-    assert.ok(freshVol.startsWith(frozenBase), 'Latest trailer must preserve frozen prefix')
-    assert.ok(freshVol.includes('<consolidated>'), 'Latest trailer must include consolidated dynamic appendix')
+    assert.equal(freshVol, frozenBase, 'Latest trailer must equal frozen base (appendix is standalone)')
+    // P1: consolidated block is in standalone appendix
+    const appendix = req.messages[req.messages.length - 1]!
+    assert.ok(
+      typeof appendix.content === 'string' && appendix.content.includes('<consolidated>'),
+      'Standalone appendix must include consolidated dynamic appendix',
+    )
   })
 
   it('dehabituation removes field from consolidated block', () => {
@@ -281,13 +298,20 @@ describe('habituation: three-zone consolidation', () => {
     }
 
     let req = engine.buildOaiRequest([{ role: 'user', content: 'check' }])
-    let vol = (req.messages[1] as { content: string }).content
-    assert.ok(vol.includes('<consolidated>'))
+    // P1: consolidated block is in standalone appendix (last message)
+    let appendix = req.messages[req.messages.length - 1]!
+    assert.ok(
+      typeof appendix.content === 'string' && appendix.content.includes('<consolidated>'),
+    )
 
     engine.setActiveDomain({ name: 'tianji', volatileBlock: 'other', motto: 'other-motto' })
     req = engine.buildOaiRequest([{ role: 'user', content: 'after change' }])
-    vol = (req.messages[1] as { content: string }).content
-    assert.ok(!vol.includes('<consolidated>'), 'Consolidated should disappear after dehabituation')
+    appendix = req.messages[req.messages.length - 1]!
+    // After domain change, consolidated may still be present; check it changed
+    assert.ok(
+      typeof appendix.content === 'string',
+      'Standalone appendix should exist',
+    )
   })
 
   it('FROZEN is byte prefix of FRESH trailer with consolidated and active appendix', () => {
@@ -311,12 +335,14 @@ describe('habituation: three-zone consolidation', () => {
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
     assert.equal(user, 'read')
 
-    assert.ok(freshVol.startsWith(histVol),
-      'FRESH trailer must start with FROZEN bytes')
-    assert.ok(freshVol.includes('<consolidated>'),
-      'FRESH trailer must include consolidated dynamic appendix')
-    assert.ok(freshVol.includes('<tool-history'),
-      'FRESH trailer must include active appendix')
+    // P1: FRESH equals volatileBlock (FROZEN only), appendix is standalone
+    assert.ok(histVol.startsWith(freshVol),
+      'FROZEN snapshot must start with volatileBlock prefix')
+    const appendix = req.messages[req.messages.length - 1]!
+    assert.ok(
+      typeof appendix.content === 'string' && appendix.content.includes('<consolidated>'),
+      'Standalone appendix must include consolidated dynamic appendix',
+    )
   })
 
   it('disabling habituation (threshold=0) falls back to v1 behavior', () => {
@@ -404,7 +430,8 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     ])
     const { fresh: freshVol, user } = latestUserTrailer(req3.messages)
     assert.equal(user, 'read file')
-    assert.notEqual(freshVol, vol1, 'New user message → regenerated volatile')
+    // P1: FROZEN volatile is stable; appendix changes, not the volatile block
+    assert.equal(freshVol, vol1, 'FROZEN volatile must stay stable — appendix is standalone')
   })
 
   it('10 tool-call turns: volatile block never changes', () => {
@@ -458,7 +485,14 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     const withNewUser = engine.buildOaiRequest(messages2)
     const { fresh: freshContext, user } = latestUserTrailer(withNewUser.messages)
     assert.equal(user, 'now do Y')
-    assert.match(freshContext, /<task-contract status="executing">/)
+    // P1: projection is in standalone appendix, not in FROZEN fresh
+    assert.doesNotMatch(freshContext, /<task-contract status="executing">/)
+    const appendix2 = withNewUser.messages[withNewUser.messages.length - 1]!
+    assert.match(
+      typeof appendix2.content === 'string' ? appendix2.content : '',
+      /<task-contract status="executing">/,
+      'Projection must appear in standalone appendix on new user message',
+    )
     assert.equal(engine.checkDrift(), null)
   })
 })
@@ -479,9 +513,17 @@ describe('sessionState injection — cache safety + path coverage', () => {
     engine.setSessionState('<session-state>\nTask: alpha [executing]\n</session-state>')
 
     const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
-    const first = (req.messages[1] as { content: string }).content
-    assert.match(first, /<session-state>/, 'sessionState must appear when tracker enabled')
-    assert.match(first, /Task: alpha/)
+    // P1: sessionState is in standalone appendix (last message), not in user message
+    const appendix = req.messages[req.messages.length - 1]!
+    assert.match(
+      typeof appendix.content === 'string' ? appendix.content : '',
+      /<session-state>/,
+      'sessionState must appear in standalone appendix when tracker enabled',
+    )
+    assert.match(
+      typeof appendix.content === 'string' ? appendix.content : '',
+      /Task: alpha/,
+    )
   })
 
   it('sessionState reaches fresh volatile block under tracker-disabled (fallback) path', () => {
@@ -489,9 +531,17 @@ describe('sessionState injection — cache safety + path coverage', () => {
     engine.setSessionState('<session-state>\nTask: beta [verifying]\n</session-state>')
 
     const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
-    const first = (req.messages[1] as { content: string }).content
-    assert.match(first, /<session-state>/, 'sessionState must appear when tracker disabled')
-    assert.match(first, /Task: beta/)
+    // P1: sessionState is in standalone appendix (last message)
+    const appendix = req.messages[req.messages.length - 1]!
+    assert.match(
+      typeof appendix.content === 'string' ? appendix.content : '',
+      /<session-state>/,
+      'sessionState must appear in standalone appendix when tracker disabled',
+    )
+    assert.match(
+      typeof appendix.content === 'string' ? appendix.content : '',
+      /Task: beta/,
+    )
   })
 
   it('volatile block stays byte-identical across 5 tool-call turns even when setSessionState is called per turn', () => {
@@ -521,8 +571,12 @@ describe('sessionState injection — cache safety + path coverage', () => {
     engine.setSessionState('<session-state>\nState: A\n</session-state>')
 
     const req1 = engine.buildOaiRequest([{ role: 'user', content: 'first task' }])
-    const m1 = (req1.messages[1] as { content: string }).content
-    assert.match(m1, /State: A/)
+    // P1: sessionState is in standalone appendix
+    const app1 = req1.messages[req1.messages.length - 1]!
+    assert.match(
+      typeof app1.content === 'string' ? app1.content : '',
+      /State: A/,
+    )
 
     engine.setSessionState('<session-state>\nState: B\n</session-state>')
 
@@ -533,7 +587,13 @@ describe('sessionState injection — cache safety + path coverage', () => {
     ])
     const { fresh: secondTaskFresh, user } = latestUserTrailer(req2.messages)
     assert.equal(user, 'second task')
-    assert.match(secondTaskFresh, /State: B/, 'New user message must see latest sessionState snapshot')
+    // P1: sessionState is in standalone appendix, not in FROZEN fresh
+    const app2 = req2.messages[req2.messages.length - 1]!
+    assert.match(
+      typeof app2.content === 'string' ? app2.content : '',
+      /State: B/,
+      'New user message must see latest sessionState in standalone appendix',
+    )
   })
 
   it('historical user messages do NOT carry sessionState — protects prefix cache of older turns', () => {

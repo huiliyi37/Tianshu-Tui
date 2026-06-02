@@ -73,7 +73,9 @@ describe('PromptEngine OpenAI-native request building', () => {
     const first = engine.buildOaiRequest([{ role: 'user', content: 'inspect' }])
     const firstVolatile = first.messages[1]
     assert.equal(firstVolatile?.role, 'user')
-    assert.match(firstVolatile?.content ?? '', /state v1/)
+    // P1: sessionState is in standalone appendix, not in user message
+    const firstAppendix = first.messages[first.messages.length - 1]!
+    assert.match(typeof firstAppendix.content === 'string' ? firstAppendix.content : '', /state v1/)
 
     engine.setSessionState('state v2')
     const second = engine.buildOaiRequest([
@@ -83,7 +85,9 @@ describe('PromptEngine OpenAI-native request building', () => {
     ])
 
     assert.deepEqual(second.messages[1], firstVolatile)
-    assert.doesNotMatch(second.messages[1]?.content ?? '', /state v2/)
+    // P1: sessionState is in appendix, not user message
+    const secondAppendix = second.messages[second.messages.length - 1]!
+    assert.doesNotMatch(typeof secondAppendix.content === 'string' ? secondAppendix.content : '', /state v2/)
   })
 
   it('refreshes cached fresh volatile at a new user message boundary', () => {
@@ -99,8 +103,10 @@ describe('PromptEngine OpenAI-native request building', () => {
     ])
 
     const { fresh, user } = latestUserTrailer(request.messages)
-    assert.match(fresh, /state v2/)
     assert.equal(user, 'continue')
+    // P1: sessionState is in standalone appendix, not in FROZEN fresh
+    const appendix = request.messages[request.messages.length - 1]!
+    assert.match(typeof appendix.content === 'string' ? appendix.content : '', /state v2/)
   })
 
   it('produces stable canonical OAI body bytes for equivalent construction', () => {
@@ -245,7 +251,9 @@ describe('PromptEngine active claims projection', () => {
 
     assert.equal(contextMessages.length, 2)
     assert.doesNotMatch(contextMessages[0]!.content as string, /star-domain/)
-    assert.match(contextMessages[1]!.content as string, /<star-domain name="破军"/)
+    // P1: active domain is in standalone appendix, not in user messages
+    const appendix = request.messages[request.messages.length - 1]!
+    assert.match(typeof appendix.content === 'string' ? appendix.content : '', /<star-domain name="破军"/)
     assert.equal(engine.checkDrift(), null)
   })
 
