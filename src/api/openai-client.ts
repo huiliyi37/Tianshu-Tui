@@ -189,11 +189,29 @@ export class OpenAIClient implements StreamClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
+    // reasoningRef survives retry attempts within this sendStream call.
+    // When a mid-stream failure occurs (e.g. idle timeout, connection reset),
+    // the accumulated reasoning_content is saved here and echoed back to the
+    // model on the next retry so it doesn't have to redo all the thinking.
+    const reasoningRef = { content: '' }
+    const isThinking = this.config.thinking === 'enabled'
+
     await withStructuredRetry(async () => {
       // Reset instance state for each attempt
       this.toolCallBuffer.clear()
       this.toolCallHintFired.clear()
       this.pendingStopReason = null
+
+      // Inject previous reasoning into messages on retry so the model can
+      // resume from where it left off instead of restarting from scratch.
+      let effectiveBody = body
+      if (isThinking && reasoningRef.content) {
+        const msgs = [...(body.messages as unknown[]), {
+          role: 'assistant',
+          reasoning_content: reasoningRef.content,
+        }]
+        effectiveBody = { ...body, messages: msgs }
+      }
 
       // Resolve auth headers: AuthProvider takes precedence over static apiKey
       const authHeaders = this.config.auth
@@ -214,7 +232,7 @@ export class OpenAIClient implements StreamClient {
           ...authHeaders,
           ...(this.config.sessionId ? { 'X-Request-Session': this.config.sessionId } : {}),
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(effectiveBody),
         signal,
       }, fetchTimeout)
 
@@ -238,8 +256,8 @@ export class OpenAIClient implements StreamClient {
       const reader = response.body?.getReader()
       if (!reader) throw new Error('Response body is not readable')
 
-      await this.parseStreamFromReader(reader, callbacks, signal)
-    }, signal, { maxTotalDurationMs: 10 * 60_000 })
+      await this.parseStreamFromReader(reader, callbacks, signal, reasoningRef)
+    }, signal, { maxTotalDurationMs: 10 * 60_000, maxTotalRetries: isThinking ? 1 : undefined })
   }
 
   /** Parse SSE stream from a reader — exposed for testing */
@@ -249,6 +267,7 @@ export class OpenAIClient implements StreamClient {
     reader: ReadableStreamDefaultReader<Uint8Array>,
     callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onContentBlock' | 'onStopReason'>>,
     signal?: AbortSignal,
+    reasoningRef?: { content: string },
   ): Promise<void> {
     const decoder = new TextDecoder()
     let buffer = ''
@@ -316,6 +335,7 @@ export class OpenAIClient implements StreamClient {
             if (parsed.choices?.[0]?.delta?.content) textReceived = true
             if (parsed.choices?.[0]?.delta?.reasoning_content) {
               reasoningAccum += parsed.choices[0].delta.reasoning_content
+              if (reasoningRef) reasoningRef.content = reasoningAccum
             }
           } catch {
             // Skip malformed SSE lines
@@ -335,6 +355,7 @@ export class OpenAIClient implements StreamClient {
               if (parsed.choices?.[0]?.delta?.content) textReceived = true
               if (parsed.choices?.[0]?.delta?.reasoning_content) {
                 reasoningAccum += parsed.choices[0].delta.reasoning_content
+                if (reasoningRef) reasoningRef.content = reasoningAccum
               }
             } catch { /* skip malformed */ }
           }
