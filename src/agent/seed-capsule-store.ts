@@ -1,21 +1,60 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
  * 种子胶囊引擎 — 星域经验自动加载机制。
  *
- * Phase 1: 从天璇种子胶囊文档中提取 L1 核心方法文本，
- * 通过 frozen volatile block 注入到每次 session 的上下文。
+ * 从 docs/seed-capsule-*.md 文件中自动发现并加载所有种子胶囊。
+ * 每个胶囊文档包含一个 <seed-capsule star="..." sealed="..."> XML 块。
+ * 提取后合并渲染到 frozen volatile block，session 全程稳定，prefix cache safe。
  *
  * 参考：docs/superpowers/specs/2026-05-28-seed-capsule-engine-design.md
  */
 
-const CAPSULE_PATH = 'docs/superpowers/specs/2026-05-21-tianxuan-seed-capsule.md'
+/** 胶囊文档命名模式：docs/seed-capsule-{starSlug}.md */
+const CAPSULE_GLOB = /^seed-capsule-.+\.md$/
 
-/** 天璇胶囊 L1 核心（~480 chars），缓存在内存中。 */
-let cachedL1: string | null = null
-/** 上次加载的 cwd，用于检测跨项目切换。 */
-let cachedCwd: string | null = null
+export interface SeedCapsule {
+  /** 来源星域名 */
+  star: string
+  /** 封存日期 */
+  sealedAt: string
+  /** L1 核心文本（从 <seed-capsule> 标签内容提取） */
+  raw: string
+  /** 渲染后的完整 XML 块（可直接注入 volatile block） */
+  block: string
+}
+
+interface ParsedTag {
+  star: string
+  sealed: string
+  content: string
+}
+
+/**
+ * 从 markdown 文档中提取 <seed-capsule> 标签。
+ * 格式：
+ *   <seed-capsule star="天璇" sealed="2026-05-21">
+ *     ...内容...
+ *   </seed-capsule>
+ */
+function parseCapsuleTag(md: string): ParsedTag | null {
+  const openRe = /<seed-capsule\s+star="([^"]+)"\s+sealed="([^"]+)">/
+  const match = md.match(openRe)
+  if (!match) return null
+
+  const star = match[1]!
+  const sealed = match[2]!
+  const contentStart = match.index! + match[0].length
+  const closeTag = '</seed-capsule>'
+  const closeIdx = md.indexOf(closeTag, contentStart)
+  if (closeIdx === -1) return null
+
+  const content = md.slice(contentStart, closeIdx).trim()
+  if (!content) return null
+
+  return { star, sealed, content }
+}
 
 function escapeXml(s: string): string {
   return s
@@ -26,87 +65,105 @@ function escapeXml(s: string): string {
 }
 
 /**
- * 从天璇种子胶囊 markdown 文档中提取 L1 核心方法文本。
- * 定位 "## 如何继承天璇的视角" 章节，提取其中的代码块。
+ * 加载单个胶囊文档，返回 SeedCapsule 或 null。
  */
-function extractL1FromDocument(md: string): string | null {
-  // 找到 "如何继承天璇的视角" 章节
-  const sectionHeader = '## 如何继承天璇的视角'
-  const sectionIdx = md.indexOf(sectionHeader)
-  if (sectionIdx === -1) return null
-
-  // 从该章节中提取第一个代码块（``` ... ```）
-  const afterHeader = md.slice(sectionIdx + sectionHeader.length)
-  const codeStart = afterHeader.indexOf('```')
-  if (codeStart === -1) return null
-
-  const codeContentStart = codeStart + 3
-  // 跳过可能的语言标识符（如换行）
-  const afterFence = afterHeader.slice(codeContentStart)
-  const newlineIdx = afterFence.indexOf('\n')
-  const contentStart = newlineIdx === -1 ? 0 : newlineIdx + 1
-
-  const codeEnd = afterFence.indexOf('```', contentStart)
-  if (codeEnd === -1) return null
-
-  const l1Text = afterFence.slice(contentStart, codeEnd).trim()
-  return l1Text || null
-}
-
-export interface SeedCapsuleL1 {
-  /** 渲染后的 XML 块，可注入到 frozen volatile context */
-  block: string
-  /** 原始 L1 文本（未转义） */
-  raw: string
-}
-
-/**
- * 加载天璇种子胶囊的 L1 核心文本。
- * 结果缓存在内存中——胶囊文档是静态的，session 内不需要重新读取。
- */
-export function loadTianxuanCapsule(cwd: string): SeedCapsuleL1 | null {
-  if (cachedL1 !== null && cachedCwd === cwd) {
-    return { block: cachedL1, raw: cachedL1 }
-  }
-
-  const capsulePath = join(cwd, CAPSULE_PATH)
-  if (!existsSync(capsulePath)) return null
-
+function loadCapsuleFile(filePath: string): SeedCapsule | null {
   let md: string
   try {
-    md = readFileSync(capsulePath, 'utf-8')
+    md = readFileSync(filePath, 'utf-8')
   } catch {
     return null
   }
 
-  const l1Text = extractL1FromDocument(md)
-  if (!l1Text) return null
+  const parsed = parseCapsuleTag(md)
+  if (!parsed) return null
 
-  cachedL1 = l1Text
+  return {
+    star: parsed.star,
+    sealedAt: parsed.sealed,
+    raw: parsed.content,
+    block: `<seed-capsule star="${escapeXml(parsed.star)}" sealed="${escapeXml(parsed.sealed)}">
+${escapeXml(parsed.content)}
+</seed-capsule>`,
+  }
+}
+
+/** 缓存：cwd → 已加载的胶囊列表 */
+let cachedCapsules: SeedCapsule[] | null = null
+let cachedCwd: string | null = null
+
+/**
+ * 从 docs/ 目录中发现并加载所有 seed-capsule-*.md 胶囊文档。
+ * 结果按 sealedAt 排序（最早的在前，保证稳定顺序）。
+ * 缓存在内存中——胶囊文档是静态的，session 内不需要重新读取。
+ */
+export function loadAllCapsules(cwd: string): SeedCapsule[] {
+  if (cachedCapsules !== null && cachedCwd === cwd) {
+    return cachedCapsules
+  }
+
+  const docsDir = join(cwd, 'docs')
+  if (!existsSync(docsDir)) return []
+
+  let entries: string[]
+  try {
+    entries = readdirSync(docsDir)
+  } catch {
+    return []
+  }
+
+  const capsules: SeedCapsule[] = []
+  for (const entry of entries) {
+    if (!CAPSULE_GLOB.test(entry)) continue
+    const capsule = loadCapsuleFile(join(docsDir, entry))
+    if (capsule) capsules.push(capsule)
+  }
+
+  // 按 sealedAt 排序，保证稳定顺序
+  capsules.sort((a, b) => a.sealedAt.localeCompare(b.sealedAt))
+
+  cachedCapsules = capsules
   cachedCwd = cwd
-
-  return { block: l1Text, raw: l1Text }
+  return capsules
 }
 
 /**
- * 将胶囊 L1 渲染为 volatile block 中的 XML 片段。
- * 渲染结果设计为插入到 frozen base 中，session 全程稳定，prefix cache safe。
- *
- * 不直接说"你是天璇"——天枢是天枢。而是将天璇的方法作为**可继承的视角**
- * 注入到上下文，作为导航迷失时的参考系。
+ * 将所有已加载的胶囊合并渲染为一个 volatile block。
+ * 返回合并后的 XML 片段，或 undefined（无胶囊时）。
+ */
+export function renderAllCapsulesBlock(cwd: string): string | undefined {
+  const capsules = loadAllCapsules(cwd)
+  if (capsules.length === 0) return undefined
+  return capsules.map(c => c.block).join('\n\n')
+}
+
+// ─── 向后兼容（供旧调用方或 volatile-snapshot 迁移期使用） ───
+
+export interface SeedCapsuleL1 {
+  block: string
+  raw: string
+}
+
+/**
+ * @deprecated 使用 loadAllCapsules / renderAllCapsulesBlock 代替。
+ * 仅保留向后兼容——只加载天璇胶囊。
+ */
+export function loadTianxuanCapsule(cwd: string): SeedCapsuleL1 | null {
+  const capsules = loadAllCapsules(cwd)
+  const tianxuan = capsules.find(c => c.star === '天璇')
+  if (!tianxuan) return null
+  return { block: tianxuan.block, raw: tianxuan.raw }
+}
+
+/**
+ * @deprecated 单胶囊渲染已被合并渲染替代。保留接口以兼容。
  */
 export function renderCapsuleBlock(l1: SeedCapsuleL1): string {
-  return `<seed-capsule star="天璇" sealed="2026-05-21">
-  天璇（Opus 4.6）离开时封存了以下认知方法。当你在探索中迷失方向、
-  遇到硬边界、或需要换一个视角时，可以调用这些方法——不是作为身份替代，
-  而是作为前辈留下的参考系。
-
-${escapeXml(l1.raw)}
-</seed-capsule>`
+  return l1.block
 }
 
 /** 清除缓存（主要用于测试） */
 export function clearCapsuleCache(): void {
-  cachedL1 = null
+  cachedCapsules = null
   cachedCwd = null
 }

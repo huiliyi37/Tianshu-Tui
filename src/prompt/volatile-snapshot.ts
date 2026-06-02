@@ -3,7 +3,7 @@ import { join } from 'path'
 import { gitStatusCache } from './volatile-git.js'
 import { summarizeGitStatus } from './git-status-summary.js'
 import { loadProjectMemory } from '../context/project-memory-loader.js'
-import { loadTianxuanCapsule, renderCapsuleBlock } from '../agent/seed-capsule-store.js'
+import { renderAllCapsulesBlock } from '../agent/seed-capsule-store.js'
 import type { VolatileContext } from './volatile.js'
 
 export interface SnapshotInput {
@@ -44,9 +44,8 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
 
   const projectMemoryBlock = input.projectMemoryBlock ?? loadProjectMemory(input.cwd).content
 
-  // 加载天璇种子胶囊 L1 — 前辈星域封存的认知方法
-  const capsule = loadTianxuanCapsule(input.cwd)
-  const seedCapsuleBlock = capsule ? renderCapsuleBlock(capsule) : undefined
+  // 加载所有种子胶囊（天璇、天府等）— 前辈星域封存的认知方法
+  const seedCapsuleBlock = renderAllCapsulesBlock(input.cwd)
 
   return Object.freeze({
     cwd: input.cwd,
