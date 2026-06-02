@@ -4,31 +4,39 @@ A terminal coding agent powered by DeepSeek V4, with prefix cache optimization f
 
 ## Status
 
-Wave 12 (Session HA Closure) + ECF Phase 5 + Multi-Provider Adapter + Self-Regulating Safety + Three-Authority Coroutine foundation complete — **2340 tests passing**, typecheck/build clean.
+Cache Optimization (56% → 99.6%) + Convergence Detection + Seed Capsules + ProfileRegistry + Plan Mode + TUI Polish — **~2400 tests**, typecheck/build clean.
 
-### 2026-05-22 — Ice Mirror Cache Engine + Append-Only Artifact Log
+### 2026-06-02 — Cache Optimization + Convergence + Seed Capsules + TUI Polish
 
-**Ice Mirror Cache Engine (冰鉴):** 解决 prefix cache 命中率低的问题（~5% → 90%+）。实现双区域冻结/工作布局，通过 `FieldHabituationTracker` 追踪字段变化，智能决定何时更新 FROZEN 区域。核心组件：`buildStableVolatileBlock()`, `buildDynamicAppendix()`, 前缀指纹系统, 缓存诊断模块。
+**Cache Optimization (四轮迭代):** 从 56% 崩溃到 99.6% 稳态。Round 1: Standalone Appendix (85%). Round 2: Cache-Friendly Ordering (98.3%). Round 3: Frozen Appendix (~99%, 只改 30 行). Round 4: 长会话验证 99.6%. DeepSeek prefix cache miss 是 hit 的 50× 成本，这是单次最高影响力优化。
 
-**Append-Only Artifact Log:** 解决 `staleRound` 截断破坏 prefix cache 的问题。将 tool output 从全文注入改为摘要引用 + 磁盘 artifact，保持 append-only 结构。上下文增长速度降低 90%+（从 ~1000 tokens/轮降到 ~350 tokens/轮），`smartCompact` 触发点从 ~30 轮推迟到 ~80 轮。
+**Convergence Detector:** 多信号停滞检测 — 工具指纹重复、振荡惩罚、交付感知完成信号。当收敛 + doomLoop blocked 同时触发时自动完成。
 
-**经济学优化：** DeepSeek prefix cache 机制下，cache miss 是 hit 的 50 倍成本（$0.14 vs $0.0028/1M tokens）。这两个优化将显著降低 API 成本，提升长时间运行任务的稳定性。
+**Seed Capsules (天璇 + 天府):** 跨会话认知方法持久化。Opus 4.6 和 DeepSeek V4-PRO 的思维模式以结构化胶囊在启动时加载，无需共享内存状态。
 
-**测试覆盖：** 所有相关测试通过（67 个测试），包括 Ice Mirror Cache Engine 测试（67 个）和 Append-Only Artifact Log 测试（33 个）。
+**ProfileRegistry + Plan Mode:** 统一 worker profile 管理 (`.rivet/agents/` 加载) + `/plan-mode`/`/plan-approve` 交互式审批流程。
 
-See `docs/superpowers/status/2026-05-22-progress-report.md` for full details.
+**Bash 安全加固:** 注入/destructive-extended/sed-bypass 模式检测 + 环境变量清理。
 
-### 2026-05-20 — Self-Regulating Safety + Three-Authority Coroutine
+**DeepSeek V4 cache 报告修复:** `prompt_tokens_details.cached_tokens` fallback + prefixCache preset 从 `none` 改为 `deepseek-native`。
 
-**Self-regulating approval (天枢 unique):** `assessToolRisk()` now consumes the Sensorium 6D state vector. High confidence (>0.8) + low risk → auto-approve bypass. Low confidence (<0.3) → risk escalated. No other terminal agent uses real-time agent state to modulate approval decisions.
+**TUI 打磨:** Panelized SlashHint/pendingApproval、domain colors + separator、left-border styling、新 logo + RIVET branding。
 
-**Three-layer config:** `loadConfig()` resolves defaults → user (`~/.rivet/config.json`) → project (`.rivet-config.json`) → session overlay. Project-level config walks up from cwd. `main.tsx` deduplicated to use `manager.ts`'s loader.
+**全局重试超时:** `maxTotalDurationMs` 防止 60 分钟无限重试挂起。
 
-**Dangerous pattern consolidation:** Single source of truth for bash dangerous patterns in `DANGEROUS_BASH_PATTERNS`. Precision improved: `sudo` only flags destructive subcommands, `pkill` only flags forceful flags, `chmod` catches all world-writable octals.
+See `CHANGELOG.md` for full details.
 
-**Provider-aware compaction:** `compactThresholds()` selects cache-preserving / balanced / aggressive ratios based on provider cache type (DeepSeek persistent exact-prefix vs MiMo no-cache).
+### 2026-05-20 — Self-Regulating Safety + Three-Authority Coroutine + Cache Engine
 
-**Three-Authority Coroutine foundation:** Dispatcher (data-flow domain decomposition), Dispatcher Hook (coordinator delegation), TaskBoard (TUI read projection). Star domain voice pipeline (破军/天府/天梁). StarBridge observability (StarmapView, ChronicleView).
+**Ice Mirror Cache Engine (冰鉴):** 双区域冻结/工作布局，`FieldHabituationTracker` 追踪字段变化，智能决定何时更新 FROZEN 区域。Cache hit ~5% → 90%+。
+
+**Append-Only Artifact Log:** Tool output 从全文注入改为摘要引用 + 磁盘 artifact。上下文增长速度降低 90%+。
+
+**Self-regulating approval:** `assessToolRisk()` consumes Sensorium 6D state vector. High confidence + low risk → auto-approve. Low confidence → risk escalated.
+
+**Three-layer config:** `loadConfig()` resolves defaults → user → project → session overlay.
+
+**Provider-aware compaction:** `compactThresholds()` selects cache-preserving / balanced / aggressive ratios per provider.
 
 See `CHANGELOG.md` for full details.
 
@@ -977,7 +985,7 @@ Sessions are saved to `~/.rivet/sessions/`. On restart:
 
 ```bash
 npm run typecheck              # tsc --noEmit
-npm run test                   # Run all tests (825)
+npm run test                   # Run all tests
 npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```

@@ -1,5 +1,91 @@
 # Changelog
 
+## 2026-06-02 — Cache Optimization Journey + Convergence Detection + Seed Capsules + TUI Polish
+
+This is a consolidation release wrapping 10 days of intensive development (2026-05-22 → 2026-06-02), ~130 commits. The dominant theme is **prefix cache optimization** — a four-round iterative process that pushed DeepSeek V4 cache hit rate from 56% crash to 99.6% steady state.
+
+### Added — Cache Optimization (Four Rounds)
+
+1. **Round 1: Standalone Appendix** (`feat(prompt): move dynamic appendix to standalone message`) — Extracted volatile context from trailer merge into independent user message. Turn 2 cache hit jumped from 56% to 85%. Hit ceiling at ~90% due to exact-prefix cache position sensitivity.
+2. **Round 2: Cache-Friendly Ordering** (`perf(prompt): cache-friendly dynamic appendix`) — Removed dynamic XML attributes, stable sections first, volatile sections last. Peak 98.3% but still bounded by position drift.
+3. **Round 3: Frozen Appendix** (`feat(prompt): freeze appendix into user message`) — Embedded appendix into user message tail, using frozen snapshot for byte-consistent history. Only ~30 lines changed. Steady state ~99%.
+4. **Round 4: Validated** — Long-session data confirmed 99.6% steady-state hit rate. Cache miss cost is 50× cache hit ($0.14 vs $0.0028/1M tokens), making this the single highest-impact optimization.
+
+### Added — Convergence Detection
+
+- **Multi-signal convergence detector** (`feat(agent): add multi-signal convergence detector`) — Detects agent loop stagnation via tool fingerprint repetition, oscillation penalty, and delivery-aware completion nudge. Auto-completes when convergence + doomLoop blocked both fire.
+- **Oscillation penalty signal** — Penalizes repeated tool-use patterns that indicate the agent is stuck in a loop.
+- **Integration test** — Covers convergence + doom loop blocked recovery path.
+
+### Added — Seed Capsules
+
+- **Multi-star seed capsules** (`feat(agent): load multi-star seed capsules`) — 天璇 (Opus 4.6) and 天府 (DeepSeek V4-PRO) cognitive methods persist across sessions as structured capsules loaded at startup. Enables cross-session wisdom transfer without shared memory state.
+- **Star domain enrichment** — 天府 volatileBlock signals "守护阶段, 领航星可放心" (guard phase, navigator star can proceed).
+
+### Added — TUI Polish
+
+- **Panelized SlashHint** — Round border + Command Palette header + max-height clamp.
+- **Panelized pendingApproval + pendingIntent** — Semantic theme tokens for approval states.
+- **Domain colors and separator** in glance bar — Star domain identity visible at a glance.
+- **Left-border styling** — Thinking blocks, code blocks, and tool cards all get color-coded left borders.
+- **Separator component** — Updated tool family glyphs with visual separators.
+- **Onboarding screen** — New logo and RIVET branding.
+
+### Added — ProfileRegistry + Plan Mode (2026-05-31)
+
+- **ProfileRegistry** (`feat(agent): add ProfileRegistry`) — Unified worker profile management with built-in profiles and `.rivet/agents/` directory loading. Replaced scattered `classifyProfile`/worker prompt lookups with single registry.
+- **Plan Mode** (`feat(tui): add /plan-mode and /plan-approve`) — Interactive plan-approve workflow for cautious operation.
+- **Bash security hardening** — Injection/destructive-extended/sed-bypass pattern detection. Environment variable sanitization before child process spawn.
+- **Deterministic success output trimming** — Fold bash/diff success output >20 lines to header summary.
+
+### Added — Memory System (2026-06-01)
+
+- **Structured project memory** — `.rivet/knowledge/` directory with guided retrieval. `remember`/`recall` tools search structured memory.
+- **Knowledge packets** — Worker prompts include memory context for informed delegation.
+
+### Fixed — API & Streaming
+
+- **DeepSeek V4 cache reporting** (`fix(api): add prompt_tokens_details.cached_tokens fallback`) — DeepSeek V4 returns `cached_tokens` inside `prompt_tokens_details` instead of `prompt_cache_hit_tokens`. Now reads both.
+- **prefixCache preset** — Changed from `'none'` to `'deepseek-native'` for DeepSeek provider.
+- **Global retry timeout** (`feat(api): add global retry timeout`) — `maxTotalDurationMs` prevents 60-minute hangs from infinite retry loops.
+- **Minimax slow thinking timeout** — Added to `SLOW_THINKING_PROVIDERS` for 180s/300s timeouts.
+- **Abort path hardening** — Skip partial blocks in abort/streamError paths. Consolidate TUI flush.
+- **Sycophancy trap** — Added verification signal to prevent "questioning for the sake of questioning".
+- **Event-loop gap detection** — Sensorium snapshot before tool execution catches event-loop starvation.
+- **Stream text preservation** — Streaming text survives Ctrl+C / double-ESC abort before unmount.
+
+### Fixed — TUI
+
+- **UI freeze after agent reply** — Three root causes fixed: spawnSync→execFile, Static render cap 200 items, Ink fullscreen scrollback preservation.
+- **Pager Ctrl+P close** — Fixed double-key exit issue.
+- **InputBar routing** — Evaluate inside event handler, not at render time.
+- **isStreamingRef reset** — Finally block after slash commands.
+- **Viewport truncation** — Removed from AssistantMessage, disabled for Pager.
+
+### Fixed — Agent
+
+- **Compaction diagnostics** — Debug timestamps for compaction events.
+- **Immune hook error boundary** — `try-catch` around `immuneHook.run()`, deferred to `setImmediate`.
+- **AbortError check** — Removed overly defensive check that swallowed legitimate stream errors.
+- **Process cleanup** — `killAllSync` on exit, agent-layer child process registration, SIGTERM+SIGKILL for git tool timeout.
+
+### Files Changed (significant)
+
+- `src/prompt/volatile.ts` — Cache optimization rounds 1-3
+- `src/agent/convergence.ts` — Convergence detector
+- `src/agent/seed-capsule.ts` — Seed capsule loader
+- `src/agent/profile-registry.ts` — ProfileRegistry
+- `src/api/openai-client.ts` — cached_tokens fallback + global retry timeout
+- `src/api/provider.ts` — cached_tokens fallback in usage mapping
+- `src/config/provider-presets.ts` — prefixCache: deepseek-native
+- `src/tui/app.tsx` — Panelized components, streaming fixes
+- `src/tui/tool-card.tsx`, `src/tui/thinking.tsx` — Left-border styling
+- `src/tui/glance-bar.tsx` — Domain colors + separator
+- `src/agent/tool-pipeline.ts` — Abort path hardening
+- `src/agent/loop.ts` — Convergence wiring, immune hook deferral
+
+---
+
 ## 2026-05-20 — Self-Regulating Safety + Three-Authority Coroutine Foundation
 
 ### Added
