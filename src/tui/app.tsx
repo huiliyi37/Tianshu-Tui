@@ -34,7 +34,7 @@ import { selectRestorableSessions } from './restore-session.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { parseSensoriumLog, generateRetrospect } from '../agent/retrospect.js'
 import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { createLogEntry, summarizeToolOutput, type LogEntry } from './log-state.js'
 import type { McpManager } from '../mcp/manager.js'
 import type { Panel } from './cockpit/types.js'
@@ -169,6 +169,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const { stdout } = useStdout()
   const supportsAnsiEscapes = (stdout as NodeJS.WriteStream & { supportsAnsiEscapes?: boolean }).supportsAnsiEscapes ?? process.stdout.isTTY
   const { rows: termRows } = useTerminalSize()
+  const projectName = basename(process.cwd())
   const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
   const [historyVersion, setHistoryVersion] = useState(0)
   const historyItems = useMemo(() => historyBufferRef.current.items(), [historyVersion])
@@ -508,6 +509,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }, 2000)
     return () => clearInterval(id)
   }, [isStreaming])
+
+  // Reset window title on unmount
+  useEffect(() => {
+    process.title = projectName
+    return () => { process.title = projectName }
+  }, [])
 
   // --- Rewind ---
   const { getRewindEntries, handleRewind } = useRewind({
@@ -1048,6 +1055,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         flushStaticBatch()
       },
       onPhaseChange: (phase, detail) => {
+        // Dynamic window title — visible in terminal tabs and Alt-Tab
+        if (phase === 'idle') process.title = projectName
+        else if (phase === 'heartbeat') process.title = `⏳ ${projectName}`
+        else if (phase === 'tool' || phase === 'mcp') process.title = `🔧 ${projectName}`
+        else if (phase.includes('error')) process.title = `⚠️ ${projectName}`
+        else process.title = `⏳ ${projectName}`
+
         // Phase → heartbeat status label (preparing, working, tool-hint, heartbeat)
         const statusLabel = phaseStatusLabel(phase, detail)
         if (statusLabel !== null) {

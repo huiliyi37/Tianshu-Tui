@@ -964,6 +964,22 @@ async function main() {
   }, 60_000)
   _perfCleanup = perfCleanup
 
+  // Slow render monitor: track event-loop stalls >200ms.
+  // Ink re-renders run synchronously on the main thread — a long render
+  // blocks the event loop. By measuring gaps between interval ticks, we
+  // can detect slow renders without needing Ink's internal hooks.
+  let slowRenderTick = Date.now()
+  const SLOW_RENDER_MS = 200
+  const slowRenderMonitor = setInterval(() => {
+    const now = Date.now()
+    const gap = now - slowRenderTick
+    slowRenderTick = now
+    if (gap > SLOW_RENDER_MS) {
+      const ts = new Date(now).toISOString()
+      process.stderr.write(`[slow-render] ${ts} gap=${gap}ms (threshold=${SLOW_RENDER_MS}ms)\n`)
+    }
+  }, SLOW_RENDER_MS)
+
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),
     { exitOnCtrlC: false },
@@ -975,6 +991,7 @@ async function main() {
 
   await waitUntilExit()
   clearInterval(perfCleanup)
+  clearInterval(slowRenderMonitor)
   // Force-exit: lingering handles (MCP stdio, libuv pool) otherwise keep the
   // event loop alive and leave an orphaned process after the TUI unmounts.
   gracefulShutdown()
