@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix } from '../volatile.js'
 import { PromptEngine } from '../engine.js'
-import { latestUserTrailer, userMessages } from './helpers/message-selectors.js'
+import { latestUserTrailer, userMessages, type LatestUserTrailer } from './helpers/message-selectors.js'
 import type { OaiMessage } from '../../api/oai-types.js'
 
 function historicalUserContent(messages: readonly OaiMessage[], userContent: string): string {
