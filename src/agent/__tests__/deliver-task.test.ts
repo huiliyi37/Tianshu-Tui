@@ -1146,7 +1146,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
       })
 
       assert.equal(result.isError, true)
-      assert.match(result.content, /not in external files/)
+      assert.match(result.content, /not in external or co-owned files/)
     })
 
     it('rejects empty adopt array', async () => {

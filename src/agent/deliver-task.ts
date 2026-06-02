@@ -114,7 +114,7 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
 - commit: set to true to request approval for scoped commit (default: false)
 - message: commit message (required if commit=true)
 - files: optional array of owned file paths to commit (subset). When omitted, commits all owned files. Use this to commit logical units separately.
-- adopt: array of external file paths to claim ownership of before committing. Use when taking over work from a crashed/frozen session. Requires commit=true. The adopted files are force-added to the owned set and included in the commit scope.
+- adopt: array of external or co-owned file paths to claim ownership of before committing. Use when taking over work from a crashed/frozen session. Requires commit=true. The adopted files are force-added to the owned set and included in the commit scope.
 - force: set to true to override the cohesion gate when committing many files across multiple areas. Use sparingly.`,
       input_schema: {
         type: 'object',
@@ -270,18 +270,25 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         // Adopt external files into owned set (cross-session takeover)
         const adoptFiles = params.input.adopt as string[] | undefined
         if (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length > 0) {
-          // Validate: adopted files must exist in the external files list
+          // Validate: adopted files must be external OR co-owned (shared ownership).
+          // Co-owned files can be adopted when the other session is done/crashed.
           const externalSet = new Set(report.externalFiles)
-          const notExternal = adoptFiles.filter(f => !externalSet.has(f))
-          if (notExternal.length > 0) {
-            lines.push('', `❌ Adopt: file(s) not in external files: ${notExternal.join(', ')}. Only external files can be adopted.`)
+          const coOwnedSet = new Set(report.coOwnedFiles)
+          const adoptableSet = new Set([...externalSet, ...coOwnedSet])
+          const notAdoptable = adoptFiles.filter(f => !adoptableSet.has(f))
+          if (notAdoptable.length > 0) {
+            lines.push('', `❌ Adopt: file(s) not in external or co-owned files: ${notAdoptable.join(', ')}. Only external and co-owned files can be adopted.`)
             return { content: lines.join('\n'), isError: true }
           }
           const adopted = ctx.ownership.adoptFiles(adoptFiles)
           if (adopted.length > 0) {
-            lines.push('', `🔓 Adopted ${adopted.length} external file(s) into owned set:`)
+            const wasCoOwned = adopted.filter(f => coOwnedSet.has(f))
+            const wasExternal = adopted.filter(f => externalSet.has(f))
+            if (wasCoOwned.length > 0) lines.push('', `🔓 Adopted ${wasCoOwned.length} co-owned file(s) into exclusive ownership:`)
+            if (wasExternal.length > 0) lines.push('', `🔓 Adopted ${wasExternal.length} external file(s) into owned set:`)
             for (const f of adopted) lines.push(`   ${f}`)
-            lines.push('', '  ⚠️ These files were modified by another session. Verify the changes are correct before committing.')
+            if (wasCoOwned.length > 0) lines.push('', '  ⚠️ These files were shared with another session. Verify the other session has finished before committing.')
+            if (wasExternal.length > 0) lines.push('', '  ⚠️ These files were modified by another session. Verify the changes are correct before committing.')
             // Refresh report after adoption — the gate may change
           }
         } else if (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length === 0) {
