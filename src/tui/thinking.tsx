@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { getTheme } from './theme.js'
 import { brailleSpinnerFrame } from './braille-spinner.js'
+import { gutterGlyph } from './gutter.js'
 
 interface ThinkingStatusOptions {
   isStreaming: boolean
@@ -178,8 +179,8 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
   if (!thinking) {
     return (
       <Box flexDirection="column" paddingX={2}>
-        <Text color={theme.muted}>
-          {'▸'} {spinner} Thinking...
+        <Text color={theme.dim}>
+          {gutterGlyph('thinking')} {spinner} <Text italic>Thinking</Text>...
         </Text>
       </Box>
     )
@@ -188,8 +189,8 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
   if (!expanded) {
     return (
       <Box flexDirection="column" paddingX={2}>
-        <Text color={theme.muted}>
-          {'▸'} {spinner} Thinking {statusLabel}
+        <Text color={theme.dim}>
+          {gutterGlyph('thinking')} {spinner} <Text italic>Thinking</Text> {statusLabel}
           {` (${formatThinkingSize(thinking.length)})`}
           {focused ? ' (Tab to expand)' : ''}
         </Text>
@@ -205,12 +206,20 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
 
   return (
     <Box flexDirection="column" paddingX={2}>
-      <Text color={theme.muted}>
-        {'▾'} {spinner} Thinking {statusLabel}
+      <Text color={theme.dim}>
+        {gutterGlyph('thinking')} {spinner} <Text italic>Thinking</Text> {statusLabel}
         {` (${formatThinkingSize(thinking.length)})`}
         {focused ? ' (Tab to collapse)' : ''}
       </Text>
-      <Box paddingLeft={2} borderStyle="single" borderColor={theme.dim}>
+      <Box
+        paddingLeft={1}
+        borderStyle="single"
+        borderColor={theme.dim}
+        borderLeft={true}
+        borderRight={false}
+        borderTop={false}
+        borderBottom={false}
+      >
         <Text color={theme.muted}>{visibleThinking}</Text>
       </Box>
     </Box>

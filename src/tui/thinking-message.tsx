@@ -55,8 +55,17 @@ export const ThinkingMessage = memo(function ThinkingMessage({ content }: Thinki
   if (totalPhysicalLines <= maxPhysicalLines) {
     return (
       <Box flexDirection="column" paddingX={2}>
-        <Text color={theme.muted}>{gutterGlyph('thinking')} Thinking ({formatThinkingSize(content.length)})</Text>
-        <Box paddingLeft={2} flexDirection="column">
+        <Text color={theme.dim}>{gutterGlyph('thinking')} <Text italic>Thinking</Text> ({formatThinkingSize(content.length)})</Text>
+        <Box
+          paddingLeft={1}
+          borderStyle="single"
+          borderColor={theme.dim}
+          borderLeft={true}
+          borderRight={false}
+          borderTop={false}
+          borderBottom={false}
+          flexDirection="column"
+        >
           {lines.map((line, i) => (
             <Text key={i} color={theme.muted}>{line}</Text>
           ))}
@@ -80,8 +89,17 @@ export const ThinkingMessage = memo(function ThinkingMessage({ content }: Thinki
   const visibleLines = lines.slice(cutoffIndex)
   return (
     <Box flexDirection="column" paddingX={2}>
-      <Text color={theme.muted}>{gutterGlyph('thinking')} Thinking ({formatThinkingSize(content.length)}, {omitted} earlier lines omitted)</Text>
-      <Box paddingLeft={2} flexDirection="column">
+      <Text color={theme.dim}>{gutterGlyph('thinking')} <Text italic>Thinking</Text> ({formatThinkingSize(content.length)}, {omitted} earlier lines omitted)</Text>
+      <Box
+        paddingLeft={1}
+        borderStyle="single"
+        borderColor={theme.dim}
+        borderLeft={true}
+        borderRight={false}
+        borderTop={false}
+        borderBottom={false}
+        flexDirection="column"
+      >
         <Text color={theme.muted}>…</Text>
         {visibleLines.map((line, i) => (
           <Text key={i} color={theme.muted}>{line}</Text>

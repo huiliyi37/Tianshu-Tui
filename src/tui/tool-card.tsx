@@ -75,7 +75,7 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
   const family = getToolFamily(name)
 
   return (
-    <Box flexDirection="column" paddingX={1} marginBottom={0}>
+    <Box flexDirection="column" paddingLeft={2} paddingRight={1} marginBottom={0}>
       <Text bold color={borderColor}>
         {family.glyph} {family.verb}{isStreaming ? ' …' : ''}
         {isStreaming && formatToolElapsed(elapsedMs ?? 0) && (
@@ -84,13 +84,24 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
         {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text color={theme.muted}> {totalLines} lines</Text>}
         {focused && totalLines > MAX_COLLAPSED_LINES ? <Text color={theme.muted}> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
       </Text>
-      <Markdown text={displayText} language={extToLang(rawPath)} />
-      {truncated > 0 && (
-        <Text color={theme.muted}>  {truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
-      )}
-      {truncated === 0 && rawPath && (
-        <Text color={theme.muted}>  raw: {compactPath(rawPath)}</Text>
-      )}
+      <Box
+        borderStyle="single"
+        borderColor={isError ? theme.error : theme.dim}
+        borderLeft={true}
+        borderRight={false}
+        borderTop={false}
+        borderBottom={false}
+        paddingLeft={1}
+        flexDirection="column"
+      >
+        <Markdown text={displayText} language={extToLang(rawPath)} />
+        {truncated > 0 && (
+          <Text color={theme.muted}>{truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
+        )}
+        {truncated === 0 && rawPath && (
+          <Text color={theme.muted}>raw: {compactPath(rawPath)}</Text>
+        )}
+      </Box>
     </Box>
   )
 })

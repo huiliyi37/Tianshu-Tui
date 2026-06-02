@@ -1,4 +1,5 @@
 import { Box, Text } from 'ink'
+import { memo } from 'react'
 import type { LogEntry } from './log-state.js'
 import { getTheme } from './theme.js'
 import { ToolCard } from './tool-card.js'
@@ -9,6 +10,19 @@ import { ThinkingMessage } from './thinking-message.js'
 import { SystemMessage } from './system-message.js'
 import { StreamOutput } from './stream.js'
 import { QuestionCard } from './question-card.js'
+import { useTerminalSize } from './use-terminal-size.js'
+import { horizontalRule } from './separator.js'
+
+const TurnSummary = memo(function TurnSummary({ content }: { content: string }) {
+  const theme = getTheme()
+  const { columns } = useTerminalSize()
+  return (
+    <Box paddingX={1} marginTop={1} flexDirection="column">
+      <Text color={theme.dim}>{horizontalRule(columns, 'dots')}</Text>
+      <Text color={theme.muted}> ◆ {content}</Text>
+    </Box>
+  )
+})
 
 type EntryRenderer = (entry: LogEntry, verbose: boolean) => ReturnType<typeof Box>
 
@@ -26,7 +40,7 @@ const RENDER_MAP: Record<string, EntryRenderer> = {
   checkpoint: (e) => <Box key={e.id} paddingX={2}><Text color={getTheme().muted} bold>⚑ {e.content}</Text></Box>,
   evidence: (e) => <Box key={e.id} paddingX={2} marginBottom={1} borderStyle="single" borderColor="green"><Text color="green">{e.content}</Text></Box>,
   system: (e) => <SystemMessage key={e.id} content={e.content} isError={e.isError} />,
-  turn_summary: (e) => <Box key={e.id} paddingX={2}><Text color={getTheme().dim} bold>⎯ {e.content}</Text></Box>,
+  turn_summary: (e) => <TurnSummary key={e.id} content={e.content} />,
 }
 
 export function renderStaticEntry(entry: LogEntry, verbose: boolean) {

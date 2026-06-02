@@ -442,7 +442,7 @@ function highlightLine(line: string, keywords: Set<string> | null, caseInsensiti
 
 // --- Block renderers ---
 
-function renderCodeBlock(language: string | undefined, content: string): ReactNode {
+function renderCodeBlock(language: string | undefined, content: string, columns: number): ReactNode {
   const theme = getTheme()
   const lines = content.split('\n')
   const langConfig = language ? keywordsForLang(language) : null
@@ -453,14 +453,31 @@ function renderCodeBlock(language: string | undefined, content: string): ReactNo
   const truncated = lines.length > MAX_CODE_LINES
   const visible = truncated ? lines.slice(0, MAX_CODE_LINES) : lines
 
+  const headerText = `── ${language || 'code'} `
+  const headerWidth = Math.max(20, columns - 6)
+  const headerBorder = '┌' + headerText + '─'.repeat(Math.max(0, headerWidth - headerText.length))
+  const footerBorder = '└' + '─'.repeat(headerWidth)
+
   return (
-    <Box flexDirection="column" paddingLeft={1}>
-      {language && <Text color={theme.muted}>{'```'}{language}</Text>}
-      {visible.map((line, i) => {
-        const segs = highlightLine(line, keywords, caseInsensitive)
-        return <Text key={i}>{renderSegments(segs)}</Text>
-      })}
-      {truncated && <Text color={theme.muted}>… ({lines.length - MAX_CODE_LINES} more lines)</Text>}
+    <Box flexDirection="column" marginY={1}>
+      <Text color={theme.dim}>{headerBorder}</Text>
+      <Box
+        borderStyle="single"
+        borderColor={theme.dim}
+        borderLeft={true}
+        borderRight={false}
+        borderTop={false}
+        borderBottom={false}
+        paddingLeft={2}
+        flexDirection="column"
+      >
+        {visible.map((line, i) => {
+          const segs = highlightLine(line, keywords, caseInsensitive)
+          return <Text key={i}>{renderSegments(segs)}</Text>
+        })}
+        {truncated && <Text color={theme.muted}>… ({lines.length - MAX_CODE_LINES} more lines)</Text>}
+      </Box>
+      <Text color={theme.dim}>{footerBorder}</Text>
     </Box>
   )
 }
@@ -487,21 +504,23 @@ function renderBlock(block: Block, key: number, columns: number): ReactNode {
   switch (block.type) {
     case 'header': {
       const colors = [theme.primary, theme.primary, theme.secondary, theme.secondary, theme.dim, theme.dim]
+      const glyphs = ['■', '⎔', '◈', '◇', '▪', '·']
+      const glyph = glyphs[(block.level ?? 1) - 1] ?? '▪'
       return (
         <Box key={key} marginTop={block.level === 1 ? 1 : 0}>
-          <Text bold color={colors[(block.level ?? 1) - 1]}>{'#'.repeat(block.level ?? 1) + ' ' + block.content}</Text>
+          <Text bold color={colors[(block.level ?? 1) - 1]}>{glyph} {block.content}</Text>
         </Box>
       )
     }
     case 'code':
-      return <Box key={key}>{renderCodeBlock(block.language, block.content)}</Box>
+      return <Box key={key}>{renderCodeBlock(block.language, block.content, columns)}</Box>
     case 'list': {
       const items = block.items ?? block.content.split('\n')
       return (
         <Box key={key} flexDirection="column" paddingLeft={1}>
           {items.map((item, i) => (
             <Text key={i}>
-              <Text color={theme.muted}>• </Text>
+              <Text color={theme.secondary}>◇ </Text>
               {renderSegments(parseInline(item))}
             </Text>
           ))}
