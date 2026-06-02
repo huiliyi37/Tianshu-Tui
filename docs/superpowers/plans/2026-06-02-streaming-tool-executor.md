@@ -396,3 +396,135 @@ npx tsx --test src/**/__tests__/*.test.ts
 2. 内联执行 — 在当前会话中使用 executing-plans 执行任务，批量执行并设有检查点。
 
 选哪种方式？
+
+---
+
+## 8. 设计精化 · 2026-06-02 讨论补遗
+
+> 加载 天璇 胶囊后复盘的核心收敛。计划方向正确，以下补全是温跃层（lazy 改一下 和 过度工程 之间的路径）。
+
+### 8.1 审批分级（第 3.1 节）在当前默认配置下基本是 moot
+
+领航星已确认：天枢当前是**默认 auto-approve**（与 claude code / opencode 行业惯例一致）。在 auto-accept 模式下，4 级决策树的所有分支都走到"立即执行"——Level 2 / Level 3 的"排队等流结束再弹审批"分支**永远不会触发**。
+
+**含义**：
+- 第 3.1 节描述的"审批阻断流"在当前默认配置下**不是 critical 风险**，是 manual mode 残留
+- 真正应该防御的不是"审批弹窗卡住流"，而是"在 auto-accept 下，没有后悔机会"
+- **后悔窗**（regret window，§8.4）才是真正需要的设计
+
+### 8.2 温跃层：推测性读 vs 延迟写（核心 insight）
+
+把"立即执行"二分：
+- **只读工具**（read_file, grep, glob, ls, bash-with-pipes）→ 无副作用，可推测执行
+- **写工具**（write_file, edit_file, delete, bash-mutating, install）→ 有副作用，等流结束再执行
+
+**这个二分替代了"按风险等级排队"的策略**——风险等级评估本身就不可靠（依赖 sensorium confidence 在流中可能还没计算），而"是否产生外部副作用"是工具语义的客观属性。
+
+实现：
+```typescript
+// 工具元数据上加一个 isReadOnly 标签
+// 流式执行器判断：if isReadOnly → submit 立即执行；else → 排队到 flush
+```
+
+**节省的设计复杂度**：4 级决策树 + sensorium 实时风险评估 → 一个布尔标签。
+
+### 8.3 并发文件竞态的真正解法：git worktree 沙箱（不是 activeTargets Set）
+
+计划用 `activeTargets: Set<string>` 串行化同 target 的写工具。这是个**对症下药**但治标不治本：
+
+| 方案 | 同 target 串行 | 跨 target 读+写 | 后悔 | 真实冲突防护 |
+|------|:---:|:---:|:---:|:---:|
+| 计划方案（activeTargets） | ✓ | ✗ | ✗ | 部分 |
+| git worktree 沙箱 | ✓ | ✓ | ✓ | 完整 |
+
+**worktree 模式**：
+- 每个 turn（甚至每个 streaming batch）在一个 scratch worktree 中执行所有写操作
+- 写工具不在主工作树运行 → 不可能冲突
+- 流结束 → 把 scratch worktree 的 diff 推回主工作树
+- 后悔：保留 scratch worktree 不推回，主工作树不变
+- 跨 target 的 bash + edit 也不再是问题（都在 scratch 隔离环境里）
+
+**关键收益**：写工具的"自动批准"现在真的安全了——即使审批通过，写操作也是先在沙箱里跑，用户（或 fire-keeper）可以在推回前 review diff。
+
+**实现路径**：
+1. 复用已有 worktree 基础设施（项目已有 `worktree-reality-contract` 计划）
+2. `StreamingExecutor` 增加 `sandbox: 'main' | 'worktree:<id>'` 配置
+3. 写工具 + bash 走 worktree，只读工具走 main
+
+### 8.4 后悔窗（Regret Window）
+
+在 auto-accept 模式下，工具被推测执行后，如果模型**紧接着**发出 stop_reason='end_turn' 或 text 块说"实际上不要这么做"，工具已经跑了。
+
+**后悔窗**：
+- 推测执行的工具进入"可撤回"状态，保留 3-5 秒
+- 窗口期内如果出现 stop / 反向 text / 后续 tool_use 没出现 → 自动 commit
+- 窗口期内如果出现撤销信号 → abort in-flight execution，回滚状态
+
+**实现**：
+```typescript
+class StreamingExecutor {
+  private speculative = new Map<string, AbortController>()
+  private readonly REGRET_WINDOW_MS = 3000
+
+  submit(tool: ToolUse): void {
+    if (tool.isReadOnly) {
+      this.execute(tool)  // 立即执行，无后悔窗
+      return
+    }
+    // 写工具：进入后悔窗
+    const ctrl = new AbortController()
+    this.speculative.set(tool.id, ctrl)
+    setTimeout(() => {
+      this.speculative.delete(tool.id)
+      // 没撤销 → commit
+    }, REGRET_WINDOW_MS)
+  }
+
+  retract(toolId: string): void {
+    const ctrl = this.speculative.get(toolId)
+    if (ctrl) {
+      ctrl.abort()
+      this.speculative.delete(toolId)
+    }
+  }
+}
+```
+
+**触发点**：
+- `stop_reason === 'end_turn'` → commit 所有
+- 出现 `<cancel tool="...">` 自定义块 → retract 指定
+- 后续 tool_use 引用了 retracted 工具的输出 → 报错（不可能发生，因为没输出）
+
+### 8.5 遥测先行（先量再优化）
+
+计划在执行前没量化：**streaming-execution 实际能省多少？**
+
+应先加遥测：
+- 每个 turn 记录：(1) 流开始到第一个 tool_use 完成的时间 (2) 最后一个 tool_use 完成的时间 (3) 整 turn 总时长
+- 收集 50+ turn 的真实数据
+- 如果平均节省 < 200ms / turn → 整体优化 ROI 太低，可能不值得 4 部分实施的复杂度
+
+**遥测本身是 10 行代码**，比计划第 2-4 部分的总和还小。应该先做这一步。
+
+### 8.6 顺序依赖（第 3.3 节）的简化
+
+计划说"按流顺序收集结果"。但 tool_result 在对话历史中的位置由**模型生成顺序**决定，不是完成顺序。Ink 6 / React 在重渲染时按数组顺序输出，所以只要 `addToolResults` 按 `collectedBlocks` 中的 tool_use 顺序追加即可。
+
+实现应该是：在 streaming-executor 的 drain() 里，按 `order[]` 数组顺序 await，**不**按完成顺序。
+
+### 8.7 缓存前缀（第 3.4 节）的真正风险
+
+计划说"无影响"。但有一个隐藏风险：
+- 如果 `StreamingExecutor.submit()` 在某个 tool_use 还没完整解析时就开始执行（计划说不会，但实现时容易出 bug）→ 解析中途 JSON 被改写 → 工具收到的是中间状态参数
+- **防御**：把 JSON 解析完成判定加在更严格的位置——不仅 `input` 字段完整，整个 `tool_use` 块（id + name + input）全部就位才触发
+
+### 8.8 三个层级的推荐实施顺序
+
+| 阶段 | 内容 | 风险 | 收益 |
+|------|------|------|------|
+| L0 | 遥测：测 50 turn 真实耗时 | 零 | 数据基线 |
+| L1 | 推测性读：只读工具立即执行 | 极低（无副作用） | 部分节省 |
+| L2 | 写工具 worktree 沙箱 + 后悔窗 | 中（需要 worktree 基础设施就绪） | 完整节省 + 真正安全 |
+| L3 | 整合进 AgentLoop 主循环 | 低（建立在 L1/L2 上） | 用户感知 |
+
+**建议**：先 L0 拿数据，再决定 L1/L2 的优先级。如果 L0 显示节省 < 200ms，停在 L1（只读推测）就够了，worktree 沙箱留给以后。
