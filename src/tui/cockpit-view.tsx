@@ -4,7 +4,6 @@ import { getTheme } from './theme.js'
 import { CockpitRail, TracePanel, VerificationPanel, ContextPanel, SafetyPanel, ModelPanel, McpPanel } from './cockpit/index.js'
 import { buildCockpitSnapshot } from './cockpit/state.js'
 import type { Panel } from './cockpit/types.js'
-import type { SummaryState } from './summary-state.js'
 import type { AgentLoop } from '../agent/loop.js'
 import type { SessionContext } from '../agent/context.js'
 import type { McpManager } from '../mcp/manager.js'
@@ -16,12 +15,11 @@ export interface CockpitViewProps {
   model: string
   cacheHitRate: number
   cost: number
-  summaryState: SummaryState
   mcpManager: McpManager | null
   claimStoreRef: RefObject<import('../context/claim-store.js').ContextClaimStore | null>
 }
 
-export function CockpitView({ panel, agent, session, model, cacheHitRate, cost, summaryState, mcpManager, claimStoreRef }: CockpitViewProps) {
+export function CockpitView({ panel, agent, session, model, cacheHitRate, cost, mcpManager, claimStoreRef }: CockpitViewProps) {
   const theme = getTheme()
   const snap = useMemo(
     () => buildCockpitSnapshot({ agent, session, model, cacheHitRate, cost, mcpManager, claimCounts: claimStoreRef.current?.getStatusCounts() }),

@@ -1235,7 +1235,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             elapsedMs={summaryState.elapsedMs}
           />
         )}
-        {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} summaryState={summaryState} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
+        {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
         {activeOverlay === 'pager' && <Pager entries={historyItems} verbose={verbose} onExit={() => { surfacePop() }} />}
         {sessionPrompt === 'waiting' && (
           <Box paddingX={2} borderStyle="single" borderColor="cyan">
