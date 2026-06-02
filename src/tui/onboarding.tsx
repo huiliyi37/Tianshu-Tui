@@ -18,15 +18,25 @@ interface WelcomeScreenProps {
   cwd: string
 }
 
-// ASCII robot — WALL-E inspired, 7 lines tall
+// Futuristic core emblem — 7 lines tall
 const LOGO = [
-  '       ╭─┤▪├─╮       ',
-  '    ┌──┴──────┴──┐    ',
-  '    │  ◉      ◉  │    ',
-  '    │    ╭──╮    │    ',
-  '    └──┬─┴──┴─┬──┘    ',
-  '     ╭─┴──────┴─╮     ',
-  '     ╰──╯    ╰──╯     ',
+  '          ▲          ',
+  '        ╱ ⎔ ╲        ',
+  '      ╱   │   ╲      ',
+  '     ▲────┼────▲     ',
+  '      ╲   │   ╱      ',
+  '        ╲ ⎔ ╱        ',
+  '          ▼          ',
+]
+
+// Sleek block ASCII RIVET brand — 6 lines tall
+const BRAND = [
+  '██████╗  ██╗██╗   ██╗███████╗████████╗',
+  '██╔══██╗ ██║██║   ██║██╔════╝╚══██╔══╝',
+  '██████╔╝ ██║██║   ██║█████╗     ██║   ',
+  '██╔══██╗ ██║╚██╗ ██╔╝██╔══╝     ██║   ',
+  '██║  ██║ ██║  ╚████╔╝ ███████╗   ██║   ',
+  '╚═╝  ╚═╝ ╚═╝   ╚═══╝  ╚══════╝   ╚═╝   ',
 ]
 
 const STAGGER_MS = 150
@@ -43,18 +53,22 @@ export function WelcomeScreen({ model, cwd }: WelcomeScreenProps) {
   }, [])
 
   // Vertical padding to center content in terminal
-  // Robot(7) + brand(1) + gap(1) + meta(1) + gap(2) + shortcuts(2) + gap(1) + hint(1) = ~16 lines
-  const contentHeight = 16
+  // Logo(7) + brand(6) + gap(1) + meta(1) + gap(2) + shortcuts(2) + gap(2) + hint(1) = ~22 lines
+  const contentHeight = 22
   const topPad = Math.max(1, Math.floor((rows - contentHeight) / 2) - 2)
 
   return (
     <Box flexDirection="column" paddingTop={topPad} alignItems="center">
-      {/* Phase 0: Robot + brand */}
+      {/* Phase 0: Logo + brand */}
       <Box flexDirection="column" alignItems="center">
         {LOGO.map((line, i) => (
           <Text key={i} color={theme.primary}>{line}</Text>
         ))}
-        <Text color={theme.primary} bold>{'R I V E T'}</Text>
+        <Box flexDirection="column" alignItems="center" marginTop={1}>
+          {BRAND.map((line, i) => (
+            <Text key={i} color={theme.secondary} bold>{line}</Text>
+          ))}
+        </Box>
       </Box>
 
       {/* Phase 1: Model + directory */}
