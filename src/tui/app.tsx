@@ -124,6 +124,7 @@ import { renderStaticEntry, renderMemoKey } from './render-entry.js'
 import { Pager } from './pager.js'
 import { CockpitView } from './cockpit-view.js'
 import { useGlobalInput, type UseGlobalInputDeps } from './hooks/use-global-input.js'
+import { useRewind } from './hooks/use-rewind.js'
 
 const INTERVIEW_MARKER_RE = /<!-- interview:(\{.*?\}) -->/
 
@@ -509,43 +510,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, [isStreaming])
 
   // --- Rewind ---
-  const getRewindEntries = useCallback((): RewindEntry[] => {
-    const msgs = session.getMessages()
-    const entries: RewindEntry[] = []
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i]!
-      if (m.role === 'user' && typeof m.content === 'string') {
-        entries.push({ index: i, content: m.content })
-      }
-    }
-    return entries
-  }, [session])
-
-  const handleRewind = useCallback((entry: RewindEntry) => {
-    // Truncate messages to before the selected user message
-    const msgs = session.getMessages()
-    session.replaceMessages(msgs.slice(0, entry.index))
-
-    // Truncate log history: remove entries from the corresponding user_message onward
-    const items = historyBufferRef.current.items()
-    // Find the log entry matching this user message (search from the end)
-    let cutIdx = items.length
-    for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i]!.type === 'user_message' && items[i]!.content === entry.content) {
-        cutIdx = i
-        break
-      }
-    }
-    historyBufferRef.current.clear()
-    for (let i = 0; i < cutIdx; i++) {
-      historyBufferRef.current.push(items[i]!)
-    }
-    setHistoryVersion(v => v + 1)
-
-    // Restore text to input bar
-    inputBarRef.current.setValue(entry.content)
-    pushStatic(createLogEntry({ type: 'system', content: `⏪ Rewound — message restored to input.` }))
-  }, [session, pushStatic])
+  const { getRewindEntries, handleRewind } = useRewind({
+    session, historyBufferRef, setHistoryVersion, inputBarRef, pushStatic,
+  })
 
   const handleSubmit = useCallback((_userInput: string) => {
     let userInput = _userInput
