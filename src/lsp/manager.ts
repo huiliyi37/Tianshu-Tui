@@ -22,6 +22,9 @@ export interface LspManager {
   supportsReferences(): boolean
   gotoDefinition(filePath: string, line: number, character: number): Promise<Location[]>
   findReferences(filePath: string, line: number, character: number): Promise<Location[]>
+  /** Notify the LSP server that a file was modified on disk (e.g. by edit_file/write_file).
+   *  Ensures the LSP's internal state stays in sync for subsequent goto-def / find-refs queries. */
+  changeFile(filePath: string): void
   dispose(): void
 }
 
@@ -181,6 +184,21 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
         }))
       } catch {
         return []
+      }
+    },
+
+    changeFile(filePath) {
+      if (!rpc || !ready) return
+      const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
+      const uri = `file://${absPath}`
+      if (!openedDocs.has(uri)) return // never opened, server has no cached state
+      try {
+        rpc.notify('textDocument/didChange', {
+          textDocument: { uri, version: Date.now() },
+          contentChanges: [{ text: '' }],
+        })
+      } catch {
+        // Best-effort: if the notification fails, next LSP query re-reads from disk anyway
       }
     },
 

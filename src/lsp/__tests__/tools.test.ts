@@ -17,6 +17,7 @@ describe('createGotoDefinitionTool', () => {
       supportsReferences: () => false,
       gotoDefinition: async () => [],
       findReferences: async () => [],
+      changeFile: () => {},
       dispose: () => {},
     }
 
@@ -41,6 +42,7 @@ describe('createGotoDefinitionTool', () => {
       supportsReferences: () => false,
       gotoDefinition: async () => [],
       findReferences: async () => [],
+      changeFile: () => {},
       dispose: () => {},
     }
 
@@ -56,6 +58,7 @@ describe('createGotoDefinitionTool', () => {
       supportsReferences: () => false,
       gotoDefinition: async () => [],
       findReferences: async () => [],
+      changeFile: () => {},
       dispose: () => {},
     }
 
@@ -79,6 +82,7 @@ describe('createGotoDefinitionTool', () => {
         }]
       },
       findReferences: async () => [],
+      changeFile: () => {},
       dispose: () => {},
     }
 
@@ -99,6 +103,7 @@ describe('createGotoDefinitionTool', () => {
       supportsReferences: () => false,
       gotoDefinition: async () => [],
       findReferences: async () => [],
+      changeFile: () => {},
       dispose: () => {},
     }
 
@@ -116,6 +121,7 @@ describe('createGotoDefinitionTool', () => {
       supportsReferences: () => false,
       gotoDefinition: async () => [],
       findReferences: async () => [],
+      changeFile: () => {},
       dispose: () => {},
     }
 
@@ -139,6 +145,7 @@ describe('createFindReferencesTool', () => {
         { uri: 'src/a.ts', range: { start: { line: 5, character: 3 }, end: { line: 5, character: 9 } } },
         { uri: 'src/b.ts', range: { start: { line: 12, character: 1 }, end: { line: 12, character: 7 } } },
       ],
+      changeFile: () => {},
       dispose: () => {},
     }
 
@@ -161,6 +168,7 @@ describe('createFindReferencesTool', () => {
       supportsReferences: () => true,
       gotoDefinition: async () => [],
       findReferences: async () => [],
+      changeFile: () => {},
       dispose: () => {},
     }
 
@@ -178,6 +186,7 @@ describe('createFindReferencesTool', () => {
       supportsReferences: () => true,
       gotoDefinition: async () => [],
       findReferences: async () => [],
+      changeFile: () => {},
       dispose: () => {},
     }
 
