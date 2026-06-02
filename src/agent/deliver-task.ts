@@ -268,6 +268,25 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
       if (commit) {
         if (report.state === 'RED') {
           lines.push('', '❌ Cannot commit: delivery gate is RED.')
+          lines.push('', 'Recovery:')
+          if (report.blockingReason) {
+            lines.push(`  Reason: ${report.blockingReason}`)
+          }
+          if (report.currentBlockingFailure) {
+            lines.push(`  Detail: ${report.currentBlockingFailure}`)
+          }
+          lines.push('')
+          // Unverified: guide to targeted verification instead of full suite
+          if (report.ownedFiles.length > 0 && report.verificationCount === 0) {
+            lines.push('  → Files are unverified. Run TARGETED tests first:')
+            lines.push('    Use run_tests with filter="test-file-name" for each changed file.')
+            lines.push('    Use related_tests(sourceFile) to find the right test file.')
+            lines.push('')
+            lines.push('    Do NOT run the full test suite as first step — it may timeout.')
+          } else {
+            lines.push('  → Fix the blocking issue above, then re-run deliver_task.')
+            lines.push('    If tests keep timing out, run them in smaller batches by directory.')
+          }
           return { content: lines.join('\n'), isError: true }
         }
         if (report.state === 'YELLOW') {

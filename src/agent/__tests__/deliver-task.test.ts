@@ -99,6 +99,24 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(result.isError, true)
     assert.ok(result.content.includes('RED'))
     assert.ok(result.content.includes('Cannot commit'))
+    // Recovery guidance should be present
+    assert.ok(result.content.includes('Recovery'))
+    assert.ok(result.content.includes('TARGETED'))
+  })
+
+  it('RED with unverified files suggests targeted tests, not full suite', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts', 'src/b.ts'],
+      commitOwnedFiles: () => {
+        throw new Error('commit executor should not run when gate is RED')
+      },
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: test' } })
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('unverified'))
+    assert.ok(result.content.includes('Do NOT run the full test suite'))
   })
 
   it('reports YELLOW when external verification blocked but owned files verified', async () => {

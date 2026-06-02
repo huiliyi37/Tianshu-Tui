@@ -174,17 +174,36 @@ export function createDelegateBatchTool(
       }
 
       let progressReported = 0
-      const run = await coordinator.delegateBatch(
-        dispatched,
-        parsed.data.policy ?? 'primary_decides',
-        params.abortSignal,
-        (completed, total) => {
-          if (completed > progressReported) {
-            progressReported = completed
-            params.onOutput?.(`⏳ batch progress: ${completed}/${total} workers done\n`)
-          }
-        },
-      )
+      let run: CoordinatorRun
+      try {
+        run = await coordinator.delegateBatch(
+          dispatched,
+          parsed.data.policy ?? 'primary_decides',
+          params.abortSignal,
+          (completed, total) => {
+            if (completed > progressReported) {
+              progressReported = completed
+              params.onOutput?.(`⏳ batch progress: ${completed}/${total} workers done\n`)
+            }
+          },
+        )
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return {
+          content: [
+            `delegate_batch failed: ${msg}`,
+            '',
+            '⚠️ Do NOT retry this batch with the same parameters — the failure is persistent.',
+            '',
+            'Recovery options (pick one):',
+            '1. Use inline tools instead: read_file, grep, glob, repo_graph for exploration',
+            '2. Use delegate_task (singular) for a single focused task with a 30s timeout',
+            '3. Reduce batch to 1-2 tasks with simpler, more specific objectives',
+            '4. If timeout: subagents exceeded their time budget — simplify the objective text',
+          ].join('\n'),
+          isError: true,
+        }
+      }
 
       // Extract worker findings into claim store
       if (run.status === 'completed') {

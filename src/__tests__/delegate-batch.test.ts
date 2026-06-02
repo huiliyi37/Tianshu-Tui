@@ -98,6 +98,29 @@ describe('delegate_batch tool', () => {
     assert.equal(new Set(proposals.map(p => p.evidence[0]!.id)).size, 4)
   })
 
+  it('returns actionable error when coordinator throws (timeout/crash)', async () => {
+    const tool = createDelegateBatchTool({
+      delegateBatch: async () => {
+        throw new Error('Tool delegate_batch timed out after 180s')
+      },
+    })
+
+    const result = await tool.execute({
+      toolUseId: 'tu-timeout',
+      cwd: '/tmp',
+      sessionTurnCount: 5,
+      input: {
+        tasks: [{ objective: 'search for patterns', kind: 'code_search' }],
+      },
+    })
+
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('delegate_batch failed'))
+    assert.ok(result.content.includes('Do NOT retry'))
+    assert.ok(result.content.includes('Recovery options'))
+    assert.ok(result.content.includes('inline tools'))
+  })
+
   describe('progressive timeout', () => {
     const base = { input: {}, toolUseId: 'tu', cwd: '/tmp' }
 
