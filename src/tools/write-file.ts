@@ -3,6 +3,8 @@ import { dirname } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
 
+const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
+
 export const WRITE_FILE_TOOL: Tool = {
   definition: {
     name: 'write_file',
@@ -37,6 +39,14 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     }
     const content = params.input.content as string
     const dir = dirname(filePath)
+
+    if (content.length > MAX_WRITE_FILE_BYTES) {
+      const sizeMB = (content.length / (1024 * 1024)).toFixed(1)
+      return {
+        content: `Error: Content too large for write_file (${sizeMB}MB). Use bash to write large files via heredoc or stream redirection.`,
+        isError: true,
+      }
+    }
 
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true })

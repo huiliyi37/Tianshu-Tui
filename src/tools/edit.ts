@@ -1,6 +1,8 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
+
+const MAX_EDIT_FILE_BYTES = 100 * 1024 // 100KB — match read_file guard
 
 export const EDIT_FILE_TOOL: Tool = {
   definition: {
@@ -43,6 +45,17 @@ Bad: using a too-short old_string that matches multiple locations`,
     }
     if (!existsSync(filePath)) {
       return { content: `Error: File not found: ${filePath}`, isError: true }
+    }
+
+    // OOM guard: reject large files that would blow the heap on readFileSync.
+    // For files >100KB, direct the model to apply_patch or sed instead.
+    const fileSize = statSync(filePath).size
+    if (fileSize > MAX_EDIT_FILE_BYTES) {
+      const sizeKB = (fileSize / 1024).toFixed(0)
+      return {
+        content: `Error: File too large for edit_file (${sizeKB}KB). Use apply_patch with a unified diff for targeted edits, or use bash with sed for simple string replacements on large files.`,
+        isError: true,
+      }
     }
 
     const content = readFileSync(filePath, 'utf-8')
