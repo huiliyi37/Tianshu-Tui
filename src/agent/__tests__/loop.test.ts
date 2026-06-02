@@ -14,6 +14,7 @@ import { PlaybookStore } from '../playbook-store.js'
 import type { StreamCallbacks } from '../../api/stream-client.js'
 import type { StreamClient } from '../../api/stream-client.js'
 import type { ContentBlock, Message } from '../../api/types.js'
+import type { Tool } from '../../tools/types.js'
 
 function makeTextBlock(text: string): ContentBlock {
   return { type: 'text', text }
@@ -1346,5 +1347,77 @@ describe('AgentLoop — task contract 3-way branch', () => {
     })
 
     assert.equal(agent.getTaskContract(), undefined, 'contract should be cleared when previous is ready_to_deliver')
+  })
+})
+
+// ── Convergence + doom loop blocked → auto-complete ──
+
+describe('AgentLoop — convergence recovery', () => {
+  it('injects completion signal when convergence fires and doom loop is blocked', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+
+    // Create a bash tool that returns predictable results
+    const bashTool: Tool = {
+      definition: {
+        name: 'bash',
+        description: 'Run shell command',
+        input_schema: {
+          type: 'object',
+          properties: { command: { type: 'string' } },
+          required: ['command'],
+        },
+      },
+      execute: async () => ({ content: 'ok' }),
+      requiresApproval: () => false,
+      isConcurrencySafe: () => true,
+      isEnabled: () => true,
+    }
+    registry.register(bashTool)
+
+    let callCount = 0
+    // Simulate repeated git log calls: 8 tool_use turns all for the same bash command
+    // This will:
+    //  1. Fill fingerprint buffer with 8 identical entries → doomLoop = blocked
+    //  2. Produce no edits, low novelty, low entropy → convergence score drops
+    //  3. Combined: inject completion signal, then model finishes
+    const client: StreamClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        callCount++
+        if (callCount <= 8) {
+          cb.onContentBlock(makeToolUseBlock(`tu_${callCount}`, 'bash', { command: 'git log --oneline' }))
+          cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 30 })
+        } else {
+          cb.onContentBlock(makeTextBlock('All tasks complete. DELIVER_TASK returned GREEN.'))
+          cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 30 })
+        }
+      }),
+    } as unknown as StreamClient
+
+    const agent = new AgentLoop(
+      {
+        client, promptEngine: makeEngine(), toolRegistry: registry,
+        maxTurns: 20, contextWindow: 200_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      },
+      session,
+      '/test',
+    )
+
+    let finalTurn = false
+    const messages: string[] = []
+    await agent.run('verify completed task', {
+      onTextDelta: (text) => { messages.push(text) },
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: (_usage, _turn, isFinal) => { if (isFinal) finalTurn = true },
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => true,
+    })
+
+    // Should have completed the turn instead of looping indefinitely
+    assert.ok(finalTurn, 'should complete turn after convergence + doom loop detection')
   })
 })
