@@ -9,7 +9,7 @@ import { validatePath } from './path-validate.js'
  * file — two different lines producing the same hash is astronomically unlikely
  * (1 in 2^32).
  */
-function hashLine(line: string): string {
+export function hashLine(line: string): string {
   const clean = line.endsWith('\r') ? line.slice(0, -1) : line
   return createHash('sha256').update(clean).digest('hex').slice(0, 8)
 }

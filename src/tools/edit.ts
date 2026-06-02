@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
+import { hashLine } from './hash-edit.js'
 
 const MAX_EDIT_FILE_BYTES = 100 * 1024 // 100KB — match read_file guard
 
@@ -159,12 +160,18 @@ function buildNotFoundError(filePath: string, oldString: string, fileContent: st
     for (let extend = end; extend < Math.min(fileLines.length, start + windowSize + 5); extend++) {
       if (fileLines[extend]!.trim() === trimmedLast) {
         const expanded = fileLines.slice(start, extend + 1).join('\n')
-        return formatDiffError(filePath, oldString, expanded, start + 1)
+        const hint = hashEditHint(fileContent, start + 1, extend + 1)
+        return hint
+          ? `${formatDiffError(filePath, oldString, expanded, start + 1)}\n\nHint: use hash_edit with these anchors instead:\n  ${hint}`
+          : formatDiffError(filePath, oldString, expanded, start + 1)
       }
     }
   }
 
-  return formatDiffError(filePath, oldString, actualWindow, start + 1)
+  const hint = hashEditHint(fileContent, start + 1, end)
+  return hint
+    ? `${formatDiffError(filePath, oldString, actualWindow, start + 1)}\n\nHint: use hash_edit with these anchors instead:\n  ${hint}`
+    : formatDiffError(filePath, oldString, actualWindow, start + 1)
 }
 
 /**
@@ -191,7 +198,13 @@ function buildMultipleMatchError(filePath: string, oldString: string, fileConten
   }
 
   const matchSummary = matches
-    .map((m, i) => `Match ${i + 1} at line ${m.lineNumber}:\n${m.context}`)
+    .map((m, i) => {
+      const startLine = m.lineNumber
+      const endLine = startLine + oldString.split('\n').length - 1
+      const anchors = hashEditHint(fileContent, startLine, endLine)
+      const hint = anchors ? `\n  Hint: use hash_edit anchors=["${anchors.split('  ').join('", "')}"]` : ''
+      return `Match ${i + 1} at line ${m.lineNumber}:\n${m.context}${hint}`
+    })
     .join('\n\n')
 
   return `Error: old_string matches multiple locations in ${filePath}. Use replace_all=true to replace every occurrence, or extend old_string with surrounding context to make it unique.\n\nMatches found:\n\n${matchSummary}`
@@ -226,4 +239,15 @@ function sharedPrefixLength(a: string, b: string): number {
   let i = 0
   while (i < limit && a[i] === b[i]) i++
   return i
+}
+
+/** Generate hash_edit anchor hints for the given line range in fileContent.
+ *  Returns a string like "L42:a1b2c3d4  L44:e5f6a7b8" or null if out of range. */
+function hashEditHint(fileContent: string, startLine: number, endLine: number): string | null {
+  const fileLines = fileContent.split('\n')
+  if (startLine < 1 || endLine > fileLines.length || startLine > endLine) return null
+  const first = `L${startLine}:${hashLine(fileLines[startLine - 1]!)}`
+  if (startLine === endLine) return first
+  const last = `L${endLine}:${hashLine(fileLines[endLine - 1]!)}`
+  return `${first}  ${last}`
 }
