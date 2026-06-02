@@ -3,10 +3,11 @@ import assert from 'node:assert/strict'
 import { gutterGlyph, GUTTER, type GutterKind } from '../gutter.js'
 
 describe('gutterGlyph', () => {
-  it('returns a distinct glyph for each known kind', () => {
+  it('returns a distinct glyph for each known kind, except user/assistant which share the bold bar', () => {
     const kinds: GutterKind[] = ['user', 'assistant', 'thinking', 'tool', 'system']
     const glyphs = kinds.map(gutterGlyph)
-    assert.equal(new Set(glyphs).size, glyphs.length) // all distinct
+    // user and assistant share '▍'
+    assert.equal(new Set(glyphs).size, 4)
   })
 
   it('maps known kinds to their table entry', () => {
@@ -19,8 +20,8 @@ describe('gutterGlyph', () => {
     assert.equal(gutterGlyph('nope' as GutterKind), GUTTER.system.glyph)
   })
 
-  it('thinking uses ◦ (distinct from the legacy ▸ now owned by tool)', () => {
-    assert.equal(gutterGlyph('thinking'), '◦')
-    assert.equal(gutterGlyph('tool'), '▸')
+  it('thinking uses ┊ and tool uses │', () => {
+    assert.equal(gutterGlyph('thinking'), '┊')
+    assert.equal(gutterGlyph('tool'), '│')
   })
 })

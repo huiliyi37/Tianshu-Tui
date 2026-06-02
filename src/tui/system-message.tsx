@@ -13,7 +13,8 @@ export const SystemMessage = memo(function SystemMessage({ content, isError }: S
   const color = isError ? theme.error : theme.systemColor
   return (
     <Box paddingX={2}>
-      <Text color={!isError ? theme.muted : color}>{gutterGlyph('system')} {content}</Text>
+      <Text color={theme.dim} dimColor={!isError}>{gutterGlyph('system')} </Text>
+      <Text color={!isError ? theme.dim : color} dimColor={!isError}>{content}</Text>
     </Box>
   )
 })

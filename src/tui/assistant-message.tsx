@@ -44,6 +44,7 @@ export const AssistantMessage = memo(function AssistantMessage({ content }: Assi
       <Box flexDirection="row" gap={1}>
         <Text color={theme.assistantColor} bold>{gutterGlyph('assistant')}</Text>
         <Box flexDirection="column" flexGrow={1}>
+          <Text color={theme.assistantColor} bold dimColor>Rivet</Text>
           {omittedLines > 0 && (
             <Text color={theme.muted}>(… {omittedLines} earlier lines omitted)</Text>
           )}
