@@ -141,6 +141,13 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
     setCursorPos(newCursor)
   }, [onChange])
 
+  /** Move cursor without editing text — updates both state and ref so the
+   *  next useInput call reads the correct position even between renders. */
+  const moveCursor = useCallback((newPos: number) => {
+    cursorPosRef.current = newPos
+    setCursorPos(newPos)
+  }, [])
+
   const insertAtCursor = useCallback((insertion: string) => {
     const normalized = insertion.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
     const cur = valueRef.current
@@ -200,7 +207,7 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         const lines = cur.split('\n')
         const { line, col } = getLineCol(cur, pos)
         if (line > 0) {
-          setCursorPos(posFromLineCol(lines, line - 1, col))
+          moveCursor(posFromLineCol(lines, line - 1, col))
           return
         }
         // At first line — fall through to history
@@ -225,7 +232,7 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         const lines = cur.split('\n')
         const { line, col } = getLineCol(cur, pos)
         if (line < lines.length - 1) {
-          setCursorPos(posFromLineCol(lines, line + 1, col))
+          moveCursor(posFromLineCol(lines, line + 1, col))
           return
         }
         // At last line — fall through to history
@@ -266,7 +273,7 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
         return
       }
       onSubmit(cur)
-      setCursorPos(0)
+      moveCursor(0)
       return
     }
 
@@ -281,11 +288,11 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
 
     // Arrow keys — cursor movement
     if (key.leftArrow) {
-      setCursorPos(prev => Math.max(0, prev - 1))
+      moveCursor(Math.max(0, pos - 1))
       return
     }
     if (key.rightArrow) {
-      setCursorPos(prev => Math.min(cur.length, prev + 1))
+      moveCursor(Math.min(cur.length, pos + 1))
       return
     }
     // Home / Ctrl+A — move to start of current line
@@ -293,9 +300,9 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       if (hasNewlines) {
         const { line } = getLineCol(cur, pos)
         const lines = cur.split('\n')
-        setCursorPos(posFromLineCol(lines, line, 0))
+        moveCursor(posFromLineCol(lines, line, 0))
       } else {
-        setCursorPos(0)
+        moveCursor(0)
       }
       return
     }
@@ -304,51 +311,51 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
       if (hasNewlines) {
         const { line } = getLineCol(cur, pos)
         const lines = cur.split('\n')
-        setCursorPos(posFromLineCol(lines, line, lines[line]!.length))
+        moveCursor(posFromLineCol(lines, line, lines[line]!.length))
       } else {
-        setCursorPos(cur.length)
+        moveCursor(cur.length)
       }
       return
     }
     // Option/Alt+Left (meta+b) — word jump backward
     if ((key.meta && (input === 'b' || input === 'B')) || (key.meta && key.leftArrow)) {
-      setCursorPos(prevWordStart(cur, pos))
+      moveCursor(prevWordStart(cur, pos))
       return
     }
     // Option/Alt+Right (meta+f) — word jump forward
     if ((key.meta && (input === 'f' || input === 'F')) || (key.meta && key.rightArrow)) {
-      setCursorPos(nextWordEnd(cur, pos))
+      moveCursor(nextWordEnd(cur, pos))
       return
     }
     // Option+Home (meta+home) — jump to buffer start
     if (key.meta && key.home) {
-      setCursorPos(0)
+      moveCursor(0)
       return
     }
     // Option+End (meta+end) — jump to buffer end
     if (key.meta && key.end) {
-      setCursorPos(cur.length)
+      moveCursor(cur.length)
       return
     }
 
+    // Option+Backspace (meta+backspace) — delete word backward (must precede plain backspace)
+    if (key.meta && key.backspace) {
+      const cut = prevWordStart(cur, pos)
+      if (cut !== pos) commitEdit(cur.slice(0, cut) + cur.slice(pos), cut)
+      return
+    }
+    // Option+Delete / Ctrl+Delete (meta+delete or ctrl+delete) — delete word forward (must precede plain delete)
+    if ((key.meta || key.ctrl) && key.delete) {
+      const cut = nextWordEnd(cur, pos)
+      if (cut !== pos) commitEdit(cur.slice(0, pos) + cur.slice(cut), pos)
+      return
+    }
     // Backspace / Delete — macOS backspace sends \x7f which Ink maps to key.delete,
     // so treat both as backward delete.
     if (key.backspace || key.delete) {
       if (pos > 0) {
         commitEdit(cur.slice(0, pos - 1) + cur.slice(pos), pos - 1)
       }
-      return
-    }
-    // Option+Backspace (meta+backspace) — delete word backward
-    if (key.meta && key.backspace) {
-      const cut = prevWordStart(cur, pos)
-      if (cut !== pos) commitEdit(cur.slice(0, cut) + cur.slice(pos), cut)
-      return
-    }
-    // Option+Delete / Ctrl+Delete (meta+delete or ctrl+delete) — delete word forward
-    if ((key.meta || key.ctrl) && key.delete) {
-      const cut = nextWordEnd(cur, pos)
-      if (cut !== pos) commitEdit(cur.slice(0, pos) + cur.slice(cut), pos)
       return
     }
 
