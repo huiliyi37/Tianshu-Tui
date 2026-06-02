@@ -1641,8 +1641,7 @@ export class AgentLoop {
         const latestTurnCache = cacheHistory.length > 0 ? cacheHistory[cacheHistory.length - 1] : null
 
         if (this.abortController.signal.aborted) {
-          // P0: skip addAssistantBlocks — partial blocks from an aborted
-          // stream must not pollute the message list and break prefix cache.
+          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
           if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           // runPostSession is best-effort cleanup — its failure must not cause
@@ -1653,7 +1652,7 @@ export class AgentLoop {
         }
 
         if (streamError) {
-          if (collectedBlocks.length > 0 && (streamError as Error).name !== 'AbortError') { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
+          if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onError(streamError)
           return
