@@ -33,6 +33,10 @@ export interface ConvergenceInput {
    *  action). Tool-based signals can't see these turns since recentToolHistory
    *  only grows on tool execution. */
   noToolTurnCount?: number
+  /** Recent turn text fingerprints (whitespace-normalized trimmed text).
+   *  Used to detect cross-turn text repetition — the model produces similar
+   *  analysis text over multiple turns without making progress. */
+  textFingerprints?: ReadonlyArray<string>
 }
 
 export interface ConvergenceResult {
@@ -60,6 +64,8 @@ export interface ConvergenceSignals {
   tokenEfficiency: number
   /** 0-1 penalty for alternating tool patterns (A→B→A→B). 0 = severe oscillation, 1 = no oscillation. */
   oscillationPenalty: number
+  /** 0-1 penalty for cross-turn text repetition. 0 = severe repetition (same text), 1 = no repetition. */
+  textRepetitionPenalty: number
 }
 
 // ─── Window-aware Thresholds ────────────────────────────────────────
@@ -124,14 +130,15 @@ interface PhaseWeights {
   errorPenalty: number
   tokenEfficiency: number
   oscillationPenalty: number
+  textRepetitionPenalty: number
 }
 
 const PHASE_WEIGHTS: Record<PhaseClass, PhaseWeights> = {
-  explore: { editRatio: 0.05, targetNovelty: 0.30, toolEntropy: 0.25, errorPenalty: 0.15, tokenEfficiency: 0.15, oscillationPenalty: 0.10 },
-  plan:    { editRatio: 0.10, targetNovelty: 0.22, toolEntropy: 0.18, errorPenalty: 0.20, tokenEfficiency: 0.20, oscillationPenalty: 0.10 },
-  execute: { editRatio: 0.46, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.20, tokenEfficiency: 0.08, oscillationPenalty: 0.06 },
-  verify:  { editRatio: 0.26, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.30, tokenEfficiency: 0.12, oscillationPenalty: 0.12 },
-  deliver: { editRatio: 0.40, targetNovelty: 0.10, toolEntropy: 0.10, errorPenalty: 0.22, tokenEfficiency: 0.08, oscillationPenalty: 0.10 },
+  explore: { editRatio: 0.05, targetNovelty: 0.25, toolEntropy: 0.20, errorPenalty: 0.12, tokenEfficiency: 0.13, oscillationPenalty: 0.10, textRepetitionPenalty: 0.15 },
+  plan:    { editRatio: 0.10, targetNovelty: 0.18, toolEntropy: 0.15, errorPenalty: 0.18, tokenEfficiency: 0.18, oscillationPenalty: 0.10, textRepetitionPenalty: 0.11 },
+  execute: { editRatio: 0.40, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.18, tokenEfficiency: 0.08, oscillationPenalty: 0.06, textRepetitionPenalty: 0.12 },
+  verify:  { editRatio: 0.22, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.28, tokenEfficiency: 0.10, oscillationPenalty: 0.10, textRepetitionPenalty: 0.14 },
+  deliver: { editRatio: 0.36, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.20, tokenEfficiency: 0.08, oscillationPenalty: 0.08, textRepetitionPenalty: 0.12 },
 }
 
 // ─── Signal Computation ─────────────────────────────────────────────
@@ -305,6 +312,54 @@ function computeOscillationPenalty(fingerprints: ReadonlyArray<string>): number 
   return 1.0
 }
 
+/**
+ * textRepetitionPenalty: detects cross-turn text output repetition.
+ * When the model produces nearly identical text across turns (despite calling
+ * different tools), it's stuck in a "reformat the same analysis" loop.
+ *
+ * Uses word-level Jaccard similarity between recent text fingerprints.
+ * Returns 0.0 (heavy penalty) when 3+ of the last 4 turns have >70% word overlap,
+ * 1.0 when text is diverse across turns.
+ */
+function computeTextRepetitionPenalty(fingerprints: ReadonlyArray<string>): number {
+  const window = fingerprints.slice(-5)
+  if (window.length < 3) return 1.0 // not enough data
+
+  // Compute word sets for each fingerprint (skip very short ones)
+  const wordSets = window
+    .filter(fp => fp.length >= 50)
+    .map(fp => new Set(fp.split(/\s+/).filter(w => w.length >= 3)))
+
+  if (wordSets.length < 3) return 1.0
+
+  // Count pairs with high Jaccard similarity
+  let highSimilarityPairs = 0
+  let totalPairs = 0
+  for (let i = 0; i < wordSets.length; i++) {
+    for (let j = i + 1; j < wordSets.length; j++) {
+      totalPairs++
+      const a = wordSets[i]!
+      const b = wordSets[j]!
+      if (a.size === 0 || b.size === 0) continue
+      let intersection = 0
+      for (const word of a) {
+        if (b.has(word)) intersection++
+      }
+      const union = a.size + b.size - intersection
+      const jaccard = union > 0 ? intersection / union : 0
+      if (jaccard > 0.7) highSimilarityPairs++
+    }
+  }
+
+  if (totalPairs === 0) return 1.0
+
+  // If more than half of pairs are highly similar, apply penalty
+  const similarRatio = highSimilarityPairs / totalPairs
+  if (similarRatio >= 0.6) return 0.0   // severe: majority of turns repeat same text
+  if (similarRatio >= 0.4) return 0.3   // moderate
+  return 1.0
+}
+
 // ─── Score Computation ──────────────────────────────────────────────
 
 function computeConvergenceScore(
@@ -319,7 +374,8 @@ function computeConvergenceScore(
     weights.toolEntropy * signals.toolEntropy +
     weights.errorPenalty * signals.errorPenalty +
     weights.tokenEfficiency * signals.tokenEfficiency +
-    weights.oscillationPenalty * signals.oscillationPenalty
+    weights.oscillationPenalty * signals.oscillationPenalty +
+    weights.textRepetitionPenalty * signals.textRepetitionPenalty
 
   // Phase expectation penalty: phases that require edits (execute, verify,
   // deliver) are fundamentally off-track if no edits are happening.
@@ -407,6 +463,9 @@ function buildInjectedMessage(
   if (signals.tokenEfficiency < 0.2 && phaseClass !== 'explore') {
     lines.push('- 纯读取无产出，建议立即采取编辑或测试行动验证当前假设')
   }
+  if (signals.textRepetitionPenalty < 0.3) {
+    lines.push('- 连续多轮输出高度相似的文本内容，模型可能陷入"重复输出"循环')
+  }
 
   if (level === 3) {
     lines.push('')
@@ -437,6 +496,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     errorPenalty: computeErrorPenalty(windowSize, input.recentToolHistory),
     tokenEfficiency: computeTokenEfficiency(windowSize, input.recentToolHistory, input.evidenceState),
     oscillationPenalty: computeOscillationPenalty(input.toolFingerprints ?? []),
+    textRepetitionPenalty: computeTextRepetitionPenalty(input.textFingerprints ?? []),
   }
 
   const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0)
@@ -449,8 +509,13 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // No-tool stagnation: fire earlier than normal thresholds. When the model
   // produces multiple turns with no tool calls, it's clearly stuck — don't
   // wait for nLow/nMid/nHigh turn counts to accumulate.
-  if (noToolCount >= 3) {
-    level = 2 // immediately kick on 3+ consecutive no-tool turns
+  // Hard cap: 5+ consecutive no-tool turns → forced abort (prevents 10+ wasted LLM calls).
+  const NO_TOOL_ABORT_THRESHOLD = 5
+  const noToolStagnation = noToolCount >= 2
+  if (noToolCount >= NO_TOOL_ABORT_THRESHOLD) {
+    level = 3 // force abort — model is clearly stuck in a text-only loop
+  } else if (noToolCount >= 3) {
+    level = 2 // kick on 3+ consecutive no-tool turns
   } else if (noToolCount >= 2 && turn >= 4) {
     level = 2 // kick after 2 no-tool turns if we're past the very early turns
   } else if (turn >= tier.nHigh && score <= 0.2) {
@@ -461,13 +526,18 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     level = 1
   }
 
-  // Level 0 early-exit if turn count is too low for the detector to be meaningful
-  if (turn < tier.nLow) {
+  // Level 0 early-exit ONLY for score-based detection (needs statistical
+  // significance from enough turns).  No-tool stagnation is meaningful from
+  // the very first turn — never override it with the early-exit gate.
+  if (turn < tier.nLow && !noToolStagnation) {
     level = 0
   }
 
-  const shouldAbort = level >= 3 && score < 0.1
-  const shouldForceSplit = level >= 3
+  const noToolForceAbort = noToolCount >= NO_TOOL_ABORT_THRESHOLD
+  const shouldAbort = (level >= 3 && score < 0.1) || noToolForceAbort
+  // Session split is pointless for no-tool stagnation — the problem is model
+  // behavior, not context size.  Only split on score-based level 3.
+  const shouldForceSplit = level >= 3 && !noToolForceAbort
   const shouldKick = level >= 2
   const injectedMessage = (level >= 2)
     ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount)

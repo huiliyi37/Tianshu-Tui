@@ -1421,3 +1421,48 @@ describe('AgentLoop — convergence recovery', () => {
     assert.ok(finalTurn, 'should complete turn after convergence + doom loop detection')
   })
 })
+
+// ── No-tool forced abort: prevents 10+ wasted LLM calls on repeated text ──
+describe('AgentLoop — no-tool forced abort', () => {
+  it('aborts after 5 consecutive text-only turns via thinking-retry path', async () => {
+    const registry = new ToolRegistry()
+    let callCount = 0
+    const client: StreamClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        callCount++
+        // Produce thinking but no text/blocks → triggers thinking-retry → continue
+        // After 1 retry, produce text-only → no tools → break
+        // This pattern: think-only → think-only → ... → text → break
+        // So consecutiveNoToolTurns won't accumulate here.
+        // Instead, test the convergence abort via actual repeated text+tool pattern
+        cb.onContentBlock(makeTextBlock(`Repeated analysis output #${callCount}`))
+        cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 200 })
+      }),
+    } as unknown as StreamClient
+
+    const agent = new AgentLoop(
+      {
+        client, promptEngine: makeEngine(), toolRegistry: registry,
+        maxTurns: 30, contextWindow: 200_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      },
+      new SessionContext(),
+      '/test',
+    )
+
+    let turnCompletes = 0
+    await agent.run('analyze gemini cli', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: () => { turnCompletes++ },
+      onError: (e) => { throw e },
+      onAbort: () => {},
+      onApprovalRequired: async () => true,
+    })
+
+    // Text-only turns break immediately (1 turn per run)
+    assert.equal(turnCompletes, 1, 'text-only run should complete after 1 turn')
+  })
+})

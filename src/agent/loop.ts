@@ -59,7 +59,7 @@ import { ArtifactStore } from '../artifact/store.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import { debugLog } from '../utils/debug.js'
-import { TurnStreamController } from './turn-stream.js'
+import { TurnStreamController, type StreamRule } from './turn-stream.js'
 import { classifySeason, type CognitiveSeason } from './cognitive-season.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
@@ -175,6 +175,9 @@ export interface AgentConfig {
   meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
   /** Plan Mode state — when 'planning', write tools are blocked in tool-pipeline. */
   planModeState?: PlanModeState
+  /** Optional stream rules — abort and inject reminders when model output matches patterns.
+   *  Each rule has a regex `pattern` and an `inject` message appended as a user reminder. */
+  streamRules?: StreamRule[]
 }
 
 export interface AgentCallbacks {
@@ -296,6 +299,8 @@ export class AgentLoop {
   private _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
   private lastToolCompleteTime = 0
   private initialUserMessage: string | null = null
+  /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
+  private recentTextFingerprints: string[] = []
 
   constructor(
     private config: AgentConfig,
@@ -607,7 +612,7 @@ export class AgentLoop {
   private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
     return {
       cwd: this.cwd,
-      turn,
+      turn: this.session.getTurnCount(),
       recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
       sensorium: this.sensorium,
       strategy: this.strategy,
@@ -880,7 +885,7 @@ export class AgentLoop {
       interrupt: {
         interruptCountThisTurn: 0,
         hasPendingTools: false,
-        turn,
+        turn: this.session.getTurnCount(),
       },
       doomLoop: {
         doomLoopLevel: this.getDoomLoopLevel(),
@@ -1112,6 +1117,7 @@ export class AgentLoop {
     this.repairHintTracker = new RepairHintTracker()
     this.contextInjection.reset()
     this.outputTokenEscalationCount = 0
+    this.recentTextFingerprints = []
     this.sensorium = null
     this.strategy = null
     this.latestResourceSnapshot = null
@@ -1405,6 +1411,7 @@ export class AgentLoop {
           evidenceState: this.evidence.getState(),
           toolFingerprints: this.traceStore.toolFingerprints,
           noToolTurnCount: this.consecutiveNoToolTurns,
+          textFingerprints: this.recentTextFingerprints,
         })
         debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
 
@@ -1436,9 +1443,10 @@ export class AgentLoop {
         }
 
         if (convergenceCheck.shouldAbort) {
-          debugLog(`[convergence] turn=${turn} abort score=${convergenceCheck.score.toFixed(2)}`)
+          const noToolInfo = this.consecutiveNoToolTurns >= 5 ? ` noToolTurns=${this.consecutiveNoToolTurns}` : ''
+          debugLog(`[convergence] turn=${turn} abort score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`)
           callbacks.onPhaseChange?.('convergence-abort', {
-            reason: `收敛检测 L3 abort: score=${convergenceCheck.score.toFixed(2)}`,
+            reason: `收敛检测 L3 abort: score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`,
           })
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onAbort()
@@ -1596,6 +1604,7 @@ export class AgentLoop {
           request,
           turn,
           lastTurnTextFingerprint: this.lastTurnTextFingerprint,
+          streamRules: this.config.streamRules,
           callbacks: {
             onTextDelta: (text) => {
               turnTextAccum += text
@@ -1652,6 +1661,18 @@ export class AgentLoop {
         const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
         this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
         this.lastTurnThinkingFingerprint = streamResult.lastTurnThinkingFingerprint
+        // Track text fingerprints for cross-turn repetition detection
+        if (streamResult.lastTurnTextFingerprint.length >= 50) {
+          this.recentTextFingerprints.push(streamResult.lastTurnTextFingerprint)
+          if (this.recentTextFingerprints.length > 8) this.recentTextFingerprints.shift()
+        }
+
+
+          // TTSR: stream rule triggered — inject reminder and retry
+          if (streamResult.triggeredRule) {
+            this.session.addUserMessage(streamResult.triggeredRule.inject)
+            continue
+          }
 
         // L0 telemetry: stream duration
         const streamEndMs = Date.now()
