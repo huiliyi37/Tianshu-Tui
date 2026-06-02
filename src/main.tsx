@@ -976,17 +976,21 @@ async function main() {
   // initial render, module loading, and prompt engine warmup.
   const SLOW_RENDER_MS = 500
   const SLOW_RENDER_GRACE_MS = 3000
+  const SLOW_RENDER_MAX_LOGS = 5
   const monitorStart = Date.now()
   let slowRenderTick = monitorStart + SLOW_RENDER_GRACE_MS
+  let slowRenderLogCount = 0
   const slowRenderMonitor = process.env.NODE_ENV !== 'production'
     ? setInterval(() => {
         const now = Date.now()
         const gap = now - slowRenderTick
         slowRenderTick = now
         if (now - monitorStart < SLOW_RENDER_GRACE_MS) return
+        if (slowRenderLogCount >= SLOW_RENDER_MAX_LOGS) return
         if (gap > SLOW_RENDER_MS) {
+          slowRenderLogCount++
           const ts = new Date(now).toISOString()
-          process.stderr.write(`[slow-render] ${ts} gap=${gap}ms (threshold=${SLOW_RENDER_MS}ms)\n`)
+          process.stderr.write(`[slow-render] ${ts} gap=${gap}ms (threshold=${SLOW_RENDER_MS}ms)${slowRenderLogCount >= SLOW_RENDER_MAX_LOGS ? ' (silenced, max logs reached)' : ''}\n`)
         }
       }, SLOW_RENDER_MS)
     : undefined
