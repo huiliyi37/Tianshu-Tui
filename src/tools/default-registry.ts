@@ -2,6 +2,7 @@ import { APPLY_PATCH_TOOL } from './apply-patch.js'
 import { BASH_TOOL } from './bash.js'
 import { DIFF_TOOL } from './diff.js'
 import { EDIT_FILE_TOOL } from './edit.js'
+import { HASH_EDIT_TOOL } from './hash-edit.js'
 import { GIT_TOOL } from './git.js'
 import { GLOB_TOOL } from './glob.js'
 import { GREP_TOOL } from './grep.js'
@@ -28,6 +29,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(PLAN_CLOSE_TOOL)
   registry.register(BASH_TOOL)
   registry.register(EDIT_FILE_TOOL)
+  registry.register(HASH_EDIT_TOOL)
   registry.register(GREP_TOOL)
   registry.register(GLOB_TOOL)
   registry.register(DIFF_TOOL)
