@@ -1589,6 +1589,9 @@ export class AgentLoop {
         let pendingFlush = ''
         const prevFingerprint = this.lastTurnTextFingerprint
 
+        // L0 streaming-executor telemetry: measure stream + tool execution latency.
+        const turnStartMs = Date.now()
+
         const streamResult = await this.turnStream!.streamTurn({
           request,
           turn,
@@ -1650,6 +1653,19 @@ export class AgentLoop {
         this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
         this.lastTurnThinkingFingerprint = streamResult.lastTurnThinkingFingerprint
 
+        // L0 telemetry: stream duration
+        const streamEndMs = Date.now()
+        if (toolUses.length > 0) {
+          this.telemetryWriter.write({
+            ts: streamEndMs,
+            turn: this.session.getTurnCount(),
+            phase: 'stream-complete',
+            streamDurationMs: streamEndMs - turnStartMs,
+            toolCount: toolUses.length,
+            toolNames: toolUses.map(tu => tu.name).join(','),
+          } as any)
+        }
+
         // Feed CacheAdvisor with turn metrics after API call completes
         // Cache read/creation metrics are captured here; artifact eviction/access
         // metrics are added after tool execution (see below).
@@ -1707,6 +1723,17 @@ export class AgentLoop {
           ;({ traceStore: this.traceStore, importGraph: this.importGraph,
              lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk } = r)
           if (r.checkpointCreated) checkpointCreatedThisTurn = true
+
+          // L0 telemetry: tools duration
+          this.telemetryWriter.write({
+            ts: Date.now(),
+            turn: this.session.getTurnCount(),
+            phase: "tools-complete",
+            toolsDurationMs: Date.now() - streamEndMs,
+            totalTurnMs: Date.now() - turnStartMs,
+            toolCount: toolUses.length,
+          } as any)
+
           // Feed CacheAdvisor with cache metrics + artifact eviction/access data
           if (latestTurnCache && latestTurnCache.turn === turn) {
             this.cacheAdvisor.onTurnEnd({
