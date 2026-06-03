@@ -23,7 +23,7 @@ export interface LogEntry {
 
 let _nextLogId = 0
 
-const MAX_LOG_STORE = 200
+const MAX_LOG_STORE = 5000
 
 export function createLogEntry(entry: {
   id?: string

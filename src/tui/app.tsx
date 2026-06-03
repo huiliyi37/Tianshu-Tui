@@ -101,7 +101,7 @@ interface AppProps {
 const THINKING_FLUSH_MS = 1000
 const TOOL_FLUSH_MS = 120
 const LIVE_STREAM_MAX_CHARS = 50_000
-const HISTORY_MAX_ITEMS = 1000
+const HISTORY_MAX_ITEMS = 5000
 const STATIC_THINKING_CAP = 10_000
 
 /** Detect GLM-style promote: reasoning_content promoted verbatim to visible text.
