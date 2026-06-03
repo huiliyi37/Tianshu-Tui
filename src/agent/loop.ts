@@ -916,6 +916,97 @@ export class AgentLoop {
    * projection building, and CVM overhead tracking.
    * Pure data transformation with no control flow.
    */
+  /**
+   * Step 6f: Build turn request — intent evaluation, repair hint injection,
+   * reliability decision, context ceiling enforcement, cross-session event
+   * sync, and OAI request building. Returns the action and request.
+   */
+  private async buildTurnRequest(
+    turn: number,
+    currentStrategy: StrategyProfile,
+    currentSensorium: Sensorium,
+    pressureResult: import('../context/pressure-monitor.js').PressureResult,
+    assistantResponded: boolean,
+    userMessageConsumed: boolean,
+    callbacks: AgentCallbacks,
+  ): Promise<{
+    action: 'proceed' | 'veto' | 'abort'
+    request?: OaiChatRequest
+  }> {
+    let _tb = Date.now()
+    const intentResult = await this.intent.evaluate({
+      strategy: currentStrategy,
+      vigor: this.vigorState,
+      sensorium: currentSensorium,
+      pheromones: this.loadedPheromones,
+      pressureResult,
+      recentToolHistory: this.recentToolHistory,
+      onIntentPreview: callbacks.onIntentPreview,
+    })
+    debugLog(`[turn-boundary] turn=${turn} intent: ${Date.now() - _tb}ms`)
+    if (intentResult === 'veto') {
+      callbacks.onPhaseChange?.('intent-veto', { reason: 'user vetoed intent', suggestion: 're-plan before tool use' })
+      callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
+      return { action: 'veto' }
+    }
+
+    // Pass 5: adaptive repair hint injection
+    this.contextInjection.refreshRepairHint()
+
+    this.refreshReliabilityDecision()
+
+    _tb = Date.now()
+    await this.compaction.enforceContextCeiling()
+    debugLog(`[turn-boundary] turn=${turn} enforceContextCeiling: ${Date.now() - _tb}ms`)
+    // A2: enforceContextCeiling can trigger LLM compact (30s timeout).
+    if (this.abortController!.signal.aborted) {
+      if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
+      callbacks.onAbort()
+      return { action: 'abort' }
+    }
+    this.contextInjection.refreshActiveClaims()
+
+    // Read events from other sessions (cache-safe: injected into dynamic appendix only)
+    if (this.config.sessionRegistry && this.config.sessionId) {
+      const events = this.config.sessionRegistry.consumeEvents(this.config.sessionId, this.lastSeenEventId)
+      let appendix = ''
+      if (events.length > 0) {
+        this.lastSeenEventId = Math.max(...events.map(e => e.id))
+        appendix = formatEventsForAppendix(events)
+      }
+      // P2b: inject active cross-session claims so the LLM can proactively avoid conflicts
+      const claims = this.config.sessionRegistry.getActiveClaims(this.config.sessionId)
+      if (claims.length > 0) {
+        const grouped = new Map<string, string[]>()
+        for (const c of claims) {
+          const key = c.filePath
+          if (!grouped.has(key)) grouped.set(key, [])
+          grouped.get(key)!.push(`${c.sessionId}(${c.claimType})`)
+        }
+        const claimLines = [...grouped.entries()].map(([file, holders]) =>
+          `  ${file} — claimed by ${holders.join(', ')}`)
+        appendix = (appendix ? appendix + '\n' : '') +
+          `<cross-session-claims count="${claims.length}">\n${claimLines.join('\n')}\n</cross-session-claims>`
+      }
+      this.config.promptEngine.setCrossSessionEvents(appendix || null)
+    }
+    // Inject session state snapshot into volatile block before building request
+    if (this.sessionStateManager) {
+      this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
+    }
+    // Pre-refresh git status so buildOaiRequest doesn't return stale cached data
+    _tb = Date.now()
+    await this.config.promptEngine.refreshGitContextIfNeeded(this.cwd)
+    debugLog(`[turn-boundary] turn=${turn} refreshGitContext: ${Date.now() - _tb}ms`)
+    const request = this.config.promptEngine.buildOaiRequest(
+      this.session.getMessages(),
+      this.recentToolHistory,
+      this.config.contextWindow,
+    )
+
+    return { action: 'proceed', request }
+  }
+
   private runCognitivePrep(
     turn: number,
     actionable: boolean,
@@ -1319,78 +1410,12 @@ export class AgentLoop {
         }
 
         _tb = Date.now()
-        const intentResult = await this.intent.evaluate({
-          strategy: currentStrategy,
-          vigor: this.vigorState,
-          sensorium: currentSensorium,
-          pheromones: this.loadedPheromones,
-          pressureResult,
-          recentToolHistory: this.recentToolHistory,
-          onIntentPreview: callbacks.onIntentPreview,
-        })
-        debugLog(`[turn-boundary] turn=${turn} intent: ${Date.now() - _tb}ms`)
-        if (intentResult === 'veto') {
-          callbacks.onPhaseChange?.('intent-veto', { reason: 'user vetoed intent', suggestion: 're-plan before tool use' })
-          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
-          continue
-        }
+        // Step 6f: build turn request (intent, repair, context ceiling, cross-session, prompt)
+        const turnRequest = await this.buildTurnRequest(turn, currentStrategy, currentSensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks)
+        if (turnRequest.action === 'veto') continue
+        if (turnRequest.action === 'abort') return
+        const request = turnRequest.request!
 
-        // Pass 5: adaptive repair hint injection
-        this.contextInjection.refreshRepairHint()
-
-        this.refreshReliabilityDecision()
-
-        _tb = Date.now()
-        await this.compaction.enforceContextCeiling()
-        debugLog(`[turn-boundary] turn=${turn} enforceContextCeiling: ${Date.now() - _tb}ms`)
-        // A2: enforceContextCeiling can trigger LLM compact (30s timeout).
-        if (this.abortController!.signal.aborted) {
-          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-          callbacks.onAbort()
-          return
-        }
-        this.contextInjection.refreshActiveClaims()
-
-        // Step 6e: run cognitive prep (sycophancy trap, CVM ledger, projection)
-        this.runCognitivePrep(turn, actionable, pressureResult)
-
-        // Read events from other sessions (cache-safe: injected into dynamic appendix only)
-        if (this.config.sessionRegistry && this.config.sessionId) {
-          const events = this.config.sessionRegistry.consumeEvents(this.config.sessionId, this.lastSeenEventId)
-          let appendix = ''
-          if (events.length > 0) {
-            this.lastSeenEventId = Math.max(...events.map(e => e.id))
-            appendix = formatEventsForAppendix(events)
-          }
-          // P2b: inject active cross-session claims so the LLM can proactively avoid conflicts
-          const claims = this.config.sessionRegistry.getActiveClaims(this.config.sessionId)
-          if (claims.length > 0) {
-            const grouped = new Map<string, string[]>()
-            for (const c of claims) {
-              const key = c.filePath
-              if (!grouped.has(key)) grouped.set(key, [])
-              grouped.get(key)!.push(`${c.sessionId}(${c.claimType})`)
-            }
-            const lines = [...grouped.entries()].map(([file, holders]) =>
-              `  ${file} — claimed by ${holders.join(', ')}`)
-            appendix = (appendix ? appendix + '\n' : '') +
-              `<cross-session-claims count="${claims.length}">\n${lines.join('\n')}\n</cross-session-claims>`
-          }
-          this.config.promptEngine.setCrossSessionEvents(appendix || null)
-        }
-        // Inject session state snapshot into volatile block before building request
-        if (this.sessionStateManager) {
-          this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
-        }
-        // Pre-refresh git status so buildOaiRequest doesn't return stale cached data
-        _tb = Date.now()
-        await this.config.promptEngine.refreshGitContextIfNeeded(this.cwd)
-        debugLog(`[turn-boundary] turn=${turn} refreshGitContext: ${Date.now() - _tb}ms`)
-        const request = this.config.promptEngine.buildOaiRequest(
-          this.session.getMessages(),
-          this.recentToolHistory,
-          this.config.contextWindow,
-        )
         let turnTextAccum = ''
         let turnThinkingAccum = ''
         const prevThinkingFingerprint = this.lastTurnThinkingFingerprint
