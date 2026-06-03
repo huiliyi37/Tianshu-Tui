@@ -989,6 +989,10 @@ ${check.formatted}`
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: '', is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }
     const msg = err instanceof Error ? err.message : String(err)
+    deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
+    callbacks.onToolResult(tu.id, tu.name, msg, true)
+    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+  }
 }
 
 /**
