@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluatePromotion, claimHasFileEvidence, countClaimsByStatus } from '../promotion.js'
+import { evaluatePromotion, claimHasFileEvidence, countClaimsByStatus, canRecallClaim } from '../promotion.js'
 import type { ContextClaim } from '../claims.js'
 
 function claim(overrides: Partial<ContextClaim> = {}): ContextClaim {
@@ -151,6 +151,41 @@ describe('claimHasFileEvidence', () => {
   it('returns false for non-file-evidence claim kinds', () => {
     const uc = claim({ kind: 'user_constraint', evidence: [{ id: 'e1', kind: 'user_message', summary: 'x', path: '/a.ts', createdAt: 1 }] })
     assert.equal(claimHasFileEvidence(uc, '/a.ts'), false)
+  })
+})
+
+describe('canRecallClaim', () => {
+  it('returns true when cwd is not provided (skip recall check)', () => {
+    const c = claim({
+      evidence: [{ id: 'e1', kind: 'file', summary: 'gone', path: '/nonexistent/file.ts', createdAt: 1 }],
+    })
+    assert.equal(canRecallClaim(c), true)
+  })
+
+  it('returns true when claim has no file evidence', () => {
+    const c = claim({
+      evidence: [{ id: 'e1', kind: 'user_message', summary: 'just text', createdAt: 1 }],
+    })
+    assert.equal(canRecallClaim(c, '/any/cwd'), true)
+  })
+
+  it('returns false when all evidence files no longer exist', () => {
+    const c = claim({
+      evidence: [{ id: 'e1', kind: 'file', summary: 'deleted', path: 'nonexistent_abc123.ts', createdAt: 1 }],
+    })
+    assert.equal(canRecallClaim(c, '/tmp'), false)
+  })
+
+  it('returns true when at least one evidence file still exists', () => {
+    const testDir = new URL('.', import.meta.url).pathname.replace(/\/$/, '')
+    const testFile = 'promotion.test.ts'
+    const c = claim({
+      evidence: [
+        { id: 'e1', kind: 'file', summary: 'deleted', path: 'nonexistent_xyz.ts', createdAt: 1 },
+        { id: 'e2', kind: 'file', summary: 'exists', path: testFile, createdAt: 1 },
+      ],
+    })
+    assert.equal(canRecallClaim(c, testDir), true)
   })
 })
 
