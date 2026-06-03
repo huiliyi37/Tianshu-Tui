@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { hashLine } from './hash-edit.js'
-import { getFileReadMtime } from './read-file.js'
+import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
 
 const MAX_EDIT_FILE_BYTES = 100 * 1024 // 100KB — match read_file guard
 
@@ -55,6 +55,11 @@ Bad: using a too-short old_string that matches multiple locations`,
     const currentMtime = statSync(filePath).mtimeMs
     const lastReadMtime = getFileReadMtime(filePath)
     if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
+      // Auto-refresh mtime cache to prevent read-edit-stale loop:
+      // after this rejection, the model will re-read the file, which updates
+      // the cache. But if it doesn't re-read and tries edit_file again,
+      // this refresh ensures the mtime comparison uses the latest value.
+      refreshFileReadMtime(filePath, currentMtime)
       return {
         content: `Error: File ${filePath} has been modified since your last read_file (mtime changed). Re-read the file to update your view, or use hash_edit with anchors from the current content to safely apply your edit.`,
         isError: true,

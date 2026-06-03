@@ -89,6 +89,17 @@ export function getFileReadMtime(canonicalPath: string): number | null {
   return entry ? entry.mtimeMs : null
 }
 
+/** Refresh the mtime cache for a file after stale detection.
+ *  This prevents a read-edit-stale loop: after edit_file detects a stale file,
+ *  it updates the cache so the next edit attempt (after the model re-reads)
+ *  won't immediately fail again. Returns the new mtimeMs or null. */
+export function refreshFileReadMtime(canonicalPath: string, newMtimeMs: number): void {
+  const entry = fileReadHistory.get(canonicalPath)
+  if (entry) {
+    entry.mtimeMs = newMtimeMs
+  }
+}
+
 async function sliceFromArtifact(
   store: { readRaw(id: string): Promise<string | null> },
   artifactId: string,

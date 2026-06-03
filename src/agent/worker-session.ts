@@ -5,6 +5,7 @@ import { PromptEngine } from '../prompt/engine.js'
 import { ToolRegistry } from '../tools/registry.js'
 import { AgentLoop } from './loop.js'
 import { SessionContext } from './context.js'
+import { classifyFailure, isTransient } from './failure-classifier.js'
 import {
   buildBlockedWorkerResult,
   parseWorkerResult,
@@ -13,6 +14,11 @@ import {
 } from './work-order.js'
 import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
 import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
+
+/** Max transient-retry attempts for network/API errors during worker execution.
+ *  Independent of order.budget.maxRetries (which covers output parse failures). */
+const MAX_TRANSIENT_RETRIES = 2
+const TRANSIENT_BACKOFF_BASE_MS = 2_000
 
 export interface WorkerSessionConfig {
   order: WorkOrder
@@ -82,6 +88,31 @@ async function runOnce(agent: AgentLoop, prompt: string, transcript: WorkerTrans
   return text
 }
 
+/** Run a single agent turn, retrying transient network/API errors with backoff. */
+async function runOnceWithTransientRetry(
+  agent: AgentLoop,
+  prompt: string,
+  transcript: WorkerTranscript,
+): Promise<string> {
+  for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+    try {
+      return await runOnce(agent, prompt, transcript)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const classified = classifyFailure(message)
+      if (classified.retryable && isTransient(classified.class) && attempt < MAX_TRANSIENT_RETRIES) {
+        const backoff = TRANSIENT_BACKOFF_BASE_MS * Math.pow(2, attempt)
+        transcript.errors.push(`Transient error (attempt ${attempt + 1}/${MAX_TRANSIENT_RETRIES + 1}): ${message} — retrying in ${backoff}ms`)
+        await new Promise<void>(resolve => setTimeout(resolve, backoff))
+        continue
+      }
+      throw err
+    }
+  }
+  // Unreachable, but satisfy TypeScript
+  throw new Error('runOnceWithTransientRetry: exhausted retries')
+}
+
 export async function runWorkerSession(config: WorkerSessionConfig): Promise<WorkerSessionRun> {
   if (config.activeClaims && config.activeClaims.length > 0) {
     config.promptEngine.updateActiveClaims(config.activeClaims)
@@ -108,7 +139,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
 
   try {
     const transcript = emptyTranscript()
-    let latestText = await runOnce(agent, prompt, transcript)
+    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript)
 
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
       try {
@@ -131,7 +162,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           }
         }
         transcript.repairAttempts++
-        latestText = await runOnce(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript)
+        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript)
       }
     }
 
