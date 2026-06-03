@@ -156,3 +156,70 @@ describe('readFilePayload', () => {
     assert.equal(payload.modelContent, short)
   })
 })
+
+describe('READ_FILE_TOOL multi-read', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-multi-'))
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    writeFileSync(join(dir, 'src', 'a.ts'), 'const a = 1\n', 'utf-8')
+    writeFileSync(join(dir, 'src', 'b.ts'), 'const b = 2\n', 'utf-8')
+    writeFileSync(join(dir, 'src', 'c.ts'), 'const c = 3\n', 'utf-8')
+  })
+
+  afterEach(() => {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reads multiple files via file_paths parameter', async () => {
+    const { READ_FILE_TOOL } = await import('../read-file.js')
+    const result = await READ_FILE_TOOL.execute({
+      input: { file_paths: ['src/a.ts', 'src/b.ts'] },
+      toolUseId: 'test',
+      cwd: dir,
+    })
+    assert.ok(!result.isError)
+    assert.match(result.content, /const a = 1/)
+    assert.match(result.content, /const b = 2/)
+    assert.match(result.content, /── src\/a\.ts ──/)
+    assert.match(result.content, /── src\/b\.ts ──/)
+  })
+
+  it('reads 3 files with sections separated', async () => {
+    const { READ_FILE_TOOL } = await import('../read-file.js')
+    const result = await READ_FILE_TOOL.execute({
+      input: { file_paths: ['src/a.ts', 'src/b.ts', 'src/c.ts'] },
+      toolUseId: 'test',
+      cwd: dir,
+    })
+    assert.ok(!result.isError)
+    assert.match(result.content, /const a = 1/)
+    assert.match(result.content, /const b = 2/)
+    assert.match(result.content, /const c = 3/)
+  })
+
+  it('handles mixed valid and invalid paths', async () => {
+    const { READ_FILE_TOOL } = await import('../read-file.js')
+    const result = await READ_FILE_TOOL.execute({
+      input: { file_paths: ['src/a.ts', 'src/nonexistent.ts'] },
+      toolUseId: 'test',
+      cwd: dir,
+    })
+    // Should succeed overall but contain an error for the missing file
+    assert.match(result.content, /const a = 1/)
+    assert.match(result.content, /Error:/)
+  })
+
+  it('falls back to single file_path when file_paths is not provided', async () => {
+    const { READ_FILE_TOOL } = await import('../read-file.js')
+    const result = await READ_FILE_TOOL.execute({
+      input: { file_path: 'src/a.ts' },
+      toolUseId: 'test',
+      cwd: dir,
+    })
+    assert.ok(!result.isError)
+    assert.match(result.content, /const a = 1/)
+  })
+})
+

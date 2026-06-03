@@ -272,6 +272,7 @@ export const READ_FILE_TOOL: Tool = {
 ### Examples
 Good: read_file(file_path="/abs/path/src/app.ts")  → returns the whole file
 Good: read_file(file_path="/abs/path/src/app.ts", offset=100, limit=50)  → only when you know you want lines 100-150
+Good: read_file(file_paths=["/abs/a.ts", "/abs/b.ts"])  → read multiple files in one call (saves turns)
 Bad:  read_file(file_path="src/app.ts")  → relative path
 Bad:  splitting a file into 6 temp files via write_file and reading them back  → wasteful, just call read_file once
 Bad:  re-reading the same file you already read this session  → look at your previous tool_result instead`,
@@ -279,6 +280,12 @@ Bad:  re-reading the same file you already read this session  → look at your p
       type: 'object',
       properties: {
         file_path: { type: 'string', description: 'Absolute path to the file' },
+        file_paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Read multiple files in one call. Use instead of repeated read_file calls. Each file gets its own section. Max 5 files.',
+        },
+
         offset: { type: 'integer', description: 'Line number to start reading from (1-based)' },
         limit: { type: 'integer', description: 'Maximum number of lines to read' },
       },
@@ -287,7 +294,14 @@ Bad:  re-reading the same file you already read this session  → look at your p
   },
 
   async execute(params: ToolCallParams) {
+    // Multi-read branch: file_paths array
+    const filePaths = params.input.file_paths as string[] | undefined
+    if (filePaths && filePaths.length > 0) {
+      return handleMultiRead(params, filePaths.slice(0, 5))
+    }
+
     let payload: ReadFilePayload
+
     const computedCap = computeModelReadCap({
       contextWindow: params.contextWindow,
       providerProfile: params.providerProfile,
@@ -442,3 +456,55 @@ Bad:  re-reading the same file you already read this session  → look at your p
   isConcurrencySafe: () => true,
   isEnabled: () => true,
 }
+
+/** Handle multi-file read: file_paths array. Reads up to 5 files, each with
+ *  an independent per-file budget derived from the overall model read cap. */
+function handleMultiRead(params: ToolCallParams, paths: string[]): import('./types.js').ToolResult {
+  const computedCap = computeModelReadCap({
+    contextWindow: params.contextWindow,
+    providerProfile: params.providerProfile,
+  })
+  const perFileCap: ModelReadCap = {
+    maxChars: Math.floor(computedCap.maxChars / paths.length),
+    headChars: Math.floor(computedCap.headChars / paths.length),
+    tailChars: Math.floor(computedCap.tailChars / paths.length),
+  }
+
+  const sections: string[] = []
+  let totalBytes = 0
+  let errors = 0
+
+  for (const rawPath of paths) {
+    const trimmed = rawPath.trim()
+    if (!trimmed) continue
+    try {
+      const payload = readFilePayload(params.cwd, { filePath: trimmed, modelCap: perFileCap })
+      const relPath = payload.canonicalPath.replace(params.cwd + '/', '')
+      sections.push(`── ${relPath} ──\n${payload.modelContent}`)
+      totalBytes += payload.rawContent.length
+
+      // Record file-level dedup for each file
+      const currentMtimeMs = statSync(payload.canonicalPath).mtimeMs
+      fileReadHistory.set(payload.canonicalPath, {
+        mtimeMs: currentMtimeMs,
+        totalLines: payload.rawContent.split('\n').length,
+        rawBytes: payload.rawContent.length,
+        modelBytes: payload.modelContent.length,
+        recordedAt: Date.now(),
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const display = trimmed.replace(params.cwd + '/', '')
+      sections.push(`── ${display} ──\nError: ${msg}`)
+      errors++
+    }
+  }
+  trimFileReadHistory()
+
+  const content = sections.join('\n\n')
+  return {
+    content,
+    uiContent: `Read ${paths.length - errors}/${paths.length} files (${(totalBytes / 1024).toFixed(1)} KB total)`,
+  }
+}
+
