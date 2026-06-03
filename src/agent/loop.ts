@@ -901,6 +901,102 @@ export class AgentLoop {
    * heap-driven forced compaction. Returns the result for the caller to
    * handle abort logic and userMessageConsumed propagation.
    */
+  /**
+   * Step 6c: Per-turn perception — pressure check, sensorium computation,
+   * season classification, phase class wiring, and contract status advancement.
+   * Pure data transformation with no control flow (no return/continue).
+   */
+  private async runPerception(
+    turn: number,
+    estTokens: number,
+    actionable: boolean,
+    callbacks: AgentCallbacks,
+  ): Promise<{
+    sensorium: Sensorium
+    strategy: StrategyProfile
+    phaseClass: string
+    pressureResult: import('../context/pressure-monitor.js').PressureResult
+  }> {
+    // ── StarFlow v2: Sensorium computation ──
+    const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
+    if (!actionable) {
+      this.config.promptEngine.setCognitiveProjection(null)
+      this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
+    }
+    callbacks.onPhaseChange?.('preparing', { reason: 'preparing next turn' })
+
+    // ── Event-loop gap detection ──
+    // If >30s elapsed since last tool completion, the event loop may have
+    // been blocked. Log a warning to help diagnose session freeze bugs.
+    if (this.lastToolCompleteTime > 0) {
+      const gapMs = Date.now() - this.lastToolCompleteTime
+      if (gapMs > 30_000) {
+        debugLog(`[event-loop] WARNING: ${(gapMs / 1000).toFixed(1)}s gap since last tool completion (turn ${this.session.getTurnCount()})`)
+      }
+    }
+
+    const _tb = Date.now()
+    const perceptionResult = await this.perception.perceive({
+      turn,
+      estimatedTokens: estTokens,
+      pressureResult,
+      evidenceState: this.evidence.getState(),
+      predictionAccumulator: this.predictionAccumulator,
+      recentToolHistory: this.recentToolHistory,
+      loadedPheromones: this.loadedPheromones,
+      traceStore: this.traceStore,
+      gitChangeRate: this.gitChangeRate,
+      fsEventRate: this.latestFsWatcherState.eventRate,
+      sensorium: this.sensorium,
+      strategy: this.strategy,
+      vigor: this.vigorState,
+      thetaState: this.thetaState,
+      thetaTelemetry: this.thetaTelemetry,
+      thetaCheckInFlight: this.thetaCheckInFlight,
+      baselineFingerprint: this.baselineFingerprint,
+    }, {
+      emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
+    })
+    this.sensorium = perceptionResult.sensorium
+    debugLog(`[turn-boundary] turn=${turn} perceive: ${Date.now() - _tb}ms`)
+    this.strategy = perceptionResult.strategy
+    this.vigorState = perceptionResult.vigor
+    this.thetaState = perceptionResult.thetaState
+    this.sensoriumSnapshots = this.perception.getSnapshots()
+    const currentSensorium: Sensorium = perceptionResult.sensorium
+
+    // ── 认知季节 — 道德经四章螺旋 ──
+    const seasonResult = classifySeason({
+      turn,
+      doomLevel: this.getDoomLoopLevel(),
+      recentCompactTurn: this.lastCompactTurn,
+      sensoriumStability: currentSensorium.stability,
+    })
+    this.currentSeason = seasonResult.season
+
+    // Wire StarPhase → phaseClass for field habituation modulation
+    const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
+    this.config.promptEngine.setPhaseHint(phaseClass)
+    const contractStatus = contractStatusFromPhaseClass(phaseClass)
+    if (this.taskContract && contractStatus) {
+      const prevStatus = this.taskContract.status
+      this.taskContract = advanceContractStatus(this.taskContract, contractStatus, this.session.getTurnCount())
+
+      // TDD Gate: one-shot check on planning→executing transition
+      if (prevStatus === 'planning' && this.taskContract.status === 'executing' && !this._lastImmuneHint) {
+        const es = this.evidence.getState()
+        const tddHint = checkTddGate({
+          filesRead: es.filesRead,
+          filesModified: es.filesModified,
+          isActionable: this.taskContract.isActionable,
+        })
+        if (tddHint) this._lastImmuneHint = tddHint
+      }
+    }
+
+    return { sensorium: perceptionResult.sensorium, strategy: perceptionResult.strategy, phaseClass, pressureResult }
+  }
+
   private async runCompaction(
     turn: number,
     snap: ResourceSensorSnapshot | null,
@@ -1068,83 +1164,8 @@ export class AgentLoop {
         // ── FS freshness: realtime external Zeitgeber signal ──
         this.latestFsWatcherState = this.fsWatcher?.getState() ?? { eventRate: 0, eventCount: 0, active: false }
 
-        // ── StarFlow v2: Sensorium computation ──
-        const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
-        if (!actionable) {
-          this.config.promptEngine.setCognitiveProjection(null)
-          this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
-        }
-        callbacks.onPhaseChange?.('preparing', { reason: 'preparing next turn' })
-
-        // ── Event-loop gap detection ──
-        // If >30s elapsed since last tool completion, the event loop may have
-        // been blocked. Log a warning to help diagnose session freeze bugs.
-        if (this.lastToolCompleteTime > 0) {
-          const gapMs = Date.now() - this.lastToolCompleteTime
-          if (gapMs > 30_000) {
-            debugLog(`[event-loop] WARNING: ${(gapMs / 1000).toFixed(1)}s gap since last tool completion (turn ${this.session.getTurnCount()})`)
-          }
-        }
-
-        _tb = Date.now()
-        const perceptionResult = await this.perception.perceive({
-          turn,
-          estimatedTokens: estTokens,
-          pressureResult,
-          evidenceState: this.evidence.getState(),
-          predictionAccumulator: this.predictionAccumulator,
-          recentToolHistory: this.recentToolHistory,
-          loadedPheromones: this.loadedPheromones,
-          traceStore: this.traceStore,
-          gitChangeRate: this.gitChangeRate,
-          fsEventRate: this.latestFsWatcherState.eventRate,
-          sensorium: this.sensorium,
-          strategy: this.strategy,
-          vigor: this.vigorState,
-          thetaState: this.thetaState,
-          thetaTelemetry: this.thetaTelemetry,
-          thetaCheckInFlight: this.thetaCheckInFlight,
-          baselineFingerprint: this.baselineFingerprint,
-        }, {
-          emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
-        })
-        this.sensorium = perceptionResult.sensorium
-        debugLog(`[turn-boundary] turn=${turn} perceive: ${Date.now() - _tb}ms`)
-        this.strategy = perceptionResult.strategy
-        this.vigorState = perceptionResult.vigor
-        this.thetaState = perceptionResult.thetaState
-        this.sensoriumSnapshots = this.perception.getSnapshots()
-        const currentSensorium: Sensorium = perceptionResult.sensorium
-        const currentStrategy: StrategyProfile = perceptionResult.strategy
-
-        // ── 认知季节 — 道德经四章螺旋 ──
-        const seasonResult = classifySeason({
-          turn,
-          doomLevel: this.getDoomLoopLevel(),
-          recentCompactTurn: this.lastCompactTurn,
-          sensoriumStability: currentSensorium.stability,
-        })
-        this.currentSeason = seasonResult.season
-
-        // Wire StarPhase → phaseClass for field habituation modulation
-        const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
-        this.config.promptEngine.setPhaseHint(phaseClass)
-        const contractStatus = contractStatusFromPhaseClass(phaseClass)
-        if (this.taskContract && contractStatus) {
-          const prevStatus = this.taskContract.status
-          this.taskContract = advanceContractStatus(this.taskContract, contractStatus, this.session.getTurnCount())
-
-          // TDD Gate: one-shot check on planning→executing transition
-          if (prevStatus === 'planning' && this.taskContract.status === 'executing' && !this._lastImmuneHint) {
-            const es = this.evidence.getState()
-            const tddHint = checkTddGate({
-              filesRead: es.filesRead,
-              filesModified: es.filesModified,
-              isActionable: this.taskContract.isActionable,
-            })
-            if (tddHint) this._lastImmuneHint = tddHint
-          }
-        }
+        // Step 6c: run perception (sensorium, season, phase class, contract)
+        const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await this.runPerception(turn, estTokens, actionable, callbacks)
 
         // ── Convergence Detection ──
         // Multi-signal stagnation check before the API call. Level 2+
