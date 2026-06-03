@@ -147,8 +147,13 @@ export class OpenAIClient implements StreamClient {
         if (this.config.providerName === 'minimax') {
           body.thinking = { type: 'adaptive' }
         }
+        // GLM Preserved Thinking: retain previous reasoning across turns.
+        // Reduces thinking time (incremental vs. full re-reasoning), improves
+        // cache hit rate, and is officially recommended for Coding/Agent use.
+        // Requires echoing reasoning_content back in subsequent requests
+        // (already handled by echoReasoning logic above).
         if (this.config.providerName === 'glm') {
-          (body.thinking as Record<string, unknown>)['clear_thinking'] = true
+          (body.thinking as Record<string, unknown>)['clear_thinking'] = false
         }
         if (this.config.providerName === 'claude' && this.config.reasoningEffort) {
           const budgetMap: Record<string, number> = {
