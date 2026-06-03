@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink'
-import { memo } from 'react'
+import { useState, useEffect } from 'react'
 import type { StarPhase } from '../agent/star-event.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS } from '../agent/star-event.js'
 import { getTheme, type RivetTheme } from './theme.js'
@@ -54,8 +54,17 @@ function getDomainColor(domainName: string | undefined, theme: RivetTheme): stri
   }
 }
 
-export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens }: GlanceBarProps) {
+const MOON_PHASES = ['◐', '◑', '◒', '◓'] as const
+
+export const GlanceBar = function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens }: GlanceBarProps) {
   const theme = getTheme()
+  const [moonIdx, setMoonIdx] = useState(0)
+
+  useEffect(() => {
+    if (!isStreaming) return
+    const interval = setInterval(() => setMoonIdx(i => (i + 1) % MOON_PHASES.length), 600)
+    return () => clearInterval(interval)
+  }, [isStreaming])
   const { columns } = useTerminalSize()
   const phaseGlyph = PHASE_GLYPHS[phase] ?? ''
   const phaseLabel = PHASE_SHORT_LABELS[phase] ?? ''
@@ -93,7 +102,7 @@ export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, 
         {(domain || (branchLabel && !narrow)) && <Text color={theme.dim}> │ </Text>}
         {phaseGlyph && <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
         {!phaseGlyph && <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>}
-        {isStreaming && <Text color={theme.primary}> ●</Text>}
+        {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
         <Text color={theme.dim}> │ </Text>
         <Text color={cacheColor}>{cachePct}%</Text>
         <Text color={theme.dim}> · </Text>
@@ -110,4 +119,4 @@ export const GlanceBar = memo(function GlanceBar({ pulses, phase, cacheHitRate, 
       </Box>
     </Box>
   )
-})
+}

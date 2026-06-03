@@ -54,7 +54,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
         <SlashHint input={value} selectedIdx={Math.min(slashIdx, filtered.length - 1)} commands={COMMANDS} />
       )}
       <Box flexDirection="row" paddingX={1} paddingY={0}>
-        <Text bold color={isSlash ? 'cyan' : steerMode ? 'yellow' : 'green'}>{steerMode ? '⚡' : '❯'} </Text>
+        <Text bold color={isSlash ? 'cyan' : steerMode ? 'yellow' : 'green'}>{steerMode ? '…' : '❯'} </Text>
         <BaseTextInput
           value={value}
           onChange={handleChange}
@@ -70,7 +70,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
             }
           }}
           disabled={disabled}
-          placeholder={steerMode ? "Steering — injected at next turn" : "Type a message... (↑↓ history)"}
+          placeholder={steerMode ? "Agent is thinking…" : "Type a message... (↑↓ history)"}
           history={history}
           onTabComplete={handleTabComplete}
           isSlashMode={isSlash}
