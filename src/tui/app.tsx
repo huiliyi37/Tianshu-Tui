@@ -986,6 +986,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // nothing in the same React batch — prevents flash-frame duplication.
         streamBuf.current = ''
         streamLiveBuf.current = ''
+        setStreamingText('')
+        setStreamingThinking('')
+        setIsStreaming(false); isStreamingRef.current = false
         if (finalText || thinkingForArchive) {
           if (finalText) {
             const parsed = parseInterviewMarker(finalText)
