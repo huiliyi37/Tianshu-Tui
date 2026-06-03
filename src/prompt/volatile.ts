@@ -161,9 +161,16 @@ export function buildConsolidatedBlock(habituatedContent: Map<string, string>): 
 
 /**
  * Render ONLY the per-turn dynamic fields into a separate `<context-update>` XML block.
- * Returns empty string if no dynamic fields are present.
+ *
+ * When maxChars is provided, applies Global Workspace Theory (GWT) Top-K selection:
+ * each sub-block gets a salience score, blocks are sorted by score descending,
+ * and only blocks that fit within the budget are included. Lower-salience blocks
+ * are silently dropped.
+ *
+ * Without maxChars (backward compatible), all blocks are included in their
+ * cache-stable order.
  */
-export function buildDynamicAppendix(ctx: VolatileContext): string {
+export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): string {
   const parts: string[] = []
 
   // ── P1b: cache-friendly ordering — stable sections first, volatile last ──
@@ -263,7 +270,78 @@ export function buildDynamicAppendix(ctx: VolatileContext): string {
     parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
   }
 
-  return parts.length > 0 ? `<context-update>\n${parts.join('\n\n')}\n</context-update>` : ''
+  if (parts.length === 0) return ''
+
+  // ── GWT Top-K selection (when budget is set) ────────────────────
+  if (maxChars !== undefined && maxChars > 0) {
+    const scored = parts.map(content => ({
+      content,
+      salience: assignSalience(content),
+    }))
+    const selected = selectTopKBlocks(scored, maxChars)
+    return `<context-update>\n${selected.join('\n\n')}\n</context-update>`
+  }
+
+  return `<context-update>\n${parts.join('\n\n')}\n</context-update>`
+}
+
+// ── Global Workspace Theory: salience scoring ──────────────────────
+
+/** A context-update sub-block with its salience score. */
+export interface SalientBlock {
+  content: string
+  salience: number
+}
+
+/**
+ * Assign a salience score to a context-update sub-block.
+ *
+ * Salience reflects information value per token:
+ * - 1.0: identity-critical (star-domain)
+ * - 0.8: directly actionable (repair-hint, historical-lessons)
+ * - 0.7: task-relevant (task-progress, decisions)
+ * - 0.6: environmental awareness (git-status, recent-commits)
+ * - 0.5: operational context (tool-history)
+ * - 0.4: session housekeeping (session-state, cross-session-events)
+ * - 0.3: deduplication hints (read-file-dedup-hint)
+ */
+export function assignSalience(blockContent: string): number {
+  if (blockContent.startsWith('<star-domain')) return 1.0
+  if (blockContent.startsWith('<repair-hint>')) return 0.8
+  if (blockContent.startsWith('<historical-lessons>')) return 0.8
+  if (blockContent.startsWith('<task-progress')) return 0.7
+  if (blockContent.startsWith('<decisions>')) return 0.7
+  if (blockContent.startsWith('<worktree-warning')) return 0.7
+  if (blockContent.startsWith('<git-status>')) return 0.6
+  if (blockContent.startsWith('<recent-commits>')) return 0.6
+  if (blockContent.startsWith('<tool-history>')) return 0.5
+  if (blockContent.startsWith('<session-state>')) return 0.4
+  if (blockContent.startsWith('<cross-session')) return 0.4
+  if (blockContent.startsWith('<read-file-dedup-hint>')) return 0.3
+  return 0.5 // default: moderate salience
+}
+
+/**
+ * Select blocks in descending salience order until the character budget is exhausted.
+ * Every block that fits is included; blocks beyond the budget are dropped.
+ * At least one block is always included (the highest-salience block).
+ */
+export function selectTopKBlocks(blocks: SalientBlock[], maxChars: number): string[] {
+  const sorted = [...blocks].sort((a, b) => b.salience - a.salience)
+  const selected: string[] = []
+  let used = 0
+
+  for (const block of sorted) {
+    // Overhead: 2 chars for '\n\n' separator when not first
+    const overhead = selected.length > 0 ? 2 : 0
+    if (used + overhead + block.content.length > maxChars && selected.length > 0) {
+      continue
+    }
+    selected.push(block.content)
+    used += overhead + block.content.length
+  }
+
+  return selected
 }
 
 /** Build latest-turn volatile block — FROZEN prefix + dynamic appendix. */
