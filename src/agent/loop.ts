@@ -98,6 +98,8 @@ import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
+import { recordToolHistory } from "./tool-history-recorder.js";
+import { requestThetaCheck } from "./theta-controller.js";
 import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, buildRuntimeSnapshot } from "./loop-factory.js";
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
@@ -153,7 +155,7 @@ export class AgentLoop {
   trajectory = new TrajectoryRecorder()
   repairPipeline = new RepairPipeline([ctclSanitizerPass, fourHorsemenPass, semanticRepairPass])
   repairHintTracker = new RepairHintTracker()
-  private traceStore: TraceStore
+  traceStore: TraceStore
   harness: TurnHarness
   routingMetrics = new RoutingMetricsCollector()
   private importGraph: ImportGraph | null = null
@@ -177,7 +179,7 @@ export class AgentLoop {
   private turnStream: TurnStreamController | null = null
   private turnCompletion: TurnCompletionController
   private toolExecution: ToolExecutionController
-  private thetaCheckInFlight = false
+  thetaCheckInFlight = false
   thetaTelemetry: {
     lastReason: string | null
     lastDurationMs: number | null
@@ -201,7 +203,7 @@ export class AgentLoop {
   private static readonly THETA_MAX_SESSION = 40
   /** Max theta checks per agent turn. */
   private static readonly THETA_MAX_PER_TURN = 2
-  private thetaRequestsThisTurn = 0
+  thetaRequestsThisTurn = 0
   private thetaState: ThetaState = createThetaState(7)
   artifactStore: import('../artifact/store.js').ArtifactStore | undefined
   sessionStateManager: SessionStateManager | undefined
@@ -226,8 +228,8 @@ export class AgentLoop {
   cacheAdvisor: CacheAdvisor
   p3: P3Integration
   immuneHook: ImmuneHook
-  private _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
-  private lastToolCompleteTime = 0
+  _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
+  lastToolCompleteTime = 0
   private initialUserMessage: string | null = null
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
   private recentTextFingerprints: string[] = []
@@ -463,75 +465,7 @@ export class AgentLoop {
 
 
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
-    const target = typeof input?.path === 'string'
-      ? input.path
-      : typeof input?.file_path === 'string'
-        ? input.file_path
-        : typeof input?.command === 'string'
-          ? input.command.slice(0, 50)
-          : name
-    this.recentToolHistory.push({
-      tool: name,
-      target,
-      status: isError ? 'failed' : 'success',
-      error: isError ? result.slice(0, 50) : undefined,
-    })
-    if (this.recentToolHistory.length > 5) this.recentToolHistory.shift()
-
-    // P3-E/H: invalidate plan cache + JIT on file mutations (sync — needed before next API call)
-    if (!isError && (name === 'edit_file' || name === 'write_file')) {
-      this.p3.invalidatePlanCache(target)
-      this.p3.invalidateJIT(target)
-    }
-
-    // P3-D Atropos: assess trajectory health → auto-escalate Flash→Pro on repeated failures (sync)
-    let trajectoryHealth: HealthSignal = 'healthy'
-    if (this.config.onModelSwitch && this.config.getCurrentModel) {
-      const currentModelId = this.config.getCurrentModel()
-      const tier: 'flash' | 'pro' = currentModelId.includes('pro') ? 'pro' : 'flash'
-      if (tier === 'flash') {
-        const recentEvents = this.traceStore.events.slice(-10).map(e => ({
-          status: (e.status === 'passed' ? 'passed' : 'failed') as 'passed' | 'failed',
-          turn: e.turn,
-        }))
-        trajectoryHealth = this.p3.assessHealth(recentEvents, this.session.getTurnCount(), tier)
-        if (trajectoryHealth === 'escalate') {
-          const proModel = currentModelId.replace('flash', 'pro')
-          try { this.config.onModelSwitch(proModel) } catch { /* non-fatal */ }
-        }
-      }
-    }
-
-    // ── Deferred post-tool processing ──
-    // Immune/Physarum analysis and P3 pattern mining are deferred to
-    // setImmediate so they never block tool result delivery.
-    const fp = this.traceStore.toolFingerprints[this.traceStore.toolFingerprints.length - 1] ?? name
-    const capturedTurn = this.session.getTurnCount()
-    const capturedDoom = this.getDoomLoopLevel()
-    const capturedTokens = this.session.getEstimatedTokens()
-    setImmediate(() => {
-      // P3 pattern mining (deferred)
-      try { this.p3.onToolComplete(name, target, isError, isError ? result.slice(0, 200) : undefined) } catch { /* non-critical */ }
-
-      // Physarum + Immune (deferred)
-      try {
-        const immuneResult = this.immuneHook.run({
-          toolName: name,
-          fingerprint: fp,
-          turn: capturedTurn,
-          doomLevel: capturedDoom,
-          targetFile: target,
-          tokenUsage: capturedTokens,
-          trajectoryHealth,
-        })
-        if (immuneResult.contextHint) {
-          this._lastImmuneHint = immuneResult.contextHint
-        }
-      } catch { /* immune failure is non-critical */ }
-    })
-
-    // Record timestamp for event-loop gap detection
-    this.lastToolCompleteTime = Date.now()
+      recordToolHistory(this, name, input, isError, result);
   }
 
   private bindSessionDomain(taskDescription: string): void {
@@ -754,59 +688,7 @@ export class AgentLoop {
   }
 
   requestThetaCheck(reason: string): void {
-    if (this.thetaCheckInFlight) return
-
-    // Gate 1: session-level cap
-    if (this.thetaTelemetry.requestedCount >= AgentLoop.THETA_MAX_SESSION) return
-
-    // Gate 2: per-turn cap
-    if (this.thetaRequestsThisTurn >= AgentLoop.THETA_MAX_PER_TURN) return
-
-    // Gate 3: consecutive-timeout backoff
-    if (this.thetaTelemetry.consecutiveTimeouts > 0) {
-      const currentTurn = this.session.getTurnCount()
-      if (currentTurn < this.thetaTelemetry.cooldownUntilTurn) return
-    }
-
-    this.thetaCheckInFlight = true
-    this.thetaRequestsThisTurn++
-    this.thetaTelemetry = {
-      ...this.thetaTelemetry,
-      lastReason: reason,
-      requestedCount: this.thetaTelemetry.requestedCount + 1,
-    }
-    runThetaCheck(this.cwd).then(result => {
-      for (const errFile of result.errors) {
-        this.repairHintTracker.recordFailure(errFile, 'type_error')
-      }
-      const timedOut = result.timedOut
-      const consecutiveTimeouts = timedOut
-        ? this.thetaTelemetry.consecutiveTimeouts + 1
-        : 0
-      const cooldownTurns = consecutiveTimeouts === 0 ? 0
-        : Math.min(4, consecutiveTimeouts)
-      this.thetaTelemetry = {
-        ...this.thetaTelemetry,
-        lastDurationMs: result.durationMs,
-        lastErrorCount: result.errors.length,
-        lastTimedOut: timedOut,
-        consecutiveTimeouts,
-        cooldownUntilTurn: cooldownTurns > 0
-          ? this.session.getTurnCount() + cooldownTurns
-          : 0,
-      }
-    }).catch(() => {
-      this.thetaTelemetry = {
-        ...this.thetaTelemetry,
-        lastDurationMs: null,
-        lastErrorCount: 0,
-        lastTimedOut: false,
-        consecutiveTimeouts: 0,
-        cooldownUntilTurn: 0,
-      }
-    }).finally(() => {
-      this.thetaCheckInFlight = false
-    })
+      requestThetaCheck(this, reason);
   }
 
   getLatestRisk(): import('./approval-risk.js').RiskAssessment { return this.latestRisk }
