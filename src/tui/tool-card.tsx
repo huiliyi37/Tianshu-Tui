@@ -17,6 +17,8 @@ interface ToolCardProps {
   rawPath?: string
   focused?: boolean
   elapsedMs?: number
+  /** Nesting depth for tool call chain tree connectors */
+  depth?: number
 }
 
 function compactPath(rawPath: string | undefined): string {
@@ -46,7 +48,7 @@ function extToLang(rawPath: string | undefined): string | undefined {
   }
 }
 
-export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs }: ToolCardProps) {
+export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs, depth = 0 }: ToolCardProps) {
   const theme = getTheme()
   const [localExpanded, setLocalExpanded] = useState(false)
 
@@ -74,33 +76,44 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
   const borderColor = isError ? theme.error : theme.toolColor(name)
   const family = getToolFamily(name)
 
+  // Tree connectors for nested tool call chains
+  const treeLead = depth > 0 ? '  '.repeat(depth - 1) + ' ├─' : ''
+  const treePad = depth > 0 ? '  '.repeat(depth) : ''
+
   return (
-    <Box flexDirection="column" paddingLeft={2} paddingRight={1} marginBottom={0}>
-      <Text bold color={borderColor}>
-        {family.glyph} {family.verb}{isStreaming ? ' …' : ''}
-        {isStreaming && formatToolElapsed(elapsedMs ?? 0) && (
-          <Text color={theme.muted}> {formatToolElapsed(elapsedMs ?? 0)}</Text>
-        )}
-        {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text color={theme.muted}> {totalLines} lines</Text>}
-        {focused && totalLines > MAX_COLLAPSED_LINES ? <Text color={theme.muted}> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
-      </Text>
-      <Box
-        borderStyle="single"
-        borderColor={isError ? theme.error : theme.dim}
-        borderLeft={true}
-        borderRight={false}
-        borderTop={false}
-        borderBottom={false}
-        paddingLeft={1}
-        flexDirection="column"
-      >
-        <Markdown text={displayText} language={extToLang(rawPath)} />
-        {truncated > 0 && (
-          <Text color={theme.muted}>{truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
-        )}
-        {truncated === 0 && rawPath && (
-          <Text color={theme.muted}>raw: {compactPath(rawPath)}</Text>
-        )}
+    <Box flexDirection="column" paddingLeft={depth > 0 ? 0 : 2} paddingRight={1} marginBottom={0}>
+      <Box flexDirection="row">
+        {depth > 0 && <Text color={theme.dim}>{treeLead}</Text>}
+        <Text bold color={borderColor}>
+          {family.glyph} {family.verb}{isStreaming ? ' …' : ''}
+          {isStreaming && formatToolElapsed(elapsedMs ?? 0) && (
+            <Text color={theme.muted}> {formatToolElapsed(elapsedMs ?? 0)}</Text>
+          )}
+          {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text color={theme.muted}> {totalLines} lines</Text>}
+          {focused && totalLines > MAX_COLLAPSED_LINES ? <Text color={theme.muted}> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
+        </Text>
+      </Box>
+      <Box flexDirection="row">
+        {depth > 0 && <Text color={theme.dim}>{treePad}│</Text>}
+        <Box
+          borderStyle="single"
+          borderColor={isError ? theme.error : theme.dim}
+          borderLeft={true}
+          borderRight={false}
+          borderTop={false}
+          borderBottom={false}
+          paddingLeft={1}
+          flexDirection="column"
+          flexGrow={1}
+        >
+          <Markdown text={displayText} language={extToLang(rawPath)} />
+          {truncated > 0 && (
+            <Text color={theme.muted}>{truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
+          )}
+          {truncated === 0 && rawPath && (
+            <Text color={theme.muted}>raw: {compactPath(rawPath)}</Text>
+          )}
+        </Box>
       </Box>
     </Box>
   )

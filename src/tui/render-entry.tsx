@@ -18,8 +18,8 @@ const TurnSummary = memo(function TurnSummary({ content }: { content: string }) 
   const { columns } = useTerminalSize()
   return (
     <Box paddingX={1} marginTop={1} flexDirection="column">
-      <Text color={theme.dim}>{horizontalRule(columns, 'dots')}</Text>
-      <Text color={theme.muted}> ◆ {content}</Text>
+      <Text color={theme.dim}>{horizontalRule(columns, 'thick')}</Text>
+      <Text bold color={theme.primary}>◆ {content}</Text>
     </Box>
   )
 })
@@ -34,7 +34,7 @@ const RENDER_MAP: Record<string, EntryRenderer> = {
     if (e.toolName === 'ask_user_question') {
       return <QuestionCard key={e.id} question={e.content} />
     }
-    return <ToolCard key={e.id} name={e.toolName ?? ''} result={e.content} isError={e.isError} verbose={verbose} rawPath={e.rawPath} />
+    return <ToolCard key={e.id} name={e.toolName ?? ''} result={e.content} isError={e.isError} verbose={verbose} rawPath={e.rawPath} depth={e.depth} />
   },
   tool_group: (e, verbose) => <ToolGroup key={e.id} tools={e.children ?? []} verbose={verbose} />,
   checkpoint: (e) => <Box key={e.id} paddingX={2}><Text color={getTheme().muted} bold>⚑ {e.content}</Text></Box>,

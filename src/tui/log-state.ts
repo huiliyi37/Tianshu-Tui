@@ -18,6 +18,8 @@ export interface LogEntry {
   rawPath?: string
   turnNumber?: number
   children?: LogEntry[]
+  /** Nesting depth for tool call chain indentation (0 = root). */
+  depth?: number
   thinking?: string
 }
 
@@ -34,6 +36,8 @@ export function createLogEntry(entry: {
   rawPath?: string
   turnNumber?: number
   children?: LogEntry[]
+  /** Nesting depth for tool call chain indentation (0 = root). */
+  depth?: number
   thinking?: string
 }): LogEntry {
   return { ...entry, id: entry.id ?? `l${_nextLogId++}` }

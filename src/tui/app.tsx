@@ -1051,6 +1051,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
         const evidence = agent.getEvidenceState()
         const turnSummary = formatTurnSummary({
+          turnNumber,
           segments: chronicleRef.current.getPhaseSegments(),
           filesRead: evidence.filesRead.size,
           filesModified: evidence.filesModified.size,
