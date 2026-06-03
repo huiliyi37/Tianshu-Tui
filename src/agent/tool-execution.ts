@@ -1,6 +1,6 @@
 import type { ContentBlock } from '../api/types.js'
 import type { TurnBudget } from './turn-budget.js'
-import { enforcePerMessageBudget, enforceTurnReadBudget } from './per-message-budget.js'
+import { enforcePerMessageBudget, enforceTurnReadBudget, enforceContextPressureTruncation } from './per-message-budget.js'
 import { perMessageToolResultBudget } from '../compact/constants.js'
 import type { AgentConfig, AgentCallbacks } from './loop.js'
 import type { TurnHarness } from './turn-harness.js'
@@ -76,7 +76,10 @@ export interface ToolExecutionDeps {
    *  prediction recording — e.g., TDD RED in verify phase is NOT a prediction error. */
   getPhaseHint?: () => string | undefined
   /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
+  /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
   lspManager?: LspManager
+  /** Session-level estimated token count — enables context-pressure-aware truncation. */
+  getEstimatedTokens?: () => number
 }
 
 export interface ToolExecBatchInput {
@@ -88,6 +91,10 @@ export interface ToolExecBatchInput {
   traceStore: TraceStore
   importGraph: ImportGraph | null
   lastConflictCheckCount: number
+  latestRisk: RiskAssessment
+}
+
+export interface ToolExecBatchResult {
   latestRisk: RiskAssessment
 }
 
@@ -273,8 +280,27 @@ export class ToolExecutionController {
           toolResults[idx] = { ...orig, content: entry.content }
         }
       }
+    // Context-pressure preflight: when estimated context usage >70%, truncate
+    // large read_file results to head-only to prevent context overflow.
+    const estimatedTokens = this.deps.getEstimatedTokens?.()
+    const ctxWindow = this.deps.config.contextWindow
+    if (estimatedTokens != null && ctxWindow != null && ctxWindow > 0) {
+      const usageRatio = estimatedTokens / ctxWindow
+      const pressureEntries = readEnforced
+      const pressureEnforced = enforceContextPressureTruncation(pressureEntries, usageRatio)
+      for (const entry of pressureEnforced) {
+        const idx = toolResults.findIndex(r => r.type === 'tool_result' && r.tool_use_id === entry.toolUseId)
+        if (idx >= 0) {
+          const orig = toolResults[idx]!
+          if (orig.type === 'tool_result' && entry.content !== (typeof orig.content === 'string' ? orig.content : '')) {
+            toolResults[idx] = { ...orig, content: entry.content }
+          }
+        }
+      }
+    }
     }
 
+    this.deps.addToolResults(toolResults)
     this.deps.addToolResults(toolResults)
 
     const level = getInterventionLevel(this.deps.getPredictionAccumulator())

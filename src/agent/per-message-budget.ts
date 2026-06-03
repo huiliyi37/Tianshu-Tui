@@ -81,3 +81,39 @@ export function enforceTurnReadBudget(
     return { ...r, content: summary }
   })
 }
+
+/**
+ * Context-pressure truncation: when the overall context usage exceeds 70%,
+ * truncate large read_file results to a head-only preview.
+ *
+ * This is the "last line of defense" — it fires in the tool-execution layer
+ * after per-message and turn-read budgets, catching cases where the context
+ * is already heavily loaded from conversation history rather than just this turn's reads.
+ *
+ * @param results Tool results for this batch
+ * @param usageRatio estimatedTokens / contextWindow (0–1)
+ * @returns Truncated results
+ */
+export function enforceContextPressureTruncation(
+  results: BudgetEntry[],
+  usageRatio: number,
+): BudgetEntry[] {
+  if (usageRatio <= 0.7) return results
+
+  return results.map(r => {
+    if (r.toolName !== 'read_file') return r
+    if (r.content.length < 2000) return r // already small
+
+    const lines = r.content.split('\n')
+    if (lines.length <= 30) return r // already short
+
+    const head = lines.slice(0, 30)
+    const omitted = lines.length - 30
+    const truncated = [
+      ...head,
+      `... ${omitted} lines omitted (context pressure: ${Math.round(usageRatio * 100)}% used). Use read_file with offset/limit for specific ranges. ...`,
+    ].join('\n')
+
+    return { ...r, content: truncated }
+  })
+}
