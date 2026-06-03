@@ -106,17 +106,43 @@ const STATIC_THINKING_CAP = 10_000
 
 /** Detect GLM-style promote: reasoning_content promoted verbatim to visible text.
  *  When thinking and text share >80% content, archiving both is redundant. */
+/** Detect GLM-style promote: reasoning_content promoted verbatim to visible text.
+ *
+ *  Key insight: promote ≈ text is mostly a copy of thinking with minimal new content.
+ *  Normal reasoning: thinking plans → text executes the plan with substantial new content.
+ *
+ *  Detection: compute common prefix length, then check "new content ratio":
+ *    newContentRatio = (text.length - commonPrefix) / text.length
+ *  Promote: newContentRatio < 25% (text is 75%+ copied from thinking)
+ *  Normal:  newContentRatio > 40% (text has substantial different content)
+ *  25–40%:  gray zone → don't suppress (prefer showing twice over losing content)
+ *
+ *  Why not just check prefix overlap (old approach)?
+ *  DeepSeek often starts text by restating the thinking plan verbatim, then diverges.
+ *  Example: thinking="我需要修复 bug...先检查 app.tsx" → text="我需要修复 bug...先检查 app.tsx\n\n经过检查..."
+ *  Old approach: 200-char prefix match → false positive → thinking swallowed.
+ */
 function isThinkingPromotedToText(thinking: string, text: string): boolean {
   if (!thinking || !text) return false
-  // Exact prefix: thinking is a prefix of text (or vice versa)
-  if (text.startsWith(thinking.slice(0, 200)) || thinking.startsWith(text.slice(0, 200))) return true
-  // Overlap ratio: check if the shorter string is >80% contained in the longer
-  const shorter = thinking.length < text.length ? thinking : text
-  const longer = thinking.length < text.length ? text : thinking
-  if (shorter.length < 100) return false
-  const windowSize = Math.min(200, shorter.length)
-  const sample = shorter.slice(0, windowSize)
-  return longer.includes(sample)
+  const minLen = Math.min(thinking.length, text.length)
+  if (minLen < 50) return false
+
+  // Compute common prefix length (cap at 5000 chars for performance)
+  let commonPrefix = 0
+  const maxCheck = Math.min(minLen, 5000)
+  for (let i = 0; i < maxCheck; i++) {
+    if (thinking[i] === text[i]) commonPrefix++
+    else break
+  }
+
+  // Need meaningful overlap to even consider
+  if (commonPrefix < 50) return false
+
+  // Core metric: how much of text is NEW (not copied from thinking)?
+  const newContentRatio = (text.length - commonPrefix) / text.length
+
+  // Promote = text has very little new content (<25%)
+  return newContentRatio < 0.25
 }
 
 // --- Static entry renderer (imported from render-entry.tsx) ---
