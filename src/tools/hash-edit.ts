@@ -15,18 +15,28 @@ export function hashLine(line: string): string {
 }
 
 interface Anchor {
-  line: number  // 1-based
-  hash: string  // 8-char hex
+  line: number      // 1-based
+  hash: string | null  // 8-char hex, or null for position-only mode
 }
 
-/** Parse "L<num>:<hex>" into { line, hash }. Returns null on parse failure. */
+/** Parse "L<num>:<hex>" or "L<num>" into { line, hash }.
+ *  Returns null on parse failure. */
 function parseAnchor(raw: string): Anchor | null {
-  const m = /^L(\d+):([0-9a-f]{8})$/.exec(raw)
-  if (!m) return null
-  const line = parseInt(m[1]!, 10)
-  const hash = m[2]!
-  if (line < 1) return null
-  return { line, hash }
+  // Full format: L<num>:<8-char-hex>
+  const fullMatch = /^L(\d+):([0-9a-f]{8})$/.exec(raw)
+  if (fullMatch) {
+    const line = parseInt(fullMatch[1]!, 10)
+    if (line < 1) return null
+    return { line, hash: fullMatch[2]! }
+  }
+  // Position-only format: L<num>
+  const posMatch = /^L(\d+)$/.exec(raw)
+  if (posMatch) {
+    const line = parseInt(posMatch[1]!, 10)
+    if (line < 1) return null
+    return { line, hash: null }
+  }
+  return null
 }
 
 function formatStaleDiagnostic(
@@ -82,6 +92,11 @@ Delete lines 10-12:
 Insert after line 42 (anchor points to line 42, replace 0 lines):
   hash_edit(file_path="/abs/path/src/app.ts", anchors=["L42:feedface"], new_string="inserted line\\n")
 
+### Position-only mode (fast path)
+When you just read the file and are confident it hasn't changed, omit the hash:
+  hash_edit(file_path="/abs/path/src/app.ts", anchors=["L5", "L7"], new_string="new line 5\\nnew line 6\\nnew line 7")
+This only verifies the line number exists — no content staleness check. Use when you just read the file.
+
 ### Hash computation
 The hash is SHA256(line_content_without_trailing_cr)[0:8].
 Use read_file first to see current content, then construct anchors from the lines you want to target.`,
@@ -92,7 +107,7 @@ Use read_file first to see current content, then construct anchors from the line
         anchors: {
           type: 'array',
           items: { type: 'string' },
-          description: '1-3 anchors in "L<line>:<8-char-hex>" format. First and last define the inclusive replacement range.',
+          description: '1-3 anchors in "L<line>:<8-char-hex>" (full) or "L<line>" (position-only) format. First and last define the inclusive replacement range.',
         },
         new_string: { type: 'string', description: 'Replacement text for the anchored block. Use "" to delete.' },
       },
@@ -113,14 +128,14 @@ Use read_file first to see current content, then construct anchors from the line
 
     const rawAnchors = params.input.anchors as string[] | undefined
     if (!rawAnchors || rawAnchors.length === 0 || rawAnchors.length > 3) {
-      return { content: 'Error: anchors must be an array of 1-3 "L<line>:<hash>" strings', isError: true }
+      return { content: 'Error: anchors must be an array of 1-3 "L<line>:<hash>" or "L<line>" strings', isError: true }
     }
 
     const anchors: Anchor[] = []
     for (const raw of rawAnchors) {
       const parsed = parseAnchor(raw)
       if (!parsed) {
-        return { content: `Error: invalid anchor format "${raw}". Expected "L<num>:<8-char-hex>" (e.g. "L5:a1b2c3d4")`, isError: true }
+        return { content: `Error: invalid anchor format "${raw}". Expected "L<num>:<8-char-hex>" (e.g. "L5:a1b2c3d4") or "L<num>" (e.g. "L5")`, isError: true }
       }
       anchors.push(parsed)
     }
@@ -135,10 +150,14 @@ Use read_file first to see current content, then construct anchors from the line
         mismatches.push({ anchor, actualHash: '<eof>', actualLine: '<line number exceeds file length>' })
         continue
       }
-      const actualHash = hashLine(lines[anchor.line - 1]!)
-      if (actualHash !== anchor.hash) {
-        mismatches.push({ anchor, actualHash, actualLine: lines[anchor.line - 1]! })
+      if (anchor.hash !== null) {
+        // Full hash verification
+        const actualHash = hashLine(lines[anchor.line - 1]!)
+        if (actualHash !== anchor.hash) {
+          mismatches.push({ anchor, actualHash, actualLine: lines[anchor.line - 1]! })
+        }
       }
+      // Position-only anchors (hash === null) only verify line exists — already checked above
     }
 
     if (mismatches.length > 0) {

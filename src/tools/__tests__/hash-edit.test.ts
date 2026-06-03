@@ -140,4 +140,54 @@ describe('hash_edit', () => {
   it('is not concurrency safe', () => {
     assert.equal(HASH_EDIT_TOOL.isConcurrencySafe(), false)
   })
+
+  it('accepts position-only anchors (no hash)', async () => {
+    const cwd = setup({
+      'test.ts': 'line one\nline two\nline three\nline four\n',
+    })
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: ['L2', 'L3'],
+      new_string: 'replaced two\nreplaced three',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('replaced L2-L3'))
+
+    const newContent = readFileSync(join(cwd, 'test.ts'), 'utf-8')
+    assert.equal(newContent, 'line one\nreplaced two\nreplaced three\nline four\n')
+  })
+
+  it('rejects position-only anchor when line exceeds file', async () => {
+    const cwd = setup({ 'test.ts': 'a\nb\n' })
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: ['L99'],
+      new_string: 'x',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('stale') || result.content.includes('exceeds'))
+  })
+
+  it('mixes full-hash and position-only anchors', async () => {
+    const cwd = setup({
+      'test.ts': 'line one\nline two\nline three\n',
+    })
+    const { createHash } = await import('crypto')
+    function h(line: string): string {
+      return createHash('sha256').update(line).digest('hex').slice(0, 8)
+    }
+    const lines = readFileSync(join(cwd, 'test.ts'), 'utf-8').split('\n')
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: [`L1:${h(lines[0]!)}`, 'L2'],
+      new_string: 'new one\nnew two',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, undefined)
+
+    const newContent = readFileSync(join(cwd, 'test.ts'), 'utf-8')
+    assert.equal(newContent, 'new one\nnew two\nline three\n')
+  })
 })

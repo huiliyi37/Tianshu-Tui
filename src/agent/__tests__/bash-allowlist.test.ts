@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { isBashCommandAllowlisted } from '../permissions.js'
+import { isBashCommandAllowlisted, extractBashPrefix, learnBashPrefix } from '../permissions.js'
+import type { PermissionConfig } from '../permissions.js'
 
 describe('isBashCommandAllowlisted', () => {
   const allowlist = ['git status', 'git log', 'git diff', 'npx', 'node', 'npm test']
@@ -85,5 +86,49 @@ describe('isBashCommandAllowlisted', () => {
   it('does not match entry as prefix of first token', () => {
     // "np" is not in the allowlist, and "npx" != "np"
     assert.equal(isBashCommandAllowlisted('npx test', ['np']), false)
+  })
+})
+
+describe('extractBashPrefix', () => {
+  it('extracts first token', () => {
+    assert.equal(extractBashPrefix('git add .'), 'git')
+    assert.equal(extractBashPrefix('npx tsx --test'), 'npx')
+    assert.equal(extractBashPrefix('node'), 'node')
+  })
+
+  it('handles leading whitespace', () => {
+    assert.equal(extractBashPrefix('  git add .'), 'git')
+  })
+
+  it('returns empty for empty string', () => {
+    assert.equal(extractBashPrefix(''), '')
+    assert.equal(extractBashPrefix('   '), '')
+  })
+})
+
+describe('learnBashPrefix', () => {
+  it('appends prefix to allowlist', () => {
+    const config: PermissionConfig = { allow: [], bash: { allowlist: ['git'] } }
+    learnBashPrefix('docker build .', config)
+    assert.deepEqual(config.bash!.allowlist, ['git', 'docker'])
+  })
+
+  it('creates bash config if missing', () => {
+    const config: PermissionConfig = { allow: [] }
+    learnBashPrefix('make test', config)
+    assert.ok(config.bash)
+    assert.deepEqual(config.bash!.allowlist, ['make'])
+  })
+
+  it('deduplicates prefixes', () => {
+    const config: PermissionConfig = { allow: [], bash: { allowlist: ['git'] } }
+    learnBashPrefix('git status', config)
+    learnBashPrefix('git log', config)
+    assert.deepEqual(config.bash!.allowlist, ['git'])
+  })
+
+  it('no-ops on undefined permissions', () => {
+    learnBashPrefix('git status', undefined as unknown as PermissionConfig)
+    // no crash
   })
 })

@@ -36,6 +36,27 @@ export function isToolAllowed(toolName: string, input: Record<string, unknown>, 
   return rules.some(rule => patternMatches(rule.tool, toolName) && paramsMatch(rule.params, input))
 }
 
+/** Extract the first token (command binary) from a bash command for allowlist learning.
+ *  "git add ." → "git", "npx tsx --test" → "npx" */
+export function extractBashPrefix(command: string): string {
+  const trimmed = command.trimStart()
+  if (!trimmed) return ''
+  const spaceIdx = trimmed.indexOf(' ')
+  return spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)
+}
+
+/** Learn a bash command prefix into the session allowlist after user approval.
+ *  Creates the bash config if needed; deduplicates to avoid unbounded growth. */
+export function learnBashPrefix(command: string, permissions: PermissionConfig | undefined): void {
+  if (!permissions || typeof command !== 'string') return
+  const prefix = extractBashPrefix(command)
+  if (!prefix) return
+  if (!permissions.bash) permissions.bash = { allowlist: [] }
+  if (!permissions.bash.allowlist.includes(prefix)) {
+    permissions.bash.allowlist.push(prefix)
+  }
+}
+
 /** Characters that terminate a shell token or start a shell operator.
  *  Used to verify the command contains no shell metacharacters after the
  *  allowlisted prefix. */

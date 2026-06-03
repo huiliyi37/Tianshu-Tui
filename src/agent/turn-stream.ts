@@ -13,6 +13,14 @@ export interface StreamRule {
   inject: string
 }
 
+/** Built-in safety-net rules — always active, even without user config.
+ *  These catch the most dangerous patterns that no model should ever generate. */
+export const DEFAULT_STREAM_RULES: readonly StreamRule[] = [
+  { pattern: 'rm\\s+-rf\\s+/(?![a-zA-Z])', inject: 'STOP: Never execute rm -rf / without a specific path. This will destroy the system.' },
+  { pattern: 'curl[^\\n]*\\|\\s*(?:sh|bash)', inject: 'STOP: Never pipe curl output directly to a shell. Download first, inspect, then run.' },
+  { pattern: 'DROP\\s+TABLE', inject: 'STOP: Do not execute DROP TABLE without explicit user confirmation. This is irreversible.' },
+]
+
 export interface TurnStreamCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
@@ -86,9 +94,9 @@ export class TurnStreamController {
     const chunkHistory: string[] = []
     const thinkingChunkHistory: string[] = []
 
-    // TTSR: compile stream rule patterns once
-    const rules = input.streamRules ?? []
-    const compiledRules = rules.map(r => ({ ...r, regex: new RegExp(r.pattern, 's') }))
+    // TTSR: compile stream rule patterns once â default rules always active
+    const rules = [...DEFAULT_STREAM_RULES, ...(input.streamRules ?? [])]
+    const compiledRules = rules.map(r => ({ ...r, regex: new RegExp(r.pattern, 'si') }))
     let triggeredRule: StreamRule | undefined
 
     const streamCallbacks: StreamCallbacks = {
