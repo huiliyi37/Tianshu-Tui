@@ -47,14 +47,42 @@ function extractSectionText(report: string, heading: RegExp): string {
   return section.join('\n')
 }
 
-function extractKeywords(text: string, max = 8): string[] {
+/**
+ * Detect if a character is CJK (Chinese/Japanese/Korean).
+ */
+function isCJKChar(ch: string): boolean {
+  const cp = ch.codePointAt(0)!
+  return (cp >= 0x4E00 && cp <= 0x9FFF) ||
+         (cp >= 0x3400 && cp <= 0x4DBF) ||
+         (cp >= 0x3000 && cp <= 0x303F) ||
+         (cp >= 0xFF00 && cp <= 0xFFEF)
+}
+
+/**
+ * Extract keywords with CJK-aware tokenization (hybrid bigram).
+ * Pure CJK > 2 chars → bigram expand; 2-char CJK → keep; non-CJK → keep.
+ */
+function extractKeywords(text: string, max = 12): string[] {
   if (!text) return []
-  const tokens = text
+  const rawTokens = text
     .split(/[^\p{L}\p{N}_./-]+/u)
-    .map(t => t.trim().toLowerCase())
+    .map(t => t.trim())
     .filter(t => t.length >= 2)
-    .filter(t => !STOP_WORDS.has(t))
-  return [...new Set(tokens)].slice(0, max)
+    .filter(t => !STOP_WORDS.has(t.toLowerCase()))
+
+  const expanded: string[] = []
+  for (const token of rawTokens) {
+    const chars = [...token]
+    const allCJK = chars.every(ch => isCJKChar(ch))
+    if (allCJK && chars.length > 2) {
+      for (let i = 0; i < chars.length - 1; i++) {
+        expanded.push(chars[i]! + chars[i + 1]!)
+      }
+    } else {
+      expanded.push(token.toLowerCase())
+    }
+  }
+  return [...new Set(expanded)].slice(0, max)
 }
 
 // ─── Build Fingerprint ──────────────────────────────────────────────
@@ -183,4 +211,14 @@ export function deserializeFingerprint(row: {
     toolFailureRate: row.tool_failure_rate,
     bulletIds: JSON.parse(row.bullet_ids) as string[],
   }
+}
+
+// ─── Trend Validation ───────────────────────────────────────────────
+
+const VALID_TRENDS = new Set(['stable', 'falling', 'rising'])
+
+/** Validate a trend value from SQLite. Defensive fallback for schema migrations. */
+export function validateTrend(value: string, fallback: 'stable' | 'falling' | 'rising'): 'stable' | 'falling' | 'rising' {
+  if (VALID_TRENDS.has(value)) return value as 'stable' | 'falling' | 'rising'
+  return fallback
 }
