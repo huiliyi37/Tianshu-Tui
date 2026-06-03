@@ -1,6 +1,7 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs'
+import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, statSync } from 'fs'
+
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { EDIT_FILE_TOOL } from '../edit.js'
@@ -165,4 +166,49 @@ describe('edit_file tool', () => {
     assert.ok(!result.content.includes('Warning'), `unexpected Warning: ${result.content}`)
     assert.ok(result.content.includes('Replaced all 3'), `expected success, got: ${result.content}`)
   })
+
+  it('on stale file: auto-reapplies edit when old_string still matches', async () => {
+    const filePath = join(TEST_DIR, 'stale-match.ts')
+    writeFileSync(filePath, 'const x = 1\nconst y = 2\n')
+
+    const { __setFileReadMtimeForTests } = await import('../read-file.js')
+    const oldMtime = statSync(filePath).mtimeMs
+    __setFileReadMtimeForTests(filePath, oldMtime)
+
+    writeFileSync(filePath, 'const x = 1\nconst y = 2\n// added comment\n')
+
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'const y = 2',
+      new_string: 'const y = 3',
+    }))
+
+    assert.ok(!result.isError, `Expected success on stale auto-apply, got: ${result.content}`)
+    assert.match(result.content, /modified externally.*still matched/i)
+
+    const content = readFileSync(filePath, 'utf-8')
+    assert.ok(content.includes('const y = 3'))
+    assert.ok(content.includes('// added comment'))
+  })
+
+  it('on stale file: shows current content near old_string when it no longer matches', async () => {
+    const filePath = join(TEST_DIR, 'stale-nomatch.ts')
+    writeFileSync(filePath, 'function foo() {\n  return 1\n}\n')
+
+    const { __setFileReadMtimeForTests } = await import('../read-file.js')
+    const oldMtime = statSync(filePath).mtimeMs
+    __setFileReadMtimeForTests(filePath, oldMtime)
+
+    writeFileSync(filePath, 'function foo() {\n  return 99\n}\n')
+
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: '  return 1',
+      new_string: '  return 2',
+    }))
+
+    assert.equal(result.isError, true)
+    assert.match(result.content, /return 99/, `Should show actual file content, got: ${result.content}`)
+  })
 })
+

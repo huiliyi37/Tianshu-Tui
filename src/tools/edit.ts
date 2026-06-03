@@ -56,13 +56,68 @@ Bad: using a too-short old_string that matches multiple locations`,
     const lastReadMtime = getFileReadMtime(filePath)
     if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
       // Auto-refresh mtime cache to prevent read-edit-stale loop:
-      // after this rejection, the model will re-read the file, which updates
-      // the cache. But if it doesn't re-read and tries edit_file again,
-      // this refresh ensures the mtime comparison uses the latest value.
       refreshFileReadMtime(filePath, currentMtime)
-      return {
-        content: `Error: File ${filePath} has been modified since your last read_file (mtime changed). Re-read the file to update your view, or use hash_edit with anchors from the current content to safely apply your edit.`,
-        isError: true,
+
+      // Smart stale recovery: instead of a generic "re-read" error, auto-read
+      // the current content and either re-apply or show what changed.
+      const oldString = params.input.old_string as string
+      try {
+        const freshContent = readFileSync(filePath, 'utf-8')
+        const freshLines = freshContent.split('\n')
+
+        if (freshContent.includes(oldString)) {
+          // old_string still matches — just re-apply the edit
+          const newString = params.input.new_string as string
+          const replaceAll = (params.input.replace_all as boolean) ?? false
+          if (replaceAll) {
+            const newContent = freshContent.replaceAll(oldString, newString)
+            writeFileSync(filePath, newContent, 'utf-8')
+            const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
+            return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}` }
+          }
+          const firstIdx = freshContent.indexOf(oldString)
+          const secondIdx = freshContent.indexOf(oldString, firstIdx + oldString.length)
+          if (secondIdx !== -1) {
+            return { content: buildMultipleMatchError(filePath, oldString, freshContent), isError: true }
+          }
+          writeFileSync(filePath, freshContent.replace(oldString, newString), 'utf-8')
+          return { content: `Applied edit to ${filePath} (file was modified externally but content still matched)` }
+        }
+
+        // old_string not found — show what the file actually looks like near the best guess
+        const oldFirstLine = oldString.split('\n')[0] ?? ''
+        const trimmedTarget = oldFirstLine.trim()
+        let bestIdx = -1
+        let bestScore = 0
+        for (let i = 0; i < freshLines.length; i++) {
+          const trimmed = freshLines[i]!.trim()
+          if (trimmed.length === 0) continue
+          const score = sharedPrefixLength(trimmed, trimmedTarget)
+          if (score > bestScore) { bestScore = score; bestIdx = i }
+        }
+
+        const CONTEXT = 5
+        if (bestIdx >= 0 && bestScore >= Math.max(8, Math.floor(trimmedTarget.length * 0.3))) {
+          const start = Math.max(0, bestIdx - CONTEXT)
+          const end = Math.min(freshLines.length, bestIdx + oldString.split('\n').length + CONTEXT)
+          const actualWindow = freshLines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n')
+          return {
+            content: `File ${filePath} was modified externally since your last read_file. old_string no longer matches.\n\nCurrent content near the expected location (line ${bestIdx + 1}):\n\`\`\`\n${actualWindow}\n\`\`\`\n\nUpdate your old_string to match the current content and retry, or use hash_edit with anchors.`,
+            isError: true,
+          }
+        }
+
+        // No close match — show file head
+        const head = freshLines.slice(0, 30).map((l, i) => `${i + 1}: ${l}`).join('\n')
+        return {
+          content: `File ${filePath} was modified externally since your last read_file. old_string not found.\n\nFile head:\n\`\`\`\n${head}${freshLines.length > 30 ? `\n... (${freshLines.length} lines total)` : ''}\n\`\`\`\n\nRe-read the file to see full content, or use hash_edit with anchors.`,
+          isError: true,
+        }
+      } catch {
+        return {
+          content: `Error: File ${filePath} has been modified since your last read_file. Re-read the file to update your view.`,
+          isError: true,
+        }
       }
     }
 

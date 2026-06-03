@@ -100,6 +100,18 @@ export function refreshFileReadMtime(canonicalPath: string, newMtimeMs: number):
   }
 }
 
+/** Test-only: inject a file read history entry so stale detection can trigger
+ *  without needing to call read_file first. */
+export function __setFileReadMtimeForTests(canonicalPath: string, mtimeMs: number): void {
+  fileReadHistory.set(canonicalPath, {
+    mtimeMs,
+    totalLines: 0,
+    rawBytes: 0,
+    modelBytes: 0,
+    recordedAt: Date.now(),
+  })
+}
+
 async function sliceFromArtifact(
   store: { readRaw(id: string): Promise<string | null> },
   artifactId: string,
