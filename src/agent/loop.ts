@@ -374,6 +374,7 @@ export class AgentLoop {
       getRepairHintTracker: () => this.repairHintTracker,
       getContextClaimStore: () => this.config.contextClaimStore,
       getPlaybookStore: () => this.config.playbookStore,
+      getCwd: () => this.cwd,
     })
     this.compaction = new CompactionController({
       session: this.session,

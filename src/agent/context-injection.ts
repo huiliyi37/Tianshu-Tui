@@ -25,6 +25,8 @@ export interface ContextInjectionDeps {
   getRepairHintTracker: () => RepairHintTracker
   getContextClaimStore: () => ContextClaimStore | undefined
   getPlaybookStore: () => PlaybookStore | undefined
+  /** Project root for recall-gate evidence verification (optional). */
+  getCwd?: () => string
 }
 
 export class ContextInjectionController {
@@ -80,7 +82,7 @@ export class ContextInjectionController {
       return
     }
 
-    contextClaimStore.promoteEligibleClaims()
+    contextClaimStore.promoteEligibleClaims(Date.now(), this.deps.getCwd?.())
     const activeClaims = contextClaimStore.listActiveClaims()
     const usedAt = Date.now()
     const consumerId = `turn-${this.deps.session.getTurnCount()}:prompt`

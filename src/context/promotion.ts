@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { isPromptEligibleClaim, type ContextClaim, type ContextClaimStatus } from './claims.js'
 
 export interface ClaimStatusCounts {
@@ -7,6 +9,34 @@ export interface ClaimStatusCounts {
   durable: number
   durableCandidate: number
   quarantined: number
+  /** Claims blocked by recall-gate (evidence files no longer exist). */
+  recallBlocked: number
+}
+
+/**
+ * Recall-gate — NREM consolidation filter.
+ *
+ * Before promoting a claim from active → durable_candidate → durable,
+ * verify that its file evidence still exists on disk.
+ *
+ * This implements the recall-gated consolidation principle: only
+ * consolidate information that can still be retrieved and verified.
+ * If evidence files have been deleted or moved, the claim's basis
+ * is irrecoverable — promotion is blocked.
+ *
+ * Skipped when cwd is not provided (e.g., in tests without filesystem).
+ */
+export function canRecallClaim(claim: ContextClaim, cwd?: string): boolean {
+  if (!cwd) return true // no cwd → skip recall check (non-blocking)
+
+  const filePaths = claim.evidence
+    .filter(e => e.path !== undefined)
+    .map(e => e.path!)
+
+  if (filePaths.length === 0) return true // no file evidence → no recall check needed
+
+  // At least one evidence file must still exist
+  return filePaths.some(p => existsSync(join(cwd, p)))
 }
 
 export function evaluatePromotion(claim: ContextClaim, now = Date.now()): ContextClaimStatus | null {
@@ -42,5 +72,5 @@ export function countClaimsByStatus(claims: ContextClaim[]): ClaimStatusCounts {
     if (c.status === 'durable_candidate') return { ...counts, durableCandidate: counts.durableCandidate + 1 }
     if (c.status === 'quarantined') return { ...counts, quarantined: counts.quarantined + 1 }
     return counts
-  }, { active: 0, stale: 0, conflicted: 0, durable: 0, durableCandidate: 0, quarantined: 0 })
+  }, { active: 0, stale: 0, conflicted: 0, durable: 0, durableCandidate: 0, quarantined: 0, recallBlocked: 0 })
 }

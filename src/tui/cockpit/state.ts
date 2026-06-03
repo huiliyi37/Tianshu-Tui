@@ -132,7 +132,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
             digest: l.digest,
             tokenEstimate: l.tokenEstimate,
           })),
-          claimCounts: claimCounts ?? { active: 0, stale: 0, conflicted: 0, durable: 0, durableCandidate: 0, quarantined: 0 },
+          claimCounts: claimCounts ?? { active: 0, stale: 0, conflicted: 0, durable: 0, durableCandidate: 0, quarantined: 0, recallBlocked: 0 },
         }
       : null,
     model: {

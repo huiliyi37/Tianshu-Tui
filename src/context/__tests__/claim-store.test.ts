@@ -191,6 +191,7 @@ test('lists claims with file evidence and summarizes lifecycle statuses', () => 
       durable: 1,
       durableCandidate: 0,
       quarantined: 0,
+      recallBlocked: 0,
     })
   } finally {
     rmSync(dir, { recursive: true, force: true })

@@ -161,10 +161,10 @@ describe('countClaimsByStatus', () => {
       claim({ id: 's', status: 'stale' }),
       claim({ id: 'd', status: 'durable' }),
       claim({ id: 'c', status: 'conflicted' }),
-    ]), { active: 1, stale: 1, conflicted: 1, durable: 1, durableCandidate: 0, quarantined: 0 })
+    ]), { active: 1, stale: 1, conflicted: 1, durable: 1, durableCandidate: 0, quarantined: 0, recallBlocked: 0 })
   })
 
   it('returns zeros for empty array', () => {
-    assert.deepEqual(countClaimsByStatus([]), { active: 0, stale: 0, conflicted: 0, durable: 0, durableCandidate: 0, quarantined: 0 })
+    assert.deepEqual(countClaimsByStatus([]), { active: 0, stale: 0, conflicted: 0, durable: 0, durableCandidate: 0, quarantined: 0, recallBlocked: 0 })
   })
 })

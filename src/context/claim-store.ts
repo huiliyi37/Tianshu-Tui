@@ -13,7 +13,7 @@ import {
   type ContextClaimStatus,
   type EvidenceRef,
 } from './claims.js'
-import { claimHasFileEvidence, countClaimsByStatus, evaluatePromotion, type ClaimStatusCounts } from './promotion.js'
+import { claimHasFileEvidence, countClaimsByStatus, evaluatePromotion, canRecallClaim, type ClaimStatusCounts } from './promotion.js'
 
 const MAX_CONSUMERS_PER_CLAIM = 50
 const MAX_ACTIVE_CLAIMS = 50
@@ -162,11 +162,19 @@ export class ContextClaimStore {
     return changed
   }
 
-  promoteEligibleClaims(now = Date.now()): ContextClaim[] {
+  promoteEligibleClaims(now = Date.now(), cwd?: string): ContextClaim[] {
     const promoted: ContextClaim[] = []
     for (const claim of this.listClaims()) {
       const next = evaluatePromotion(claim, now)
       if (!next) continue
+
+      // Recall-gate (NREM consolidation): verify evidence files still exist
+      // before promoting. If evidence is irrecoverable, mark stale and skip.
+      if (!canRecallClaim(claim, cwd)) {
+        this.updateClaimStatus(claim.id, 'stale', 'recall-gate: evidence files no longer exist')
+        continue
+      }
+
       const updated = this.updateClaimStatus(claim.id, next, 'promotion threshold met')
       if (updated) promoted.push(updated)
     }
