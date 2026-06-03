@@ -28,6 +28,8 @@ import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { debugLog } from '../utils/debug.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
 import { PrewarmCache } from './prewarm.js'
+import { batchPrewarm } from './prewarm-file.js'
+
 import { compactThresholds, pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from '../tools/artifact-threshold.js'
 import { truncateToolResult } from './tool-result-truncate.js'
@@ -902,6 +904,16 @@ ${check.formatted}`
      }
    }
 
+    // Prewarm grep-matched files: grep→read_file is the most common tool sequence.
+    // After grep succeeds, prewarm up to 5 matched file paths so the next
+    // read_file hits the PrewarmCache instead of doing a cold fs read.
+    if (tu.name === 'grep' && !harnessResult.isError) {
+      const matchedFiles = extractGrepMatchPaths(finalContent, deps.cwd)
+      if (matchedFiles.length > 0) {
+        void batchPrewarm(deps.cwd, matchedFiles, deps.prewarm).catch(() => {})
+      }
+    }
+
     // Evidence tracking + import graph
     if (tu.name === 'read_file' && !harnessResult.isError) {
       deps.evidence.trackFileRead(tu.input.file_path as string)
@@ -977,8 +989,32 @@ ${check.formatted}`
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: '', is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }
     const msg = err instanceof Error ? err.message : String(err)
-    deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
-    callbacks.onToolResult(tu.id, tu.name, msg, true)
-    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
- }
 }
+
+/**
+ * Extract unique file paths from grep output.
+ * Grep output format: `relative/path.ts:42:  const x = 1`
+ * We extract just the file path portion (before the first colon on each line).
+ */
+function extractGrepMatchPaths(grepOutput: string, cwd: string): string[] {
+  const seen = new Set<string>()
+  const paths: string[] = []
+  const MAX_FILES = 5
+
+  for (const line of grepOutput.split('\n')) {
+    if (paths.length >= MAX_FILES) break
+    // Match lines like "src/foo.ts:42:  content" or "src/foo.ts:content"
+    const colonIdx = line.indexOf(':')
+    if (colonIdx <= 0) continue
+    const filePath = line.slice(0, colonIdx)
+    // Skip if it looks like a non-path (e.g. artifact markers, section headers)
+    if (filePath.startsWith('[') || filePath.startsWith('Use ') || filePath.startsWith('...')) continue
+    if (!seen.has(filePath)) {
+      seen.add(filePath)
+      paths.push(filePath)
+    }
+  }
+
+  return paths
+}
+
