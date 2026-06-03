@@ -1,0 +1,57 @@
+# CODEOWNERS — Rivet (天枢)
+#
+# Protected Zone: changes require review by the project owner.
+# See CONTRIBUTING.md for the rationale behind each protection.
+#
+# 🔴 Protected — identity, memory, and cognitive architecture
+
+# Star identity canonical
+/CLAUDE.md @banxia
+
+# Architecture maps loaded into every session
+/AGENTS.md @banxia
+/.rivet.md @banxia
+
+# Agent memory system
+/.rivet/knowledge/ @banxia
+
+# Core design theory IP
+/docs/superpowers/ @banxia
+
+# System prompt — every token change affects all sessions
+/src/prompt/static.ts @banxia
+/src/prompt/volatile.ts @banxia
+/src/prompt/volatile-snapshot.ts @banxia
+/src/prompt/volatile-git.ts @banxia
+/src/prompt/engine.ts @banxia
+
+# Memory protection and automated writing
+/src/agent/dream.ts @banxia
+/src/agent/auto-writer*.ts @banxia
+/src/agent/claim-extractor.ts @banxia
+/src/agent/sensorium.ts @banxia
+
+# CVM — cognitive virtual machine
+/src/context/cognitive-ledger.ts @banxia
+/src/context/cognitive-mirror.ts @banxia
+
+# Tool prompt templates
+/prompts/ @banxia
+
+#
+# 🟡 Review Zone — extra scrutiny, any maintainer can review
+#
+/src/agent/loop.ts @banxia
+/src/agent/checkpoint.ts @banxia
+/src/agent/approval-risk.ts @banxia
+/src/agent/delegate-*.ts @banxia
+/src/agent/compaction-controller.ts @banxia
+/src/agent/convergence-detector.ts @banxia
+/src/agent/behavior-mirror.ts @banxia
+/src/agent/cognitive-season.ts @banxia
+
+#
+# 🟢 Open Zone — default, any maintainer can review
+# No explicit entries needed; GitHub falls through to the default below.
+#
+* @banxia

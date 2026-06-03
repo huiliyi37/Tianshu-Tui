@@ -1,6 +1,12 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# TypeScript emitted files alongside sources (tsup outputs to dist/)
+src/**/*.js
+src/**/*.d.ts
+src/**/*.js.map
+src/**/*.d.ts.map
 .DS_Store
 failure-samples/**/transcript.raw.jsonl
 

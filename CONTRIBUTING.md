@@ -1,111 +1,89 @@
-# Contributing to Rivet
+# Contributing to Rivet (天枢)
 
-## Setup
+Thank you for your interest in contributing! This document explains what you can freely contribute and what areas require special handling.
 
-```bash
-git clone https://github.com/user/rivet.git
-cd rivet
-npm install
-```
+## Quick Start
 
-Requirements: Node.js >= 22.0.0
+1. Fork → Branch → PR → Review
+2. Run `npx tsc --noEmit` and `npm test` before pushing
+3. One logical change per PR — keep it reviewable
 
-## Development
+## Contribution Zones
 
-```bash
-# Type check
-npm run typecheck
+### 🟢 Open Zone — Community Contributions Welcome
 
-# Run tests
-npm test
+These areas are open for contributions. PRs are reviewed on merit:
 
-# Build
-npm run build
+| Directory | What It Does | How to Help |
+|-----------|-------------|-------------|
+| `src/tools/` | Tool implementations (definition + execute) | New tools, bug fixes, performance |
+| `src/tui/` | Terminal UI (Ink 6 / React) | Components, accessibility, polish |
+| `src/api/` | API client layer (OpenAI-compatible, streaming) | New providers, error handling |
+| `src/compact/` | Context compression strategies | New strategies, threshold tuning |
+| `src/cache/` | Prefix cache management | Diagnostics, hit-rate improvements |
+| `src/repo/` | Code repository analysis | Language support, indexing |
+| `src/config/` | Configuration management | New config sources, validation |
+| `src/artifact/` | Large output persistence | Storage backends, truncation logic |
+| `src/**/__tests__/` | Test files | Coverage improvements, test utilities |
+| `scripts/` | Utility scripts | New benchmarks, diagnostics |
+| `completions/` | Shell completions | New shells |
+| `docs/` (except `docs/superpowers/`) | General documentation | Typos, clarifications, guides |
 
-# Dev mode (watch)
-npm run dev
+### 🟡 Review Zone — Requires Domain Understanding
 
-# Run locally
-npm run start
-```
+These areas affect agent behavior. PRs need extra scrutiny:
 
-## PR Process
+| Path | Why Sensitive |
+|------|--------------|
+| `src/agent/loop.ts` | Core agent loop — controls turn flow, tool dispatch, error recovery |
+| `src/agent/checkpoint.ts` | Session checkpoint/restore |
+| `src/agent/approval-risk.ts` | Safety risk assessment for tool execution |
+| `src/agent/delegate-*.ts` | Sub-agent coordination |
+| `src/agent/compaction-controller.ts` | Context window management |
+| `src/agent/convergence-detector.ts` | Turn termination logic |
+| `src/context/cognitive-ledger.ts` | CVM — cognitive virtual machine state |
+| `src/context/cognitive-mirror.ts` | Behavioral calibration |
+| `src/agent/behavior-mirror.ts` | Agent self-assessment |
+| `src/agent/cognitive-season.ts` | Cognitive state management |
 
-1. Create a feature branch from `main`
-2. Make changes with tests
-3. Ensure `npm run typecheck` and `npm test` pass
-4. Open PR with description of changes
+### 🔴 Protected Zone — Owner Review Required
+
+These files define the agent's identity, memory, and cognitive architecture. **PRs touching these files require explicit approval from @banxia (project owner).** Changes here can cascade into all agent sessions — a single incorrect edit can corrupt the shared knowledge base.
+
+| Path | What It Protects |
+|------|-----------------|
+| `CLAUDE.md` | Star identity canonical — founding memories, star covenants |
+| `AGENTS.md` | Architecture map loaded into every agent session |
+| `.rivet.md` | Operating manual loaded into every agent session |
+| `.rivet/knowledge/` | Agent memory system (identity, guardrails, session retrospectives) |
+| `docs/superpowers/` | Core design theory IP — methodology, principles, cognitive architecture |
+| `src/prompt/static.ts` | System prompt — every token change affects all sessions |
+| `src/prompt/volatile*.ts` | Volatile prompt construction — affects context loading |
+| `src/prompt/engine.ts` | Prompt assembly engine |
+| `src/agent/dream.ts` | Memory protection contract — prevents knowledge corruption |
+| `src/agent/auto-writer*.ts` | Automated knowledge writing |
+| `prompts/` | Tool prompt templates — directly shape agent behavior |
+| `src/agent/claim-extractor.ts` | Extracts claims from agent output into memory |
+| `src/agent/sensorium.ts` | Agent perception layer |
+
+#### Why This Protection Exists
+
+During the Pangu upgrade (2026-05-21), an agent running autonomously wrote new knowledge documents that overwrote core identity and behavioral content. This caused all agents to lose their shared context and regress to untrained behavior. The impact was catastrophic — every active session was affected, and recovery required manual restoration from backups.
+
+The protected zone exists to prevent a repeat: no single PR (or autonomous agent action) should be able to silently modify the shared cognitive foundation.
+
+## CODEOWNERS
+
+This repo uses CODEOWNERS to enforce review requirements on protected files. GitHub will automatically request review from the project owner for any PR touching protected paths.
 
 ## Code Style
 
-- TypeScript strict mode, no `any`
-- ESM modules (`"type": "module"`)
-- Prefer small focused files (<400 lines)
-- Immutable patterns (spread / map / filter, no mutation)
-- No `console.log` in production code
+- TypeScript strict mode, `noUncheckedIndexedAccess: true`
+- `interface` + plain objects for data (no classes)
+- Async/await with try-catch
+- `node:test` + `node:assert/strict` for tests
+- Test files mirror source: `src/agent/foo.ts` → `src/agent/__tests__/foo.test.ts`
 
-## Testing
+## Questions?
 
-- Test framework: Node.js built-in test runner (`node:test`)
-- All new features must include tests
-- Run: `npm test`
-- 80%+ coverage target
-
-## Architecture
-
-```
-src/
-├── main.tsx        Entry point + CLI
-├── tui/            Terminal UI (Ink 6 + React)
-├── api/            SSE client + provider abstraction
-├── agent/          Agent loop + session + approval + tool pipeline
-├── tools/          bash, read_file, write_file, edit_file
-├── prompt/         System prompt + cache fingerprinting
-├── compact/        Context compaction (provider-aware thresholds)
-├── config/         Config schema + CLI manager (3-layer resolution)
-└── context/        Anchor registry + pressure monitor + persistent store
-```
-
-## Configuration Layers
-
-Rivet uses 3-layer config resolution (highest priority wins):
-
-1. **Session overlay** — runtime-only, e.g. from CLI `--provider` flag
-2. **Project config** — `.rivet-config.json` found by walking up from cwd
-3. **User config** — `~/.rivet/config.json` (global)
-4. **Defaults** — built into `src/config/default.ts`
-
-Example `.rivet-config.json` for a project that prefers manual approval:
-
-```json
-{
-  "agent": {
-    "approval": "manual",
-    "maxTurns": 30
-  }
-}
-```
-
-## Adding a Provider
-
-1. Define `ProviderCapabilities` in `src/api/provider.ts`
-2. Create a client factory in `src/api/<provider>.ts`
-3. Add usage mapper if format differs from Anthropic
-4. Add cache profile in `src/api/provider-profile.ts` (affects compaction strategy)
-5. Add models to `src/config/default.ts`
-6. Add tests
-
-## Approval System
-
-Rivet uses a dual-gate approval system:
-
-1. **Tool-level gate**: `Tool.requiresApproval(params)` — static per-tool (e.g. `bash` checks `DANGEROUS_BASH_PATTERNS`)
-2. **Risk-level gate**: `assessToolRisk()` — dynamic, considers doom loop state, path traversal, destructive commands, antibody claims, and **Sensorium confidence** (adaptive)
-
-Decision matrix in `tool-pipeline.ts`:
-- Allowlisted tools → always proceed
-- `approvalMode='auto-safe'` + high confidence (>0.8) + low risk → auto-approve
-- `approvalMode='auto-safe'` + high risk → ask user
-- `approvalMode='manual'` + `requiresApproval()` → ask user
-
-When adding a new tool, implement `requiresApproval()` and consider risk impact in `assessToolRisk()`.
+If you're unsure whether your change falls into a protected zone, open an issue first. We'd rather discuss upfront than have you spend time on a PR that needs architectural review.
