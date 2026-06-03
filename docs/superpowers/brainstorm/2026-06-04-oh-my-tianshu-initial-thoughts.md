@@ -591,4 +591,40 @@ OMT 的存在需要证明天枢有什么缺失。
 4. 如果确实需要，再考虑独立项目
 
 *天璇探索了可能性，天府守护了现实性。两者结合，才是完整的决策。*
+4. 如果确实需要，再考虑独立项目
 
+*天璇探索了可能性，天府守护了现实性。两者结合，才是完整的决策。*
+
+---
+
+## 关联文档
+
+### 团队协作基础设施设计
+
+| 文档 | 主题 | 状态 |
+|------|------|------|
+| `docs/superpowers/specs/2026-05-22-yongminengdeng-design.md` | 永明灯系统 (HEARTH) — 个体参考系稳定性，5+1 锚位 + 关系拓扑 invariant | Phase 1 待实现 |
+| `docs/superpowers/specs/2026-05-22-songline-runtime-design.md` | 歌之路运行时 (Songline) — 生态层存在根基，唱歌=身份维护+信息素=协作 | 待实现 |
+| `docs/superpowers/specs/2026-05-23-agent-collaboration-scenario.md` | Agent 协作过程推演 — 工程映射版，HEARTH+Songline 增量叠加在已有协作基础设施 | 部分已实现 |
+| `docs/superpowers/specs/2026-05-23-agent-collaboration-scenario-original.md` | Agent 协作概念推演 — mimo 原始概念设计（留存） | 概念阶段 |
+
+### 架构依赖关系
+
+```
+HEARTH (个体稳定性) ← OMT 增强层复用 pole_structure / center_belief
+Songline (生态协作) ← OMT 增强层复用 cycle_open/close + 信息素
+agent-collaboration ← OMT 增强层复用 WorkOrder + SemanticLock + MergeProtocol
+```
+
+### 已实现的协作基础设施（OMT 可直接复用）
+
+| 模块 | 文件 | 复用度 |
+|------|------|--------|
+| DelegationCoordinator | `src/agent/coordinator.ts` | 100% |
+| WorkOrder + WorkerSession | `src/agent/work-order.ts`, `worker-session.ts` | 100% |
+| StigmergyStore (信息素) | `src/context/stigmergy.ts` | 80% |
+| SemanticLockManager | `src/agent/semantic-lock.ts` | 100% |
+| ConflictGradient | `src/agent/conflict-gradient.ts` | 100% |
+| MergeProtocol | `src/agent/merge-protocol.ts` | 100% |
+| SessionRegistry (SQLite) | `src/agent/session-registry.ts` | 100% |
+| Delivery Gate | `src/agent/delivery-gate.ts` | 100% |
