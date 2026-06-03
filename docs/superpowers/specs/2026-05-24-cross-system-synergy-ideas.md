@@ -267,3 +267,68 @@ Autopoietic Maintenance：
 | 4 | 全局工作空间竞争 | 中-高 | 极高 | 强 | Phase 5 |
 | 1 | 自由能引擎 | 高 | 极高 | 极强 | Phase 5 |
 | 7 | 具身认知闭环 | 高 | 高 | 中-强 | Phase 6 |
+
+---
+
+## 执行记录
+
+> 2026-06-04 天枢域会话 — 推进 #6 → #3 → #4（Step 1）
+
+### ✅ 联动 #6：Theta 相位机 — `89a5516`
+
+将 ThetaState 从简单计数器升级为相位振荡器：
+
+- `phase ∈ [0,1)`：[0, 0.5) = ENCODING（接收信息），[0.5, 1) = RETRIEVAL（反思整合）
+- phase 随每次工具调用推进，由 vigor 和 complexity 联合调制
+- 高 vigor → 慢推进（保护心流），高 complexity → 快推进（更多检查）
+- theta check 仅在 retrieval 阶段 + interval 满足时触发（双重门控）
+- 新增 `getThetaPhase()`、`advanceThetaCounter(state, phaseInput?)`
+
+文件：`src/agent/star-event.ts`、`src/agent/hooks/theta-hook.ts`
+
+### ✅ 联动 #3：记忆巩固管道（NREM 阶段）— `0800c05`
+
+实现 recall-gated consolidation — promotion 前验证 evidence 文件仍存在：
+
+- 新增 `canRecallClaim(claim, cwd)`：检查 claim 的 evidence 文件是否仍可访问
+- `promoteEligibleClaims()` 接入 recall-gate：证据不可检索 → 标记 stale，阻止晋升
+- `ClaimStatusCounts` 新增 `recallBlocked` 计数器
+- 无 cwd 时优雅降级（非阻塞）
+
+文件：`src/context/promotion.ts`、`src/context/claim-store.ts`、`src/agent/context-injection.ts`
+
+### ✅ 联动 #4：全局工作空间竞争（Step 1）— `aae8cd3`
+
+给 context-update 子块赋 salience 分数，在 token budget 内做 Top-K 选择：
+
+- 新增 `SalientBlock { content, salience }` 接口
+- `assignSalience(content)`：根据 XML 标签名返回 0.3~1.0 的显著性分数
+- `selectTopKBlocks(blocks, maxChars)`：按 salience 降序选择，直到预算耗尽
+- `buildDynamicAppendix(ctx, maxChars?)`：可选 maxChars 参数启用 GWT
+
+文件：`src/prompt/volatile.ts`
+
+### ✅ 天枢种子胶囊 — `e52219a`
+
+创建天枢域种子胶囊（北斗第一星，执中者），定义 9 条认知方法：
+全貌定向、意图高于指令、适时委派、步步为营、收束意识、方案择优、证据驱动、沉默即失职、上下文流动。
+
+文件：`docs/seed-capsule-tianshu.md`
+
+### ✅ Skill-as-Profile — `9637fcc`
+
+将 deerflow P1 skill 系统重新设计为子代理 profile 模式：
+- 新增内置 profile：`architect`（架构分析）、`troubleshooter`（根因诊断）
+- 示例 `.rivet/agents/` 文件：`research.md`、`security-auditor.md`
+- 用户可通过 `.rivet/agents/*.md` 扩展自定义 skill profile
+
+文件：`src/agent/profile-registry.ts`、`.rivet/agents/`
+
+### ⏳ 待推进
+
+| # | 联动 | 下一步 |
+|---|------|--------|
+| 3 | 记忆巩固（REM 阶段） | playbook-reflect 增加跨 session 重复模式检测 |
+| 4 | 全局工作空间（Step 2+） | 在 engine 层接入 maxChars 预算；动态 salience 基于 goal-alignment |
+| 1 | 自由能引擎 | 需要 PredictionAccumulator 扩展，工程量大 |
+| 7 | 具身认知闭环 | 工具 affordance 评分，EFE-driven 工具选择 |
