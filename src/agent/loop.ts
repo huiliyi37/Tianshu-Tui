@@ -200,9 +200,6 @@ export class AgentLoop {
     cooldownUntilTurn: 0,
   }
   /** Max theta checks per session. Prevents runaway tsc spawning. */
-  private static readonly THETA_MAX_SESSION = 40
-  /** Max theta checks per agent turn. */
-  private static readonly THETA_MAX_PER_TURN = 2
   thetaRequestsThisTurn = 0
   private thetaState: ThetaState = createThetaState(7)
   artifactStore: import('../artifact/store.js').ArtifactStore | undefined
