@@ -13,7 +13,7 @@ export const UserMessage = memo(function UserMessage({ content }: UserMessagePro
   const theme = getTheme()
   const { columns } = useTerminalSize()
   return (
-    <Box flexDirection="column" paddingX={1} marginTop={1} marginBottom={0}>
+    <Box flexDirection="column" paddingX={1} marginTop={2} marginBottom={0}>
       <Text color={theme.dim}>{horizontalRule(columns, 'thin')}</Text>
       <Box flexDirection="row" gap={1} marginTop={1}>
         <Text color={theme.userColor} bold>{gutterGlyph('user')}</Text>

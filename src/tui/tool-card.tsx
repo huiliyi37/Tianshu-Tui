@@ -122,7 +122,7 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
   const foldHint = focused && truncated > 0 ? ` Enter/Tab to ${localExpanded ? 'collapse' : 'expand'}` : ''
 
   return (
-    <Box flexDirection="column" paddingLeft={depth > 0 ? 0 : 2} paddingRight={1} marginBottom={0}>
+    <Box flexDirection="column" paddingLeft={depth > 0 ? 0 : 2} paddingRight={1} marginBottom={1}>
       <Box flexDirection="row">
         {depth > 0 && <Text color={theme.dim}>{treeLead}</Text>}
         <Text bold color={borderColor}>
