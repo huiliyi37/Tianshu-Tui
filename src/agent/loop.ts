@@ -911,6 +911,84 @@ export class AgentLoop {
    * the API call. Level 2+ injects guidance; Level 3 forces session split
    * or abort. Returns the action for the caller to handle control flow.
    */
+  /**
+   * Step 6e: Cognitive prep — sycophancy trap, CVM cognitive ledger,
+   * projection building, and CVM overhead tracking.
+   * Pure data transformation with no control flow.
+   */
+  private runCognitivePrep(
+    turn: number,
+    actionable: boolean,
+    pressureResult: import('../context/pressure-monitor.js').PressureResult,
+  ): void {
+    // ── Sycophancy Trap: record previous turn agreement ──
+    // 仁者必有勇。连续盲从 + confidence 下降 → 质疑注入。
+    // agreedWithUser: 有破坏性操作，但既没有质疑（ask_user_question），
+    // 也没有验证（read_file, grep, typecheck 等）→ 盲从执行。
+    // 先质疑再执行 → 独立判断；先验证再执行 → 尽责执行。
+    const recentToolNames = this.recentToolHistory.slice(-8).map(h => h.tool)
+    const hadAskTool = recentToolNames.includes('ask_user_question')
+    const verificationTools = new Set([
+      'read_file', 'grep', 'glob', 'run_tests',
+      'lsp_goto_definition', 'lsp_find_references', 'inspect_project',
+    ])
+    const hadVerification = recentToolNames.some(t => verificationTools.has(t))
+    const hadDestructive = recentToolNames.some(
+      t => t === 'write_file' || t === 'edit_file' || t === 'bash'
+    )
+    // Blind execution: destructive without question AND without verification
+    const agreedWithUser = hadDestructive && !hadAskTool && !hadVerification
+    if (actionable && (hadDestructive || hadAskTool)) {
+      this.sycophancyTrap.recordTurn({
+        agreedWithUser,
+        confidence: this.sensorium?.confidence ?? 0.5,
+      })
+    }
+
+    // Immune signal: surface new sycophancy detection as danger signal (rising edge only)
+    const sycActive = this.sycophancyTrap.shouldInjectChallenge()
+    if (sycActive && !this.sycophancyWasActive) {
+      try {
+        this.immuneHook.injectSignal({
+          kind: 'sycophancy_detected',
+          severity: 0.7,
+          turn,
+          source: 'sycophancy-trap',
+        })
+      } catch { /* non-critical */ }
+    }
+    this.sycophancyWasActive = sycActive
+
+    const cognitiveLedger = createCognitiveLedger({
+      contract: this.taskContract,
+      evidence: this.evidence.getState(),
+      trace: this.traceStore,
+      turn,
+      // 道常无为而无不为：CVM throttle — skip mirror when overhead > 5%
+      sensorium: pressureResult.shouldThrottleCvm ? null : this.sensorium,
+      strategy: pressureResult.shouldThrottleCvm ? null : this.strategy,
+      vigor: pressureResult.shouldThrottleCvm ? null : this.vigorState,
+      season: pressureResult.shouldThrottleCvm ? null : this.currentSeason,
+      // CVM uncertainty trap: risk level from latest tool assessment
+      riskLevel: this.latestRisk.level,
+    })
+    this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
+    const sycophancyHint = undefined
+    const immuneHint = this._lastImmuneHint ? formatImmuneContext(this._lastImmuneHint) : undefined
+    this._lastImmuneHint = undefined // consume once
+    const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint }) : ''
+    this.config.promptEngine.setCognitiveProjection(projection)
+
+    // ── CVM overhead tracking ──
+    // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
+    // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
+    // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
+    if (actionable) {
+      const cvmTokenEstimate = Math.ceil(projection.length / 4)
+      this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
+    }
+  }
+
   private async runConvergenceCheck(
     turn: number,
     phaseClass: string,
@@ -1273,73 +1351,9 @@ export class AgentLoop {
         }
         this.contextInjection.refreshActiveClaims()
 
-        // ── Sycophancy Trap: record previous turn agreement ──
-        // 仁者必有勇。连续盲从 + confidence 下降 → 质疑注入。
-        // agreedWithUser: 有破坏性操作，但既没有质疑（ask_user_question），
-        // 也没有验证（read_file, grep, typecheck 等）→ 盲从执行。
-        // 先质疑再执行 → 独立判断；先验证再执行 → 尽责执行。
-        const recentToolNames = this.recentToolHistory.slice(-8).map(h => h.tool)
-        const hadAskTool = recentToolNames.includes('ask_user_question')
-        const verificationTools = new Set([
-          'read_file', 'grep', 'glob', 'run_tests',
-          'lsp_goto_definition', 'lsp_find_references', 'inspect_project',
-        ])
-        const hadVerification = recentToolNames.some(t => verificationTools.has(t))
-        const hadDestructive = recentToolNames.some(
-          t => t === 'write_file' || t === 'edit_file' || t === 'bash'
-        )
-        // Blind execution: destructive without question AND without verification
-        const agreedWithUser = hadDestructive && !hadAskTool && !hadVerification
-        if (actionable && (hadDestructive || hadAskTool)) {
-          this.sycophancyTrap.recordTurn({
-            agreedWithUser,
-            confidence: this.sensorium?.confidence ?? 0.5,
-          })
-        }
+        // Step 6e: run cognitive prep (sycophancy trap, CVM ledger, projection)
+        this.runCognitivePrep(turn, actionable, pressureResult)
 
-        // Immune signal: surface new sycophancy detection as danger signal (rising edge only)
-        const sycActive = this.sycophancyTrap.shouldInjectChallenge()
-        if (sycActive && !this.sycophancyWasActive) {
-          try {
-            this.immuneHook.injectSignal({
-              kind: 'sycophancy_detected',
-              severity: 0.7,
-              turn,
-              source: 'sycophancy-trap',
-            })
-          } catch { /* non-critical */ }
-        }
-        this.sycophancyWasActive = sycActive
-
-        const cognitiveLedger = createCognitiveLedger({
-          contract: this.taskContract,
-          evidence: this.evidence.getState(),
-          trace: this.traceStore,
-          turn,
-          // 道常无为而无不为：CVM throttle — skip mirror when overhead > 5%
-          sensorium: pressureResult.shouldThrottleCvm ? null : this.sensorium,
-          strategy: pressureResult.shouldThrottleCvm ? null : this.strategy,
-          vigor: pressureResult.shouldThrottleCvm ? null : this.vigorState,
-          season: pressureResult.shouldThrottleCvm ? null : this.currentSeason,
-          // CVM uncertainty trap: risk level from latest tool assessment
-          riskLevel: this.latestRisk.level,
-        })
-        this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
-        const sycophancyHint = undefined
-        const immuneHint = this._lastImmuneHint ? formatImmuneContext(this._lastImmuneHint) : undefined
-        this._lastImmuneHint = undefined // consume once
-        const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint }) : ''
-        this.config.promptEngine.setCognitiveProjection(projection)
-
-        // ── CVM overhead tracking ──
-        // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
-        // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
-        // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
-        if (actionable) {
-          const cvmTokenEstimate = Math.ceil(projection.length / 4)
-          this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
-        }
-        // ── Cross-session event sync ──
         // Read events from other sessions (cache-safe: injected into dynamic appendix only)
         if (this.config.sessionRegistry && this.config.sessionId) {
           const events = this.config.sessionRegistry.consumeEvents(this.config.sessionId, this.lastSeenEventId)
