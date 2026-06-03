@@ -1,4 +1,5 @@
 import { APPLY_PATCH_TOOL } from './apply-patch.js'
+import { IMPORT_RESOURCE_TOOL } from './import-resource.js'
 import { BASH_TOOL } from './bash.js'
 import { DIFF_TOOL } from './diff.js'
 import { EDIT_FILE_TOOL } from './edit.js'
@@ -24,6 +25,7 @@ import { WRITE_FILE_TOOL } from './write-file.js'
 export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry {
   const registry = new ToolRegistry()
   registry.register(APPLY_PATCH_TOOL)
+  registry.register(IMPORT_RESOURCE_TOOL)
   registry.register(READ_FILE_TOOL)
   registry.register(WRITE_FILE_TOOL)
   registry.register(PLAN_CLOSE_TOOL)

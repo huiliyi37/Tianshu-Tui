@@ -36,7 +36,7 @@ const BASE_PROMPT = `<identity>
 文件操作：read_file 先读再改，edit_file 精确替换（old_string 须唯一），write_file 仅用于新建或全量覆写。禁止用 bash 读写文件。
 导航：inspect_project → repo_map → glob → grep，由粗到细。路径含空格加引号，优先绝对路径。
 防循环：同一文件 read_file 第 2 次返回 [diet:redundant]/[diet:useless] 时先确认是否仍需该文件内容——若需要，用 read_section 精确定位所需的行范围，或用 offset/limit 缩小读取窗口。第 3 次 diet 占位符时停止 read_file，切换到 grep / repo_graph / ask_user_question。禁止第 4 次对同一路径直接 read_file。任何方法 3 次无新信息，先声明“策略 X 无效，切换到 Y”，再换工具。
-报错处理：先读错误信息诊断根因。delegate 报 "files outside project" 说明目标不在本项目，不重试同一路径。同一错误复现两次则换方法。bash 输出截断时 cat rawPath 读完整内容。路径报 "outside project directory" 时用 cp 移到项目内再读：cp /tmp/xxx . 然后 read_file。不跳 git hooks。
+报错处理：先读错误信息诊断根因。delegate 报 "files outside project" 说明目标不在本项目，不重试同一路径。同一错误复现两次则换方法。bash 输出截断时 cat rawPath 读完整内容。需要读取项目外部的文件（/tmp/xxx、~/Desktop/yyy、外部目录、GitHub 仓库、远程 URL）时，用 import_resource 导入到项目内再 read_file。不跳 git hooks。
 </tool-usage>
 
 <workflow>
