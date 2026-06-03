@@ -2,6 +2,7 @@ import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { dirname } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
+import { syntaxCheck } from './syntax-check.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -54,7 +55,8 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
 
     writeFileSync(filePath, content, 'utf-8')
     const lines = content.split('\n').length
-    return { content: `Wrote ${content.length} bytes (${lines} lines) to ${filePath}` }
+    const warn = syntaxCheck(filePath, content)
+    return { content: `Wrote ${content.length} bytes (${lines} lines) to ${filePath}` + (warn ? '\n\n' + warn : '') }
   },
 
   requiresApproval: () => true,

@@ -3,8 +3,10 @@ import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { hashLine } from './hash-edit.js'
 import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
+import { syntaxCheck } from './syntax-check.js'
 
 const MAX_EDIT_FILE_BYTES = 100 * 1024 // 100KB — match read_file guard
+
 
 export const EDIT_FILE_TOOL: Tool = {
   definition: {
@@ -73,15 +75,18 @@ Bad: using a too-short old_string that matches multiple locations`,
             const newContent = freshContent.replaceAll(oldString, newString)
             writeFileSync(filePath, newContent, 'utf-8')
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
-            return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}` }
+            const warn = syntaxCheck(filePath, newContent)
+            return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}` }
           }
           const firstIdx = freshContent.indexOf(oldString)
           const secondIdx = freshContent.indexOf(oldString, firstIdx + oldString.length)
           if (secondIdx !== -1) {
             return { content: buildMultipleMatchError(filePath, oldString, freshContent), isError: true }
           }
-          writeFileSync(filePath, freshContent.replace(oldString, newString), 'utf-8')
-          return { content: `Applied edit to ${filePath} (file was modified externally but content still matched)` }
+          const recovered = freshContent.replace(oldString, newString)
+          writeFileSync(filePath, recovered, 'utf-8')
+          const warn = syntaxCheck(filePath, recovered)
+          return { content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}` }
         }
 
         // old_string not found — show what the file actually looks like near the best guess
@@ -148,10 +153,12 @@ Bad: using a too-short old_string that matches multiple locations`,
       writeFileSync(filePath, newContent, 'utf-8')
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
+      const warn = syntaxCheck(filePath, newContent)
       if (expectedCount !== undefined && occurrences !== expectedCount) {
-        return { content: `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.` }
+        const base = `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
+        return { content: base + (warn ? '\n\n' + warn : '') }
       }
-      return { content: `Replaced all ${occurrences} occurrences in ${filePath}` }
+      return { content: `Replaced all ${occurrences} occurrences in ${filePath}` + (warn ? '\n\n' + warn : '') }
     }
 
     const firstIndex = content.indexOf(oldString)
@@ -168,10 +175,10 @@ Bad: using a too-short old_string that matches multiple locations`,
         isError: true,
       }
     }
-
     const newContent = content.replace(oldString, newString)
     writeFileSync(filePath, newContent, 'utf-8')
-    return { content: `Applied edit to ${filePath}` }
+    const warn = syntaxCheck(filePath, newContent)
+    return { content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : '') }
   },
 
   requiresApproval: () => true,
