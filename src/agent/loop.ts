@@ -795,7 +795,14 @@ export class AgentLoop {
     try { this.p3?.notebook.importEntries(db.loadMistakeEntries()) } catch { /* non-critical */ }
   }
 
-  private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {
+  /**
+   * Step 6a: Per-run initialization — warmup, heartbeat, state resets,
+   * worktree detection, session split, user message, task contract.
+   *
+   * Returns the heartbeat (for cleanup) and the wrapped callbacks (which
+   * the caller must use for the rest of the run).
+   */
+  private async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean }> {
     await this.warmupMemories()
     this.abortController = new AbortController()
     await this.startFsWatcher()
@@ -886,6 +893,13 @@ export class AgentLoop {
       this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
       this.config.client.setReasoningEffort?.(this.config.reasoningEffort)
     }
+    return { heartbeat, wrappedCallbacks: callbacks, actionable }
+  }
+
+  private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {
+    const { heartbeat, wrappedCallbacks, actionable } = await this.initializeRun(userInput, callbacks)
+    callbacks = wrappedCallbacks
+    callbacks = wrappedCallbacks
 
     let checkpointCreatedThisTurn = false
 
@@ -903,7 +917,7 @@ export class AgentLoop {
         this.thetaRequestsThisTurn = 0
         // Sync plan-mode state into config so tool-pipeline gate reads it
         this.syncPlanModeToConfig()
-        if (this.abortController.signal.aborted) {
+        if (this.abortController!.signal.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onAbort()
           return
@@ -926,7 +940,7 @@ export class AgentLoop {
         debugLog(`[turn-boundary] turn=${turn} trySessionSplit: ${Date.now() - _tb}ms`)
         // A2: user may have aborted during trySessionSplit (which can trigger
         // 60s LLM compact). Bail early instead of continuing into maybeCompact.
-        if (this.abortController.signal.aborted) {
+        if (this.abortController!.signal.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onAbort()
           return
@@ -940,7 +954,7 @@ export class AgentLoop {
         debugLog(`[turn-boundary] turn=${turn} maybeCompact: ${Date.now() - _tb}ms compacted=${compactResult.compacted}`)
         if (compactResult.compacted) userMessageConsumed = true
         // A2: bail after maybeCompact (can also trigger LLM compact on 1M windows)
-        if (this.abortController.signal.aborted) {
+        if (this.abortController!.signal.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onAbort()
           return
@@ -1186,7 +1200,7 @@ export class AgentLoop {
         await this.compaction.enforceContextCeiling()
         debugLog(`[turn-boundary] turn=${turn} enforceContextCeiling: ${Date.now() - _tb}ms`)
         // A2: enforceContextCeiling can trigger LLM compact (30s timeout).
-        if (this.abortController.signal.aborted) {
+        if (this.abortController!.signal.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onAbort()
           return
@@ -1400,7 +1414,7 @@ export class AgentLoop {
         const cacheHistory = this.session.getCacheHistory()
         const latestTurnCache = cacheHistory.length > 0 ? cacheHistory[cacheHistory.length - 1] : null
 
-        if (this.abortController.signal.aborted) {
+        if (this.abortController!.signal.aborted) {
           // P0: skip addAssistantBlocks — partial blocks from an aborted
           // stream must not pollute the message list and break prefix cache.
           if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
@@ -1443,7 +1457,7 @@ export class AgentLoop {
 
           const r = await this.toolExecution.executeBatch({
             toolUses, callbacks, turn, checkpointCreatedThisTurn,
-            abortSignal: this.abortController.signal,
+            abortSignal: this.abortController!.signal,
             traceStore: this.traceStore, importGraph: this.importGraph,
             lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk,
           })
