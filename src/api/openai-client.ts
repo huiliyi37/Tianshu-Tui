@@ -54,6 +54,17 @@ const SLOW_FIRST_BYTE_TIMEOUT_MS = 180_000
 const SLOW_READ_TIMEOUT_MS = 300_000
 /** Providers whose thinking mode can exceed 90s before first token. */
 const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'minimax'])
+/**
+ * Thinking-stall timeout: once thinking tokens have been received, if no new
+ * SSE chunk arrives within this window the stream is considered stuck.
+ * This is shorter than SLOW_READ_TIMEOUT_MS (300s) because:
+ *   - Pre-first-byte silence: model is generating, be patient (180s)
+ *   - Mid-thinking stall after tokens arrived: model likely hung (90s)
+ *   - Normal thinking bursts: tokens arrive every few seconds (no trigger)
+ * 90s is generous enough for MiMo/GLM's legitimate pauses between reasoning
+ * segments, but catches genuine hangs before the user waits 5 minutes.
+ */
+const THINKING_STALL_TIMEOUT_MS = 90_000
 
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
@@ -274,6 +285,8 @@ export class OpenAIClient implements StreamClient {
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
+    /** Whether any reasoning_content has been received — used to detect thinking stalls. */
+    let receivedThinking = false
     // GLM-5.1 mandatory thinking mode outputs everything as reasoning_content
     // with no content field. Accumulate reasoning to promote if no content arrives.
     let reasoningAccum = ''
@@ -295,7 +308,16 @@ export class OpenAIClient implements StreamClient {
         : isReasoning ? REASONING_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
       const readMs = isSlowProvider ? SLOW_READ_TIMEOUT_MS
         : isReasoning ? REASONING_READ_TIMEOUT_MS : READ_TIMEOUT_MS
-      const timeout = receivedFirstChunk ? readMs : firstByteMs
+      // Thinking-stall detection: once thinking tokens have arrived but no text
+      // content yet, use a shorter timeout to catch stalled thinking streams.
+      // Without this, a mimo/glm model that sends one thinking chunk then hangs
+      // would silently block for 300s (SLOW_READ_TIMEOUT_MS) before timeout.
+      const thinkingStallMs = (receivedThinking && !textReceived)
+        ? THINKING_STALL_TIMEOUT_MS
+        : null
+      const timeout = receivedFirstChunk
+        ? (thinkingStallMs ?? readMs)
+        : firstByteMs
       idleTimer = setTimeout(() => {
         streamTimedOut = true
         reader.cancel().catch(() => {})
@@ -311,7 +333,12 @@ export class OpenAIClient implements StreamClient {
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
         // read() to return done=true, but we must throw, not silently break.
-        if (streamTimedOut) throw new Error('OpenAI SSE stream idle timeout')
+        if (streamTimedOut) {
+          const msg = (receivedThinking && !textReceived)
+            ? 'OpenAI SSE stream thinking stall timeout (90s) — model stopped producing thinking tokens'
+            : 'OpenAI SSE stream idle timeout'
+          throw new Error(msg)
+        }
         if (done) break
 
         receivedFirstChunk = true
@@ -335,6 +362,7 @@ export class OpenAIClient implements StreamClient {
             if (parsed.choices?.[0]?.delta?.content) textReceived = true
             if (parsed.choices?.[0]?.delta?.reasoning_content) {
               reasoningAccum += parsed.choices[0].delta.reasoning_content
+              receivedThinking = true
               if (reasoningRef) reasoningRef.content = reasoningAccum
             }
           } catch {
@@ -355,6 +383,7 @@ export class OpenAIClient implements StreamClient {
               if (parsed.choices?.[0]?.delta?.content) textReceived = true
               if (parsed.choices?.[0]?.delta?.reasoning_content) {
                 reasoningAccum += parsed.choices[0].delta.reasoning_content
+                receivedThinking = true
                 if (reasoningRef) reasoningRef.content = reasoningAccum
               }
             } catch { /* skip malformed */ }
