@@ -1,5 +1,6 @@
 import { APPLY_PATCH_TOOL } from './apply-patch.js'
 import { IMPORT_RESOURCE_TOOL } from './import-resource.js'
+import { FILE_INFO_TOOL } from './file-info.js'
 import { BASH_TOOL } from './bash.js'
 import { DIFF_TOOL } from './diff.js'
 import { EDIT_FILE_TOOL } from './edit.js'
@@ -45,6 +46,8 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(WEB_SEARCH_TOOL)
   registry.register(READ_SECTION_TOOL)
   registry.register(SANDBOX_EXEC_TOOL)
+  registry.register(IMPORT_RESOURCE_TOOL)
+  registry.register(FILE_INFO_TOOL)
   for (const tool of extraTools) registry.register(tool)
   return registry
 }
