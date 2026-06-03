@@ -1284,27 +1284,22 @@ export class AgentLoop {
         }
 
         // Heap-driven forced compaction: when memory pressure is high,
-        // run phase 1 only (tool content + reasoning truncation).
-        // Never delete entire rounds — assistant reasoning is a scarce asset.
+        // run phase 1 only (tool content truncation).
+        // On 1M+ windows, use a higher threshold (0.75) to delay prefix
+        // cache disruption. Phase 2 (round removal) won't fire since
+        // tokens << contextWindow — only tool_result truncation applies.
         const heapRatio = snap
           ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
           : 0
-        if (!compactResult.compacted && heapRatio >= 0.6 && this.session.getMessages().length >= 10) {
-          // P3 trace: verify phase 2 (round deletion) is blocked, phase 1 only
-          debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} phase2-blocked=true msgCount=${this.session.getMessages().length}`)
+        const heapCompactThreshold = (this.config.contextWindow ?? 1_000_000) >= 1_000_000 ? 0.75 : 0.6
+        if (!compactResult.compacted && heapRatio >= heapCompactThreshold && this.session.getMessages().length >= 10) {
+          debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} threshold=${heapCompactThreshold} msgCount=${this.session.getMessages().length}`)
           const before = this.session.getMessages()
-          // Pass full contextWindow so phase 2 (round removal) never triggers.
-          // Phase 1 (tool_result + reasoning_content truncation) still applies.
           const contextWindow = this.config.contextWindow ?? 1_000_000
-          // Phase 2.1: On 1M+ windows, skip heap-driven micro compact to
-          // preserve exact prefix cache. Memory pressure is resolved via
-          // enforceContextCeiling (95% ceiling) as emergency last resort.
-          if (contextWindow < 1_000_000) {
-            const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
-            if (trimmed.length < before.length || trimmed !== before) {
-              this.session.replaceMessages(trimmed)
-              if (typeof globalThis.gc === 'function') globalThis.gc()
-            }
+          const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
+          if (trimmed.length < before.length || trimmed !== before) {
+            this.session.replaceMessages(trimmed)
+            if (typeof globalThis.gc === 'function') globalThis.gc()
           }
         }
 
