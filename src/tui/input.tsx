@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { Box, Text } from 'ink'
 import { BaseTextInput } from './base-text-input.js'
 import { loadHistory, appendHistory, nextHistoryAfterSubmit } from './history.js'
@@ -6,6 +6,9 @@ import { SlashHint } from './slash-hint.js'
 import { getPaletteCommands, filterCommands } from './command-palette.js'
 
 const COMMANDS = getPaletteCommands()
+
+/** Breathing diamond frames — subtle pulse when agent is thinking */
+const PULSE_FRAMES = ['◇', '◈', '◆', '◈'] as const
 
 interface InputBarProps {
   onSubmit: (value: string) => void
@@ -19,6 +22,13 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
   const [value, setValue] = useState('')
   const [history, setHistory] = useState(() => loadHistory())
   const [slashIdx, setSlashIdx] = useState(0)
+  const [pulseIdx, setPulseIdx] = useState(0)
+
+  useEffect(() => {
+    if (!steerMode) return
+    const id = setInterval(() => setPulseIdx(i => (i + 1) % PULSE_FRAMES.length), 800)
+    return () => clearInterval(id)
+  }, [steerMode])
 
   React.useEffect(() => {
     if (inputRef) {
@@ -54,7 +64,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
         <SlashHint input={value} selectedIdx={Math.min(slashIdx, filtered.length - 1)} commands={COMMANDS} />
       )}
       <Box flexDirection="row" paddingX={1} paddingY={0}>
-        <Text bold color={isSlash ? 'cyan' : steerMode ? 'yellow' : 'green'}>{steerMode ? '…' : '❯'} </Text>
+        <Text bold color={isSlash ? 'cyan' : steerMode ? 'yellow' : 'green'}>{steerMode ? PULSE_FRAMES[pulseIdx] : '❯'} </Text>
         <BaseTextInput
           value={value}
           onChange={handleChange}
