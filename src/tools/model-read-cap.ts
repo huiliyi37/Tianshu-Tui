@@ -38,13 +38,20 @@ const ABSOLUTE_MAX_CHARS = 200_000
 
 /**
  * Fraction of the context window allocated to a single tool result that is
- * shown verbatim to the model. 5 % keeps room for many tool calls per turn
- * while still letting one read_file return a useful slab.
+ * shown verbatim to the model.
  *
- * Multiplied by 4 to convert tokens → characters (the standard ratio used
- * elsewhere in this codebase).
+ * Larger windows can afford 5% per call; smaller windows need more conservative
+ * budgets to prevent a handful of read_file calls from consuming the entire
+ * context. The breakpoints align with pruneThresholds' window tiers so the
+ * read cap and prune/exemption logic stay coherent.
+ *
+ * Multiplied by CHARS_PER_TOKEN (4) to convert tokens → characters.
  */
-const TOKEN_FRACTION_PER_CALL = 0.05
+function tokenFractionPerCall(contextWindow: number): number {
+  if (contextWindow >= 500_000) return 0.05  // ≥500K: 5% — ample room
+  if (contextWindow >= 200_000) return 0.03  // 200K–500K: 3%
+  return 0.02                                 // <200K: 2%
+}
 const CHARS_PER_TOKEN = 4
 
 /** Strategy multiplier — cache-preserving providers can afford to send more
@@ -83,7 +90,8 @@ export function computeModelReadCap(input: ModelReadCapInput = {}): ModelReadCap
   const strategy = compactProviderStrategy(providerProfile)
   const multiplier = STRATEGY_MULTIPLIER[strategy]
 
-  const computed = Math.floor(contextWindow * TOKEN_FRACTION_PER_CALL * CHARS_PER_TOKEN * multiplier)
+  const fraction = tokenFractionPerCall(contextWindow)
+  const computed = Math.floor(contextWindow * fraction * CHARS_PER_TOKEN * multiplier)
   const maxChars = Math.min(Math.max(computed, DEFAULT_MODEL_READ_CAP.maxChars), ABSOLUTE_MAX_CHARS)
 
   return {
