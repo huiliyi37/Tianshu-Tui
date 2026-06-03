@@ -903,7 +903,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const midText = streamBuf.current
           if (midText) {
             const midThinking = thinkBuf.current || undefined
-            pushAssistantEntry(midText, midThinking)
+            // When model promotes thinking verbatim to visible text (DeepSeek/GLM),
+            // suppress the assistant_message — the thinking tab already renders it.
+            // Progress visibility is preserved via tools + thinking tab expansion.
+            if (midThinking && isThinkingPromotedToText(midThinking, midText)) {
+              pushStaticBatch([createLogEntry({ type: 'thinking_message', content: midThinking })])
+            } else {
+              pushAssistantEntry(midText, midThinking)
+            }
           }
           streamBuf.current = ''
           streamLiveBuf.current = ''
