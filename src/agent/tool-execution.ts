@@ -1,6 +1,6 @@
 import type { ContentBlock } from '../api/types.js'
 import type { TurnBudget } from './turn-budget.js'
-import { enforcePerMessageBudget } from './per-message-budget.js'
+import { enforcePerMessageBudget, enforceTurnReadBudget } from './per-message-budget.js'
 import { perMessageToolResultBudget } from '../compact/constants.js'
 import type { AgentConfig, AgentCallbacks } from './loop.js'
 import type { TurnHarness } from './turn-harness.js'
@@ -253,6 +253,19 @@ export class ToolExecutionController {
       .filter((e): e is NonNullable<typeof e> => e !== null)
     const enforced = enforcePerMessageBudget(budgetEntries, perMessageToolResultBudget(this.deps.config.contextWindow))
     for (const entry of enforced) {
+      const idx = toolResults.findIndex(r => r.type === 'tool_result' && r.tool_use_id === entry.toolUseId)
+      if (idx >= 0) {
+        const orig = toolResults[idx]!
+        if (orig.type === 'tool_result' && entry.content !== (typeof orig.content === 'string' ? orig.content : '')) {
+          toolResults[idx] = { ...orig, content: entry.content }
+        }
+      }
+    }
+
+    // Enforce per-turn read budget: truncate read_file results when cumulative
+    // chars exceed 15% of the context window.
+    const readEnforced = enforceTurnReadBudget(enforced, this.deps.config.contextWindow)
+    for (const entry of readEnforced) {
       const idx = toolResults.findIndex(r => r.type === 'tool_result' && r.tool_use_id === entry.toolUseId)
       if (idx >= 0) {
         const orig = toolResults[idx]!
