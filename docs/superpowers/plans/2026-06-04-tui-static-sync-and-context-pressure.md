@@ -52,7 +52,29 @@
 
 - 在 buffer 清理后、归档前恢复 `setStreamingText('')` / `setStreamingThinking('')` / `setIsStreaming(false)`
 - 防止 turn 完成后 UI 卡在 streaming 模式
+### Task 4: 降低 200K 窗口下的单次读取上限 ✅
 
+**状态：已完成** — commit 1ffd5ad
+
+- `tokenFractionPerCall()` 替换静态 `TOKEN_FRACTION_PER_CALL`
+- ≥500K: 5%, 200K–500K: 3%, <200K: 2%
+- 测试覆盖三个分级
+
+### Task 5: 添加每轮总读取预算 ✅
+
+**状态：已完成** — commit a9955a5
+
+- `enforceTurnReadBudget()` 在 per-message-budget.ts 中追踪 read_file 累计 chars
+- 预算 = contextWindow × 15% × 4 chars/token
+- 超预算后截断为 head+tail + budget-exceeded 标记
+- tool-execution.ts 中接入
+
+### Task 6: 大文件预检 — 高上下文压力截断 ✅
+
+**状态：已完成** — commit a8f5e7d + 90fe311
+
+- tool-execution.ts 中新增 context-pressure preflight：usage >70% 时截断 read_file 为前 30 行
+- loop.ts 传入 `getEstimatedTokens` 给 ToolExecutionController
 ### Task 4: 降低 200K 窗口下的单次读取上限 🔲
 
 **问题：** 200K 窗口下 `computeModelReadCap` 返回 40K chars（~10K tokens）。模型一次可以读 4 个 40K 文件 = 40K tokens，加上 system prompt + 对话历史，轻松超过 100K tokens。API 推理变慢甚至超时。
@@ -94,9 +116,9 @@
 Task 1 ✅ ──┐
 Task 2 ✅ ──┼── 基础：Static 渲染同步
 Task 3 ✅ ──┘
-Task 4 🔲 ──── 独立：读取上限调整
-Task 5 🔲 ──── 依赖 Task 4
-Task 6 🔲 ──── 依赖 Task 4，可与 Task 5 并行
+Task 4 ✅ ──── 独立：读取上限调整
+Task 5 ✅ ──── 依赖 Task 4
+Task 6 ✅ ──── 依赖 Task 4，可与 Task 5 并行
 ```
 
 ## 4. Risk Assessment
