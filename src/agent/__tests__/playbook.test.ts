@@ -9,8 +9,12 @@ import {
   extractBullets,
   matchBullets,
   shouldReflect,
+  detectCrossSessionPatterns,
+  suppressStalePatterns,
+  shouldRunREM,
   type PlaybookBullet,
 } from '../playbook.js'
+import type { RetrospectFingerprint } from '../retrospect-fingerprint.js'
 
 function makeSensorium(overrides: Partial<Sensorium> = {}): Sensorium {
   return {
@@ -145,5 +149,281 @@ describe('playbook core', () => {
     assert.ok(capped.some(b => b.id === 'dead'))
     assert.ok(capped.some(b => b.id === 'b'))
     assert.equal(capped.length, 2)
+  })
+})
+
+describe('detectCrossSessionPatterns', () => {
+  it('returns empty when fewer than 2 similar historical sessions', () => {
+    const current: RetrospectFingerprint = {
+      sessionId: 'current',
+      createdAt: Date.now(),
+      rootCauseKeywords: ['验证', '振荡'],
+      recommendationKeywords: ['doom'],
+      stabilityTrend: 'stable',
+      confidenceTrend: 'stable',
+      maxPressure: 0.5,
+      toolFailureRate: 0,
+      bulletIds: [],
+    }
+    const historical: RetrospectFingerprint[] = [
+      {
+        sessionId: 'sess-1',
+        createdAt: Date.now() - 10000,
+        rootCauseKeywords: ['缓存', '失效'],
+        recommendationKeywords: ['重构'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: [],
+      },
+    ]
+
+    const patterns = detectCrossSessionPatterns(current, historical, [])
+    assert.equal(patterns.length, 0)
+  })
+
+  it('creates pattern bullet when 2+ similar sessions match', () => {
+    const current: RetrospectFingerprint = {
+      sessionId: 'current',
+      createdAt: Date.now(),
+      rootCauseKeywords: ['验证', '振荡', '策略'],
+      recommendationKeywords: ['doom'],
+      stabilityTrend: 'stable',
+      confidenceTrend: 'stable',
+      maxPressure: 0.5,
+      toolFailureRate: 0,
+      bulletIds: [],
+    }
+    const historical: RetrospectFingerprint[] = [
+      {
+        sessionId: 'sess-1',
+        createdAt: Date.now() - 10000,
+        rootCauseKeywords: ['验证', '振荡', '反馈'],
+        recommendationKeywords: ['doom', 'loop'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: ['pb_1'],
+      },
+      {
+        sessionId: 'sess-2',
+        createdAt: Date.now() - 5000,
+        rootCauseKeywords: ['验证', '振荡', '工具'],
+        recommendationKeywords: ['doom', '阈值'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: ['pb_2'],
+      },
+    ]
+
+    const patterns = detectCrossSessionPatterns(current, historical, [])
+    assert.ok(patterns.length > 0)
+    assert.equal(patterns[0]!.context, 'pattern:recurring')
+    assert.ok(patterns[0]!.keywords.some(k => k.includes('验证') || k.includes('振荡')))
+  })
+
+  it('boosts existing pattern bullet importance', () => {
+    const current: RetrospectFingerprint = {
+      sessionId: 'current',
+      createdAt: Date.now(),
+      rootCauseKeywords: ['验证', '振荡'],
+      recommendationKeywords: ['doom'],
+      stabilityTrend: 'stable',
+      confidenceTrend: 'stable',
+      maxPressure: 0.5,
+      toolFailureRate: 0,
+      bulletIds: [],
+    }
+    const historical: RetrospectFingerprint[] = [
+      {
+        sessionId: 'sess-1',
+        createdAt: Date.now() - 10000,
+        rootCauseKeywords: ['验证', '振荡'],
+        recommendationKeywords: ['doom'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: ['pb_1'],
+      },
+      {
+        sessionId: 'sess-2',
+        createdAt: Date.now() - 5000,
+        rootCauseKeywords: ['验证', '振荡'],
+        recommendationKeywords: ['doom'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: ['pb_1'],
+      },
+    ]
+    const existing = [bullet('existing', {
+      context: 'pattern:recurring',
+      keywords: ['验证', '振荡'],
+      importance: 0.6,
+      bulletIds: ['pb_1'],
+    })]
+
+    const patterns = detectCrossSessionPatterns(current, historical, existing)
+    assert.ok(patterns.length > 0)
+    assert.ok(patterns[0]!.importance > 0.6)
+  })
+})
+
+describe('suppressStalePatterns', () => {
+  it('suppresses patterns not seen in recent sessions', () => {
+    const bullets = [bullet('pattern-1', {
+      context: 'pattern:recurring',
+      keywords: ['验证', '振荡'],
+      importance: 0.7,
+    })]
+    const recentFingerprints: RetrospectFingerprint[] = [
+      {
+        sessionId: 'sess-1',
+        createdAt: Date.now() - 10000,
+        rootCauseKeywords: ['缓存', '失效'],
+        recommendationKeywords: ['重构'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: [],
+      },
+      {
+        sessionId: 'sess-2',
+        createdAt: Date.now() - 5000,
+        rootCauseKeywords: ['工具', '超时'],
+        recommendationKeywords: ['重试'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: [],
+      },
+      {
+        sessionId: 'sess-3',
+        createdAt: Date.now() - 2000,
+        rootCauseKeywords: ['测试', '失败'],
+        recommendationKeywords: ['修复'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: [],
+      },
+    ]
+
+    const result = suppressStalePatterns(bullets, recentFingerprints)
+    assert.equal(result[0]!.context, 'pattern:suppressed')
+    assert.ok(result[0]!.importance < 0.7)
+  })
+
+  it('keeps patterns that appeared recently', () => {
+    const bullets = [bullet('pattern-1', {
+      context: 'pattern:recurring',
+      keywords: ['验证', '振荡'],
+      importance: 0.7,
+    })]
+    const recentFingerprints: RetrospectFingerprint[] = [
+      {
+        sessionId: 'sess-1',
+        createdAt: Date.now() - 10000,
+        rootCauseKeywords: ['验证', '振荡'],
+        recommendationKeywords: ['doom'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: ['pattern-1'],
+      },
+      {
+        sessionId: 'sess-2',
+        createdAt: Date.now() - 5000,
+        rootCauseKeywords: ['工具', '超时'],
+        recommendationKeywords: ['重试'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: [],
+      },
+      {
+        sessionId: 'sess-3',
+        createdAt: Date.now() - 2000,
+        rootCauseKeywords: ['测试', '失败'],
+        recommendationKeywords: ['修复'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: [],
+      },
+    ]
+
+    const result = suppressStalePatterns(bullets, recentFingerprints)
+    assert.equal(result[0]!.context, 'pattern:recurring')
+    assert.equal(result[0]!.importance, 0.7)
+  })
+
+  it('does not suppress when fewer than threshold fingerprints', () => {
+    const bullets = [bullet('pattern-1', {
+      context: 'pattern:recurring',
+      keywords: ['验证'],
+      importance: 0.7,
+    })]
+    const recentFingerprints: RetrospectFingerprint[] = [
+      {
+        sessionId: 'sess-1',
+        createdAt: Date.now() - 10000,
+        rootCauseKeywords: ['缓存'],
+        recommendationKeywords: ['重构'],
+        stabilityTrend: 'stable',
+        confidenceTrend: 'stable',
+        maxPressure: 0.5,
+        toolFailureRate: 0,
+        bulletIds: [],
+      },
+    ]
+
+    const result = suppressStalePatterns(bullets, recentFingerprints, 3)
+    assert.equal(result[0]!.context, 'pattern:recurring')
+    assert.equal(result[0]!.importance, 0.7)
+  })
+})
+
+describe('shouldRunREM', () => {
+  it('returns full when shouldReflect passes', () => {
+    const result = shouldRunREM(
+      createVigorState({ variability: 0.35 }),
+      makeSensorium(),
+      'none',
+      0,
+    )
+    assert.equal(result, 'full')
+  })
+
+  it('returns light when shouldReflect fails but sessionCount >= 2', () => {
+    const result = shouldRunREM(
+      createVigorState({ variability: 0.1 }),
+      makeSensorium({ stability: 0.9 }),
+      'none',
+      3,
+    )
+    assert.equal(result, 'light')
+  })
+
+  it('returns skip when shouldReflect fails and sessionCount < 2', () => {
+    const result = shouldRunREM(
+      createVigorState({ variability: 0.1 }),
+      makeSensorium({ stability: 0.9 }),
+      'none',
+      1,
+    )
+    assert.equal(result, 'skip')
   })
 })

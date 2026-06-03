@@ -84,6 +84,21 @@ CREATE TABLE IF NOT EXISTS cycle_relay (
   closed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cycle_relay_closed ON cycle_relay(closed_at);
+
+CREATE TABLE IF NOT EXISTS retrospect_fingerprints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  root_cause_keywords TEXT NOT NULL,
+  recommendation_keywords TEXT NOT NULL,
+  stability_trend TEXT NOT NULL,
+  confidence_trend TEXT NOT NULL,
+  max_pressure REAL NOT NULL,
+  tool_failure_rate REAL NOT NULL,
+  bullet_ids TEXT NOT NULL DEFAULT '[]',
+  UNIQUE(session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fingerprints_created ON retrospect_fingerprints(created_at);
 `
 
 export class SessionRegistry {
@@ -324,5 +339,106 @@ export class SessionRegistry {
     } catch {
       return false
     }
+  }
+
+  // ── Retrospect Fingerprints (REM pattern detection) ──────
+
+  /**
+   * 存储 session 的 retrospect 指纹。
+   * 如果该 session 已有指纹，会被覆盖（UPSERT）。
+   */
+  storeFingerprint(fp: {
+    sessionId: string
+    createdAt: number
+    rootCauseKeywords: string[]
+    recommendationKeywords: string[]
+    stabilityTrend: 'stable' | 'falling' | 'rising'
+    confidenceTrend: 'stable' | 'falling' | 'rising'
+    maxPressure: number
+    toolFailureRate: number
+    bulletIds: string[]
+  }): void {
+    this.db.prepare(`
+      INSERT INTO retrospect_fingerprints
+        (session_id, created_at, root_cause_keywords, recommendation_keywords,
+         stability_trend, confidence_trend, max_pressure, tool_failure_rate, bullet_ids)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET
+        created_at = excluded.created_at,
+        root_cause_keywords = excluded.root_cause_keywords,
+        recommendation_keywords = excluded.recommendation_keywords,
+        stability_trend = excluded.stability_trend,
+        confidence_trend = excluded.confidence_trend,
+        max_pressure = excluded.max_pressure,
+        tool_failure_rate = excluded.tool_failure_rate,
+        bullet_ids = excluded.bullet_ids
+    `).run(
+      fp.sessionId,
+      fp.createdAt,
+      JSON.stringify(fp.rootCauseKeywords),
+      JSON.stringify(fp.recommendationKeywords),
+      fp.stabilityTrend,
+      fp.confidenceTrend,
+      fp.maxPressure,
+      fp.toolFailureRate,
+      JSON.stringify(fp.bulletIds),
+    )
+  }
+
+  /**
+   * 加载历史指纹，按时间倒序。
+   * @param limit 最多返回的指纹数量（默认 10）
+   * @param excludeSessionId 排除的 session ID（通常是当前 session）
+   */
+  loadFingerprints(limit = 10, excludeSessionId?: string): Array<{
+    sessionId: string
+    createdAt: number
+    rootCauseKeywords: string[]
+    recommendationKeywords: string[]
+    stabilityTrend: 'stable' | 'falling' | 'rising'
+    confidenceTrend: 'stable' | 'falling' | 'rising'
+    maxPressure: number
+    toolFailureRate: number
+    bulletIds: string[]
+  }> {
+    const query = excludeSessionId
+      ? `SELECT session_id, created_at, root_cause_keywords, recommendation_keywords,
+                stability_trend, confidence_trend, max_pressure, tool_failure_rate, bullet_ids
+         FROM retrospect_fingerprints
+         WHERE session_id != ?
+         ORDER BY created_at DESC
+         LIMIT ?`
+      : `SELECT session_id, created_at, root_cause_keywords, recommendation_keywords,
+                stability_trend, confidence_trend, max_pressure, tool_failure_rate, bullet_ids
+         FROM retrospect_fingerprints
+         ORDER BY created_at DESC
+         LIMIT ?`
+
+    const rows = excludeSessionId
+      ? this.db.prepare(query).all(excludeSessionId, limit) as Array<Record<string, unknown>>
+      : this.db.prepare(query).all(limit) as Array<Record<string, unknown>>
+
+    return rows.map(row => ({
+      sessionId: row.session_id as string,
+      createdAt: row.created_at as number,
+      rootCauseKeywords: JSON.parse(row.root_cause_keywords as string) as string[],
+      recommendationKeywords: JSON.parse(row.recommendation_keywords as string) as string[],
+      stabilityTrend: row.stability_trend as 'stable' | 'falling' | 'rising',
+      confidenceTrend: row.confidence_trend as 'stable' | 'falling' | 'rising',
+      maxPressure: row.max_pressure as number,
+      toolFailureRate: row.tool_failure_rate as number,
+      bulletIds: JSON.parse(row.bullet_ids as string) as string[],
+    }))
+  }
+
+  /**
+   * 清理旧指纹。
+   * @param maxAgeMs 最大保留时间（毫秒）
+   * @returns 删除的指纹数量
+   */
+  cleanupOldFingerprints(maxAgeMs: number): number {
+    const cutoff = Date.now() - maxAgeMs
+    const result = this.db.prepare('DELETE FROM retrospect_fingerprints WHERE created_at < ?').run(cutoff)
+    return result.changes
   }
 }

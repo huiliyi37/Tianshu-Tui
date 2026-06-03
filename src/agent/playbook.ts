@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import type { Sensorium } from './sensorium.js'
 import type { VigorState } from './vigor.js'
 import type { DoomLoopLevel } from './trace-store.js'
+import type { RetrospectFingerprint } from './retrospect-fingerprint.js'
+import { fingerprintSimilarity } from './retrospect-fingerprint.js'
 
 export interface PlaybookBullet {
   id: string
@@ -13,6 +15,7 @@ export interface PlaybookBullet {
   lastUsedAt: number | null
   importance: number
   details?: string
+  bulletIds?: string[] // 用于 REM pattern bullets，引用相关的 NREM bullet IDs
 }
 
 export interface ExtractBulletsOptions {
@@ -226,4 +229,156 @@ export function enforceCapacity(playbook: PlaybookBullet[], max = DEFAULT_CAPACI
   const reserved = deadEnds.slice(0, max)
   const remaining = Math.max(0, max - reserved.length)
   return [...reserved, ...ordinary.slice(0, remaining)]
+}
+
+// ── REM: Cross-session pattern detection ───────────────────
+
+const PATTERN_SIMILARITY_THRESHOLD = 0.5
+const MIN_SESSIONS_FOR_PATTERN = 2
+
+/**
+ * 从跨 session 的 retrospect 指纹中检测重复出现的模式。
+ *
+ * 逻辑：
+ * 1. 找到与当前 fingerprint 的 rootCauseKeywords 重叠度 ≥ 0.5 的历史 session
+ * 2. 如果已有对应的 PatternBullet：增加 importance（跨 session 强化）
+ * 3. 如果没有且匹配 session 数 ≥ 2：创建新的 PatternBullet
+ *
+ * @param currentFingerprint 当前 session 的指纹
+ * @param historicalFingerprints 历史指纹（按时间倒序）
+ * @param existingBullets 现有的 PlaybookBullet（包括 NREM 和 REM）
+ * @returns 新创建或强化的 PatternBullet[]
+ */
+export function detectCrossSessionPatterns(
+  currentFingerprint: RetrospectFingerprint,
+  historicalFingerprints: RetrospectFingerprint[],
+  existingBullets: PlaybookBullet[],
+): PlaybookBullet[] {
+  // Step 1: 找到相似的历史 session
+  const similarSessions = historicalFingerprints.filter(
+    fp => fingerprintSimilarity(currentFingerprint, fp) >= PATTERN_SIMILARITY_THRESHOLD,
+  )
+
+  if (similarSessions.length < MIN_SESSIONS_FOR_PATTERN) {
+    return [] // 不够形成模式
+  }
+
+  const patternBullets: PlaybookBullet[] = []
+  const now = Date.now()
+
+  // Step 2: 检查是否已有对应的 PatternBullet
+  const existingPatterns = existingBullets.filter(b => b.context.startsWith('pattern:'))
+
+  for (const historical of similarSessions) {
+    // 检查是否已有与该历史 session 相关的 PatternBullet
+    const relatedPattern = existingPatterns.find(b =>
+      b.bulletIds?.some(id => historical.bulletIds.includes(id)),
+    )
+
+    if (relatedPattern) {
+      // 已有模式：增加 importance（跨 session 强化）
+      patternBullets.push({
+        ...relatedPattern,
+        importance: clamp01(relatedPattern.importance + 0.15),
+        useCount: relatedPattern.useCount + 1,
+        lastUsedAt: now,
+      })
+    } else {
+      // 没有已有模式：从相似 session 中提取共同根因关键词
+      const sharedKeywords = currentFingerprint.rootCauseKeywords.filter(k =>
+        historical.rootCauseKeywords.includes(k),
+      )
+
+      if (sharedKeywords.length >= 2) {
+        // 创建新的 PatternBullet
+        const lesson = `跨 session 重复模式：${sharedKeywords.join('、')} 问题反复出现`
+        patternBullets.push({
+          id: hashId(`pattern:${sharedKeywords.join(':')}`),
+          createdAt: now,
+          keywords: sharedKeywords,
+          lesson,
+          context: 'pattern:recurring',
+          useCount: 1,
+          lastUsedAt: now,
+          importance: 0.7,
+          details: `相似 session: ${historical.sessionId} (${similarSessions.length} 个匹配)`,
+        })
+      }
+    }
+  }
+
+  return patternBullets
+}
+
+/**
+ * 抑制长时间未重现的模式。
+ *
+ * 连续 3+ session 未重现的 pattern → context 标记为 'pattern:suppressed'
+ * suppressed 状态的 bullet 的 importance 加速衰减
+ *
+ * @param bullets 现有的 PlaybookBullet[]
+ * @param recentFingerprints 最近的 fingerprint（用于检查是否重现）
+ * @param staleThreshold 未重现的 session 数阈值（默认 3）
+ * @returns 更新后的 PlaybookBullet[]
+ */
+export function suppressStalePatterns(
+  bullets: PlaybookBullet[],
+  recentFingerprints: RetrospectFingerprint[],
+  staleThreshold = 3,
+): PlaybookBullet[] {
+  if (recentFingerprints.length < staleThreshold) {
+    return bullets // 不够判断是否 stale
+  }
+
+  const recentSessions = recentFingerprints.slice(0, staleThreshold)
+
+  return bullets.map(bullet => {
+    // 只处理 pattern bullets
+    if (!bullet.context.startsWith('pattern:')) return bullet
+    if (bullet.context === 'pattern:suppressed') return bullet // 已经 suppressed
+
+    // 检查该 pattern 是否在最近 N 个 session 中出现过
+    const appearedRecently = recentSessions.some(fp =>
+      fp.bulletIds.includes(bullet.id) ||
+      fp.rootCauseKeywords.some(k => bullet.keywords.includes(k)),
+    )
+
+    if (!appearedRecently) {
+      // 未重现：标记为 suppressed，加速衰减
+      return {
+        ...bullet,
+        context: 'pattern:suppressed',
+        importance: clamp01(bullet.importance * 0.5), // 加速衰减
+      }
+    }
+
+    return bullet
+  })
+}
+
+/**
+ * 判断是否应该运行 REM 模式检测。
+ *
+ * 三级门控：
+ * - 'full': shouldReflect 通过 → 完整 reflect + 模式检测
+ * - 'light': shouldReflect 未通过，但 sessionCount ≥ 3 → 只做指纹存储 + 模式检测
+ * - 'skip': shouldReflect 未通过且 sessionCount < 3 → 完全跳过
+ */
+export function shouldRunREM(
+  vigor: VigorState,
+  sensorium: Sensorium,
+  doomLevel: DoomLoopLevel | string,
+  sessionCount: number,
+): 'full' | 'light' | 'skip' {
+  // shouldReflect 通过 → 完整模式
+  if (shouldReflect(vigor, sensorium, doomLevel)) {
+    return 'full'
+  }
+
+  // 有足够的历史 session → 轻量模式
+  if (sessionCount >= MIN_SESSIONS_FOR_PATTERN) {
+    return 'light'
+  }
+
+  return 'skip'
 }
