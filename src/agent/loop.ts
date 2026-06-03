@@ -906,6 +906,73 @@ export class AgentLoop {
    * season classification, phase class wiring, and contract status advancement.
    * Pure data transformation with no control flow (no return/continue).
    */
+  /**
+   * Step 6d: Convergence detection — multi-signal stagnation check before
+   * the API call. Level 2+ injects guidance; Level 3 forces session split
+   * or abort. Returns the action for the caller to handle control flow.
+   */
+  private async runConvergenceCheck(
+    turn: number,
+    phaseClass: string,
+    assistantResponded: boolean,
+    userMessageConsumed: boolean,
+    callbacks: AgentCallbacks,
+  ): Promise<{
+    action: 'proceed' | 'abort'
+  }> {
+    const convergenceCheck = evaluateConvergence({
+      turn,
+      phaseClass: phaseClass as PhaseClass,
+      contextWindow: this.config.contextWindow,
+      recentToolHistory: this.recentToolHistory,
+      evidenceState: this.evidence.getState(),
+      toolFingerprints: this.traceStore.toolFingerprints,
+      noToolTurnCount: this.consecutiveNoToolTurns,
+      textFingerprints: this.recentTextFingerprints,
+    })
+    debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
+
+    if (convergenceCheck.shouldKick && convergenceCheck.injectedMessage) {
+      // Level 2: inject user guidance as a system-visible nudge
+      callbacks.onPhaseChange?.('convergence-warning', {
+        reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段 ${turn} 轮未收敛 (score=${convergenceCheck.score.toFixed(2)})`,
+        suggestion: convergenceCheck.injectedMessage.slice(0, 200),
+      })
+      this.session.addUserMessage(convergenceCheck.injectedMessage)
+
+      // When convergence is detected AND doom loop is blocked, the agent is
+      // likely in a post-completion verification loop. Signal completion
+      // instead of letting the model continue alternating between tools.
+      if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
+        this.session.addUserMessage(
+          '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
+        )
+      }
+    }
+
+    if (convergenceCheck.shouldForceSplit) {
+      // Level 3: force session split to reset context and break the loop
+      debugLog(`[convergence] turn=${turn} force-split score=${convergenceCheck.score.toFixed(2)}`)
+      if (await this.compaction.trySessionSplit()) {
+        // split succeeded — reset turn counter and continue
+        debugLog(`[convergence] turn=${turn} split-succeeded`)
+      }
+    }
+
+    if (convergenceCheck.shouldAbort) {
+      const noToolInfo = this.consecutiveNoToolTurns >= 5 ? ` noToolTurns=${this.consecutiveNoToolTurns}` : ''
+      debugLog(`[convergence] turn=${turn} abort score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`)
+      callbacks.onPhaseChange?.('convergence-abort', {
+        reason: `收敛检测 L3 abort: score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`,
+      })
+      if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
+      callbacks.onAbort()
+      return { action: 'abort' }
+    }
+
+    return { action: 'proceed' }
+  }
+
   private async runPerception(
     turn: number,
     estTokens: number,
@@ -1167,57 +1234,10 @@ export class AgentLoop {
         // Step 6c: run perception (sensorium, season, phase class, contract)
         const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await this.runPerception(turn, estTokens, actionable, callbacks)
 
-        // ── Convergence Detection ──
-        // Multi-signal stagnation check before the API call. Level 2+
-        // injects guidance; Level 3 forces session split or abort.
-        const convergenceCheck = evaluateConvergence({
-          turn,
-          phaseClass: phaseClass as PhaseClass,
-          contextWindow: this.config.contextWindow,
-          recentToolHistory: this.recentToolHistory,
-          evidenceState: this.evidence.getState(),
-          toolFingerprints: this.traceStore.toolFingerprints,
-          noToolTurnCount: this.consecutiveNoToolTurns,
-          textFingerprints: this.recentTextFingerprints,
-        })
-        debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
-
-        if (convergenceCheck.shouldKick && convergenceCheck.injectedMessage) {
-          // Level 2: inject user guidance as a system-visible nudge
-          callbacks.onPhaseChange?.('convergence-warning', {
-            reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段 ${turn} 轮未收敛 (score=${convergenceCheck.score.toFixed(2)})`,
-            suggestion: convergenceCheck.injectedMessage.slice(0, 200),
-          })
-          this.session.addUserMessage(convergenceCheck.injectedMessage)
-
-          // When convergence is detected AND doom loop is blocked, the agent is
-          // likely in a post-completion verification loop. Signal completion
-          // instead of letting the model continue alternating between tools.
-          if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
-            this.session.addUserMessage(
-              '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
-            )
-          }
-        }
-
-        if (convergenceCheck.shouldForceSplit) {
-          // Level 3: force session split to reset context and break the loop
-          debugLog(`[convergence] turn=${turn} force-split score=${convergenceCheck.score.toFixed(2)}`)
-          if (await this.compaction.trySessionSplit()) {
-            // split succeeded — reset turn counter and continue
-            debugLog(`[convergence] turn=${turn} split-succeeded`)
-          }
-        }
-
-        if (convergenceCheck.shouldAbort) {
-          const noToolInfo = this.consecutiveNoToolTurns >= 5 ? ` noToolTurns=${this.consecutiveNoToolTurns}` : ''
-          debugLog(`[convergence] turn=${turn} abort score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`)
-          callbacks.onPhaseChange?.('convergence-abort', {
-            reason: `收敛检测 L3 abort: score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`,
-          })
-          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-          callbacks.onAbort()
-          return
+        // Step 6d: run convergence check
+        {
+          const { action } = await this.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks)
+          if (action === 'abort') return
         }
 
         _tb = Date.now()
