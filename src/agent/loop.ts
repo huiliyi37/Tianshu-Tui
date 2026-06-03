@@ -604,9 +604,9 @@ export class AgentLoop {
       cacheAdvisor: this.cacheAdvisor,
       p3: this.p3,
       lspManager: this.config.lspManager,
+      getEstimatedTokens: () => this.session.getEstimatedTokens(),
     })
   }
-
   private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
     return {
       cwd: this.cwd,
