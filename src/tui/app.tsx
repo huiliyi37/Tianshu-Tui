@@ -1272,6 +1272,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             <Text>◌ {heartbeatStatus}</Text>
           </Box>
         )}
+        {/* Spacer: pushes GlanceBar + InputBar to terminal bottom when content is sparse (e.g. after WelcomeScreen disappears). Shrinks to 0 when streaming content fills the area. */}
+        <Box flexGrow={1} minHeight={0} />
         {/* Status base: GlanceBar + contextual footer stay adjacent to InputBar so long stream output above never separates them */}
         <GlanceBar
           pulses={glancePulses}
