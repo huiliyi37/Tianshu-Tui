@@ -1,6 +1,6 @@
 import type { PostToolRuntimeHook } from '../runtime-hooks.js'
-import { advanceThetaCounter, completeTheta, tickTheta } from '../star-event.js'
-import type { ThetaState } from '../star-event.js'
+import { advanceThetaCounter, completeTheta, tickTheta, getThetaPhase } from '../star-event.js'
+import type { ThetaState, ThetaPhase } from '../star-event.js'
 
 export interface ThetaRuntimeHookDeps {
   getThetaState: () => ThetaState
@@ -12,14 +12,27 @@ export function createThetaRuntimeHook(deps: ThetaRuntimeHookDeps): PostToolRunt
     phase: 'postTool',
     name: 'theta-runtime',
     run(ctx) {
-      const advanced = advanceThetaCounter(deps.getThetaState())
+      const sensorium = ctx.snapshot.sensorium
+      const vigor = ctx.snapshot.vigor
+
+      // Phase modulation: vigor and complexity control phase advance rate.
+      // High vigor = preserve flow (slower phase). High complexity = need checks (faster phase).
+      const phaseInput = (sensorium && vigor) ? {
+        vigor: vigor.vigor,
+        complexity: sensorium.complexity,
+      } : undefined
+
+      const advanced = advanceThetaCounter(deps.getThetaState(), phaseInput)
       deps.setThetaState(advanced)
 
-      const sensorium = ctx.snapshot.sensorium
       if (!sensorium || sensorium.complexity <= 0.5) return
+
+      // Phase gate: theta checks only fire in retrieval phase
+      // This prevents disrupting the agent during active encoding (flow state).
       if (!tickTheta(advanced, ctx.snapshot.turn)) return
 
-      ctx.effects.requestThetaCheck('theta-cycle')
+      const phase: ThetaPhase = getThetaPhase(advanced)
+      ctx.effects.requestThetaCheck(`theta-cycle:${phase}`)
       deps.setThetaState(completeTheta(advanced))
     },
   }

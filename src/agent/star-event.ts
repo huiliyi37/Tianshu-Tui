@@ -173,43 +173,113 @@ export function createStarEvent(
 /**
  * State tracker for theta-gamma cross-file consistency checks.
  *
- * Theta cycle: every N tool calls, pause and verify cross-file
- * consistency (import resolution, type signature matching).
+ * Theta Phase Machine (upgraded from simple counter):
+ * - Phase ∈ [0, 1): [0, 0.5) = ENCODING (receiving), [0.5, 1) = RETRIEVAL (reflection)
+ * - Phase advances on each tool call, modulated by vigor and complexity
+ * - Theta checks only fire in RETRIEVAL phase (momentum-gated)
+ * - High vigor → slower phase advance (longer encoding, preserve flow)
+ * - High complexity → faster phase advance (more frequent consistency checks)
+ *
  * Enabled only when Sensorium.complexity > 0.5.
  */
 export interface ThetaState {
   toolCallCount: number
   lastThetaAt: number
   interval: number
+  /** Normalized phase [0, 1). 0 = start of encoding, 0.5 = retrieval boundary. */
+  phase: number
+  /** Number of times the phase has wrapped (cycled through a full rotation). */
+  cycleCount: number
 }
 
 export function createThetaState(interval = 7): ThetaState {
-  return { toolCallCount: 0, lastThetaAt: 0, interval }
+  return { toolCallCount: 0, lastThetaAt: 0, interval, phase: 0, cycleCount: 0 }
+}
+
+/** Theta phase mode: encoding (receiving) or retrieval (reflection). */
+export type ThetaPhase = 'encoding' | 'retrieval'
+
+/** Get the current phase mode. [0, 0.5) → encoding, [0.5, 1) → retrieval. */
+export function getThetaPhase(state: ThetaState): ThetaPhase {
+  return state.phase < 0.5 ? 'encoding' : 'retrieval'
 }
 
 /**
- * Advance the theta counter. Returns true if it's time for a
- * cross-file consistency check.
+ * Advance the theta counter and phase.
+ * Returns true if it's time for a cross-file consistency check AND
+ * the phase is in retrieval mode (momentum-safe).
  */
 export function tickTheta(state: ThetaState, currentTurn: number): boolean {
   const next = state.toolCallCount + 1
-  return next - state.lastThetaAt >= state.interval
+  const due = next - state.lastThetaAt >= state.interval
+  if (!due) return false
+  // Phase gate: only fire theta checks during retrieval phase
+  return state.phase >= 0.5
 }
 
 /**
- * Mark a theta check as completed, resetting the counter.
+ * Mark a theta check as completed, resetting the counter
+ * and wrapping the phase back to encoding.
  */
 export function completeTheta(state: ThetaState): ThetaState {
   return {
     ...state,
     toolCallCount: state.toolCallCount,
     lastThetaAt: state.toolCallCount,
+    // Wrap phase back to start of encoding
+    phase: 0,
+    cycleCount: state.cycleCount + 1,
   }
 }
 
+export interface ThetaPhaseInput {
+  /** Integrated behavioral energy [0, 1]. Higher = more encoding time. */
+  vigor: number
+  /** Task complexity [0, 1]. Higher = more frequent checks. */
+  complexity: number
+}
+
 /**
- * Advance tool call counter (called after every tool execution).
+ * Advance tool call counter AND phase.
+ *
+ * Phase step size is modulated by:
+ * - vigor: high vigor → slower advance (preserve encoding flow)
+ * - complexity: high complexity → faster advance (need more checks)
+ *
+ * A full phase cycle = interval tool calls at baseline.
+ * Modulation scales the step by (1 - vigor * 0.4) * (0.5 + complexity * 0.5).
  */
-export function advanceThetaCounter(state: ThetaState): ThetaState {
-  return { ...state, toolCallCount: state.toolCallCount + 1 }
+export function advanceThetaCounter(state: ThetaState, phaseInput?: ThetaPhaseInput): ThetaState {
+  const next = { ...state, toolCallCount: state.toolCallCount + 1 }
+
+  if (!phaseInput) {
+    // No modulation input → simple linear advance
+    const step = 1 / (state.interval || 7)
+    const newPhase = (state.phase + step) % 1
+    const cycles = Math.floor((state.phase + step))
+    return {
+      ...next,
+      phase: newPhase,
+      cycleCount: state.cycleCount + cycles,
+    }
+  }
+
+  const { vigor, complexity } = phaseInput
+  const baseStep = 1 / (state.interval || 7)
+
+  // Modulation: vigor slows phase (preserve flow), complexity accelerates (need checks)
+  // Range: [0.3, 1.3] × baseStep
+  const vigorMod = 1 - vigor * 0.4   // [0.6, 1.0] — high vigor = slower
+  const complexityMod = 0.5 + complexity * 0.5  // [0.5, 1.0] — high complexity = faster
+  const step = baseStep * vigorMod * complexityMod
+
+  const rawPhase = state.phase + step
+  const newPhase = rawPhase % 1
+  const cycles = Math.floor(rawPhase)
+
+  return {
+    ...next,
+    phase: newPhase,
+    cycleCount: state.cycleCount + cycles,
+  }
 }
