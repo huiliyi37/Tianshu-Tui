@@ -141,6 +141,52 @@ describe('GREP_TOOL', () => {
     assert.equal(GREP_TOOL.isConcurrencySafe(), true)
   })
 
+  it('context_lines shows surrounding lines (native fallback)', async () => {
+    const ctxDir = mkdtempSync(join(tmpdir(), 'grep-ctx-'))
+    try {
+      mkdirSync(join(ctxDir, 'src'), { recursive: true })
+      writeFileSync(join(ctxDir, 'src', 'target.ts'), [
+        'line 1',
+        'line 2',
+        'MATCH_HERE',
+        'line 4',
+        'line 5',
+        'line 6',
+      ].join('\n'))
+
+      // Without context
+      const noCtx = await GREP_TOOL.execute({
+        input: { pattern: 'MATCH_HERE', path: 'src', literal: true },
+        toolUseId: 'test',
+        cwd: ctxDir,
+      })
+      assert.ok(noCtx.content.includes('MATCH_HERE'))
+      assert.ok(!noCtx.content.includes('line 2'))
+
+      // With context=1
+      const ctx1 = await GREP_TOOL.execute({
+        input: { pattern: 'MATCH_HERE', path: 'src', literal: true, context_lines: 1 },
+        toolUseId: 'test',
+        cwd: ctxDir,
+      })
+      assert.ok(ctx1.content.includes('MATCH_HERE'))
+      assert.ok(ctx1.content.includes('line 2'), 'context_lines=1 should include line before match')
+      assert.ok(ctx1.content.includes('line 4'), 'context_lines=1 should include line after match')
+      assert.ok(!ctx1.content.includes('line 1'), 'context_lines=1 should NOT include 2 lines before')
+
+      // With context=2
+      const ctx2 = await GREP_TOOL.execute({
+        input: { pattern: 'MATCH_HERE', path: 'src', literal: true, context_lines: 2 },
+        toolUseId: 'test',
+        cwd: ctxDir,
+      })
+      assert.ok(ctx2.content.includes('line 1'), 'context_lines=2 should include 2 lines before match')
+      assert.ok(ctx2.content.includes('line 5'), 'context_lines=2 should include 2 lines after match')
+    } finally {
+      rmSync(ctxDir, { recursive: true, force: true })
+    }
+  })
+
   it('truncates large output to ~8000 chars by default', async () => {
     // Generate enough matches to exceed the default 8000-char model cap.
     const bigDir = mkdtempSync(join(tmpdir(), 'grep-bigout-'))

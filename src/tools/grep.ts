@@ -10,7 +10,6 @@ import { validatePathSafe } from './path-validate.js'
 import { summarizeGrepResult } from '../artifact/summarize.js'
 import type { ArtifactStore } from '../artifact/store.js'
 import { computeModelReadCap, type ModelReadCap } from './model-read-cap.js'
-import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 import { track } from './process-tracker.js'
@@ -32,6 +31,7 @@ export const GREP_TOOL: Tool = {
 ### Examples
 Good: grep(pattern="function handleSubmit", path="src/")
 Good: grep(pattern="API_KEY", path=".", glob="*.{ts,tsx}")
+Good: grep(pattern="class Foo", path="src/", context_lines=3)
 Bad: grep(pattern="x") (too broad — will match too many lines)`,
     input_schema: {
       type: 'object',
@@ -41,6 +41,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
         glob: { type: 'string', description: 'File filter e.g. "*.ts" or "*.{ts,tsx}"' },
         max_results: { type: 'integer', description: 'Max matching lines (default: 100)' },
         literal: { type: 'boolean', description: 'Treat pattern as literal, not regex (default: false)' },
+        context_lines: { type: 'integer', description: 'Number of context lines before and after each match (default: 0). Use 2-3 to see surrounding code without a separate read_file.' },
       },
       required: ['pattern'],
     },
@@ -52,6 +53,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const glob = params.input.glob as string | undefined
     const maxResults = (params.input.max_results as number) ?? MAX_RESULTS_DEFAULT
     const literal = (params.input.literal as boolean) ?? false
+    const contextLines = (params.input.context_lines as number) ?? 0
     const modelCap = computeModelReadCap({
       contextWindow: params.contextWindow,
       providerProfile: params.providerProfile,
@@ -66,7 +68,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const artifactThreshold = getToolArtifactThreshold('grep', params.contextWindow)
 
     // Try ripgrep first, fall back to native search
-    const rgResult = await tryRipgrep(pattern, absPath, searchPath, glob, maxResults, params.cwd, literal, modelCap, params.artifactStore, artifactThreshold)
+    const rgResult = await tryRipgrep(pattern, absPath, searchPath, glob, maxResults, params.cwd, literal, contextLines, modelCap, params.artifactStore, artifactThreshold)
     if (rgResult !== null) return rgResult
 
     // Native fallback
@@ -76,7 +78,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     }
 
     try {
-      const results = await nativeSearch(absPath, regex, glob, maxResults, params.cwd)
+      const results = await nativeSearch(absPath, regex, glob, maxResults, params.cwd, contextLines)
       if (results.length === 0) {
         return { content: 'No matches found.' }
       }
@@ -85,9 +87,6 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
         : results.join('\n')
       const hintedText = appendLogRangeHints(text, searchPath)
 
-      // Use ArtifactStore if available — but only when content actually warrants it.
-      // See bash.ts/read-file.ts for the full rationale: small results returned as
-      // [artifact:X] summary made the model think grep was hiding hits.
       if (params.artifactStore) {
         if (hintedText.length < artifactThreshold) {
           debugLog(`[artifact-skip] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
@@ -102,8 +101,6 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
           summary,
           sections,
         })
-        // Return a truncated view of the actual matches plus the artifact ref —
-        // model sees real hits up front, artifact is only the recovery path.
         const truncated = truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars)
         return {
           content: `${truncated}\n\n${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L500") for the full match list.\n[artifact:${artifactId}]`,
@@ -157,6 +154,7 @@ async function tryRipgrep(
   maxResults: number,
   cwd: string,
   literal: boolean,
+  contextLines: number,
   modelCap: ModelReadCap,
   artifactStore?: ArtifactStore,
   artifactThreshold: number = 0,
@@ -173,6 +171,9 @@ async function tryRipgrep(
     }
     if (glob) {
       args.push('--glob', glob)
+    }
+    if (contextLines > 0) {
+      args.push('--context', String(contextLines))
     }
     args.push('--', pattern, absPath)
 
@@ -228,8 +229,6 @@ async function tryRipgrep(
       const text = lines.join('\n') + suffix
       const hintedText = appendLogRangeHints(text, searchPath)
 
-      // Use ArtifactStore if available — but only when content warrants it.
-      // See bash.ts/read-file.ts for rationale.
       if (artifactStore) {
         if (hintedText.length < artifactThreshold) {
           debugLog(`[artifact-skip] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
@@ -250,7 +249,6 @@ async function tryRipgrep(
             content: `${truncated}\n\n${summary}\nUse read_section(artifactId="${artifactId}", section="L1-L500") for the full match list.\n[artifact:${artifactId}]`,
           })
         }).catch(() => {
-          // Fallback to truncation if artifact save fails
           resolve({ content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
         })
         return
@@ -267,6 +265,7 @@ async function nativeSearch(
   glob: string | undefined,
   maxResults: number,
   cwd: string,
+  contextLines: number = 0,
 ): Promise<string[]> {
   const filter = new GitignoreFilter(cwd)
   const globRegex = glob ? globToRegex(glob) : null
@@ -299,7 +298,7 @@ async function nativeSearch(
         if (filter.isIgnored(cwd, fullPath)) continue
         if (globRegex && !globRegex.test(entry.name)) continue
 
-        const matched = await searchFile(fullPath, regex, maxResults - results.length)
+        const matched = await searchFile(fullPath, regex, maxResults - results.length, contextLines)
         for (const line of matched) {
           results.push(`${relPath}:${line}`)
           if (results.length >= maxResults) return
@@ -311,7 +310,7 @@ async function nativeSearch(
   const s = await lstat(absPath).catch(() => null)
   if (s?.isFile()) {
     const relPath = relative(cwd, absPath)
-    const matched = await searchFile(absPath, regex, maxResults)
+    const matched = await searchFile(absPath, regex, maxResults, contextLines)
     for (const line of matched) {
       results.push(`${relPath}:${line}`)
       if (results.length >= maxResults) return results
@@ -323,22 +322,54 @@ async function nativeSearch(
   return results
 }
 
-async function searchFile(filePath: string, regex: RegExp, remaining = Number.POSITIVE_INFINITY): Promise<string[]> {
-  const results: string[] = []
+async function searchFile(
+  filePath: string,
+  regex: RegExp,
+  remaining = Number.POSITIVE_INFINITY,
+  contextLines = 0,
+): Promise<string[]> {
+  const allLines: string[] = []
+  const matchLineNums: number[] = []
+
   const stream = createReadStream(filePath, { encoding: 'utf-8' })
   const rl = createInterface({ input: stream, crlfDelay: Infinity })
 
   let lineNum = 0
   for await (const line of rl) {
     lineNum++
+    allLines.push(line)
     if (regex.test(line)) {
-      results.push(`${lineNum}:  ${line}`)
-      if (results.length >= remaining) break
+      matchLineNums.push(lineNum - 1) // 0-based index into allLines
+      if (matchLineNums.length >= remaining) break
     }
   }
 
   rl.close()
   stream.destroy()
+
+  if (contextLines <= 0 || matchLineNums.length === 0) {
+    // No context — original behavior
+    return matchLineNums.map(idx => `${idx + 1}:  ${allLines[idx]}`)
+  }
+
+  // With context: collect expanded line ranges, deduplicate, format
+  const included = new Set<number>()
+  for (const idx of matchLineNums) {
+    for (let c = Math.max(0, idx - contextLines); c <= Math.min(allLines.length - 1, idx + contextLines); c++) {
+      included.add(c)
+    }
+  }
+
+  const results: string[] = []
+  let prevLineNum = -1
+  for (const lineNum_ of [...included].sort((a, b) => a - b)) {
+    if (prevLineNum !== -1 && lineNum_ > prevLineNum + 1) {
+      results.push('  ...')
+    }
+    const marker = matchLineNums.includes(lineNum_) ? '>' : ' '
+    results.push(`${marker}${String(lineNum_ + 1).padStart(4)}│ ${allLines[lineNum_]}`)
+    prevLineNum = lineNum_
+  }
   return results
 }
 
