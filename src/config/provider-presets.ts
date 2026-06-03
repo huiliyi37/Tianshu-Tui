@@ -64,13 +64,13 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         prefixCompletion: false,
       },
       thinking: 'enabled',
-      maxTokens: 128000,
+      maxTokens: 131072,
       models: [
         {
           id: 'glm-5.1',
           alias: 'glm',
           contextWindow: 200_000,
-          maxTokens: 128000,
+          maxTokens: 131072,
           reasoningEffort: 'high',
         },
       ],
