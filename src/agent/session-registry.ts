@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
+import { validateTrend } from './retrospect-fingerprint.js'
 
 export interface SessionEntry {
   id: string
@@ -53,21 +54,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE TABLE IF NOT EXISTS claims (
-  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   file_path TEXT NOT NULL,
   claim_type TEXT NOT NULL CHECK(claim_type IN ('exclusive','shared_read')),
-  acquired_at TEXT NOT NULL,
-  PRIMARY KEY(session_id, file_path)
-);
-
-CREATE INDEX IF NOT EXISTS idx_claims_file ON claims(file_path, claim_type);
-CREATE INDEX IF NOT EXISTS idx_sessions_pid ON sessions(pid);
-
-CREATE TABLE IF NOT EXISTS events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
-  event_type TEXT NOT NULL,
-  file_path TEXT,
+  confidence_trend TEXT NOT NULL CHECK(confidence_trend IN ('stable','falling','rising')),
   detail TEXT,
   priority INTEGER DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -91,8 +80,8 @@ CREATE TABLE IF NOT EXISTS retrospect_fingerprints (
   created_at INTEGER NOT NULL,
   root_cause_keywords TEXT NOT NULL,
   recommendation_keywords TEXT NOT NULL,
-  stability_trend TEXT NOT NULL,
-  confidence_trend TEXT NOT NULL,
+  stability_trend TEXT NOT NULL CHECK(stability_trend IN ('stable','falling','rising')),
+  confidence_trend TEXT NOT NULL CHECK(confidence_trend IN ('stable','falling','rising')),
   max_pressure REAL NOT NULL,
   tool_failure_rate REAL NOT NULL,
   bullet_ids TEXT NOT NULL DEFAULT '[]',
@@ -423,8 +412,8 @@ export class SessionRegistry {
       createdAt: row.created_at as number,
       rootCauseKeywords: JSON.parse(row.root_cause_keywords as string) as string[],
       recommendationKeywords: JSON.parse(row.recommendation_keywords as string) as string[],
-      stabilityTrend: row.stability_trend as 'stable' | 'falling' | 'rising',
-      confidenceTrend: row.confidence_trend as 'stable' | 'falling' | 'rising',
+      stabilityTrend: validateTrend(row.stability_trend as string, 'stable'),
+      confidenceTrend: validateTrend(row.confidence_trend as string, 'stable'),
       maxPressure: row.max_pressure as number,
       toolFailureRate: row.tool_failure_rate as number,
       bulletIds: JSON.parse(row.bullet_ids as string) as string[],
