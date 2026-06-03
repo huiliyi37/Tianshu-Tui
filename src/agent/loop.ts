@@ -896,6 +896,117 @@ export class AgentLoop {
     return { heartbeat, wrappedCallbacks: callbacks, actionable }
   }
 
+  /**
+   * Step 6b: Per-turn compaction — session split, maybeCompact, stale round,
+   * heap-driven forced compaction. Returns the result for the caller to
+   * handle abort logic and userMessageConsumed propagation.
+   */
+  private async runCompaction(
+    turn: number,
+    snap: ResourceSensorSnapshot | null,
+  ): Promise<{
+    compacted: boolean
+    shouldAbort: boolean
+    userMessageConsumed: boolean
+  }> {
+    let userMessageConsumed = false
+
+    // Phase 2.3: Proactive session split at 86% context.
+    let _tb = Date.now()
+    if (await this.compaction.trySessionSplit()) {
+      userMessageConsumed = true
+    }
+    debugLog(`[turn-boundary] turn=${turn} trySessionSplit: ${Date.now() - _tb}ms`)
+    // A2: user may have aborted during trySessionSplit (which can trigger
+    // 60s LLM compact). Bail early instead of continuing into maybeCompact.
+    if (this.abortController!.signal.aborted) {
+      return { compacted: false, shouldAbort: true, userMessageConsumed }
+    }
+
+    _tb = Date.now()
+    const compactResult = await this.compaction.maybeCompact({
+      loopTurn: turn,
+      failures: this.compactFailures,
+    })
+    debugLog(`[turn-boundary] turn=${turn} maybeCompact: ${Date.now() - _tb}ms compacted=${compactResult.compacted}`)
+    if (compactResult.compacted) userMessageConsumed = true
+    // A2: bail after maybeCompact (can also trigger LLM compact on 1M windows)
+    if (this.abortController!.signal.aborted) {
+      return { compacted: false, shouldAbort: true, userMessageConsumed }
+    }
+    this.compactFailures = compactResult.failures
+    // Immune signal: surface compaction failures as danger signal for dual-signal gating
+    if (this.compactFailures.consecutiveFailures > 0) {
+      try {
+        this.immuneHook.injectSignal({
+          kind: 'compaction_fail',
+          severity: Math.min(1.0, this.compactFailures.consecutiveFailures * 0.3),
+          turn,
+          source: 'compaction-controller',
+        })
+      } catch { /* non-critical */ }
+    }
+    if (compactResult.compacted) {
+      this.lastCompactTurn = turn
+      // Hint V8 to release freed message objects sooner
+      if (typeof globalThis.gc === 'function') globalThis.gc()
+    }
+
+    // Stale round compaction: proactively shrink N-2+ tool_results
+    if (!compactResult.compacted) {
+      // Token gate: skip stale-round + diet when under 50% context capacity
+      const contextWindow = this.config.contextWindow ?? 1_000_000
+      const tokenBudget = estimateOaiTokens(this.session.getMessages() as any)
+      // P1+P2 trace: verify token gate skips diet/stale below 50% capacity
+      // eslint-disable-next-line no-console
+      const tokenRatio = tokenBudget / contextWindow
+      const skipGate = tokenRatio < 0.5
+      debugLog(`[token-gate] tokens=${tokenBudget} window=${contextWindow} ratio=${tokenRatio.toFixed(2)} skip=${skipGate}`)
+      if (tokenRatio >= 0.5 && contextWindow < 1_000_000) {
+        // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
+        const dietBefore = this.session.getMessages()
+        const dietResult = this.p3.dietMessages(dietBefore as any)
+        if (dietResult.removedCount > 0) {
+          this.session.replaceMessages(dietResult.messages as any)
+        }
+
+        const before = this.session.getMessages()
+        // Take max of cacheAdvisor's adaptive value and the window-aware
+        // default. cacheAdvisor is bounded to 600–2400 (legacy small-window
+        // tuning); on a 1M window staleRoundThresholds gives 30K, which we
+        // want to win unless cacheAdvisor has actually escalated.
+        const advisorPreview = this.cacheAdvisor.getStalePreviewChars()
+        const after = compactStaleRoundsOai(before, contextWindow, Math.max(advisorPreview, staleRoundThresholds(contextWindow).previewChars))
+        if (after !== before) {
+          this.session.replaceMessages(after)
+          if (typeof globalThis.gc === 'function') globalThis.gc()
+        }
+      }
+    }
+
+    // Heap-driven forced compaction: when memory pressure is high,
+    // run phase 1 only (tool content truncation).
+    // On 1M+ windows, use a higher threshold (0.75) to delay prefix
+    // cache disruption. Phase 2 (round removal) won't fire since
+    // tokens << contextWindow — only tool_result truncation applies.
+    const heapRatio = snap
+      ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
+      : 0
+    const heapCompactThreshold = (this.config.contextWindow ?? 1_000_000) >= 1_000_000 ? 0.75 : 0.6
+    if (!compactResult.compacted && heapRatio >= heapCompactThreshold && this.session.getMessages().length >= 10) {
+      debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} threshold=${heapCompactThreshold} msgCount=${this.session.getMessages().length}`)
+      const before = this.session.getMessages()
+      const contextWindow = this.config.contextWindow ?? 1_000_000
+      const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
+      if (trimmed.length < before.length || trimmed !== before) {
+        this.session.replaceMessages(trimmed)
+        if (typeof globalThis.gc === 'function') globalThis.gc()
+      }
+    }
+
+    return { compacted: compactResult.compacted, shouldAbort: false, userMessageConsumed }
+  }
+
   private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {
     const { heartbeat, wrappedCallbacks, actionable } = await this.initializeRun(userInput, callbacks)
     callbacks = wrappedCallbacks
@@ -932,106 +1043,20 @@ export class AgentLoop {
         this.turnBudget = createTurnBudget(rssRatio)
         
 
-        // Phase 2.3: Proactive session split at 86% context.
-        let _tb = Date.now()
-        if (await this.compaction.trySessionSplit()) {
-          userMessageConsumed = true
-        }
-        debugLog(`[turn-boundary] turn=${turn} trySessionSplit: ${Date.now() - _tb}ms`)
-        // A2: user may have aborted during trySessionSplit (which can trigger
-        // 60s LLM compact). Bail early instead of continuing into maybeCompact.
-        if (this.abortController!.signal.aborted) {
-          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-          callbacks.onAbort()
-          return
-        }
-
-        _tb = Date.now()
-        const compactResult = await this.compaction.maybeCompact({
-          loopTurn: turn,
-          failures: this.compactFailures,
-        })
-        debugLog(`[turn-boundary] turn=${turn} maybeCompact: ${Date.now() - _tb}ms compacted=${compactResult.compacted}`)
-        if (compactResult.compacted) userMessageConsumed = true
-        // A2: bail after maybeCompact (can also trigger LLM compact on 1M windows)
-        if (this.abortController!.signal.aborted) {
-          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-          callbacks.onAbort()
-          return
-        }
-        this.compactFailures = compactResult.failures
-        // Immune signal: surface compaction failures as danger signal for dual-signal gating
-        if (this.compactFailures.consecutiveFailures > 0) {
-          try {
-            this.immuneHook.injectSignal({
-              kind: 'compaction_fail',
-              severity: Math.min(1.0, this.compactFailures.consecutiveFailures * 0.3),
-              turn,
-              source: 'compaction-controller',
-            })
-          } catch { /* non-critical */ }
-        }
-        if (compactResult.compacted) {
-          this.lastCompactTurn = turn
-          // Hint V8 to release freed message objects sooner
-          if (typeof globalThis.gc === 'function') globalThis.gc()
-        }
-
-        // Stale round compaction: proactively shrink N-2+ tool_results
-        if (!compactResult.compacted) {
-          // Token gate: skip stale-round + diet when under 50% context capacity
-          const contextWindow = this.config.contextWindow ?? 1_000_000
-          const tokenBudget = estimateOaiTokens(this.session.getMessages() as any)
-          // P1+P2 trace: verify token gate skips diet/stale below 50% capacity
-          // eslint-disable-next-line no-console
-          const tokenRatio = tokenBudget / contextWindow
-          const skipGate = tokenRatio < 0.5
-          debugLog(`[token-gate] tokens=${tokenBudget} window=${contextWindow} ratio=${tokenRatio.toFixed(2)} skip=${skipGate}`)
-          if (tokenRatio >= 0.5 && contextWindow < 1_000_000) {
-            // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
-            const dietBefore = this.session.getMessages()
-            const dietResult = this.p3.dietMessages(dietBefore as any)
-            if (dietResult.removedCount > 0) {
-              this.session.replaceMessages(dietResult.messages as any)
-            }
-
-            const before = this.session.getMessages()
-            // Take max of cacheAdvisor's adaptive value and the window-aware
-            // default. cacheAdvisor is bounded to 600–2400 (legacy small-window
-            // tuning); on a 1M window staleRoundThresholds gives 30K, which we
-            // want to win unless cacheAdvisor has actually escalated.
-            const advisorPreview = this.cacheAdvisor.getStalePreviewChars()
-            const after = compactStaleRoundsOai(before, contextWindow, Math.max(advisorPreview, staleRoundThresholds(contextWindow).previewChars))
-            if (after !== before) {
-              this.session.replaceMessages(after)
-              if (typeof globalThis.gc === 'function') globalThis.gc()
-            }
+        // Step 6b: run compaction (session split, maybeCompact, stale rounds, heap)
+        {
+          const compactionResult = await this.runCompaction(turn, snap)
+          if (compactionResult.shouldAbort) {
+            if (!assistantResponded && !compactionResult.userMessageConsumed) this.session.removeLastMessage()
+            callbacks.onAbort()
+            return
           }
-        }
-
-        // Heap-driven forced compaction: when memory pressure is high,
-        // run phase 1 only (tool content truncation).
-        // On 1M+ windows, use a higher threshold (0.75) to delay prefix
-        // cache disruption. Phase 2 (round removal) won't fire since
-        // tokens << contextWindow — only tool_result truncation applies.
-        const heapRatio = snap
-          ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
-          : 0
-        const heapCompactThreshold = (this.config.contextWindow ?? 1_000_000) >= 1_000_000 ? 0.75 : 0.6
-        if (!compactResult.compacted && heapRatio >= heapCompactThreshold && this.session.getMessages().length >= 10) {
-          debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} threshold=${heapCompactThreshold} msgCount=${this.session.getMessages().length}`)
-          const before = this.session.getMessages()
-          const contextWindow = this.config.contextWindow ?? 1_000_000
-          const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
-          if (trimmed.length < before.length || trimmed !== before) {
-            this.session.replaceMessages(trimmed)
-            if (typeof globalThis.gc === 'function') globalThis.gc()
-          }
+          if (compactionResult.userMessageConsumed) userMessageConsumed = true
         }
 
         this.streamedText = ''
         this.lastPrewarmAt = 0
-        _tb = Date.now()
+        let _tb = Date.now()
         await this.prewarmRecentReads()
         debugLog(`[turn-boundary] turn=${turn} prewarmRecentReads: ${Date.now() - _tb}ms`)
 
