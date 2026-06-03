@@ -293,12 +293,19 @@ export class OpenAIClient implements StreamClient {
     let textReceived = false
     let promotionFired = false
 
-    // Wire external abort signal to reader.cancel() so that agent.abort()
-    // (from worker budget timeout, tool pipeline timeout, or user Ctrl+C)
-    // can interrupt a blocking reader.read() call. Without this, signal.aborted
-    // is set but reader.read() remains blocked waiting for the next SSE chunk,
-    // creating a deadlock when the provider is slow (e.g. GLM thinking, 180s).
-    const abortCleanup = signal ? wireAbortToReaderCancel(signal, reader) : null
+    // Create an internal timeout AbortSignal for hard timeout guarantee.
+    // This ensures reader.read() is unblocked even if reader.cancel() alone
+    // cannot break the TCP connection (e.g. GLM server keeps connection alive).
+    // Max stream duration = 10 minutes (aligned with withStructuredRetry budget).
+    const timeoutController = new AbortController()
+    const maxStreamMs = 10 * 60_000
+    const maxStreamTimer = setTimeout(() => timeoutController.abort(), maxStreamMs)
+
+    // Wire both external and timeout signals to reader.cancel() so that
+    // either agent.abort() OR the hard timeout can interrupt blocking read().
+    const signalCleanup = signal
+      ? wireAbortToReaderCancel(AbortSignal.any([signal, timeoutController.signal]), reader)
+      : wireAbortToReaderCancel(timeoutController.signal, reader)
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
@@ -328,7 +335,13 @@ export class OpenAIClient implements StreamClient {
       resetIdleTimer()
       let streamDone = false
       while (!streamDone) {
+        // Check both external signal and internal timeout signal.
+        // External signal: agent.abort() / worker budget / Ctrl+C
+        // Timeout signal: hard 10min ceiling on stream duration
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        if (timeoutController.signal.aborted) {
+          throw new Error('OpenAI SSE stream hard timeout (10min) — stream exceeded maximum duration')
+        }
 
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
@@ -414,7 +427,8 @@ export class OpenAIClient implements StreamClient {
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
-      if (abortCleanup) abortCleanup()
+      if (maxStreamTimer) clearTimeout(maxStreamTimer)
+      if (signalCleanup) signalCleanup()
 
       // Promote reasoning to text even on stream error — prevents GLM "stuck" when
       // stream breaks after receiving reasoning_content but before normal completion.
