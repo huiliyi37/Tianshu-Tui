@@ -48,37 +48,78 @@ function extToLang(rawPath: string | undefined): string | undefined {
   }
 }
 
+/** Build a framed folding marker: ┌─ 34 lines ─┐ */
+function foldMarker(lines: number, width: number, focused: boolean, theme: ReturnType<typeof getTheme>): string {
+  const label = ` ${lines} lines `
+  const inner = Math.max(0, width - label.length - 2) // 2 for ┌─/─┐
+  const left = '─'.repeat(Math.floor(inner / 2))
+  const right = '─'.repeat(Math.ceil(inner / 2))
+  return `┌${left}${label}${right}┐`
+}
+
 export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs, depth = 0 }: ToolCardProps) {
   const theme = getTheme()
   const [localExpanded, setLocalExpanded] = useState(false)
 
   useInput((_input, key) => {
-    if (focused && key.tab) {
+    if (focused && (key.tab || key.return)) {
       setLocalExpanded(v => !v)
     }
   })
 
   const expanded = verbose || localExpanded
   const expandedLimit = useViewportLines(0.6, 8)
-  const limit = expanded ? expandedLimit : MAX_COLLAPSED_LINES
-  const { displayText, truncated, totalLines } = useMemo(() => {
+  const family = getToolFamily(name)
+  const isReader = family.family === 'read'
+
+  const { displayText, truncated, totalLines, previewLines } = useMemo(() => {
     const lines = result.split('\n')
+    const limit = expanded ? expandedLimit : MAX_COLLAPSED_LINES
     const isLong = lines.length > limit
-    // Show last N lines (tail) so the output/result is visible, not the header
-    const displayLines = isLong ? lines.slice(-limit) : lines
+
+    if (!isLong) {
+      return {
+        displayText: result,
+        truncated: 0,
+        totalLines: lines.length,
+        previewLines: [] as string[],
+      }
+    }
+
+    // For read_file results (read family), show file header as preview
+    // so users can see file content context even when collapsed.
+    // For other tools, show tail to see the result/output.
+    if (isReader && !expanded) {
+      const previewCount = Math.min(5, Math.floor(limit / 3))
+      const tailCount = limit - previewCount
+      const head = lines.slice(0, previewCount)
+      const tail = lines.slice(-tailCount)
+      return {
+        displayText: [...head, `┄┄┄ ${lines.length - limit} lines ┄┄┄`, ...tail].join('\n'),
+        truncated: lines.length - limit,
+        totalLines: lines.length,
+        previewLines: head,
+      }
+    }
+
+    const displayLines = lines.slice(-limit)
     return {
       displayText: displayLines.join('\n'),
-      truncated: isLong ? lines.length - limit : 0,
+      truncated: lines.length - limit,
       totalLines: lines.length,
+      previewLines: [] as string[],
     }
-  }, [result, limit])
+  }, [result, expanded ? expandedLimit : MAX_COLLAPSED_LINES, expanded, isReader])
 
   const borderColor = isError ? theme.error : theme.toolColor(name)
-  const family = getToolFamily(name)
 
   // Tree connectors for nested tool call chains
   const treeLead = depth > 0 ? '  '.repeat(depth - 1) + ' ├─' : ''
   const treePad = depth > 0 ? '  '.repeat(depth) : ''
+
+  // Collapse marker: boxed fold indicator
+  const foldColor = focused ? theme.primary : theme.dim
+  const foldHint = focused && truncated > 0 ? ` Enter/Tab to ${localExpanded ? 'collapse' : 'expand'}` : ''
 
   return (
     <Box flexDirection="column" paddingLeft={depth > 0 ? 0 : 2} paddingRight={1} marginBottom={0}>
@@ -90,7 +131,7 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
             <Text color={theme.muted}> {formatToolElapsed(elapsedMs ?? 0)}</Text>
           )}
           {totalLines > MAX_COLLAPSED_LINES && !expanded && <Text color={theme.muted}> {totalLines} lines</Text>}
-          {focused && totalLines > MAX_COLLAPSED_LINES ? <Text color={theme.muted}> (Tab to {localExpanded ? 'collapse' : 'expand'})</Text> : ''}
+          {foldHint ? <Text color={theme.primary}> {foldHint}</Text> : null}
         </Text>
       </Box>
       <Box flexDirection="row">
@@ -107,8 +148,10 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
           flexGrow={1}
         >
           <Markdown text={displayText} language={extToLang(rawPath)} />
-          {truncated > 0 && (
-            <Text color={theme.muted}>{truncated} more lines{rawPath ? ` · raw: ${compactPath(rawPath)}` : ''}</Text>
+          {truncated > 0 && !expanded && (
+            <Text color={foldColor} bold={!!focused}>
+              {foldMarker(totalLines, 32, !!focused, theme)}
+            </Text>
           )}
           {truncated === 0 && rawPath && (
             <Text color={theme.muted}>raw: {compactPath(rawPath)}</Text>
