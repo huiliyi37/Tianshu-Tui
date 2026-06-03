@@ -1,11 +1,12 @@
 import { Box, Text } from 'ink'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import type { StarPhase } from '../agent/star-event.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS } from '../agent/star-event.js'
 import { getTheme, type RivetTheme } from './theme.js'
 import { useTerminalSize } from './use-terminal-size.js'
 import type { GlancePulse } from './surface/types.js'
-import { horizontalRule } from './separator.js'
+import { horizontalRule, type SeparatorStyle } from './separator.js'
+import { STAR_DOMAINS } from '../agent/star-domain.js'
 
 interface GlanceBarProps {
   pulses: readonly GlancePulse[]
@@ -54,9 +55,20 @@ function getDomainColor(domainName: string | undefined, theme: RivetTheme): stri
   }
 }
 
+
+export function getDomainSeparatorStyle(domainName: string | undefined): SeparatorStyle {
+  if (!domainName) return 'thin'
+  for (const [id, domain] of Object.entries(STAR_DOMAINS)) {
+    if (domain.name === domainName || id === domainName) {
+      return domain.uiPersona.separator
+    }
+  }
+  if (domainName === '天枢' || domainName === 'tianshu') return 'thin'
+  return 'thin'
+}
 const MOON_PHASES = ['◐', '◑', '◒', '◓'] as const
 
-export const GlanceBar = function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens }: GlanceBarProps) {
+export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens }: GlanceBarProps) {
   const theme = getTheme()
   const [moonIdx, setMoonIdx] = useState(0)
 
@@ -93,7 +105,7 @@ export const GlanceBar = function GlanceBar({ pulses, phase, cacheHitRate, cost,
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box paddingX={narrow ? 0 : 1}>
-        <Text color={domainColor}>{horizontalRule(columns, 'thin')}</Text>
+        <Text color={domainColor}>{horizontalRule(columns, getDomainSeparatorStyle(domain))}</Text>
       </Box>
       <Box paddingX={narrow ? 0 : 1} flexDirection="row">
         {domain && <Text bold color={domainColor}>☆ {domain}</Text>}
@@ -119,4 +131,4 @@ export const GlanceBar = function GlanceBar({ pulses, phase, cacheHitRate, cost,
       </Box>
     </Box>
   )
-}
+})
