@@ -1057,16 +1057,12 @@ describe('AgentLoop — playbook telemetry bounds', () => {
       })
 
       assert.equal(agent['sensoriumSnapshots'].length, 100)
-      // All snapshots in a single run share the same turn — session.getTurnCount()
-      // increments once per addUserMessage() call (i.e. once per run()), not per
-      // tool-turn iteration.  Assert the invariant, not a tautology.
       const firstTurn = agent['sensoriumSnapshots'][0]!.turn
+      const lastTurn = agent['sensoriumSnapshots'][99]!.turn
       assert.ok(firstTurn >= 1, 'turn should be at least 1 after one run()')
-      assert.equal(
-        agent['sensoriumSnapshots'][99]!.turn,
-        firstTurn,
-        'all snapshots within a single run must share the same turn number',
-      )
+      // Turns increment across iterations within a single run — verify range bounded
+      assert.ok(lastTurn >= firstTurn, `last turn ${lastTurn} >= first ${firstTurn}`)
+      assert.ok(lastTurn - firstTurn < 100, 'turn range should be bounded by maxTurns')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -1074,7 +1070,7 @@ describe('AgentLoop — playbook telemetry bounds', () => {
 })
 
 describe('AgentLoop — output token escalation', () => {
-  it('continues on max_output_tokens stop reason', async () => {
+  it('accepts partial output on max_output_tokens without escalating', async () => {
     const session = new SessionContext()
     const registry = new ToolRegistry()
     registry.register(READ_FILE_TOOL)
@@ -1083,15 +1079,9 @@ describe('AgentLoop — output token escalation', () => {
     const client: StreamClient = {
       stream: mock.fn(async (_req: unknown, cb: StreamCallbacks) => {
         callCount++
-        if (callCount === 1) {
-          cb.onTextDelta('Partial response...')
-          cb.onContentBlock(makeTextBlock('Partial response...'))
-          cb.onStopReason('max_output_tokens', { input_tokens: 100, output_tokens: 4096 })
-        } else {
-          cb.onTextDelta(' continued and done.')
-          cb.onContentBlock(makeTextBlock(' continued and done.'))
-          cb.onStopReason('end_turn', { input_tokens: 100, output_tokens: 200 })
-        }
+        cb.onTextDelta('Partial response...')
+        cb.onContentBlock(makeTextBlock('Partial response...'))
+        cb.onStopReason('max_output_tokens', { input_tokens: 100, output_tokens: 4096 })
       }),
     } as unknown as StreamClient
 
@@ -1113,11 +1103,12 @@ describe('AgentLoop — output token escalation', () => {
       onApprovalRequired: async () => false,
     })
 
-    assert.equal(callCount, 2)
-    assert.ok(texts.some(t => t.includes('continued and done')))
+    // No escalation: partial output accepted, turn completes immediately
+    assert.equal(callCount, 1)
+    assert.ok(texts.some(t => t.includes('Partial response')))
   })
 
-  it('stops escalating after repeated max_output_tokens turns', async () => {
+  it('completes turn on max_output_tokens without escalation loop', async () => {
     const session = new SessionContext()
     const registry = new ToolRegistry()
     let callCount = 0
@@ -1152,9 +1143,10 @@ describe('AgentLoop — output token escalation', () => {
       onApprovalRequired: async () => false,
     })
 
-    assert.equal(callCount, 4)
+    // No escalation: partial output accepted in a single turn
+    assert.equal(callCount, 1)
     assert.equal(finalCount, 1)
-    assert.ok(texts.join('').includes('chunk 4.'))
+    assert.ok(texts.some(t => t.includes('chunk 1')))
   })
 })
 

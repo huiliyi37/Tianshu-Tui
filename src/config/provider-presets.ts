@@ -27,20 +27,20 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         prefixCompletion: true,
       },
       thinking: 'enabled',
-      maxTokens: 64000,
+      maxTokens: 384_000,
       models: [
         {
           id: 'deepseek-v4-pro',
           alias: 'v4-pro',
           contextWindow: 1_000_000,
-          maxTokens: 163_000,
+          maxTokens: 384_000,
           reasoningEffort: 'max',
         },
         {
           id: 'deepseek-v4-flash',
           alias: 'v4-flash',
           contextWindow: 1_000_000,
-          maxTokens: 163_000,
+          maxTokens: 384_000,
           reasoningEffort: 'high',
         },
       ],

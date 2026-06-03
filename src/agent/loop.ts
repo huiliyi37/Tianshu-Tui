@@ -227,11 +227,9 @@ export class AgentLoop {
   private importGraph: ImportGraph | null = null
   private lastConflictCheckCount = 0
   private predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
-  private outputTokenEscalationCount = 0
   private sessionDomain: ActiveStarDomain | null | undefined
   /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
   private prevAnchorGraphHash: string | null = null
-  private static readonly MAX_OUTPUT_ESCALATION = 3
   private pressureMonitor: PressureMonitor
   private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   private sycophancyWasActive = false
@@ -1116,7 +1114,6 @@ export class AgentLoop {
     this.evidence.reset()
     this.repairHintTracker = new RepairHintTracker()
     this.contextInjection.reset()
-    this.outputTokenEscalationCount = 0
     this.recentTextFingerprints = []
     this.sensorium = null
     this.strategy = null
@@ -1709,11 +1706,10 @@ export class AgentLoop {
 
         if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
 
-        if (stopReason === 'max_output_tokens' && toolUses.length === 0 && this.outputTokenEscalationCount < AgentLoop.MAX_OUTPUT_ESCALATION) {
-          this.outputTokenEscalationCount++
-          this.session.addUserMessage('Continue your response from where you left off.')
-          continue
-        }
+        // max_output_tokens on text-only turns: accept partial output instead of
+        // escalating. The model rarely continues coherently — it usually restarts
+        // from scratch, causing a confusing "cut off → restart" loop for users.
+        // Previously we tried up to 3 escalations; now we just end the turn.
 
         if (toolUses.length > 0) {
           // Reset no-tool counter — model is taking action
