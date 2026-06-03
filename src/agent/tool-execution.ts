@@ -297,10 +297,9 @@ export class ToolExecutionController {
           }
         }
       }
-    }
+      }
     }
 
-    this.deps.addToolResults(toolResults)
     this.deps.addToolResults(toolResults)
 
     const level = getInterventionLevel(this.deps.getPredictionAccumulator())
