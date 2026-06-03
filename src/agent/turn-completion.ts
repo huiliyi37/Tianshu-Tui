@@ -1,5 +1,5 @@
 import type { Usage } from '../api/types.js'
-import type { AgentConfig } from './loop.js'
+import type { AgentConfig } from './loop-types.js'
 import type { SessionContext } from './context.js'
 import type { TrajectoryRecorder } from './trajectory.js'
 import type { RoutingMetricsCollector } from '../model/routing-metrics.js'
@@ -45,7 +45,7 @@ export class TurnCompletionController {
       routingMetrics: this.deps.routingMetrics,
       decisions: this.deps.getDecisions(),
       evidence: this.deps.evidence,
-    })
+   })
     this.deps.setDecisions(result.decisions)
     if (input.emitBadge && result.badge) input.callbacks.onTextDelta('\n' + result.badge)
     this.deps.refreshLedger()
@@ -57,5 +57,5 @@ export class TurnCompletionController {
       this.deps.session.getTurnCount(),
       input.isFinal,
     )
-  }
+ }
 }

@@ -2,7 +2,7 @@ import type { ContentBlock } from '../api/types.js'
 import type { TurnBudget } from './turn-budget.js'
 import { enforcePerMessageBudget, enforceTurnReadBudget, enforceContextPressureTruncation } from './per-message-budget.js'
 import { perMessageToolResultBudget } from '../compact/constants.js'
-import type { AgentConfig, AgentCallbacks } from './loop.js'
+import type { AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTracker } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
@@ -160,7 +160,7 @@ export class ToolExecutionController {
             this.deps.setPredictionAccumulator(
               recordPrediction(this.deps.getPredictionAccumulator(), correct),
             )
-          },
+         },
           getSensorium: () => this.deps.getSensorium(),
           getReliabilityDecision: () => this.deps.getReliabilityDecision(),
           turnBudget: this.deps.getTurnBudget(),
@@ -175,7 +175,7 @@ export class ToolExecutionController {
           artifactIdsEvicted,
           artifactIdsAccessed,
           lspManager: this.deps.lspManager,
-        })
+       })
 
         const results = await Promise.all(
           batch.map(({ tu }) => executeToolUse(tu, makeDeps(), input.callbacks, input.turn, checkpointCreatedThisTurn)),
@@ -187,8 +187,8 @@ export class ToolExecutionController {
           latestRisk = result.latestRisk
           if (result.checkpointCreated) checkpointCreatedThisTurn = true
           toolResults.push(result.toolResult)
-        }
-      } else {
+       }
+     } else {
         // Sequential execution for non-safe tools
         const { tu } = indexed[cursor]!
         cursor++
@@ -216,7 +216,7 @@ export class ToolExecutionController {
             this.deps.setPredictionAccumulator(
               recordPrediction(this.deps.getPredictionAccumulator(), correct),
             )
-          },
+         },
           getSensorium: () => this.deps.getSensorium(),
           getReliabilityDecision: () => this.deps.getReliabilityDecision(),
           turnBudget: this.deps.getTurnBudget(),
@@ -231,7 +231,7 @@ export class ToolExecutionController {
           artifactIdsEvicted,
           artifactIdsAccessed,
           lspManager: this.deps.lspManager,
-        }
+       }
 
         const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)
         traceStore = result.traceStore
@@ -240,8 +240,8 @@ export class ToolExecutionController {
         latestRisk = result.latestRisk
         if (result.checkpointCreated) checkpointCreatedThisTurn = true
         toolResults.push(result.toolResult)
-      }
-    }
+     }
+   }
 
     const steerText = input.callbacks.onSteerDrain?.()
     if (steerText && toolResults.length > 0) {
@@ -249,8 +249,8 @@ export class ToolExecutionController {
       if (lastResult.type === 'tool_result') {
         const existing = typeof lastResult.content === 'string' ? lastResult.content : ''
         toolResults[toolResults.length - 1] = { ...lastResult, content: existing + '\n\n' + steerText }
-      }
-    }
+     }
+   }
 
     // Enforce per-message aggregate budget before adding to conversation.
     const budgetEntries = toolResults
@@ -265,9 +265,9 @@ export class ToolExecutionController {
         const orig = toolResults[idx]!
         if (orig.type === 'tool_result' && entry.content !== (typeof orig.content === 'string' ? orig.content : '')) {
           toolResults[idx] = { ...orig, content: entry.content }
-        }
-      }
-    }
+       }
+     }
+   }
 
     // Enforce per-turn read budget: truncate read_file results when cumulative
     // chars exceed 15% of the context window.
@@ -278,8 +278,8 @@ export class ToolExecutionController {
         const orig = toolResults[idx]!
         if (orig.type === 'tool_result' && entry.content !== (typeof orig.content === 'string' ? orig.content : '')) {
           toolResults[idx] = { ...orig, content: entry.content }
-        }
-      }
+       }
+     }
     // Context-pressure preflight: when estimated context usage >70%, truncate
     // large read_file results to head-only to prevent context overflow.
     const estimatedTokens = this.deps.getEstimatedTokens?.()
@@ -294,11 +294,11 @@ export class ToolExecutionController {
           const orig = toolResults[idx]!
           if (orig.type === 'tool_result' && entry.content !== (typeof orig.content === 'string' ? orig.content : '')) {
             toolResults[idx] = { ...orig, content: entry.content }
-          }
-        }
-      }
-      }
-    }
+         }
+       }
+     }
+     }
+   }
 
     this.deps.addToolResults(toolResults)
 
@@ -327,8 +327,8 @@ export class ToolExecutionController {
                 'stale',
                 `invalidated by ${tu.name}${target ? ` on ${target}` : ''}`,
               )
-            },
-          },
+           },
+         },
         ),
         {
           name: tu.name,
@@ -340,9 +340,9 @@ export class ToolExecutionController {
           failureClass: result && 'is_error' in result && result.is_error === true
             ? classifyFailure(typeof result.content === 'string' ? result.content : '').class
             : undefined,
-        },
+       },
       )
-    }
+   }
 
     // Update session state based on tool results
     const mgr = this.deps.sessionStateManager
@@ -353,27 +353,27 @@ export class ToolExecutionController {
         if (!isError) {
           if (tu.name === 'read_file' && typeof tu.input?.file_path === 'string') {
             mgr.trackFileRead(tu.input.file_path, `read:${tu.id}`)
-          }
+         }
           if ((tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input?.file_path === 'string') {
             mgr.trackFileModified(tu.input.file_path)
-          }
-        }
+         }
+       }
         if (tu.name === 'run_tests') {
           const target = typeof tu.input?.filter === 'string' ? tu.input.filter : 'tests'
           mgr.recordVerification(target, isError ? 'failed' : 'passed')
-        }
-      }
-    }
+       }
+     }
+   }
 
     if (shouldTippingPointReset(this.deps.getPredictionAccumulator())) {
       this.deps.setPredictionAccumulator(resetAccumulator(this.deps.getPredictionAccumulator()))
       this.deps.contextInjection.clearCerebellarHint()
-    }
+   }
     if (this.deps.getAutoReasoning() && this.deps.getReasoningEffort()) {
       const newEffort = adjustReasoningEffort(this.deps.getReasoningEffort()!, level)
       this.deps.setClientReasoningEffort(newEffort)
-    }
+   }
 
     return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed }
-  }
+ }
 }

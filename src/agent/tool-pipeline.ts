@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentCallbacks } from './loop.js'
+import type { AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { TurnBudget } from './turn-budget.js'
 import type { ContentBlock } from '../api/types.js'
 import type { ToolCallParams } from '../tools/types.js'
@@ -67,7 +67,7 @@ function withToolTimeout<T>(
   // Guard against NaN/Infinity/negative timeout (e.g. parameter misplacement bugs)
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     timeoutMs = DEFAULT_TOOL_TIMEOUT_MS
-  }
+ }
   if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
 
   return new Promise<T>((resolve, reject) => {
@@ -79,7 +79,7 @@ function withToolTimeout<T>(
       (v) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); resolve(v) },
       (e) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(e) },
     )
-  })
+ })
 }
 
 export interface ToolPipelineDeps {
@@ -145,7 +145,7 @@ function truncateSuccessfulToolResult(content: string, config: AgentConfig): str
   return truncateToolResult(content, compactThresholds({
     contextWindow: config.contextWindow ?? 1_000_000,
     providerProfile: config.providerProfile,
-  }).toolResultMaxTokens)
+ }).toolResultMaxTokens)
 }
 
 /**
@@ -248,22 +248,22 @@ async function artifactIntercept(
   if (!isError && contextWindow != null) {
     const floor = getToolArtifactThreshold(toolName, contextWindow)
     threshold = Math.max(threshold, floor)
-  }
+ }
 
   // Budget-aware scaling: when context budget is ample, inline more aggressively
   if (remainingBudgetFraction != null) {
     if (remainingBudgetFraction > 0.5) {
       threshold = Math.max(threshold, threshold * 3) // plenty of room → 3x threshold
-    } else if (remainingBudgetFraction > 0.3) {
+   } else if (remainingBudgetFraction > 0.3) {
       threshold = Math.max(threshold, threshold * 1.5) // moderate room → 1.5x
-    }
+   }
     // < 0.3 → use base threshold (context is getting tight)
-  }
+ }
 
   if (content.length <= threshold) {
     debugLog(`[artifact-intercept-skip] tool=${toolName} len=${content.length} threshold=${threshold} isError=${isError}`)
     return content
-  }
+ }
   if (content.startsWith('[artifact:')) return content // already an artifact ref
 
   // Determine target label for the artifact
@@ -289,16 +289,16 @@ async function artifactIntercept(
       rawContent: content,
       summary,
       sections: [],
-    })
+   })
 
     // For errors, include a head excerpt so the model can debug without read_section
     const headExcerpt = isError ? `\n${extractErrorHead(content)}` : ''
     return `[artifact:${artifactId}] ${summary}${headExcerpt}\nUse read_section(artifactId="${artifactId}", section="L1-L200") to expand.`
-  } catch {
+ } catch {
     // Graceful degradation: if disk write fails, return original content
     // and let downstream truncation handle it
     return content
-  }
+ }
 }
 
 /** Extract the most diagnostic lines from error output (max ~600 chars). */
@@ -308,7 +308,7 @@ function extractErrorHead(content: string): string {
   const errorLines = lines.filter(l => /\b(?:error|Error|FAIL|AssertionError|TypeError|ReferenceError)\b|expect\(/.test(l))
   if (errorLines.length > 0) {
     return errorLines.slice(0, 8).map(l => l.trim().slice(0, 120)).join('\n')
-  }
+ }
   // Fallback: last 8 lines (often contain the summary)
   return lines.slice(-8).map(l => l.trim().slice(0, 120)).join('\n')
 }
@@ -328,48 +328,48 @@ function generateToolSummary(content: string, toolName: string, input: Record<st
       if (testLine) parts.push(testLine.trim())
       if (errorLines.length > 0) parts.push(`Errors: ${errorLines.map(l => l.trim().slice(0, 60)).join('; ')}`)
       return parts.join(' ')
-    }
+   }
     case 'diff': {
       const files = lines.filter(l => l.startsWith('diff --git')).map(l => {
         const m = l.match(/b\/(.+)$/)
         return m ? m[1] : ''
-      }).filter(Boolean)
+     }).filter(Boolean)
       return `[diff] ${files.length} files changed, ${lineCount} lines. Files: ${files.slice(0, 5).join(', ')}${files.length > 5 ? ` (+${files.length - 5})` : ''}`
-    }
+   }
     case 'glob': {
       const matches = lines.filter(l => l.trim())
       const pattern = typeof input.pattern === 'string' ? input.pattern : '?'
       return `[glob "${pattern}"] ${matches.length} files found. First: ${matches.slice(0, 3).join(', ')}${matches.length > 3 ? ` (+${matches.length - 3})` : ''}`
-    }
+   }
     case 'web_fetch': {
       const url = typeof input.url === 'string' ? input.url : '?'
       return `[web_fetch ${url}] ${charCount} chars, ${lineCount} lines fetched.`
-    }
+   }
     case 'repo_map': {
       return `[repo_map] ${lineCount} lines. ${lines.find(l => /\d+ files/.test(l))?.trim() ?? `${lineCount} entries`}`
-    }
+   }
     case 'inspect_project': {
       return `[inspect_project] ${lineCount} lines of project analysis.`
-    }
+   }
     case 'bash': {
       const cmd = typeof input.command === 'string' ? input.command.slice(0, 80) : '?'
       // Detect test/typecheck output
       if (/\b(tsc|typecheck|type-check)\b/.test(cmd)) {
         const errorCount = lines.filter(l => /error TS\d+/.test(l)).length
         return `[bash typecheck] ${errorCount} errors, ${lineCount} lines. cmd: ${cmd}`
-      }
+     }
       if (/\b(test|jest|vitest|mocha|pytest)\b/.test(cmd)) {
         const passLine = lines.find(l => /pass|fail|tests?\s+\d+/i.test(l))?.trim().slice(0, 80) ?? ''
         return `[bash test] ${lineCount} lines. ${passLine} cmd: ${cmd}`
-      }
+     }
       return `[bash] ${charCount} chars, ${lineCount} lines. cmd: ${cmd}`
-    }
+   }
     default: {
       // Generic: first meaningful line + stats
       const firstLine = lines.find(l => l.trim().length > 10)?.trim().slice(0, 80) ?? ''
       return `[${toolName}] ${charCount} chars, ${lineCount} lines. ${firstLine}`
-    }
-  }
+   }
+ }
 }
 
 export async function executeToolUse(
@@ -387,7 +387,7 @@ export async function executeToolUse(
     cwd: deps.cwd,
     onOutput: (chunk) => {
       callbacks.onToolResult(tu.id, tu.name, chunk)
-    },
+   },
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     artifactStore: deps.artifactStore,
@@ -395,7 +395,7 @@ export async function executeToolUse(
     providerProfile: deps.config.providerProfile,
     sessionTurnCount: deps.sessionTurnCount,
     abortSignal: deps.abortSignal,
-  }
+ }
 
   // Star signature: counter training-mode regression at token level (思路 E)
   const starSig = getStarSignature(tu.name)
@@ -409,8 +409,8 @@ export async function executeToolUse(
         const gateMsg = `Tool blocked by cerebellar gate: recent prediction error rate is elevated. Read the file before editing to ensure mental model is current.`
         callbacks.onToolResult(tu.id, tu.name, gateMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: gateMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-      }
-    }
+     }
+   }
 
     // PreToolUse hook
     const preHookResult = deps.config.hooks?.firePreToolUse({ toolName: tu.name, input: tu.input as Record<string, unknown> }) ?? {}
@@ -418,11 +418,11 @@ export async function executeToolUse(
       const blockMsg = `Tool blocked by hook: ${preHookResult.reason ?? 'no reason given'}`
       callbacks.onToolResult(tu.id, tu.name, blockMsg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: blockMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-    }
+   }
     if (preHookResult.input) {
       tu.input = preHookResult.input
       params.input = preHookResult.input
-    }
+   }
 
     // Multi-pass tool input repair
     const toolDef = deps.config.toolRegistry.get(tu.name)
@@ -447,10 +447,10 @@ export async function executeToolUse(
             endedAt: now,
             durationMs: 0,
             summary: repairSummary,
-          })
-        }
-      }
-    }
+         })
+       }
+     }
+   }
 
     // Reliability mode gate — Phase 2 degraded/minimal executor.
     const reliabilityDecision = deps.getReliabilityDecision?.() ?? null
@@ -458,7 +458,7 @@ export async function executeToolUse(
       const msg = reliabilityBlockMessage(reliabilityDecision, tu.name)
       callbacks.onToolResult(tu.id, tu.name, msg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-    }
+   }
 
     // Strategy shift + doom loop check
     const trajectorySummary: TrajectorySummary[] = deps.trajectory.getEntries().map(e => ({
@@ -466,7 +466,7 @@ export async function executeToolUse(
       target: e.target,
       status: e.status === 'retried-failed' || e.status === 'failed' ? 'failed' : 'success',
       errorClass: e.errorClass,
-    }))
+   }))
     const doomLevel = deps.getDoomLoopLevel()
     const hint = suggestStrategyShift(trajectorySummary, doomLevel)
     deps.config.promptEngine.setStrategyShift(hint)
@@ -483,7 +483,7 @@ export async function executeToolUse(
       ].join('\n')
       callbacks.onToolResult(tu.id, tu.name, msg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-    }
+   }
 
     // Plan-mode gate — block write tools during planning phase
     const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name)
@@ -491,7 +491,7 @@ export async function executeToolUse(
       const planMsg = planModeResult.reason ?? 'Plan Mode: write operations blocked'
       callbacks.onToolResult(tu.id, tu.name, planMsg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? planMsg + starSig : planMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-    }
+   }
 
     // Sensitive-area preflight — nudge, don't block. The model must read the
     // knowledge manifest before editing prompt/memory/recall/verification/ownership
@@ -501,7 +501,7 @@ export async function executeToolUse(
       : undefined
     if (writePath && deps.taskLedger && shouldRequireSensitivePreflight({ path: writePath, events: deps.taskLedger.getEvents() })) {
       callbacks.onToolResult(tu.id, tu.name, buildSensitivePreflightMessage(writePath), false)
-    }
+   }
 
     // Approval gate — with sensorium-driven adaptive confidence
     const needsApproval = deps.config.toolRegistry.needsApproval(tu.name, params)
@@ -552,31 +552,31 @@ export async function executeToolUse(
         const denyMsg = 'Tool execution denied: requires user approval'
         callbacks.onToolResult(tu.id, tu.name, denyMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: denyMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-      }
+     }
       if (finalInput !== tu.input) {
         tu.input = finalInput
         params.input = finalInput
-      }
+     }
       // Thermocline 2: learn bash command prefix into session allowlist after approval
       if (tu.name === 'bash' && typeof tu.input.command === 'string') {
         learnBashPrefix(tu.input.command, deps.config.permissions)
-      }
-    }
+     }
+   }
 
     // Checkpoint before first write
     if ((tu.name === 'write_file' || tu.name === 'edit_file') && !checkpointCreated) {
       const cp = await createCheckpoint(deps.cwd, 'auto', deps.config.sessionId)
       checkpointCreated = true
       if (cp) callbacks.onCheckpoint?.(cp.hash)
-    }
+   }
 
     if ((tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
       recordAgentTouchedFile(deps.cwd, tu.input.file_path, deps.config.sessionId)
-    }
+   }
 
     if (deps.config.fileHistory && (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string') {
       await deps.config.fileHistory.trackEdit(tu.input.file_path, tu.id)
-    }
+   }
 
     // Execute via TurnHarness
     // P3-C: trigger speculative pre-execution for next likely tool
@@ -596,7 +596,7 @@ export async function executeToolUse(
       startedAt: Date.now(),
       summary: JSON.stringify(tu.input).slice(0, 60),
       predictedSuccess: true,
-    })
+   })
     let rawToolResult: import('../tools/types.js').ToolResult | undefined
     const harnessResult = await deps.harness.executeTool({
       id: tu.id,
@@ -608,7 +608,7 @@ export async function executeToolUse(
         if (speculativeHit && (tu.name === 'read_file' || tu.name === 'grep' || tu.name === 'glob')) {
           rawToolResult = { content: speculativeHit }
           return { content: speculativeHit }
-        }
+       }
         // P5+P6: read_file must always go through real execute to honor the
         // active contextWindow's read cap. The prewarm cache is shared with
         // P3 speculative reads which may have been populated under a different
@@ -623,10 +623,10 @@ export async function executeToolUse(
         )
         rawToolResult = r
         return { content: r.content, isError: r.isError }
-      },
+     },
       classify: (content) => classifyFailure(content).class,
       isConcurrencySafe: toolDef?.isConcurrencySafe() ?? false,
-    })
+   })
 
     // PostToolUse hook
     const postHookResult = deps.config.hooks?.firePostToolUse({
@@ -634,7 +634,7 @@ export async function executeToolUse(
       input: tu.input as Record<string, unknown>,
       result: harnessResult.content,
       isError: harnessResult.isError,
-    }) ?? {}
+   }) ?? {}
     let finalContent = postHookResult.result ?? harnessResult.content
     // Normalize: strip trailing whitespace to produce stable byte sequences
     // for DeepSeek exact-prefix cache. Non-deterministic trailing whitespace
@@ -645,7 +645,7 @@ export async function executeToolUse(
     // Must happen BEFORE tsc diagnostics so the server's view is current.
     if (!harnessResult.isError && (tu.name === 'edit_file' || tu.name === 'write_file' || tu.name === 'apply_patch')) {
       deps.lspManager?.changeFile(tu.input.file_path as string)
-    }
+   }
 
     // LSP diagnostics
     if (deps.config.lspEnabled && !harnessResult.isError && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
@@ -655,8 +655,8 @@ export async function executeToolUse(
 
 [LSP Diagnostics]
 ${check.formatted}`
-      }
-    }
+     }
+   }
 
     if (!harnessResult.isError) {
       // Artifact intercept: persist long output to disk, replace with compact ref.
@@ -677,8 +677,8 @@ ${check.formatted}`
         const preview = finalContent.slice(0, 500)
         const refPath = rawToolResult?.rawPath ?? 'unknown'
         finalContent = `<stored ref="${refPath}" chars=${contentChars} tool="${tu.name}">\n${preview}\n...(turn budget exceeded — use read_file with offset/limit for full content)</stored>`
-      }
-    } else {
+     }
+   } else {
       // Error results can also be very long (e.g. failed test output).
       // Artifact-intercept them too to keep message history append-only.
       const errorThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', true)
@@ -694,8 +694,8 @@ ${check.formatted}`
       if (deps.p3) {
         const hints = deps.p3.getMistakeHints(finalContent.slice(0, 300), `${tu.name} ${toolTarget}`)
         if (hints) finalContent = finalContent + '\n' + hints
-      }
-    }
+     }
+   }
 
     const readLoopSignal = buildReadLoopStrategySignal(tu.name, toolTarget, finalContent, priorReadLoopPlaceholders)
     if (readLoopSignal) finalContent = `${finalContent}${readLoopSignal}`
@@ -705,7 +705,7 @@ ${check.formatted}`
       status: harnessResult.isError ? 'failed' : 'passed',
       endedAt: Date.now(),
       summary: harnessResult.content.slice(0, 100),
-    })
+   })
     // Record prediction outcome for the cerebellar prediction loop.
     // In verify phase (kaiyang-testing), run_tests returning RED is expected
     // TDD behavior — an information gain, not a cognitive prediction failure.
@@ -716,7 +716,7 @@ ${check.formatted}`
     const isTddRed = isTestRun && isVerifyPhase && harnessResult.isError
     if (!isTddRed) {
       deps.recordPrediction?.(!harnessResult.isError)
-    }
+   }
     const fp = fingerprintToolCall(tu.name, tu.input, harnessResult.isError ? 'error' : 'success')
     traceStore = recordToolFingerprint(traceStore, fp)
 
@@ -734,7 +734,7 @@ ${check.formatted}`
             inputDigest,
             [tu.name],
           )
-        } catch { /* non-critical: notebook learning is best-effort */ }
+       } catch { /* non-critical: notebook learning is best-effort */ }
 
         // Immune adaptive learning: record successful repair fingerprint
         if (deps.immuneHook) {
@@ -745,10 +745,10 @@ ${check.formatted}`
               { type: 'quarantine', targetFile: undefined },
               turn,
             )
-          } catch { /* non-critical: immune learning is best-effort */ }
-        }
-      }
-    }
+         } catch { /* non-critical: immune learning is best-effort */ }
+       }
+     }
+   }
 
     callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError, rawToolResult?.rawPath, rawToolResult?.uiContent)
 
@@ -761,42 +761,42 @@ ${check.formatted}`
       // matches git-reported paths in collectCurrentDirtyFiles.
       if (filePath && (filePath.startsWith(deps.cwd + '/') || filePath.startsWith(deps.cwd + '\\'))) {
         filePath = filePath.slice(deps.cwd.length + 1)
-      }
+     }
       if (tu.name === 'read_file' && filePath) {
         deps.taskLedger.record({ type: 'file_read', path: filePath })
-      } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && filePath) {
+     } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && filePath) {
         deps.taskLedger.record({ type: 'file_write', path: filePath })
         deps.ownershipLedger?.registerOwned(filePath)
         // P2 cross-session signal: auto-acquire exclusive claim on written file
         if (deps.sessionRegistry && deps.sessionId) {
           deps.sessionRegistry.acquireClaim(deps.sessionId, filePath, 'exclusive')
-        }
+       }
         // Commit nudge: warn when uncommitted files accumulate
         const nudge = buildCommitNudge({ ownedFiles: deps.taskLedger.getOwnedFiles() })
         if (nudge) finalContent += nudge
-      } else if (tu.name === 'plan_close' && filePath) {
+     } else if (tu.name === 'plan_close' && filePath) {
         if (tu.input.apply === true && !harnessResult.isError) {
           deps.taskLedger.record({ type: 'file_write', path: filePath })
           deps.ownershipLedger?.registerOwned(filePath)
           if (deps.sessionRegistry && deps.sessionId) {
             deps.sessionRegistry.acquireClaim(deps.sessionId, filePath, 'exclusive')
-          }
-        } else {
+         }
+       } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
-        }
-      } else if (tu.name === 'bash') {
+       }
+     } else if (tu.name === 'bash') {
         const cmd = (tu.input.command as string | undefined) ?? ''
         if (!harnessResult.isError && (cmd.startsWith('git ') || /\b(rm|mv|cp|touch|mkdir)\b/.test(cmd))) {
           deps.config.promptEngine.markGitDirty()
-        }
+       }
         if (cmd.startsWith('git ')) {
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
-        } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
+       } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
           deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: harnessResult.isError ? 'failed' : 'passed', meta: { scope: 'full' } })
-        } else {
+       } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
-        }
-      } else if (tu.name === 'run_tests') {
+       }
+     } else if (tu.name === 'run_tests') {
         const filter = typeof tu.input.filter === 'string' ? tu.input.filter : undefined
         const command = filter ? `run_tests ${filter}` : 'run_tests'
         const verification = rawToolResult?.verification
@@ -811,18 +811,18 @@ ${check.formatted}`
           meta.recommendedCommand = verification.command
           if (verification.failureKind) meta.failureKind = verification.failureKind
           if (verification.targetFiles) meta.targetFiles = verification.targetFiles
-        }
+       }
         deps.taskLedger.record({ type: 'verification', command, status: harnessResult.isError ? 'failed' : 'passed', meta })
-      } else {
+     } else {
         deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
-      }
-    }
+     }
+   }
 
     // GhostRegistry: track read_section as artifact access
     if (tu.name === 'read_section' && !harnessResult.isError) {
       const accessedId = tu.input.artifactId as string | undefined
       if (accessedId) deps.artifactIdsAccessed?.push(accessedId)
-    }
+   }
 
     // Claim extraction + conflict detection
     if (deps.config.contextClaimStore && deps.sessionId) {
@@ -843,8 +843,8 @@ ${check.formatted}`
         if (proposal.scope === 'project') {
           appendProjectMemory(deps.cwd, claim)
           projectMemoryDirty = true
-        }
-      }
+       }
+     }
       // Compact once after the batch, not per-claim.
       if (projectMemoryDirty) compactProjectMemory(deps.cwd)
       if (proposals.some(p => p.kind === 'file_observation')) {
@@ -857,16 +857,16 @@ ${check.formatted}`
               conflict.olderClaimId, 'conflicted',
               `superseded by ${conflict.newerClaimId} on ${conflict.sharedPath}`,
             )
-          }
-        }
-      }
-    }
+         }
+       }
+     }
+   }
 
     // Repair hint + antibody
     if (!harnessResult.isError) {
       deps.repairHintTracker.recordSuccess(tu.name)
       deps.config.promptEngine.setStrategyShift(null)
-    } else {
+   } else {
       const failureClass = classifyFailure(harnessResult.content)
       deps.repairHintTracker.recordFailure(tu.name, failureClass.class)
       if (deps.config.contextClaimStore && deps.sessionId && failureClass.class !== 'unknown') {
@@ -876,10 +876,10 @@ ${check.formatted}`
           sessionId: deps.sessionId,
           turn: deps.sessionTurnCount,
           eventId: `turn-${deps.sessionTurnCount}:${tu.name}:${tu.id}`,
-        })
+       })
         deps.config.contextClaimStore.propose(proposal)
-      }
-    }
+     }
+   }
 
     // Activity status: notify TUI when tool is blocked by critical failure
     if (harnessResult.isError && callbacks.onPhaseChange) {
@@ -889,18 +889,18 @@ ${check.formatted}`
           tool: tu.name,
           reason: failureClass.class,
           suggestion: failureClass.suggestion,
-        })
-      }
-    }
+       })
+     }
+   }
 
     // Prewarm invalidation after writes
     if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError && typeof tu.input.file_path === 'string') {
       try {
         deps.prewarm.invalidate(validatePath(deps.cwd, tu.input.file_path as string))
-      } catch {
+     } catch {
         deps.prewarm.invalidate(tu.input.file_path as string)
-      }
-    }
+     }
+   }
 
     // Evidence tracking + import graph
     if (tu.name === 'read_file' && !harnessResult.isError) {
@@ -916,10 +916,10 @@ ${check.formatted}`
             turn,
             source: 'tool-pipeline',
             context: `read_file returned pruned content for ${tu.input.file_path}`,
-          })
-        } catch { /* non-critical: signal injection is best-effort */ }
-      }
-    } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
+         })
+       } catch { /* non-critical: signal injection is best-effort */ }
+     }
+   } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
       deps.evidence.trackFileModified(tu.input.file_path as string)
       deps.config.promptEngine.markGitDirty()
       deps.config.contextClaimStore?.markClaimsStaleForFile(
@@ -928,16 +928,16 @@ ${check.formatted}`
       )
       if (!importGraph) {
         importGraph = buildImportGraph(deps.cwd)
-      }
+     }
       if (importGraph) {
         importGraph = invalidateFile(importGraph, deps.cwd, tu.input.file_path as string)
         const hint = generateImpactHint(importGraph, tu.input.file_path as string, deps.cwd)
         if (hint) {
           deps.evidence.trackImpact(hint.impactedFiles, hint.relatedTests)
           deps.config.promptEngine.setImpactHint(hint.summary)
-        }
-      }
-    } else if (tu.name === 'run_tests' && rawToolResult) {
+       }
+     }
+   } else if (tu.name === 'run_tests' && rawToolResult) {
       // Reconnect EvidenceTracker verification pipeline.
       // run_tests returns VerificationMetadata, but this was never fed into
       // EvidenceTracker — leaving deliveryStatus stuck at 'unverified',
@@ -945,7 +945,7 @@ ${check.formatted}`
       // buildDeliveryGate.canClaimComplete always false.
       if (rawToolResult.verification) {
         deps.evidence.trackVerification(rawToolResult.verification)
-      }
+     }
 
       if (rawToolResult.verification && rawToolResult.verification.status !== 'passed') {
         const failures = classifyTestRun(harnessResult.content)
@@ -955,7 +955,7 @@ ${check.formatted}`
           let diagnosedContent = `${finalContent}\n\nDiagnosis: ${failures[0]!.suggestion}`
           if (!harnessResult.isError) {
             diagnosedContent = truncateSuccessfulToolResult(diagnosedContent, deps.config)
-          }
+         }
           const diagThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', harnessResult.isError)
           const diagBudgetFrac = deps.turnBudget.maxTokensPerTurn > 0
             ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
@@ -964,21 +964,21 @@ ${check.formatted}`
           const diagEvictedId = extractArtifactId(diagnosedContent)
           if (diagEvictedId) deps.artifactIdsEvicted?.push(diagEvictedId)
           return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? diagnosedContent + starSig : diagnosedContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-        }
-      }
-    }
+       }
+     }
+   }
 
     return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-  } catch (err) {
+ } catch (err) {
     // AbortError: user cancelled — not a tool failure.
     // Skip failure recording so immune/doom-loop signals aren't polluted.
     if ((err as Error).name === 'AbortError') {
       callbacks.onToolResult(tu.id, tu.name, '', false)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: '', is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-    }
+   }
     const msg = err instanceof Error ? err.message : String(err)
     deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
     callbacks.onToolResult(tu.id, tu.name, msg, true)
     return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-  }
+ }
 }

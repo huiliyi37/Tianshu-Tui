@@ -1,4 +1,4 @@
-import type { AgentConfig } from './loop.js'
+import type { AgentConfig } from './loop-types.js'
 import type { SessionContext } from './context.js'
 import type { TrajectoryRecorder } from './trajectory.js'
 import type { RoutingMetricsCollector } from '../model/routing-metrics.js'
@@ -31,7 +31,7 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
   if (session.getTurnCount() > 3) {
     const taskState = extractTaskState(trajectory.getEntries(), streamedText)
     config.promptEngine.setTaskProgress(taskState)
-  }
+ }
 
   const mirror = session.getTurnCount() > 3
     ? detectMirror(trajectory.getEntries())
@@ -43,7 +43,7 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
     const recentCalls = trajectory.getEntries().slice(-10).map(e => ({
       name: e.tool,
       isError: e.status === 'failed' || e.status === 'retried-failed',
-    }))
+   }))
     const inference = inferTaskType(recentCalls)
     if (inference) {
       const recommended = recommendModelForTask(inference.task, config.modelCards)
@@ -57,16 +57,16 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
           switched: true,
           reason: inference.reason,
           timestamp: Date.now(),
-        })
+       })
         try { config.onModelSwitch(recommended.model) } catch { /* non-fatal */ }
-      }
-    }
-  }
+     }
+   }
+ }
 
   const newDecisions = extractDecisions(streamedText)
   for (const d of newDecisions) {
     if (!decisions.includes(d)) decisions.push(d)
-  }
+ }
   if (decisions.length > 3) decisions = decisions.slice(-3)
   config.promptEngine.setDecisions(decisions)
 

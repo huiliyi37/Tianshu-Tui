@@ -10,7 +10,7 @@ import {
 } from './work-order.js'
 import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
 import { materializeScope } from './worktree-scope.js'
-import type { AgentCallbacks } from './loop.js'
+import type { AgentCallbacks } from './loop-types.js'
 import type { Usage } from '../api/types.js'
 
 function worktreeScopeFiles(order: WorkOrder): string[] {
@@ -64,8 +64,8 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
           `Worker scope file(s) are missing or outside the project: ${scopeResult.missing.join(', ')}`,
         ),
         usage: {},
-      }
-    }
+     }
+   }
     let text = ''
     let apiError: string | undefined
     let turnUsage: Partial<Usage> = {}
@@ -79,14 +79,14 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
       onError: (err) => { apiError = err.message },
       onAbort: () => { apiError = 'aborted' },
       onApprovalRequired: async () => false,
-    }, wt.path)
+   }, wt.path)
 
     if (apiError) {
       return {
         result: buildBlockedWorkerResult(config.order, apiError),
         usage: turnUsage,
-      }
-    }
+     }
+   }
 
     const baseRef = config.baseRef ?? getCurrentGitRef(config.cwd)
     const diff = baseRef ? collectDiff(config.cwd, wt.path, baseRef) : ''
@@ -94,7 +94,7 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
     let result: WorkerResult
     try {
       result = parseWorkerResult(text, config.order.id)
-    } catch (parseError) {
+   } catch (parseError) {
       const message = parseError instanceof Error ? parseError.message : String(parseError)
       // Retry: send repair prompt and re-parse (mirrors worker-session.ts retry loop)
       result = buildBlockedWorkerResult(config.order, message) // default — overwritten on success
@@ -110,25 +110,25 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
             onError: (err) => { apiError = err.message },
             onAbort: () => { apiError = 'aborted' },
             onApprovalRequired: async () => false,
-          }, wt.path)
+         }, wt.path)
 
           if (apiError) break // API error during repair — fall through to blocked
 
           result = parseWorkerResult(text, config.order.id)
           break
-        } catch {
+       } catch {
           // Repair attempt failed — try again
           continue
-        }
-      }
-    }
+       }
+     }
+   }
 
     if (diff) {
       result.artifacts.push(formatDiffArtifact(diff, config.order.profile))
-    }
+   }
 
     return { result, usage: turnUsage }
-  } finally {
+ } finally {
     config.wtCoordinator.remove(config.order.id)
-  }
+ }
 }
