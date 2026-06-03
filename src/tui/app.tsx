@@ -258,13 +258,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   const pushStatic = useCallback((entry: LogEntry) => {
     historyBufferRef.current.push(entry)
-    totalItemsPushedRef.current++
     staticBatchRef.current.push(entry)
     if (!staticBatchScheduled.current) {
       staticBatchScheduled.current = true
       queueMicrotask(() => {
         staticBatchScheduled.current = false
         if (staticBatchRef.current.length > 0) {
+          // Increment totalItemsPushedRef atomically with setHistoryVersion
+          // to prevent staticItemsForInk computing a stale `start` offset.
+          totalItemsPushedRef.current += staticBatchRef.current.length
           staticBatchRef.current = []
           setHistoryVersion(v => v + 1)
         }
@@ -278,8 +280,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const flushStaticBatch = useCallback(() => {
     if (staticBatchScheduled.current) {
       staticBatchScheduled.current = false
-      staticBatchRef.current = []
-      setHistoryVersion(v => v + 1)
+      const count = staticBatchRef.current.length
+      if (count > 0) {
+        totalItemsPushedRef.current += count
+        staticBatchRef.current = []
+        setHistoryVersion(v => v + 1)
+      }
     }
   }, [])
 
@@ -976,8 +982,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           : (thinkBuf.current || undefined)
         // Stop streaming FIRST so StreamOutput unmounts before Static entry appears,
         // preventing duplicate content visible simultaneously in terminal.
-        setIsStreaming(false); isStreamingRef.current = false
-        if (finalText || thinkBuf.current) {
+        // Clear live text BEFORE flipping isStreaming so that StreamOutput renders
+        // nothing in the same React batch — prevents flash-frame duplication.
+        streamBuf.current = ''
+        streamLiveBuf.current = ''
+        if (finalText || thinkingForArchive) {
           if (finalText) {
             const parsed = parseInterviewMarker(finalText)
             if (parsed) {
