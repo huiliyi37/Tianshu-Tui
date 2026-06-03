@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, delimiter } from 'node:path'
 import type { Tool, ToolCallParams, VerificationMetadata } from './types.js'
@@ -35,6 +35,28 @@ function isTestFileFilter(filter: string): boolean {
   return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(filter)
 }
 
+
+/**
+ * Resolve a non-file-path filter string to an actual test file path.
+ * Uses find to locate matching test files, preferring the most specific match.
+ * Returns null if no match is found.
+ */
+function resolveFilterToTestFile(cwd: string, filter: string): string | null {
+  try {
+    const safeFilter = filter.replace(/'/g, "'\\''")
+    const result = execSync(
+      `find src -name '*.test.ts' -path '*${safeFilter}*' | head -5`,
+      { cwd, encoding: 'utf-8', timeout: 3000 },
+    ).trim()
+    if (!result) return null
+    const files = result.split('\n').filter(Boolean)
+    const exact = files.find(f => f.includes('/' + filter + '.test.ts') || f.includes('/' + filter))
+    return exact ?? files[0] ?? null
+  } catch {
+    return null
+  }
+}
+
 function buildTestCommand(cwd: string, filter?: string): TestCommand {
   const { base, runner } = detectTestCommand(cwd)
   if (!filter) {
@@ -51,6 +73,17 @@ function buildTestCommand(cwd: string, filter?: string): TestCommand {
       return { command: 'tsx', args: ['--test', safeFilter], display: `tsx --test ${safeFilter}`, runner, scope: 'targeted' }
     }
     return { command: 'node', args: ['--test', safeFilter], display: `node --test ${safeFilter}`, runner, scope: 'targeted' }
+  }
+
+  // Resolve non-file-path filter to actual test file via find
+  if (runner === 'node-test' && safeFilter.length > 0) {
+    const resolved = resolveFilterToTestFile(cwd, safeFilter)
+    if (resolved && base.includes('tsx')) {
+      return { command: 'tsx', args: ['--test', resolved], display: `tsx --test ${resolved}`, runner, scope: 'targeted' }
+    }
+    if (resolved) {
+      return { command: 'node', args: ['--test', resolved], display: `node --test ${resolved}`, runner, scope: 'targeted' }
+    }
   }
 
   if (runner === 'vitest') {
