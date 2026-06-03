@@ -102,32 +102,48 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
 
   const domainColor = getDomainColor(domain, theme)
 
+  // ── Three-zone layout: Left (identity) · Center (phase) · Right (metrics) ──
+  const modelLabel = narrow ? model.slice(0, 12) : model.slice(0, 20)
+
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box paddingX={narrow ? 0 : 1}>
         <Text color={domainColor}>{horizontalRule(columns, getDomainSeparatorStyle(domain))}</Text>
       </Box>
-      <Box paddingX={narrow ? 0 : 1} flexDirection="row">
-        {domain && <Text bold color={domainColor}>☆ {domain}</Text>}
-        {domain && branchLabel && !narrow && <Text color={theme.dim}> · </Text>}
-        {branchLabel && !narrow && <Text color={theme.secondary}>⎇ {branchLabel}</Text>}
-        {(domain || (branchLabel && !narrow)) && <Text color={theme.dim}> │ </Text>}
-        {phaseGlyph && <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
-        {!phaseGlyph && <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>}
-        {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
-        <Text color={theme.dim}> │ </Text>
-        <Text color={cacheColor}>{cachePct}%</Text>
-        <Text color={theme.dim}> · </Text>
-        <Text color={theme.muted}>${cost.toFixed(2)}</Text>
-        {!narrow && <Text color={theme.muted}> · {model.slice(0, 20)}</Text>}
-        {!narrow && <Text color={theme.dim}> · </Text>}
-        {!narrow && <Text color={tokenColor}>{estimatedK}k/{maxK}k ({pct}%)</Text>}
-        {narrow && <Text color={tokenColor}> · {pct}%</Text>}
-        {ratio >= 0.78 && <Text color={theme.error}> · compact</Text>}
-        {historyCount !== undefined && !narrow && (
-          <Text color={theme.muted}> · {historyCount} msgs</Text>
-        )}
-        {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
+      {/* Left zone: identity — star domain (bold + domain color) + branch */}
+      <Box paddingX={narrow ? 0 : 1} flexDirection="row" justifyContent="space-between" width="100%">
+        <Box flexDirection="row" flexShrink={0}>
+          {domain
+            ? <Text bold color={domainColor}>☆ {domain}</Text>
+            : <Text color={theme.dim}>☆ —</Text>
+          }
+          {branchLabel && !narrow && <Text color={theme.dim}> · </Text>}
+          {branchLabel && !narrow && <Text color={theme.secondary}>⎇ {branchLabel}</Text>}
+        </Box>
+
+        {/* Center zone: phase + streaming indicator */}
+        <Box flexDirection="row" justifyContent="center">
+          {phaseGlyph && <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
+          {!phaseGlyph && <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>}
+          {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
+        </Box>
+
+        {/* Right zone: metrics — model (bold), cache, cost, tokens */}
+        <Box flexDirection="row" flexShrink={0}>
+          <Text bold color={theme.primary}>「{modelLabel}」</Text>
+          <Text color={theme.dim}> │ </Text>
+          <Text color={cacheColor}>{cachePct}%</Text>
+          <Text color={theme.dim}> · </Text>
+          <Text color={theme.muted}>${cost.toFixed(2)}</Text>
+          {!narrow && <Text color={theme.dim}> · </Text>}
+          {!narrow && <Text color={tokenColor}>{estimatedK}k/{maxK}k ({pct}%)</Text>}
+          {narrow && <Text color={tokenColor}> · {pct}%</Text>}
+          {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
+          {historyCount !== undefined && !narrow && (
+            <Text color={theme.muted}> · {historyCount} msgs</Text>
+          )}
+          {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
+        </Box>
       </Box>
     </Box>
   )
