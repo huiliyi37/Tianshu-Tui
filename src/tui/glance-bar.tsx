@@ -102,48 +102,50 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
 
   const domainColor = getDomainColor(domain, theme)
 
-  // ── Three-zone layout: Left (identity) · Center (phase) · Right (metrics) ──
+  // ── Single-line cohesive status bar — │ separators, no spatial gaps ──
   const modelLabel = narrow ? model.slice(0, 12) : model.slice(0, 20)
+
+  // Full-width rule: pass columns as maxWidth to remove the 72-char cap
+  const rule = horizontalRule(columns, getDomainSeparatorStyle(domain), columns)
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Box paddingX={narrow ? 0 : 1}>
-        <Text color={domainColor}>{horizontalRule(columns, getDomainSeparatorStyle(domain))}</Text>
-      </Box>
-      {/* Left zone: identity — star domain (bold + domain color) + branch */}
-      <Box paddingX={narrow ? 0 : 1} flexDirection="row" justifyContent="space-between" width="100%">
-        <Box flexDirection="row" flexShrink={0}>
-          {domain
-            ? <Text bold color={domainColor}>☆ {domain}</Text>
-            : <Text color={theme.dim}>☆ —</Text>
-          }
-          {branchLabel && !narrow && <Text color={theme.dim}> · </Text>}
-          {branchLabel && !narrow && <Text color={theme.secondary}>⎇ {branchLabel}</Text>}
-        </Box>
+      {/* Full-width separator line */}
+      <Text color={domainColor}>{rule}</Text>
+      {/* Single cohesive status line: identity │ phase │ metrics */}
+      <Box flexDirection="row" width="100%">
+        {/* Left: identity — star domain (bold + domain color) + branch */}
+        {domain
+          ? <Text bold color={domainColor}>☆ {domain}</Text>
+          : <Text color={theme.dim}>☆ —</Text>
+        }
+        {branchLabel && !narrow && <Text color={theme.secondary}> ⎇ {branchLabel}</Text>}
 
-        {/* Center zone: phase + streaming indicator */}
-        <Box flexDirection="row" justifyContent="center">
-          {phaseGlyph && <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>}
-          {!phaseGlyph && <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>}
-          {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
-        </Box>
+        <Text color={theme.dim}> │ </Text>
 
-        {/* Right zone: metrics — model (bold), cache, cost, tokens */}
-        <Box flexDirection="row" flexShrink={0}>
-          <Text bold color={theme.primary}>「{modelLabel}」</Text>
-          <Text color={theme.dim}> │ </Text>
-          <Text color={cacheColor}>{cachePct}%</Text>
-          <Text color={theme.dim}> · </Text>
-          <Text color={theme.muted}>${cost.toFixed(2)}</Text>
-          {!narrow && <Text color={theme.dim}> · </Text>}
-          {!narrow && <Text color={tokenColor}>{estimatedK}k/{maxK}k ({pct}%)</Text>}
-          {narrow && <Text color={tokenColor}> · {pct}%</Text>}
-          {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
-          {historyCount !== undefined && !narrow && (
-            <Text color={theme.muted}> · {historyCount} msgs</Text>
-          )}
-          {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
-        </Box>
+        {/* Center: phase + streaming indicator */}
+        {phaseGlyph
+          ? <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>
+          : <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>
+        }
+        {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
+
+        <Text color={theme.dim}> │ </Text>
+
+        {/* Right: metrics — model (bold), cache, cost, tokens */}
+        <Text bold color={theme.primary}>「{modelLabel}」</Text>
+        <Text color={theme.dim}> </Text>
+        <Text color={cacheColor}>{cachePct}%</Text>
+        <Text color={theme.dim}> · </Text>
+        <Text color={theme.muted}>${cost.toFixed(2)}</Text>
+        {!narrow && <Text color={theme.dim}> · </Text>}
+        {!narrow && <Text color={tokenColor}>{estimatedK}k/{maxK}k ({pct}%)</Text>}
+        {narrow && <Text color={tokenColor}> · {pct}%</Text>}
+        {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
+        {historyCount !== undefined && !narrow && (
+          <Text color={theme.muted}> · {historyCount} msgs</Text>
+        )}
+        {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
       </Box>
     </Box>
   )
