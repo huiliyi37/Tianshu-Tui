@@ -1493,12 +1493,11 @@ export class AgentLoop {
           if (this.recentTextFingerprints.length > 8) this.recentTextFingerprints.shift()
         }
 
-
-          // TTSR: stream rule triggered — inject reminder and retry
-          if (streamResult.triggeredRule) {
-            this.session.addUserMessage(streamResult.triggeredRule.inject)
-            continue
-          }
+        // TTSR: stream rule triggered — inject reminder and retry
+        if (streamResult.triggeredRule) {
+          this.session.addUserMessage(streamResult.triggeredRule.inject)
+          continue
+        }
 
         // L0 telemetry: stream duration
         const streamEndMs = Date.now()
