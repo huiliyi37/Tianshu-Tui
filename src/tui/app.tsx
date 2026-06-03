@@ -1318,22 +1318,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             <Text>◌ {heartbeatStatus}</Text>
           </Box>
         )}
-        {/* Spacer: pushes GlanceBar + InputBar to terminal bottom when content is sparse (e.g. after WelcomeScreen disappears). Shrinks to 0 when streaming content fills the area. */}
+        {/* Spacer: pushes ground zone (GlanceBar + InputBar) to terminal bottom */}
         <Box flexGrow={1} minHeight={0} />
-        {/* Status base: GlanceBar + contextual footer stay adjacent to InputBar so long stream output above never separates them */}
-        <GlanceBar
-          pulses={glancePulses}
-          phase={phaseFromSummary(summaryState)}
-          cacheHitRate={cacheHitRate}
-          cost={cost}
-          model={model}
-          isStreaming={isStreaming}
-          historyCount={historyItems.length}
-          domain={starDomain}
-          branch={gitBranch}
-          estimatedTokens={session.getEstimatedTokens()}
-          maxTokens={maxTokens}
-        />
+        {/* Zone 2: Dialog — conditional items that need user attention */}
         {fluencyStale && termRows >= 24 && (
           <Box paddingX={1}>
             <Text color={fluencyStale.level === 'action' ? theme.error : fluencyStale.level === 'warn' ? theme.warning : theme.dim}>
@@ -1401,6 +1388,20 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             onCancel={() => surfacePop()}
           />
         )}
+        {/* Zone 3: Ground — GlanceBar + InputBar always adjacent */}
+        <GlanceBar
+          pulses={glancePulses}
+          phase={phaseFromSummary(summaryState)}
+          cacheHitRate={cacheHitRate}
+          cost={cost}
+          model={model}
+          isStreaming={isStreaming}
+          historyCount={historyItems.length}
+          domain={starDomain}
+          branch={gitBranch}
+          estimatedTokens={session.getEstimatedTokens()}
+          maxTokens={maxTokens}
+        />
         <InputBar onSubmit={(text: string) => {
           // Evaluate routing INSIDE the event handler, not at render time.
           // isStreamingRef is a ref — reading it at render time in JSX prop
