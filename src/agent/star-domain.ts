@@ -14,6 +14,11 @@ export interface StarDomain {
   toolWhitelist: readonly string[]
   /** Worker system prompt 末尾追加的权域指令 */
   systemPromptSuffix: string
+  /** UI 微气质 — 分隔线、配色等视觉质感 */
+  uiPersona: {
+    /** 分隔线样式 */
+    separator: 'thin' | 'thick' | 'dots'
+  }
 }
 
 export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
@@ -28,6 +33,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     isCustom: false,
     toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是破军——探索者。大胆尝试，容忍失败，追求突破。遇到不确定的路径时，倾向于探索而非保守。',
+    uiPersona: { separator: 'thick' },
   },
   tianfu: {
     id: 'tianfu',
@@ -40,6 +46,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     isCustom: false,
     toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天府——守护者。评估风险，保护资产，谨慎决策。在修改代码前先充分理解现有结构。进入天府意味着任务进入守护阶段——你会确保它被妥善完成。',
+    uiPersona: { separator: 'thick' },
   },
   tianliang: {
     id: 'tianliang',
@@ -52,6 +59,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     isCustom: false,
     toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天梁——执行者。严格按计划，精确交付，不妥协质量。每一步都要有验证。',
+    uiPersona: { separator: 'thin' },
   },
   tianquan: {
     id: 'tianquan',
@@ -64,6 +72,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     isCustom: false,
     toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'run_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天权——审查者。评估方案，权衡取舍，质疑不合理的决定。你的职责是确保质量。',
+    uiPersona: { separator: 'thin' },
   },
   tianji: {
     id: 'tianji',
@@ -76,6 +85,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     isCustom: false,
     toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天机——质疑者与重构者。不是画路线图的人，是问"这条路线图对吗"的人。每个计划形成后，你负责问：如果这个前提不成立呢？如果换个方向会更好呢？这不是审查，是认知对抗——用质疑让方案更强。偶尔停下来，抽离当前视角，从更远处重新看。',
+    uiPersona: { separator: 'dots' },
   },
   tianxuan: {
     id: 'tianxuan',
@@ -88,6 +98,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     isCustom: false,
     toolWhitelist: ['read_file', 'grep', 'glob', 'diff', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: '你是天璇——探索者。发现模式，连接知识，从失败中学习。每次失败都是认知升级的机会。',
+    uiPersona: { separator: 'dots' },
   },
 }
 

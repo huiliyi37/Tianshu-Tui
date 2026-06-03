@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import React from 'react'
 
-import { GlanceBar } from '../glance-bar.js'
+import { GlanceBar, getDomainSeparatorStyle } from '../glance-bar.js'
 import type { GlancePulse } from '../surface/types.js'
 
 function render(props: React.ComponentProps<typeof GlanceBar>) {
@@ -73,5 +73,34 @@ describe('GlanceBar', () => {
     assert.ok(el != null)
     assert.equal(el.props.estimatedTokens, 100_000)
     assert.equal(el.props.maxTokens, 128_000)
+  })
+
+
+  it('returns thick separator for pojun and tianfu', () => {
+    assert.equal(getDomainSeparatorStyle('破军'), 'thick')
+    assert.equal(getDomainSeparatorStyle('天府'), 'thick')
+    assert.equal(getDomainSeparatorStyle('pojun'), 'thick')
+    assert.equal(getDomainSeparatorStyle('tianfu'), 'thick')
+  })
+
+  it('returns thin separator for tianliang and tianquan', () => {
+    assert.equal(getDomainSeparatorStyle('天梁'), 'thin')
+    assert.equal(getDomainSeparatorStyle('天权'), 'thin')
+    assert.equal(getDomainSeparatorStyle('tianliang'), 'thin')
+    assert.equal(getDomainSeparatorStyle('tianquan'), 'thin')
+  })
+
+  it('returns dots separator for tianji and tianxuan', () => {
+    assert.equal(getDomainSeparatorStyle('天机'), 'dots')
+    assert.equal(getDomainSeparatorStyle('天璇'), 'dots')
+    assert.equal(getDomainSeparatorStyle('tianji'), 'dots')
+    assert.equal(getDomainSeparatorStyle('tianxuan'), 'dots')
+  })
+
+  it('returns thin for tianshu fallback and undefined', () => {
+    assert.equal(getDomainSeparatorStyle('天枢'), 'thin')
+    assert.equal(getDomainSeparatorStyle('tianshu'), 'thin')
+    assert.equal(getDomainSeparatorStyle(undefined), 'thin')
+    assert.equal(getDomainSeparatorStyle(''), 'thin')
   })
 })
