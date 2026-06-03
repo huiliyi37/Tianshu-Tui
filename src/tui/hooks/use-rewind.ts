@@ -8,13 +8,14 @@ import type { LogEntry } from '../log-state.js'
 export interface UseRewindDeps {
   session: SessionContext
   historyBufferRef: React.MutableRefObject<RingBuffer<LogEntry>>
+  totalItemsPushedRef: React.MutableRefObject<number>
   setHistoryVersion: React.Dispatch<React.SetStateAction<number>>
   inputBarRef: React.MutableRefObject<{ setValue: (v: string) => void }>
   pushStatic: (entry: LogEntry) => void
 }
 
 export function useRewind(deps: UseRewindDeps) {
-  const { session, historyBufferRef, setHistoryVersion, inputBarRef, pushStatic } = deps
+  const { session, historyBufferRef, totalItemsPushedRef, setHistoryVersion, inputBarRef, pushStatic } = deps
 
   const getRewindEntries = useCallback((): RewindEntry[] => {
     const msgs = session.getMessages()
@@ -44,6 +45,10 @@ export function useRewind(deps: UseRewindDeps) {
     for (let i = 0; i < cutIdx; i++) {
       historyBufferRef.current.push(items[i]!)
     }
+    // Reset totalItemsPushedRef to match new buffer size.
+    // Without this, Ink's <Static> computes start = max(0, totalPushed - bufferLen)
+    // which slices past all items → renders NOTHING (the "message swallowing" bug).
+    totalItemsPushedRef.current = cutIdx
     setHistoryVersion(v => v + 1)
 
     inputBarRef.current.setValue(entry.content)

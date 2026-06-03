@@ -518,7 +518,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   // --- Rewind ---
   const { getRewindEntries, handleRewind } = useRewind({
-    session, historyBufferRef, setHistoryVersion, inputBarRef, pushStatic,
+    session, historyBufferRef, totalItemsPushedRef, setHistoryVersion, inputBarRef, pushStatic,
   })
 
   const handleSubmit = useCallback((_userInput: string) => {
