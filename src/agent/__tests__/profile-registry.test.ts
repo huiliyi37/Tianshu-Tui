@@ -19,8 +19,8 @@ describe('ProfileRegistry', () => {
     registry = new ProfileRegistry()
   })
 
-  it('has 6 built-in profiles', () => {
-    assert.equal(registry.list().length, 6)
+  it('has 8 built-in profiles', () => {
+    assert.equal(registry.list().length, 8)
   })
 
   it('maps code_scout as readonly', () => {
@@ -62,12 +62,12 @@ describe('ProfileRegistry', () => {
 
   it('listReadOnlyProfiles returns readonly roles', () => {
     const ro = registry.listReadOnlyProfiles()
-    assert.deepEqual(ro.sort(), ['code_scout', 'doc_scout', 'reviewer'])
+    assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'doc_scout', 'reviewer', 'troubleshooter'])
   })
 
-  it('getProfileNames returns all 6 names', () => {
+  it('getProfileNames returns all 8 names', () => {
     const names = registry.getProfileNames().sort()
-    assert.deepEqual(names, ['code_scout', 'doc_scout', 'patcher', 'planner', 'reviewer', 'verifier'])
+    assert.deepEqual(names, ['architect', 'code_scout', 'doc_scout', 'patcher', 'planner', 'reviewer', 'troubleshooter', 'verifier'])
   })
 
   it('rejects overriding built-in profiles', () => {
