@@ -98,6 +98,7 @@ import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, buildRuntimeSnapshot } from "./loop-factory.js";
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
 
@@ -126,56 +127,58 @@ function mapQueriedPheromones(results: PheromoneQueryResult[]): Pheromone[] {
 }
 
 export class AgentLoop {
-  private abortController: AbortController | null = null
-  private cwd: string
-  private evidence: EvidenceTracker
+    session!: SessionContext;
+    config!: AgentConfig;
+  abortController: AbortController | null = null
+  cwd: string
+  evidence: EvidenceTracker
   private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
-  private recentToolHistory: ToolHistoryEntry[] = []
-  private prewarm = new PrewarmCache(60_000, 50)
+  recentToolHistory: ToolHistoryEntry[] = []
+  prewarm = new PrewarmCache(60_000, 50)
   private _running = false
   private physarumForWarmup?: PhysarumEngine
   private meridianDbForWarmup?: import('../repo/meridian-db.js').MeridianDb
   private memoriesWarmed = false
-  private streamedText = ''
+  streamedText = ''
   private thinkingOnlyRetries = 0
   private lastThinkingContent = ''
   private consecutiveNoToolTurns = 0
   private lastTurnTextFingerprint = ''
   private lastTurnThinkingFingerprint = ''
-  private lastPrewarmAt = 0
+  lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
   private planModeState: PlanModeState = 'off'
-  private decisions: string[] = []
-  private trajectory = new TrajectoryRecorder()
-  private repairPipeline = new RepairPipeline([ctclSanitizerPass, fourHorsemenPass, semanticRepairPass])
-  private repairHintTracker = new RepairHintTracker()
+  decisions: string[] = []
+  trajectory = new TrajectoryRecorder()
+  repairPipeline = new RepairPipeline([ctclSanitizerPass, fourHorsemenPass, semanticRepairPass])
+  repairHintTracker = new RepairHintTracker()
   private traceStore: TraceStore
-  private harness: TurnHarness
-  private routingMetrics = new RoutingMetricsCollector()
+  harness: TurnHarness
+  routingMetrics = new RoutingMetricsCollector()
   private importGraph: ImportGraph | null = null
   private lastConflictCheckCount = 0
-  private predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
+  predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   private sessionDomain: ActiveStarDomain | null | undefined
   /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
   private prevAnchorGraphHash: string | null = null
   private pressureMonitor: PressureMonitor
   private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   private sycophancyWasActive = false
-  private turnBudget: TurnBudget = createTurnBudget(0)
-  private sensorium: Sensorium | null = null
-  private strategy: StrategyProfile | null = null
-  private vigorState: VigorState = createVigorState()
-  private runtimeHooks: RuntimeHookPipeline
+  turnBudget: TurnBudget = createTurnBudget(0)
+  sensorium: Sensorium | null = null
+  strategy: StrategyProfile | null = null
+  vigorState: VigorState = createVigorState()
+  runtimeHooks: RuntimeHookPipeline
   private perception: TurnPerceptionController
   private intent: TurnIntentController
-  private contextInjection: ContextInjectionController
+  contextInjection: ContextInjectionController
   private compaction: CompactionController
   private turnStream: TurnStreamController | null = null
   private turnCompletion: TurnCompletionController
   private toolExecution: ToolExecutionController
   private thetaCheckInFlight = false
-  private thetaTelemetry: {
+  thetaTelemetry: {
     lastReason: string | null
     lastDurationMs: number | null
     lastErrorCount: number
@@ -200,13 +203,13 @@ export class AgentLoop {
   private static readonly THETA_MAX_PER_TURN = 2
   private thetaRequestsThisTurn = 0
   private thetaState: ThetaState = createThetaState(7)
-  private artifactStore: import('../artifact/store.js').ArtifactStore | undefined
-  private sessionStateManager: SessionStateManager | undefined
+  artifactStore: import('../artifact/store.js').ArtifactStore | undefined
+  sessionStateManager: SessionStateManager | undefined
   private stigmergyStore: StigmergyStore
   private loadedPheromones: Pheromone[] = []
   private readonly stanceTally = createStanceTally()
   private lastSeenEventId = 0
-  private gitChangeRate = 0
+  gitChangeRate = 0
   private telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
   private sensoriumSnapshots: SensoriumEntry[] = []
@@ -215,14 +218,14 @@ export class AgentLoop {
   private persist: SessionPersist | null = null
   private resourceSensor: ResourceSensor
   private latestResourceSnapshot: ResourceSensorSnapshot | null = null
-  private latestReliabilityDecision: ReliabilityDecision | null = null
+  latestReliabilityDecision: ReliabilityDecision | null = null
   private fsWatcher: ReturnType<typeof createFsWatcher> | null = null
   private latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
-  private currentSeason: CognitiveSeason | null = null
+  currentSeason: CognitiveSeason | null = null
   private lastCompactTurn: number | null = null
-  private cacheAdvisor: CacheAdvisor
-  private p3: P3Integration
-  private immuneHook: ImmuneHook
+  cacheAdvisor: CacheAdvisor
+  p3: P3Integration
+  immuneHook: ImmuneHook
   private _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
   private lastToolCompleteTime = 0
   private initialUserMessage: string | null = null
@@ -230,10 +233,11 @@ export class AgentLoop {
   private recentTextFingerprints: string[] = []
 
   constructor(
-    private config: AgentConfig,
-    private session: SessionContext,
+    config: AgentConfig,
+    session: SessionContext,
     cwd?: string,
   ) {
+      this.config = config; this.session = session;
     this.cwd = cwd ?? process.cwd()
     this.evidence = new EvidenceTracker()
     this.traceStore = createTraceStore()
@@ -443,119 +447,22 @@ export class AgentLoop {
   }
 
   private createTurnStreamController(): TurnStreamController {
-    return new TurnStreamController({
-      client: this.config.client,
-      abortSignal: this.abortController?.signal ?? new AbortController().signal,
-      getStreamedTextLength: () => this.streamedText.length,
-      appendStreamedText: text => { this.streamedText += text },
-      getLastPrewarmAt: () => this.lastPrewarmAt,
-      setLastPrewarmAt: position => { this.lastPrewarmAt = position },
-      maybePrewarm: text => { this.maybePrewarm(text) },
-      prewarmFile: filePath => {
-        const value = buildPrewarmValue(this.cwd, filePath)
-        if (value && !this.prewarm.has(value.canonicalPath)) {
-          this.prewarm.set(value.canonicalPath, value)
-        }
-      },
-      addUsage: usage => { this.session.addUsage(usage) },
-      recordTurnCache: (turn, usage) => {
-        this.session.recordTurnCache(turn, usage)
-        const hitRate = usage.input_tokens > 0
-          ? ((usage.cache_read_input_tokens ?? 0) / usage.input_tokens * 100).toFixed(1)
-          : '0.0'
-        const sid = this.config.sessionId ?? 'anon'
-        const line = JSON.stringify({ t: Date.now(), turn, input: usage.input_tokens, cacheRead: usage.cache_read_input_tokens, cacheCreate: usage.cache_creation_input_tokens, hitRate: `${hitRate}%` })
-        import('node:fs/promises').then(fs => {
-          const dir = join(this.cwd, '.rivet', 'sessions', sid)
-          return fs.mkdir(dir, { recursive: true })
-            .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
-        }).catch(() => {})
-      },
-    })
+      return createTurnStreamController(this);
   }
 
   private createTurnCompletionController(callbacks?: AgentCallbacks): TurnCompletionController {
-    return new TurnCompletionController({
-      config: this.config,
-      session: this.session,
-      trajectory: this.trajectory,
-      routingMetrics: this.routingMetrics,
-      evidence: this.evidence,
-      getStreamedText: () => this.streamedText,
-      getDecisions: () => this.decisions,
-      setDecisions: decisions => { this.decisions = decisions },
-      refreshLedger: () => { this.contextInjection.refreshLedger() },
-      refreshCacheDiagnostic: turn => { this.refreshCacheDiagnostic(turn) },
-      runPostTurn: async () => {
-        await this.runtimeHooks.runPostTurn(createRuntimeHookContext(this.buildRuntimeSnapshot(), {
-          emitPhaseChange: (phase, detail) => { callbacks?.onPhaseChange?.(phase, detail) },
-        }))
-      },
-      runBeforeComplete: async () => {
-        if (callbacks) await this.runPostSession(callbacks)
-      },
-    })
+      return createTurnCompletionController(this, callbacks);
   }
 
   private createToolExecutionController(): ToolExecutionController {
-    return new ToolExecutionController({
-      config: this.config,
-      cwd: this.cwd,
-      harness: this.harness,
-      prewarm: this.prewarm,
-      evidence: this.evidence,
-      repairHintTracker: this.repairHintTracker,
-      repairPipeline: this.repairPipeline,
-      immuneHook: this.immuneHook,
-      runtimeHooks: this.runtimeHooks,
-      contextInjection: this.contextInjection,
-      trajectory: this.trajectory,
-      getPredictionAccumulator: () => this.predictionAccumulator,
-      setPredictionAccumulator: a => { this.predictionAccumulator = a },
-      getVigorState: () => this.vigorState,
-      setVigorState: v => { this.vigorState = v },
-      getDoomLoopLevel: () => this.getDoomLoopLevel(),
-      getPhaseHint: () => this.config.promptEngine.getPhaseHint(),
-      getSessionTurnCount: () => this.session.getTurnCount(),
-      getSessionId: () => this.config.sessionId,
-      addToolResults: results => { this.session.addToolResults(results) },
-      recordToolHistory: (name, input, isError, content) => this.recordToolHistory(name, input, isError, content),
-      buildRuntimeSnapshot: extra => this.buildRuntimeSnapshot(extra),
-      requestThetaCheck: reason => { this.requestThetaCheck(reason) },
-      getAutoReasoning: () => this.config.autoReasoning ?? false,
-      getReasoningEffort: () => this.config.reasoningEffort,
-      setClientReasoningEffort: effort => { this.config.reasoningEffort = effort; this.config.client.setReasoningEffort?.(effort) },
-      getSensorium: () => this.sensorium,
-      getReliabilityDecision: () => this.latestReliabilityDecision,
-      getTurnBudget: () => this.turnBudget,
-      artifactStore: this.artifactStore,
-      sessionStateManager: this.sessionStateManager,
-      cacheAdvisor: this.cacheAdvisor,
-      p3: this.p3,
-      lspManager: this.config.lspManager,
-      getEstimatedTokens: () => this.session.getEstimatedTokens(),
-    })
+      return createToolExecutionController(this);
   }
-  private buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
-    return {
-      cwd: this.cwd,
-      turn: this.session.getTurnCount(),
-      recentToolHistory: this.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
-      sensorium: this.sensorium,
-      strategy: this.strategy,
-      vigor: this.vigorState,
-      gitChangeRate: this.gitChangeRate,
-      season: this.currentSeason,
-      thetaTelemetry: {
-        lastTimedOut: this.thetaTelemetry.lastTimedOut,
-        consecutiveTimeouts: this.thetaTelemetry.consecutiveTimeouts,
-      },
-      ...extra,
-    }
+  buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
+      return buildRuntimeSnapshot(this, extra);
   }
 
 
-  private recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
+  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
     const target = typeof input?.path === 'string'
       ? input.path
       : typeof input?.file_path === 'string'
@@ -690,7 +597,7 @@ export class AgentLoop {
     return text.trim()
   }
 
-  private maybePrewarm(text: string): void {
+  maybePrewarm(text: string): void {
     const intents = extractIntents(text)
     for (const intent of intents) {
       if (intent.type !== 'file') continue
@@ -846,7 +753,7 @@ export class AgentLoop {
     this.latestReliabilityDecision = modeForRecoveryTrigger(trigger)
   }
 
-  private requestThetaCheck(reason: string): void {
+  requestThetaCheck(reason: string): void {
     if (this.thetaCheckInFlight) return
 
     // Gate 1: session-level cap
@@ -917,7 +824,7 @@ export class AgentLoop {
 
   getCacheDiagnostic(): string | null { return this.lastCacheDiagnostic }
 
-  private refreshCacheDiagnostic(turn: number): void {
+  refreshCacheDiagnostic(turn: number): void {
     this.lastCacheDiagnostic = this.compaction.refreshCacheDiagnostic(turn)
   }
 
@@ -945,7 +852,7 @@ export class AgentLoop {
       cacheAdvisor: this.cacheAdvisor.getDiagnostic() }
   }
 
-  private async runPostSession(callbacks: AgentCallbacks): Promise<void> {
+  async runPostSession(callbacks: AgentCallbacks): Promise<void> {
     await this.runtimeHooks.runPostSession(createRuntimeHookContext(this.buildRuntimeSnapshot(),
       { emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) } }))
     // Cleanup old cross-session events (2h TTL)
