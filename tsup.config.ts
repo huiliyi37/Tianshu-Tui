@@ -3,18 +3,16 @@ import { defineConfig, type Options } from 'tsup'
 /**
  * esbuild plugin: makes better-sqlite3 a runtime-optional dependency.
  *
- * Problem: esbuild detects createRequire()('better-sqlite3') and hoists it
- * to a static ESM import at the top of the bundle. If the module isn't
- * installed (e.g. Windows without C++ build tools), the static import
- * crashes the process immediately on startup — before any try/catch can fire.
+ * The virtual module does a runtime require('better-sqlite3') inside try/catch.
+ * If the native module is not installed, it returns a NullDatabase class that
+ * implements the same interface (prepare, exec, pragma, close, transaction)
+ * as no-ops. This way `new Database(path)` never throws, regardless of whether
+ * better-sqlite3 is installed.
  *
- * Solution: this plugin intercepts the resolution of 'better-sqlite3' and
- * provides a virtual module that does a safe runtime require inside try/catch.
- * The default export is the Database constructor, or null if unavailable.
- *
- * Source code (tsx dev mode): createRequire + try/catch works natively.
- * Bundled mode (dist/main.js): the plugin replaces the static import with
- * a runtime-safe virtual module that returns null instead of crashing.
+ * Why a class proxy instead of null? Because esbuild tree-shakes null checks
+ * on static imports. The source code's `if (!Database)` and `try/catch` get
+ * stripped in the bundle. By always providing a valid constructor, we avoid
+ * "Database is not a constructor" at runtime.
  */
 const optionalNativeModulePlugin = {
   name: 'optional-native-module',
@@ -26,14 +24,32 @@ const optionalNativeModulePlugin = {
     build.onLoad({ filter: /.*/, namespace: 'optional-native' }, () => ({
       contents: [
         '// Runtime loader for optional native module better-sqlite3',
-        '// Returns Database constructor or null if unavailable',
-        'var Database = null;',
+        'var NativeDB = null;',
         'try {',
         '  var { createRequire } = require("node:module");',
-        '  Database = createRequire(import.meta.url)("better-sqlite3");',
+        '  NativeDB = createRequire(import.meta.url)("better-sqlite3");',
         '} catch (e) {',
-        '  // better-sqlite3 not installed — callers should use fallback',
+        '  // better-sqlite3 not installed — NullDatabase will be used',
         '}',
+        '',
+        '// No-op statement that mimics better-sqlite3 Statement API',
+        'var noopStmt = {',
+        '  run: function() {},',
+        '  all: function() { return []; },',
+        '  get: function() { return undefined; },',
+        '};',
+        '',
+        '// NullDatabase: drop-in replacement when better-sqlite3 is unavailable.',
+        '// All DB operations silently succeed — features degrade gracefully.',
+        'function NullDatabase() {}',
+        'NullDatabase.prototype.prepare = function() { return noopStmt; };',
+        'NullDatabase.prototype.exec = function() {};',
+        'NullDatabase.prototype.pragma = function() {};',
+        'NullDatabase.prototype.close = function() {};',
+        'NullDatabase.prototype.transaction = function(fn) { return fn; };',
+        '',
+        '// Export the real constructor if available, otherwise the null proxy',
+        'var Database = NativeDB || NullDatabase;',
         'export default Database;',
       ].join('\n'),
     }))
@@ -48,9 +64,6 @@ export default defineConfig({
   clean: true,
   shims: true,
   treeshake: true,
-  // better-sqlite3 is handled by the plugin above (not external).
-  // The plugin provides a virtual module that does runtime require with
-  // try/catch, so the bundle doesn't crash if the module is missing.
   external: ['esbuild', /^node:/],
   esbuildPlugins: [optionalNativeModulePlugin],
   banner: {

@@ -99,6 +99,7 @@ export class MeridianDb {
       try {
         const { createRequire } = require('node:module') as typeof import('node:module')
         const Database = createRequire(import.meta.url)('better-sqlite3')
+        if (!Database) throw new Error('better-sqlite3 not installed')
         const dbPath = join(this.stateDir, 'meridian.db')
         this.conn = new Database(dbPath)
         this.conn.pragma('journal_mode = WAL')

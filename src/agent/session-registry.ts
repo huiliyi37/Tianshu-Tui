@@ -99,6 +99,7 @@ export class SessionRegistry {
     try {
       const { createRequire } = require('node:module') as typeof import('node:module')
       const Database = createRequire(import.meta.url)('better-sqlite3')
+      if (!Database) throw new Error('better-sqlite3 not installed')
       const dbPath = join(stateDir, 'registry.db')
       db = new Database(dbPath)
       db.pragma('journal_mode = WAL')
