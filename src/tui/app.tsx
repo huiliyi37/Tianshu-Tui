@@ -210,7 +210,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const totalItemsPushedRef = useRef(0)
   const staticItemsForInk = useMemo(() => {
     const all = historyItems
+    // totalItemsPushedRef tracks every push across all paths. When the ring
+    // buffer wraps, all.length caps at HISTORY_MAX_ITEMS while the ref keeps
+    // growing. The difference is the wrapped count to skip so <Static> only
+    // sees new entries.
+    // Defensive: if the ref fell behind the buffer (shouldn't happen), clamp.
+    // If start >= all.length (ref way ahead), return empty — transient when
+    // pushStaticBatch bumps the ref before ring buffer flush completes.
     const start = Math.max(0, totalItemsPushedRef.current - all.length)
+    if (start >= all.length) return []
     return all.slice(start)
   }, [historyItems])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
@@ -281,8 +289,21 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
    *  notification is deferred to the next microtask. */
   const staticBatchRef = useRef<LogEntry[]>([])
   const staticBatchScheduled = useRef(false)
+  /** Dedup fingerprints: last 16 entries' type+content-prefix hashes.
+   *  Prevents the same LogEntry from being pushed into the ring buffer
+   *  multiple times, which causes duplicate rendering in <Static>. */
+  const staticDedupRef = useRef<Set<string>>(new Set())
 
   const pushStatic = useCallback((entry: LogEntry) => {
+    const fp = `${entry.type}:${entry.content.slice(0, 120)}`
+    if (staticDedupRef.current.has(fp)) return
+    staticDedupRef.current.add(fp)
+    if (staticDedupRef.current.size > 16) {
+      // Rotate: keep only last 8 to bound memory
+      const entries = [...staticDedupRef.current]
+      staticDedupRef.current = new Set(entries.slice(-8))
+      staticDedupRef.current.add(fp)
+    }
     historyBufferRef.current.push(entry)
     staticBatchRef.current.push(entry)
     if (!staticBatchScheduled.current) {
@@ -321,6 +342,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     const grouped = groupLogs(entries)
     for (const entry of grouped) {
+      const fp = `${entry.type}:${entry.content.slice(0, 120)}`
+      if (staticDedupRef.current.has(fp)) continue
+      staticDedupRef.current.add(fp)
       historyBufferRef.current.push(entry)
       totalItemsPushedRef.current++
     }
