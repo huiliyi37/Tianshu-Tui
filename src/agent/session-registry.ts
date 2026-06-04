@@ -99,6 +99,8 @@ export class SessionRegistry {
     try {
       const { createRequire } = require('node:module') as typeof import('node:module')
       const Database = createRequire(import.meta.url)('better-sqlite3')
+      const dbPath = join(stateDir, 'registry.db')
+      db = new Database(dbPath)
       db.pragma('journal_mode = WAL')
       db.pragma('busy_timeout = 3000')
       db.pragma('foreign_keys = ON')
