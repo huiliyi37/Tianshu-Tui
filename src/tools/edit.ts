@@ -151,6 +151,7 @@ Bad: using a too-short old_string that matches multiple locations`,
       }
       const newContent = content.replaceAll(oldString, newString)
       writeFileSync(filePath, newContent, 'utf-8')
+      refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
       const warn = syntaxCheck(filePath, newContent)
@@ -177,6 +178,7 @@ Bad: using a too-short old_string that matches multiple locations`,
     }
     const newContent = content.replace(oldString, newString)
     writeFileSync(filePath, newContent, 'utf-8')
+    refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
     const warn = syntaxCheck(filePath, newContent)
     return { content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : '') }
   },
