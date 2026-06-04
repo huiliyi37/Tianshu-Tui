@@ -1419,6 +1419,7 @@ export class AgentLoop {
 
         let turnTextAccum = ''
         let turnThinkingAccum = ''
+        let emittedTextThisTurn = ''
         const prevThinkingFingerprint = this.lastTurnThinkingFingerprint
         let turnDedupState: 'tracking' | 'flushed' = 'tracking'
         let pendingFlush = ''
@@ -1434,13 +1435,32 @@ export class AgentLoop {
           streamRules: this.config.streamRules,
           callbacks: {
             onTextDelta: (text) => {
+              // Within-turn repetition detection: if the model repeats a
+              // substantial prefix (>100 chars) within the same turn, suppress.
+              const candidate = turnTextAccum + text
+              if (candidate.length > 200) {
+                const half = Math.floor(candidate.length / 2)
+                const prefixLen = Math.min(100, half)
+                const prefix = candidate.slice(0, prefixLen)
+                const rest = candidate.slice(half)
+                if (prefix.length >= 50 && rest.includes(prefix)) {
+                  return // suppress within-turn repetition
+                }
+              }
+              // Cross-turn repetition detection: if the model already emitted
+              // this content earlier in the turn, suppress the duplicate.
+              if (emittedTextThisTurn.length > 100 && emittedTextThisTurn.includes(text.slice(0, Math.min(80, text.length)))) {
+                return
+              }
               turnTextAccum += text
               if (turnDedupState === 'flushed') {
+                emittedTextThisTurn += text
                 callbacks.onTextDelta(text)
                 return
               }
               if (!prevFingerprint) {
                 turnDedupState = 'flushed'
+                emittedTextThisTurn += text
                 callbacks.onTextDelta(text)
                 return
               }
@@ -1451,6 +1471,7 @@ export class AgentLoop {
                 // and switch to pass-through. Do not suppress mid-stream: a full match so
                 // far may still be followed by new content in a later delta.
                 turnDedupState = 'flushed'
+                emittedTextThisTurn += pendingFlush
                 callbacks.onTextDelta(pendingFlush)
                 pendingFlush = ''
               }
