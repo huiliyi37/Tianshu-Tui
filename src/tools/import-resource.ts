@@ -1,7 +1,8 @@
-import { existsSync, statSync, symlinkSync, mkdirSync, cpSync, readFileSync, rmSync, lstatSync, readdirSync } from 'fs'
+import { existsSync, statSync, symlinkSync, mkdirSync, cpSync, readFileSync, rmSync, lstatSync, readdirSync, writeFileSync } from 'fs'
 import { basename, join, resolve, relative, extname } from 'path'
 import { execFileSync } from 'child_process'
 import type { Tool, ToolCallParams } from './types.js'
+import { expandHome } from '../platform.js'
 
 const IMPORT_DIR = '.rivet/external'
 const PREVIEW_BYTES = 4000
@@ -131,7 +132,7 @@ export const IMPORT_RESOURCE_TOOL: Tool = {
     const gh = parseGitHubUrl(rawSource)
     if (gh) return handleGitHubImport(params.cwd, importDir, gh, params.input.ref as string | undefined)
 
-    if (/^https?:\/\//i.test(rawSource)) return handleUrlImport(params.cwd, importDir, rawSource)
+    if (/^https?:\/\//i.test(rawSource)) return await handleUrlImport(params.cwd, importDir, rawSource)
 
     return handleLocalImport(params.cwd, importDir, rawSource)
   },
@@ -142,7 +143,7 @@ export const IMPORT_RESOURCE_TOOL: Tool = {
 }
 
 function handleLocalImport(cwd: string, importDir: string, source: string): { content: string; uiContent: string; isError?: boolean } {
-  const expanded = source.replace(/^~/, process.env.HOME ?? '~')
+  const expanded = expandHome(source)
   const resolved = resolve(expanded)
 
   if (!existsSync(resolved)) {
@@ -215,7 +216,7 @@ function handleGitHubImport(
   )
 }
 
-function handleUrlImport(cwd: string, importDir: string, url: string): { content: string; uiContent: string; isError?: boolean } {
+async function handleUrlImport(cwd: string, importDir: string, url: string): Promise<{ content: string; uiContent: string; isError?: boolean }> {
   let filename: string
   try {
     const parsed = new URL(url)
@@ -228,8 +229,23 @@ function handleUrlImport(cwd: string, importDir: string, url: string): { content
   try {
     execFileSync('curl', ['-sL', '-o', targetPath, url], { timeout: 60_000 })
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { content: `Error downloading ${url}: ${msg}`, isError: true, uiContent: `Download failed: ${url}` }
+    // On Windows, curl may not be installed. Fall back to Node.js fetch.
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) {
+          return { content: `Error downloading ${url}: HTTP ${res.status}`, isError: true, uiContent: `Download failed: ${url}` }
+        }
+        const buf = Buffer.from(await res.arrayBuffer())
+        writeFileSync(targetPath, buf)
+      } catch (fetchErr) {
+        const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+        return { content: `Error downloading ${url}: ${msg}`, isError: true, uiContent: `Download failed: ${url}` }
+      }
+    } else {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { content: `Error downloading ${url}: ${msg}`, isError: true, uiContent: `Download failed: ${url}` }
+    }
   }
 
   if (!existsSync(targetPath) || statSync(targetPath).size === 0) {

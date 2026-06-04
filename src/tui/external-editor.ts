@@ -2,9 +2,10 @@ import { writeFileSync, readFileSync, unlinkSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import { getDefaultEditor } from '../platform.js'
 
 export function getEditorCommand(): string {
-  return process.env['VISUAL'] || process.env['EDITOR'] || 'vi'
+  return process.env['VISUAL'] || process.env['EDITOR'] || getDefaultEditor()
 }
 
 export function createTempFile(content: string): string {
