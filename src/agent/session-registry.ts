@@ -95,13 +95,18 @@ export class SessionRegistry {
 
   static async create(stateDir: string): Promise<SessionRegistry> {
     if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
-    const { default: Database } = await import('better-sqlite3')
-    const dbPath = join(stateDir, 'registry.db')
-    const db = new Database(dbPath)
-    db.pragma('journal_mode = WAL')
-    db.pragma('busy_timeout = 3000')
-    db.pragma('foreign_keys = ON')
-    db.exec(SCHEMA)
+    let db: any
+    try {
+      const { createRequire } = require('node:module') as typeof import('node:module')
+      const Database = createRequire(import.meta.url)('better-sqlite3')
+      db.pragma('journal_mode = WAL')
+      db.pragma('busy_timeout = 3000')
+      db.pragma('foreign_keys = ON')
+      db.exec(SCHEMA)
+    } catch {
+      console.warn('⚠ better-sqlite3 not available. Session registry disabled — running in memory-only mode.')
+      db = createNullDb()
+    }
     return new SessionRegistry(db)
   }
 
@@ -429,5 +434,24 @@ export class SessionRegistry {
     const cutoff = Date.now() - maxAgeMs
     const result = this.db.prepare('DELETE FROM retrospect_fingerprints WHERE created_at < ?').run(cutoff)
     return result.changes
+    return result.changes
   }
 }
+
+/**
+ * Creates a no-op database proxy when better-sqlite3 is unavailable.
+ * All method calls succeed silently — session features degrade gracefully.
+ */
+function createNullDb(): any {
+  const noopStmt = { run: () => {}, all: () => [] as any[], get: () => undefined }
+  return new Proxy(Object.create(null), {
+    get: (_target, prop: string) => {
+      if (prop === 'prepare') return () => noopStmt
+      if (prop === 'exec') return () => {}
+      if (prop === 'pragma') return () => {}
+      if (prop === 'close') return () => {}
+      return () => {}
+    },
+  })
+}
+

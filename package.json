@@ -48,7 +48,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "better-sqlite3": "^12.10.0",
     "diff": "^9.0.0",
     "ink": "^6.8.0",
     "react": "^19.2.6",
@@ -58,6 +57,9 @@
     "undici": "^8.3.0",
     "web-tree-sitter": "^0.24.7",
     "zod": "^3.24.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.10.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

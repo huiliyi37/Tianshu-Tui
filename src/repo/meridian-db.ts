@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3'
 import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
@@ -86,21 +85,30 @@ CREATE INDEX IF NOT EXISTS idx_mistake_error ON mistake_entries(error);
 `
 
 export class MeridianDb {
-  private conn: Database.Database | null = null
+  private conn: any = null
   private readonly stateDir: string
+  private _available = true
 
   constructor(stateDir: string) {
     this.stateDir = stateDir
   }
 
-  private get db(): Database.Database {
+  private get db(): any {
     if (!this.conn) {
       if (!existsSync(this.stateDir)) mkdirSync(this.stateDir, { recursive: true })
-      const dbPath = join(this.stateDir, 'meridian.db')
-      this.conn = new Database(dbPath)
-      this.conn.pragma('journal_mode = WAL')
-      this.conn.pragma('busy_timeout = 3000')
-      this.conn.exec(SCHEMA)
+      try {
+        const { createRequire } = require('node:module') as typeof import('node:module')
+        const Database = createRequire(import.meta.url)('better-sqlite3')
+        const dbPath = join(this.stateDir, 'meridian.db')
+        this.conn = new Database(dbPath)
+        this.conn.pragma('journal_mode = WAL')
+        this.conn.pragma('busy_timeout = 3000')
+        this.conn.exec(SCHEMA)
+      } catch {
+        console.warn('⚠ better-sqlite3 not available. Code index (MeridianDb) disabled.')
+        this._available = false
+        this.conn = createNullDb()
+      }
     }
     return this.conn
   }
@@ -390,3 +398,19 @@ export class MeridianDb {
     if (this.conn) { this.conn.close(); this.conn = null }
   }
 }
+
+/** No-op database proxy when better-sqlite3 is unavailable */
+function createNullDb(): any {
+  const noopStmt = { run: () => {}, all: () => [] as any[], get: () => undefined }
+  return new Proxy(Object.create(null), {
+    get: (_target: any, prop: string) => {
+      if (prop === 'prepare') return () => noopStmt
+      if (prop === 'exec') return () => {}
+      if (prop === 'pragma') return () => {}
+      if (prop === 'close') return () => {}
+      if (prop === 'transaction') return (fn: any) => fn
+      return () => {}
+    },
+  })
+}
+
