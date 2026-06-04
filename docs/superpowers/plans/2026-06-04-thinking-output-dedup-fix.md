@@ -250,9 +250,9 @@ node dist/main.js --provider mimo
 | 顺序 | 修复项 | 优先级 | 预计工作量 | 风险 | 状态 |
 |------|--------|--------|-----------|------|------|
 | 1 | 限制 Thinking Promotion 仅对 GLM 生效 | P0 | 15 min | 低 | ✅ 已完成 (`8e54a42`) |
-| 2 | 优化 systemSuffix 表述 | P2 | 5 min | 低 | ⬜ 待实施 |
-| 3 | 加强 Text Dedup | P1 | 30 min | 中 | ⬜ 待实施 |
-| 4 | Thinking Retry fingerprint 检查 | P2 | 20 min | 低 | ⬜ 待实施 |
+| 2 | 优化 systemSuffix 表述 | P2 | 5 min | 低 | ✅ 已完成 (`494cb0e`) — 替换为明确中文指令 |
+| 3 | 加强 Text Dedup（within-turn 重复检测） | P1 | 30 min | 中 | ✅ 已完成 (`c1a7f40`) — 前缀包含检测 + 已发送文本去重 |
+| 4 | Thinking Retry fingerprint 检查 | P2 | 20 min | 低 | ⬜ 待实施 — 根因 3 勘误后优先级降低 |
 
 ---
 
@@ -265,10 +265,7 @@ node dist/main.js --provider mimo
 3. Text dedup 逻辑不够完善，无法处理 within-turn 重复
 4. systemSuffix 表述可能诱导模型输出推理
 
-修复 1（限制 promotion）已通过 `8e54a42` 完成。
-
----
-
+修复 1（限制 promotion）已通过 `8e54a42` 完成。修复 2（systemSuffix）已通过 `494cb0e` 完成。修复 3（within-turn dedup）已通过 `c1a7f40` 完成。
 ## 7. 事后核验（2026-06-04 会话排查）
 
 > 两次 MiMo 会话因 429 限流卡死。排查后确认：计划文档的根因分析有一处关键错误。
@@ -336,10 +333,10 @@ node dist/main.js --provider mimo
 
 ### 7.4 修正后的优先级
 
-原计划的 Fix 1 已正确实施。但 429 问题的真正解决需要新增措施：
+原计划的 Fix 1–3 已正确实施。Rate-aware backpressure 已通过 `2083424` + `6c91136` 完成。剩余项：
 
-| 新增项 | 描述 | 优先级 |
-|--------|------|--------|
-| Rate-aware backpressure | 429 发生后通知 loop 降低请求频率（如增加 turn 间延迟） | P1 |
-| Provider RPM/TPM 配置 | 允许用户在 config 中设置 provider 的速率上限 | P2 |
-| Token budgeting per turn | 预估每个 turn 的 token 消耗，提前预警 TPM 超限 | P3 |
+| 新增项 | 描述 | 优先级 | 状态 |
+|--------|------|--------|------|
+| Rate-aware backpressure | 429 发生后通知 loop 增加 2s turn 间延迟 | P1 | ✅ 已完成 (`2083424` + `6c91136`) — `onRateLimit` callback + inter-turn delay |
+| Provider RPM/TPM 配置 | 允许用户在 config 中设置 provider 的速率上限 | P2 | ⬜ 待实施 |
+| Token budgeting per turn | 预估每个 turn 的 token 消耗，提前预警 TPM 超限 | P3 | ⬜ 待实施 |
