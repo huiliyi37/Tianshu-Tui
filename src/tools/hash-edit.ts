@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
 import { createHash } from 'crypto'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
+import { refreshFileReadMtime } from './read-file.js'
 
 /**
  * Compute a 8-char hex hash of a line's content (stripped of trailing \r).
@@ -180,6 +181,7 @@ Use read_file first to see current content, then construct anchors from the line
     const newContent = [...before, ...newLines, ...after].join('\n')
 
     writeFileSync(filePath, newContent, 'utf-8')
+    refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
     const warn = syntaxCheck(filePath, newContent)
     return { content: `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') }
   },
