@@ -52,6 +52,10 @@ export class AnthropicClient implements StreamClient {
     // Anthropic doesn't use reasoning_effort — thinking budget is set at construction
   }
 
+  setThinking(_mode: 'enabled' | 'disabled'): void {
+    // Anthropic thinking is controlled via budget_tokens, not a toggle
+  }
+
   async stream(
     request: OaiChatRequest,
     callbacks: StreamCallbacks,

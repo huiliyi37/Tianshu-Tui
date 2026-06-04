@@ -84,6 +84,10 @@ export class OpenAIClient implements StreamClient {
     this.config = { ...this.config, reasoningEffort: effort }
   }
 
+  setThinking(mode: 'enabled' | 'disabled'): void {
+    this.config = { ...this.config, thinking: mode }
+  }
+
   async stream(
     request: OaiChatRequest,
     callbacks: StreamCallbacks,

@@ -22,4 +22,6 @@ export interface StreamClient {
   stream(request: OaiChatRequest, callbacks: StreamCallbacks, signal?: AbortSignal): Promise<void>
   /** Update reasoning effort at runtime (optional — not all providers support this) */
   setReasoningEffort?(effort: string): void
+  /** Toggle thinking/reasoning mode at runtime (GLM turn-level thinking). Optional — not all providers support this. */
+  setThinking?(mode: 'enabled' | 'disabled'): void
 }

@@ -22,6 +22,8 @@ export class CodexClient implements StreamClient {
 
   setReasoningEffort(_effort: string): void {}
 
+  setThinking(_mode: 'enabled' | 'disabled'): void {}
+
   async stream(
     request: OaiChatRequest,
     callbacks: StreamCallbacks,
