@@ -75,7 +75,7 @@ export class OpenAIClient implements StreamClient {
 
   constructor(private config: OpenAIClientConfig) {
     this.systemSuffix = (config.providerName === 'mimo' || config.providerName === 'deepseek') && config.thinking === 'enabled'
-      ? '\n\nPlease think and reason in Chinese (中文) during your internal chain of thought.'
+      ? '\n\n请在内部思考链中使用中文进行推理。不要在回复中输出你的推理过程，只输出最终答案或工具调用。'
       : ''
   }
 
