@@ -420,7 +420,10 @@ export class OpenAIClient implements StreamClient {
 
       // GLM-5.1 mandatory thinking: if only reasoning_content arrived (no content),
       // promote reasoning to visible text so the TUI shows a reply.
-      if (!textReceived && reasoningAccum) {
+      // ONLY promote for GLM — MiMo/DeepSeek properly separate reasoning from
+      // content. When MiMo sends a tool-call turn (reasoning_content + tool_calls
+      // but no content), promoting would leak thinking into visible text.
+      if (!textReceived && reasoningAccum && this.config.providerName === 'glm') {
         callbacks.onTextDelta?.(reasoningAccum)
         promotionFired = true
       }
@@ -437,7 +440,8 @@ export class OpenAIClient implements StreamClient {
 
       // Promote reasoning to text even on stream error — prevents GLM "stuck" when
       // stream breaks after receiving reasoning_content but before normal completion.
-      if (!textReceived && reasoningAccum && !promotionFired) {
+      // Only for GLM — see main promotion block above for rationale.
+      if (!textReceived && reasoningAccum && !promotionFired && this.config.providerName === 'glm') {
         callbacks.onTextDelta?.(reasoningAccum)
       }
     }
