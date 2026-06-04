@@ -37,6 +37,10 @@ export interface VolatileContext {
   impactHint?: string | null
   routingReason?: string | null
   cerebellarHint?: string | null
+  /** Affordance hint from Embodied Cognition engine.
+   *  Cache-safe: rendered ONLY into the dynamic appendix.
+   *  MUST stay out of buildVolatileBlockInternal — changes every turn. */
+  affordanceHint?: string | null
   /** Cross-session events formatted for injection (cache-safe: only in dynamic appendix) */
   crossSessionEvents?: string
   /**
@@ -135,6 +139,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     impactHint: undefined,
     routingReason: undefined,
     cerebellarHint: undefined,
+    affordanceHint: undefined,
     // gitStatus moved to dynamic appendix — changes every turn, breaks prefix cache
     gitStatus: undefined,
     // planModeState and worktreeReality rendered in buildVolatileBlockInternal
@@ -265,6 +270,12 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(ctx.crossSessionEvents)
   }
 
+  // Affordance hint: cognitive-state-driven tool selection guidance.
+  // Changes per turn based on sensorium / vigor / theta / season.
+  if (ctx.affordanceHint) {
+    parts.push(ctx.affordanceHint)
+  }
+
   // Repair hint: ephemeral — keep at very end
   if (ctx.repairHint) {
     parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
@@ -309,6 +320,7 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<star-domain')) return 1.0
   if (blockContent.startsWith('<repair-hint>')) return 0.8
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
+  if (blockContent.startsWith('<affordance-hint>')) return 0.7
   if (blockContent.startsWith('<task-progress')) return 0.7
   if (blockContent.startsWith('<decisions>')) return 0.7
   if (blockContent.startsWith('<worktree-warning')) return 0.7
