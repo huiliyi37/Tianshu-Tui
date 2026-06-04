@@ -13,6 +13,7 @@ import { computeModelReadCap, type ModelReadCap } from './model-read-cap.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 import { track } from './process-tracker.js'
+import { gracefulKill } from '../platform.js'
 
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
@@ -193,7 +194,7 @@ async function tryRipgrep(
     let lineCount = 0
 
     const timer = setTimeout(() => {
-      child.kill('SIGTERM')
+      gracefulKill(child)
       resolve(null)
     }, TIMEOUT_MS)
 
@@ -203,7 +204,7 @@ async function tryRipgrep(
       if (!stdout.endsWith('\n')) lines.pop()
       lineCount = lines.filter(l => l.length > 0).length
       if (lineCount >= maxResults || stdout.length > 200_000) {
-        child.kill('SIGTERM')
+        gracefulKill(child)
       }
     })
 

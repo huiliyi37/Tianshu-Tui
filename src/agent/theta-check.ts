@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { gracefulKill, forceKill } from '../platform.js'
 import { track } from '../tools/process-tracker.js'
 
 export interface ThetaCheckResult {
@@ -47,8 +48,8 @@ export function runThetaCheck(cwd: string, timeoutMs = 3000): Promise<ThetaCheck
 
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill('SIGTERM')
-      setTimeout(() => child.kill('SIGKILL'), 3000)
+      gracefulKill(child)
+      setTimeout(() => forceKill(child), 3000)
       finish([])
     }, timeoutMs)
 

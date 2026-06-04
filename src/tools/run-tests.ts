@@ -1,8 +1,9 @@
-import { spawn, execSync } from 'child_process'
-import { readFileSync, existsSync } from 'node:fs'
+import { spawn } from 'child_process'
+import { readFileSync, existsSync, globSync } from 'node:fs'
 import { join, delimiter } from 'node:path'
 import type { Tool, ToolCallParams, VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
+import { gracefulKill, forceKill } from '../platform.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
 
 interface TestCommand {
@@ -38,19 +39,14 @@ function isTestFileFilter(filter: string): boolean {
 
 /**
  * Resolve a non-file-path filter string to an actual test file path.
- * Uses find to locate matching test files, preferring the most specific match.
+ * Uses Node.js globSync (available in Node 22+) for cross-platform file matching.
  * Returns null if no match is found.
  */
 function resolveFilterToTestFile(cwd: string, filter: string): string | null {
   try {
-    const safeFilter = filter.replace(/'/g, "'\\''")
-    const result = execSync(
-      `find src -name '*.test.ts' -path '*${safeFilter}*' | head -5`,
-      { cwd, encoding: 'utf-8', timeout: 3000 },
-    ).trim()
-    if (!result) return null
-    const files = result.split('\n').filter(Boolean)
-    const exact = files.find(f => f.includes('/' + filter + '.test.ts') || f.includes('/' + filter))
+    const files = globSync(`src/**/*${filter}*.test.{ts,tsx,js,jsx,mjs,cjs}`, { cwd })
+    if (files.length === 0) return null
+    const exact = files.find(f => f.includes('/' + filter + '.test.') || f.includes('/' + filter))
     return exact ?? files[0] ?? null
   } catch {
     return null
@@ -309,8 +305,8 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
       }
 
       const timer = setTimeout(async () => {
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 3000)
+        gracefulKill(child)
+        setTimeout(() => forceKill(child), 3000)
         const raw = stdout + (stderr ? '\n' + stderr : '')
         const meta = { command: testCommand.display, exitCode: -1, durationMs: Date.now() - startTime }
         const rawPath = await persistRawOutput(params.toolUseId, raw)

@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { parseDiagnosticOutput, formatDiagnostics, type Diagnostic } from './diagnostics.js'
 
 export interface LspCheckResult {
@@ -7,18 +7,22 @@ export interface LspCheckResult {
 }
 
 export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
-  try {
-    execSync('npx tsc --noEmit --pretty false 2>&1', { cwd, encoding: 'utf-8', timeout: 30_000, stdio: 'pipe' })
+  const result = spawnSync('npx', ['tsc', '--noEmit', '--pretty', 'false'], {
+    cwd,
+    encoding: 'utf-8',
+    timeout: 30_000,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  const output = (result.stdout || '') + (result.stderr || '')
+
+  if (result.status === 0 && !output.trim()) {
     return { diagnostics: [], formatted: '' }
-  } catch (err: unknown) {
-    const output = (err as { stdout?: string; message?: string })?.stdout
-      ?? (err as { message?: string })?.message
-      ?? ''
-    const diagnostics = parseDiagnosticOutput(output, 'typescript').filter(
-      d => d.file.includes(filePath) || filePath === '*',
-    )
-    return { diagnostics, formatted: formatDiagnostics(diagnostics) }
   }
+
+  const diagnostics = parseDiagnosticOutput(output, 'typescript').filter(
+    d => d.file.includes(filePath) || filePath === '*',
+  )
+  return { diagnostics, formatted: formatDiagnostics(diagnostics) }
 }
 
 export function shouldRunDiagnostics(toolName: string, filePath?: string): boolean {
