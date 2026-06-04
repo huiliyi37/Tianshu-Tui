@@ -1,6 +1,6 @@
 # Agent 故障态恐慌防护 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。
+> **状态：✅ 已全部实施** — agent 故障态恐慌防护 — immune-innate token_spike 检测
 
 **目标：** doom-loop 触发时阻止 agent 恐慌性破坏工作区（git stash 等），正常态零干扰。
 

@@ -1,6 +1,6 @@
 # deliver_task 按逻辑单元提交 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — deliver_task 内聚性门禁 (commit-cohesion)
 
 **目标：** 让 `deliver_task` 在 agent 试图批量提交不相关改动时产生结构摩擦，迫使 agent 按逻辑单元分步提交。
 

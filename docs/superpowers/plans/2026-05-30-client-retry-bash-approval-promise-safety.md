@@ -1,6 +1,6 @@
 # Client Retry / Bash Approval / Promise Safety 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — bash approval 模式 + promise safety
 
 **目标：** 修复三个独立问题：B2（三个 API client 的 Retry-After 解析不一致）、B3（bash rtkRewrite 双调用性能开销）、B4（两个浮动 promise 的防御性改进）。
 

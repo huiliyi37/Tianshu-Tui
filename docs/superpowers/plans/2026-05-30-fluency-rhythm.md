@@ -1,6 +1,6 @@
 # 流畅度优化 · 簇二：输出节奏（S5-S7）实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — Fluency rhythm 策略 (fluency-policy.ts)
 
 **目标：** 让流式输出文本平滑逐句流动、慢流也有稳定心跳、回答定稿瞬间无布局跳变。
 

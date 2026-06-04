@@ -1,6 +1,6 @@
 # 思考循环恢复实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — 收敛检测器 oscillationPenalty + deliveryStatus 感知
 
 **目标：** 为收敛检测器添加振荡信号和交付状态感知功能，使任务完成后的验证循环能在 2-3 轮内自动终止，而非运行 10+ 轮。
 

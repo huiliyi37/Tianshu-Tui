@@ -1,6 +1,6 @@
 # 正确性高危修复 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — retry-after 卡死修复 + withStructuredRetry 统一 + SSE 泄漏修复
 
 **目标：** 修复 4 个已确认的正确性缺陷：OpenAI retry-after 卡死 16.7 分钟、三客户端 retry 不一致、bash 审批绕过、2 个未处理 promise rejection。
 

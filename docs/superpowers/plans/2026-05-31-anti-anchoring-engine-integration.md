@@ -1,6 +1,6 @@
 # 反锚定引擎集成实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — anti-anchoring 配置 schema + 集成
 
 **目标：** 将 Rebook 因果解耦机制 + CTM 调研的推理时增强方案原生集成到天枢 TUI，使 agent loop 具备模型级反锚定能力
 

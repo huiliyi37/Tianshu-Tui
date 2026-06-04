@@ -1,5 +1,7 @@
 # GWT Step 2：Engine 层接入 maxChars + 动态 Salience
 
+> **状态：✅ 已全部实施** — commit 92cdd16, GWT Step 2 engine 层 maxChars 预算
+
 > 日期：2026-06-04
 > 关联：#4 全局工作空间竞争（跨系统联动创意文档 §4）
 > 设计文档：`docs/superpowers/specs/2026-06-04-gwt-salience-design.md`

@@ -1,6 +1,6 @@
 # removeLastMessage role 类型守卫 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — removeLastMessage role 类型守卫
 
 **目标：** 为 `removeLastMessage` 添加 `role === 'user'` 运行时守卫，使该方法不再依赖调用者的控制流不变式来保证安全。
 

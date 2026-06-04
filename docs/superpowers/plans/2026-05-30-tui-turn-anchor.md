@@ -1,6 +1,6 @@
 # 会话 TUI turn 折叠锚点 实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — turn anchor 渲染
 
 **目标：** 每个用户请求（一个完整的 final turn）结束时，在 Static 历史里注入一条 git-log 风格的折叠锚点：相位轨迹（`⭐→🔨→⚔️`）+ 读改文件数 + 验证数 + 时长。让回看的用户像翻 git log 一样定位「哪个 turn 做了什么」。
 

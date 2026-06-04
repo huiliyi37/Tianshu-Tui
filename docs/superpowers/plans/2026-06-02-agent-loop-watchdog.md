@@ -1,6 +1,6 @@
 # Agent Loop 事件循环弹性改造
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — immune-hook error boundary + recordToolHistory setImmediate + TurnHeartbeat
 
 **目标：** 消除 agent loop 中所有可能阻塞事件循环的同步操作，增加事件循环健康看门狗，并在工具执行前写入 sensorium 遥测以便诊断卡死。
 

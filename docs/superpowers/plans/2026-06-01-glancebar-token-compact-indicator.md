@@ -1,6 +1,6 @@
 # GlanceBar Token & Compact Indicator 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — GlanceBar token 计数 + compact 提示
 
 **目标：** 在始终可见的 GlanceBar 底部状态栏中显示当前会话 token 使用量（估算值 / 上限）和 compact 紧迫度提示，让用户无需打开 cockpit overlay 就能判断何时该触发上下文压缩。
 

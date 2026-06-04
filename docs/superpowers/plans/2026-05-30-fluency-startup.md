@@ -1,6 +1,6 @@
 # 流畅度优化 · 簇三：启动延迟（S8-S11）实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — Fluency startup 策略 (fluency-policy.ts)
 
 **目标：** 把首帧前的同步 I/O（SQLite 建表、跨会话记忆加载、session 文件读取、目录清理）移出冷启动关键路径，缩短"冷启动到可输入"的等待感。
 

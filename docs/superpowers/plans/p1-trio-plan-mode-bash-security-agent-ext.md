@@ -1,6 +1,6 @@
 # P1 三件套：Plan Mode / Bash 安全 / Agent 外部化 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — Plan Mode + Bash 安全补强 + Agent 外部化
 
 **目标：** 按优先级依次实现三个 P1 功能：Plan Mode（只读探索→审批→执行）、Bash 安全补强（命令注入检测 + 破坏性命令警告 + env 清洗）、Agent 定义外部化（`.rivet/agents/*.md`）。
 

@@ -1,6 +1,6 @@
 # Diet 占位符退避：从硬阻止到渐进提醒
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — 软化 diet 防循环规则 + behavior-mirror 文案
 
 **目标：** 将 `[diet:redundant]`/`[diet:useless]` 的响应从"2 次即死"硬阻止改为三阶段渐进式提醒（提醒 → 警告 → 阻止），保留模型在上下文压缩后重新读取所需文件的能力。
 

@@ -1,6 +1,6 @@
 # 边流边执行（Streaming Tool Executor）实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：⬜ 设计完成待实施** — StreamingToolExecutor 尚未编码，保留为设计参考
 
 **目标：** 在模型流式生成时，一旦某个 `tool_use` 块的参数 JSON 解析完整，立即并发执行该工具，将长耗时工具（bash 编译、网络请求等）的延迟与模型后续生成重叠。
 

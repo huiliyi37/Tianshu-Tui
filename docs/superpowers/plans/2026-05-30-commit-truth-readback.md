@@ -1,6 +1,6 @@
 # 提交事实回执与持久化 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — post-commit git show readback
 
 **目标：** 修复 commit 回执丢失 hash 的问题，并在压缩后让 agent 仍能回忆提交事实——三层：展示修复（A）、claim 持久化（B）、归属兜底（C）。
 

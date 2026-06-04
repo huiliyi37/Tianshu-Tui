@@ -1,6 +1,6 @@
 # Git 真相回读三件套 实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — git truth readback 集成
 
 **目标：** 用「强制回读真实 git 状态」封堵两个真实事故——#1 虚假提交（commit message 标签 ≠ 实际内容）与 #3 stash 污染（裸 `git stash pop` 撞他会话改动），不引入 worktree。
 

@@ -1,6 +1,6 @@
 # 会话 TUI 历史区 gutter 编码 实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — gutter glyph 渲染
 
 **目标：** 给 Static 历史区每类条目（user/assistant/thinking/tool/system）建立一套统一语义的单字符 gutter 字形体系，让用户上下扫历史时靠最左列符号+颜色一眼分清内容类型，无需读内容。
 

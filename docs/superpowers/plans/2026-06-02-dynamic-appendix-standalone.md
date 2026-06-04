@@ -1,6 +1,6 @@
 # 动态附录独立化 — 消除 turn 间 prefix cache 断裂
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — 动态附录独立消息注入，消除 prefix cache 断裂
 
 **目标：** 将动态附录（`buildDynamicAppendix` 输出）从 `lastUserIdx` 的 trailer merge 改为独立追加在消息列表末尾，使倒数第二条 user message 的字节在 turn 间完全不变，消除 DeepSeek exact-prefix cache 在 turn 2+ 的 ~44% 命中率骤降。
 

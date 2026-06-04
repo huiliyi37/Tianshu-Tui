@@ -1,6 +1,6 @@
 # 流畅度优化 · 簇一：静默窗口（S1-S4）实现计划
 
-> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — Fluency silence 策略 (fluency-policy.ts)
 
 **目标：** 消除"UI 在工作但看起来像卡死"的静默窗口——让"即将调工具 / 正在等首字节 / 正在准备下一轮 / 工具执行中"随时可见。
 

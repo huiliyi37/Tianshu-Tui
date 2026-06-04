@@ -1,6 +1,6 @@
 # Abort Resilience — 中止韧性修复
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — AbortError 不计为工具失败 + compact abort 信号
 
 **目标：** 修复四个 abort/compaction 边界缺陷：压缩后 removeLastMessage 丢摘要(A1)、abort 窗口越过整轮重活(A2)、LLM compact timeout 与用户 abort 脱钩(A3)、工具 AbortError 被记成失败污染 immune/doom-loop(A4)。
 

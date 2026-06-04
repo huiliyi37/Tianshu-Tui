@@ -1,6 +1,6 @@
 # Pager 主屏方案 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — Pager 主屏 overlay (历史翻页)
 
 **目标：** 将会话历史从 Ink `<Static>` 一次性渲染模式改为可滚动的主屏交互模式，用户无需 Shift 切换即可用 j/k/PgUp/PgDn 浏览历史。
 
