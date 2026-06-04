@@ -1,6 +1,6 @@
 # delegate_batch 阻塞导致消息丢失与 UI 卡死 — 修复计划
 
-> **面向 AI 代理的工作者：** 使用 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — Task 1（steerBuffer drain 替代 clear）、Task 2（onProgress/onOutput 批处理进度）、Task 3（集成验证）均已落地。
 
 **目标：** 修复 delegate_batch 执行期间用户消息静默丢失 + UI 无反馈卡死的问题
 

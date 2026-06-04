@@ -1,6 +1,6 @@
 # Theta Check 限流与退避 — 修复计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — Task 1（thetaTelemetry 退避状态）、Task 2（requestThetaCheck cooldown 限流）、Task 3（elm-micro-release 超时抑制）均已落地。
 
 **目标：** 为 theta-gamma 一致性检查（`runThetaCheck`）添加会话级请求上限、连续超时指数退避、和资源感知触发门禁，防止 session 在 tsc 反复超时时无限重试导致卡死。
 

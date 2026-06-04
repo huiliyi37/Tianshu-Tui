@@ -1,6 +1,6 @@
 # deliver_task 门禁验证失效滞留修复计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+> **状态：✅ 已全部实施** — Task 1（tool_invocation_failure RED→YELLOW）、Task 2（run_tests 填充 targetFiles）、Task 3（verificationKey 优先使用 meta.targetFiles）均已落地。
 
 **目标：** 修复 `deliver_task` 门禁中 `tool_invocation_failure`（如 run_tests 超时）被永久缓存为 RED，即使后续精确路径重新运行全部通过也无法清除的根因问题。
 
