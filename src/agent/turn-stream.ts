@@ -28,6 +28,7 @@ export interface TurnStreamCallbacks {
   onToolHint?: (name: string) => void
   onStreamStart?: () => void
   onError: (error: Error) => void
+  onRateLimit?: () => void
 }
 
 export interface TurnStreamDeps {
@@ -167,6 +168,9 @@ export class TurnStreamController {
       },
       onError: (error) => {
         input.callbacks.onError(error)
+      },
+      onRateLimit: () => {
+        input.callbacks.onRateLimit?.()
       },
       onToolCallHint: (toolName, partialArgs) => {
         input.callbacks.onToolHint?.(toolName)

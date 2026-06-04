@@ -1420,6 +1420,7 @@ export class AgentLoop {
         let turnTextAccum = ''
         let turnThinkingAccum = ''
         let emittedTextThisTurn = ''
+        let rateLimitOccurred = false
         const prevThinkingFingerprint = this.lastTurnThinkingFingerprint
         let turnDedupState: 'tracking' | 'flushed' = 'tracking'
         let pendingFlush = ''
@@ -1496,6 +1497,9 @@ export class AgentLoop {
               callbacks.onPhaseChange?.('working', { reason: 'waiting for first token' })
             },
             onError: callbacks.onError,
+            onRateLimit: () => {
+              rateLimitOccurred = true
+            },
           },
         })
         // Only decide full-turn suppression at the stream boundary. A mid-stream exact
@@ -1519,6 +1523,13 @@ export class AgentLoop {
         if (streamResult.triggeredRule) {
           this.session.addUserMessage(streamResult.triggeredRule.inject)
           continue
+        }
+
+        // Rate-aware backpressure: if the API layer signaled a 429 retry,
+        // add an inter-turn delay to avoid hitting the rate limit again
+        // before the provider's rate window resets.
+        if (rateLimitOccurred) {
+          await new Promise(r => setTimeout(r, 2000))
         }
 
         // L0 telemetry: stream duration
