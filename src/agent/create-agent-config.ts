@@ -73,7 +73,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'permissions'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'permissions'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -116,6 +116,9 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     antiAnchoring: input.antiAnchoring,
     autoReasoning: true,
     reasoningFloor: model.reasoningEffort,
+    // GLM turn-level thinking: disable thinking on tool execution turns
+    // to prevent reasoning_content accumulation and context window stalls.
+    turnLevelThinking: provider.name === 'glm',
     permissions: input.permissions,
  }
 }

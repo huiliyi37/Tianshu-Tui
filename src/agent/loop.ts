@@ -1417,6 +1417,16 @@ export class AgentLoop {
         if (turnRequest.action === 'abort') return
         const request = turnRequest.request!
 
+        // Turn-level thinking (GLM): disable thinking on tool execution turns
+        // to reduce reasoning_content accumulation. Enable on planning/analysis turns.
+        // This prevents the "200k window stall" where preserved thinking bloats context.
+        if (this.config.turnLevelThinking && this.config.client.setThinking) {
+          const messages = this.session.getMessages()
+          const lastMsg = messages[messages.length - 1]
+          const isToolExecTurn = lastMsg?.role === 'tool'
+          this.config.client.setThinking(isToolExecTurn ? 'disabled' : 'enabled')
+        }
+
         let turnTextAccum = ''
         let turnThinkingAccum = ''
         let emittedTextThisTurn = ''

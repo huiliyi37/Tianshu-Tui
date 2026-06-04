@@ -45,6 +45,9 @@ export interface AgentConfig {
   autoReasoning?: boolean
   reasoningEffort?: import('./auto-reasoning.js').ReasoningEffort
   reasoningFloor?: import('./auto-reasoning.js').ReasoningEffort
+  /** Turn-level thinking: disable thinking on tool execution turns (GLM turn-level thinking).
+   *  Reduces reasoning_content accumulation and prevents context window stalls. */
+  turnLevelThinking?: boolean
   lspEnabled?: boolean
   /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
   lspManager?: import('../lsp/manager.js').LspManager
