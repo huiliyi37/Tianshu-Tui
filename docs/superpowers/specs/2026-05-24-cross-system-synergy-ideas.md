@@ -270,6 +270,155 @@ Autopoietic Maintenance：
 
 ---
 
+## 实施计划：自由能引擎（#1） + 具身认知闭环（#7）
+
+> 评估日期：2026-06-11 天枢域
+> 状态：待执行
+
+### 前置依赖分析
+
+两个联动共享相同的前置子系统，可以协同推进：
+
+| 子系统 | 当前状态 | #1 依赖 | #7 依赖 |
+|--------|---------|---------|---------|
+| PredictionAccumulator | ✅ 已实现 | 需扩展 EFE 计算 | 间接使用 |
+| VigorState | ✅ 已实现 | gamma/precision | explore/exploit 调制 |
+| ThetaState (相位) | ✅ 已实现 (#6) | 层级推断时钟 | 相位门控 |
+| CognitiveSeason | ✅ 已实现 | pragmatic vs epistemic 权重 | contextual_affordance |
+| Sensorium | ✅ 已实现 | — | 环境感知输入 |
+| Meridian Graph | ✅ 已实现 | generative model (A/B) | 工具-上下文映射 |
+
+**结论**：所有前置子系统已就位。两个联动都是"连接已有模块"而非"从零构建"。
+
+---
+
+### 阶段 A：具身认知闭环（先做，#7）
+
+**理由**：复杂度更低（只涉及 prompt 层改动），收益立即可见，为自由能引擎提供 affordance 信号源。
+
+#### Step A1：工具描述增强（~1h）
+
+修改 `src/tools/*.ts` 的 `definition.description`，为每个工具增加结构化的 `affordance` 元数据注释：
+
+```markdown
+<!-- affordance: epistemic=0.8 instrumental=0.2 -->
+Search file contents with regex or literal patterns.
+```
+
+- 不需要修改 Tool 接口，只需在 description 中嵌入元数据
+- 下游 prompt 构建时解析这些元数据
+
+#### Step A2：Affordance 评分引擎（~2h）
+
+新建 `src/agent/affordance.ts`：
+
+```typescript
+interface AffordanceScore {
+  epistemic: number    // 减少不确定性
+  instrumental: number // 推进目标
+  contextual: number   // 当前状态下的可用性
+}
+```
+
+基于当前 agent 状态计算每种工具的 affordance：
+
+- **epistemic** = f(uncertainty in context, theta phase is ENCODING)
+- **instrumental** = f(goal proximity, vigor is high)
+- **contextual** = f(files in scope, recent tool history, season)
+
+#### Step A3：Prompt 注入（~1h）
+
+修改 `src/prompt/volatile.ts`，在 context-update 中注入"工具可供性提示"：
+
+```markdown
+<affordance-context>
+Current cognitive state: theta=ENCODING, vigor=0.7, season=genesis
+Prefer epistemic tools (grep, read_file, glob) — uncertainty is high.
+Consider instrumental tools (bash, write_file) when confidence builds.
+</affordance-context>
+```
+
+不强制工具选择，只是为模型提供认知状态感知的上下文提示。
+
+**交付物**：`src/agent/affordance.ts` (new), `src/prompt/volatile.ts` (modified)
+
+---
+
+### 阶段 B：自由能引擎（后做，#1）
+
+**理由**：需要 PredictionAccumulator 扩展，涉及决策逻辑变更，需更谨慎。
+
+#### Step B1：EFE 计算核心（~2h）
+
+扩展 `src/agent/prediction-error.ts`：
+
+```typescript
+export interface EFEComponents {
+  epistemicValue: number   // 信息增益预期
+  pragmaticValue: number   // 目标推进预期
+  noveltyBonus: number     // 探索奖励（缓解 stagnation）
+  precision: number        // 置信度加权（gamma = vigor）
+}
+
+export function computeEFE(
+  acc: PredictionAccumulator,
+  season: CognitiveSeason,
+  vigor: VigorState,
+): EFEComponents
+```
+
+#### Step B2：softmax 动作选择（~2h）
+
+新建 `src/agent/policy-selection.ts`：
+
+```typescript
+// 基于 EFE 的 softmax 工具选择
+// G(π) = epistemic × α + pragmatic × (1-α)
+// α = season === 'genesis' ? 0.8 : season === 'wuwei' ? 0.2 : 0.5
+// p(tool_i) = softmax(-G(π_i) / gamma)
+```
+
+注意：这个不替代 LLM 的工具调用，而是作为 context 注入影响 LLM 的选择（与 A3 类似）。
+
+#### Step B3：感知-行动闭环（~2h）
+
+在 `src/agent/turn-perception.ts` 中接入 EFE：
+
+```
+工具执行 → PredictionAccumulator.recordPrediction() → computeEFE() → policy温度 → 下一轮 context 注入
+```
+
+#### Step B4：Sensorimotor 学习（~1.5h）
+
+扩展 Meridian Graph，记录 `(context, tool, outcome)` 三元组，驱动 affordance 更新。
+
+**交付物**：`src/agent/prediction-error.ts` (extended), `src/agent/policy-selection.ts` (new), `src/agent/turn-perception.ts` (modified)
+
+---
+
+### 执行顺序
+
+```
+A1 (工具元数据) → A2 (评分引擎) → A3 (prompt注入) → 验证 → 提交
+                    ↓
+B1 (EFE计算) → B2 (动作选择) → B3 (闭环) → B4 (学习) → 验证 → 提交
+```
+
+### 估算
+
+| 阶段 | 文件 | 工作量 |
+|------|------|--------|
+| A1 | `src/tools/*.ts` (description 更新) | 1h |
+| A2 | `src/agent/affordance.ts` (new) | 2h |
+| A3 | `src/prompt/volatile.ts` (modify) | 1h |
+| B1 | `src/agent/prediction-error.ts` (extend) | 2h |
+| B2 | `src/agent/policy-selection.ts` (new) | 2h |
+| B3 | `src/agent/turn-perception.ts` (modify) | 2h |
+| B4 | `src/repo/meridian-db.ts` (extend) | 1.5h |
+| **总计** | | **~11.5h**, 7 个文件, 可拆成 5-6 个独立提交 |
+
+---
+
 ## 执行记录
 
 > 2026-06-04 天枢域会话 — 推进 #6 → #3 → #4（Step 1）
