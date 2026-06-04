@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ContextLedger } from '../../context/types.js'
-import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, type VolatileContext } from '../volatile.js'
+import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, assignSalience, selectTopKBlocks, type VolatileContext, type SalientBlock } from '../volatile.js'
 
 function ledger(): ContextLedger {
   return {
@@ -491,5 +491,139 @@ describe('worktree-warning dynamic appendix', () => {
   it('omits worktree-warning when worktreeReality is undefined', () => {
     const block = buildLatestTurnVolatileBlock(base)
     assert.ok(!block.includes('<worktree-warning>'))
+  })
+})
+
+describe('GWT salience and Top-K selection', () => {
+  describe('assignSalience', () => {
+    it('returns 1.0 for star-domain', () => {
+      assert.equal(assignSalience('<star-domain name="test">content</star-domain>'), 1.0)
+    })
+
+    it('returns 0.8 for repair-hint', () => {
+      assert.equal(assignSalience('<repair-hint>fix this</repair-hint>'), 0.8)
+    })
+
+    it('returns 0.8 for historical-lessons', () => {
+      assert.equal(assignSalience('<historical-lessons>\n- lesson\n</historical-lessons>'), 0.8)
+    })
+
+    it('returns 0.7 for task-progress', () => {
+      assert.equal(assignSalience('<task-progress current="step1">'), 0.7)
+    })
+
+    it('returns 0.7 for decisions', () => {
+      assert.equal(assignSalience('<decisions>\n  <decision>d1</decision>\n</decisions>'), 0.7)
+    })
+
+    it('returns 0.6 for git-status', () => {
+      assert.equal(assignSalience('<git-status>M src/main.ts</git-status>'), 0.6)
+    })
+
+    it('returns 0.6 for recent-commits', () => {
+      assert.equal(assignSalience('<recent-commits>abc123 fix</recent-commits>'), 0.6)
+    })
+
+    it('returns 0.5 for tool-history', () => {
+      assert.equal(assignSalience('<tool-history>\n  <tool-summary />\n</tool-history>'), 0.5)
+    })
+
+    it('returns 0.4 for session-state', () => {
+      assert.equal(assignSalience('<session-state>state</session-state>'), 0.4)
+    })
+
+    it('returns 0.3 for read-file-dedup-hint', () => {
+      assert.equal(assignSalience('<read-file-dedup-hint>files</read-file-dedup-hint>'), 0.3)
+    })
+
+    it('returns 0.5 for unknown tags (default)', () => {
+      assert.equal(assignSalience('<unknown-tag>content</unknown-tag>'), 0.5)
+    })
+  })
+
+  describe('selectTopKBlocks', () => {
+    const blocks: SalientBlock[] = [
+      { content: '<star-domain>identity</star-domain>', salience: 1.0 },
+      { content: '<repair-hint>fix</repair-hint>', salience: 0.8 },
+      { content: '<git-status>status</git-status>', salience: 0.6 },
+      { content: '<read-file-dedup-hint>hint</read-file-dedup-hint>', salience: 0.3 },
+    ]
+
+    it('selects all blocks when budget is sufficient', () => {
+      const selected = selectTopKBlocks(blocks, 10_000)
+      assert.equal(selected.length, 4)
+    })
+
+    it('selects blocks in descending salience order', () => {
+      // Budget only fits the top 2 blocks
+      const selected = selectTopKBlocks(blocks, 100)
+      assert.ok(selected.length >= 1)
+      // First selected should be highest salience
+      assert.ok(selected[0]!.includes('star-domain'))
+    })
+
+    it('always includes at least one block (highest salience)', () => {
+      // Budget is tiny — only 1 char
+      const selected = selectTopKBlocks(blocks, 1)
+      assert.ok(selected.length >= 1)
+      assert.ok(selected[0]!.includes('star-domain'))
+    })
+
+    it('handles empty input', () => {
+      const selected = selectTopKBlocks([], 10_000)
+      assert.equal(selected.length, 0)
+    })
+
+    it('handles single block', () => {
+      const single: SalientBlock[] = [{ content: '<git-status>status</git-status>', salience: 0.6 }]
+      const selected = selectTopKBlocks(single, 10_000)
+      assert.equal(selected.length, 1)
+    })
+  })
+
+  describe('buildDynamicAppendix with maxChars', () => {
+    const baseCtx: VolatileContext = {
+      cwd: '/repo',
+      gitStatus: 'M src/main.ts',
+      decisions: ['decision 1'],
+      sessionState: '<session-state>state</session-state>',
+    }
+
+    it('returns full output when maxChars is undefined (backward compatible)', () => {
+      const full = buildDynamicAppendix(baseCtx)
+      const limited = buildDynamicAppendix(baseCtx, undefined)
+      assert.equal(full, limited)
+    })
+
+    it('returns full output when maxChars is 0', () => {
+      const full = buildDynamicAppendix(baseCtx)
+      const limited = buildDynamicAppendix(baseCtx, 0)
+      assert.equal(full, limited)
+    })
+
+    it('applies GWT Top-K selection when maxChars is positive', () => {
+      const full = buildDynamicAppendix(baseCtx)
+      // With a very small budget, output should be shorter
+      const limited = buildDynamicAppendix(baseCtx, 50)
+      assert.ok(limited.length <= full.length)
+    })
+
+    it('preserves high-salience blocks when budget is constrained', () => {
+      const ctx: VolatileContext = {
+        cwd: '/repo',
+        activeDomain: { name: 'test', motto: 'test motto', volatileBlock: 'test block' },
+        gitStatus: 'M src/main.ts',
+        decisions: ['low priority decision'],
+      }
+      // With moderate budget, star-domain (salience 1.0) should be preserved
+      const limited = buildDynamicAppendix(ctx, 500)
+      assert.ok(limited.includes('star-domain'))
+    })
+
+    it('wraps output in <context-update> tags', () => {
+      const output = buildDynamicAppendix(baseCtx, 10_000)
+      assert.ok(output.startsWith('<context-update>'))
+      assert.ok(output.endsWith('</context-update>'))
+    })
   })
 })

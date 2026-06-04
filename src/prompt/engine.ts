@@ -142,6 +142,14 @@ export class PromptEngine {
     // Reset per-call fetch index — each call re-fetches frozen entries in order.
     this.frozenFetchIndex.clear()
 
+    // Compute GWT budget for dynamic appendix (context-update sub-blocks).
+    // Scales with context window; caps at 200K chars to prevent bloat.
+    // On 1M+ windows: 5% × 4 chars/token = 200K chars (hits cap).
+    // On 200K windows: 5% × 4 chars/token = 40K chars. Minimum 2K.
+    const appendixMaxChars = contextWindow && contextWindow > 0
+      ? Math.min(Math.max(Math.floor(contextWindow * 0.05 * 4), 2_000), 200_000)
+      : undefined
+
     let firstUserIdx = -1
     let lastUserIdx = -1
     for (let i = 0; i < oaiMessages.length; i++) {
@@ -212,13 +220,13 @@ export class PromptEngine {
               if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
               if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
 
-              const activeAppendix = this.actionableTurn ? buildDynamicAppendix(activeCtx) : ''
+              const activeAppendix = this.actionableTurn ? buildDynamicAppendix(activeCtx, appendixMaxChars) : ''
               const projection = this.actionableTurn ? this.cognitiveProjection : null
               const fullAppendix = [projection, this.consolidatedBlock, activeAppendix].filter(Boolean).join('\n')
               this.cachedAppendix = fullAppendix
             } else {
               if (this.actionableTurn) {
-                const appendix = buildDynamicAppendix(dynamicCtx)
+                const appendix = buildDynamicAppendix(dynamicCtx, appendixMaxChars)
                 const projection = this.actionableTurn ? this.cognitiveProjection : null
                 this.cachedAppendix = projection ? [projection, appendix].filter(Boolean).join('\n') : appendix
               } else {
