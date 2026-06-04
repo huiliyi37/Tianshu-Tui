@@ -273,7 +273,15 @@ export class OpenAIClient implements StreamClient {
       if (!reader) throw new Error('Response body is not readable')
 
       await this.parseStreamFromReader(reader, callbacks, signal, reasoningRef)
-    }, signal, { maxTotalDurationMs: 10 * 60_000, maxTotalRetries: isThinking ? 1 : undefined })
+    }, signal, {
+      maxTotalDurationMs: 10 * 60_000,
+      maxTotalRetries: isThinking ? 1 : undefined,
+      onRetry: (info) => {
+        if (info.classified.category === 'rate_limit') {
+          callbacks.onRateLimit?.()
+        }
+      },
+    })
   }
 
   /** Parse SSE stream from a reader — exposed for testing */
