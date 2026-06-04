@@ -3,6 +3,7 @@ import { DANGEROUS_BASH_PATTERNS } from '../agent/approval-risk.js'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
+import { getShellCommand } from '../platform.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { summarizeBashOutput } from '../artifact/summarize.js'
 import { pruneThresholds } from '../compact/constants.js'
@@ -102,7 +103,8 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
     const startTime = Date.now()
 
     return new Promise((resolve) => {
-      const child = track(spawn('sh', ['-c', command], {
+      const shell = getShellCommand()
+      const child = track(spawn(shell.cmd, [...shell.args, command], {
         cwd: params.cwd,
         env: sanitizeEnv(process.env),
         stdio: ['ignore', 'pipe', 'pipe'],
