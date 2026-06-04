@@ -296,17 +296,34 @@ Autopoietic Maintenance：
 
 **理由**：复杂度更低（只涉及 prompt 层改动），收益立即可见，为自由能引擎提供 affordance 信号源。
 
-#### Step A1：工具描述增强（~1h）
+#### Step A1：工具 Affordance 注册表（~0.5h）
 
-修改 `src/tools/*.ts` 的 `definition.description`，为每个工具增加结构化的 `affordance` 元数据注释：
+新建 `src/agent/affordance.ts`，定义集中式工具 affordance 映射：
 
-```markdown
-<!-- affordance: epistemic=0.8 instrumental=0.2 -->
-Search file contents with regex or literal patterns.
+```typescript
+interface BaseAffordance {
+  epistemic: number    // 减少不确定性（读/search/查看）
+  instrumental: number // 推进目标（写/执行/修改）
+}
+
+const toolAffordanceRegistry: Record<string, BaseAffordance> = {
+  read_file:      { epistemic: 0.9, instrumental: 0.1 },
+  grep:           { epistemic: 0.85, instrumental: 0.15 },
+  glob:           { epistemic: 0.8, instrumental: 0.2 },
+  repo_map:       { epistemic: 0.85, instrumental: 0.15 },
+  lsp_find_references: { epistemic: 0.7, instrumental: 0.3 },
+  bash:           { epistemic: 0.2, instrumental: 0.8 },
+  write_file:     { epistemic: 0.0, instrumental: 1.0 },
+  edit_file:      { epistemic: 0.1, instrumental: 0.9 },
+  run_tests:      { epistemic: 0.2, instrumental: 0.8 },
+  // ... 其余工具按此模式
+}
 ```
 
-- 不需要修改 Tool 接口，只需在 description 中嵌入元数据
-- 下游 prompt 构建时解析这些元数据
+**优势**（对比原方案"修改每个工具 description"）：
+1. 一处修改：40+ 个工具的基础 affordance 集中管理
+2. 不污染 LLM prompt：元数据不在 description 字符串里
+3. 静态值与动态值分离：registry 存基础值，A2 叠加运行时状态
 
 #### Step A2：Affordance 评分引擎（~2h）
 
@@ -408,14 +425,14 @@ B1 (EFE计算) → B2 (动作选择) → B3 (闭环) → B4 (学习) → 验证 
 
 | 阶段 | 文件 | 工作量 |
 |------|------|--------|
-| A1 | `src/tools/*.ts` (description 更新) | 1h |
-| A2 | `src/agent/affordance.ts` (new) | 2h |
-| A3 | `src/prompt/volatile.ts` (modify) | 1h |
-| B1 | `src/agent/prediction-error.ts` (extend) | 2h |
-| B2 | `src/agent/policy-selection.ts` (new) | 2h |
-| B3 | `src/agent/turn-perception.ts` (modify) | 2h |
-| B4 | `src/repo/meridian-db.ts` (extend) | 1.5h |
-| **总计** | | **~11.5h**, 7 个文件, 可拆成 5-6 个独立提交 |
+| A1 | `src/agent/affordance.ts` (new) — registry + 基础 affordance | 0.5h |
+| A2 | `src/agent/affordance.ts` (extend) — 动态评分引擎 | 2h |
+| A3 | `src/prompt/volatile.ts` (modify) — affordance 上下文注入 | 1h |
+| B1 | `src/agent/prediction-error.ts` (extend) — EFE 计算 | 2h |
+| B2 | `src/agent/policy-selection.ts` (new) — softmax 动作选择 | 2h |
+| B3 | `src/agent/turn-perception.ts` (modify) — 感知-行动闭环 | 2h |
+| B4 | `src/repo/meridian-db.ts` (extend) — sensorimotor 学习 | 1.5h |
+| **总计** | | **~11h**, 6 个文件, 可拆成 5 个独立提交 |
 
 ---
 
