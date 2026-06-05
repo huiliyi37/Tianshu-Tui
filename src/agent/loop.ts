@@ -167,6 +167,8 @@ export class AgentLoop {
   private lastConflictCheckCount = 0
   predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   private sessionDomain: ActiveStarDomain | null | undefined
+  /** Session-local affordance adaptations — per-session, never mutates global registry */
+  private sessionAffordanceAdaptations: Record<string, import('./affordance.js').BaseAffordance> = {}
   /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
   private prevAnchorGraphHash: string | null = null
   private pressureMonitor: PressureMonitor
@@ -1229,7 +1231,7 @@ export class AgentLoop {
 
     // ── Free Energy Engine: EFE-driven policy guidance ──
     const efe = computeEFE(this.predictionAccumulator, this.currentSeason, this.vigorState, currentSensorium)
-    const affordances = computeAffordanceScores(affordanceState)
+    const affordances = computeAffordanceScores(affordanceState, this.sessionAffordanceAdaptations)
     const policies = selectPolicy(efe, affordances, { topK: 5 })
     this.config.promptEngine.setPolicyGuidance(renderPolicyGuidance(policies, efe) || null)
 
@@ -1238,7 +1240,7 @@ export class AgentLoop {
       try {
         const db = this.config.meridianIndexer?.getDb()
         if (db) {
-          adaptAffordanceFromHistory(toolName => db.getToolSuccessRate(toolName, 20))
+          this.sessionAffordanceAdaptations = adaptAffordanceFromHistory(toolName => db.getToolSuccessRate(toolName, 20))
         }
       } catch { /* affordance adaptation is non-critical */ }
     }

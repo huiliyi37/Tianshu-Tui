@@ -178,6 +178,7 @@ function contextualModulator(
  */
 export function computeAffordanceScores(
   state: AffordanceState,
+  adaptations?: Record<string, BaseAffordance>,
 ): Record<string, AffordanceScore> {
   const epMod = epistemicModulator(state)
   const insMod = instrumentalModulator(state)
@@ -190,7 +191,8 @@ export function computeAffordanceScores(
 
   const result: Record<string, AffordanceScore> = {}
   for (const name of names) {
-    const base = toolAffordanceRegistry[name] ?? DEFAULT_AFFORDANCE
+    // Session-local adaptation overrides global registry, if present
+    const base = adaptations?.[name] ?? toolAffordanceRegistry[name] ?? DEFAULT_AFFORDANCE
     result[name] = {
       epistemic: clamp(base.epistemic * epMod),
       instrumental: clamp(base.instrumental * insMod),
@@ -218,9 +220,19 @@ export function getBaseAffordance(toolName: string): BaseAffordance {
  *
  * Returns the updated registry (mutates in place for efficiency).
  */
+/**
+ * Compute session-local affordance adaptations from sensorimotor history.
+ *
+ * Multi-session safe: returns a new adapted map instead of mutating the shared
+ * global toolAffordanceRegistry. Each session maintains its own adapted copy.
+ *
+ * @param getSuccessRate callback to query MeridianDb for tool success rates
+ * @returns session-local adapted base affordances (only tools with deviations)
+ */
 export function adaptAffordanceFromHistory(
   getSuccessRate: (toolName: string) => number | null,
-): typeof toolAffordanceRegistry {
+): Record<string, BaseAffordance> {
+  const adapted: Record<string, BaseAffordance> = {}
   for (const toolName of Object.keys(toolAffordanceRegistry)) {
     const rate = getSuccessRate(toolName)
     if (rate === null) continue
@@ -233,13 +245,13 @@ export function adaptAffordanceFromHistory(
     if (Math.abs(rate - expected) > 0.15) {
       // Nudge epistemic up if tool underperforms, instrumental up if overperforms
       const delta = (rate - expected) * 0.1
-      toolAffordanceRegistry[toolName] = {
+      adapted[toolName] = {
         epistemic: clamp(base.epistemic - delta * (isInstrumental ? 1 : -1)),
         instrumental: clamp(base.instrumental + delta * (isInstrumental ? 1 : -1)),
       }
     }
   }
-  return toolAffordanceRegistry
+  return adapted
 }
 
 // ─── Affordance Hint Rendering ─────────────────────────────────────

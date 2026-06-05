@@ -167,63 +167,61 @@ describe('Cognitive Pipeline — end-to-end', () => {
     assert.ok(policies[0]!.probability > 0,
       `top policy ${policies[0]!.toolName} should have positive probability`)
   })
-
-  it('adapts affordance from sensorimotor history', () => {
-    // Save original values to restore after test
+  it('adapts affordance from sensorimotor history (multi-session safe)', () => {
+    // Capture original registry values to verify they are NOT mutated
     const origBash = { ...toolAffordanceRegistry['bash']! }
     const origReadFile = { ...toolAffordanceRegistry['read_file']! }
 
-    try {
-      // Simulate: 10 bash failures out of 12 — terrible track record
-      const mockGetRate = (toolName: string): number | null => {
-        // bash: 2/12 = 0.167 success rate — far below expected 1.0 for instrumental tools
-        if (toolName === 'bash') return 0.17
-        // read_file: 11/12 = 0.917 — slightly below expected 0.95 for epistemic tools
-        if (toolName === 'read_file') return 0.92
-        return null
-      }
-
-      adaptAffordanceFromHistory(mockGetRate)
-
-      // bash: instrumental should decrease, epistemic should increase
-      const adaptedBash = toolAffordanceRegistry['bash']!
-      assert.ok(adaptedBash.instrumental < origBash.instrumental,
-        `bash instrumental should decrease: ${adaptedBash.instrumental} < ${origBash.instrumental}`)
-      assert.ok(adaptedBash.epistemic > origBash.epistemic,
-        `bash epistemic should increase: ${adaptedBash.epistemic} > ${origBash.epistemic}`)
-
-      // read_file: slight deviation (0.92 vs expected 0.95, diff=0.03 < 0.15) → no change
-      const adaptedReadFile = toolAffordanceRegistry['read_file']!
-      assert.equal(adaptedReadFile.epistemic, origReadFile.epistemic,
-        'read_file should be unchanged (deviation below threshold)')
-      assert.equal(adaptedReadFile.instrumental, origReadFile.instrumental,
-        'read_file instrumental should be unchanged')
-
-      // Verify adapted registry affects affordance rendering
-      const state: AffordanceState = {
-        sensorium: mockSensorium({ confidence: 0.9 }),
-        vigor: mockVigor({ vigor: 0.9 }),
-        thetaPhase: 'retrieval',
-        season: 'return',
-        workingSetSize: 3,
-        recentToolNames: ['bash', 'edit_file'],
-      }
-      const scores = computeAffordanceScores(state)
-
-      // bash instrumental should be lower due to adaptation
-      const adaptedBashScore = scores['bash']!
-      const editFileScore = scores['edit_file']!
-      assert.ok(
-        editFileScore.instrumental >= adaptedBashScore.instrumental,
-        `edit_file instrumental ${editFileScore.instrumental} should >= bash instrumental ${adaptedBashScore.instrumental}`,
-      )
-    } finally {
-      // Restore original values to avoid side effects on other tests
-      toolAffordanceRegistry['bash'] = origBash
-      toolAffordanceRegistry['read_file'] = origReadFile
+    // Simulate: 10 bash failures out of 12 — terrible track record
+    const mockGetRate = (toolName: string): number | null => {
+      // bash: 2/12 = 0.167 success rate — far below expected 1.0 for instrumental tools
+      if (toolName === 'bash') return 0.17
+      // read_file: 11/12 = 0.917 — slightly below expected 0.95 for epistemic tools
+      if (toolName === 'read_file') return 0.92
+      return null
     }
-  })
 
+    // Returns session-local adapted map — does NOT mutate global registry
+    const adapted = adaptAffordanceFromHistory(mockGetRate)
+
+    // Global registry must be unchanged (multi-session safety)
+    assert.equal(toolAffordanceRegistry['bash']!.instrumental, origBash.instrumental,
+      'global registry must not be mutated')
+    assert.equal(toolAffordanceRegistry['bash']!.epistemic, origBash.epistemic,
+      'global registry must not be mutated')
+    assert.equal(toolAffordanceRegistry['read_file']!.epistemic, origReadFile.epistemic,
+      'global registry must not be mutated')
+
+    // Adapted map: bash instrumental should decrease, epistemic increase
+    const adaptedBash = adapted['bash']!
+    assert.ok(adaptedBash.instrumental < origBash.instrumental,
+      `bash instrumental should decrease: ${adaptedBash.instrumental} < ${origBash.instrumental}`)
+    assert.ok(adaptedBash.epistemic > origBash.epistemic,
+      `bash epistemic should increase: ${adaptedBash.epistemic} > ${origBash.epistemic}`)
+
+    // read_file: slight deviation (0.92 vs expected 0.95, diff=0.03 < 0.15) → not in adapted map
+    assert.equal(adapted['read_file'], undefined,
+      'read_file should not be in adapted map (deviation below threshold)')
+
+    // Passing adaptations to computeAffordanceScores should affect the output
+    const state: AffordanceState = {
+      sensorium: mockSensorium({ confidence: 0.9 }),
+      vigor: mockVigor({ vigor: 0.9 }),
+      thetaPhase: 'retrieval',
+      season: 'return',
+      workingSetSize: 3,
+      recentToolNames: ['bash', 'edit_file'],
+    }
+    const scoresWithAdapt = computeAffordanceScores(state, adapted)
+
+    // bash instrumental should be lower due to adaptation
+    const adaptedBashScore = scoresWithAdapt['bash']!
+    const editFileScore = scoresWithAdapt['edit_file']!
+    assert.ok(
+      editFileScore.instrumental >= adaptedBashScore.instrumental,
+      `edit_file instrumental ${editFileScore.instrumental} should >= bash instrumental ${adaptedBashScore.instrumental}`,
+    )
+  })
   it('returns empty hint when both sensorium and vigor are null (no cognitive state)', () => {
     const state = mockAffordanceState()
     const hint = renderAffordanceHint(state)

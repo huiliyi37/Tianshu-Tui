@@ -200,8 +200,8 @@ describe('renderAffordanceHint', () => {
 })
 
 describe('adaptAffordanceFromHistory', () => {
-  it('adjusts affordance when actual success rate deviates from expected', () => {
-    const orig = { ...toolAffordanceRegistry['bash']! }
+  it('returns adapted map when actual success rate deviates from expected (multi-session safe)', () => {
+    const origBash = { ...toolAffordanceRegistry['bash']! }
 
     const mockGetRate = (name: string): number | null => {
       if (name === 'bash') return 0.7
@@ -209,23 +209,27 @@ describe('adaptAffordanceFromHistory', () => {
       return null
     }
 
-    adaptAffordanceFromHistory(mockGetRate)
+    const adapted = adaptAffordanceFromHistory(mockGetRate)
 
-    const adapted = toolAffordanceRegistry['bash']!
-    assert.ok(adapted.instrumental < orig.instrumental,
+    // Global registry must be unchanged
+    assert.equal(toolAffordanceRegistry['bash']!.instrumental, origBash.instrumental,
+      'global registry must not be mutated')
+
+    // Adapted map: bash instrumental should decrease
+    const adaptedBash = adapted['bash']!
+    assert.ok(adaptedBash.instrumental < origBash.instrumental,
       'bash instrumental should decrease')
-    assert.ok(adapted.epistemic > orig.epistemic,
+    assert.ok(adaptedBash.epistemic > origBash.epistemic,
       'bash epistemic should increase')
 
-    const rf = toolAffordanceRegistry['read_file']!
-    assert.equal(rf.epistemic, 0.90, 'read_file should be unchanged')
-    assert.equal(rf.instrumental, 0.10, 'read_file should be unchanged')
-
-    toolAffordanceRegistry['bash'] = orig
+    // read_file: 0.98 vs expected 0.95, diff=0.03 < 0.15 → not in adapted map
+    assert.equal(adapted['read_file'], undefined,
+      'read_file should not be in adapted map (below threshold)')
   })
 
-  it('returns null for tools without enough data', () => {
-    assert.doesNotThrow(() => adaptAffordanceFromHistory(() => null))
+  it('returns empty map when no tools have enough data', () => {
+    const adapted = adaptAffordanceFromHistory(() => null)
+    assert.deepEqual(adapted, {})
   })
 })
 
