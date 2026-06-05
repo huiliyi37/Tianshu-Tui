@@ -16,8 +16,15 @@ export interface PermissionConfig {
   bash?: BashAllowlistConfig
 }
 
+/** Characters that are NOT matched by the `*` wildcard in permission patterns.
+ *  Prevents cross-token matching: `git status*` must NOT match
+ *  `git status&&curl evil` — the wildcard must not cross shell operators.
+ *  Mirrors SHELL_OPERATOR_RE character set (whitespace excluded so normal
+ *  args like `--short` still match). */
+const WILDCARD_EXCLUDE = `[^&|;<>()$\\x60\\\\!"']`
+
 function patternMatches(pattern: string, value: string): boolean {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, `${WILDCARD_EXCLUDE}*`)
   return new RegExp(`^${escaped}$`).test(value)
 }
 
