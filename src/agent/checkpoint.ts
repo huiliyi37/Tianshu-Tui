@@ -155,7 +155,16 @@ export async function createCheckpoint(cwd: string, label?: string, sessionId?: 
   }
 }
 
-/** Record that the agent touched a file — used for safe rollback scoping. */
+/** Record that the agent touched a file — used for safe rollback scoping.
+ *
+ *  Race note: this is a read-modify-write on the checkpoint JSON file.
+ *  In Node's single-threaded event loop with synchronous fs calls, two
+ *  calls cannot interleave — each runs to completion before the next
+ *  starts. The writeFileAtomicSync (tmp+rename) ensures individual writes
+ *  are atomic. The only theoretical risk is two rapid calls in the same
+ *  async tick both reading before either writes, but tool-pipeline.ts
+ *  calls this synchronously per-tool in a sequential batch, so the
+ *  read→modify→write window is effectively serialized. */
 export function recordAgentTouchedFile(cwd: string, file: string, sessionId?: string): void {
   const data = sessionId ? loadCheckpointDataForSession(sessionId) : loadCheckpointData(cwd)
   if (!data) return

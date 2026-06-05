@@ -911,7 +911,7 @@ async function main() {
   // 心跳定时器
   const heartbeatInterval = setInterval(() => {
     try { registry.heartbeat(sessionId) } catch { /* ignore */ }
-  }, 10_000)
+  }, 10_000).unref()
   _heartbeatInterval = heartbeatInterval
 
   // 退出时清理
@@ -981,7 +981,7 @@ async function main() {
   // performance entries indefinitely. Clear the buffer periodically.
   const perfCleanup = setInterval(() => {
     try { performance.clearMeasures() } catch { /* noop */ }
-  }, 60_000)
+  }, 60_000).unref()
   _perfCleanup = perfCleanup
 
   // Slow render monitor: track event-loop stalls.
@@ -1012,7 +1012,7 @@ async function main() {
           const ts = new Date(now).toISOString()
           process.stderr.write(`[slow-render] ${ts} gap=${gap}ms (threshold=${SLOW_RENDER_MS}ms)${slowRenderLogCount >= SLOW_RENDER_MAX_LOGS ? ' (silenced, max logs reached)' : ''}\n`)
         }
-      }, SLOW_RENDER_MS)
+      }, SLOW_RENDER_MS).unref()
     : undefined
 
   const { waitUntilExit } = render(
