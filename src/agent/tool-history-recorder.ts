@@ -83,26 +83,28 @@ const target = typeof input?.path === 'string'
     // Record timestamp for event-loop gap detection
     self.lastToolCompleteTime = Date.now()
 
-    // ── Sensorimotor learning: record (context, tool, outcome) for affordance adaptation ──
-    try {
-      const db = self.config.meridianIndexer?.getDb()
-      if (db) {
-        const sensorium = self.sensorium
-        const contextSig = createHash('sha256')
-          .update(JSON.stringify({
-            confidence: sensorium?.confidence ?? 0.5,
-            complexity: sensorium?.complexity ?? 0.5,
-            season: self.currentSeason ?? 'genesis',
-            vigor: self.vigorState?.vigor ?? 0.5,
-          }))
-          .digest('hex').slice(0, 16)
-        db.recordSensorimotorExperience(
-          contextSig,
-          name,
-          !isError,
-          0, // duration not tracked at this level
-          self.session.getTurnCount(),
-        )
-      }
-    } catch { /* sensorimotor recording is non-critical */ }
+    // ── Sensorimotor learning: deferred (SHA-256 + DB INSERT is non-critical) ──
+    setImmediate(() => {
+      try {
+        const db = self.config.meridianIndexer?.getDb()
+        if (db) {
+          const sensorium = self.sensorium
+          const contextSig = createHash('sha256')
+            .update(JSON.stringify({
+              confidence: sensorium?.confidence ?? 0.5,
+              complexity: sensorium?.complexity ?? 0.5,
+              season: self.currentSeason ?? 'genesis',
+              vigor: self.vigorState?.vigor ?? 0.5,
+            }))
+            .digest('hex').slice(0, 16)
+          db.recordSensorimotorExperience(
+            contextSig,
+            name,
+            !isError,
+            0, // duration not tracked at this level
+            self.session.getTurnCount(),
+          )
+        }
+      } catch { /* sensorimotor recording is non-critical */ }
+    })
 }
