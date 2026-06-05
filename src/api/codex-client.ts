@@ -219,7 +219,17 @@ export class CodexClient implements StreamClient {
     let receivedFirstChunk = false
 
     // Wire external abort signal to reader.cancel() (same fix as OpenAIClient).
-    const abortCleanup = signal ? wireAbortToReaderCancel(signal, reader) : null
+
+    // Hard timeout guarantee: ensures reader.read() is unblocked even if
+    // reader.cancel() alone cannot break the TCP connection (keep-alive hang).
+    // Matches the OpenAIClient pattern — max stream duration = 10 minutes.
+    const timeoutController = new AbortController()
+    const maxStreamMs = 10 * 60_000
+    const maxStreamTimer = setTimeout(() => timeoutController.abort(), maxStreamMs)
+
+    const signalCleanup = signal
+      ? wireAbortToReaderCancel(AbortSignal.any([signal, timeoutController.signal]), reader)
+      : wireAbortToReaderCancel(timeoutController.signal, reader)
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
@@ -234,6 +244,9 @@ export class CodexClient implements StreamClient {
       resetIdleTimer()
       while (true) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        if (timeoutController.signal.aborted) {
+          throw new Error('Codex SSE stream hard timeout (10min) — stream exceeded maximum duration')
+        }
 
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
@@ -390,7 +403,8 @@ export class CodexClient implements StreamClient {
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
-      if (abortCleanup) abortCleanup()
+      if (maxStreamTimer) clearTimeout(maxStreamTimer)
+      if (signalCleanup) signalCleanup()
       reader.releaseLock()
     }
 
