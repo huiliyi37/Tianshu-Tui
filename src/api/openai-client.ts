@@ -304,7 +304,7 @@ export class OpenAIClient implements StreamClient {
       maxTotalRetries: isThinking ? 1 : undefined,
       onRetry: (info) => {
         if (info.classified.category === 'rate_limit') {
-          callbacks.onRateLimit?.()
+          callbacks.onRateLimit?.(info.classified.retryDelayMs)
         }
       },
     })

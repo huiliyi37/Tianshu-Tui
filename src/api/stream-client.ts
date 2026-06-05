@@ -14,7 +14,7 @@ export interface StreamCallbacks {
   /** Hint: a tool call's name and partial args are parseable (for speculative prewarm). Optional. */
   onToolCallHint?: (toolName: string, partialArgs: Record<string, unknown>) => void
   /** Called when a rate limit (429) is encountered and being retried. Optional. */
-  onRateLimit?: () => void
+  onRateLimit?: (retryDelayMs?: number) => void
 }
 
 /** Canonical streaming interface shared by all provider clients */

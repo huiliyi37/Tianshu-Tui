@@ -1506,6 +1506,7 @@ export class AgentLoop {
         let turnThinkingAccum = ''
         let emittedTextThisTurn = ''
         let rateLimitOccurred = false
+        let rateLimitRetryMs = 0
         const prevThinkingFingerprint = this.lastTurnThinkingFingerprint
         let turnDedupState: 'tracking' | 'flushed' = 'tracking'
         let pendingFlush = ''
@@ -1582,8 +1583,9 @@ export class AgentLoop {
               callbacks.onPhaseChange?.('working', { reason: 'waiting for first token' })
             },
             onError: callbacks.onError,
-            onRateLimit: () => {
+            onRateLimit: (retryDelayMs) => {
               rateLimitOccurred = true
+              rateLimitRetryMs = retryDelayMs ?? 0
             },
           },
         })
@@ -1614,7 +1616,9 @@ export class AgentLoop {
         // add an inter-turn delay to avoid hitting the rate limit again
         // before the provider's rate window resets.
         if (rateLimitOccurred) {
-          await new Promise(r => setTimeout(r, 2000))
+          // Use server-provided retry delay when available, otherwise fall back to 2s
+          const delayMs = rateLimitRetryMs > 0 ? rateLimitRetryMs : 2000
+          await new Promise(r => setTimeout(r, delayMs))
         }
 
         // L0 telemetry: stream duration
