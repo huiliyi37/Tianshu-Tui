@@ -113,6 +113,38 @@ describe('parseBlocks', () => {
     assert.equal(blocks.length, 4)
     assert.deepEqual(blocks.map(b => b.type), ['header', 'paragraph', 'code', 'list'])
   })
+
+  // Regression: a `#`-prefixed line that is NOT a valid ATX header (the header
+  // branch requires `#{1,6}\s+`, but the paragraph collector excludes anything
+  // starting with `#`) used to leave `i` unchanged → infinite 100% CPU loop
+  // that froze the entire TUI. parseBlocks must always terminate.
+  describe('terminates on hash lines that are not valid headers (no UI freeze)', () => {
+    const wedgers = [
+      '#foo',              // no space after hash
+      '#标题',             // CJK header without space (very common)
+      '###结论',           // multi-hash CJK header without space
+      '####### x',         // 7+ hashes — exceeds #{1,6}
+      '#',                 // bare hash
+      'normal line\n#标题\nmore text', // wedger mid-stream
+    ]
+    for (const input of wedgers) {
+      it(`does not hang on ${JSON.stringify(input)}`, () => {
+        // If parseBlocks regresses to the infinite loop, this never returns and
+        // the test runner times out — a hang is the failure signal.
+        const blocks = parseBlocks(input)
+        assert.ok(blocks.length >= 1, 'should emit at least one block')
+        // The orphan hash line is preserved as paragraph text, not dropped.
+        const joined = blocks.map(b => b.content).join('\n')
+        assert.ok(joined.includes('#'), 'hash line content must be preserved')
+      })
+    }
+
+    it('renders a valid ATX header normally (space after hash)', () => {
+      const blocks = parseBlocks('# Real Header')
+      assert.equal(blocks.length, 1)
+      assert.equal(blocks[0]!.type, 'header')
+    })
+  })
 })
 
 describe('keywordsForLang', () => {
