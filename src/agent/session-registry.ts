@@ -109,8 +109,8 @@ export class SessionRegistry {
     if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
     let db: any
     try {
-      const { createRequire } = require('node:module') as typeof import('node:module')
-      const Database = createRequire(import.meta.url)('better-sqlite3')
+      const nodeModule = await import('node:module')
+      const Database = nodeModule.createRequire(import.meta.url)('better-sqlite3')
       if (!Database) throw new Error('better-sqlite3 not installed')
       const dbPath = join(stateDir, 'registry.db')
       db = new Database(dbPath)
@@ -203,10 +203,12 @@ export class SessionRegistry {
         crashed.push(s)
       }
     }
-    // Reap crashed sessions (cascades to claims)
+    // Reap crashed sessions and their claims (no FK cascade in schema)
     if (crashed.length > 0) {
       const ids = crashed.map(s => s.id)
       const placeholders = ids.map(() => '?').join(',')
+      this.safeRun(`DELETE FROM claims WHERE session_id IN (${placeholders})`, ...ids)
+      this.safeRun(`DELETE FROM sessions WHERE id IN (${placeholders})`, ...ids)
       this.safeRun(`DELETE FROM sessions WHERE id IN (${placeholders})`, ...ids)
     }
     return crashed
@@ -265,7 +267,8 @@ export class SessionRegistry {
       ...deadIds
     )
 
-    // Delete dead sessions (cascades to claims)
+    // Delete dead sessions and their claims (no FK cascade in schema)
+    this.safeRun(`DELETE FROM claims WHERE session_id IN (${placeholders})`, ...deadIds)
     this.safeRun(`DELETE FROM sessions WHERE id IN (${placeholders})`, ...deadIds)
 
     return rows.map(r => r.file_path)
