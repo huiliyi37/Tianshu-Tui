@@ -88,7 +88,6 @@ export class OpenAIClient implements StreamClient {
   // context windows. We track the sanitized count and only apply the
   // safety-net sanitize to newly appended messages.
   private _sanitizedCount: number
-  }
 
   setReasoningEffort(effort: string): void {
     // OpenAI uses reasoning_effort in request body — store for next request

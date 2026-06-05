@@ -296,6 +296,10 @@ export class CompactionController {
       }
       return { failures: input.failures, compacted: false }
     }
+
+    const compactDecision = decideCompactTier({
+      estimatedTokens,
+      maxTokens: contextWindow,
       turn: this.deps.session.getTurnCount(),
       failures: input.failures,
       providerProfile: this.deps.providerProfile,
