@@ -1,4 +1,5 @@
 import type { TrajectoryEntry } from './trajectory.js'
+import type { TodoItem } from '../tools/todo-store.js'
 
 export interface TaskState {
   completed: string[]
@@ -40,4 +41,21 @@ export function extractTaskState(entries: TrajectoryEntry[], lastModelText: stri
   }
 
   return { completed, current, remaining, decisions }
+}
+
+/**
+ * Build TaskState from the authoritative todo list instead of trajectory
+ * heuristics. The TodoStore is the model's canonical record, but nothing ever
+ * read it back into the prompt — so after compaction discarded the todo tool
+ * messages the model rebuilt the list from lossy memory and re-ran finished
+ * work. Re-injecting the real list every turn closes that gap.
+ * Decisions still come from the heuristic pass (todos don't carry them).
+ * (root-cause analysis 2026-06-05, Thread 3)
+ */
+export function taskStateFromTodos(todos: TodoItem[], decisions: string[]): TaskState {
+  const completed = todos.filter(t => t.status === 'completed').map(t => t.content)
+  const pending = todos.filter(t => t.status === 'pending').map(t => t.content)
+  const inProgress = todos.find(t => t.status === 'in_progress')
+  const current = inProgress?.content ?? pending[0] ?? 'working'
+  return { completed, current, remaining: pending, decisions }
 }

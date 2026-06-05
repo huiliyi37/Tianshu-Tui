@@ -73,6 +73,24 @@ describe('TODO_TOOL', () => {
   it('is concurrency safe', () => {
     assert.equal(TODO_TOOL.isConcurrencySafe(), true)
   })
+
+  it('warns when a write resets a previously-completed item', async () => {
+    setTodos([
+      { id: '1', content: 'Ship feature', status: 'completed' },
+      { id: '2', content: 'Add tests', status: 'in_progress' },
+    ])
+    const result = await TODO_TOOL.execute({
+      input: { action: 'write', todos: [
+        { id: '1', content: 'Ship feature', status: 'pending' },
+        { id: '2', content: 'Add tests', status: 'in_progress' },
+      ] },
+      toolUseId: 't', cwd: '/',
+    })
+    assert.equal(result.isError ?? false, false)
+    assert.ok(result.content.includes('⚠️'), 'should warn on regression')
+    assert.ok(result.content.includes('Ship feature'))
+    assert.ok(result.content.toLowerCase().includes('do not redo'))
+  })
 })
 
 describe('TodoStore', () => {
@@ -101,4 +119,32 @@ describe('TodoStore', () => {
     assert.equal(store.read().length, 1)
     assert.equal(store.read()[0]!.content, 'New')
   })
+
+  it('detectRegressions flags completed→non-completed and dropped items', () => {
+    const store = new TodoStore()
+    store.write([
+      { id: '1', content: 'Build parser', status: 'completed' },
+      { id: '2', content: 'Wire CLI', status: 'completed' },
+      { id: '3', content: 'Write docs', status: 'in_progress' },
+    ])
+    // Model rebuilds from lossy memory: id 1 reset to pending, id 2 dropped.
+    const regressions = store.detectRegressions([
+      { id: '1', content: 'Build parser', status: 'pending' },
+      { id: '3', content: 'Write docs', status: 'in_progress' },
+    ])
+    assert.equal(regressions.length, 2)
+    assert.ok(regressions.some(r => r.includes('Build parser') && r.includes('pending')))
+    assert.ok(regressions.some(r => r.includes('Wire CLI') && r.includes('dropped')))
+  })
+
+  it('detectRegressions returns empty when completed items stay completed', () => {
+    const store = new TodoStore()
+    store.write([{ id: '1', content: 'Done thing', status: 'completed' }])
+    const regressions = store.detectRegressions([
+      { id: '1', content: 'Done thing', status: 'completed' },
+      { id: '2', content: 'New thing', status: 'pending' },
+    ])
+    assert.deepEqual(regressions, [])
+  })
 })
+

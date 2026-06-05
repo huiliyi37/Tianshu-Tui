@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractTaskState } from '../task-state.js'
+import { extractTaskState, taskStateFromTodos } from '../task-state.js'
 import type { TrajectoryEntry } from '../trajectory.js'
 
 describe('extractTaskState', () => {
@@ -38,5 +38,35 @@ describe('extractTaskState', () => {
     const state = extractTaskState([], '')
     assert.equal(state.completed.length, 0)
     assert.equal(state.current, 'starting')
+  })
+})
+
+describe('taskStateFromTodos', () => {
+  it('maps the authoritative todo list to completed/current/remaining', () => {
+    const state = taskStateFromTodos([
+      { id: '1', content: 'Parse input', status: 'completed' },
+      { id: '2', content: 'Validate', status: 'completed' },
+      { id: '3', content: 'Emit output', status: 'in_progress' },
+      { id: '4', content: 'Document', status: 'pending' },
+    ], ['chose streaming parser'])
+    assert.deepEqual(state.completed, ['Parse input', 'Validate'])
+    assert.equal(state.current, 'Emit output')
+    assert.deepEqual(state.remaining, ['Document'])
+    assert.deepEqual(state.decisions, ['chose streaming parser'])
+  })
+
+  it('falls to first pending as current when nothing is in_progress', () => {
+    const state = taskStateFromTodos([
+      { id: '1', content: 'A', status: 'completed' },
+      { id: '2', content: 'B', status: 'pending' },
+    ], [])
+    assert.equal(state.current, 'B')
+  })
+
+  it('uses "working" when no in_progress or pending items remain', () => {
+    const state = taskStateFromTodos([
+      { id: '1', content: 'A', status: 'completed' },
+    ], [])
+    assert.equal(state.current, 'working')
   })
 })

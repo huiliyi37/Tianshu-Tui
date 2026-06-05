@@ -3,11 +3,12 @@ import type { SessionContext } from './context.js'
 import type { TrajectoryRecorder } from './trajectory.js'
 import type { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { EvidenceTracker } from './evidence.js'
-import { extractTaskState } from './task-state.js'
+import { extractTaskState, taskStateFromTodos } from './task-state.js'
 import { detectMirror } from './behavior-mirror.js'
 import { inferTaskType } from '../model/task-inferrer.js'
 import { recommendModelForTask } from '../model/capability.js'
 import { extractDecisions } from './decision-anchor.js'
+import { getTodos } from '../tools/todo.js'
 
 export interface TurnEndDeps {
   config: AgentConfig
@@ -29,7 +30,15 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
   let decisions = [...deps.decisions]
 
   if (session.getTurnCount() > 3) {
-    const taskState = extractTaskState(trajectory.getEntries(), streamedText)
+    const heuristic = extractTaskState(trajectory.getEntries(), streamedText)
+    // Prefer the authoritative todo list when the model is actively using it;
+    // fall back to the trajectory heuristic otherwise. The real list survives
+    // compaction (the store is a process singleton), so re-injecting it each
+    // turn prevents post-compaction "todo 退回重做". (Thread 3)
+    const todos = getTodos()
+    const taskState = todos.length > 0
+      ? taskStateFromTodos(todos, heuristic.decisions)
+      : heuristic
     config.promptEngine.setTaskProgress(taskState)
  }
 

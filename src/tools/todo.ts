@@ -77,9 +77,25 @@ Always update the list when completing or starting a task.`,
         return { content: TodoStore.formatList(todos) }
       }
 
+      // Warn (don't block) when this write resets or drops a previously
+      // completed item — the signature of post-compaction memory loss. A
+      // legitimate re-open is still allowed; the model just gets told so it
+      // can confirm rather than silently redo finished work. (Thread 3)
+      const regressions = store.detectRegressions(data.todos)
+
       store.write(data.todos)
 
-      return { content: TodoStore.formatSummary(data.todos) }
+      const summary = TodoStore.formatSummary(data.todos)
+      if (regressions.length > 0) {
+        const warn = regressions.map(r => `  - ${r}`).join('\n')
+        return {
+          content: `⚠️ ${regressions.length} previously-completed item(s) were reset or dropped:\n${warn}\n\n`
+            + `If this was unintentional (e.g. rebuilding the list from memory after a long task), `
+            + `re-mark them as completed. Do NOT redo finished work.\n\n${summary}`,
+        }
+      }
+
+      return { content: summary }
     },
 
     requiresApproval: () => false,
