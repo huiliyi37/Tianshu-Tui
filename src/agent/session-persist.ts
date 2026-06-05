@@ -196,7 +196,36 @@ export class SessionPersist {
         }
       } catch { /* skip malformed rows */ }
     }
-    return messages
+    // 压#7: Validate tool_call/tool_result pairing
+    return this.repairOrphanToolCalls(messages)
+  }
+
+  /** 压#7: Remove orphan tool_use/tool_result pairs */
+  private repairOrphanToolCalls(messages: OaiMessage[]): OaiMessage[] {
+    const toolCallIds = new Set<string>()
+    const toolResultIndices = new Map<string, number>()
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i]!
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) { if (tc.id) toolCallIds.add(tc.id) }
+      }
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        toolResultIndices.set(msg.tool_call_id, i)
+      }
+    }
+    const orphanResultIdx = new Set<number>()
+    for (const [id, idx] of toolResultIndices) {
+      if (!toolCallIds.has(id)) orphanResultIdx.add(idx)
+    }
+    return messages.filter((msg, idx) => {
+      if (orphanResultIdx.has(idx)) return false
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        const valid = msg.tool_calls.filter(tc => tc.id && toolResultIndices.has(tc.id))
+        if (valid.length === 0) { const { tool_calls: _, ...rest } = msg; Object.assign(msg, rest) }
+        else if (valid.length < msg.tool_calls.length) { msg.tool_calls = valid }
+      }
+      return true
+    })
   }
 
   /** Compact the session file with the given messages (with checksums) */
