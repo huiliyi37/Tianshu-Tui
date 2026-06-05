@@ -245,6 +245,22 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
   if (offset > 1 || limit) {
     const lines = content.split('\n')
     const startIdx = offset - 1
+    if (startIdx >= lines.length) {
+      return {
+        canonicalPath: filePath,
+        rawContent: `Error: offset ${offset} exceeds file length (${lines.length} lines)`,
+        modelContent: `Error: offset ${offset} exceeds file length (${lines.length} lines). File has ${lines.length} lines. Re-read without offset or use a smaller offset value.`,
+        uiContent: '',
+      }
+    }
+    if (offset < 1) {
+      return {
+        canonicalPath: filePath,
+        rawContent: `Error: offset must be >= 1 (got ${offset})`,
+        modelContent: `Error: offset must be >= 1 (got ${offset}). Lines are 1-based.`,
+        uiContent: '',
+      }
+    }
     const endIdx = limit ? startIdx + limit : undefined
     content = lines.slice(startIdx, endIdx).join('\n')
   }

@@ -144,6 +144,19 @@ Use read_file first to see current content, then construct anchors from the line
       anchors.push(parsed)
     }
 
+    // Ascending order check: anchors must be in strictly increasing line order
+    // for first/last to define a valid replacement range. Reversed anchors
+    // cause line duplication and silent file corruption.
+    for (let i = 1; i < anchors.length; i++) {
+      if (anchors[i]!.line <= anchors[i - 1]!.line) {
+        return {
+          content: `Error: anchors must be in strictly ascending line order. ` +
+            `Anchor ${i + 1} (L${anchors[i]!.line}) is not after anchor ${i} (L${anchors[i - 1]!.line}).`,
+          isError: true,
+        }
+      }
+    }
+
     const content = readFileSync(filePath, 'utf-8')
     const lines = content.split('\n')
 

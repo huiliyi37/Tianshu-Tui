@@ -134,8 +134,10 @@ export class MeridianDb {
   upsertFile(result: ParseResult): void {
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM symbols WHERE file_path = ?').run(result.filePath)
-      this.db.prepare('DELETE FROM edges WHERE source_id LIKE ?').run(`${result.filePath}:%`)
-      this.db.prepare('INSERT OR REPLACE INTO files (path, content_hash) VALUES (?, ?)').run(result.filePath, result.contentHash)
+      // Use GLOB instead of LIKE — LIKE treats _ as single-char wildcard,
+      // causing mis-deletion of edges for similarly-named files (persistence #2).
+      const escapedPath = result.filePath.replace(/[*?[]/g, '[$&]')
+      this.db.prepare('DELETE FROM edges WHERE source_id GLOB ?').run(`${escapedPath}:*`)
 
       const insertSym = this.db.prepare('INSERT OR REPLACE INTO symbols (id, name, kind, file_path, line, exported, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?)')
       for (const s of result.symbols) {
