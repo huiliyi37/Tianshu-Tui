@@ -1,9 +1,10 @@
-import { readFile, writeFile, stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { createHash } from 'crypto'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
 import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
+import { writeFileAtomicAsync } from '../fs-atomic.js'
 
 /**
  * Compute a 8-char hex hash of a line's content (stripped of trailing \r).
@@ -223,7 +224,7 @@ Use read_file first to see current content, then construct anchors from the line
     const newLines = newString === '' ? [] : newString.split('\n')
     const newContent = [...before, ...newLines, ...after].join('\n')
 
-    await writeFile(filePath, newContent, 'utf-8')
+    await writeFileAtomicAsync(filePath, newContent)
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     const warn = syntaxCheck(filePath, newContent)
     return { content: `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') }

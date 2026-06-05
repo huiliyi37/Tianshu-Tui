@@ -1,9 +1,10 @@
-import { writeFile, mkdir, stat } from 'node:fs/promises'
+import { mkdir, stat } from 'node:fs/promises'
 import { dirname } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
 import { refreshFileReadMtime, getFileReadMtime } from './read-file.js'
+import { writeFileAtomicAsync } from '../fs-atomic.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -65,7 +66,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
       // File doesn't exist yet — skip staleness check
     }
 
-    await writeFile(filePath, content, 'utf-8')
+    await writeFileAtomicAsync(filePath, content)
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     const lines = content.split('\n').length
     const warn = syntaxCheck(filePath, content)

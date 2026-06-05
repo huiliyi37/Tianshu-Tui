@@ -1,9 +1,10 @@
-import { readFile, writeFile, stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { hashLine } from './hash-edit.js'
 import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
 import { syntaxCheck } from './syntax-check.js'
+import { writeFileAtomicAsync } from '../fs-atomic.js'
 
 const MAX_EDIT_FILE_BYTES = 100 * 1024 // 100KB — match read_file guard
 
@@ -81,7 +82,7 @@ Bad: using a too-short old_string that matches multiple locations`,
           const replaceAll = (params.input.replace_all as boolean) ?? false
           if (replaceAll) {
             const newContent = freshContent.replaceAll(oldString, newString)
-            await writeFile(filePath, newContent, 'utf-8')
+            await writeFileAtomicAsync(filePath, newContent)
             refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const warn = syntaxCheck(filePath, newContent)
@@ -93,7 +94,7 @@ Bad: using a too-short old_string that matches multiple locations`,
             return { content: buildMultipleMatchError(filePath, oldString, freshContent), isError: true }
           }
           const recovered = freshContent.replace(oldString, newString)
-          await writeFile(filePath, recovered, 'utf-8')
+          await writeFileAtomicAsync(filePath, recovered)
           refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
           const warn = syntaxCheck(filePath, recovered)
           return { content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}` }
@@ -136,7 +137,7 @@ Bad: using a too-short old_string that matches multiple locations`,
       }
     }
 
-    // OOM guard: reject large files that would blow the heap on readFileSync.
+    // OOM guard: reject large files that would blow the heap on readFile.
     // For files >100KB, direct the model to apply_patch or sed instead.
     if (fileStat.size > MAX_EDIT_FILE_BYTES) {
       const sizeKB = (fileStat.size / 1024).toFixed(0)
@@ -159,7 +160,7 @@ Bad: using a too-short old_string that matches multiple locations`,
         }
       }
       const newContent = content.replaceAll(oldString, newString)
-      await writeFile(filePath, newContent, 'utf-8')
+      await writeFileAtomicAsync(filePath, newContent)
       refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
@@ -186,7 +187,7 @@ Bad: using a too-short old_string that matches multiple locations`,
       }
     }
     const newContent = content.replace(oldString, newString)
-    await writeFile(filePath, newContent, 'utf-8')
+    await writeFileAtomicAsync(filePath, newContent)
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     const warn = syntaxCheck(filePath, newContent)
     return { content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : '') }
