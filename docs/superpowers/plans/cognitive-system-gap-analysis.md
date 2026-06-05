@@ -1,26 +1,42 @@
 # 认知系统闭环审计
 
-> 日期: 2026-06-05
-> 状态: Gap Analysis — 记录未整合/不完整部分，待讨论方案
+> 日期: 2026-05-22 设计 → 2026-06-05 审计
+> 状态: Gap Analysis — 三层架构视角
 
 ---
 
-## 已完成的认知管线（✅ 全部接入 loop.ts）
+## 设计三层架构
 
-| 模块 | 行数 | 测试数 | 接入点 |
-|------|------|--------|--------|
-| `affordance.ts` | 361 | 16 | loop.ts:1230 `renderAffordanceHint` |
-| `sensorium.ts` | 279 | 28 | turn-perception.ts → loop.ts:1207 |
-| `vigor.ts` | 217 | 20 | turn-perception.ts → loop.ts:1208 |
-| `cognitive-season.ts` | 68 | 21 | loop.ts:1213 `classifySeason` |
-| `star-event.ts` | 285 | 32 | loop.ts:1206 `getThetaPhase` |
-| `policy-selection.ts` | 137 | 13 | loop.ts:1236 `selectPolicy` |
-| `prediction-error.ts` | 132 | — | loop.ts:1188 `computeEFE` |
-| `turn-perception.ts` | 223 | — | loop.ts:1183 `perception.perceive` |
-| `tool-execution.ts` | 379 | — | 预测误差记录 + 干预升级 |
-| `theta-check.ts` | 79 | — | 外部 theta 信号触发 |
-| `theta-controller.ts` | 68 | — | loop.ts:696 `requestThetaCheck` |
-| `context/cognitive-ledger.ts` | — | — | loop.ts:1061-1078 CVM 投影 |
+认知系统的完整设计来自三份文档：
+1. **HEARTH / 永明灯** (`specs/2026-05-22-yongminengdeng-design.md`) — 个体层参考系稳定性
+2. **Songline / 歌之路** (`specs/2026-05-22-songline-runtime-design.md`) — 生态层存在根基
+3. **协作场景** (`specs/2026-05-23-agent-collaboration-scenario.md`) — 工程映射版
+
+三层关系：
+```
+HEARTH (个体参考系) ← 歌的乐谱骨架
+Songline (生态存在) ← 歌被唱出来的过程
+协作场景            ← 工程落地映射
+```
+
+---
+
+## 第一层：已完成的认知管线（✅ 全部接入 loop.ts）
+
+| 模块 | 行数 | 测试数 | 接入点 | 设计归属 |
+|------|------|--------|--------|---------|
+| `affordance.ts` | 361 | 16 | loop.ts:1230 | Free Energy Engine B1 |
+| `sensorium.ts` | 279 | 28 | turn-perception.ts | Songline 个体层 |
+| `vigor.ts` | 217 | 20 | turn-perception.ts | 认知管线 |
+| `cognitive-season.ts` | 68 | 21 | loop.ts:1213 | Songline 世界节律（session 内） |
+| `star-event.ts` | 285 | 32 | loop.ts:1206 | 阶段转换 |
+| `policy-selection.ts` | 137 | 13 | loop.ts:1236 | Free Energy Engine B2 |
+| `prediction-error.ts` | 132 | — | loop.ts:1188 | Free Energy Engine B1 |
+| `turn-perception.ts` | 223 | — | loop.ts:1183 | 认知管线 |
+| `tool-execution.ts` | 379 | — | 预测误差记录 | Free Energy Engine B4 |
+| `theta-check.ts` | 79 | — | 外部信号触发 | Songline 世界节律 |
+| `theta-controller.ts` | 68 | — | loop.ts:696 | Songline 世界节律 |
+| `context/cognitive-ledger.ts` | — | — | loop.ts:1061 | CVM 认知投影 |
 
 **集成管线流程**（每轮执行）:
 ```
@@ -37,61 +53,107 @@ perceive() → sensorium + vigor + theta
 
 ---
 
-## 未整合 / 不完整的部分
+## 第二层：已实现但未接入（🟡 等待上层完成）
 
-### 1. 🟡 `world-season.ts` — 世界级季节信号（未接入）
+### 2.1 `world-season.ts` — 世界级季节信号
 
 - **文件**: `src/agent/world-season.ts` (46 行)
-- **状态**: 已实现，但 **零 import**。没有任何文件引用它。
-- **设计意图**: 基于"一天中的时间"和"会话持续时间"计算世界级季节（晨/午/暮/夜），作为 `cognitive-season` 的外部输入。
-- **当前问题**: `cognitive-season.ts` 的 `classifySeason` 完全基于内部信号（turn、doom level、stability），没有消费 world-season。
-- **闭环方案**: 
-  - A) 在 `classifySeason` 的输入中增加 `worldSeason` 字段，作为季节分类的额外因子（权重低，例如 0.1）
-  - B) 删除 `world-season.ts`，如果认为内部信号已足够
-
-### 2. 🟡 `ask_user_question` affordance 分类粗糙
-
-- **当前**: `{ epistemic: 0.5, instrumental: 0.5 }` — 完全中性
-- **问题**: 提问行为有明确的认知语义——"获取缺失信息"是 epistemic，"确认执行意图"是 instrumental。静态 0.5/0.5 丢失了这个信号。
-- **影响**: 对工具选择影响小（ask_user_question 不常被 policy 推荐），但作为认知系统完整性的 gap 值得修复。
-- **方案**:
-  - A) 保持 0.5/0.5，因为它确实取决于上下文，affordance 系统的设计就是"静态基线 + 动态调制"
-  - B) 改为 `{ epistemic: 0.65, instrumental: 0.35 }`，因为提问的主要目的是减少不确定性
-
-### 3. 🟡 Prediction Error 反馈链未验证
-
-- **现状**: `tool-execution.ts` 中有 `recordPrediction(correct)` 调用，`prediction-error.ts` 有 `computeEFE` 和干预级别系统。
-- **问题**: 预测的"正确性"判定逻辑是什么？`tool-execution.ts:158-161` 中 `correct` 是怎么算的？这条链路缺少独立测试。
-- **需要**: 确认 prediction → error → EFE → policy 这条反馈链是否真正在影响行为，还是只是"计算了但没用上"。
-
-### 4. 🟢 `contextualModulator` 中的 `fileTools` Set 每次重建
-
-- **现状**: `contextualModulator` 在每次调用时 `new Set([...])`。N=40+ 工具时，每轮创建 40 个 Set。
-- **严重性**: 极低。40 个 Set 创建 < 0.1ms，不会成为瓶颈。
-- **是否修复**: 可以提取为模块级常量，但不是优先级。
-
-### 5. 🟢 Cognitive Pipeline 集成测试覆盖范围
-
-- **现有**: 7 个测试覆盖基本管线流转
-- **缺失场景**:
-  - sensorimotor 反馈触发 affordance 适配（需要 mock MeridianDb）
-  - 连续重复工具触发渐进惩罚
-  - world-season 输入（如果整合的话）
-  - theta phase 变化对 policy 的影响
+- **设计归属**: Songline Phase 1 — "世界物理法则层"
+- **功能**: 基于 UTC 时间戳的 24h 周期（genesis → reversal → return → wuwei），所有 agent 共享
+- **状态**: 已实现，零 import。没有被任何文件引用。
+- **未接入原因**: 它是 Songline 系统的组件，需要 HEARTH 锚位拓扑完成后一起接入。单独接入没有意义——世界节律信号需要落地到锚位才有价值。
+- **Songline 设计公理 3**: "同步来自共享外部信号，不来自内部通信" → `world-season` 就是这个共享外部信号
+- **接入路径**: HEARTH Phase 1 完成 → 在 `classifySeason` 输入中增加 `worldSeason` 作为额外因子
 
 ---
 
-## 总结
+## 第三层：设计完成但未实现（❌ HEARTH + Songline 核心）
 
-| 类别 | 数量 | 说明 |
-|------|------|------|
-| ✅ 已完成并接入 | 12 模块 | 核心管线完整 |
-| 🟡 需要决策 | 3 项 | world-season、ask_user_question、prediction 反馈链验证 |
-| 🟢 可选优化 | 2 项 | Set 提取、测试覆盖扩展 |
+### 3.1 HEARTH 锚位拓扑 (`anchor-graph.ts`)
 
-**核心管线已闭环**。剩余的 gap 都是"增强"而非"缺失"——认知系统的主要信号流（感知 → 季节 → 可供性 → 策略 → 提示注入 → 行动反馈 → 自适应）已经完整运行。
+- **设计**: 5+1 锚位（pole_structure / pole_void / cycle_close / cycle_open / center_belief + 扰动位）
+- **5 条不变量**: INV-1~5（乾坤互补 / 首尾相接 / 中孚环绕 / 扰动位 / 漂移检测）
+- **工程计划**: `src/prompt/anchor-graph.ts`（数据结构 + invariant 校验）
+- **状态**: ❌ 待实现
+- **阻塞**: 无，可独立启动
 
-下一步建议按优先级：
-1. **验证 prediction feedback chain** — 确认 EFE → policy 是否真正影响模型行为
-2. **决定 world-season 去留** — 要么接入，要么删除死代码
-3. **ask_user_question 分类** — 低优先级，5 分钟修复
+### 3.2 Songline 义务引擎 (`obligation.ts`)
+
+- **设计**: 语义级目标追踪，替代预设轮次
+- **关键接口**: `Obligation { description, completionSignal }` + `ObligationEngine.advance(evidence)`
+- **状态**: ❌ 待实现
+- **依赖**: 无硬依赖，但与 HEARTH 锚位协同效果更好
+
+### 3.3 Worker 锚位投影注入
+
+- **设计**: 在 worker prompt 中注入简化的锚位投影（structure/void/belief）
+- **位置**: `src/agent/worker-prompts.ts` → `buildPrimaryWorkerPacket()`
+- **状态**: ❌ 待实现
+- **依赖**: HEARTH Phase 1
+
+### 3.4 Scope-Claim 信息素
+
+- **设计**: Worker 启动时声明 scope-claim，完成时 deposit scope-complete
+- **位置**: 扩展 `StigmergyStore` 信号类型
+- **状态**: ❌ 待实现
+- **依赖**: 无
+
+### 3.5 守火人 (Fire-Keeper)
+
+- **设计**: 碑文迁入 fire-keeper sub-agent，按需召唤校准
+- **状态**: ❌ 待实现（远期，需要 ablation 实验验证）
+- **依赖**: HEARTH Phase 1 + 内化验证数据
+
+---
+
+## 第四层：小优化（🟢 可选）
+
+### 4.1 `ask_user_question` affordance 分类粗糙
+
+- **当前**: `{ epistemic: 0.5, instrumental: 0.5 }`
+- **方案**: 改为 `{ epistemic: 0.65, instrumental: 0.35 }`（提问主要目的是减少不确定性）
+
+### 4.2 `contextualModulator` 中 `fileTools` Set 每次重建
+
+- **严重性**: 极低。40 个 Set 创建 < 0.1ms
+- **方案**: 提取为模块级常量
+
+### 4.3 Prediction Error 反馈链验证
+
+- **问题**: 预测"正确性"判定逻辑需要确认是否真正影响行为
+- **方案**: 添加独立测试验证 `prediction → error → EFE → policy` 链路
+
+---
+
+## 实施路径建议
+
+```
+现在 ──────────────────────────────────────────────► 完整认知系统
+
+[第一层 ✅] 认知管线              [已完成]
+    │
+[第二层 🟡] world-season 接入     [需要 HEARTH 先完成]
+    │
+[第三层 ❌] HEARTH Phase 1        [可独立启动]
+           ├─ anchor-graph.ts
+           ├─ invariant 校验
+           └─ fingerprint 扩展
+    │
+           Songline Phase 1       [可与 HEARTH 并行]
+           ├─ world-season 接入
+           ├─ obligation.ts
+           └─ scope-claim 信息素
+    │
+           Worker 增强             [依赖 HEARTH]
+           ├─ 锚位投影注入
+           └─ scope 边界 gate
+    │
+[远期]      Fire-Keeper           [需要 ablation 数据]
+```
+
+**下一步建议**：
+1. ✅ 第一层已完成
+2. 🔜 HEARTH Phase 1 (`anchor-graph.ts` + 5 invariant) — 认知系统的核心缺失部分
+3. 🔜 Songline Phase 1 (义务引擎 + world-season 接入) — 与 HEARTH 可并行
+4. ⏳ Worker 增强 — HEARTH 完成后
+5. ⏳ Fire-Keeper — 需要实验数据，不设 deadline
