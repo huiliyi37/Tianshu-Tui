@@ -65,6 +65,9 @@ import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
 import { renderAffordanceHint, type AffordanceState } from './affordance.js'
 import { getThetaPhase } from './star-event.js'
+import { selectPolicy, renderPolicyGuidance } from './policy-selection.js'
+import { computeEFE } from './prediction-error.js'
+import { computeAffordanceScores } from './affordance.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
@@ -1223,6 +1226,12 @@ export class AgentLoop {
       recentToolNames: this.recentToolHistory.map(t => t.tool),
     }
     this.config.promptEngine.setAffordanceHint(renderAffordanceHint(affordanceState) || null)
+
+    // ── Free Energy Engine: EFE-driven policy guidance ──
+    const efe = computeEFE(this.predictionAccumulator, this.currentSeason, this.vigorState, currentSensorium)
+    const affordances = computeAffordanceScores(affordanceState)
+    const policies = selectPolicy(efe, affordances, { topK: 5 })
+    this.config.promptEngine.setPolicyGuidance(renderPolicyGuidance(policies, efe) || null)
 
     // Wire StarPhase → phaseClass for field habituation modulation
     const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
