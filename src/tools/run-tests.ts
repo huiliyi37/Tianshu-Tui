@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { readFileSync, existsSync, globSync } from 'node:fs'
+import { readFile, stat, glob } from 'node:fs/promises'
 import { join, delimiter } from 'node:path'
 import type { Tool, ToolCallParams, VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
@@ -14,13 +14,15 @@ interface TestCommand {
   scope: 'full' | 'targeted'
 }
 
-function detectTestCommand(cwd: string): { base: string; runner: string } {
+async function detectTestCommand(cwd: string): Promise<{ base: string; runner: string }> {
   const pkgPath = join(cwd, 'package.json')
-  if (!existsSync(pkgPath)) {
+  try {
+    await stat(pkgPath)
+  } catch {
     return { base: 'npm test', runner: 'npm' }
   }
 
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { scripts?: { test?: string } }
+  const pkg = JSON.parse(await readFile(pkgPath, 'utf-8')) as { scripts?: { test?: string } }
   const testScript = pkg.scripts?.test ?? ''
 
   if (testScript.includes('vitest')) return { base: 'npx vitest run', runner: 'vitest' }
@@ -42,9 +44,12 @@ function isTestFileFilter(filter: string): boolean {
  * Uses Node.js globSync (available in Node 22+) for cross-platform file matching.
  * Returns null if no match is found.
  */
-function resolveFilterToTestFile(cwd: string, filter: string): string | null {
+async function resolveFilterToTestFile(cwd: string, filter: string): Promise<string | null> {
   try {
-    const files = globSync(`src/**/*${filter}*.test.{ts,tsx,js,jsx,mjs,cjs}`, { cwd })
+    const files: string[] = []
+    for await (const f of glob(`src/**/*${filter}*.test.{ts,tsx,js,jsx,mjs,cjs}`, { cwd })) {
+      files.push(f)
+    }
     if (files.length === 0) return null
     const exact = files.find(f => f.includes('/' + filter + '.test.') || f.includes('/' + filter))
     return exact ?? files[0] ?? null
@@ -53,8 +58,8 @@ function resolveFilterToTestFile(cwd: string, filter: string): string | null {
   }
 }
 
-function buildTestCommand(cwd: string, filter?: string): TestCommand {
-  const { base, runner } = detectTestCommand(cwd)
+async function buildTestCommand(cwd: string, filter?: string): Promise<TestCommand> {
+  const { base, runner } = await detectTestCommand(cwd)
   if (!filter) {
     return { command: 'npm', args: ['test'], display: 'npm test', runner, scope: 'full' }
   }
@@ -73,7 +78,7 @@ function buildTestCommand(cwd: string, filter?: string): TestCommand {
 
   // Resolve non-file-path filter to actual test file via find
   if (runner === 'node-test' && safeFilter.length > 0) {
-    const resolved = resolveFilterToTestFile(cwd, safeFilter)
+    const resolved = await resolveFilterToTestFile(cwd, safeFilter)
     if (resolved && base.includes('tsx')) {
       return { command: 'tsx', args: ['--test', resolved], display: `tsx --test ${resolved}`, runner, scope: 'targeted' }
     }
@@ -254,7 +259,7 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
     const filter = params.input.filter as string | undefined
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
-    const testCommand = buildTestCommand(params.cwd, filter)
+    const testCommand = await buildTestCommand(params.cwd, filter)
 
     return new Promise((resolve) => {
       const child = track(spawn(testCommand.command, testCommand.args, {

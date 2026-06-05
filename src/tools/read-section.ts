@@ -1,4 +1,4 @@
-import { statSync } from 'fs'
+import { stat } from 'node:fs/promises'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { ArtifactCorruptionError } from '../artifact/store.js'
 import { computeModelReadCap } from './model-read-cap.js'
@@ -146,7 +146,7 @@ Good: read_section(artifactId="abc123", section="L100-L200")`,
     try {
       // Guard against reading multi-MB raw files into memory.
       let _rawSize = 0
-      try { _rawSize = statSync(artifact.rawPath).size } catch { /* file may not exist */ }
+      try { _rawSize = (await stat(artifact.rawPath)).size } catch { /* file may not exist */ }
       if (_rawSize > MAX_RAW_BYTES) {
         return {
           content: `Error: Artifact ${artifactId} raw file is too large (${(_rawSize / 1024 / 1024).toFixed(1)}MB > 2MB limit). Use grep on the original output, or bash with head/tail to inspect the file directly.`,

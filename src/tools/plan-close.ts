@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFile, writeFile, stat } from 'node:fs/promises'
 import { relative } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { validatePath } from './path-validate.js'
@@ -75,7 +75,9 @@ export const PLAN_CLOSE_TOOL: Tool = {
     if (!relativePath.startsWith('docs/superpowers/plans/') || !relativePath.endsWith('.md')) {
       return { content: `Error: plan_close only supports Markdown files under docs/superpowers/plans/: ${relativePath}`, isError: true }
     }
-    if (!existsSync(filePath)) {
+    try {
+      await stat(filePath)
+    } catch {
       return { content: `Error: Plan file not found: ${filePath}`, isError: true }
     }
 
@@ -85,7 +87,7 @@ export const PLAN_CLOSE_TOOL: Tool = {
     }
 
     try {
-      const result = closePlanMarkdown(readFileSync(filePath, 'utf-8'), {
+      const result = closePlanMarkdown(await readFile(filePath, 'utf-8'), {
         tasks,
         verifiedCommands: asStringArray(params.input.verifiedCommands),
         deliveryState,
@@ -95,7 +97,7 @@ export const PLAN_CLOSE_TOOL: Tool = {
 
       const action = closureAction(result)
       if (params.input.apply === true) {
-        writeFileSync(filePath, result.content, 'utf-8')
+        await writeFile(filePath, result.content, 'utf-8')
         return {
           content: [
             `Plan closed: ${relativePath}`,
