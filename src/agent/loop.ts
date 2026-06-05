@@ -136,6 +136,8 @@ export class AgentLoop {
     session!: SessionContext;
     config!: AgentConfig;
   abortController: AbortController | null = null
+  /** Count of user interrupts within the current turn (中#5). */
+  private _turnInterruptCount = 0
   cwd: string
   evidence: EvidenceTracker
   private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
@@ -555,6 +557,7 @@ export class AgentLoop {
   }
 
   abort(): void {
+    this._turnInterruptCount++
     this.abortController?.abort()
     // NOTE: killAll() removed — it was a global hammer that killed processes
     // from ALL AgentLoop instances, not just this one (中间层 #1).
@@ -658,8 +661,8 @@ export class AgentLoop {
     const disk = this.latestResourceSnapshot.disk
     const trigger = classifyRecoveryTrigger({
       interrupt: {
-        interruptCountThisTurn: 0,
-        hasPendingTools: false,
+        interruptCountThisTurn: this._turnInterruptCount,
+        hasPendingTools: this.detectPendingTools(),
         turn: this.session.getTurnCount(),
       },
       doomLoop: {
@@ -675,13 +678,7 @@ export class AgentLoop {
         contextWindow: this.config.contextWindow,
         lastCompactFailed: this.compactFailures.consecutiveFailures > 0,
       },
-      integrity: {
-        orphanToolUseCount: 0,
-        orphanToolResultCount: 0,
-        wasRepaired: false,
-        syntheticResultsInserted: 0,
-        messageCount: this.session.getMessages().length,
-      },
+      integrity: this.computeSessionIntegrity(),
       resourcePressure: {
         rssBytes: this.latestResourceSnapshot.memory.rssBytes,
         heapUsedBytes: this.latestResourceSnapshot.memory.heapUsedBytes,
@@ -692,6 +689,47 @@ export class AgentLoop {
       },
     })
     this.latestReliabilityDecision = modeForRecoveryTrigger(trigger)
+  }
+
+  /** 中#5: Check for tool_calls that have no matching tool_result. */
+  private detectPendingTools(): boolean {
+    const msgs = this.session.getMessages()
+    const pendingIds = new Set<string>()
+    for (const msg of msgs) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          if (tc.id) pendingIds.add(tc.id)
+        }
+      }
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        pendingIds.delete(msg.tool_call_id)
+      }
+    }
+    return pendingIds.size > 0
+  }
+
+  /** 中#5: Compute session integrity snapshot for recovery trigger. */
+  private computeSessionIntegrity() {
+    const msgs = this.session.getMessages()
+    const toolCallIds = new Set<string>()
+    const toolResultIds = new Set<string>()
+    for (const msg of msgs) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          if (tc.id) toolCallIds.add(tc.id)
+        }
+      }
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        toolResultIds.add(msg.tool_call_id)
+      }
+    }
+    return {
+      orphanToolUseCount: [...toolCallIds].filter(id => !toolResultIds.has(id)).length,
+      orphanToolResultCount: [...toolResultIds].filter(id => !toolCallIds.has(id)).length,
+      wasRepaired: false,
+      syntheticResultsInserted: 0,
+      messageCount: msgs.length,
+    }
   }
 
   requestThetaCheck(reason: string): void {
@@ -815,6 +853,7 @@ export class AgentLoop {
   private async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean }> {
     await this.warmupMemories()
     this.abortController = new AbortController()
+    this._turnInterruptCount = 0
     await this.startFsWatcher()
     // P7: heartbeat watchdog — surfaces "still working" signal during long
     // silent operations so the UI doesn't appear frozen and users don't
