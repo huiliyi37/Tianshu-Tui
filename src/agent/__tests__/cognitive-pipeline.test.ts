@@ -224,6 +224,119 @@ describe('Cognitive Pipeline — end-to-end', () => {
     }
   })
 
+  it('returns empty hint when both sensorium and vigor are null (no cognitive state)', () => {
+    const state = mockAffordanceState()
+    const hint = renderAffordanceHint(state)
+    assert.equal(hint, '', 'should return empty string when no sensorium and no vigor')
+
+    // Full pipeline with null state: computeEFE should degrade gracefully
+    const acc = mockAccumulator([])
+    const efe = computeEFE(acc, null, null, null)
+    assert.ok(efe.epistemicValue >= 0, 'epistemicValue should degrade gracefully')
+    assert.ok(efe.pragmaticValue >= 0, 'pragmaticValue should degrade gracefully')
+    assert.ok(efe.precision >= 0.3, 'precision should floor at 0.3')
+
+    // Affordance scores with null state should still produce valid output
+    const scores = computeAffordanceScores(state)
+    assert.ok(Object.keys(scores).length > 0, 'should still produce affordance scores')
+    for (const [name, score] of Object.entries(scores)) {
+      assert.ok(score.epistemic >= 0 && score.epistemic <= 1,
+        `${name} epistemic ${score.epistemic} should be in [0,1]`)
+      assert.ok(score.instrumental >= 0 && score.instrumental <= 1,
+        `${name} instrumental ${score.instrumental} should be in [0,1]`)
+    }
+
+    // Policy selection with null-derived EFE should still work
+    const policies = selectPolicy(efe, scores, { topK: 3 })
+    assert.ok(Array.isArray(policies), 'should return an array')
+    assert.ok(policies.length > 0, 'should return at least one policy')
+    assert.equal(policies.length, 3, 'should respect topK')
+  })
+
+  it('softmax policy probabilities are valid probability distributions', () => {
+    // With asymmetric tools, specific tools should dominate
+    const state: AffordanceState = {
+      sensorium: mockSensorium({ confidence: 0.2, freshness: 0.3 }),
+      vigor: null,
+      thetaPhase: 'encoding',
+      season: 'genesis',
+      workingSetSize: 0,
+      recentToolNames: [], // empty history
+    }
+    const acc = mockAccumulator([true])
+    const efe = computeEFE(acc, state.season, state.vigor, state.sensorium)
+    const scores = computeAffordanceScores(state)
+
+    // Full distribution (all tools, not just top-K) must sum to ~1
+    const allPolicies = selectPolicy(efe, scores, { topK: 100 })
+    const sum = allPolicies.reduce((s, p) => s + p.probability, 0)
+    assert.ok(Math.abs(sum - 1.0) < 0.001,
+      `full distribution sum ${sum} should ≈ 1.0`)
+
+    // Every probability must be in valid range
+    for (const p of allPolicies) {
+      assert.ok(p.probability >= 0 && p.probability <= 1,
+        `${p.toolName} probability ${p.probability} should be in [0,1]`)
+    }
+
+    // Expected Free Energy G values should be negative for dominant tools
+    // (since computeG returns -(epistemicValue * a.epistemic + pragmaticValue * a.instrumental),
+    //  and all components are positive)
+    for (const p of allPolicies) {
+      assert.ok(typeof p.expectedFreeEnergy === 'number',
+        `${p.toolName} G should be a number`)
+    }
+
+    // Tools with higher G (less negative) should have lower probability
+    for (let i = 1; i < allPolicies.length; i++) {
+      assert.ok(allPolicies[i - 1]!.probability >= allPolicies[i]!.probability,
+        `policies should be sorted: ${allPolicies[i - 1]!.toolName} (${allPolicies[i - 1]!.probability}) >= ${allPolicies[i]!.toolName} (${allPolicies[i]!.probability})`)
+    }
+  })
+
+  it('handles empty recentToolNames — contextual modulator baseline', () => {
+    // Empty recentToolNames: no repetition penalty, no working-set bias for file tools
+    const stateNoWs: AffordanceState = {
+      sensorium: mockSensorium({ confidence: 0.5 }),
+      vigor: null,
+      thetaPhase: null,
+      season: null,
+      workingSetSize: 0,
+      recentToolNames: [],
+    }
+    const scoresNoWs = computeAffordanceScores(stateNoWs)
+
+    // With empty working set, all contextual scores should be at baseline (0.5 ± offset)
+    for (const [name, score] of Object.entries(scoresNoWs)) {
+      assert.ok(score.contextual >= 0 && score.contextual <= 1,
+        `${name} contextual ${score.contextual} should be in [0,1]`)
+    }
+
+    // File tools should not be boosted without working set
+    const rfNoWs = scoresNoWs['read_file']!
+    const wfNoWs = scoresNoWs['write_file']!
+
+    // With working set: file tools get +0.2 contextual boost
+    const stateWithWs: AffordanceState = {
+      sensorium: mockSensorium({ confidence: 0.5 }),
+      vigor: null,
+      thetaPhase: null,
+      season: null,
+      workingSetSize: 5,
+      recentToolNames: [],
+    }
+    const scoresWithWs = computeAffordanceScores(stateWithWs)
+    const rfWithWs = scoresWithWs['read_file']!
+
+    assert.ok(rfWithWs.contextual > rfNoWs.contextual,
+      `read_file contextual should boost with working set: ${rfWithWs.contextual} > ${rfNoWs.contextual}`)
+
+    // No repetition penalty since recentToolNames is empty
+    // (baseline contextual for grep is same as read_file without working set)
+    assert.equal(rfNoWs.contextual, 0.5,
+      'baseline contextual should be 0.5 with no working set and empty history')
+  })
+
   it('produces valid XML blocks within token budget', () => {
     const state: AffordanceState = {
       sensorium: mockSensorium({ confidence: 0.6, freshness: 0.5 }),
