@@ -213,11 +213,46 @@ export interface MaybeCompactResult {
 export class CompactionController {
   private _llmCompactInFlight = false
   constructor(private deps: CompactionControllerDeps) {}
+  private _prefixOverheadSet = false
+
+  constructor(private deps: CompactionControllerDeps) {}
+
+  /**
+   * Compute the fixed token overhead from system prompt and tool definitions.
+   * Called once per session. Without this baseline, estimatedTokens is
+   * systematically 5K-8K tokens too low, causing compaction decisions to
+   * trigger too late.
+   */
+  private _ensurePrefixOverhead(): void {
+    if (this._prefixOverheadSet) return
+    this._prefixOverheadSet = true
+
+    // System prompt tokens
+    const sysPrompt = this.deps.promptEngine.getSystemPrompt()
+    const sysTokens = estimateOaiTokens([{ role: 'system', content: sysPrompt }])
+
+    // Tool definition tokens: ~200 chars per tool, CHARS_PER_TOKEN=4 → ~50/tool
+    // Conservative estimate based on typical tool schema size
+    const toolCount = this.deps.promptEngine.getToolCount?.() ?? 12
+    const toolTokens = toolCount * 50
+
+    // Volatile block overhead (frozen hints, git-status, session-state)
+    // — stripped for cache stability but still present in token count
+    const volatileOverhead = 400
+
+    const overhead = sysTokens + toolTokens + volatileOverhead
+    this.deps.session.setPrefixOverhead(overhead)
+  }
 
   async maybeCompact(input: MaybeCompactInput): Promise<MaybeCompactResult> {
     const messages = this.deps.session.getMessages()
 
     // Prune removed (C4): pruneStaleToolResults was called here solely for debugLog
+    // stats — it never mutated storage. The actual request-time pruning happens in
+    // PromptEngine.buildOaiRequest via semanticPruneLayer1 + detectStaleness.
+
+    this._ensurePrefixOverhead()
+    const estimatedTokens = this.deps.session.getEstimatedTokens()
     // stats — it never mutated storage. The actual request-time pruning happens in
     // PromptEngine.buildOaiRequest via semanticPruneLayer1 + detectStaleness.
 
@@ -230,8 +265,20 @@ export class CompactionController {
     // compact at 75% as a graceful degradation before the 86% session split.
     // This preserves key context via model-generated summary rather than the
     // abrupt "nuke everything" of trySessionSplit.
+    //
+    // Circuit breaker: consecutive LLM compact failures are tracked via
+    // CompactCircuitBreakerState. After 3 consecutive failures, the breaker
+    // opens and skips LLM compact for the next 3 turns, preventing repeated
+    // 750K-860K token requests from being wasted on a failing pipeline.
     if (this.deps.contextWindow >= 1_000_000) {
       if (ratio >= 0.75 && this.deps.primaryClient) {
+        // Check circuit breaker before attempting expensive LLM compact
+        const breakerOpen = input.failures.disabledUntilTurn !== undefined
+          && this.deps.session.getTurnCount() < input.failures.disabledUntilTurn
+        if (breakerOpen) {
+          debugLog(`[llm-compact] circuit breaker open until turn ${input.failures.disabledUntilTurn} — skipping`)
+          return { failures: input.failures, compacted: false }
+        }
         debugLog(`[llm-compact] 1M window at ${(ratio * 100).toFixed(0)}% — triggering LLM compact`)
         const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
         if (summary) {
@@ -242,15 +289,17 @@ export class CompactionController {
             maxFallback: this.deps.contextWindow * 0.3,
             fallbackText: '<compact-summary>LLM compact failed to fit; session continues with cache anchors.</compact-summary>',
           })
-          return { failures: input.failures, compacted: true }
+          return { failures: recordCompactSuccess(input.failures), compacted: true }
+        }
+        // LLM compact returned null — track failure for circuit breaker
+        debugLog(`[llm-compact] LLM compact failed (null summary)`)
+        return {
+          failures: recordCompactFailure(input.failures, this.deps.session.getTurnCount()),
+          compacted: false,
         }
       }
       return { failures: input.failures, compacted: false }
     }
-
-    const compactDecision = decideCompactTier({
-      estimatedTokens,
-      maxTokens: contextWindow,
       turn: this.deps.session.getTurnCount(),
       failures: input.failures,
       providerProfile: this.deps.providerProfile,

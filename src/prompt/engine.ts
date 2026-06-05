@@ -416,6 +416,10 @@ export class PromptEngine {
     this.fingerprint = computeFingerprint(this.systemPrompt, tools, this.volatileBlock)
   }
 
+  /** Number of tool definitions (for prefix overhead estimation). */
+  getToolCount(): number {
+    return this.config.staticCtx.tools.length
+  }
   updateSessionMemory(block: string): void {
     this.sessionMemoryOverride = block
     this.rebuildFrozenBase()

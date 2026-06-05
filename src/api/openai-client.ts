@@ -77,6 +77,17 @@ export class OpenAIClient implements StreamClient {
     this.systemSuffix = (config.providerName === 'mimo' || config.providerName === 'deepseek') && config.thinking === 'enabled'
       ? '\n\n请在内部思考链中使用中文进行推理。不要在回复中输出你的推理过程，只输出最终答案或工具调用。'
       : ''
+    this._sanitizedCount = 0
+  }
+
+  // ── Incremental sanitize ─────────────────────────────────────
+  // Historical messages are already sanitized at entry points
+  // (addUserMessage/addAssistantBlocks/addToolResults). Re-sanitizing
+  // the full message array every turn is O(history) overhead that grows
+  // linearly with conversation length — particularly wasteful at 1M
+  // context windows. We track the sanitized count and only apply the
+  // safety-net sanitize to newly appended messages.
+  private _sanitizedCount: number
   }
 
   setReasoningEffort(effort: string): void {
@@ -183,19 +194,25 @@ export class OpenAIClient implements StreamClient {
       const sysMsg = (body.messages as Record<string, unknown>[]).find(m => m.role === 'system')
       if (sysMsg && typeof sysMsg.content === 'string') {
         sysMsg.content += this.systemSuffix
+    // Incremental sanitize: only re-sanitize messages appended since last
+    // request. Historical messages were already sanitized at entry points
+    // (addUserMessage/addAssistantBlocks/addToolResults). This avoids O(n)
+    // overhead that grows linearly with conversation length.
+    const messages = body.messages as Array<Record<string, unknown>>
+    if (messages.length <= this._sanitizedCount) {
+      // Compaction or message replacement: reset and full sanitize
+      this._sanitizedCount = 0
+    }
+    const newMessages = messages.slice(this._sanitizedCount)
+    if (newMessages.length > 0) {
+      const sanitizedNew = sanitizeMessageContent(newMessages)
+      for (let i = 0; i < sanitizedNew.length; i++) {
+        messages[this._sanitizedCount + i] = sanitizedNew[i]!
       }
+      this._sanitizedCount = messages.length
     }
 
-    // DeepSeek Beta prefix completion: inject assistant prefix to skip preamble.
-    if (shouldInjectPrefix({
-      provider: this.config.providerName ?? '',
-      hasToolChoice: !!body.tool_choice,
-      enabled: this.config.prefixCompletion ?? false,
-    })) {
-      ;(body.messages as unknown[]).push(buildPrefixMessage())
-    }
-
-    // Sanitize messages to remove problematic characters (control chars, lone surrogates)
+    await this.sendStream(body, callbacks, signal)
     // that inflate JSON body size and can cause "unexpected end of hex escape" parse errors
     // when the API server truncates the body at a byte boundary.
     const sanitizedBody = sanitizeMessageContent(body)
