@@ -94,6 +94,30 @@ function classifyByStatus(status: number): ClassifiedError | null {
     }
   }
 
+  // Request timeout (server timed out waiting for request) — transient, retryable
+  if (status === 408) {
+    return {
+      retryable: true,
+      retryDelayMs: 2000,
+      shouldReconnect: true,
+      category: 'timeout',
+      userMessage: 'Server request timeout. Retrying.',
+      maxRetries: 3,
+    }
+  }
+
+  // Too Early (RFC 8470) — server unwilling to process, retryable after delay
+  if (status === 425) {
+    return {
+      retryable: true,
+      retryDelayMs: 2000,
+      shouldReconnect: true,
+      category: 'overloaded',
+      userMessage: 'Server not ready (Too Early). Retrying.',
+      maxRetries: 3,
+    }
+  }
+
   // Context overflow
   if (status === 413) {
     return {
