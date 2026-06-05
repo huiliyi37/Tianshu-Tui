@@ -200,18 +200,18 @@ export class OpenAIClient implements StreamClient {
     // request. Historical messages were already sanitized at entry points
     // (addUserMessage/addAssistantBlocks/addToolResults). This avoids O(n)
     // overhead that grows linearly with conversation length.
-    const messages = body.messages as Array<Record<string, unknown>>
-    if (messages.length <= this._sanitizedCount) {
+    const msgArray = body.messages as Array<Record<string, unknown>>
+    if (msgArray.length <= this._sanitizedCount) {
       // Compaction or message replacement: reset and full sanitize
       this._sanitizedCount = 0
     }
-    const newMessages = messages.slice(this._sanitizedCount)
+    const newMessages = msgArray.slice(this._sanitizedCount)
     if (newMessages.length > 0) {
       const sanitizedNew = sanitizeMessageContent(newMessages)
       for (let i = 0; i < sanitizedNew.length; i++) {
-        messages[this._sanitizedCount + i] = sanitizedNew[i]!
+        msgArray[this._sanitizedCount + i] = sanitizedNew[i]!
       }
-      this._sanitizedCount = messages.length
+      this._sanitizedCount = msgArray.length
     }
 
     await this.sendStream(body, callbacks, signal)

@@ -212,7 +212,6 @@ export interface MaybeCompactResult {
 
 export class CompactionController {
   private _llmCompactInFlight = false
-  constructor(private deps: CompactionControllerDeps) {}
   private _prefixOverheadSet = false
 
   constructor(private deps: CompactionControllerDeps) {}

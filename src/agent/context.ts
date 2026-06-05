@@ -33,7 +33,8 @@ export interface SessionState {
   startTime: number
   estimatedTokens: number
   filesRead: Set<string>
-  estimatedTokens: number
+  filesModified: Set<string>
+  testResults: Array<{ passed: number; failed: number }>
   /** Fixed overhead from system prompt, tool schemas, and static blocks
    *  that are not reflected in per-message token estimates. Set by the
    *  prompt engine after the first request build. */
@@ -68,6 +69,7 @@ export class SessionContext {
       startTime: Date.now(),
       estimatedTokens: 0,
       prefixOverhead: 0,
+      filesRead: new Set(),
       filesModified: new Set(),
       testResults: [],
       turnCacheHistory: [],
