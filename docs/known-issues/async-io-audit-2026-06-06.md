@@ -127,11 +127,53 @@
 
 ---
 
-## 六、附录：未提交改动清单
+## 六、session-registry.ts 专项审计
 
-```
- M docs/known-issues/tui-duplicate-render-and-scroll.md
- M src/tools/path-validate.ts
+### 修改历史
+
+| 提交 | 变更 |
+|------|------|
+| `b31ba91` | 修复 ESM require 崩溃 + 显式 claims 删除（因无 FK cascade） |
+| `9718ce3` | 检查 `safeRun` 返回值 + 移除重复 session 删除 |
+| `fa90d29` | 仅改 warning 消息（+reason），无行为变更 |
+
+### 发现的问题
+
+**1. `acquireClaim` 存在死代码（不影响卡死）**
+
+`src/agent/session-registry.ts:224-226`:
+```typescript
+    const changes = this.safeRun(...)
+    return changes > 0
+    return true        // ← 死代码，永不可达
 ```
 
-`path-validate.ts` 改动：`resolveNearestExisting` 增加 `floor` 参数，防止在 macOS 上因 `/home` symlink 误判路径逃逸。与卡死无直接关系。
+`9718ce3` 在 `return true` 之前插入了 `return changes > 0`，但没有删除原有的 `return true`。当 `safeRun` 失败并返回 0 时（如 null DB fallback），函数返回 `false` 而非 fallback 的 `true`。
+
+**实际影响**：当 `better-sqlite3` 不可用时，`acquireClaim` 永远返回 `false`。这会导致 delegation coordinator 和 tool-pipeline 的 claims 检测功能退化——但**不会导致卡死**，只是 claims 冲突检测不生效。
+
+**2. `create()` 中的 sync I/O（不影响卡死）**
+
+`src/agent/session-registry.ts:113-115`:
+```typescript
+if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
+```
+
+仅在启动时调用一次，`existsSync` + `mkdirSync` 是瞬时操作，不构成阻塞风险。
+
+**3. `create()` 中的动态 import（不影响卡死）**
+
+```typescript
+const nodeModule = await import('node:module')
+const Database = nodeModule.createRequire(import.meta.url)('better-sqlite3')
+```
+
+与 `meridian-db.ts`(`a023e0c`) 的静态 `import { createRequire } from 'node:module'` 方式不同，但功能等效。动态 import 内置模块不会阻塞。
+
+### 结论
+
+`session-registry.ts` 没有引入可导致卡死的代码缺陷。发现的问题限于 `acquireClaim` 在 null DB 场景下的返回值语义错误。
+
+---
+
+## 七、附录：未提交改动清单
