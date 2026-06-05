@@ -203,6 +203,13 @@ export function assessToolRisk(
     }
   }
 
+  // Sandbox execution: code runs in Node.js child process with full fs/net/child_process
+  // access. Despite the "sandbox" name, this is NOT isolated — treat as arbitrary code execution.
+  if (toolName === 'sandbox_exec') {
+    reasons.push('arbitrary JavaScript execution — full Node.js process with fs/net/child_process access')
+    level = 'high'
+  }
+
   // Write operations
   if (toolName === 'write_file' || toolName === 'edit_file') {
     level = level === 'none' ? 'low' : level
