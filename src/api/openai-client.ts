@@ -35,6 +35,11 @@ export interface OpenAIClientConfig {
   useMaxCompletionTokens?: boolean
   /** Custom User-Agent header — required by providers that verify caller identity (e.g. Kimi) */
   userAgent?: string
+  /** Provider-specific capability flags (网#1). */
+  capabilities?: {
+    /** DeepSeek sometimes emits tool JSON as plain text content. */
+    hasToolJsonInContentBug?: boolean
+  }
 }
 
 interface ToolCallChunk {
@@ -70,6 +75,8 @@ export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
   private toolCallHintFired = new Set<number>()
   private pendingStopReason: string | null = null
+  /** Accumulated text for DeepSeek tool-JSON-in-content fallback (网#1). */
+  private _textAccum = ''
   /** Stable suffix appended to system message for Chinese thinking (computed once, cache-safe). */
   private readonly systemSuffix: string
 
@@ -235,6 +242,7 @@ export class OpenAIClient implements StreamClient {
       this.toolCallBuffer.clear()
       this.toolCallHintFired.clear()
       this.pendingStopReason = null
+      this._textAccum = ''
 
       // Inject previous reasoning into messages on retry so the model can
       // resume from where it left off instead of restarting from scratch.
@@ -436,6 +444,11 @@ export class OpenAIClient implements StreamClient {
       }
 
       this.flushToolCalls(callbacks)
+      // 网#1: DeepSeek tool-JSON-in-content fallback
+      if (this.toolCallBuffer.size === 0 && this._textAccum && this.config.capabilities?.hasToolJsonInContentBug) {
+        this.tryParseToolJsonFromContent(this._textAccum, callbacks)
+      }
+      this._textAccum = ''
 
       // Emit thinking content block so reasoning_content can be passed back
       // in subsequent requests. Mimo, MiniMax, and other OpenAI-compatible
@@ -512,6 +525,9 @@ export class OpenAIClient implements StreamClient {
 
     if (delta.content) {
       callbacks.onTextDelta?.(delta.content)
+      if (this.config.capabilities?.hasToolJsonInContentBug) {
+        this._textAccum += delta.content
+      }
     }
 
     if (delta.tool_calls) {
@@ -582,6 +598,32 @@ export class OpenAIClient implements StreamClient {
       })
     }
     this.toolCallBuffer.clear()
+  }
+
+  /** 网#1: Parse tool JSON from accumulated text content (DeepSeek bug workaround). */
+  private tryParseToolJsonFromContent(
+    text: string,
+    callbacks: Partial<Pick<StreamCallbacks, 'onContentBlock'>>,
+  ): void {
+    const trimmed = text.trim()
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return
+    try {
+      const parsed: unknown = JSON.parse(trimmed)
+      const toolCalls = Array.isArray(parsed) ? parsed : [parsed]
+      let emitted = 0
+      for (const tc of toolCalls) {
+        if (typeof tc !== 'object' || tc === null) continue
+        const obj = tc as Record<string, unknown>
+        if (typeof obj.name !== 'string') continue
+        const input = typeof obj.arguments === 'object' && obj.arguments !== null
+          ? obj.arguments as Record<string, unknown>
+          : typeof obj.arguments === 'string'
+            ? (() => { try { return JSON.parse(obj.arguments as string) as Record<string, unknown> } catch { return {} } })()
+            : {}
+        callbacks.onContentBlock?.({ type: 'tool_use', id: `fallback_${obj.name}_${emitted}`, name: obj.name, input })
+        emitted++
+      }
+    } catch { /* Not valid JSON */ }
   }
 }
 
