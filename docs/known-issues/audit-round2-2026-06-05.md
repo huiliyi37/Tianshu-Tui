@@ -21,15 +21,22 @@
 | `2c59dad` | `anthropic-client.ts`, `codex-client.ts` | 第一轮 网#3: abort → AbortError | ✅ |
 | `fe4760f` | `app.tsx` | 第一轮 TUI 真凶①: Static 重复渲染 | ✅ |
 
-**剩余待处理 (新会话接手):**
-- 安全#3: `permissions.ts` patternMatches `*`→`.*` 通配跨 token
-- 持久化#3: stigmergy `_persist` 裸 writeFile 非原子
-- 持久化#4: claims SELECT+INSERT 非事务竞态
+**第二轮修复 (会话 28d4eac6, 2026-06-06):**
+
+| Commit | 文件 | 修复内容 |
+|--------|------|---------|
+| `33e82c0` | `permissions.ts` | 安全#3: `*` 通配从 `.*` 改为排除 shell 操作符字符 |
+| `bbdc8aa` | `stigmergy.ts`, `edit.ts`, `read-file.ts`, `write-file.ts`, `path-validate.ts` | 持久化#3: stigmergy `_persist` 改用 `writeFileAtomicAsync`; 工具#1: read_file 描述修正; 工具#3: write_file staleness warn; 工具#6: edit_file stale recovery OOM guard; path-validate `resolveNearestExisting` 修复 |
+| `6495ccd` | `session-registry.ts` | 持久化#4+#6: 新增 `safeRun`/`safeGet`/`safeAll` helper，所有 DB 操作 try-catch 包裹 |
+| `c53f50b` | `read-file.ts`, `import-resource.ts` | 工具#1: read_file 新增 `BINARY_EXTENSIONS` 检查，真正拒绝二进制文件; 工具#2: import_resource 图片提示不再导向 read_file |
+| `75b3677` | `edit.ts` | 工具#7: stale recovery 写入后刷新 mtime 到写后值，打破 edit→stale→edit 死循环（根因：会话 28d4eac6 9次编辑级联损坏） |
+| `1d652d0` | `package.json` | 测试: `npm test` 加 `--test-force-exit` 防 tsx+454文件孤儿进程 |
+| `b31ba91` | `session-registry.ts` | ESM `require`→`await import` (nullDb 静默失效根因) + detectCrashedSessions/reapStaleClaims 补 claims FK 删除 |
+| `9718ce3` | `session-registry.ts` | acquireClaim 检查 safeRun 返回值 + 删除重复 `DELETE FROM sessions` |
+| `d6824f1` | `read-section.ts` | 2MB 文件大小守卫 + "Re-read the source" 错误信息改为可执行指引（防死循环） |
+
+**剩余待处理:**
 - 持久化#5: checkpoint touched-files 读改写无锁
-- 持久化#6: SQLite 写方法缺 try/catch + migration
-- 工具#1: read_file 假称多模态 (image/PDF)
-- 工具#3: write_file 无 staleness 检测
-- 工具#6: edit_file 陈旧恢复缺 100KB 守卫
 - 安全#5-#11: MCP/SSRF/DNS/注入 机制隐患
 - 资源生命周期维度 (代理夭折,待重做)
 
