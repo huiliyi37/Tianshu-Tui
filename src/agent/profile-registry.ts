@@ -179,7 +179,7 @@ export class ProfileRegistry {
     const loaded: string[] = []
     const errors: string[] = []
     try {
-      const files = readdirSync(dir).filter(f => f.endsWith('.md'))
+      const files = readdirSync(dir).filter(f => f.endsWith('.md') && f !== 'README.md')
       for (const file of files) {
         try {
           const content = readFileSync(join(dir, file), 'utf-8')
