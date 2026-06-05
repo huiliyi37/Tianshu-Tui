@@ -3,7 +3,7 @@ import { createHash } from 'crypto'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
-import { refreshFileReadMtime } from './read-file.js'
+import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
 
 /**
  * Compute a 8-char hex hash of a line's content (stripped of trailing \r).
@@ -97,7 +97,9 @@ Insert after line 42 (anchor points to line 42, replace 0 lines):
 ### Position-only mode (fast path)
 When you just read the file and are confident it hasn't changed, omit the hash:
   hash_edit(file_path="/abs/path/src/app.ts", anchors=["L5", "L7"], new_string="new line 5\\nnew line 6\\nnew line 7")
-This only verifies the line number exists — no content staleness check. Use when you just read the file.
+This verifies the line number exists AND checks that the file has not been
+modified by another tool since your last read_file (same staleness guard as
+edit_file). Use when you just read the file — never chain position-only calls.
 
 ### Hash computation
 The hash is SHA256(line_content_without_trailing_cr)[0:8].
@@ -144,6 +146,29 @@ Use read_file first to see current content, then construct anchors from the line
 
     const content = readFileSync(filePath, 'utf-8')
     const lines = content.split('\n')
+
+    // Staleness guard for position-only anchors: if every anchor omits the
+    // hash (fast-path mode), the file must not have been modified since the
+    // last read_file.  Without this check, consecutive position-only
+    // hash_edit calls on the same file silently operate on shifted line
+    // numbers — the first edit changes the file, and the second edit's
+    // L<num> anchors point to wrong locations because the tool never
+    // verifies content after the first mutation.
+    const currentMtime = statSync(filePath).mtimeMs
+    const posOnly = anchors.every(a => a.hash === null)
+    if (posOnly) {
+      const lastReadMtime = getFileReadMtime(filePath)
+      if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
+        return {
+          content: [
+            `hash_edit position-only stale guard: ${filePath} was modified since your last read_file.`,
+            `Last read mtime: ${lastReadMtime}, current mtime: ${currentMtime}.`,
+            'Re-read the relevant portion and retry with updated anchors, or use full L<num>:<hash> anchors.',
+          ].join('\n'),
+          isError: true,
+        }
+      }
+    }
 
     // Verify all anchors — compute line hashes and match
     const mismatches: Array<{ anchor: Anchor; actualHash: string; actualLine: string }> = []
