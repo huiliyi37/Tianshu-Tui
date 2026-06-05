@@ -209,7 +209,6 @@ export class SessionRegistry {
       const placeholders = ids.map(() => '?').join(',')
       this.safeRun(`DELETE FROM claims WHERE session_id IN (${placeholders})`, ...ids)
       this.safeRun(`DELETE FROM sessions WHERE id IN (${placeholders})`, ...ids)
-      this.safeRun(`DELETE FROM sessions WHERE id IN (${placeholders})`, ...ids)
     }
     return crashed
   }
@@ -225,12 +224,12 @@ export class SessionRegistry {
       if (c.claim_type === 'exclusive') return false // file exclusively locked by another
       if (claimType === 'exclusive') return false // want exclusive but shared_read exists
     }
-
     const now = new Date().toISOString()
-    this.safeRun(
+    const changes = this.safeRun(
       'INSERT OR REPLACE INTO claims (session_id, file_path, claim_type, acquired_at) VALUES (?, ?, ?, ?)',
       sessionId, filePath, claimType, now
     )
+    return changes > 0
     return true
   }
 
