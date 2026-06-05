@@ -108,4 +108,35 @@ describe('BlockStreamWriter', () => {
     assert.ok(emitted.length > 1)
     assert.ok(emitted.every(chunk => chunk.length <= 120))
   })
+
+  // Regression: enforceBufferLimit's `while (buffer.length > maxBufferSize)`
+  // loop relies on findBreakPoint returning a positive cut. A degenerate config
+  // (maxChars <= 0) made it return 0 → buffer.slice(0) unchanged → infinite
+  // 100% CPU spin (same non-advancing-loop class that froze the TUI via
+  // parseBlocks). The writer must always terminate and drain the buffer.
+  it('terminates when maxChars is misconfigured to 0 (no 100% CPU spin)', async () => {
+    const out: string[] = []
+    // If the guard regresses, this push never returns and the test runner
+    // times out — a hang is the failure signal.
+    const w = new BlockStreamWriter(
+      { minChars: 1, maxChars: 0, idleMs: 100, maxBufferSize: 10 },
+      (text) => { out.push(text) },
+    )
+    w.push('y'.repeat(50))
+    await w.flush()
+    assert.ok(out.length >= 1, 'must still emit blocks')
+    assert.equal(out.join(''), 'y'.repeat(50), 'all input must be drained, none lost or duplicated')
+  })
+
+  it('terminates on a long unbroken token with no break points (cap forces progress)', async () => {
+    const out: string[] = []
+    const w = new BlockStreamWriter(
+      { minChars: 1, maxChars: 5, idleMs: 100, maxBufferSize: 8 },
+      (text) => { out.push(text) },
+    )
+    // No spaces/newlines/punctuation → findBreakPoint falls back to maxPos.
+    w.push('Z'.repeat(40))
+    await w.flush()
+    assert.equal(out.join(''), 'Z'.repeat(40), 'all chars drained exactly once')
+  })
 })
