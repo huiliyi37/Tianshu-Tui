@@ -2,7 +2,7 @@
 
 > Phase B of `cross-system-synergy-ideas.md` 联动 #1
 > 前置依赖：Phase A 具身认知闭环 ✅ 已完成
-> 状态：待执行
+> 状态：✅ 已完成 (2026-06-11)
 > 预估：~7.5h，4 个文件，可拆成 4 个独立提交
 
 ## 目标
@@ -237,3 +237,21 @@ B1 (EFE 计算) → B2 (动作选择) → B3 (闭环注入) → B4 (学习)
 2. **不替代 LLM 决策**：EFE 输出是 guidance hint，不是强制 policy——LLM 始终保留自主选择权
 3. **空状态处理**：首次运行时 sensorium/vigor/season 可能为 null，EFE 计算需优雅降级
 4. **Meridian 依赖**：B4 依赖 better-sqlite3，需确认可选化方案（已完成）在 sensorimotor 写入时正常降级
+
+---
+
+## 执行记录
+
+> 2026-06-11 全部完成，5 个提交
+
+| Commit | Step | 内容 |
+|--------|------|------|
+| `e701756` | B1 | EFE 计算核心 — `computeEFE()` + 扩展 `prediction-error.ts` |
+| `7f38363` | B2 | Softmax 动作选择 — `selectPolicy()` + `renderPolicyGuidance()` |
+| `e55aa07` | B3 | 感知-行动闭环 — volatile/engine 注入 policy guidance |
+| `ca57501` | B3 fix | loop.ts 策略引导注入点修正 |
+| `576cbe6` | B4 | Sensorimotor 学习 — `meridian-db.ts` 扩展 sensorimotor_log 表 |
+
+**数据流**：工具执行 → `recordPrediction()` → `computeEFE()` → `selectPolicy()` → `<policy-guidance>` 注入 context → 下一轮 LLM 参考。
+
+**Phase A+B 合计**：6 个新文件，4 个修改文件，63 个测试全部通过。~11.5h 计划 → 实际 5 个提交组。
