@@ -41,6 +41,10 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal — changes every turn. */
   affordanceHint?: string | null
+  /** Policy guidance from Free Energy Engine (EFE + softmax selection).
+   *  Cache-safe: rendered ONLY into the dynamic appendix.
+   *  MUST stay out of buildVolatileBlockInternal — changes every turn. */
+  policyGuidance?: string | null
   /** Cross-session events formatted for injection (cache-safe: only in dynamic appendix) */
   crossSessionEvents?: string
   /**
@@ -140,6 +144,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     routingReason: undefined,
     cerebellarHint: undefined,
     affordanceHint: undefined,
+    policyGuidance: undefined,
     // gitStatus moved to dynamic appendix — changes every turn, breaks prefix cache
     gitStatus: undefined,
     // planModeState and worktreeReality rendered in buildVolatileBlockInternal
@@ -276,6 +281,12 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(ctx.affordanceHint)
   }
 
+  // Policy guidance: EFE-driven softmax action ranking.
+  // Changes per turn based on EFE + affordance scores.
+  if (ctx.policyGuidance) {
+    parts.push(ctx.policyGuidance)
+  }
+
   // Repair hint: ephemeral — keep at very end
   if (ctx.repairHint) {
     parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
@@ -321,6 +332,7 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<repair-hint>')) return 0.8
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
   if (blockContent.startsWith('<affordance-hint>')) return 0.7
+  if (blockContent.startsWith('<policy-guidance>')) return 0.7
   if (blockContent.startsWith('<task-progress')) return 0.7
   if (blockContent.startsWith('<decisions>')) return 0.7
   if (blockContent.startsWith('<worktree-warning')) return 0.7

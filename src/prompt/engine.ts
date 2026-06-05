@@ -68,6 +68,7 @@ export class PromptEngine {
   private routingReason?: string | null
   private cerebellarHint?: string | null
   private affordanceHint?: string | null
+  private policyGuidance?: string | null
   private decisions?: string[]
   private activeDomain?: VolatileContext['activeDomain']
   private activeClaims?: VolatileContext['activeClaims']
@@ -186,7 +187,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, affordanceHint: this.affordanceHint, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -483,6 +484,10 @@ export class PromptEngine {
 
   setAffordanceHint(hint: string | null): void {
     this.affordanceHint = hint ?? undefined
+  }
+
+  setPolicyGuidance(guidance: string | null): void {
+    this.policyGuidance = guidance ?? undefined
   }
 
   setDecisions(decisions: string[]): void {
