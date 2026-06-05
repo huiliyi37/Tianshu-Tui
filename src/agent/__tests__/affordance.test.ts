@@ -5,6 +5,7 @@ import {
   getBaseAffordance,
   computeAffordanceScores,
   renderAffordanceHint,
+  adaptAffordanceFromHistory,
   type AffordanceState,
 } from '../affordance.js'
 
@@ -197,3 +198,34 @@ describe('renderAffordanceHint', () => {
     assert.ok(!inner.includes(' > '), 'should not have unescaped >')
   })
 })
+
+describe('adaptAffordanceFromHistory', () => {
+  it('adjusts affordance when actual success rate deviates from expected', () => {
+    const orig = { ...toolAffordanceRegistry['bash']! }
+
+    const mockGetRate = (name: string): number | null => {
+      if (name === 'bash') return 0.7
+      if (name === 'read_file') return 0.98
+      return null
+    }
+
+    adaptAffordanceFromHistory(mockGetRate)
+
+    const adapted = toolAffordanceRegistry['bash']!
+    assert.ok(adapted.instrumental < orig.instrumental,
+      'bash instrumental should decrease')
+    assert.ok(adapted.epistemic > orig.epistemic,
+      'bash epistemic should increase')
+
+    const rf = toolAffordanceRegistry['read_file']!
+    assert.equal(rf.epistemic, 0.90, 'read_file should be unchanged')
+    assert.equal(rf.instrumental, 0.10, 'read_file should be unchanged')
+
+    toolAffordanceRegistry['bash'] = orig
+  })
+
+  it('returns null for tools without enough data', () => {
+    assert.doesNotThrow(() => adaptAffordanceFromHistory(() => null))
+  })
+})
+

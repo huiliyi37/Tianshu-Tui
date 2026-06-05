@@ -63,7 +63,7 @@ import { TurnStreamController, type StreamRule } from './turn-stream.js'
 import { classifySeason, type CognitiveSeason } from './cognitive-season.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
-import { renderAffordanceHint, type AffordanceState } from './affordance.js'
+import { renderAffordanceHint, type AffordanceState, adaptAffordanceFromHistory } from './affordance.js'
 import { getThetaPhase } from './star-event.js'
 import { selectPolicy, renderPolicyGuidance } from './policy-selection.js'
 import { computeEFE } from './prediction-error.js'
@@ -1232,6 +1232,16 @@ export class AgentLoop {
     const affordances = computeAffordanceScores(affordanceState)
     const policies = selectPolicy(efe, affordances, { topK: 5 })
     this.config.promptEngine.setPolicyGuidance(renderPolicyGuidance(policies, efe) || null)
+
+    // ── Adaptive Affordance: periodically recalibrate base affordances from sensorimotor history ──
+    if (this.session.getTurnCount() % 10 === 0) {
+      try {
+        const db = this.config.meridianIndexer?.getDb()
+        if (db) {
+          adaptAffordanceFromHistory(toolName => db.getToolSuccessRate(toolName, 20))
+        }
+      } catch { /* affordance adaptation is non-critical */ }
+    }
 
     // Wire StarPhase → phaseClass for field habituation modulation
     const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'

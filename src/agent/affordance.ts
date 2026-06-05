@@ -207,6 +207,41 @@ export function getBaseAffordance(toolName: string): BaseAffordance {
   return toolAffordanceRegistry[toolName] ?? DEFAULT_AFFORDANCE
 }
 
+// ─── Adaptive Affordance (Sensorimotor Learning) ─────────────────────
+
+/**
+ * Adapt tool affordance base values based on actual sensorimotor history.
+ *
+ * For each tool with ≥5 recorded experiences, compares actual success rate
+ * against expected (1.0 for instrumental-heavy, 0.95 for epistemic).
+ * Nudges the base affordance toward the tool that actually works better.
+ *
+ * Returns the updated registry (mutates in place for efficiency).
+ */
+export function adaptAffordanceFromHistory(
+  getSuccessRate: (toolName: string) => number | null,
+): typeof toolAffordanceRegistry {
+  for (const toolName of Object.keys(toolAffordanceRegistry)) {
+    const rate = getSuccessRate(toolName)
+    if (rate === null) continue
+
+    const base = toolAffordanceRegistry[toolName]!
+    // Only adapt if there's a meaningful deviation (>0.15) from expectation
+    const isInstrumental = base.instrumental > base.epistemic
+    const expected = isInstrumental ? 1.0 : 0.95
+
+    if (Math.abs(rate - expected) > 0.15) {
+      // Nudge epistemic up if tool underperforms, instrumental up if overperforms
+      const delta = (rate - expected) * 0.1
+      toolAffordanceRegistry[toolName] = {
+        epistemic: clamp(base.epistemic - delta * (isInstrumental ? 1 : -1)),
+        instrumental: clamp(base.instrumental + delta * (isInstrumental ? 1 : -1)),
+      }
+    }
+  }
+  return toolAffordanceRegistry
+}
+
 // ─── Affordance Hint Rendering ─────────────────────────────────────
 
 interface AffordanceHint {
