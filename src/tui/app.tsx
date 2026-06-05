@@ -305,15 +305,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       staticDedupRef.current.add(fp)
     }
     historyBufferRef.current.push(entry)
+    totalItemsPushedRef.current++
     staticBatchRef.current.push(entry)
     if (!staticBatchScheduled.current) {
       staticBatchScheduled.current = true
       queueMicrotask(() => {
         staticBatchScheduled.current = false
         if (staticBatchRef.current.length > 0) {
-          // Increment totalItemsPushedRef atomically with setHistoryVersion
-          // to prevent staticItemsForInk computing a stale `start` offset.
-          totalItemsPushedRef.current += staticBatchRef.current.length
           staticBatchRef.current = []
           setHistoryVersion(v => v + 1)
         }
@@ -323,13 +321,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   /** Synchronously flush any pending microtask-batched static entries.
    *  Called at turn-end / error / abort to ensure all Static updates are
-   *  committed before isStreaming flips. */
+   *  committed before isStreaming flips.
+   *  ref++ is already synced in pushStatic — this only flushes the render batch. */
   const flushStaticBatch = useCallback(() => {
     if (staticBatchScheduled.current) {
       staticBatchScheduled.current = false
-      const count = staticBatchRef.current.length
-      if (count > 0) {
-        totalItemsPushedRef.current += count
+      if (staticBatchRef.current.length > 0) {
         staticBatchRef.current = []
         setHistoryVersion(v => v + 1)
       }
@@ -1049,6 +1046,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         streamLiveBuf.current = ''
         setStreamingText('')
         setStreamingThinking('')
+        // Flush any pending microtask-batched Static entries before isStreaming
+        // flips — prevents late tool-result pushStatic from colliding with the
+        // synchronous pushStaticBatch below (真凶① double-safety, see HANDOFF doc).
+        flushStaticBatch()
         setIsStreaming(false); isStreamingRef.current = false
         if (finalText || thinkingForArchive) {
           if (finalText) {
