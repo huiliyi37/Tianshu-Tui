@@ -214,9 +214,16 @@ export class CodexClient implements StreamClient {
     // GPT-5.5 thinking can exceed 3 min; match OpenAIClient slow-provider caps.
     const FIRST_BYTE_TIMEOUT_MS = 180_000
     const READ_TIMEOUT_MS = 300_000
+    // Thinking-stall timeout: once reasoning items have been received but no
+    // text content yet, use a shorter timeout to catch stalled thinking.
+    // Same rationale as OpenAIClient — Codex always reasons, so this is
+    // even more relevant here. 90s is generous for legitimate pauses.
+    const THINKING_STALL_TIMEOUT_MS = 90_000
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
+    let receivedThinking = false
+    let textReceived = false
 
     // Wire external abort signal to reader.cancel() (same fix as OpenAIClient).
 
@@ -233,7 +240,14 @@ export class CodexClient implements StreamClient {
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
-      const timeout = receivedFirstChunk ? READ_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
+      // Thinking-stall detection: once reasoning arrived but no text yet,
+      // use shorter timeout to catch stalled thinking streams.
+      const thinkingStallMs = (receivedThinking && !textReceived)
+        ? THINKING_STALL_TIMEOUT_MS
+        : null
+      const timeout = receivedFirstChunk
+        ? (thinkingStallMs ?? READ_TIMEOUT_MS)
+        : FIRST_BYTE_TIMEOUT_MS
       idleTimer = setTimeout(() => {
         streamTimedOut = true
         reader.cancel().catch(() => {})
@@ -278,6 +292,7 @@ export class CodexClient implements StreamClient {
           switch (type) {
             case 'response.output_text.delta': {
               seenTextDelta = true
+              textReceived = true
               // delta is a plain string, not { text: "..." }
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
@@ -289,6 +304,7 @@ export class CodexClient implements StreamClient {
             case 'response.reasoning_text.delta':
             case 'response.reasoning_summary_text.delta': {
               seenReasoningItem = true
+              receivedThinking = true
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
                 : (parsed.delta as Record<string, unknown>)?.text as string | undefined
