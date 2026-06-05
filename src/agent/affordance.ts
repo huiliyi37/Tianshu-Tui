@@ -153,9 +153,12 @@ function contextualModulator(
     if (fileTools.has(toolName)) score += 0.2
   }
 
-  // 重复使用惩罚：最近 3 次中出现了 → 稍微降低（避免陷入循环）
-  const recent = state.recentToolNames.slice(-3)
-  if (recent.includes(toolName)) score -= 0.1
+  // 重复使用惩罚：渐进式——出现次数越多，信号越强
+  const recent = state.recentToolNames.slice(-5)
+  const repeatCount = recent.filter(n => n === toolName).length
+  if (repeatCount >= 3) score -= 0.30    // 强循环信号
+  else if (repeatCount === 2) score -= 0.15  // 模式形成中
+  else if (repeatCount === 1) score -= 0.05  // 正常复用，轻微衰减
 
   // 高复杂度 → 偏好精确工具
   const s = state.sensorium
