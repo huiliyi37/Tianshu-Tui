@@ -252,6 +252,9 @@ export class DelegationCoordinator {
     // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
+    // Propagate parent abort signal so worker stops immediately on abort
+    // instead of waiting for its internal budget timeout (中间层 #1).
+    workerConfig.abortSignal = this.config.abortSignal
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 

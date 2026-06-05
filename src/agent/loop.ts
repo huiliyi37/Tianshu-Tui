@@ -6,7 +6,6 @@ import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { getGitInjectedContext } from '../prompt/volatile-git.js'
 import { ToolRegistry } from '../tools/registry.js'
-import { killAll } from '../tools/process-tracker.js'
 import { SessionContext } from './context.js'
 import { SessionPersist } from './session-persist.js'
 import { extractIntents } from './intent-extractor.js'
@@ -557,7 +556,10 @@ export class AgentLoop {
 
   abort(): void {
     this.abortController?.abort()
-    killAll()
+    // NOTE: killAll() removed — it was a global hammer that killed processes
+    // from ALL AgentLoop instances, not just this one (中间层 #1).
+    // abortController.abort() + reader.cancel() handles in-flight operations.
+    // Process cleanup at exit is still handled by main.tsx's killAllSync().
   }
 
   setApprovalMode(mode: ApprovalMode): void {
