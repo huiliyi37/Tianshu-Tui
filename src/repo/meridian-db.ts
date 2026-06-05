@@ -82,6 +82,18 @@ CREATE TABLE IF NOT EXISTS mistake_entries (
   tags_json TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_mistake_error ON mistake_entries(error);
+
+CREATE TABLE IF NOT EXISTS sensorimotor_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  context_hash TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  success INTEGER NOT NULL,
+  duration_ms INTEGER,
+  turn INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sm_context ON sensorimotor_log(context_hash, tool_name);
+CREATE INDEX IF NOT EXISTS idx_sm_tool ON sensorimotor_log(tool_name);
 `
 
 export class MeridianDb {
@@ -393,6 +405,50 @@ export class MeridianDb {
       }
     }
     return result
+  }
+
+  /**
+   * Record a sensorimotor experience: (context, tool, outcome).
+   * Gracefully degrades when DB is unavailable.
+   */
+  recordSensorimotorExperience(
+    contextHash: string,
+    toolName: string,
+    success: boolean,
+    durationMs: number,
+    turn: number,
+  ): void {
+    if (!this._available) return
+    try {
+      this.db.prepare(
+        `INSERT INTO sensorimotor_log (context_hash, tool_name, success, duration_ms, turn)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run(contextHash, toolName, success ? 1 : 0, durationMs, turn)
+    } catch {
+      // Non-critical logging — degrade silently
+    }
+  }
+
+  /**
+   * Get the success rate of a tool from recent sensorimotor history.
+   * Returns null if no data exists.
+   */
+  getToolSuccessRate(toolName: string, recentWindow?: number): number | null {
+    if (!this._available) return null
+    try {
+      const limit = recentWindow && recentWindow > 0 ? `LIMIT ${recentWindow}` : ''
+      const rows = this.db.prepare(
+        `SELECT success FROM sensorimotor_log
+         WHERE tool_name = ?
+         ORDER BY id DESC
+         ${limit}`,
+      ).all(toolName) as { success: number }[]
+      if (rows.length === 0) return null
+      const successes = rows.filter(r => r.success === 1).length
+      return successes / rows.length
+    } catch {
+      return null
+    }
   }
 
   close(): void {
