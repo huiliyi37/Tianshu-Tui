@@ -78,6 +78,7 @@ import { CacheAdvisor } from '../cache/advisor.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { TurnHeartbeat } from './turn-heartbeat.js'
+import { rejectOnAbort } from './turn-boundary-abort.js'
 import { createP3Integration, type P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
@@ -565,6 +566,18 @@ export class AgentLoop {
     // Process cleanup at exit is still handled by main.tsx's killAllSync().
   }
 
+  /**
+   * System-initiated abort (hard-stall watchdog) — breaks a wedged turn
+   * WITHOUT incrementing `_turnInterruptCount`. That counter feeds the
+   * recovery-trigger's "repeatedly interrupted" classification (see
+   * refreshReliabilityDecision); a watchdog stall-recovery is not a user
+   * interrupt and must not be mislabeled as one, especially when combined
+   * with a genuine earlier interrupt in the same run.
+   */
+  private abortStalledTurn(): void {
+    this.abortController?.abort()
+  }
+
   setApprovalMode(mode: ApprovalMode): void {
     this.config.approvalMode = mode
   }
@@ -857,15 +870,27 @@ export class AgentLoop {
     await this.startFsWatcher()
     // P7: heartbeat watchdog — surfaces "still working" signal during long
     // silent operations so the UI doesn't appear frozen and users don't
-    // interrupt the agent mid-task.
+    // interrupt the agent mid-task. ALSO acts as a watchdog with teeth: if
+    // silence exceeds hardStallMs (turn-boundary blind spot — postTurn hooks /
+    // compaction / prewarm hang with no abort cooperation), it aborts the turn
+    // so the loop's rejectOnAbort races break out instead of freezing forever.
     const heartbeat = new TurnHeartbeat({
       silentMs: 20_000,
       repeatMs: 15_000,
+      hardStallMs: 240_000,
       onHeartbeat: (elapsed, lastActivity) => {
         const seconds = Math.round(elapsed / 1000)
         callbacks.onPhaseChange?.('heartbeat', {
           reason: `still working — last activity: ${lastActivity} (${seconds}s ago)`,
         })
+      },
+      onHardStall: (elapsed, lastActivity) => {
+        const seconds = Math.round(elapsed / 1000)
+        debugLog(`[watchdog] hard stall after ${seconds}s (last activity: ${lastActivity}) — aborting wedged turn`)
+        callbacks.onPhaseChange?.('heartbeat', {
+          reason: `recovering — turn stalled ${seconds}s at "${lastActivity}", aborting`,
+        })
+        this.abortStalledTurn()
       },
     })
     callbacks = this.wrapCallbacksWithHeartbeat(callbacks, heartbeat)
@@ -1453,7 +1478,11 @@ export class AgentLoop {
 
         // Step 6b: run compaction (session split, maybeCompact, stale rounds, heap)
         {
-          const compactionResult = await this.runCompaction(turn, snap)
+          const compactionResult = await rejectOnAbort(
+            this.runCompaction(turn, snap),
+            this.abortController!.signal,
+            'compaction',
+          )
           if (compactionResult.shouldAbort) {
             if (!assistantResponded && !compactionResult.userMessageConsumed) this.session.removeLastMessage()
             callbacks.onAbort()
@@ -1465,7 +1494,7 @@ export class AgentLoop {
         this.streamedText = ''
         this.lastPrewarmAt = 0
         let _tb = Date.now()
-        await this.prewarmRecentReads()
+        await rejectOnAbort(this.prewarmRecentReads(), this.abortController!.signal, 'prewarm')
         debugLog(`[turn-boundary] turn=${turn} prewarmRecentReads: ${Date.now() - _tb}ms`)
 
         // ── Git freshness: file change rate (Zeitgeber signal) ──
@@ -1477,17 +1506,33 @@ export class AgentLoop {
         this.latestFsWatcherState = this.fsWatcher?.getState() ?? { eventRate: 0, eventCount: 0, active: false }
 
         // Step 6c: run perception (sensorium, season, phase class, contract)
-        const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await this.runPerception(turn, estTokens, actionable, callbacks)
+        const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await rejectOnAbort(
+          this.runPerception(turn, estTokens, actionable, callbacks),
+          this.abortController!.signal,
+          'perception',
+        )
 
         // Step 6d: run convergence check
         {
-          const { action } = await this.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks)
+          // Wrapped for parity with the other boundary steps: convergence can
+          // call trySessionSplit → llmCompact (a network call) whose internal
+          // abort cooperation is exactly the unreliable mechanism this commit
+          // backstops. Without the race, a watchdog abort can't free a wedge here.
+          const { action } = await rejectOnAbort(
+            this.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
+            this.abortController!.signal,
+            'convergence',
+          )
           if (action === 'abort') return
         }
 
         _tb = Date.now()
         // Step 6f: build turn request (intent, repair, context ceiling, cross-session, prompt)
-        const turnRequest = await this.buildTurnRequest(turn, currentStrategy, currentSensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks)
+        const turnRequest = await rejectOnAbort(
+          this.buildTurnRequest(turn, currentStrategy, currentSensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
+          this.abortController!.signal,
+          'build-request',
+        )
         if (turnRequest.action === 'veto') continue
         if (turnRequest.action === 'abort') return
         const request = turnRequest.request!
@@ -1713,7 +1758,11 @@ export class AgentLoop {
             })
           }
           this.config.meridianIndexer?.flushTurn()
-          await this.turnCompletion.complete({ turn, isFinal: false, callbacks })
+          await rejectOnAbort(
+            this.turnCompletion.complete({ turn, isFinal: false, callbacks }),
+            this.abortController!.signal,
+            'post-turn',
+          )
           continue
         }
 
