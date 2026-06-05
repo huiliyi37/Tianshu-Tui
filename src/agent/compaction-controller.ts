@@ -253,10 +253,6 @@ export class CompactionController {
 
     this._ensurePrefixOverhead()
     const estimatedTokens = this.deps.session.getEstimatedTokens()
-    // stats — it never mutated storage. The actual request-time pruning happens in
-    // PromptEngine.buildOaiRequest via semanticPruneLayer1 + detectStaleness.
-
-    const estimatedTokens = this.deps.session.getEstimatedTokens()
     const contextWindow = this.deps.contextWindow
     const ratio = contextWindow > 0 ? estimatedTokens / contextWindow : 0
     debugLog(`[compaction-check] contextWindow=${contextWindow} estimatedTokens=${estimatedTokens} ratio=${(ratio * 100).toFixed(1)}% turn=${this.deps.session.getTurnCount()}`)

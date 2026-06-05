@@ -194,6 +194,9 @@ export class OpenAIClient implements StreamClient {
       const sysMsg = (body.messages as Record<string, unknown>[]).find(m => m.role === 'system')
       if (sysMsg && typeof sysMsg.content === 'string') {
         sysMsg.content += this.systemSuffix
+      }
+    }
+
     // Incremental sanitize: only re-sanitize messages appended since last
     // request. Historical messages were already sanitized at entry points
     // (addUserMessage/addAssistantBlocks/addToolResults). This avoids O(n)
@@ -213,11 +216,6 @@ export class OpenAIClient implements StreamClient {
     }
 
     await this.sendStream(body, callbacks, signal)
-    // that inflate JSON body size and can cause "unexpected end of hex escape" parse errors
-    // when the API server truncates the body at a byte boundary.
-    const sanitizedBody = sanitizeMessageContent(body)
-
-    await this.sendStream(sanitizedBody, callbacks, signal)
   }
 
   /** Shared inner retry+fetch+SSE loop used by both stream and streamOai. */

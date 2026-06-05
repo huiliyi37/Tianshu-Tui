@@ -206,7 +206,6 @@ export class SessionContext {
   }
 
   getEstimatedTokens(): number {
-  getEstimatedTokens(): number {
     return this.state.estimatedTokens + this.state.prefixOverhead
   }
 
