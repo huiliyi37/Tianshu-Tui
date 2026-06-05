@@ -63,6 +63,8 @@ import { TurnStreamController, type StreamRule } from './turn-stream.js'
 import { classifySeason, type CognitiveSeason } from './cognitive-season.js'
 import { createVigorState } from './vigor.js'
 import type { VigorState } from './vigor.js'
+import { renderAffordanceHint, type AffordanceState } from './affordance.js'
+import { getThetaPhase } from './star-event.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
@@ -1210,6 +1212,17 @@ export class AgentLoop {
       sensoriumStability: currentSensorium.stability,
     })
     this.currentSeason = seasonResult.season
+
+    // ── Embodied Cognition: affordance-gated tool selection hint ──
+    const affordanceState: AffordanceState = {
+      sensorium: currentSensorium,
+      vigor: this.vigorState,
+      thetaPhase: getThetaPhase(this.thetaState),
+      season: this.currentSeason,
+      workingSetSize: this.evidence.getState().filesModified.size,
+      recentToolNames: this.recentToolHistory.map(t => t.tool),
+    }
+    this.config.promptEngine.setAffordanceHint(renderAffordanceHint(affordanceState) || null)
 
     // Wire StarPhase → phaseClass for field habituation modulation
     const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
