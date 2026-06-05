@@ -40,7 +40,7 @@ import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { profileRegistry } from './agent/profile-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
-import { killAll, killAllSync } from './tools/process-tracker.js'
+import { killAllSync } from './tools/process-tracker.js'
 import { runConfigCLI, loadConfig as loadLayeredConfig } from './config/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
@@ -131,15 +131,29 @@ let _perfCleanup: ReturnType<typeof setInterval> | null = null
 function gracefulShutdown() {
   if (isShuttingDown) return
   isShuttingDown = true
-  shutdownCallback?.()
-  if (_heartbeatInterval) clearInterval(_heartbeatInterval)
-  if (_perfCleanup) clearInterval(_perfCleanup)
-  void _mcpManager?.shutdown?.()
-  if (process.stdin.isTTY && process.stdin.setRawMode) {
-    process.stdin.setRawMode(false)
+  // The callback persists session state via SYNCHRONOUS writes (compactOai,
+  // persistFileHistory). On a full disk / permission error those throw — so it
+  // must not gate the kill+exit below, or the process hangs with all children
+  // alive ("卡死冻屏"). Everything that MUST run on exit goes in `finally`.
+  // (root-cause analysis 2026-06-05, Thread 1B)
+  try {
+    shutdownCallback?.()
+  } catch (err) {
+    try { process.stderr.write(`[shutdown] callback error: ${(err as Error)?.message}\n`) } catch { /* noop */ }
+  } finally {
+    if (_heartbeatInterval) clearInterval(_heartbeatInterval)
+    if (_perfCleanup) clearInterval(_perfCleanup)
+    // MCP children are spawned by the SDK (not via process-tracker), so
+    // killAllSync can't reach them. Force-kill them inline — the async
+    // shutdown() below would be abandoned by process.exit. (Thread 1A)
+    try { _mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
+    void _mcpManager?.shutdown?.()
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      process.stdin.setRawMode(false)
+    }
+    killAllSync()
+    process.exit(0)
   }
-  killAllSync()
-  process.exit(0)
 }
 
 function Root({ provider, apiKey, config, auth, initialModelId }: { provider: ProviderConfig; apiKey: string; config: Config; auth?: AuthProvider; initialModelId?: string }) {
@@ -606,10 +620,9 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
   // Register shutdown callback for signal handlers
   useEffect(() => {
     shutdownCallback = () => {
-      agent.abort()
-      killAll()
-      _mcpManager?.shutdown().catch(() => {})
-      _meridianIndexerRef?.close()
+      // Persist session state FIRST — these synchronous writes are the most
+      // valuable work on exit and the most likely to throw (disk full). Do them
+      // before any cleanup so state is saved even if a later step fails.
       persist.compactOai(session.getMessages())
       if (_fileHistoryRef) {
         persistFileHistory(
@@ -617,6 +630,13 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
           _fileHistoryRef.getAllSnapshots(),
         )
       }
+      // agent.abort() already triggers killAll() internally (loop.ts); a second
+      // killAll() here is dead on the exit path (its setTimeout SIGKILL never
+      // fires before process.exit). gracefulShutdown's killAllSync() does the
+      // real synchronous reap. (root-cause analysis 2026-06-05, Thread 1C)
+      agent.abort()
+      _mcpManager?.shutdown().catch(() => {})
+      _meridianIndexerRef?.close()
     }
     return () => { shutdownCallback = null }
   }, [agent, persist, session, sessionId])

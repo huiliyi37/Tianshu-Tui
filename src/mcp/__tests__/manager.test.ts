@@ -208,4 +208,39 @@ describe('McpManager', () => {
     assert.equal(mgr.getAllTools().length, 1)
     assert.equal(mgr.getAllTools()[0]!.definition.name, 'mcp__remote__remote_tool')
   })
+
+  it('killChildrenSync force-kills MCP child pids and clears connections', async () => {
+    // Regression guard (root-cause analysis 2026-06-05, Thread 1A): MCP children
+    // are spawned by the SDK, not via process-tracker, so the exit path must
+    // SIGKILL them by pid inline — the async shutdown() is abandoned by
+    // process.exit before transport.close() runs.
+    const mgr = new McpManager(makeConfig({
+      echo: { command: 'node', args: ['echo.js'] },
+    }))
+    mgr['_connectServer'] = async () => ({
+      client: {} as any,
+      transport: { close: async () => {}, pid: 4242 },
+      serverId: 'echo',
+    })
+    mgr['_discoverTools'] = async () => []
+    await mgr.initialize()
+
+    const killed: Array<{ pid: number; signal: NodeJS.Signals | number }> = []
+    const origKill = process.kill
+    // Spy on process.kill; swallow the call (pid 4242 doesn't exist).
+    ;(process as any).kill = (pid: number, signal: NodeJS.Signals | number) => {
+      killed.push({ pid, signal })
+      return true
+    }
+    try {
+      mgr.killChildrenSync()
+    } finally {
+      process.kill = origKill
+    }
+
+    // Process-group kill first (negative pid), SIGKILL.
+    assert.ok(killed.some(k => k.pid === -4242 && k.signal === 'SIGKILL'), 'should SIGKILL the child process group')
+    // Connections cleared so a later shutdown() is a no-op.
+    assert.deepEqual([...(mgr as any).connections.keys()], [])
+  })
 })
