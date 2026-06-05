@@ -180,3 +180,202 @@
 ## 下一步(步骤 1 第一步)
 读 `app.tsx` 的 `staticItemsForInk` + `historyBufferRef`(RingBuffer)+ rewind 重置路径,设计"只增不减的 committed 数组 + 写入终端后释放内容"如何替代 `slice(start)` —— 然后出步骤 1 的 writing-plans。
 
+---
+
+## 修订意见(自审,按严重度排序)
+
+### 🔴 R1（致命·会让"超 500 行"重新翻车）—— 步骤 2"安全边界"自相矛盾,漏了长代码块
+步骤 2 写"代码围栏平衡后才算安全边界可提交"。但**一个比屏幕高、还在流式的单个代码块**(agent 倾倒一个大文件,极常见)围栏一直没闭合 → 按这条规则**一行都不能提交** → 整块全留 live 区 → 又超视口 → 真凶②原样回来。
+**修订**:把规则改成——**代码围栏内部的行照样提交,只留最后 N 行可变**。理由:围栏内是 code,已按 code 渲染,不会再随 markdown 重分类/重折(line 50 永远是 code 的 line 50);真正有歧义的只有"围栏开/表格头"那 1–2 行边界,N 行尾部余量正好盖住。这正是 aider 的做法(commit 全部除最后 6 行,不管围栏开没开)。**没有这条修订,长代码块场景方案失效。**
+
+### 🔴 R2（致命·真凶①的另一半根因没写进步骤 1)—— 单写者路径漏了
+步骤 1 只说"数组不切片"。但真凶① 的**另一半根因**是双写者时序:`pushStatic`(微任务里 ref++)vs `pushStaticBatch`(同步 ref++)步调不一(app.tsx:297-352)。流式边提交时,assistant 正文和 tool-result 都往 Static 写,**两条路径不同时序 → 交错 → 重复/乱序**(对抗 scout #5:"你调试生命都花在这")。
+**修订**:步骤 1 必须再加一条——**所有进 Static 的写入走单一有序路径(同一时钟),禁止 sync 与 microtask 混用**。否则边流边提交一定撞这个。
+
+### 🟡 R3（重要·数据模型变更没说清)—— 一条流式消息怎么变成多条 Static 条目
+现在 assistant 消息流式时是**一条**不断长大的 `LogEntry`;turn 末才整条进 Static。步骤 2 的"边流边提交前缀"要求把**这一条**拆成"已提交的多个块条目 + live 尾段"。文档没说这个拆分怎么做(按块切成多个 LogEntry?还是 Static 接受可增长的单条目?)。这是核心数据模型改动,目前 under-specified。
+**修订**:步骤 1/2 之间补一节"流式消息 → committed 块 + live 尾"的数据模型,明确提交粒度(建议:每个写定的 markdown 块成为一个独立 committed LogEntry)。
+
+### 🟡 R4（重要·rewind 被我过度简化)—— "清屏重来重画是预期"站不住
+我写"rewind = 清屏重来,重画是预期,可接受"。但 append-only 历史**无法收回已进 scrollback 的内容**:rewind 后旧内容仍物理躺在 scrollback 上方,重画只会把回退后的内容**叠在旧内容下面 = 重复**。要么 `clearTerminal` 彻底清掉整个 scrollback(用户丢失全部上文历史,代价大),要么打个分隔符往下续(旧内容仍在)。这是**真正需要设计的点,不是"预期行为"**。
+**修订**:rewind 单列一节,明确取舍(整屏清 vs 分隔符续),别用"可接受"盖过去。
+
+### 🟢 R5（次要·"释放内容"时机没说)—— 步骤 1 何时能安全 null 掉旧条目内容
+"写入终端后释放内容"对——但**外部无法直接知道** Static 的内部 `index` 已越过某条目(那是 Static 私有 state)。释放必须**延迟到该条目确实被某次 render 提交之后**(它在 slice 里出现过的下一轮)。文档说得太轻。
+**修订**:补一句释放时机 = "该条目进入过 Static 渲染切片的下一个 render 周期后,才置空其重内容"。
+
+### 🟢 R6（次要·别重犯"逻辑行≠折行"的错)—— "live 区天然只有几行高"措辞
+尾段是"最后 N 个**逻辑行**",但每行可能折成多个**显示行**(N=6 逻辑行、宽行折 3 倍 = 18 显示行)。通常仍 < 视口,但前面那位批评者正是抓"逻辑行 vs 折行行"这个雷,别重犯。
+**修订**:措辞改成"尾段是少量逻辑行、显示高度远小于视口",N 的选取要把折行算进去;并保留 Ink 6.8.0 溢出全清分支作为**万一尾段仍超高时的兜底**(它现在有 CSI2026 包裹,至少不撕裂)。
+
+---
+
+**结论**:R1、R2 不补,方案在长代码块 + 边流边提交时会原样翻车,**必须先改再进实施**。R3–R6 是把 under-specified 的地方补实。改完这 6 条,步骤 1 才算真正可落地。
+
+
+---
+
+# 代码审查补遗(2026-06-06,天枢)
+
+> 本节是对方案与当前代码实现之间差距的系统审查。基于 `app.tsx`、`block-stream-writer.ts`、`markdown-render.tsx`、`stream.tsx`、`ring-buffer.ts`、`main.tsx` 的逐行阅读。
+
+## 一、步骤 1 现状审计
+
+### 1.1 `staticItemsForInk` 切片机制已确认有结构性缺陷
+
+`app.tsx:211-223`:
+
+```typescript
+const staticItemsForInk = useMemo(() => {
+    const all = historyItems  // RingBuffer.items() → 新数组,环满后固定 5000 项
+    const start = Math.max(0, totalItemsPushedRef.current - all.length)
+    if (start >= all.length) return []
+    return all.slice(start)
+  }, [historyItems])
+```
+
+**缺陷追溯**:RingBuffer 环满(5000)后,`all.length` 封顶 5000,但 `totalItemsPushedRef` 持续递增 → `start` 单调增 → `slice(start)` 返回的数组长度**递减**(4999→4998→...)。Ink 6.8.0 `<Static>` 内部 index 只增不减,当 index > 当前 items.length 时 `items.slice(index)` 返回 `[]` — **静默丢失**。这就是 spec 正文已指出的「第三个同源 bug:`2026-06-01-static-sliding-window-bug.md`」。
+
+该注释称 "Defensive: if the ref fell behind the buffer (shouldn't happen)" — 但这不是 transient race,是环满后**必然发生**的结构性问题。5000 条消息后每次推送都会触发。
+
+### 1.2 现有重复抑制机制
+
+当前有三层去重,均不依赖切片:
+
+| 机制 | 位置 | 作用 |
+|------|------|------|
+| `staticDedupRef`(Set, 最近 16 指纹) | `pushStatic` L238 | 同一内容不入环缓冲区 |
+| `staticBatchRef` + microtask 批处理 | `pushStatic` L247 | 同一 tick 多次 push 合并为单次 `setHistoryVersion` |
+| `pushStaticBatch` 同步路径 | L267 | turn-end 时绕过 microtask,保证 commit 在 isStreaming flip 前完成 |
+
+这三层去重是**正确的**,不应在步骤 1 中移除或削弱。新 committed 数组方案需要**保持**这些去重机制。
+
+### 1.3 RingBuffer 与 committed 数组的关系
+
+当前架构:所有 Static 内容走过 `historyBufferRef`(RingBuffer, 5000 上限)。spec 提议的"只增不减 committed 数组"需要明确与 RingBuffer 的关系:
+
+- **选项 A**:用 committed 数组替代 RingBuffer 作为 `<Static>` 的 items 来源,RingBuffer 只保留给 pager/transcript 使用。
+- **选项 B**:committed 数组从 RingBuffer 派生,但每次只追加不切片(受 RingBuffer 环满限制)。
+
+**建议选项 A**。但需解决:committed 数组无限增长 → 内存问题。spec 说"写入终端后释放内容",但需要实现知道 Ink 何时完成了某条 item 的渲染。Ink 6.8.0 `<Static>` 的 `index` 推进到 `items.length` 即表示已渲染全部 → 可以在 `items` 更新时,将已经被 Static 渲染过的旧 item 的 content 置空(只保留 type/id 等轻量字段用于 memo key 稳定性)。
+
+### 1.4 rewind 路径
+
+`hooks/use-rewind.ts` 通过 `historyBufferRef`、`totalItemsPushedRef`、`setHistoryVersion` 操作。步骤 1 实现时需确保 rewind 路径与新 committed 数组正确交互。spec 已明确 rewind 是唯一允许重置数组的例外 — 实现时需要 `clear()` 操作。
+
+---
+
+## 二、步骤 2 现状审计
+
+### 2.1 当前流式路径:零前缀 commit
+
+流式数据流(`app.tsx` handleSubmit → `block-stream-writer.ts`):
+
+```
+onTextDelta(text) → blockWriter.push(text)
+  → BlockStreamWriter 内部缓冲
+  → 段落断/句尾/idle timer 触发 flush
+  → onBlock(text) 回调
+  → textBatcher.push(text)
+  → RenderBatcher 微批量合并
+  → setStreamingText(streamLiveBuf)  ← 全部进 live 区
+```
+
+**关键发现:整个流式期间,没有任何内容进入 Static。** `pushAssistantEntry`(唯一向 Static 写 assistant 内容的函数)只在 `onTurnComplete`(turn 末)和 `flushStreamingState`(abort/error/Ctrl+C)时调用。这就是 spec 说的「只在 turn 末 commit」— live 区承载全部流式内容,500 行回复 = live 区 500 行 = 真凶②。
+
+### 2.2 BlockStreamWriter 的切分能力不足以支撑 markdown 安全边界
+
+`block-stream-writer.ts:checkEmit()` 的切分逻辑:
+
+1. **硬上限**:buffer ≥ maxChars(默认 200) → `findBreakPoint` 在 `\n\n` / `\n` / ` ` 处切
+2. **段落边界**:`\n\n` 在 ≥ 0.5×minChars 位置 → 切
+3. **句末标点**:中英文标点(。！？.!?；;) 取最后一个位置 → 切
+
+**缺失的能力**:spec 要求的"代码围栏平衡后、表格分隔行已消费后"等 markdown 语义边界。当前 `BlockStreamWriter` 是纯文本级的,不理解 markdown 结构。要支持"围栏平衡",它需要追踪 ` ``` ` 开启/关闭状态。
+
+**但这不等于 BlockStreamWriter 不能用**。spec 的两层策略(优先安全边界 + 硬上限兜底)意味着:先用现有的段落/句末切分,加上硬上限保证 live 区不超视口。更精细的 markdown 感知切分是后续优化,不是步骤 2 的前置条件。
+
+### 2.3 流式切分与 Markdown 渲染的交互
+
+`stream.tsx:44`:流式时 `StreamOutput` 对**每个 token** 调用 `<Markdown text={text}>` → `parseBlocks(text)`。如果步骤 2 实现前缀 commit,需要考虑:
+
+- committed prefix → 进入 Static,由 `renderStaticEntry` → `AssistantMessage` → `<Markdown>` 渲染
+- live tail → 留在 `StreamOutput` → `<Markdown>` 渲染
+
+两个 `<Markdown>` 实例独立解析,不会出现跨边界解析不一致(因为它们渲染的是**不同文本**)。但 tail 的 markdown 可能因前缀已被切走而缺少上下文(如未闭合围栏),导致尾部渲染异常(把代码当段落渲染)。这是 spec 已接受的代价。
+
+### 2.4 实现接口建议
+
+步骤 2 需要一个新的切分决策点,位于 `BlockStreamWriter` 的 `checkEmit` 或 flush 路径中:
+
+```
+// 伪代码
+onSafeBoundary(committedPrefix: string) {
+  // 1. 将 committedPrefix 通过 pushStatic 送入 Static
+  pushStatic(createLogEntry({ type: 'assistant_message', content: committedPrefix }))
+  // 2. 从 streamLiveBuf 中移除已 commit 的部分
+  // 3. 更新 streamBuf/streamLiveBuf 只保留 tail
+}
+```
+
+head 挑战:当前 `BlockStreamWriter` 的输出经过 `RenderBatcher` → `setStreamingText`,已经和 buffer 管理耦合。需要在不破坏现有 tool-result flush / thinking flush 路径的前提下插入 commit 路径。
+
+---
+
+## 三、步骤 3 现状审计
+
+### 3.1 `incrementalRendering` 未开启
+
+`src/main.tsx:1018`:
+
+```typescript
+const { waitUntilExit } = render(
+    createElement(ErrorBoundary, null, createElement(Root, { ... })),
+    { exitOnCtrlC: false },
+  )
+```
+
+确认无 `incrementalRendering: true`。Ink 6.8.0 当前走 `createStandard` renderer(整块 eraseLines),而非 `createIncremental`(逐行 diff + CSI 2026)。
+
+### 3.2 选项验证需要
+
+实现前应确认:
+1. Ink 6.8.0 的 `incrementalRendering` 选项名是否确实为 `incrementalRendering`(读 `node_modules/ink/build/options.js`)
+2. 该选项与 `Static` 组件组合是否有已知问题(issue 搜索)
+3. CI/非-TTY 环境下的降级行为(6.8.0 应自动降级为 pure-append)
+
+---
+
+## 四、布局问题(方案外但相关)
+
+### 4.1 spacer 无效
+
+`app.tsx` JSX 返回部分(约 L1280):
+
+```tsx
+<Box flexGrow={1} minHeight={0} />
+```
+
+位于 `<Box flexDirection="column">` 内,但根是 Fragment `<>`。Fragment 无高度约束 → flexGrow 无界 → spacer 不起作用。方案中对此的判断正确。这是独立 bug,但与真凶①②不直接相关。
+
+### 4.2 双写入路径竞态
+
+spec 已识别:Static append 路径(pushStatic/pushStaticBatch) vs live redraw 路径(setStreamingText),两者异步竞争。当前缓解:
+- `flushStaticBatch()` 在 isStreaming flip 前调用
+- `pushStaticBatch` 同步路径在 turn-end 使用
+
+步骤 2 引入流式 prefix commit 后,Static 追加频率从 "只在 turn 末" 变为 "每秒数次" → 双写者竞态窗口大幅扩大。需要明确的不变量:每次 prefix commit 后立即 flush microtask batch,保证 Static 渲染先于下一次 live 区更新。
+
+---
+
+## 五、结论
+
+**方案方向正确,三步顺序合理。** 与代码对照后,需要补充的关键实现细节:
+
+1. 步骤 1:committed 数组需与现有 RingBuffer 去重机制共存;内存回收需设计(content 置空而非元素删除)
+2. 步骤 2:BlockStreamWriter 的文本级切分足以支撑 MVP(段落断+硬上限),markdown 感知切分是后续优化
+3. 步骤 2:双写者竞态窗口会因流式 prefix commit 大幅扩大,需要更强的排序保证
+4. 步骤 3:确认 `incrementalRendering` 选项名和 Static 兼容性后再改
+
+**未发现根本性阻塞**。方案可以推进实现。
+
