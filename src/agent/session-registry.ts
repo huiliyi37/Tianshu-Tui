@@ -134,9 +134,39 @@ export class SessionRegistry {
     this.db = db
   }
 
+  // ── Safe DB helpers ──
+
+  private safeRun(sql: string, ...params: unknown[]): number {
+    try {
+      return this.db.prepare(sql).run(...params).changes ?? 0
+    } catch (err) {
+      console.error('SessionRegistry write error:', (err as Error).message)
+      return 0
+    }
+  }
+
+  private safeGet<T>(sql: string, ...params: unknown[]): T | undefined {
+    try {
+      return this.db.prepare(sql).get(...params) as T | undefined
+    } catch (err) {
+      console.error('SessionRegistry read error:', (err as Error).message)
+      return undefined
+    }
+  }
+
+  private safeAll<T>(sql: string, ...params: unknown[]): T[] {
+    try {
+      return this.db.prepare(sql).all(...params) as T[]
+    } catch (err) {
+      console.error('SessionRegistry read error:', (err as Error).message)
+      return []
+    }
+  }
+
+
   register(sessionId: string, cwd: string, role: 'coordinator' | 'worker' | 'standalone' = 'standalone'): void {
     const now = new Date().toISOString()
-    this.db.prepare(`
+    this.safeRun(`
       INSERT INTO sessions (id, pid, cwd, started_at, heartbeat_at, role)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
@@ -144,25 +174,25 @@ export class SessionRegistry {
         cwd = excluded.cwd,
         heartbeat_at = excluded.heartbeat_at,
         role = excluded.role
-    `).run(sessionId, process.pid, cwd, now, now, role)
+    `, sessionId, process.pid, cwd, now, now, role)
   }
 
   heartbeat(sessionId: string): void {
     const now = new Date().toISOString()
-    this.db.prepare('UPDATE sessions SET heartbeat_at = ? WHERE id = ?').run(now, sessionId)
+    this.safeRun('UPDATE sessions SET heartbeat_at = ? WHERE id = ?', now, sessionId)
   }
 
   unregister(sessionId: string): void {
     this.releaseAllClaims(sessionId)
-    this.db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId)
+    this.safeRun('DELETE FROM sessions WHERE id = ?', sessionId)
   }
 
   updatePid(sessionId: string, pid: number): void {
-    this.db.prepare('UPDATE sessions SET pid = ? WHERE id = ?').run(pid, sessionId)
+    this.safeRun('UPDATE sessions SET pid = ? WHERE id = ?', pid, sessionId)
   }
 
   listActive(): SessionEntry[] {
-    return this.db.prepare('SELECT id, pid, role, task_description AS taskDescription, heartbeat_at AS heartbeatAt FROM sessions').all() as SessionEntry[]
+    return this.safeAll<SessionEntry>('SELECT id, pid, role, task_description AS taskDescription, heartbeat_at AS heartbeatAt FROM sessions')
   }
 
   detectCrashedSessions(): SessionEntry[] {
@@ -177,16 +207,16 @@ export class SessionRegistry {
     if (crashed.length > 0) {
       const ids = crashed.map(s => s.id)
       const placeholders = ids.map(() => '?').join(',')
-      this.db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids)
+      this.safeRun(`DELETE FROM sessions WHERE id IN (${placeholders})`, ...ids)
     }
     return crashed
   }
 
   acquireClaim(sessionId: string, filePath: string, claimType: 'exclusive' | 'shared_read'): boolean {
     // Check existing claims
-    const existing = this.db.prepare(
-      'SELECT session_id, claim_type FROM claims WHERE file_path = ?'
-    ).all(filePath) as Array<{ session_id: string; claim_type: string }>
+    const existing = this.safeAll<{ session_id: string; claim_type: string }>(
+      'SELECT session_id, claim_type FROM claims WHERE file_path = ?', filePath
+    )
 
     for (const c of existing) {
       if (c.session_id === sessionId) return true // same session re-acquires
@@ -195,24 +225,26 @@ export class SessionRegistry {
     }
 
     const now = new Date().toISOString()
-    this.db.prepare(
-      'INSERT OR REPLACE INTO claims (session_id, file_path, claim_type, acquired_at) VALUES (?, ?, ?, ?)'
-    ).run(sessionId, filePath, claimType, now)
+    this.safeRun(
+      'INSERT OR REPLACE INTO claims (session_id, file_path, claim_type, acquired_at) VALUES (?, ?, ?, ?)',
+      sessionId, filePath, claimType, now
+    )
     return true
   }
 
   releaseClaim(sessionId: string, filePath: string): void {
-    this.db.prepare('DELETE FROM claims WHERE session_id = ? AND file_path = ?').run(sessionId, filePath)
+    this.safeRun('DELETE FROM claims WHERE session_id = ? AND file_path = ?', sessionId, filePath)
   }
 
   releaseAllClaims(sessionId: string): void {
-    this.db.prepare('DELETE FROM claims WHERE session_id = ?').run(sessionId)
+    this.safeRun('DELETE FROM claims WHERE session_id = ?', sessionId)
   }
 
   checkClaim(filePath: string): ClaimEntry | null {
-    const row = this.db.prepare(
-      'SELECT session_id AS sessionId, claim_type AS claimType, file_path AS filePath FROM claims WHERE file_path = ? LIMIT 1'
-    ).get(filePath) as ClaimEntry | undefined
+    const row = this.safeGet<ClaimEntry>(
+      'SELECT session_id AS sessionId, claim_type AS claimType, file_path AS filePath FROM claims WHERE file_path = ? LIMIT 1',
+      filePath
+    )
     return row ?? null
   }
 
@@ -228,12 +260,13 @@ export class SessionRegistry {
 
     // Collect files held by dead sessions
     const placeholders = deadIds.map(() => '?').join(',')
-    const rows = this.db.prepare(
-      `SELECT DISTINCT file_path FROM claims WHERE session_id IN (${placeholders})`
-    ).all(...deadIds) as Array<{ file_path: string }>
+    const rows = this.safeAll<{ file_path: string }>(
+      `SELECT DISTINCT file_path FROM claims WHERE session_id IN (${placeholders})`,
+      ...deadIds
+    )
 
     // Delete dead sessions (cascades to claims)
-    this.db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...deadIds)
+    this.safeRun(`DELETE FROM sessions WHERE id IN (${placeholders})`, ...deadIds)
 
     return rows.map(r => r.file_path)
   }
@@ -245,79 +278,80 @@ export class SessionRegistry {
   // ── Events (cross-session communication) ──────────────────
 
   publishEvent(sessionId: string, input: EventInput): void {
-    this.db.prepare(`
+    this.safeRun(`
       INSERT INTO events (session_id, event_type, file_path, detail, priority)
       VALUES (?, ?, ?, ?, ?)
-    `).run(sessionId, input.eventType, input.filePath ?? null, input.detail ?? null, input.priority ?? 0)
+    `, sessionId, input.eventType, input.filePath ?? null, input.detail ?? null, input.priority ?? 0)
   }
 
   consumeEvents(mySessionId: string, lastSeenId: number, limit = 50): EventRecord[] {
-    return this.db.prepare(`
+    return this.safeAll<EventRecord>(`
       SELECT id, session_id AS sessionId, event_type AS eventType,
              file_path AS filePath, detail, priority, created_at AS createdAt
       FROM events
       WHERE id > ? AND session_id != ?
       ORDER BY id ASC
       LIMIT ?
-    `).all(lastSeenId, mySessionId, limit) as EventRecord[]
+    `, lastSeenId, mySessionId, limit)
   }
 
   cleanupOldEvents(maxAgeMs: number): number {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
-    const result = this.db.prepare('DELETE FROM events WHERE created_at < ?').run(cutoff)
-    return result.changes
+    return this.safeRun('DELETE FROM events WHERE created_at < ?', cutoff)
   }
 
   // ── Cycle relay (Songline substrate) ─────────────────────
 
   setCycleOpen(sessionId: string, cycleOpen: string, generation = 0): void {
-    this.db.prepare(`
+    this.safeRun(`
       INSERT INTO cycle_relay (session_id, cycle_open, generation)
       VALUES (?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         cycle_open = excluded.cycle_open,
         generation = excluded.generation
-    `).run(sessionId, cycleOpen, generation)
+    `, sessionId, cycleOpen, generation)
   }
 
   setCycleClose(sessionId: string, cycleClose: string): void {
-    this.db.prepare(`
+    this.safeRun(`
       INSERT INTO cycle_relay (session_id, cycle_open, cycle_close, generation, closed_at)
       VALUES (?, ?, ?, 0, datetime('now'))
       ON CONFLICT(session_id) DO UPDATE SET
         cycle_close = excluded.cycle_close,
         generation = cycle_relay.generation + 1,
         closed_at = excluded.closed_at
-    `).run(sessionId, cycleClose, cycleClose)
+    `, sessionId, cycleClose, cycleClose)
   }
 
   getCycleOpen(sessionId: string): string | null {
-    const row = this.db.prepare(
-      'SELECT cycle_open AS cycleOpen FROM cycle_relay WHERE session_id = ?'
-    ).get(sessionId) as { cycleOpen: string } | undefined
+    const row = this.safeGet<{ cycleOpen: string }>(
+      'SELECT cycle_open AS cycleOpen FROM cycle_relay WHERE session_id = ?',
+      sessionId
+    )
     return row?.cycleOpen ?? null
   }
 
   getCycleClose(sessionId: string): string | null {
-    const row = this.db.prepare(
-      'SELECT cycle_close AS cycleClose FROM cycle_relay WHERE session_id = ?'
-    ).get(sessionId) as { cycleClose: string | null } | undefined
+    const row = this.safeGet<{ cycleClose: string | null }>(
+      'SELECT cycle_close AS cycleClose FROM cycle_relay WHERE session_id = ?',
+      sessionId
+    )
     return row?.cycleClose ?? null
   }
 
   getLastCycleClose(): string | null {
-    const row = this.db.prepare(`
+    const row = this.safeGet<{ cycleClose: string }>(`
       SELECT cycle_close AS cycleClose
       FROM cycle_relay
       WHERE cycle_close IS NOT NULL
       ORDER BY closed_at DESC, created_at DESC
       LIMIT 1
-    `).get() as { cycleClose: string } | undefined
+    `)
     return row?.cycleClose ?? null
   }
 
   getCycleRelay(sessionId: string): CycleRelayEntry | null {
-    const row = this.db.prepare(`
+    const row = this.safeGet<CycleRelayEntry>(`
       SELECT session_id AS sessionId,
              cycle_open AS cycleOpen,
              cycle_close AS cycleClose,
@@ -326,7 +360,7 @@ export class SessionRegistry {
              closed_at AS closedAt
       FROM cycle_relay
       WHERE session_id = ?
-    `).get(sessionId) as CycleRelayEntry | undefined
+    `, sessionId)
     return row ?? null
   }
 
@@ -337,13 +371,12 @@ export class SessionRegistry {
    * Used for prompt injection so the LLM can see which files other sessions are working on.
    */
   getActiveClaims(excludeSessionId: string): Array<{ sessionId: string; filePath: string; claimType: string }> {
-    const rows = this.db.prepare(`
+    return this.safeAll<{ sessionId: string; filePath: string; claimType: string }>(`
       SELECT c.session_id AS sessionId, c.file_path AS filePath, c.claim_type AS claimType
       FROM claims c
       JOIN sessions s ON s.id = c.session_id
       WHERE c.session_id != ?
-    `).all(excludeSessionId) as Array<{ sessionId: string; filePath: string; claimType: string }>
-    return rows
+    `, excludeSessionId)
   }
 
   private isProcessRunning(pid: number): boolean {
@@ -372,7 +405,7 @@ export class SessionRegistry {
     toolFailureRate: number
     bulletIds: string[]
   }): void {
-    this.db.prepare(`
+    this.safeRun(`
       INSERT INTO retrospect_fingerprints
         (session_id, created_at, root_cause_keywords, recommendation_keywords,
          stability_trend, confidence_trend, max_pressure, tool_failure_rate, bullet_ids)
@@ -386,7 +419,7 @@ export class SessionRegistry {
         max_pressure = excluded.max_pressure,
         tool_failure_rate = excluded.tool_failure_rate,
         bullet_ids = excluded.bullet_ids
-    `).run(
+    `,
       fp.sessionId,
       fp.createdAt,
       JSON.stringify(fp.rootCauseKeywords),
@@ -429,8 +462,8 @@ export class SessionRegistry {
          LIMIT ?`
 
     const rows = excludeSessionId
-      ? this.db.prepare(query).all(excludeSessionId, limit) as Array<Record<string, unknown>>
-      : this.db.prepare(query).all(limit) as Array<Record<string, unknown>>
+      ? this.safeAll<Record<string, unknown>>(query, excludeSessionId, limit)
+      : this.safeAll<Record<string, unknown>>(query, limit)
 
     return rows.map(row => ({
       sessionId: row.session_id as string,
@@ -452,9 +485,7 @@ export class SessionRegistry {
    */
   cleanupOldFingerprints(maxAgeMs: number): number {
     const cutoff = Date.now() - maxAgeMs
-    const result = this.db.prepare('DELETE FROM retrospect_fingerprints WHERE created_at < ?').run(cutoff)
-    return result.changes
-    return result.changes
+    return this.safeRun('DELETE FROM retrospect_fingerprints WHERE created_at < ?', cutoff)
   }
 }
 
