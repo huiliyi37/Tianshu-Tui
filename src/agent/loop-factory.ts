@@ -17,8 +17,8 @@ return new TurnStreamController({
       getLastPrewarmAt: () => self.lastPrewarmAt,
       setLastPrewarmAt: position => { self.lastPrewarmAt = position },
       maybePrewarm: text => { self.maybePrewarm(text) },
-      prewarmFile: filePath => {
-        const value = buildPrewarmValue(self.cwd, filePath)
+      prewarmFile: async filePath => {
+        const value = await buildPrewarmValue(self.cwd, filePath)
         if (value && !self.prewarm.has(value.canonicalPath)) {
           self.prewarm.set(value.canonicalPath, value)
         }

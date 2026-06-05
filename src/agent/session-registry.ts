@@ -121,7 +121,7 @@ export class SessionRegistry {
     } catch (err) {
       // Distinguish "library missing" from "schema execution failed"
       if (err instanceof Error && err.message?.includes('better-sqlite3')) {
-        console.warn('⚠ better-sqlite3 not available. Session registry disabled — running in memory-only mode.')
+        console.warn(`⚠ better-sqlite3 not available. Session registry disabled — running in memory-only mode. Reason: ${(err as Error).message}`)
       } else {
         console.error('Session registry schema failed:', err)
       }

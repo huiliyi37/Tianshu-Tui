@@ -1,4 +1,5 @@
-import { readFileSync, existsSync, statSync } from 'fs'
+import { existsSync } from 'fs'
+import { stat, readFile } from 'node:fs/promises'
 import { extname } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent } from './truncation.js'
@@ -13,7 +14,7 @@ import { debugLog } from '../utils/debug.js'
 import { decideReadPolicy } from './read-policy.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
-const gitignoreCache = new Map<string, { filter: GitignoreFilter; ts: number }>()
+const gitignoreCache = new Map<string, { filter: Promise<GitignoreFilter>; ts: number }>()
 const GITIGNORE_CACHE_TTL = 60_000 // 60 seconds
 const GITIGNORE_CACHE_MAX = 50
 
@@ -127,15 +128,15 @@ async function sliceFromArtifact(
   return lines.slice(start, end).join('\n')
 }
 
-function getGitignoreFilter(cwd: string): GitignoreFilter {
+function getGitignoreFilter(cwd: string): Promise<GitignoreFilter> {
   const cached = gitignoreCache.get(cwd)
   if (cached && Date.now() - cached.ts < GITIGNORE_CACHE_TTL) {
     return cached.filter
   }
-  const filter = new GitignoreFilter(cwd)
-  gitignoreCache.set(cwd, { filter, ts: Date.now() })
+  const filterPromise = GitignoreFilter.create(cwd)
+  gitignoreCache.set(cwd, { filter: filterPromise, ts: Date.now() })
   trimGitignoreCache()
-  return filter
+  return filterPromise
 }
 
 const MAX_TOOL_INPUT_BYTES = 100 * 1024
@@ -213,13 +214,16 @@ export interface ReadFilePayload {
 }
 
 /** Centralized safe file read — validates path, checks gitignore, applies offset/limit, truncates for model. */
-export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): ReadFilePayload {
+export async function readFilePayload(cwd: string, options: ReadFilePayloadOptions): Promise<ReadFilePayload> {
   const filePath = validatePath(cwd, options.filePath)
-  if (!existsSync(filePath)) {
+  let fileStat: Awaited<ReturnType<typeof stat>>
+  try {
+    fileStat = await stat(filePath)
+  } catch {
     throw new Error(`File not found: ${filePath}`)
   }
 
-  const filter = getGitignoreFilter(cwd)
+  const filter = await getGitignoreFilter(cwd)
   if (filter.isIgnored(cwd, filePath)) {
     throw new Error(`File is gitignored (node_modules, build artifacts, etc.): ${filePath}`)
   }
@@ -231,8 +235,7 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
     throw new Error(`File is binary (${ext} format). read_file only reads text files. Use file_info to inspect metadata.`)
   }
 
-
-  const fileSize = statSync(filePath).size
+  const fileSize = fileStat.size
   const hasExplicitRange = options.offset !== undefined || options.limit !== undefined
   const policy = decideReadPolicy({ filePath, sizeBytes: fileSize, hasExplicitRange })
 
@@ -244,7 +247,7 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
     )
   }
 
-  let content = readFileSync(filePath, 'utf-8')
+  let content = await readFile(filePath, 'utf-8')
   const offset = options.offset ?? 1
   const limit = options.limit
   const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
@@ -334,7 +337,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
     // Multi-read branch: file_paths array
     const filePaths = params.input.file_paths as string[] | undefined
     if (filePaths && filePaths.length > 0) {
-      return handleMultiRead(params, filePaths.slice(0, 5))
+      return await handleMultiRead(params, filePaths.slice(0, 5))
     }
 
     let payload: ReadFilePayload
@@ -356,7 +359,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
     try {
       canonical = validatePath(params.cwd, filePath)
       if (existsSync(canonical)) {
-        currentMtimeMs = statSync(canonical).mtimeMs
+        currentMtimeMs = (await stat(canonical)).mtimeMs
         dedupKey = readHistoryKey(params.cwd, canonical, offset, limit)
         const prior = readHistory.get(dedupKey)
         if (prior && prior.mtimeMs === currentMtimeMs && prior.artifactId) {
@@ -384,7 +387,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
     } catch { /* fall through to real read; e.g. invalid path → let readFilePayload error normally */ }
 
     try {
-      payload = readFilePayload(params.cwd, {
+      payload = await readFilePayload(params.cwd, {
         filePath,
         offset,
         limit,
@@ -496,7 +499,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
 
 /** Handle multi-file read: file_paths array. Reads up to 5 files, each with
  *  an independent per-file budget derived from the overall model read cap. */
-function handleMultiRead(params: ToolCallParams, paths: string[]): import('./types.js').ToolResult {
+async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise<import('./types.js').ToolResult> {
   const computedCap = computeModelReadCap({
     contextWindow: params.contextWindow,
     providerProfile: params.providerProfile,
@@ -515,13 +518,13 @@ function handleMultiRead(params: ToolCallParams, paths: string[]): import('./typ
     const trimmed = rawPath.trim()
     if (!trimmed) continue
     try {
-      const payload = readFilePayload(params.cwd, { filePath: trimmed, modelCap: perFileCap })
+      const payload = await readFilePayload(params.cwd, { filePath: trimmed, modelCap: perFileCap })
       const relPath = payload.canonicalPath.replace(params.cwd + '/', '')
       sections.push(`── ${relPath} ──\n${payload.modelContent}`)
       totalBytes += payload.rawContent.length
 
       // Record file-level dedup for each file
-      const currentMtimeMs = statSync(payload.canonicalPath).mtimeMs
+      const currentMtimeMs = (await stat(payload.canonicalPath)).mtimeMs
       fileReadHistory.set(payload.canonicalPath, {
         mtimeMs: currentMtimeMs,
         totalLines: payload.rawContent.split('\n').length,

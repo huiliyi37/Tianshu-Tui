@@ -117,8 +117,9 @@ export class MeridianDb {
         this.conn.pragma('journal_mode = WAL')
         this.conn.pragma('busy_timeout = 3000')
         this.conn.exec(SCHEMA)
-      } catch {
-        console.warn('⚠ better-sqlite3 not available. Code index (MeridianDb) disabled.')
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        console.warn(`⚠ better-sqlite3 not available. Code index (MeridianDb) disabled. Reason: ${reason}`)
         this._available = false
         this.conn = createNullDb()
       }

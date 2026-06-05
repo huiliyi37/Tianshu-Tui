@@ -1,4 +1,5 @@
-import { readFileSync, existsSync } from 'fs'
+import { existsSync } from 'fs'
+import { readFile } from 'node:fs/promises'
 import { resolve, join, relative } from 'path'
 
 const DEFAULT_IGNORE = [
@@ -14,17 +15,34 @@ const DEFAULT_IGNORE = [
 ]
 
 export class GitignoreFilter {
-  private patterns: string[] = []
+  private patterns: string[]
 
-  constructor(cwd: string) {
-    this.patterns = [...DEFAULT_IGNORE]
-    this.loadGitignore(cwd)
+  constructor(cwd: string, patterns?: string[]) {
+    this.patterns = patterns ?? [...DEFAULT_IGNORE]
+    if (!patterns) this.loadGitignoreSync(cwd)
   }
 
-  private loadGitignore(cwd: string): void {
+  static async create(cwd: string): Promise<GitignoreFilter> {
+    const patterns = [...DEFAULT_IGNORE]
+    const gitignorePath = join(cwd, '.gitignore')
+    if (existsSync(gitignorePath)) {
+      try {
+        const content = await readFile(gitignorePath, 'utf-8')
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed || trimmed.startsWith('#')) continue
+          patterns.push(trimmed)
+        }
+      } catch { /* ignore */ }
+    }
+    return new GitignoreFilter(cwd, patterns)
+  }
+
+  private loadGitignoreSync(cwd: string): void {
     const gitignorePath = join(cwd, '.gitignore')
     if (!existsSync(gitignorePath)) return
     try {
+      const { readFileSync } = require('fs') as typeof import('fs')
       const content = readFileSync(gitignorePath, 'utf-8')
       for (const line of content.split('\n')) {
         const trimmed = line.trim()

@@ -537,11 +537,11 @@ export class AgentLoop {
     return text.trim()
   }
 
-  maybePrewarm(text: string): void {
+  async maybePrewarm(text: string): Promise<void> {
     const intents = extractIntents(text)
     for (const intent of intents) {
       if (intent.type !== 'file') continue
-      const value = buildPrewarmValue(this.cwd, intent.value)
+      const value = await buildPrewarmValue(this.cwd, intent.value)
       if (!value) continue
       if (!this.prewarm.has(value.canonicalPath)) {
         this.prewarm.set(value.canonicalPath, value)
