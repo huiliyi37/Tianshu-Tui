@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from 'path'
+import { isAbsolute, relative, resolve, dirname, join, basename } from 'path'
 import { realpathSync, existsSync } from 'fs'
 
 export interface ValidatedPath {
@@ -14,8 +14,22 @@ export interface InvalidPath {
 export type PathValidationResult = ValidatedPath | InvalidPath
 
 export function validatePathSafe(cwd: string, inputPath: string): PathValidationResult {
+  // Returned path stays original-cwd-based to preserve the existing contract
+  // (callers compute relative labels / read via this path). Validation, however,
+  // canonicalizes both sides: without resolving cwd, a cwd reached through a
+  // symlink (macOS /var→/private/var temp dirs, symlinked home/mount/repo) makes
+  // the realpath check compare a resolved file against an unresolved cwd and
+  // reject every legitimate file as a "symlink escape".
   const resolved = resolve(cwd, inputPath)
-  const rel = relative(cwd, resolved)
+
+  let realCwd: string
+  try {
+    realCwd = realpathSync(cwd)
+  } catch {
+    realCwd = resolve(cwd)
+  }
+  const realResolved = resolve(realCwd, inputPath)
+  const rel = relative(realCwd, realResolved)
 
   if (rel === '') {
     return { ok: true, path: resolved }
@@ -25,23 +39,44 @@ export function validatePathSafe(cwd: string, inputPath: string): PathValidation
     return { ok: false, error: `Path outside project directory: ${inputPath}` }
   }
 
-  // Symlink traversal guard: resolve symlinks and verify the real path is
-  // still within cwd. Without this, a symlink inside the project pointing
-  // outside would bypass the string-based check above.
-  if (existsSync(resolved)) {
-    let real: string
-    try {
-      real = realpathSync(resolved)
-    } catch {
-      return { ok: false, error: `Cannot resolve path: ${inputPath}` }
-    }
-    const realRel = relative(cwd, real)
-    if (realRel.startsWith('..') || isAbsolute(realRel)) {
-      return { ok: false, error: `Symlink escapes project directory: ${inputPath} → ${realRel}` }
-    }
+  // Symlink traversal guard: resolve symlinks and verify the real path is still
+  // within cwd. For a new file (not yet on disk) realpathSync would throw, so we
+  // resolve the nearest existing ancestor instead — this still catches a symlinked
+  // parent directory that escapes the project (e.g. ./evil -> /etc, write evil/new).
+  let real: string
+  try {
+    real = realpathSync(realResolved)
+  } catch {
+    real = resolveNearestExisting(realResolved)
+  }
+  const realRel = relative(realCwd, real)
+  if (realRel.startsWith('..') || isAbsolute(realRel)) {
+    return { ok: false, error: `Symlink escapes project directory: ${inputPath} → ${realRel}` }
   }
 
   return { ok: true, path: resolved }
+}
+
+/**
+ * Resolve the real path of `target` when it does not yet exist, by walking up to
+ * the nearest existing ancestor, canonicalizing that, then re-appending the
+ * non-existent tail. Lets new-file writes be validated while still resolving any
+ * symlink in the existing portion of the path.
+ */
+function resolveNearestExisting(target: string): string {
+  const segments: string[] = []
+  let current = target
+  while (!existsSync(current)) {
+    segments.unshift(basename(current))
+    const parent = dirname(current)
+    if (parent === current) return target // reached root without finding existing
+    current = parent
+  }
+  try {
+    return join(realpathSync(current), ...segments)
+  } catch {
+    return target
+  }
 }
 
 export function validatePath(cwd: string, filePath: string): string {

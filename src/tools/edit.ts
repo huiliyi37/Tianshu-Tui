@@ -64,6 +64,11 @@ Bad: using a too-short old_string that matches multiple locations`,
       // the current content and either re-apply or show what changed.
       const oldString = params.input.old_string as string
       try {
+        // OOM guard: check file size before reading (same as normal path above)
+        const freshStat = statSync(filePath)
+        if (freshStat.size > MAX_EDIT_FILE_BYTES) {
+          return { content: `File was modified externally and is now too large (${Math.round(freshStat.size / 1024)}KB > 100KB limit) for auto-recovery. Use hash_edit with current anchors instead.`, isError: true }
+        }
         const freshContent = readFileSync(filePath, 'utf-8')
         const freshLines = freshContent.split('\n')
 

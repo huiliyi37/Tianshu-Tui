@@ -282,7 +282,7 @@ export const READ_FILE_TOOL: Tool = {
 - Always provide absolute file paths
 - Files up to ~50,000 lines are returned in full — DO NOT split them yourself by writing temp files and reading slices, just call read_file once
 - Use offset and limit ONLY when you specifically need a known sub-range (e.g. a function at line 800-900); never as a workaround for "the file might be too long"
-- This tool can read text files, images (PNG/JPG), and PDF files
+- This tool reads text files only (UTF-8). Binary files (images, PDFs, executables) will be rejected
 - Do NOT re-read a file that you already read in the current session unless you have edited it since — your earlier tool_result is still in context
 
 ### Examples

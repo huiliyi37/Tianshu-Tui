@@ -1,5 +1,7 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
+
+import { writeFileAtomicAsync } from '../fs-atomic.js'
 
 import type { PheromoneSignal } from '../agent/sensorium.js'
 
@@ -142,10 +144,10 @@ export class StigmergyStore {
     }, this._flushDelayMs)
   }
 
-  /** Write entries to disk and clear dirty flag. */
+  /** Write entries to disk atomically and clear dirty flag. */
   private async _persist(entries: Pheromone[]): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true })
-    await writeFile(this.filePath, JSON.stringify(entries, null, 2), 'utf-8')
+    await writeFileAtomicAsync(this.filePath, JSON.stringify(entries, null, 2))
     this._dirty = false
   }
 

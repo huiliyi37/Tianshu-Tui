@@ -3,7 +3,7 @@ import { dirname } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
-import { refreshFileReadMtime } from './read-file.js'
+import { refreshFileReadMtime, getFileReadMtime } from './read-file.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -52,6 +52,15 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
 
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true })
+    }
+    // Staleness check: warn if file was read earlier and has since been modified
+    // by another process/tool (prevents silent overwrite of external changes).
+    if (existsSync(filePath)) {
+      const currentMtime = statSync(filePath).mtimeMs
+      const lastReadMtime = getFileReadMtime(filePath)
+      if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
+        console.warn(`⚠ write_file: ${filePath} was modified externally since last read. Overwriting.`)
+      }
     }
 
     writeFileSync(filePath, content, 'utf-8')
