@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
+import { readFile, writeFile, stat } from 'node:fs/promises'
 import { createHash } from 'crypto'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
@@ -126,7 +126,12 @@ Use read_file first to see current content, then construct anchors from the line
     } catch {
       return { content: 'Error: Path escapes project directory', isError: true }
     }
-    if (!existsSync(filePath)) {
+
+    // Check file exists asynchronously
+    let fileStat: Awaited<ReturnType<typeof stat>>
+    try {
+      fileStat = await stat(filePath)
+    } catch {
       return { content: `Error: File not found: ${filePath}`, isError: true }
     }
 
@@ -157,7 +162,7 @@ Use read_file first to see current content, then construct anchors from the line
       }
     }
 
-    const content = readFileSync(filePath, 'utf-8')
+    const content = await readFile(filePath, 'utf-8')
     const lines = content.split('\n')
 
     // Staleness guard for position-only anchors: if every anchor omits the
@@ -167,7 +172,7 @@ Use read_file first to see current content, then construct anchors from the line
     // numbers — the first edit changes the file, and the second edit's
     // L<num> anchors point to wrong locations because the tool never
     // verifies content after the first mutation.
-    const currentMtime = statSync(filePath).mtimeMs
+    const currentMtime = fileStat.mtimeMs
     const posOnly = anchors.every(a => a.hash === null)
     if (posOnly) {
       const lastReadMtime = getFileReadMtime(filePath)
@@ -218,8 +223,8 @@ Use read_file first to see current content, then construct anchors from the line
     const newLines = newString === '' ? [] : newString.split('\n')
     const newContent = [...before, ...newLines, ...after].join('\n')
 
-    writeFileSync(filePath, newContent, 'utf-8')
-    refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
+    await writeFile(filePath, newContent, 'utf-8')
+    refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     const warn = syntaxCheck(filePath, newContent)
     return { content: `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') }
   },

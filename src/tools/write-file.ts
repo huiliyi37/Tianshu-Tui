@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync, existsSync, statSync } from 'fs'
+import { writeFile, mkdir, stat } from 'node:fs/promises'
 import { dirname } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
@@ -50,21 +50,23 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
       }
     }
 
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
-    }
+    await mkdir(dir, { recursive: true })
+
     // Staleness check: warn if file was read earlier and has since been modified
     // by another process/tool (prevents silent overwrite of external changes).
-    if (existsSync(filePath)) {
-      const currentMtime = statSync(filePath).mtimeMs
+    try {
+      const currentStat = await stat(filePath)
+      const currentMtime = currentStat.mtimeMs
       const lastReadMtime = getFileReadMtime(filePath)
       if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
         console.warn(`⚠ write_file: ${filePath} was modified externally since last read. Overwriting.`)
       }
+    } catch {
+      // File doesn't exist yet — skip staleness check
     }
 
-    writeFileSync(filePath, content, 'utf-8')
-    refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
+    await writeFile(filePath, content, 'utf-8')
+    refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     const lines = content.split('\n').length
     const warn = syntaxCheck(filePath, content)
     return { content: `Wrote ${content.length} bytes (${lines} lines) to ${filePath}` + (warn ? '\n\n' + warn : '') }

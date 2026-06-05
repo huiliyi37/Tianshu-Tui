@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
+import { readFile, writeFile, stat } from 'node:fs/promises'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { hashLine } from './hash-edit.js'
@@ -47,14 +47,18 @@ Bad: using a too-short old_string that matches multiple locations`,
     } catch {
       return { content: 'Error: Path escapes project directory', isError: true }
     }
-    if (!existsSync(filePath)) {
+
+    let fileStat: Awaited<ReturnType<typeof stat>>
+    try {
+      fileStat = await stat(filePath)
+    } catch {
       return { content: `Error: File not found: ${filePath}`, isError: true }
     }
 
     // Stale file detection: if the file was modified externally since the
     // model's last read_file, reject the edit to prevent silent corruption.
     // hash_edit is the safe alternative — its anchor verification catches this.
-    const currentMtime = statSync(filePath).mtimeMs
+    const currentMtime = fileStat.mtimeMs
     const lastReadMtime = getFileReadMtime(filePath)
     if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
       // Auto-refresh mtime cache to prevent read-edit-stale loop:
@@ -65,11 +69,10 @@ Bad: using a too-short old_string that matches multiple locations`,
       const oldString = params.input.old_string as string
       try {
         // OOM guard: check file size before reading (same as normal path above)
-        const freshStat = statSync(filePath)
-        if (freshStat.size > MAX_EDIT_FILE_BYTES) {
-          return { content: `File was modified externally and is now too large (${Math.round(freshStat.size / 1024)}KB > 100KB limit) for auto-recovery. Use hash_edit with current anchors instead.`, isError: true }
+        if (fileStat.size > MAX_EDIT_FILE_BYTES) {
+          return { content: `File was modified externally and is now too large (${Math.round(fileStat.size / 1024)}KB > 100KB limit) for auto-recovery. Use hash_edit with current anchors instead.`, isError: true }
         }
-        const freshContent = readFileSync(filePath, 'utf-8')
+        const freshContent = await readFile(filePath, 'utf-8')
         const freshLines = freshContent.split('\n')
 
         if (freshContent.includes(oldString)) {
@@ -78,8 +81,8 @@ Bad: using a too-short old_string that matches multiple locations`,
           const replaceAll = (params.input.replace_all as boolean) ?? false
           if (replaceAll) {
             const newContent = freshContent.replaceAll(oldString, newString)
-            writeFileSync(filePath, newContent, 'utf-8')
-            refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
+            await writeFile(filePath, newContent, 'utf-8')
+            refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const warn = syntaxCheck(filePath, newContent)
             return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}` }
@@ -90,8 +93,8 @@ Bad: using a too-short old_string that matches multiple locations`,
             return { content: buildMultipleMatchError(filePath, oldString, freshContent), isError: true }
           }
           const recovered = freshContent.replace(oldString, newString)
-          writeFileSync(filePath, recovered, 'utf-8')
-          refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
+          await writeFile(filePath, recovered, 'utf-8')
+          refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
           const warn = syntaxCheck(filePath, recovered)
           return { content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}` }
         }
@@ -135,16 +138,15 @@ Bad: using a too-short old_string that matches multiple locations`,
 
     // OOM guard: reject large files that would blow the heap on readFileSync.
     // For files >100KB, direct the model to apply_patch or sed instead.
-    const fileSize = statSync(filePath).size
-    if (fileSize > MAX_EDIT_FILE_BYTES) {
-      const sizeKB = (fileSize / 1024).toFixed(0)
+    if (fileStat.size > MAX_EDIT_FILE_BYTES) {
+      const sizeKB = (fileStat.size / 1024).toFixed(0)
       return {
         content: `Error: File too large for edit_file (${sizeKB}KB). Use apply_patch with a unified diff for targeted edits, or use bash with sed for simple string replacements on large files.`,
         isError: true,
       }
     }
 
-    const content = readFileSync(filePath, 'utf-8')
+    const content = await readFile(filePath, 'utf-8')
     const oldString = params.input.old_string as string
     const newString = params.input.new_string as string
     const replaceAll = (params.input.replace_all as boolean) ?? false
@@ -157,8 +159,8 @@ Bad: using a too-short old_string that matches multiple locations`,
         }
       }
       const newContent = content.replaceAll(oldString, newString)
-      writeFileSync(filePath, newContent, 'utf-8')
-      refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
+      await writeFile(filePath, newContent, 'utf-8')
+      refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
       const warn = syntaxCheck(filePath, newContent)
@@ -184,8 +186,8 @@ Bad: using a too-short old_string that matches multiple locations`,
       }
     }
     const newContent = content.replace(oldString, newString)
-    writeFileSync(filePath, newContent, 'utf-8')
-    refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
+    await writeFile(filePath, newContent, 'utf-8')
+    refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     const warn = syntaxCheck(filePath, newContent)
     return { content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : '') }
   },
