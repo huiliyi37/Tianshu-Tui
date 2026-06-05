@@ -322,7 +322,7 @@ export class AnthropicClient implements StreamClient {
     try {
       resetIdleTimer()
       while (true) {
-        if (signal?.aborted) break
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
 
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
