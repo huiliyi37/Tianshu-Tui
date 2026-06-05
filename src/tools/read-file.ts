@@ -1,4 +1,5 @@
 import { readFileSync, existsSync, statSync } from 'fs'
+import { extname } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent } from './truncation.js'
 import { validatePath } from './path-validate.js'
@@ -140,6 +141,19 @@ function getGitignoreFilter(cwd: string): GitignoreFilter {
 const MAX_TOOL_INPUT_BYTES = 100 * 1024
 const LOG_PREVIEW_LINES = 80
 
+/** File extensions known to be binary — read_file rejects them with a clear error
+ *  instead of returning garbled UTF-8 to the model. */
+const BINARY_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.svgz',
+  '.pdf',
+  '.exe', '.dll', '.so', '.dylib', '.wasm',
+  '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar',
+  '.mp3', '.mp4', '.avi', '.mov', '.wav', '.ogg', '.flac',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+  '.pyc', '.class', '.o', '.obj',
+  '.db', '.sqlite', '.sqlite3',
+])
+
 function buildLogPreviewContent(filePath: string, content: string): string {
   const lines = content.split('\n')
   const headCount = Math.min(LOG_PREVIEW_LINES, lines.length)
@@ -167,7 +181,6 @@ function buildLogPreviewContent(filePath: string, content: string): string {
 function buildFileUiOutput(raw: string, maxLines: number): string {
   const lines = raw.split('\n')
   const totalLines = lines.length
-
   if (totalLines <= maxLines) {
     return lines.map((l, i) => `${String(i + 1).padStart(4, ' ')}│ ${l}`).join('\n')
   }
@@ -210,6 +223,14 @@ export function readFilePayload(cwd: string, options: ReadFilePayloadOptions): R
   if (filter.isIgnored(cwd, filePath)) {
     throw new Error(`File is gitignored (node_modules, build artifacts, etc.): ${filePath}`)
   }
+
+  // Reject binary files with a clear error — the tool description promises this.
+  // Common binary extensions are checked before reading to avoid returning garbled UTF-8.
+  const ext = extname(filePath).toLowerCase()
+  if (BINARY_EXTENSIONS.has(ext)) {
+    throw new Error(`File is binary (${ext} format). read_file only reads text files. Use file_info to inspect metadata.`)
+  }
+
 
   const fileSize = statSync(filePath).size
   const hasExplicitRange = options.offset !== undefined || options.limit !== undefined

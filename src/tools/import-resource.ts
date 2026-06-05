@@ -85,7 +85,7 @@ function buildResult(
         : `\n\n── Content ──\n${content}`
     } catch { /* binary / unreadable */ }
   } else if (stats.type === 'file' && isImageFile(localPath)) {
-    preview = '\n\n(Image file — use read_file to view)'
+    preview = '\n\n(Image file — imported but not viewable as text. Use file_info for metadata.)'
   }
 
   return {
