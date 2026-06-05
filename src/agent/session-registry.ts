@@ -54,11 +54,23 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE TABLE IF NOT EXISTS claims (
+  session_id TEXT NOT NULL,
   file_path TEXT NOT NULL,
   claim_type TEXT NOT NULL CHECK(claim_type IN ('exclusive','shared_read')),
-  confidence_trend TEXT NOT NULL CHECK(confidence_trend IN ('stable','falling','rising')),
+  acquired_at TEXT NOT NULL,
+  confidence_trend TEXT,
   detail TEXT,
   priority INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_claims_session ON claims(session_id);
+CREATE INDEX IF NOT EXISTS idx_claims_file ON claims(file_path);
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  payload TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
@@ -106,8 +118,13 @@ export class SessionRegistry {
       db.pragma('busy_timeout = 3000')
       db.pragma('foreign_keys = ON')
       db.exec(SCHEMA)
-    } catch {
-      console.warn('⚠ better-sqlite3 not available. Session registry disabled — running in memory-only mode.')
+    } catch (err) {
+      // Distinguish "library missing" from "schema execution failed"
+      if (err instanceof Error && err.message?.includes('better-sqlite3')) {
+        console.warn('⚠ better-sqlite3 not available. Session registry disabled — running in memory-only mode.')
+      } else {
+        console.error('Session registry schema failed:', err)
+      }
       db = createNullDb()
     }
     return new SessionRegistry(db)
