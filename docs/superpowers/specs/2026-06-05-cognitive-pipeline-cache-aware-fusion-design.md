@@ -269,3 +269,72 @@ Phase 3（端到端 · 清醒度的可重复快照）
 | prediction 成败率（待补真预测） | `tool-pipeline.ts:720` |
 | P1 cache 实证 | `docs/analysis/2026-06-02-p1-cache-hit-rate-comparison.md` |
 | AB 行为实证 | `test/ab-control:docs/superpowers/ab-harness/results-2026-05-19.md` |
+
+---
+
+## 天枢修订 · 2026-06-05
+
+> 修订者：天枢（主会话）· 执中域
+> 性质：代码审计 + 设计评估（不启动实施）
+> 状态：实验性质改动暂缓，文档归档待后续收束后重新评估
+
+### 审计方法
+
+逐文件核对了文档附录全部代码锚点，覆盖认知管线（`loop.ts`）、A 臂渲染（`affordance.ts`/`policy-selection.ts`）、B 臂闭环（`tool-execution.ts`）、prompt 通道（`engine.ts`/`volatile.ts`）、认知镜面（`cognitive-ledger.ts`）、prediction 记录（`tool-pipeline.ts`）。
+
+### 锚点验证
+
+| 文档声明 | 实际位置 | 偏差 |
+|---------|---------|------|
+| `cognitive-ledger.ts:95–138` | `src/context/cognitive-ledger.ts:95–138` | 路径前缀：`src/context/` 非 `src/agent/` |
+| `engine.ts:182` 重建条件 | `engine.ts:~186`（`userContent !== this.cachedFreshForUser`） | 行号偏移约 4 行，逻辑不变 |
+| `engine.ts:485/489/540` setter 无 invalidate | 确认：三个 setter 均不调 `invalidateFreshCache()` | 无偏差 |
+| `engine.ts:422/437` 触发 invalidate | 确认：`updateSessionMemory` + `setActionableTurn` | 无偏差 |
+| `tool-execution.ts:305/373` B 臂 | 当前 `:322`（`getInterventionLevel`）/ `:394`（`adjustReasoningEffort`） | 行号偏移（代码演进），逻辑不变 |
+| `tool-pipeline.ts:720` prediction | 确认：`!harnessResult.isError` — 纯布尔成败率 | 无偏差 |
+| 其余锚点 | 全部确认 | 无偏差 |
+
+### 关键发现
+
+**1. A 臂冻结机制 —— 文档诊断正确**
+
+`loop.ts:1228` 每轮调 `setAffordanceHint`，`loop.ts:1233` 每轮调 `setPolicyGuidance`。两个 setter（`engine.ts:485/489`）不触发 `invalidateFreshCache()`。动态附录仅在 `engine.ts:186` 的 `userContent !== this.cachedFreshForUser` 条件满足时重建——即新 user 消息到达时。**工具轮 2–50 内，A 臂注入内容停留在第一轮的快照**。文档 §1–§2 对此的诊断完全正确。
+
+**2. cerebellarHint 的意外发现**
+
+`tool-execution.ts:322` 调 `setCerebellarHint(level)`，值存入 `engine.ts:482`。但 `cerebellarHint` 虽在 `VolatileContext` 接口中声明（`volatile.ts:39`），**`buildDynamicAppendix` 从未渲染它**——搜索整个 `volatile.ts`，无 `cerebellarHint` 的渲染路径。真正承重的 B 臂是 `tool-execution.ts:394–396` 的 `adjustReasoningEffort(newEffort)` → `setClientReasoningEffort`，这条路径走 API 参数、零 prompt 代价。`cerebellarHint` 字符串通道是死代码。
+
+**影响**：文档 §2 的「B 臂 = reasoning-effort 等级」判断正确，但未发现 cerebellarHint 提示字符串从未进入 prompt。这不影响本设计（B 臂保持不动），但若未来想在 prompt 层暴露干预等级，需要补渲染路径。
+
+**3. theta 在 cognitive-mirror 中缺失 —— 确认**
+
+`buildCognitiveMirror`（`src/context/cognitive-ledger.ts:95–138`）渲染的维度：`verification_coverage`、`files_modified`、`complexity`、`momentum`、`stability`、`freshness`、`pressure`、`reasoning`、`exploration`、`caution`、`escalation`、`vigor`、`season`、`regulation-cost`。**不含 theta**。
+
+`renderAffordanceHint`（`affordance.ts:341–343`）的认知状态行：`theta`、`vigor`、`season`、`confidence`。
+
+**重叠字段**：`vigor`、`season`、`confidence`（后者在 cognitive-mirror 中叫 `verification_coverage`）。**theta 仅在 affordance-hint 中出现**——若删除认知状态行且不迁移 theta，将丢失唯一的 theta 展示位。文档 §5.1 对此的处理（降级为待研究项 ⏸）是审慎的。
+
+**4. prediction 薄弱的确认**
+
+`tool-pipeline.ts:720`：`deps.recordPrediction?.(!harnessResult.isError)`。输入是工具是否报错的布尔值，不是「预测 vs 实际」的偏离。文档 §3「数学是真的，喂进去的信号是平凡的成败计数器」——精确。
+
+**5. tool-result nudge 载体可行性**
+
+文档 §5.2 选 tool-result 末尾挂 nudge，论据正确：
+- tool-result 在消息数组末尾 → 当轮 cacheCreate（零额外前缀代价）
+- 下一轮变历史、不改写 → cacheRead 到底
+- 离当前决策最近 → 注意力权重高
+
+实施期需验证的点：nudge 文本附加在 tool_result content 字符串尾部，需确认不破坏 JSON 结构（若 content 为 JSON）且不被 observation-masking 截断（1M 窗口下 masking 跳过，安全）。
+
+### 总体评估
+
+| 维度 | 评价 |
+|------|------|
+| 诊断准确性 | 高。§1 根因（静态注入点前载衰减）与代码实际行为一致 |
+| 通道分析 | 基本正确。A/B 臂区分精准，仅 cerebellarHint 死代码为未覆盖细节 |
+| 代码锚点 | 全部可定位，仅 `cognitive-ledger.ts` 路径前缀和少量行号偏移 |
+| 实施风险 | Phase 0 低风险纯函数；Phase 1 需 JSON 结构安全测试；去重/删减已按 §0 降级 |
+| §0 公理 | 同意前提——认知管线是清醒运行态前提，改动标的是精炼非验证 |
+
+**决策**：实验性质改动暂不启动。当前分支 `fix/stall-root-causes-abort-exit` 有未完成的 stall 修复需优先收束。本设计文档归档，待稳定后重新评估实施优先级。
