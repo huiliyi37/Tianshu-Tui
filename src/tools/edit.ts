@@ -79,6 +79,7 @@ Bad: using a too-short old_string that matches multiple locations`,
           if (replaceAll) {
             const newContent = freshContent.replaceAll(oldString, newString)
             writeFileSync(filePath, newContent, 'utf-8')
+            refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const warn = syntaxCheck(filePath, newContent)
             return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}` }
@@ -90,6 +91,7 @@ Bad: using a too-short old_string that matches multiple locations`,
           }
           const recovered = freshContent.replace(oldString, newString)
           writeFileSync(filePath, recovered, 'utf-8')
+          refreshFileReadMtime(filePath, statSync(filePath).mtimeMs)
           const warn = syntaxCheck(filePath, recovered)
           return { content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}` }
         }
