@@ -84,9 +84,13 @@ export function useGlobalInput(deps: UseGlobalInputDeps): void {
         flushStreamingState()
         flushStaticBatch()
         agent.abort()
-        const ctrlPreservedSteer = steerBuffer.current.drain()
-        if (ctrlPreservedSteer) {
-          pushStatic(createLogEntry({ type: 'system', content: `📨 ${ctrlPreservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+        // Preserve queued guidance — do NOT drain on interrupt. drain() empties
+        // the buffer but the interrupt path never re-injects it (addAnchor is
+        // display-only; the real steer→model path is onSteerDrain → tool_result).
+        // Leaving pending intact lets the next tool-using turn inject it.
+        const ctrlPendingCount = steerBuffer.current.getPending().length
+        if (ctrlPendingCount > 0) {
+          pushStatic(createLogEntry({ type: 'system', content: `📨 ${ctrlPendingCount} queued message(s) preserved for next turn.` }))
         }
         setIsStreaming(false); isStreamingRef.current = false
         pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))
@@ -120,9 +124,10 @@ export function useGlobalInput(deps: UseGlobalInputDeps): void {
           flushStreamingState()
           flushStaticBatch()
           agent.abort()
-          const escPreservedSteer = steerBuffer.current.drain()
-          if (escPreservedSteer) {
-            pushStatic(createLogEntry({ type: 'system', content: `📨 ${escPreservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+          // Preserve queued guidance — see Ctrl+C handler above.
+          const escPendingCount = steerBuffer.current.getPending().length
+          if (escPendingCount > 0) {
+            pushStatic(createLogEntry({ type: 'system', content: `📨 ${escPendingCount} queued message(s) preserved for next turn.` }))
           }
           setIsStreaming(false); isStreamingRef.current = false
           pushStatic(createLogEntry({ type: 'system', content: '⏹ Interrupted.' }))

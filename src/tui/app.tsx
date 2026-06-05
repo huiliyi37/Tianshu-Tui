@@ -457,6 +457,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, [])
 
   const promptQueueRef = useRef({ running: false })
+  // Deferred-submit queue: messages submitted during the window between an
+  // interrupt (isStreamingRef flipped false synchronously) and the aborted
+  // run actually settling (promptQueueRef.running still true). Without this,
+  // handleSubmit's queue guard silently dropped them — no echo, no agent send.
+  const pendingSubmitsRef = useRef<string[]>([])
+  const handleSubmitRef = useRef<((text: string) => void) | null>(null)
   const steerBuffer = useRef(new SteerBuffer())
   const isStreamingRef = useRef(false)
   const [steerPending, setSteerPending] = useState(false)
@@ -519,8 +525,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     // Welcome screen is rendered inline, no banner needed
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const initSubmittedRef = useRef(false)
   useEffect(() => {
-    if (initialInput) {
+    // One-shot guard: under React StrictMode this effect fires twice. Without
+    // the guard the second call would (now that the queue guard defers instead
+    // of dropping) be queued and replayed → agent receives initialInput twice.
+    if (initialInput && !initSubmittedRef.current) {
+      initSubmittedRef.current = true
       handleSubmit(initialInput)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1092,10 +1103,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         phaseTracker.current.onTurnComplete()
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
-        // Drain any remaining steer guidance at turn boundary (pure-text turns)
-        const turnSteer = steerBuffer.current.drain()
-        if (turnSteer) {
-          agent.addAnchor('user_constraint', turnSteer)
+        // Preserve queued steer guidance at turn boundary. Do NOT drain into
+        // addAnchor — that API only updates the display ledger (userAnchors →
+        // setContextLedger), it never reaches the model prompt (buildProactiveContext
+        // has no production caller). The only working injection is onSteerDrain →
+        // tool_result. Leaving pending intact lets the next tool-using turn inject it.
+        const turnSteerCount = steerBuffer.current.getPending().length
+        if (turnSteerCount > 0) {
           pushStatic(createLogEntry({ type: 'system', content: 'Steering guidance will be applied on next turn.' }))
         }
         // Flush any remaining folded tools
@@ -1181,9 +1195,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolTargetMap.current.clear()
         toolStartMap.current.clear()
         toolCallTracker.current.clear()
-        const preservedSteer = steerBuffer.current.drain()
-        if (preservedSteer) {
-          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+        // Preserve queued guidance — do NOT drain. The interrupt handler already
+        // leaves pending intact; draining here would discard it (addAnchor is
+        // display-only). Next tool-using turn injects it via onSteerDrain.
+        const preservedSteer = steerBuffer.current.getPending().length
+        if (preservedSteer > 0) {
+          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer} queued message(s) preserved for next turn.` }))
         }
         liveToolsRef.current = []
         setLiveTools([])
@@ -1215,9 +1232,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolTargetMap.current.clear()
         toolStartMap.current.clear()
         toolCallTracker.current.clear()
-        const preservedSteer = steerBuffer.current.drain()
-        if (preservedSteer) {
-          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+        // Preserve queued guidance — see onError above. Leaving pending intact
+        // lets the next tool-using turn inject it via onSteerDrain → tool_result.
+        const preservedSteer = steerBuffer.current.getPending().length
+        if (preservedSteer > 0) {
+          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer} queued message(s) preserved for next turn.` }))
         }
         liveToolsRef.current = []
         setLiveTools([])
@@ -1256,8 +1275,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     })
     } // end run
 
-    // Serialize via flag — if a run is already in progress, guard against double-submit
+    // Serialize via flag — if a run is already in progress, defer (do NOT drop).
+    // This covers the interrupt window: ESC/Ctrl+C flips isStreamingRef false
+    // synchronously, but the aborted run's promise is still settling (e.g. a
+    // hung tool waits up to 2s for SIGKILL), so promptQueueRef.running is still
+    // true. Queue the message and auto-submit it once the current run settles.
     if (promptQueueRef.current.running) {
+      pendingSubmitsRef.current.push(_userInput)
+      pushStatic(createLogEntry({ type: 'system', content: '⏳ Finishing previous turn — message queued, will send automatically.' }))
       return
     }
     promptQueueRef.current.running = true
@@ -1276,8 +1301,19 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       if (isStreamingRef.current && isCurrentGeneration(myGen, streamGenRef.current)) {
         isStreamingRef.current = false
       }
+      // Drain any messages deferred during this run (interrupt-window submits).
+      // Replay on a microtask so this run fully unwinds before the next starts.
+      if (pendingSubmitsRef.current.length > 0) {
+        const next = pendingSubmitsRef.current.shift()!
+        queueMicrotask(() => handleSubmitRef.current?.(next))
+      }
     })
   }, [agent, session, pushStatic, pushStaticBatch, flushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+
+  // Keep a ref to the latest handleSubmit so the deferred-submit drain (in the
+  // run().finally above) can replay queued interrupt-window messages without
+  // capturing a stale closure or creating a useCallback self-dependency cycle.
+  handleSubmitRef.current = handleSubmit
 
   // Must be after handleSubmit (uses it in the closure chain)
   useGlobalInput({
