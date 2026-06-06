@@ -225,6 +225,10 @@ export class CronScheduler {
           }
           continue
         }
+
+        if (next <= now) {
+          toFire.push(task)
+        }
       }
 
       if (toRemove.length > 0) {
