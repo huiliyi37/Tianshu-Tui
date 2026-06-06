@@ -51,19 +51,19 @@ export function isExecFailure(exitCode: number): boolean {
 }
 
 /**
- * Single-entry cache to avoid calling rtkRewrite twice for the same command.
+ * Per-call cache to avoid calling rtkRewrite twice for the same command
+ * within a single tool invocation (requiresApproval → execute).
  *
- * Intentionally trades freshness for gate/execute consistency: the cached
- * result guarantees requiresApproval() and execute() see the identical
- * rewrite, closing a TOCTOU window.  If rtk isn't installed or errors,
- * the fallback (result === command) is also cached — acceptable because
- * gate→execute runs within milliseconds on the same command.
+ * Keyed by (command, toolUseId) to isolate concurrent workers — a global
+ * single-entry cache would let one worker's rewrite bleed into another's
+ * gate/execute cycle, violating the TOCTOU safety guarantee.
  */
 let _cachedCommand: string | undefined
 let _cachedResult: string | undefined
+let _cachedToolUseId: string | undefined
 
-function rtkRewrite(command: string): string {
-  if (command === _cachedCommand && _cachedResult !== undefined) {
+function rtkRewrite(command: string, toolUseId?: string): string {
+  if (command === _cachedCommand && _cachedResult !== undefined && toolUseId === _cachedToolUseId) {
     return _cachedResult
   }
   let result: string
@@ -74,6 +74,7 @@ function rtkRewrite(command: string): string {
   }
   _cachedCommand = command
   _cachedResult = result
+  _cachedToolUseId = toolUseId
   return result
 }
 
@@ -98,7 +99,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
 
   async execute(params: ToolCallParams) {
     const rawCommand = params.input.command as string
-    const command = rtkRewrite(rawCommand)
+    const command = rtkRewrite(rawCommand, params.toolUseId)
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
 
@@ -237,7 +238,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
 
   requiresApproval(params: ToolCallParams): boolean {
     const rawCommand = params.input.command as string
-    const rewrittenCommand = rtkRewrite(rawCommand)
+    const rewrittenCommand = rtkRewrite(rawCommand, params.toolUseId)
     // Check BOTH raw and rewritten commands.
     // rtkRewrite may expand aliases/macros into dangerous commands
     // that the raw form does not match.
