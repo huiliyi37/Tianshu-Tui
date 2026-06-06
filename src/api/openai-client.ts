@@ -110,16 +110,18 @@ export class OpenAIClient implements StreamClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
-    // DeepSeek thinking mode: reasoning_content MUST be echoed when thinking is enabled,
-    // MUST NOT be present when thinking is disabled.
-    const echoReasoning = this.config.thinking === 'enabled'
-    const messages = echoReasoning
-      ? request.messages
-      : request.messages.map(m => {
-        if (m.role !== 'assistant' || !('reasoning_content' in m)) return m
-        const { reasoning_content: _, ...rest } = m
-        return rest
-      })
+    // DeepSeek thinking mode reasoning_content rules (official docs):
+    // - Tool-call turns: reasoning_content MUST be echoed in all subsequent requests.
+    // - Pure text turns (no tool_calls): reasoning_content is ignored by the API;
+    //   strip it to avoid bloating context and potentially triggering repetition.
+    // - Thinking disabled: strip all reasoning_content.
+    const messages = request.messages.map(m => {
+      if (m.role !== 'assistant' || !('reasoning_content' in m)) return m
+      const hasToolCalls = Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
+      if (this.config.thinking === 'enabled' && hasToolCalls) return m
+      const { reasoning_content: _, ...rest } = m
+      return rest
+    })
 
     const body: Record<string, unknown> = {
       model: request.model,
