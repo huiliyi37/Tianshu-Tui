@@ -754,16 +754,108 @@ async function main() {
     const { startServer } = await import('./server/index.js')
     const { createRoutes } = await import('./server/routes.js')
 
-    const apiToken = process.env.RIVET_SERVER_TOKEN
-    const state: import('./server/routes.js').ServerState = { running: false, apiToken }
-    const routes = createRoutes(state)
-    const server = startServer(port, routes)
+    const apiToken = process.env.RIVET_SERVER_TOKEN?.trim()
+    if (!apiToken) {
+      console.error('RIVET_SERVER_TOKEN is required for rivet serve')
+      process.exit(1)
+    }
 
-    process.on('SIGINT', () => { server.close(); process.exit(0) })
-    process.on('SIGTERM', () => { server.close(); process.exit(0) })
+    const config = loadConfig()
+    const provider = config.provider.providers[config.provider.default]
+    if (!provider) {
+      console.error(`Provider "${config.provider.default}" not configured`)
+      process.exit(1)
+    }
+
+    let auth: AuthProvider | undefined
+    let apiKey = ''
+    if (provider.auth?.type === 'oauth') {
+      auth = createAuthProvider(provider.auth, process.env, provider.apiKey)
+      if (!auth.isAuthenticated()) {
+        console.error(`Provider "${provider.name}" OAuth authentication is required before starting the server`)
+        process.exit(1)
+      }
+    } else {
+      apiKey = resolveApiKey(provider)
+    }
+
+    const model = provider.models[0]
+    if (!model) {
+      console.error(`Provider "${provider.name}" has no configured models`)
+      process.exit(1)
+    }
+
+    const activeAgents = new Set<AgentLoop>()
+    let activeAgent: AgentLoop | null = null
+    const state: import('./server/routes.js').ServerState = {
+      running: false,
+      apiToken,
+      abort: () => {
+        for (const agent of activeAgents) agent.abort()
+      },
+    }
+    const routes = createRoutes(state, {
+      createAgent: () => {
+        const sessionId = randomUUID()
+        const persist = new SessionPersist(sessionId)
+        const claimStore = persist.createClaimStore()
+        persist.injectDurableClaims(claimStore)
+        for (const rule of loadProjectRules(process.cwd())) claimStore.propose(rule)
+        const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
+        const playbookStore = new PlaybookStore(process.cwd())
+        const toolRegistry = createDefaultToolRegistry()
+        const agentCfg = createAgentConfig(createMainAgentConfigInput({
+          apiKey,
+          model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
+          cwd: process.cwd(),
+          provider,
+          config,
+          sessionId,
+          toolDefinitions: toolRegistry.getDefinitions(),
+          sessionMemoryBlock: persist.buildMemoryBlock(),
+          auth,
+        }))
+        const session = new SessionContext()
+        const agent = new AgentLoop({
+          ...agentCfg,
+          toolRegistry,
+          maxTurns: config.agent.maxTurns,
+          contextClaimStore: claimStore,
+          getSessionMemoryState: () => persist.getSessionMemoryState(),
+          fileHistory,
+          playbookStore,
+        }, session, process.cwd())
+        activeAgents.add(agent)
+        activeAgent = agent
+        state.running = true
+        state.sessionId = sessionId
+        return {
+          run: async (prompt, callbacks) => {
+            try {
+              await agent.run(prompt, callbacks)
+            } finally {
+              activeAgents.delete(agent)
+              if (activeAgent === agent) activeAgent = activeAgents.values().next().value ?? null
+              state.running = activeAgents.size > 0
+              state.sessionId = activeAgent?.config.sessionId
+            }
+          },
+          abort: () => agent.abort(),
+        }
+      },
+    })
+    const server = startServer(port, routes, apiToken)
+
+    const shutdownServer = () => {
+      for (const agent of activeAgents) agent.abort()
+      server.close()
+      process.exit(0)
+    }
+    process.on('SIGINT', shutdownServer)
+    process.on('SIGTERM', shutdownServer)
 
     console.log(`Rivet Runtime API listening on http://localhost:${port}`)
-    console.log('Endpoints: GET /status, POST /abort')
+    console.log('Endpoints: GET /status, POST /abort, POST /prompt')
     return
   }
 
