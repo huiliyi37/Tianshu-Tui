@@ -58,6 +58,9 @@ export class ContextClaimStore {
   private cachedClaims: ContextClaim[] | null = null
   private lastProcessedLineCount: number = 0
   private readonly snapshotPath: string
+  // ⚠️ Single-writer assumption: seq is per-instance, not coordinated across processes.
+  // If multiple processes append to the same .claims.jsonl concurrently, seq may collide.
+  // This is acceptable because claim-store is session-scoped and each session has exactly one writer.
   private nextSeq: number = 1
   private checkpointing = false
   private readonly checkpointEveryEvents?: number
@@ -89,7 +92,7 @@ export class ContextClaimStore {
       this.cachedEvents.push(withSeq)
       this.lastFileSize += Buffer.byteLength(line)
     }
-    if (!this.checkpointing && this.checkpointEveryEvents !== undefined && this.checkpointEveryEvents > 0 && this.readEvents().length >= this.checkpointEveryEvents) {
+    if (!this.checkpointing && this.checkpointEveryEvents !== undefined && this.checkpointEveryEvents > 0 && this.cachedEvents !== null && this.cachedEvents.length >= this.checkpointEveryEvents) {
       this.checkpoint()
     }
   }
