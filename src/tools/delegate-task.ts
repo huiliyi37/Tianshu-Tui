@@ -125,7 +125,7 @@ export function createDelegateTaskTool(
                 text: claimText,
                 confidence,
                 fitness: confidence >= 0.85 ? 5 : confidence >= 0.7 ? 3 : 2,
-                source: { actor: 'worker', sessionId: sid, turn: 0, eventId: `${params.toolUseId}:worker` },
+                source: { actor: 'worker', sessionId: sid, turn: params.sessionTurnCount ?? 0, eventId: `${params.toolUseId}:worker` },
                 evidence: [{
                   id: `${params.toolUseId}:finding`,
                   kind: 'worker',
