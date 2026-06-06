@@ -31,23 +31,41 @@ describe('committed-log: append + items', () => {
 })
 
 describe('committed-log: dedup', () => {
-  it('skips an entry with identical type + content prefix, returns false', () => {
+  it('skips an entry with the SAME id (double-push guard), returns false', () => {
     const log = createCommittedLog()
-    assert.equal(log.append(entry('hello world')), true)
-    assert.equal(log.append(entry('hello world')), false)
+    const e = entry('hello world')
+    assert.equal(log.append(e), true)
+    // Same object re-pushed → same id → dedup
+    assert.equal(log.append(e), false)
     assert.equal(log.items().length, 1)
   })
 
-  it('dedup is bounded to recent window (re-append after 16 distinct is allowed)', () => {
+  it('accepts entries with different ids even if content is identical', () => {
+    // Each createLogEntry gets a unique counter id. With chunked streaming,
+    // blocks may have similar prefixes (e.g. repeated ``` fences, headers).
+    // ID-based dedup correctly allows these through.
     const log = createCommittedLog()
-    log.append(entry('x'))
-    for (let i = 0; i < 16; i++) log.append(entry(`d${i}`))
-    assert.equal(log.append(entry('x')), true)
-    assert.equal(log.length, 18)
+    assert.equal(log.append(entry('```')), true)
+    assert.equal(log.append(entry('```')), true)
+    assert.equal(log.append(entry('```')), true)
+    assert.equal(log.items().length, 3)
   })
 
-  it('dedup keys on type+content prefix (different type not deduped)', () => {
+  it('dedup window is bounded (256 entries then rotates)', () => {
     const log = createCommittedLog()
+    const first = entry('first')
+    log.append(first)
+    // Fill past the rotation threshold
+    for (let i = 0; i < 300; i++) log.append(entry(`d${i}`))
+    // The first entry's id has been rotated out of the window
+    assert.equal(log.append(first), true, 're-insert after window rotation should succeed')
+    assert.ok(log.length > 256)
+  })
+
+  it('dedup keys on entry id (content/type differences irrelevant)', () => {
+    const log = createCommittedLog()
+    // Different types, different content — but each call gets a new id
+    // so no dedup should occur
     log.append(createLogEntry({ type: 'assistant_message', content: 'same' }))
     assert.equal(log.append(createLogEntry({ type: 'system', content: 'same' })), true)
     assert.equal(log.length, 2)

@@ -19,7 +19,7 @@ import type { LogEntry } from './log-state.js'
  * which would shift indices.
  */
 export interface CommittedLog {
-  /** Append an entry. Deduped by `type:content-prefix` over a recent window.
+  /** Append an entry. Deduped by entry id over a rolling window (256 ids).
    *  Returns true if appended, false if a duplicate was skipped. */
   append(entry: LogEntry): boolean
   /** The array to feed <Static items={...}>. Only grows; never shrinks or reorders. */
@@ -39,19 +39,20 @@ export interface CommittedLog {
 export function createCommittedLog(): CommittedLog {
   const arr: LogEntry[] = []
   let dedup = new Set<string>()
-
-  const fingerprint = (entry: LogEntry) => `${entry.type}:${entry.content.slice(0, 120)}`
+  const MAX_DEDUP = 256
 
   return {
     append(entry: LogEntry): boolean {
-      const fp = fingerprint(entry)
-      if (dedup.has(fp)) return false
-      dedup.add(fp)
-      if (dedup.size > 16) {
-        // Rotate: keep last 8 (mirrors the previous app.tsx staticDedupRef behavior)
-        const recent = [...dedup].slice(-8)
-        dedup = new Set(recent)
-        dedup.add(fp)
+      const id = entry.id
+      if (dedup.has(id)) return false
+      dedup.add(id)
+      if (dedup.size > MAX_DEDUP) {
+        // Rotate: keep last 128 (half window) to bound memory while preserving
+        // reasonable window for streaming chunked commits (~dozens per turn).
+        const recent = [...dedup].slice(-128)
+        dedup.clear()
+        for (const r of recent) dedup.add(r)
+        dedup.add(id)
       }
       arr.push(entry)
       return true
