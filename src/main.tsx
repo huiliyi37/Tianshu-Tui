@@ -36,6 +36,7 @@ import { createAuthProvider } from './auth/registry.js'
 import type { AuthProvider } from './auth/types.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
+import { createCoordinatorReviewDeps } from './agent/review-coordinator-deps.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { profileRegistry } from './agent/profile-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
@@ -215,6 +216,16 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       gate: _b1Gate,
       sessionRegistry: _sessionRegistryRef ?? undefined,
       sessionId: _sessionIdRef ?? undefined,
+      reviewDeps: createCoordinatorReviewDeps({
+        delegate: async (request, abortSignal) => {
+          if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+          return _coordinatorRef.delegate(request, abortSignal)
+        },
+        delegateBatch: async (requests, policy, abortSignal, onProgress) => {
+          if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+          return _coordinatorRef.delegateBatch(requests, policy, abortSignal, onProgress)
+        },
+      }),
     })))
 
     return reg

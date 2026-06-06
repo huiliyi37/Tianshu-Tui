@@ -155,8 +155,7 @@ export class DelegationCoordinator {
         }
       }
 
-      const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
-      const isWrite = writeProfiles.includes(request.profile)
+      const isWrite = classifyProfile(request.profile) === 'hands'
       const order = isWrite
         ? createWriteWorkOrder({
             parentTurnId: request.parentTurnId,
@@ -406,13 +405,12 @@ export class DelegationCoordinator {
         return { status: 'skipped', results: [], packet: buildPrimaryWorkerPacket([]) }
       }
 
-    const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
     const queue = new WorkOrderQueue(this.config.maxWorkers)
 
     // Pre-create work orders for deduplication and dependency ordering
     const orders: WorkOrder[] = []
     for (const r of runnables) {
-      const isWrite = writeProfiles.includes(r.profile)
+      const isWrite = classifyProfile(r.profile) === 'hands'
       const order = isWrite
         ? createWriteWorkOrder({
             parentTurnId: r.parentTurnId,

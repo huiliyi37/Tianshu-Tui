@@ -1,0 +1,130 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { createCoordinatorReviewDeps, type ReviewCoordinator } from '../review-coordinator-deps.js'
+import type { CoordinatorRun, DelegationRequest } from '../coordinator.js'
+import type { WorkerResult } from '../work-order.js'
+
+function worker(overrides: Partial<WorkerResult> = {}): WorkerResult {
+  return {
+    workOrderId: 'wo-test',
+    status: 'passed',
+    summary: 'verified with tests',
+    findings: [],
+    artifacts: [],
+    changedFiles: [],
+    risks: [],
+    nextActions: [],
+    evidenceStatus: 'verified',
+    ...overrides,
+  }
+}
+
+function run(results: WorkerResult[], status: CoordinatorRun['status'] = 'completed'): CoordinatorRun {
+  return {
+    status,
+    results,
+    packet: results.map(result => result.summary).join('\n'),
+  }
+}
+
+describe('createCoordinatorReviewDeps', () => {
+  it('spawns adversarial verifier with review-depth guard and maps verified evidence', async () => {
+    let captured: DelegationRequest | undefined
+    const coordinator: ReviewCoordinator = {
+      delegate: async request => {
+        captured = request
+        return run([worker({
+          verification: {
+            command: 'npm exec -- tsx --test src/agent/__tests__/deliver-task.test.ts',
+            status: 'passed',
+            scope: 'targeted',
+            exitCode: 0,
+            passed: 61,
+            failed: 0,
+            skipped: 0,
+            durationMs: 537,
+          },
+        })])
+      },
+    }
+
+    const deps = createCoordinatorReviewDeps(coordinator, { parentTurnId: 'turn-1', reviewDepth: 2 })
+    const result = await deps.spawnVerifier({ files: ['src/agent/deliver-task.ts'], crossModule: false, isFix: true })
+
+    assert.equal(captured?.parentTurnId, 'turn-1')
+    assert.equal(captured?.profile, 'adversarial_verifier')
+    assert.equal(captured?.kind, 'verify')
+    assert.deepEqual(captured?.scope.files, ['src/agent/deliver-task.ts'])
+    assert.match(captured?.objective ?? '', /Review depth: 3/)
+    assert.match(captured?.objective ?? '', /Do not call deliver_task/)
+    assert.equal(result.verdict, 'verified')
+    assert.match(result.evidence, /ran: npm exec -- tsx --test/)
+    assert.match(result.evidence, /61 passed/)
+  })
+
+  it('maps unverified verifier result to rejected', async () => {
+    const coordinator: ReviewCoordinator = {
+      delegate: async () => run([worker({ evidenceStatus: 'unverified', summary: 'read code only' })]),
+    }
+
+    const deps = createCoordinatorReviewDeps(coordinator)
+    const result = await deps.spawnVerifier({ files: ['src/a.ts'], crossModule: false, isFix: true })
+
+    assert.equal(result.verdict, 'rejected')
+    assert.match(result.evidence, /read code only/)
+  })
+
+  it('spawns patcher and reports patched only when a patch was produced', async () => {
+    const requests: DelegationRequest[] = []
+    const coordinator: ReviewCoordinator = {
+      delegate: async request => {
+        requests.push(request)
+        return run([worker({
+          summary: 'patched deliver-task',
+          patchSummary: 'added router gate',
+          changedFiles: ['src/agent/deliver-task.ts'],
+          evidenceStatus: 'skipped',
+        })])
+      },
+    }
+
+    const deps = createCoordinatorReviewDeps(coordinator)
+    const result = await deps.spawnPatcher(
+      { files: ['src/agent/deliver-task.ts'], crossModule: false, isFix: true },
+      { verdict: 'rejected', evidence: 'missing review gate' },
+    )
+
+    assert.equal(requests[0]?.profile, 'patcher')
+    assert.equal(requests[0]?.kind, 'patch_proposal')
+    assert.match(requests[0]?.objective ?? '', /missing review gate/)
+    assert.equal(result.patched, true)
+  })
+
+  it('spawns squadron through delegateBatch and maps high-severity findings', async () => {
+    let capturedPolicy: string | undefined
+    let capturedRequests: DelegationRequest[] = []
+    const coordinator: ReviewCoordinator = {
+      delegate: async () => run([]),
+      delegateBatch: async (requests, policy) => {
+        capturedRequests = requests
+        capturedPolicy = policy
+        return run([worker({
+          summary: 'Lifecycle HIGH: race in transition',
+          findings: [{ claim: 'HIGH race in transition', evidence: 'src/a.ts:10', confidence: 'high' }],
+          evidenceStatus: 'skipped',
+        })])
+      },
+    }
+
+    const deps = createCoordinatorReviewDeps(coordinator)
+    const result = await deps.spawnSquadron({ files: ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'], crossModule: false, isFix: false })
+
+    assert.equal(capturedPolicy, 'all_required')
+    assert.equal(capturedRequests.length, 4)
+    assert.ok(capturedRequests.every(request => request.profile === 'reviewer'))
+    assert.ok(capturedRequests.every(request => request.kind === 'review'))
+    assert.deepEqual(capturedRequests[0]?.scope.files, ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'])
+    assert.equal(result.findings[0]?.severity, 'HIGH')
+    assert.match(result.findings[0]?.claim ?? '', /race/)
+  })
+})
