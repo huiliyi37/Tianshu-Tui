@@ -1,13 +1,23 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { isAuthorizedRequest } from './auth.js'
 import { errorContext, serverLogger } from './logger.js'
+
+const MAX_BODY_BYTES = 1_048_576
 
 export interface RouteResponse {
   status: number
   body?: unknown
   headers?: Record<string, string>
+  /** Handler already took ownership of the ServerResponse (e.g. SSE). */
+  handled?: boolean
 }
 
-export type RouteHandler = (body: unknown, params?: Record<string, string>, headers?: Record<string, string>) => RouteResponse | Promise<RouteResponse>
+export type RouteHandler = (
+  body: unknown,
+  params?: Record<string, string>,
+  headers?: Record<string, string>,
+  res?: ServerResponse,
+) => RouteResponse | Promise<RouteResponse>
 
 export function createRouter(routes: Record<string, RouteHandler>) {
   // Build exact match map + parameterized routes
@@ -35,14 +45,20 @@ export function createRouter(routes: Record<string, RouteHandler>) {
     }
   }
 
-  return async (method: string, path: string, body: unknown, reqHeaders?: Record<string, string>): Promise<RouteResponse> => {
+  return async (
+    method: string,
+    path: string,
+    body: unknown,
+    reqHeaders?: Record<string, string>,
+    res?: ServerResponse,
+  ): Promise<RouteResponse> => {
     // Strip query string from path
     const cleanPath = path.split('?')[0] ?? path
 
     // Try exact match first
     const exactKey = method + ' ' + cleanPath
     const exactHandler = exact.get(exactKey)
-    if (exactHandler) return await exactHandler(body, undefined, reqHeaders)
+    if (exactHandler) return await exactHandler(body, undefined, reqHeaders, res)
 
     // Try parameterized routes
     for (const { pattern, paramNames, handler } of parameterized) {
@@ -52,7 +68,7 @@ export function createRouter(routes: Record<string, RouteHandler>) {
         for (let i = 0; i < paramNames.length; i++) {
           params[paramNames[i]!] = match[i + 1]!
         }
-        return await handler(body, params, reqHeaders)
+        return await handler(body, params, reqHeaders, res)
       }
     }
 
@@ -60,17 +76,26 @@ export function createRouter(routes: Record<string, RouteHandler>) {
   }
 }
 
-export function startServer(port: number, routes: Record<string, RouteHandler>): { close: () => void } {
+export function startServer(port: number, routes: Record<string, RouteHandler>, apiToken?: string): { close: () => void } {
   const router = createRouter(routes)
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    const body = await readBody(req)
-    const reqHeaders: Record<string, string> = {}
-    for (const [k, v] of Object.entries(req.headers)) {
-      if (typeof v === 'string') reqHeaders[k.toLowerCase()] = v
-      else if (Array.isArray(v)) reqHeaders[k.toLowerCase()] = v[0] ?? ''
+    const reqHeaders = normalizeHeaders(req)
+    if (!isAuthorizedRequest({ headers: reqHeaders }, apiToken)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Unauthorized' }))
+      return
     }
-    const result = await router(req.method ?? 'GET', req.url ?? '/', body, reqHeaders)
+
+    const body = await readBody(req)
+    if (body === BODY_TOO_LARGE) {
+      res.writeHead(413, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Request body too large' }))
+      return
+    }
+
+    const result = await router(req.method ?? 'GET', req.url ?? '/', body, reqHeaders, res)
+    if (result.handled) return
     const headers: Record<string, string> = { 'Content-Type': 'application/json', ...result.headers }
     res.writeHead(result.status, headers)
     res.end(result.body ? JSON.stringify(result.body) : '')
@@ -80,9 +105,31 @@ export function startServer(port: number, routes: Record<string, RouteHandler>):
   return { close: () => server.close() }
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+const BODY_TOO_LARGE = Symbol('body-too-large')
+
+type ReadBodyResult = unknown | typeof BODY_TOO_LARGE
+
+function normalizeHeaders(req: IncomingMessage): Record<string, string> {
+  const reqHeaders: Record<string, string> = {}
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (typeof v === 'string') reqHeaders[k.toLowerCase()] = v
+    else if (Array.isArray(v)) reqHeaders[k.toLowerCase()] = v[0] ?? ''
+  }
+  return reqHeaders
+}
+
+async function readBody(req: IncomingMessage): Promise<ReadBodyResult> {
   const chunks: Buffer[] = []
-  for await (const chunk of req) chunks.push(chunk as Buffer)
+  let total = 0
+  for await (const chunk of req) {
+    const buffer = chunk as Buffer
+    total += buffer.length
+    if (total > MAX_BODY_BYTES) {
+      req.destroy()
+      return BODY_TOO_LARGE
+    }
+    chunks.push(buffer)
+  }
   const raw = Buffer.concat(chunks).toString()
   if (!raw) return {}
   try {

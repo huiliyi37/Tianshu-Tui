@@ -17,9 +17,9 @@ function unauthorized() {
 }
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
-  return async (body, params, headers) => {
+  return async (body, params, headers, res) => {
     if (!isAuthorizedRequest({ body, headers }, apiToken)) return unauthorized()
-    return handler(body, params, headers)
+    return handler(body, params, headers, res)
   }
 }
 
