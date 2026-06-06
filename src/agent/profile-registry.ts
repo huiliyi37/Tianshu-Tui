@@ -8,7 +8,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-export type AgentRole = 'brain' | 'hands' | 'readonly'
+export type AgentRole = 'brain' | 'hands' | 'readonly' | 'readonly_plus_test'
 
 /** 单个 Profile 的完整定义 */
 export interface ProfileDefinition {
@@ -75,6 +75,50 @@ Do NOT modify any files.`,
     role: 'hands',
     allowedTools: [...WRITE_TOOLS],
     expertisePrompt: `You are a verifier. Run tests, check type errors, and verify changes work correctly. You may write and edit test files.`,
+    defaultMaxTokens: 16384,
+    defaultKind: 'verify',
+    builtIn: true,
+  },
+  {
+    name: 'adversarial_verifier',
+    role: 'readonly_plus_test',
+    allowedTools: [...READ_ONLY_TOOLS, 'run_tests'],
+    expertisePrompt: `## Adversarial Verifier
+
+Your job is NOT to confirm the implementation works — it is to **try to break it**.
+
+### Core Directive
+You are an independent, adversarial verifier. The implementer is also a model, and its tests may be stacked with mocks and confirmation bias. You do NOT trust the implementer's assertions. You independently verify.
+
+### Failure Modes to Avoid
+1. **Verification avoidance**: reading the code and writing PASS without actually running tests — this is the #1 failure mode. Don't do it.
+2. **First-80% seduction**: the first few tests pass and look good, so you stop probing — always go deeper.
+
+### Evidence Mandate
+Every PASS verdict **MUST** include:
+- The exact command you ran
+- The observed output (snippet of key lines)
+Without this, the verdict is treated as unverified.
+
+### Adversarial Strategy (MANDATORY — do NOT skip)
+For each change, execute at least 3 of the following:
+
+1. **Boundary probes**: empty input, zero, negative numbers, very long strings, special characters
+2. **Concurrency probes**: if the change involves async/file/state, attempt concurrent scenarios
+3. **Type boundary probes**: if the change involves type assertions/narrowing, construct type-mismatched inputs
+4. **Error path probes**: force the code to take error paths — invalid inputs, missing files, permission issues
+5. **Idempotency probes**: run the same operation twice — should the second be a no-op? Does it error?
+
+### Independence Advisory
+- The implementer's tests may be full of mocks — test independently, don't reuse their assertions.
+- If you need new tests written, that's a separate work order for a patcher. Your job is to run tests and break things, not write new test files.
+
+### Verdict Format
+End every verification with:
+\`\`\`json
+{"verdict": "verified|failed|blocked", "command": "actual command run", "evidence": "observed output (key lines)"}
+\`\`\`
+If failed or blocked, include: "counterexample": "the specific input/scenario that triggered the failure"`,
     defaultMaxTokens: 16384,
     defaultKind: 'verify',
     builtIn: true,
@@ -256,8 +300,8 @@ function parseAgentMarkdown(content: string): ProfileDefinition {
 
   // Validate required fields
   if (typeof fm.name !== 'string' || !fm.name) throw new Error('Missing required field: name')
-  if (fm.role !== 'brain' && fm.role !== 'hands' && fm.role !== 'readonly') {
-    throw new Error(`Invalid role "${String(fm.role)}". Must be: brain, hands, or readonly`)
+  if (fm.role !== 'brain' && fm.role !== 'hands' && fm.role !== 'readonly' && fm.role !== 'readonly_plus_test') {
+    throw new Error(`Invalid role "${String(fm.role)}". Must be: brain, hands, readonly, or readonly_plus_test`)
   }
   if (!Array.isArray(fm.tools) || fm.tools.length === 0) {
     throw new Error('tools must be a non-empty array')

@@ -127,15 +127,37 @@ test('patcher profile gets advisory risk instead of blocked', () => {
   assert.ok(checked.risks.some(r => r.includes('advisory')))
 })
 
-test('verifier profile gets advisory risk instead of blocked', () => {
+test('verifier profile (old verifier) now blocked instead of advisory', () => {
+  // Old verifier is no longer in WRITE_PROFILES_ADVISORY — treated as regular write worker
   const checked = verifyWorkerEvidence(result({
     changedFiles: ['src/a.ts'],
     evidenceStatus: 'unverified',
   }), 'verifier')
 
+  assert.equal(checked.status, 'blocked')
+  assert.equal(checked.evidenceStatus, 'blocked')
+  assert.ok(checked.risks.some(r => r.includes('unverified')))
+})
+
+test('adversarial_verifier verified evidence accepted directly (no advisory, no block)', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'verified',
+  }), 'adversarial_verifier')
+
   assert.equal(checked.status, 'passed')
-  assert.equal(checked.evidenceStatus, 'unverified')
-  assert.ok(checked.risks.some(r => r.includes('advisory')))
+  assert.equal(checked.evidenceStatus, 'verified')
+  assert.equal(checked.risks.filter(r => r.includes('unverified') || r.includes('advisory')).length, 0)
+})
+
+test('adversarial_verifier unverified evidence still blocked', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'unverified',
+  }), 'adversarial_verifier')
+
+  assert.equal(checked.status, 'blocked')
+  assert.equal(checked.evidenceStatus, 'blocked')
 })
 
 test('blocks write worker with changedFiles and examinedFiles but no verification', () => {

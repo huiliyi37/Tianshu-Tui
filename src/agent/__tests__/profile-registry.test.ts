@@ -19,8 +19,8 @@ describe('ProfileRegistry', () => {
     registry = new ProfileRegistry()
   })
 
-  it('has 8 built-in profiles', () => {
-    assert.equal(registry.list().length, 8)
+  it('has 9 built-in profiles', () => {
+    assert.equal(registry.list().length, 9)
   })
 
   it('maps code_scout as readonly', () => {
@@ -55,19 +55,34 @@ describe('ProfileRegistry', () => {
     assert.equal(p.defaultMaxTokens, 16384)
   })
 
-  it('listWriteProfiles returns hands roles', () => {
+  it('maps adversarial_verifier as readonly_plus_test with no write/bash tools', () => {
+    const p = registry.get('adversarial_verifier')!
+    assert.ok(p)
+    assert.equal(p.role, 'readonly_plus_test')
+    assert.equal(p.defaultKind, 'verify')
+    assert.equal(p.defaultMaxTokens, 16384)
+    assert.ok(p.allowedTools.includes('run_tests'))
+    assert.ok(p.allowedTools.includes('read_file'))
+    assert.ok(!p.allowedTools.includes('edit_file'))
+    assert.ok(!p.allowedTools.includes('write_file'))
+    assert.ok(!p.allowedTools.includes('bash'))
+  })
+
+  it('listWriteProfiles returns hands roles (adversarial_verifier is not hands)', () => {
     const write = registry.listWriteProfiles()
+    // adversarial_verifier has role 'readonly_plus_test', not 'hands' — excluded from write list
     assert.deepEqual(write.sort(), ['patcher', 'verifier'])
   })
 
   it('listReadOnlyProfiles returns readonly roles', () => {
     const ro = registry.listReadOnlyProfiles()
+    // adversarial_verifier is readonly_plus_test, not 'readonly' — excluded from readonly list
     assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'doc_scout', 'reviewer', 'troubleshooter'])
   })
 
-  it('getProfileNames returns all 8 names', () => {
+  it('getProfileNames returns all 9 names', () => {
     const names = registry.getProfileNames().sort()
-    assert.deepEqual(names, ['architect', 'code_scout', 'doc_scout', 'patcher', 'planner', 'reviewer', 'troubleshooter', 'verifier'])
+    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'doc_scout', 'patcher', 'planner', 'reviewer', 'troubleshooter', 'verifier'])
   })
 
   it('rejects overriding built-in profiles', () => {

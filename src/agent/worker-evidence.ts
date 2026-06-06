@@ -5,7 +5,7 @@ function addRisk(risks: string[], risk: string): string[] {
 }
 
 const READ_ONLY_PROFILES = ['code_scout', 'doc_scout', 'planner', 'reviewer']
-const WRITE_PROFILES_ADVISORY = ['patcher', 'verifier']
+const WRITE_PROFILES_ADVISORY = ['patcher']
 
 /**
  * Verify worker evidence for mutation safety.
@@ -25,8 +25,14 @@ const WRITE_PROFILES_ADVISORY = ['patcher', 'verifier']
  */
 export function verifyWorkerEvidence(result: WorkerResult, profile?: string): WorkerResult {
   // Read-only profiles skip the verification gate when no files were changed.
-  // Without a profile, the same mutation-based rule still applies: examinedFiles are informational only.
   if (result.changedFiles.length === 0) return result
+
+  // Adversarial verifier's evidenceStatus is trusted — it has no write tools
+  // and its expertisePrompt mandates command+evidence output for every PASS.
+  // Accept its 'verified' directly, bypassing advisory and block paths.
+  if (profile === 'adversarial_verifier' && result.evidenceStatus === 'verified') {
+    return result
+  }
 
   if (profile && WRITE_PROFILES_ADVISORY.includes(profile)) {
     if (result.evidenceStatus !== 'verified') {
