@@ -276,6 +276,10 @@ export class CompactionController {
         }
         debugLog(`[llm-compact] 1M window at ${(ratio * 100).toFixed(0)}% — triggering LLM compact`)
         const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
+        if (this.isAbortRequested()) {
+          debugLog('[llm-compact] turn aborted after compact returned — skipping checkpoint replacement')
+          return { failures: input.failures, compacted: false }
+        }
         if (summary) {
           this.replaceWithCheckpoint({
             tier: 2,
@@ -395,6 +399,10 @@ export class CompactionController {
     // Try LLM compact first (short timeout — emergency path, can't wait long)
     if (this.deps.primaryClient) {
       const summary = await this.llmCompact(30_000, this.deps.getAbortSignal?.())
+      if (this.isAbortRequested()) {
+        debugLog('[llm-compact] turn aborted after compact returned — skipping ceiling checkpoint replacement')
+        return
+      }
       if (summary) {
         this.replaceWithCheckpoint({
           tier: 4,
@@ -456,6 +464,10 @@ export class CompactionController {
     // Try LLM compact first for higher-fidelity summary
     if (this.deps.primaryClient) {
       const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
+      if (this.isAbortRequested()) {
+        debugLog('[llm-compact] turn aborted after compact returned — skipping session-split checkpoint replacement')
+        return false
+      }
       if (summary) {
         this.replaceWithCheckpoint({
           tier: 3,
@@ -555,6 +567,10 @@ export class CompactionController {
     tokenCount: number,
   ): { messages: OaiMessage[] } {
     return microCompactOai(messages, this.deps.contextWindow, tokenCount)
+  }
+
+  private isAbortRequested(): boolean {
+    return this.deps.getAbortSignal?.()?.aborted === true
   }
 
   private persistExtractedMemories(trajectory: TrajectoryEntry[]): void {

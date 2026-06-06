@@ -5,6 +5,8 @@ import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { PressureMonitor } from '../../context/pressure-monitor.js'
 import type { TrajectoryEntry } from '../trajectory.js'
+import type { OaiChatRequest } from '../../api/oai-types.js'
+import type { StreamCallbacks, StreamClient } from '../../api/stream-client.js'
 
 function makeEngine(): PromptEngine {
   return new PromptEngine({
@@ -450,6 +452,41 @@ describe('CompactionController', () => {
     assert.equal(refreshed, true)
   })
 
+  it('A-1: trySessionSplit skips checkpoint mutation when abort lands after LLM compact returns', async () => {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(220_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+    ])
+    const before = session.getMessages().map(m => m.content)
+    const abortController = new AbortController()
+    let refreshed = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('late compact summary')
+        abortController.abort()
+      },
+    }
+
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getAbortSignal: () => abortController.signal,
+      refreshLedger: () => { refreshed = true },
+    })
+
+    const didSplit = await controller.trySessionSplit()
+
+    assert.equal(didSplit, false)
+    assert.deepEqual(session.getMessages().map(m => m.content), before)
+    assert.equal(refreshed, false)
+  })
+
   it('P4: enforceContextCeiling handoff also benefits from trajectory data', async () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(200_000 * 4)
@@ -517,9 +554,9 @@ describe('CompactionController', () => {
     let refreshed = false
     const controller = new CompactionController({
       session,
-      promptEngine: {} as PromptEngine,
+      promptEngine: makeEngine(),
       contextWindow: Math.max(tokens * 2, 100_000), // large enough to not ceiling
-      pressureMonitor: {} as PressureMonitor,
+      pressureMonitor: new PressureMonitor(Math.max(tokens * 2, 100_000)),
       getTrajectoryEntries: () => entries,
       getStreamedText: () => 'I will fix the bug. Next, add tests.',
       refreshLedger: () => { refreshed = true },
