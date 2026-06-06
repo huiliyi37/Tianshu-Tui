@@ -199,16 +199,25 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     profile: input.profile,
     objective: input.objective,
     scope: input.scope,
-    constraints: input.constraints ?? [
-      'Return only evidence-backed claims.',
-      'Do not suggest edits as completed changes.',
-      'Do not request write, edit, bash, or test execution tools.',
-    ],
+    constraints: input.constraints ?? (input.profile === 'adversarial_verifier'
+      ? [
+          'Return only evidence-backed claims.',
+          'Do not suggest edits as completed changes.',
+          'Do not request write, edit, or bash tools.',
+          'Run tests whenever possible — your verdict requires command+evidence output.',
+        ]
+      : [
+          'Return only evidence-backed claims.',
+          'Do not suggest edits as completed changes.',
+          'Do not request write, edit, bash, or test execution tools.',
+        ]),
     allowedTools: (() => {
       const profileDef = profileRegistry.get(input.profile)
       return profileDef?.allowedTools ?? [...READ_ONLY_WORKER_TOOLS]
     })(),
-    disallowedTools: [...PHASE1_DISALLOWED_WORKER_TOOLS],
+    disallowedTools: input.profile === 'adversarial_verifier'
+      ? ['bash', 'write_file', 'edit_file', 'delegate_task', 'delegate_batch'] // run_tests NOT disallowed — it's the verifier's primary weapon
+      : [...PHASE1_DISALLOWED_WORKER_TOOLS],
     dedupeKey: `${input.kind}:${input.scope.files?.join(',') || input.objective}`,
     dependencies: input.dependencies ?? [],
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',

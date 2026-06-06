@@ -139,25 +139,27 @@ test('verifier profile (old verifier) now blocked instead of advisory', () => {
   assert.ok(checked.risks.some(r => r.includes('unverified')))
 })
 
-test('adversarial_verifier verified evidence accepted directly (no advisory, no block)', () => {
+test('adversarial_verifier with empty changedFiles passes through (no write tools)', () => {
+  // adversarial_verifier has no write tools → changedFiles always empty → always passes through
+  // Its evidenceStatus='verified' is carried in the result for downstream consumers (coordinator)
   const checked = verifyWorkerEvidence(result({
-    changedFiles: ['src/a.ts'],
+    changedFiles: [],
     evidenceStatus: 'verified',
   }), 'adversarial_verifier')
 
   assert.equal(checked.status, 'passed')
   assert.equal(checked.evidenceStatus, 'verified')
-  assert.equal(checked.risks.filter(r => r.includes('unverified') || r.includes('advisory')).length, 0)
+  assert.equal(checked.risks.length, 0)
 })
 
-test('adversarial_verifier unverified evidence still blocked', () => {
+test('adversarial_verifier with unchanged evidenceStatus still passes through', () => {
   const checked = verifyWorkerEvidence(result({
-    changedFiles: ['src/a.ts'],
+    changedFiles: [],
     evidenceStatus: 'unverified',
   }), 'adversarial_verifier')
 
-  assert.equal(checked.status, 'blocked')
-  assert.equal(checked.evidenceStatus, 'blocked')
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
 })
 
 test('blocks write worker with changedFiles and examinedFiles but no verification', () => {

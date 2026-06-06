@@ -24,15 +24,10 @@ const WRITE_PROFILES_ADVISORY = ['patcher']
  * @param profile - Optional worker profile for profile-aware verification
  */
 export function verifyWorkerEvidence(result: WorkerResult, profile?: string): WorkerResult {
-  // Read-only profiles skip the verification gate when no files were changed.
+  // All workers with no changed files pass through — the evidence gate
+  // is only about write workers who mutate files. This includes adversarial_verifier
+  // (no write tools → changedFiles always empty → always passes through cleanly).
   if (result.changedFiles.length === 0) return result
-
-  // Adversarial verifier's evidenceStatus is trusted — it has no write tools
-  // and its expertisePrompt mandates command+evidence output for every PASS.
-  // Accept its 'verified' directly, bypassing advisory and block paths.
-  if (profile === 'adversarial_verifier' && result.evidenceStatus === 'verified') {
-    return result
-  }
 
   if (profile && WRITE_PROFILES_ADVISORY.includes(profile)) {
     if (result.evidenceStatus !== 'verified') {
