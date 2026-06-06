@@ -32,6 +32,7 @@ import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
 import { isCrossModule, isFixContext, type ChangeSet } from './review-discipline.js'
 import { routeReviewWorkflow, type ReviewRouterDeps } from './review-router.js'
+import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -358,7 +359,8 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
 
         // Review discipline gate: fix commits must pass an independent review route when wired.
         // The reviewDepth guard prevents verifier/patcher child contexts from recursively reviewing themselves.
-        if (reviewDepth === 0 && isFixContext(message)) {
+        // RIVET_REVIEW_DISCIPLINE=0 / false / off / no disables the gate (default: enabled).
+        if (reviewDepth === 0 && isFixContext(message) && isReviewDisciplineEnabled()) {
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
           if (route && ctx.reviewDeps) {
             const change: ChangeSet = {
