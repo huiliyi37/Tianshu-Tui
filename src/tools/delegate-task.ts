@@ -57,7 +57,7 @@ export function createDelegateTaskTool(
         properties: {
           objective: { type: 'string', description: 'Specific objective for the worker.' },
           kind: { type: 'string', enum: ['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal'], description: 'Worker task type. Default: code_search.' },
-          profile: { type: 'string', enum: ['code_scout', 'doc_scout', 'planner', 'reviewer', 'verifier', 'patcher'], description: 'Worker profile. Default: code_scout.' },
+          profile: { type: 'string', enum: profileRegistry.getProfileNames(), description: 'Worker profile. Default: code_scout.' },
           files: { type: 'array', items: { type: 'string' }, description: 'Optional file paths to focus on.' },
           symbols: { type: 'array', items: { type: 'string' }, description: 'Optional symbols to focus on.' },
         },

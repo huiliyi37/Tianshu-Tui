@@ -114,7 +114,7 @@ export function createDelegateBatchTool(
               properties: {
                 objective: { type: 'string' },
                 kind: { type: 'string', enum: ['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal'] },
-                profile: { type: 'string', enum: ['code_scout', 'doc_scout', 'planner', 'reviewer', 'verifier', 'patcher'] },
+                profile: { type: 'string', enum: profileRegistry.getProfileNames() },
                 files: { type: 'array', items: { type: 'string' } },
                 symbols: { type: 'array', items: { type: 'string' } },
               },

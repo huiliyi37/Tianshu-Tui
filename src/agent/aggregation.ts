@@ -1,4 +1,5 @@
 import type { AggregationPolicy, WorkerResult } from './work-order.js'
+import type { WorkerTranscript } from './worker-session.js'
 import { verifyWorkerEvidence } from './worker-evidence.js'
 import { profileRegistry } from './profile-registry.js'
 
@@ -27,7 +28,9 @@ function detectVerificationGap(results: WorkerResult[], profiles?: Map<string, s
   for (const r of results) {
     const profile = profiles?.get(r.workOrderId)
     if (profile === 'adversarial_verifier') {
-      hasAdversarialVerifier = true
+      if (r.status === 'passed' && r.evidenceStatus === 'verified') {
+        hasAdversarialVerifier = true
+      }
       continue
     }
     if (profile && isWriteProfile(profile) && r.changedFiles.length > 0) {
@@ -119,9 +122,14 @@ function applyPolicy(results: WorkerResult[], policy: AggregationPolicy): Worker
   return results
 }
 
-export function aggregateResults(results: WorkerResult[], policy: AggregationPolicy, profiles?: Map<string, string>): WorkerResult[] {
+export function aggregateResults(
+  results: WorkerResult[],
+  policy: AggregationPolicy,
+  profiles?: Map<string, string>,
+  transcripts?: Map<string, WorkerTranscript>,
+): WorkerResult[] {
   // Step 1: gate each result through evidence verification
-  const gated = results.map(r => verifyWorkerEvidence(r, profiles?.get(r.workOrderId)))
+  const gated = results.map(r => verifyWorkerEvidence(r, profiles?.get(r.workOrderId), transcripts?.get(r.workOrderId)))
 
   // Step 2: detect verification gap across the batch
   const nudge = detectVerificationGap(gated, profiles)

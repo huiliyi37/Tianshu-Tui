@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { aggregateResults } from '../aggregation.js'
 import type { WorkerResult } from '../work-order.js'
+import type { WorkerTranscript } from '../worker-session.js'
 
 function result(id: string, status: WorkerResult['status'], confidence?: 'low' | 'medium' | 'high'): WorkerResult {
   return {
@@ -160,6 +161,17 @@ describe('aggregateResults', () => {
 
   const NUDGE = '存在未验证的改动，应 delegate 一个对抗 verifier；你不能靠在汇总里列 caveat 自封通过。'
 
+  function transcript(toolUses: string[]): WorkerTranscript {
+    return {
+      text: '',
+      thinking: '',
+      toolUses,
+      toolResults: [],
+      errors: [],
+      repairAttempts: 0,
+    }
+  }
+
   function patcherResult(id: string, changedFiles: string[]): WorkerResult {
     return {
       workOrderId: id,
@@ -208,6 +220,30 @@ describe('aggregateResults', () => {
     assert.ok(aggregated[0]!.risks.some(r => r.includes('advisory')))
     // No nudge because adversarial_verifier is present
     assert.ok(!aggregated.some(r => r.risks.some(rr => rr === NUDGE)))
+  })
+
+  it('keeps nudge when adversarial_verifier did not actually run tests', () => {
+    const results = [
+      patcherResult('wo_1', ['src/a.ts']),
+      {
+        workOrderId: 'wo_2',
+        status: 'passed' as const,
+        summary: 'claimed verification after reading only',
+        findings: [],
+        artifacts: [],
+        changedFiles: [],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'verified' as const,
+      },
+    ]
+    const profiles = new Map([['wo_1', 'patcher'], ['wo_2', 'adversarial_verifier']])
+    const transcripts = new Map([['wo_2', transcript(['read_file'])]])
+    const aggregated = aggregateResults(results, 'primary_decides', profiles, transcripts)
+
+    assert.ok(aggregated.some(r => r.risks.some(rr => rr === NUDGE)))
+    const verifier = aggregated.find(r => r.workOrderId === 'wo_2')!
+    assert.equal(verifier.evidenceStatus, 'unverified')
   })
 
   it('no nudge when no files were changed', () => {

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { WorkerResult } from '../work-order.js'
+import type { WorkerTranscript } from '../worker-session.js'
 import { verifyWorkerEvidence } from '../worker-evidence.js'
 
 function result(overrides: Partial<WorkerResult>): WorkerResult {
@@ -15,6 +16,17 @@ function result(overrides: Partial<WorkerResult>): WorkerResult {
     nextActions: [],
     evidenceStatus: 'unverified',
     ...overrides,
+  }
+}
+
+function transcript(toolUses: string[]): WorkerTranscript {
+  return {
+    text: '',
+    thinking: '',
+    toolUses,
+    toolResults: [],
+    errors: [],
+    repairAttempts: 0,
   }
 }
 
@@ -139,13 +151,22 @@ test('verifier profile (old verifier) now blocked instead of advisory', () => {
   assert.ok(checked.risks.some(r => r.includes('unverified')))
 })
 
-test('adversarial_verifier with empty changedFiles passes through (no write tools)', () => {
-  // adversarial_verifier has no write tools → changedFiles always empty → always passes through
-  // Its evidenceStatus='verified' is carried in the result for downstream consumers (coordinator)
+test('adversarial_verifier verified verdict requires run_tests in transcript', () => {
   const checked = verifyWorkerEvidence(result({
     changedFiles: [],
     evidenceStatus: 'verified',
-  }), 'adversarial_verifier')
+  }), 'adversarial_verifier', transcript(['read_file']))
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('without running run_tests')))
+})
+
+test('adversarial_verifier keeps verified verdict when run_tests was actually used', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'adversarial_verifier', transcript(['read_file', 'run_tests']))
 
   assert.equal(checked.status, 'passed')
   assert.equal(checked.evidenceStatus, 'verified')

@@ -35,6 +35,30 @@ describe('work-order contract', () => {
     assert.equal(order.aggregationPolicy, 'primary_decides')
   })
 
+  it('accepts all built-in registry profiles in work orders', () => {
+    const architect = createReadOnlyWorkOrder({
+      id: 'wo_architect',
+      parentTurnId: 'turn_1',
+      kind: 'review',
+      profile: 'architect',
+      objective: 'Review architectural boundaries in the worker registry implementation.',
+      scope: { files: ['src/agent/profile-registry.ts'] },
+    })
+    const troubleshooter = createReadOnlyWorkOrder({
+      id: 'wo_troubleshooter',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'troubleshooter',
+      objective: 'Trace root cause across worker evidence and aggregation modules.',
+      scope: { files: ['src/agent/worker-evidence.ts'] },
+    })
+
+    assert.equal(architect.profile, 'architect')
+    assert.ok(architect.allowedTools.includes('lsp_goto_definition'))
+    assert.equal(troubleshooter.profile, 'troubleshooter')
+    assert.ok(troubleshooter.allowedTools.includes('grep'))
+  })
+
   it('parses a fenced WorkerResult JSON packet', () => {
     const result = parseWorkerResult(`Here is the packet:\n\n\`\`\`json
 {

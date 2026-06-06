@@ -258,7 +258,7 @@ export class DelegationCoordinator {
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
-    let run: { result: WorkerResult }
+    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript'] }
 
     // Wrap worker execution with abort signal so the caller unblocks immediately
     // when the tool-level timeout fires, instead of waiting for the worker's
@@ -356,7 +356,8 @@ export class DelegationCoordinator {
       }))
       run = { result: handsRun.result }
     } else {
-      run = await wrapAbort(this.runWorker(workerConfig))
+      const workerRun = await wrapAbort(this.runWorker(workerConfig))
+      run = { result: workerRun.result, transcript: workerRun.transcript }
     }
 
     // Release semantic lock after worker completes
@@ -378,7 +379,8 @@ export class DelegationCoordinator {
     }
 
     const profileMap = new Map([[order.id, order.profile]])
-    const results = aggregateResults([run.result], 'primary_decides', profileMap)
+    const transcriptMap = run.transcript ? new Map([[order.id, run.transcript]]) : undefined
+    const results = aggregateResults([run.result], 'primary_decides', profileMap, transcriptMap)
 
     return {
       status: 'completed',

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createDelegateBatchTool, progressiveTaskCap } from '../tools/delegate-batch.js'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
+import { profileRegistry } from '../agent/profile-registry.js'
 import type { ClaimProposal } from '../context/claims.js'
 
 function makeFiveTasks(): Array<{ objective: string; kind: string; profile: string }> {
@@ -15,6 +16,19 @@ function makeFiveTasks(): Array<{ objective: string; kind: string; profile: stri
 }
 
 describe('delegate_batch tool', () => {
+  it('exposes profile schema from the profile registry', () => {
+    const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
+    const tasksSchema = tool.definition.input_schema!.properties.tasks as {
+      items: { properties: { profile: { enum: string[] } } }
+    }
+    const profileEnum = tasksSchema.items.properties.profile.enum
+
+    assert.deepEqual(profileEnum, profileRegistry.getProfileNames())
+    assert.ok(profileEnum.includes('adversarial_verifier'))
+    assert.ok(profileEnum.includes('architect'))
+    assert.ok(profileEnum.includes('troubleshooter'))
+  })
+
   it('delegates multiple tasks and returns combined packet', async () => {
     let batchCaptured: DelegationRequest[] = []
     const tool = createDelegateBatchTool({

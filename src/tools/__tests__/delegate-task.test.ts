@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createDelegateTaskTool, type DelegateTaskCoordinator } from '../delegate-task.js'
 import type { CoordinatorRun, DelegationRequest } from '../../agent/coordinator.js'
+import { profileRegistry } from '../../agent/profile-registry.js'
 
 function makeRun(): CoordinatorRun {
   return {
@@ -50,6 +51,16 @@ describe('DELEGATE_TASK_TOOL', () => {
     assert.equal(result.isError, false)
     assert.ok(result.content.includes('<worker_results>'))
     assert.ok(result.uiContent!.includes('delegate_task completed'))
+  })
+
+  it('exposes profile schema from the profile registry', () => {
+    const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
+    const profileSchema = tool.definition.input_schema!.properties.profile as { enum: string[] }
+
+    assert.deepEqual(profileSchema.enum, profileRegistry.getProfileNames())
+    assert.ok(profileSchema.enum.includes('adversarial_verifier'))
+    assert.ok(profileSchema.enum.includes('architect'))
+    assert.ok(profileSchema.enum.includes('troubleshooter'))
   })
 
   it('reports invalid input as a tool error', async () => {

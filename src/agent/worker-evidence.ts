@@ -1,4 +1,5 @@
 import type { WorkerResult } from './work-order.js'
+import type { WorkerTranscript } from './worker-session.js'
 
 function addRisk(risks: string[], risk: string): string[] {
   return risks.includes(risk) ? risks : [...risks, risk]
@@ -22,11 +23,19 @@ const WRITE_PROFILES_ADVISORY = ['patcher']
  *
  * @param result - The worker result to verify
  * @param profile - Optional worker profile for profile-aware verification
+ * @param transcript - Optional worker transcript for behavior-backed verifier gating
  */
-export function verifyWorkerEvidence(result: WorkerResult, profile?: string): WorkerResult {
+export function verifyWorkerEvidence(result: WorkerResult, profile?: string, transcript?: WorkerTranscript): WorkerResult {
+  if (profile === 'adversarial_verifier' && result.evidenceStatus === 'verified' && transcript && !transcript.toolUses.includes('run_tests')) {
+    return {
+      ...result,
+      evidenceStatus: 'unverified',
+      risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
+    }
+  }
+
   // All workers with no changed files pass through — the evidence gate
-  // is only about write workers who mutate files. This includes adversarial_verifier
-  // (no write tools → changedFiles always empty → always passes through cleanly).
+  // is only about write workers who mutate files.
   if (result.changedFiles.length === 0) return result
 
   if (profile && WRITE_PROFILES_ADVISORY.includes(profile)) {

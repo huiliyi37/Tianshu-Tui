@@ -41,15 +41,11 @@ export const workOrderKindSchema = z.enum([
 
 export type WorkOrderKind = z.infer<typeof workOrderKindSchema>
 
-export const workerProfileSchema = z.enum([
-  'code_scout',
-  'doc_scout',
-  'planner',
-  'reviewer',
-  'verifier',
-  'adversarial_verifier',
-  'patcher',
-])
+/** Dynamic profile validation — accepts built-in + user-loaded profiles. */
+export const workerProfileSchema = z.string().refine(
+  (val) => profileRegistry.getProfileNames().includes(val),
+  (val) => ({ message: `Unknown worker profile "${val}". Available: ${profileRegistry.getProfileNames().join(', ')}` }),
+)
 
 export type WorkerProfile = z.infer<typeof workerProfileSchema>
 
