@@ -52,6 +52,7 @@
 
 **2.2 调度器（cron，新增）** — `src/server/scheduler.ts`
 - 定时触发任务（cron 表达式或间隔）。最小实现：`setInterval` + **持久化 schedule 表**。
+- **具体落地方案见** `2026-06-06-cc-borrowings-adversarial-verifier-and-cron-lease.md` §2（cron 租约锁，移植 CC cronTasksLock 的 PID 租约锁 + 多会话单调度器选举 + `.rivet/scheduled_tasks.json` 持久化，扩展现有 nightcrawler）。
 - **schedule 必须持久化（天枢二次审查强调）**：写入文件/KV，否则进程重启后所有定时任务全丢。这是硬要求，不是可选。
 - 用途示例：天枢可被设定「每晚跑一次仓库健康检查」——这才是「常驻协作者」而非「被动应答」。
 
