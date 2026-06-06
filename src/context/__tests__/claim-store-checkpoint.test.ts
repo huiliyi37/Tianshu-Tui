@@ -1,10 +1,10 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ContextClaimStore } from '../claim-store.js'
-import type { ClaimProposal } from '../claims.js'
+import { checkpointClaims, type ClaimProposal } from '../claims.js'
 
 function proposal(text: string, eventId: string): ClaimProposal {
   return {
@@ -67,5 +67,36 @@ describe('ContextClaimStore checkpoint — 溶解即新生', () => {
 
     assert.deepEqual(snapshot.claims.map(c => c.id), [alive.id])
     assert.deepEqual(store.listClaims().map(c => c.id), [alive.id])
+  })
+
+  it('does not double replay JSONL events after snapshot write but before truncate', () => {
+    const store = new ContextClaimStore(dir, 'session-crash')
+    const claim = store.propose(proposal('crash window claim', 'e1'))
+    store.recordClaimUsed(claim.id, { consumerId: 'turn-1:prompt', consumerKind: 'prompt', usedAt: 10 })
+    store.updateClaimStatus(claim.id, 'durable', 'promoted')
+
+    const eventsBeforeCrash = store.exportSession()
+    const snapshot = checkpointClaims(store.listClaims(), 1234, store.eventCount)
+    writeFileSync(join(dir, 'session-crash.claims.snapshot.json'), JSON.stringify(snapshot, null, 2) + '\n')
+    // Simulate crash before the JSONL truncate step: events remain on disk.
+    writeFileSync(store.path, eventsBeforeCrash)
+
+    const reloaded = new ContextClaimStore(dir, 'session-crash')
+    const [replayed] = reloaded.listClaims()
+
+    assert.equal(replayed?.id, claim.id)
+    assert.equal(replayed?.consumers.length, 1)
+    assert.equal(replayed?.counterevidence.length, 1)
+    assert.equal(replayed?.status, 'durable')
+  })
+
+  it('auto-checkpoints after a bounded number of appended events', () => {
+    const store = new ContextClaimStore(dir, 'session-auto', { checkpointEveryEvents: 2 })
+    store.propose(proposal('first', 'e1'))
+    store.propose(proposal('second', 'e2'))
+
+    assert.ok(existsSync(join(dir, 'session-auto.claims.snapshot.json')))
+    assert.equal(readFileSync(store.path, 'utf-8'), '')
+    assert.equal(store.listClaims().length, 2)
   })
 })

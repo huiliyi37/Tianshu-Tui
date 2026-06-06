@@ -89,4 +89,58 @@ describe('loadDurableClaims with claim_used replay', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('reuses full projection logic for boosted fitness and counterevidence', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-durable-projection-'))
+    const filePath = join(dir, 's3.claims.jsonl')
+    const claim = {
+      id: 'c3', kind: 'decision', scope: 'project', status: 'active',
+      text: 'Persist projection semantics', confidence: 0.8, fitness: 1,
+      source: { actor: 'assistant', sessionId: 's3', turn: 1, eventId: 'e-1' },
+      evidence: [{ id: 'e-1', kind: 'assistant_message' as const, summary: 'decision', createdAt: 1000 }],
+      consumers: [] as unknown[], counterevidence: [], createdAt: 1000, lastUsedAt: 1000, tags: [],
+    }
+    const events = [
+      JSON.stringify({ type: 'claim_proposed', eventId: 'e-1', createdAt: 1000, claim }),
+      JSON.stringify({ type: 'claim_boosted', eventId: 'e-2', createdAt: 2000, claimId: 'c3', fitness: 9 }),
+      JSON.stringify({ type: 'claim_status_changed', eventId: 'e-3', createdAt: 3000, claimId: 'c3', status: 'durable', reason: 'promotion threshold met' }),
+    ]
+    writeFileSync(filePath, events.join('\n') + '\n')
+    try {
+      const durables = ContextClaimStore.loadDurableClaims(dir, 's3')
+      assert.equal(durables.length, 1)
+      assert.equal(durables[0]!.fitness, 9)
+      assert.equal(durables[0]!.counterevidence.length, 1)
+      assert.equal(durables[0]!.counterevidence[0]!.summary, 'promotion threshold met')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('loads durable claims from snapshot plus incremental JSONL', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-durable-snapshot-'))
+    try {
+      const store = new ContextClaimStore(dir, 's4')
+      const claim = store.propose({
+        kind: 'decision',
+        scope: 'project',
+        text: 'Snapshot durable claim',
+        confidence: 0.8,
+        fitness: 3,
+        source: { actor: 'assistant', sessionId: 's4', turn: 1, eventId: 'e-1' },
+        evidence: [{ id: 'e-1', kind: 'assistant_message' as const, summary: 'decision', createdAt: 1000 }],
+        createdAt: 1000,
+        tags: [],
+      })
+      store.updateClaimStatus(claim.id, 'durable', 'promotion')
+      store.checkpoint(2000)
+
+      const durables = ContextClaimStore.loadDurableClaims(dir, 's4')
+      assert.equal(durables.length, 1)
+      assert.equal(durables[0]!.text, 'Snapshot durable claim')
+      assert.equal(durables[0]!.status, 'durable')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

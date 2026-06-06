@@ -17,12 +17,18 @@ import { claimHasFileEvidence, countClaimsByStatus, evaluatePromotion, canRecall
 
 const MAX_CONSUMERS_PER_CLAIM = 50
 const MAX_ACTIVE_CLAIMS = 50
+const DEFAULT_CHECKPOINT_EVERY_EVENTS = 500
 
 export type ContextClaimEvent =
-  | { type: 'claim_proposed'; eventId: string; createdAt: number; claim: ContextClaim }
-  | { type: 'claim_status_changed'; eventId: string; createdAt: number; claimId: string; status: ContextClaimStatus; reason: string }
-  | { type: 'claim_used'; eventId: string; createdAt: number; claimId: string; consumerId: string; consumerKind: 'prompt' | 'tool' | 'test' | 'worker' }
-  | { type: 'claim_boosted'; eventId: string; createdAt: number; claimId: string; fitness: number }
+  | { type: 'claim_proposed'; eventId: string; createdAt: number; seq?: number; claim: ContextClaim }
+  | { type: 'claim_status_changed'; eventId: string; createdAt: number; seq?: number; claimId: string; status: ContextClaimStatus; reason: string }
+  | { type: 'claim_used'; eventId: string; createdAt: number; seq?: number; claimId: string; consumerId: string; consumerKind: 'prompt' | 'tool' | 'test' | 'worker' }
+  | { type: 'claim_boosted'; eventId: string; createdAt: number; seq?: number; claimId: string; fitness: number }
+
+export interface ContextClaimStoreOptions {
+  /** Auto-checkpoint after this many incremental JSONL events. Defaults to 500. */
+  checkpointEveryEvents?: number
+}
 
 export interface ClaimFilter {
   status?: ContextClaimStatus[]
@@ -52,20 +58,39 @@ export class ContextClaimStore {
   private cachedClaims: ContextClaim[] | null = null
   private lastProcessedLineCount: number = 0
   private readonly snapshotPath: string
+  private nextSeq: number = 1
+  private checkpointing = false
+  private readonly checkpointEveryEvents?: number
 
-  constructor(dir: string, sessionId: string) {
+  constructor(dir: string, sessionId: string, options: ContextClaimStoreOptions = {}) {
     assertValidSessionId(sessionId)
     this.sessionId = sessionId
+    this.checkpointEveryEvents = options.checkpointEveryEvents ?? DEFAULT_CHECKPOINT_EVERY_EVENTS
     mkdirSync(dir, { recursive: true })
     this.path = join(dir, `${this.sessionId}.claims.jsonl`)
     this.snapshotPath = join(dir, `${this.sessionId}.claims.snapshot.json`)
   }
 
+  get eventCount(): number {
+    return this.readEvents().length
+  }
+
   appendEvent(event: ContextClaimEvent): void {
-    appendFileSync(this.path, JSON.stringify(event) + '\n', 'utf-8')
+    if (!this.cachedEvents) {
+      if (existsSync(this.path)) this.readEvents()
+      const checkpointSnapshot = this.loadFromCheckpoint()
+      if (checkpointSnapshot) this.nextSeq = Math.max(this.nextSeq, checkpointSnapshot.lastEventSeq + 1)
+    }
+    const withSeq: ContextClaimEvent = { ...event, seq: event.seq ?? this.nextSeq }
+    const line = JSON.stringify(withSeq) + '\n'
+    appendFileSync(this.path, line, 'utf-8')
+    this.nextSeq = Math.max(this.nextSeq, (withSeq.seq ?? 0) + 1)
     if (this.cachedEvents) {
-      this.cachedEvents.push(event)
-      this.lastFileSize += Buffer.byteLength(JSON.stringify(event) + '\n')
+      this.cachedEvents.push(withSeq)
+      this.lastFileSize += Buffer.byteLength(line)
+    }
+    if (!this.checkpointing && this.checkpointEveryEvents !== undefined && this.checkpointEveryEvents > 0 && this.readEvents().length >= this.checkpointEveryEvents) {
+      this.checkpoint()
     }
   }
 
@@ -209,32 +234,42 @@ export class ContextClaimStore {
    * - Load = read snapshot + replay incr events
    */
   checkpoint(now = Date.now()): ClaimStoreCheckpointResult {
-    const snapshot = checkpointClaims(this.listClaims(), now)
-    writeFileAtomicSync(this.snapshotPath, JSON.stringify(snapshot, null, 2) + '\n')
+    this.checkpointing = true
+    try {
+      const snapshot = checkpointClaims(this.listClaims(), now, this.maxEventSeq(this.readEvents()))
+      writeFileAtomicSync(this.snapshotPath, JSON.stringify(snapshot, null, 2) + '\n')
 
-    // Truncate JSONL — start fresh incremental log.
-    writeFileAtomicSync(this.path, '')
+      // Truncate JSONL — start fresh incremental log.
+      writeFileAtomicSync(this.path, '')
 
-    // Keep the projected snapshot in memory so the current store remains usable.
-    this.cachedEvents = []
-    this.cachedClaims = loadClaimSnapshot(snapshot, now)
-    this.lastProcessedLineCount = 0
-    this.lastFileSize = 0
+      // Keep the projected snapshot in memory so the current store remains usable.
+      this.cachedEvents = []
+      this.cachedClaims = loadClaimSnapshot(snapshot, now)
+      this.lastProcessedLineCount = 0
+      this.lastFileSize = 0
 
-    return { snapshotPath: this.snapshotPath, claimCount: snapshot.claims.length, truncatedPath: this.path }
+      return { snapshotPath: this.snapshotPath, claimCount: snapshot.claims.length, truncatedPath: this.path }
+    } finally {
+      this.checkpointing = false
+    }
   }
 
   /**
    * Load claims from checkpoint snapshot. Incremental JSONL events are replayed
    * by projectClaims() after this base state is loaded.
    */
-  private loadFromCheckpoint(now = Date.now()): ContextClaim[] | null {
+  private loadFromCheckpoint(now = Date.now()): { claims: ContextClaim[]; lastEventSeq: number } | null {
     if (!existsSync(this.snapshotPath)) return null
 
     try {
       const raw = readFileSync(this.snapshotPath, 'utf-8')
       const snapshot = JSON.parse(raw) as ClaimSnapshot
-      return loadClaimSnapshot(snapshot, now)
+      return {
+        claims: loadClaimSnapshot(snapshot, now),
+        // Old snapshots predate watermarks and were always paired with a
+        // truncated JSONL in production. Treat them as base state only.
+        lastEventSeq: snapshot.lastEventSeq ?? 0,
+      }
     } catch {
       return null
     }
@@ -248,35 +283,9 @@ export class ContextClaimStore {
   }
 
   static loadDurableClaims(dir: string, sessionId: string): ContextClaim[] {
-    const filePath = join(dir, `${sessionId}.claims.jsonl`)
-    if (!existsSync(filePath)) return []
-    const lines = readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim().length > 0)
-    const claims = new Map<string, ContextClaim>()
-    for (const line of lines) {
-      try {
-        const event = JSON.parse(line) as ContextClaimEvent
-        if (event.type === 'claim_proposed' && !claims.has(event.claim.id)) {
-          claims.set(event.claim.id, event.claim)
-        } else if (event.type === 'claim_status_changed') {
-          const claim = claims.get(event.claimId)
-          if (claim) claims.set(event.claimId, { ...claim, status: event.status })
-        } else if (event.type === 'claim_used') {
-          const claim = claims.get(event.claimId)
-          if (claim) {
-            claims.set(event.claimId, {
-              ...claim,
-              lastUsedAt: event.createdAt,
-              consumers: [...claim.consumers, {
-                id: event.consumerId,
-                kind: event.consumerKind,
-                usedAt: event.createdAt,
-              }],
-            })
-          }
-        }
-      } catch { /* skip malformed lines */ }
-    }
-    return [...claims.values()].filter(c => c.status === 'durable')
+    if (!existsSync(join(dir, `${sessionId}.claims.jsonl`)) && !existsSync(join(dir, `${sessionId}.claims.snapshot.json`))) return []
+    const store = new ContextClaimStore(dir, sessionId)
+    return store.listClaims().filter(c => c.status === 'durable')
   }
 
   private readEvents(): ContextClaimEvent[] {
@@ -300,7 +309,12 @@ export class ContextClaimStore {
         }
       })
     this.cachedEvents = events
+    this.nextSeq = Math.max(1, this.maxEventSeq(events) + 1)
     return events
+  }
+
+  private maxEventSeq(events: readonly ContextClaimEvent[]): number {
+    return events.reduce((max, event, index) => Math.max(max, event.seq ?? index + 1), 0)
   }
 
   private projectClaims(): ContextClaim[] {
@@ -320,11 +334,14 @@ export class ContextClaimStore {
     }
 
     // Try loading from checkpoint snapshot first
-    const checkpointClaims = this.loadFromCheckpoint()
-    if (checkpointClaims) {
-      const claims = new Map(checkpointClaims.map(c => [c.id, c]))
-      // Replay any incremental events after the snapshot
-      this.applyEventsToMap(claims, events)
+    const checkpointSnapshot = this.loadFromCheckpoint()
+    if (checkpointSnapshot) {
+      const claims = new Map(checkpointSnapshot.claims.map(c => [c.id, c]))
+      this.nextSeq = Math.max(this.nextSeq, checkpointSnapshot.lastEventSeq + 1, this.maxEventSeq(events) + 1)
+      // Replay only events newer than the snapshot watermark. This makes the
+      // snapshot-write-before-jsonl-truncate crash window safe.
+      const replayEvents = events.filter((event, index) => (event.seq ?? index + 1) > checkpointSnapshot.lastEventSeq)
+      this.applyEventsToMap(claims, replayEvents)
       this.cachedClaims = [...claims.values()]
       this.lastProcessedLineCount = events.length
       return this.cachedClaims
