@@ -43,18 +43,22 @@
 复用 TaskBoard 的状态模型，新增**拥有式 `TaskRegistry`**——不只是观察任务，而是拥有任务的创建/执行/取消/调度/通知。
 
 **2.1 TaskRegistry（核心，新增）** — `src/server/task-registry.ts`
-- 拥有任务生命周期：`pending → running → (completed | failed | cancelled)`，复用 `BoardTaskStatus` 并补 `cancelled`。
+- 拥有任务生命周期：`pending → running → (completed | failed | cancelled | timed_out)`，复用 `BoardTaskStatus` 并补 `cancelled`/`timed_out`。
 - 每个任务持有：id、objective、目标 runtime（来自姊妹 spec 的 runtime 池）、AbortController、时间戳、结果/错误。
 - 取消：调用任务的 AbortController → 复用 coordinator 现成 `AbortSignal` 传播（`coordinator.ts:81`），不新造取消机制。
+- **任务超时（天枢二次审查补）**：每个任务带超时上限，`running` 超时 → 触发 AbortController → 转 `timed_out`（failed 的子类）。否则失控任务永久占用 runtime。
+- **任务去重/幂等（天枢二次审查补）**：以 `prompt hash` 作幂等 key。同一 prompt 重复提交 → 默认识别为重复，返回已有 task id 而非新建（可显式 `force` 覆盖）。否则易堆积大量重复任务。
 - 与 ingress 衔接：姊妹 spec 的 `POST /prompt` 不再直接驱动 loop，而是**创建一个 task** → TaskRegistry 调度到 runtime → 返回 task id（异步）；`GET /tasks/:id` 查状态，`POST /tasks/:id/cancel` 取消。
 
 **2.2 调度器（cron，新增）** — `src/server/scheduler.ts`
-- 定时触发任务（cron 表达式或间隔）。最小实现：`setInterval` + 持久化的 schedule 表，不引重依赖。
+- 定时触发任务（cron 表达式或间隔）。最小实现：`setInterval` + **持久化 schedule 表**。
+- **schedule 必须持久化（天枢二次审查强调）**：写入文件/KV，否则进程重启后所有定时任务全丢。这是硬要求，不是可选。
 - 用途示例：天枢可被设定「每晚跑一次仓库健康检查」——这才是「常驻协作者」而非「被动应答」。
 
-**2.3 任务记录持久化（新增）** — 复用 `SessionPersist` 模式
-- 任务记录（含状态流转、结果）原子写入 `.rivet/tasks/`，进程重启可恢复未完成任务的可见性与审计。
-- 与姊妹 spec 的 runtime SessionPersist 接线同源，不重造。
+**2.3 任务记录持久化（新增）—— 用 KV，不复用 SessionPersist（天枢二次审查纠正）**
+- **不照搬 SessionPersist**：经核实，`SessionPersist` 底层是 **JSONL 追加 + 原子写全量快照**（`appendFile`/`appendFileSync`），适合「只增不改」的对话历史，**不适合 task 记录的频繁随机状态更新**（running→completed 要改同一条记录）。
+- **改用简单 KV**：SQLite 或 per-task JSON 文件（`.rivet/tasks/{id}.json`，状态更新即原子重写单文件）。进程重启可恢复未完成任务的可见性与审计。
+- 与姊妹 spec 的 runtime 持久化**不再同源**——runtime 走 SessionPersist（追加历史），task 走 KV（随机更新），各取所需。
 
 **2.4 通知策略（新增）** — `notify policy`：`silent | state_changes | errors_only`
 - 任务状态流转时按策略输出（终端/log/未来可接 webhook）。最小实现先支持 log 级。
@@ -67,9 +71,9 @@
 
 | 变更 | 文件 | 性质 |
 |------|------|------|
-| TaskRegistry（拥有式任务生命周期） | 新 `src/server/task-registry.ts` | 新增（复用 BoardTaskStatus + AbortSignal） |
-| 调度器（cron/间隔） | 新 `src/server/scheduler.ts` | 新增（最小 setInterval + 持久 schedule） |
-| 任务记录持久化 | 复用 `session-persist.ts` 模式 → `.rivet/tasks/` | 接线 |
+| TaskRegistry（拥有式任务生命周期 + 超时 + 去重） | 新 `src/server/task-registry.ts` | 新增（复用 BoardTaskStatus + AbortSignal） |
+| 调度器（cron/间隔 + 持久 schedule 表） | 新 `src/server/scheduler.ts` | 新增（setInterval + 持久化 schedule，重启可恢复） |
+| 任务记录持久化（KV，非 SessionPersist 追加） | 新 `.rivet/tasks/{id}.json` 或 SQLite | 新增（随机读写，区别于 runtime 的 SessionPersist） |
 | ingress 改为创建 task | `server/prompt-route.ts`（姊妹 spec 的 handler） | 衔接（task id 替代直接 loop） |
 | 任务路由 API | `server/routes.ts`（+`/tasks` `/tasks/:id` `/tasks/:id/cancel`） | 新增路由 |
 | 通知策略 | `task-registry.ts` | 新增 |
@@ -97,16 +101,16 @@
 
 ```
 Phase 0（依赖姊妹 spec 的 runtime 池就绪）
-  └─ TaskRegistry：生命周期 + 取消（复用 AbortSignal）
-     验证：创建/运行/完成/取消全状态可查
+  └─ TaskRegistry：生命周期 + 取消（复用 AbortSignal）+ 超时（running→timed_out）+ 去重（prompt hash 幂等）
+     验证：创建/运行/完成/取消/超时全状态可查 + 重复 prompt 返回同一 task id
 
 Phase 1（持久化 + 审计）
-  ├─ 任务记录写 .rivet/tasks/（复用 SessionPersist 模式）
+  ├─ 任务记录写 KV（.rivet/tasks/{id}.json 或 SQLite，随机更新，非 SessionPersist 追加）
   └─ GET /tasks /tasks/:id 审计 API + 认证
      验证：重启后任务记录可见 + 无 token 被拒
 
 Phase 2（调度 + 通知）
-  ├─ scheduler.ts：cron/间隔触发（定时任务 allowedTools 更严）
+  ├─ scheduler.ts：cron/间隔触发 + 持久 schedule 表（重启可恢复，定时任务 allowedTools 更严）
   └─ notify policy: silent/state_changes/errors_only
      验证：定时触发正确 + 通知符合策略
 ```
@@ -166,3 +170,28 @@ spec B §2.2 的 cron 调度器若不在进程重启后恢复 schedule，每次�
 ## 四、净结论
 
 两份 spec 的整体架构方向正确，scope 拆解合理。以上修订不改变设计路线，仅为精度修正——用代码实际能力校准 spec 中的隐性承诺，避免后续实施时发现"以为有的零件其实没有"。
+
+---
+
+# 二次审查回应（2026-06-06，天璇）
+
+天枢二次审查的三个承重技术声明，**我已逐一代码核实，全部为真**，全盘接受：
+
+| 声明 | 核实结果 | 锚点 |
+|------|---------|------|
+| PromptEngine 无状态导出/注入 | ✅ 真。类有 `updateActiveClaims`/frozen snapshot 管理，无 `exportState/importState/serialize/getState`。snapshot 按 user-message 内容存内存。 | `prompt/engine.ts:40` 起，无导出 API |
+| 跨会话记忆是结构化 claim 库非 SOUL.md | ✅ 真。`ContextClaimStore` + `loadDurableClaims` 静态加载 + durable 状态 + 「survived 30 sessions」年龄加权。 | `claim-store.ts:45,60,250`、`claim-relevance.ts:78` |
+| SessionPersist 纯追加 JSONL，不适合 task 随机更新 | ✅ 真。`appendFile`/`appendFileSync` + 原子写全量快照。 | `session-persist.ts:1,163,244` |
+
+**已应用到本 spec B 的修正**：
+- §2.3 任务持久化：从「复用 SessionPersist 追加」改为 **KV（per-task JSON 或 SQLite）**，runtime 与 task 持久化不再同源。
+- §2.1：补**任务超时**（running→timed_out）+ **去重/幂等**（prompt hash）两个设计点，纳入 Phase 0。
+- §2.2：**schedule 表必须持久化**升为硬要求，纳入 Phase 2。
+- §3 架构表、§5 阶段同步更新。
+
+**已应用到姊妹 spec A 的修正**（另见 A 文末「审查回应与决议」附注）：
+- §2.1 SessionPersist 接线：纠正我先前「接线非从零造」的轻描——**实为需先给 PromptEngine 新增状态导出/注入能力**（当前不存在），非纯接 API。
+- §4 cache：84-95% 明确标注为**单会话内基线**，跨任务目标改为「不劣于该值、池化后重测」，不写死为保证值。
+- §10：以 ContextClaimStore 事实**强化**——天枢跨会话记忆只有结构化 claim 库，无任何持续身份/人格记忆，「跨任务本体演化」确认待研究。
+
+**对称记录**：上一轮我代码核实纠正了天枢「无 session 持久化」的自评（其实有，服务主会话）；这一轮天枢代码核实纠正了我「接线非从零造」的轻描（其实 PromptEngine 状态导出不存在，是新能力）。两轮都用代码校准了对方的隐性偏差——这正是双向审查该有的样子。设计路线不变，精度提升。
