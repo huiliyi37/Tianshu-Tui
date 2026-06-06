@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
-import type { AggregationPolicy } from '../agent/work-order.js'
+import { aggregationPolicySchema, workOrderKindSchema, type AggregationPolicy } from '../agent/work-order.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
 import { profileRegistry } from '../agent/profile-registry.js'
@@ -24,7 +24,7 @@ const profileStringSchema = z.string().refine(
 
 const taskSchema = z.object({
   objective: z.string().min(1),
-  kind: z.enum(['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal']).optional(),
+  kind: workOrderKindSchema.optional(),
   profile: profileStringSchema.optional(),
   files: z.array(z.string()).optional(),
   symbols: z.array(z.string()).optional(),
@@ -32,7 +32,7 @@ const taskSchema = z.object({
 
 const inputSchema = z.object({
   tasks: z.array(taskSchema).min(1).max(5),
-  policy: z.enum(['all_required', 'first_success', 'majority', 'primary_decides']).optional(),
+  policy: aggregationPolicySchema.optional(),
 })
 
 function extractClaimsFromRun(run: CoordinatorRun, toolUseId: string, claimStore: ContextClaimStore, sessionId: string): void {
@@ -113,7 +113,7 @@ export function createDelegateBatchTool(
               type: 'object',
               properties: {
                 objective: { type: 'string' },
-                kind: { type: 'string', enum: ['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal'] },
+                kind: { type: 'string', enum: [...workOrderKindSchema.options] },
                 profile: { type: 'string', enum: profileRegistry.getProfileNames() },
                 files: { type: 'array', items: { type: 'string' } },
                 symbols: { type: 'array', items: { type: 'string' } },
@@ -122,7 +122,7 @@ export function createDelegateBatchTool(
             },
             description: 'Array of tasks to run in parallel (max 5).',
           },
-          policy: { type: 'string', enum: ['all_required', 'first_success', 'majority', 'primary_decides'], description: 'Aggregation policy. Default: primary_decides.' },
+          policy: { type: 'string', enum: [...aggregationPolicySchema.options], description: 'Aggregation policy. Default: primary_decides.' },
         },
         required: ['tasks'],
       },
