@@ -1292,26 +1292,26 @@ Do not declare a streamed response duplicate in the middle of the stream.
       assert.match(result.content, /not in external or co-owned files/)
     })
 
-    it('rejects empty adopt array', async () => {
+    it('accepts empty adopt array as no-op (not an error)', async () => {
       const ctx = makeContext({
         taskId: 't1',
         ownedFiles: ['src/mine.ts'],
         dirtyFiles: ['src/mine.ts'],
         verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
-        commitOwnedFiles: () => { throw new Error('should not be called') },
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc1234' }),
       })
 
       const result = await ctx.tool.execute({
         ...ctx.params,
         input: {
           commit: true,
-          message: 'fix: empty adopt',
+          message: 'fix: empty adopt is no-op',
           adopt: [],
         },
       })
 
-      assert.equal(result.isError, true)
-      assert.match(result.content, /Adopt array is empty/)
+      // Empty adopt array should be treated the same as omitting adopt — not an error
+      assert.equal(result.isError, undefined)
     })
 
     it('ignores adopt when commit is false (status-only)', async () => {

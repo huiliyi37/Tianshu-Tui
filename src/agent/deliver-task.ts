@@ -332,8 +332,9 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
             // Refresh report after adoption — the gate may change
           }
         } else if (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length === 0) {
-          lines.push('', '❌ Adopt array is empty. Provide file paths to adopt, or omit the parameter.')
-          return { content: lines.join('\n'), isError: true }
+          // adopt: [] is equivalent to omitting adopt — no files to adopt, not an error.
+          // Previously this was treated as a user mistake, but callers (especially
+          // model-generated tool calls) may pass an explicit empty array to mean "no adoption".
         }
 
         // Resolve files to commit: subset from `files` param, or all owned
