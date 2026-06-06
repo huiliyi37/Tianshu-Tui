@@ -112,38 +112,40 @@ export class TaskRegistry {
   async createTask(input: CreateTaskInput): Promise<TaskRecord> {
     const callerId = input.callerId ?? 'anonymous'
     const idempotencyKey = input.idempotencyKey ?? buildIdempotencyKey(input.prompt, callerId)
+    const force = input.force ?? false
 
-    // 去重检查（per-key 串行化防 TOCTOU）
-    if (!input.force) {
-      const existing = await this.serialized(idempotencyKey, async () => {
-        return this.store.findActiveByIdempotencyKey(idempotencyKey)
-      })
-      if (existing) return existing
-    }
+    // 整块串行化：find → build → save 在同一个 per-key 锁内完成
+    const record = await this.serialized(idempotencyKey, async () => {
+      // 去重检查（force 跳过）
+      if (!force) {
+        const existing = await this.store.findActiveByIdempotencyKey(idempotencyKey)
+        if (existing) return existing
+      }
 
-    const timeoutMs = input.timeoutMs ??
-      (input.source === 'cron' ? this.cronTimeoutMs : this.defaultTimeoutMs)
+      const timeoutMs = input.timeoutMs ??
+        (input.source === 'cron' ? this.cronTimeoutMs : this.defaultTimeoutMs)
 
-    const record: TaskRecord = {
-      id: generateTaskId(),
-      prompt: input.prompt,
-      source: input.source,
-      status: 'pending',
-      createdAt: nowISO(),
-      timeoutMs,
-      callerId,
-      idempotencyKey,
-      force: input.force ?? false,
-      allowedTools: input.allowedTools,
-    }
+      const r: TaskRecord = {
+        id: generateTaskId(),
+        prompt: input.prompt,
+        source: input.source,
+        status: 'pending',
+        createdAt: nowISO(),
+        timeoutMs,
+        callerId,
+        idempotencyKey,
+        force,
+        allowedTools: input.allowedTools,
+      }
 
-    await this.store.save(record)
-    this.emit({ taskId: record.id, type: 'created', timestamp: record.createdAt })
+      await this.store.save(r)
+      this.emit({ taskId: r.id, type: 'created', timestamp: r.createdAt })
+      return r
+    })
 
     // 如有 runtime 池，立即调度
     if (this.runtimePool) {
       this.scheduleExecution(record).catch(err => {
-        // 调度失败 → 标记 failed
         this.transition(record.id, 'failed', { error: String(err) }).catch(() => {})
       })
     }
@@ -243,11 +245,18 @@ export class TaskRegistry {
 
   // ─── 内部方法 ──────────────────────────────────────────────
 
-  /** 按 key 串行化异步操作，防止并发竞态 */
+  /** 按 key 串行化异步操作，防止并发竞态。完成后自动清理锁条目。 */
   private async serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.idLocks.get(key) ?? Promise.resolve()
     const next = prev.then(fn, fn) // 前一个无论成功失败都继续
-    this.idLocks.set(key, next.then(() => {}, () => {})) // 存 settled promise
+    // 存 settled promise 作为新链尾；完成后只删自己的尾巴（不误删后来者）
+    const settled = next.then(() => {}, () => {})
+    this.idLocks.set(key, settled)
+    settled.then(() => {
+      if (this.idLocks.get(key) === settled) {
+        this.idLocks.delete(key)
+      }
+    })
     return next
   }
 

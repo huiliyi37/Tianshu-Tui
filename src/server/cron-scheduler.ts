@@ -134,6 +134,14 @@ export class CronScheduler {
         )
       }
     }
+    if (task.trigger.type === 'interval') {
+      const ms = parseInt(task.trigger.spec, 10)
+      if (isNaN(ms) || ms <= 0) {
+        throw new Error(
+          `Invalid interval "${task.trigger.spec}". Must be a positive integer (milliseconds).`
+        )
+      }
+    }
     if (task.trigger.type === 'oneshot') {
       const ts = new Date(task.trigger.spec).getTime()
       if (!isNaN(ts) && ts < Date.now()) {
@@ -211,12 +219,11 @@ export class CronScheduler {
 
         const next = computeNextTrigger(task, now)
         if (next === null) {
-          toRemove.push(task.id)
+          // oneshot 已完成 → 删除；recurring 的 null 是坏数据 → 保留跳过
+          if (task.trigger.type === 'oneshot') {
+            toRemove.push(task.id)
+          }
           continue
-        }
-
-        if (next <= now) {
-          toFire.push(task)
         }
       }
 

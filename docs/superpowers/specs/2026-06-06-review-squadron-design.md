@@ -207,6 +207,36 @@ Review Squadron **复用**现有 `delegate_batch` + `delegate_task` 基础设施
 
 ---
 
+## 5. 经验教训：H3 假修复与"验证回避"
+
+### 5.1 事件回顾
+
+2026-06-06 第二轮审查发现：`51a26a3` 声称修了 H3（dedup TOCTOU），但实际上只把锁加在了单独的 `find` 调用上——`find` 返回 `null` 后锁立即释放，`build` + `save` 在锁外执行，两个并发 `createTask` 仍然可以各自读到 `null` 再各自建 task。**真正的临界区是整个 find→build→save 序列**，锁只保护了其中的读。
+
+这是教科书级的 **verification avoidance**：
+- 提交 `51a26a3` 时声称修了 H2/H3/H4，但没有新增任何测试
+- 用旧测试的通过来"验证"并发修复——旧测试全部是串行路径，不可能暴露并发竞态
+- 这正是对抗 verifier prompt 里点名的 #1 失败模式：**"读了代码就盖 PASS，没用能暴露问题的输入去打它"**
+
+### 5.2 对 Review Squadron 设计的补强
+
+基于此教训，Inspector 的审查指南增加一条**硬性规则**：
+
+> **修复验证规则**：任何声称修复了并发/竞态类缺陷的提交，必须同时包含至少一个 `Promise.all([...])` 式的并发测试。Inspector 在审查修复提交时，若看到"声称修复并发但测试全是串行"，应立即标注为 `VERIFICATION_AVOIDANCE` 并升级严重度（至少 HIGH）。
+
+同时，Squadron Phase 1 新增基线检查步骤：
+
+```
+Phase 1.5: 基线检查（Commander 在委派前执行）
+  检查修复提交的 diff：
+  - 若 diff 涉及并发/竞态修复（串行化、dedup、锁）
+    但未新增 Promise.all 式并发测试 → 标记 VERIFICATION_AVOIDANCE
+  - 若 diff 声称修了 N 个缺陷但测试文件行数无新增 → 同样标记
+  该标记不等同于"提交有 bug"，而是"验证不充分 —— 需要补测试后重新评估"
+```
+
+---
+
 ## 附录 A：本次外部审查发现的完整清单（作为测试用例）
 
 用于验证 Review Squadron 实施后能否复现同样的发现。

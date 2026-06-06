@@ -269,6 +269,27 @@ describe('TaskRegistry', () => {
     assert.notEqual(t1.id, t2.id)
   })
 
+  it('concurrent createTask with same key produces exactly one task', async () => {
+    // H3 真修验证：Promise.all 并发，去重必须生效
+    const [t1, t2] = await Promise.all([
+      registry.createTask({ prompt: 'concurrent', source: 'api', callerId: 'u1' }),
+      registry.createTask({ prompt: 'concurrent', source: 'api', callerId: 'u1' }),
+    ])
+    assert.equal(t1.id, t2.id, 'concurrent creates must deduplicate')
+
+    // 确认只有一个 task 在存储中
+    const all = await registry.listTasks()
+    assert.equal(all.length, 1)
+  })
+
+  it('concurrent createTask with force creates two tasks', async () => {
+    const [t1, t2] = await Promise.all([
+      registry.createTask({ prompt: 'concurrent', source: 'api', callerId: 'u1' }),
+      registry.createTask({ prompt: 'concurrent', source: 'api', callerId: 'u1', force: true }),
+    ])
+    assert.notEqual(t1.id, t2.id, 'force must bypass dedup')
+  })
+
   it('transitions pending → running → completed', async () => {
     const task = await registry.createTask({ prompt: 'test', source: 'manual' })
     assert.equal(task.status, 'pending')
