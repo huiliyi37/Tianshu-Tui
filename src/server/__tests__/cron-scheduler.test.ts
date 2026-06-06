@@ -14,6 +14,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { rmSync, unlinkSync, existsSync, writeFileSync, readdirSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { hostname as osHostname } from 'node:os'
 import {
   CronScheduler,
   computeNextTrigger,
@@ -322,14 +323,14 @@ describe('CronLock', () => {
     const fakeOwner: LockInfo = {
       pid: process.pid, // 自己（确保存活）
       acquiredAt: new Date().toISOString(),
-      hostname: 'test',
+      hostname: osHostname(),
     }
     writeFileSync(TEST_LOCK_PATH, JSON.stringify(fakeOwner), 'utf-8')
 
     const lock = new CronLock({ lockPath: TEST_LOCK_PATH, healthCheckIntervalMs: 99999 })
     const state = lock.acquire()
 
-    assert.equal(state.status, 'acquired') // 同 PID → 视为自己持有
+    assert.equal(state.status, 'contended') // 同 PID 但缺少 owner token → 不视为自己持有，防 PID 复用
     lock.release()
   })
 
@@ -338,7 +339,7 @@ describe('CronLock', () => {
     const fakeOwner: LockInfo = {
       pid: 99999, // 极不可能存在
       acquiredAt: new Date().toISOString(),
-      hostname: 'test',
+      hostname: osHostname(),
     }
     writeFileSync(TEST_LOCK_PATH, JSON.stringify(fakeOwner), 'utf-8')
 
@@ -378,7 +379,7 @@ describe('CronLock', () => {
     const fakeOwner: LockInfo = {
       pid: process.pid,
       acquiredAt: new Date().toISOString(),
-      hostname: 'test',
+      hostname: osHostname(),
     }
     writeFileSync(TEST_LOCK_PATH, JSON.stringify(fakeOwner), 'utf-8')
 

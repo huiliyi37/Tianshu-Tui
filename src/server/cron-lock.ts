@@ -34,6 +34,8 @@ export interface LockInfo {
   pid: number
   acquiredAt: string
   hostname: string
+  ownerToken?: string
+  startedAtMs?: number
 }
 
 export interface CronLockConfig {
@@ -60,6 +62,8 @@ type CreateLockResult =
 
 const DEFAULT_LOCK_PATH = '.rivet/scheduled_tasks.lock'
 const DEFAULT_HEALTH_CHECK_MS = 10_000
+const PROCESS_OWNER_TOKEN = randomUUID()
+const PROCESS_STARTED_AT_MS = Math.floor(Date.now() - process.uptime() * 1000)
 
 // ─── PID Liveness ─────────────────────────────────────────────
 
@@ -163,8 +167,7 @@ export class CronLock {
     }
 
     // 检查 owner PID 是否存活
-    if (owner.pid === process.pid) {
-      // 自己已持有锁（可能是重启恢复）
+    if (this.isOwnLockInfo(owner)) {
       this.state = { status: 'acquired', info: owner }
       this.startHealthCheck()
       return this.state
@@ -192,7 +195,7 @@ export class CronLock {
     try {
       if (existsSync(this.lockPath)) {
         const owner = readLockFile(this.lockPath)
-        if (owner?.pid === process.pid) {
+        if (owner && this.isOwnLockInfo(owner)) {
           unlinkSync(this.lockPath)
         }
       }
@@ -244,7 +247,16 @@ export class CronLock {
       pid: process.pid,
       acquiredAt: new Date().toISOString(),
       hostname: this.getHostname(),
+      ownerToken: PROCESS_OWNER_TOKEN,
+      startedAtMs: PROCESS_STARTED_AT_MS,
     }
+  }
+
+  private isOwnLockInfo(info: LockInfo): boolean {
+    return info.pid === process.pid &&
+      info.hostname === this.getHostname() &&
+      info.ownerToken === PROCESS_OWNER_TOKEN &&
+      info.startedAtMs === PROCESS_STARTED_AT_MS
   }
 
   private recoverInvalidLock(): LockState {
@@ -319,7 +331,7 @@ export class CronLock {
     if (created.reason === 'error') return created
 
     const owner = readLockFile(path)
-    if (owner?.pid === process.pid) return { ok: true }
+    if (owner && this.isOwnLockInfo(owner)) return { ok: true }
     if (owner && !isPidAlive(owner.pid)) {
       try {
         unlinkSync(path)
@@ -335,7 +347,7 @@ export class CronLock {
     const path = this.reclaimLockPath()
     try {
       const owner = readLockFile(path)
-      if (owner?.pid === process.pid) {
+      if (owner && this.isOwnLockInfo(owner)) {
         unlinkSync(path)
       }
     } catch {
@@ -362,7 +374,7 @@ export class CronLock {
   private checkHealth(): void {
     // 验证锁文件仍归自己所有
     const owner = readLockFile(this.lockPath)
-    if (!owner || owner.pid !== process.pid) {
+    if (!owner || !this.isOwnLockInfo(owner)) {
       // 锁被意外篡改/丢失 → 标记 contended，并通知上层停掉 scheduler
       this.markLockLost(owner ?? { pid: -1, acquiredAt: '', hostname: '' })
     }

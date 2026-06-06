@@ -172,6 +172,23 @@ describe('CronLock P0 regressions', () => {
     lock.release()
   })
 
+  it('does not treat same-pid lock without matching owner token as own lock', () => {
+    writeOwner(TEST_LOCK_PATH, {
+      pid: process.pid,
+      acquiredAt: new Date().toISOString(),
+      hostname: osHostname(),
+      ownerToken: 'previous-process-token',
+      startedAtMs: 1,
+    })
+
+    const lock = new CronLock({ lockPath: TEST_LOCK_PATH, healthCheckIntervalMs: 99999 })
+    const state = lock.acquire()
+
+    assert.equal(state.status, 'contended')
+    assert.equal((state as Extract<LockState, { status: 'contended' }>).owner.ownerToken, 'previous-process-token')
+    lock.release()
+  })
+
   it('notifies onLockLost when the lock file is no longer owned by this process', async () => {
     const lock = new CronLock({ lockPath: TEST_LOCK_PATH, healthCheckIntervalMs: 10 })
     const acquired = lock.acquire()
