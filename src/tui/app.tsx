@@ -1105,11 +1105,21 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const thinkingForArchive = (finalText && thinkBuf.current && isThinkingPromotedToText(thinkBuf.current, finalText))
           ? undefined
           : (thinkBuf.current || undefined)
-        // Stop streaming FIRST so StreamOutput unmounts before Static entry appears,
-        // preventing duplicate content visible simultaneously in terminal.
-        streamBuf.current = ''
-        streamLiveBuf.current = ''
-        setStreamingText('')
+        // For incremental-commit (DeepSeek): all blocks are already in scrollback
+        // via committed-log. Clearning streamingText would leave the live zone
+        // empty, making the reply appear to vanish. Keep the last few lines of
+        // the full text visible so the user sees a smooth transition — streaming
+        // tail → final reply tail (content above is in scrollback, scrollable).
+        if (incrementalCommit && finalText) {
+          const cols = process.stdout.columns ?? 80
+          const rows = process.stdout.rows ?? 24
+          const tailRows = Math.max(3, Math.min(8, Math.floor(rows * 0.25)))
+          streamLiveBuf.current = capLiveTail(finalText, cols, tailRows)
+          setStreamingText(streamLiveBuf.current)
+        } else {
+          streamLiveBuf.current = ''
+          setStreamingText('')
+        }
         setStreamingThinking('')
         // Flush any pending microtask-batched Static entries before isStreaming
         // flips — prevents late tool-result pushStatic from colliding with the
