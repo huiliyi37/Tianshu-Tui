@@ -116,6 +116,46 @@ describe('CronLock P0 regressions', () => {
     assert.ok(statuses.some(status => status.status === 'contended'), JSON.stringify(statuses))
   })
 
+  it('recovers a corrupted lock with only one winner under concurrent contenders', async () => {
+    writeFileSync(TEST_LOCK_PATH, '{not-json', 'utf-8')
+
+    const contenders = Array.from({ length: 8 }, () => startContender(TEST_LOCK_PATH, TEST_RELEASE_PATH))
+    let statuses: ChildStatus[] = []
+    let statusError: unknown
+
+    try {
+      statuses = await withTimeout(
+        Promise.all(contenders.map(contender => contender.status)),
+        8_000,
+        'contenders did not all report lock state',
+      )
+    } catch (error) {
+      statusError = error
+    } finally {
+      writeFileSync(TEST_RELEASE_PATH, 'release', 'utf-8')
+    }
+
+    const exits = await withTimeout(
+      Promise.all(contenders.map(contender => contender.close)),
+      4_000,
+      'contenders did not exit after release',
+    )
+    for (const contender of contenders) {
+      contender.child.kill()
+    }
+
+    if (statusError) throw statusError
+    for (const exit of exits) {
+      assert.equal(exit.code, 0, exit.stderr)
+    }
+
+    const ownerStatuses = statuses.filter(
+      status => status.status === 'acquired' || status.status === 'stale_recovered',
+    )
+    assert.equal(ownerStatuses.length, 1, JSON.stringify(statuses))
+    assert.ok(statuses.some(status => status.status === 'contended'), JSON.stringify(statuses))
+  })
+
   it('notifies onLockLost when the lock file is no longer owned by this process', async () => {
     const lock = new CronLock({ lockPath: TEST_LOCK_PATH, healthCheckIntervalMs: 10 })
     const acquired = lock.acquire()

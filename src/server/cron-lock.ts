@@ -162,25 +162,8 @@ export class CronLock {
     // 锁文件已存在 → 检查 owner
     const owner = readLockFile(this.lockPath)
     if (!owner) {
-      // 锁文件损坏 → 清理后重试；重试仍需走 O_EXCL，避免与其他进程脑裂
-      this.forceRelease()
-      const retryInfo = this.buildLockInfo()
-      const retried = createLockFileExclusive(this.lockPath, retryInfo)
-      if (retried.ok) {
-        this.state = { status: 'acquired', info: retryInfo }
-        this.startHealthCheck()
-        return this.state
-      }
-      if (retried.reason === 'error') {
-        this.state = { status: 'error', reason: retried.message }
-        return this.state
-      }
-      const currentOwner = readLockFile(this.lockPath)
-      this.state = {
-        status: 'contended',
-        owner: currentOwner ?? { pid: -1, acquiredAt: '', hostname: '' },
-      }
-      return this.state
+      // 锁文件损坏 → 走 reclaim lock 串行回收；禁止裸 forceRelease，避免误删刚接管的活锁。
+      return this.recoverInvalidLock()
     }
 
     // 检查 owner PID 是否存活
@@ -266,7 +249,15 @@ export class CronLock {
     }
   }
 
+  private recoverInvalidLock(): LockState {
+    return this.recoverLock({ pid: -1, acquiredAt: '', hostname: '' })
+  }
+
   private recoverStaleLock(previousOwner: LockInfo): LockState {
+    return this.recoverLock(previousOwner)
+  }
+
+  private recoverLock(previousOwner: LockInfo): LockState {
     const reclaimLock = this.acquireReclaimLock()
     if (!reclaimLock.ok) {
       this.state = {
