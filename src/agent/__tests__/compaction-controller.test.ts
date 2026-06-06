@@ -487,6 +487,41 @@ describe('CompactionController', () => {
     assert.equal(refreshed, false)
   })
 
+  it('A-1b: enforceContextCeiling skips checkpoint mutation when abort lands after LLM compact returns', async () => {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(200_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+    ])
+    const before = session.getMessages().map(m => m.content)
+    const abortController = new AbortController()
+    let refreshed = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('late ceiling compact summary')
+        abortController.abort()
+      },
+    }
+
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getAbortSignal: () => abortController.signal,
+      refreshLedger: () => { refreshed = true },
+    })
+
+    await controller.enforceContextCeiling()
+
+    assert.deepEqual(session.getMessages().map(m => m.content), before)
+    assert.equal(refreshed, false)
+  })
+
   it('P4: enforceContextCeiling handoff also benefits from trajectory data', async () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(200_000 * 4)
