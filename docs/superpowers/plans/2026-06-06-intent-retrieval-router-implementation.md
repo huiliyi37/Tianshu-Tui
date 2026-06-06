@@ -279,6 +279,30 @@ export const DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG: IntentRetrievalRouterConfig
 - [ ] 用「怎么用 X」断言 external/docs 为 must 或 should，git 为 avoid/optional。
 - [ ] 用「审查 P0」断言包含 codebase + tests + git + memory。
 - [ ] LLM 合法 JSON 如果遗漏该任务类型的 baseline `must` 源，normalize 后仍应补回；否则 LLM 分类器本身会重新制造“漏查源”的问题。
+- [ ] 用「慢慢解释这个函数」断言不要误判为 `performance_diagnosis`；`慢/slow` 只有与性能、延迟、卡顿、吞吐等语义同现时才触发性能路由。
+- [ ] 用「token refresh API 怎么用」断言不要误判为 `security_safety`；只有泄露、权限、secret、路径穿越、命令执行等安全语义同现时才触发安全路由。
+- [ ] 用「最近升级后 X 怎么用失败」断言允许 `usage_question + bug_fix` 多标签，并补 codebase/tests/git，而不是被“怎么用”单词锁死。
+
+---
+
+## 天璇复核补充：跨域收敛出的增量约束
+
+按天璇方法，从医疗分诊、搜索查询规划、空管/事故指挥、编译器前端四个无关领域类比，收敛出 5 条必须补进实现约束的模式；这些约束不改变 guide-only 架构，只防止轻路由自己变成新锚点。
+
+1. **Route 是 advisory，不是 authority**  
+   像医疗分诊只给下一步检查方向，不替代医生诊断。`renderIntentRetrievalRoute` 建议带 `advisory="true" scope="current-turn"`，并在块内写明：项目规则、工具权限、实际证据优先于 route；route 不能禁止模型查其它必要来源。
+
+2. **先处理“字面诱饵”负例，再做关键词命中**  
+   搜索查询规划不会把每个词都当主题词。heuristic 需要负例护栏：`慢慢解释/慢一点说` 不等于性能问题，`token refresh` 不等于安全问题，`P0` 单独出现不等于 review/audit。任务 5 的 anti-anchor 测试必须覆盖这些词面陷阱。
+
+3. **Route 必须有 turn 级有效期**  
+   空管 clearance 有时效，不能无限期沿用。PromptEngine 每个新 user turn 先清空 route，再按当前 turn 设置；历史消息里冻结的旧 route 即使仍在上下文中，也必须通过 `scope="current-turn"` 提醒模型不要把它当作最新路由。
+
+4. **Source 是工具族契约，不是自动命令**  
+   编译器前端输出 AST，不直接执行后端优化。`source: external/docs/git/...` 只表示“该信息源值得主模型考虑”，不是要求 router 自动调用工具；`external` 仍受现有 approval / web_fetch 规则约束，`docs` 优先项目内文档而非网络。
+
+5. **需要轻量观测，不记录用户全文**  
+   搜索路由要看召回质量。实现可 debug 记录 `taskKinds`、sources、classifier、fallbackUsed、latencyMs、directionCount；禁止记录完整 user message 和 LLM 原文，避免把隐私或 prompt injection 持久化。
 
 ---
 
