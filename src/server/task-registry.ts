@@ -32,7 +32,7 @@ import {
 
 export interface RuntimeHandle {
   /** 在 runtime 上执行 AgentLoop，返回结果 */
-  execute(prompt: string, signal: AbortSignal): Promise<RuntimeResult>
+  execute(prompt: string, signal: AbortSignal, allowedTools?: string[]): Promise<RuntimeResult>
   /** 释放 runtime 回池 */
   release(): void
 }
@@ -94,6 +94,9 @@ export class TaskRegistry {
   /** 活跃任务的超时 timer */
   private timeoutTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+  /** 每任务串行化锁：防止 transition/createTask 并发竞态 */
+  private idLocks = new Map<string, Promise<void>>()
+
   constructor(config: TaskRegistryConfig) {
     this.store = config.taskStore
     this.runtimePool = config.runtimePool
@@ -102,6 +105,7 @@ export class TaskRegistry {
     this.onEvent = config.onEvent
     this.notifyPolicy = config.notifyPolicy ?? 'state_changes'
   }
+
   // ─── 创建任务 ─────────────────────────────────────────────
 
   /** 创建任务并立即调度执行（如有 runtime 池） */
@@ -109,9 +113,11 @@ export class TaskRegistry {
     const callerId = input.callerId ?? 'anonymous'
     const idempotencyKey = input.idempotencyKey ?? buildIdempotencyKey(input.prompt, callerId)
 
-    // 去重检查（force 跳过）
+    // 去重检查（per-key 串行化防 TOCTOU）
     if (!input.force) {
-      const existing = await this.store.findActiveByIdempotencyKey(idempotencyKey)
+      const existing = await this.serialized(idempotencyKey, async () => {
+        return this.store.findActiveByIdempotencyKey(idempotencyKey)
+      })
       if (existing) return existing
     }
 
@@ -152,33 +158,33 @@ export class TaskRegistry {
    * 终态不可被低优先级覆盖（cancelled > timed_out > failed > completed）。
    */
   async transition(id: string, to: TaskStatus, extra?: { error?: string; result?: TaskRecord['result'] }): Promise<TaskRecord | null> {
-    const record = await this.store.load(id)
-    if (!record) return null
+    return this.serialized(id, async () => {
+      const record = await this.store.load(id)
+      if (!record) return null
 
-    // 终态保护：不可被低优先级覆盖
-    if (!canTransition(record.status, to)) {
-      return record
-    }
+      if (!canTransition(record.status, to)) {
+        return record
+      }
 
-    const now = nowISO()
-    const updated: TaskRecord = {
-      ...record,
-      status: to,
-      ...(to === 'running' ? { startedAt: record.startedAt ?? now } : {}),
-      ...(to === 'completed' || to === 'failed' || to === 'cancelled' || to === 'timed_out' ? { completedAt: now } : {}),
-      ...(extra?.error ? { error: extra.error } : {}),
-      ...(extra?.result ? { result: extra.result } : {}),
-    }
+      const now = nowISO()
+      const updated: TaskRecord = {
+        ...record,
+        status: to,
+        ...(to === 'running' ? { startedAt: record.startedAt ?? now } : {}),
+        ...(to === 'completed' || to === 'failed' || to === 'cancelled' || to === 'timed_out' ? { completedAt: now } : {}),
+        ...(extra?.error ? { error: extra.error } : {}),
+        ...(extra?.result ? { result: extra.result } : {}),
+      }
 
-    await this.store.save(updated)
-    this.emit({ taskId: id, type: to as TaskEvent['type'], timestamp: now })
+      await this.store.save(updated)
+      this.emit({ taskId: id, type: to as TaskEvent['type'], timestamp: now })
 
-    // 清理资源
-    if (to === 'completed' || to === 'failed' || to === 'cancelled' || to === 'timed_out') {
-      this.cleanup(id)
-    }
+      if (to === 'completed' || to === 'failed' || to === 'cancelled' || to === 'timed_out') {
+        this.cleanup(id)
+      }
 
-    return updated
+      return updated
+    })
   }
 
   // ─── 取消 ──────────────────────────────────────────────────
@@ -236,6 +242,14 @@ export class TaskRegistry {
   }
 
   // ─── 内部方法 ──────────────────────────────────────────────
+
+  /** 按 key 串行化异步操作，防止并发竞态 */
+  private async serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.idLocks.get(key) ?? Promise.resolve()
+    const next = prev.then(fn, fn) // 前一个无论成功失败都继续
+    this.idLocks.set(key, next.then(() => {}, () => {})) // 存 settled promise
+    return next
+  }
 
   private emit(event: TaskEvent): void {
     // 按 notify policy 过滤
@@ -295,7 +309,7 @@ export class TaskRegistry {
         return // cancel() 已处理状态转换
       }
 
-      const result = await handle.execute(record.prompt, ac.signal)
+      const result = await handle.execute(record.prompt, ac.signal, record.allowedTools)
 
       await this.transition(record.id, 'completed', { result })
     } catch (err) {

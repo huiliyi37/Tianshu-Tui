@@ -57,7 +57,8 @@ export class CronWiring {
         prompt,
         source: 'cron',
         callerId: agentId ?? 'cron-scheduler',
-        allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
+        // 保留空数组语义（空=无工具，undefined=默认全量）
+        allowedTools: allowedTools,
       })
     }
 
