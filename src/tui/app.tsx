@@ -1367,7 +1367,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       >
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
       </Static>
-      <Box flexDirection="column">
+      <Box flexDirection="column" height={termRows}>
         {activeOverlay === 'starmap' && (
           <StarmapView
             activePhase={phaseFromSummary(summaryState)}
