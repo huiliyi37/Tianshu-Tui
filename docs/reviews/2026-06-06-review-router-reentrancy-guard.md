@@ -47,5 +47,6 @@ ReviewRouter spawn 出来的 review/verifier/patcher worker 不允许通过再�
 
 ## 交付状态
 
-- M2 修复**当前在工作区未提交**（17 文件）。提交时须**显式列文件**，排除游离改动 `plan-close.ts` / `bash.ts` / `gitignore.ts`（不属本次），避免 `git add .` 搭车。
+- M2 修复**已全部提交**（17 文件，零丢失，`tsc --noEmit` 通过）。
+- **提交错位说明（多会话并发）：** 因多个会话并发接到同一任务，一边在另一边提交前用了广撒网式 `git add`/`commit -a`，导致 16 个 reviewDepth 源码/测试文件实际落入提交 `5bcf7d3`（提交信息误标为 `test(agent): cover maybeCompact abort-after-compact path (A-1c)`，与 reviewDepth 无关）；本复核文档落入提交 `060c830`（信息正确）。代码完整、与 HEAD 零差异，已核验。**历史不做手术**（共享分支并发活跃，rebase/amend 会与其他会话竞态）。对账时以本说明为准。
 - 对应计划任务：见 [`../superpowers/plans/2026-06-06-review-discipline-internalization.md`](../superpowers/plans/2026-06-06-review-discipline-internalization.md) 任务 4 / 任务 5。
