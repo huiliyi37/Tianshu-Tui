@@ -11,51 +11,16 @@
  * 认证：通过 Bearer token 或 API key header 验证（MVP: 与 /prompt 共享 token）
  */
 
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { join, relative, resolve, sep } from 'node:path'
 import type { RouteHandler } from './index.js'
 import type { TaskRegistry, NotifyPolicy } from './task-registry.js'
 import type { TaskFilter, TaskStatus } from './task-store.js'
-import { timingSafeEqual } from 'node:crypto'
-
-// ─── Auth ─────────────────────────────────────────────────────
-
-function extractToken(_body: unknown, headers?: Record<string, string>): string | null {
-  // Authorization: Bearer <token> header（优先）
-  const authHeader = headers?.['authorization']
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.slice(7)
-  }
-  // fallback: body-based token（POST 兼容）
-  if (_body && typeof _body === 'object' && 'token' in _body) {
-    return String((_body as Record<string, unknown>).token)
-  }
-  return null
-}
-
-function checkAuth(token: string | null, expectedToken?: string): boolean {
-  // 未配置 token → 拒绝所有请求（fail-closed）
-  if (!expectedToken) return false
-  if (!token) return false
-  // 长度不同直接拒绝（避免 timingSafeEqual 抛异常）
-  if (token.length !== expectedToken.length) return false
-  return timingSafeEqual(
-    Buffer.from(token),
-    Buffer.from(expectedToken),
-  )
-}
+import { isAuthorizedRequest } from './auth.js'
+import { assertValidTaskId, isValidTaskId } from './task-store.js'
+import { errorContext, serverLogger } from './logger.js'
 
 // ─── Query String Parser ──────────────────────────────────────
-
-function parseQuery(path: string): Record<string, string> {
-  const qIndex = path.indexOf('?')
-  if (qIndex === -1) return {}
-  const qs = path.slice(qIndex + 1)
-  const params: Record<string, string> = {}
-  for (const pair of qs.split('&')) {
-    const [k, v] = pair.split('=')
-    if (k) params[decodeURIComponent(k)] = decodeURIComponent(v ?? '')
-  }
-  return params
-}
 
 function parseTaskFilter(query: Record<string, string>): TaskFilter {
   const filter: TaskFilter = {}
@@ -75,9 +40,6 @@ function parseTaskFilter(query: Record<string, string>): TaskFilter {
 
 // ─── Event Log ────────────────────────────────────────────────
 
-import { appendFileSync, existsSync, readFileSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
-
 const DEFAULT_EVENTS_DIR = '.rivet/tasks/events'
 
 interface TaskEventLog {
@@ -88,12 +50,24 @@ interface TaskEventLog {
   detail?: Record<string, unknown>
 }
 
-/** 写入一条事件到 events.jsonl */
-export function writeTaskEvent(taskId: string, type: string, detail?: Record<string, unknown>): void {
+export interface TaskEventStoreOptions {
+  eventsDir?: string
+}
+
+/** 写入一条事件到 events.jsonl。seq 以 sidecar 为权威，避免坏尾行导致重置。 */
+export function writeTaskEvent(
+  taskId: string,
+  type: string,
+  detail?: Record<string, unknown>,
+  options?: TaskEventStoreOptions,
+): void {
   try {
-    mkdirSync(DEFAULT_EVENTS_DIR, { recursive: true })
-    const filePath = join(DEFAULT_EVENTS_DIR, `${taskId}.jsonl`)
-    const seq = nextSeq(filePath)
+    assertValidTaskId(taskId)
+    const eventsDir = resolve(options?.eventsDir ?? DEFAULT_EVENTS_DIR)
+    mkdirSync(eventsDir, { recursive: true })
+    const filePath = pathInside(eventsDir, `${taskId}.jsonl`)
+    const seqPath = pathInside(eventsDir, `${taskId}.seq`)
+    const seq = nextSeq(seqPath, filePath)
     const event: TaskEventLog = {
       seq,
       taskId,
@@ -102,28 +76,62 @@ export function writeTaskEvent(taskId: string, type: string, detail?: Record<str
       ...(detail ? { detail } : {}),
     }
     appendFileSync(filePath, JSON.stringify(event) + '\n', 'utf-8')
-  } catch {
-    // 事件写入失败不影响主流程
+    writeSeq(seqPath, seq)
+  } catch (err) {
+    serverLogger.warn('Failed to write task event', { taskId, type, ...errorContext(err) })
   }
 }
 
-function nextSeq(filePath: string): number {
-  if (!existsSync(filePath)) return 1
+function nextSeq(seqPath: string, filePath: string): number {
+  const sidecarSeq = readSeq(seqPath) ?? 0
+  const eventSeq = maxSeqFromEvents(filePath)
+  return Math.max(sidecarSeq, eventSeq) + 1
+}
+
+function readSeq(seqPath: string): number | null {
+  if (!existsSync(seqPath)) return null
+  try {
+    const n = Number(readFileSync(seqPath, 'utf-8').trim())
+    return Number.isInteger(n) && n >= 0 ? n : null
+  } catch (err) {
+    serverLogger.warn('Failed to read task event seq sidecar', { seqPath, ...errorContext(err) })
+    return null
+  }
+}
+
+function writeSeq(seqPath: string, seq: number): void {
+  const tmpPath = `${seqPath}.tmp`
+  writeFileSync(tmpPath, `${seq}\n`, 'utf-8')
+  renameSync(tmpPath, seqPath)
+}
+
+function maxSeqFromEvents(filePath: string): number {
+  if (!existsSync(filePath)) return 0
   try {
     const content = readFileSync(filePath, 'utf-8')
-    const lines = content.trim().split('\n')
-    if (lines.length === 0) return 1
-    const lastLine = lines[lines.length - 1]
-    if (!lastLine) return 1
-    const lastEvent = JSON.parse(lastLine) as TaskEventLog
-    return (lastEvent.seq ?? 0) + 1
-  } catch {
-    return 1
+    let maxSeq = 0
+    for (const line of content.split('\n')) {
+      if (line.trim().length === 0) continue
+      try {
+        const event = JSON.parse(line) as Partial<TaskEventLog>
+        if (typeof event.seq === 'number' && Number.isFinite(event.seq)) {
+          maxSeq = Math.max(maxSeq, event.seq)
+        }
+      } catch (err) {
+        serverLogger.warn('Skipping corrupt task event line while computing seq', { filePath, ...errorContext(err) })
+      }
+    }
+    return maxSeq
+  } catch (err) {
+    serverLogger.warn('Failed to scan task event log for seq', { filePath, ...errorContext(err) })
+    return 0
   }
 }
 
-function readEvents(taskId: string, sinceSeq?: number): TaskEventLog[] {
-  const filePath = join(DEFAULT_EVENTS_DIR, `${taskId}.jsonl`)
+function readEvents(taskId: string, sinceSeq?: number, options?: TaskEventStoreOptions): TaskEventLog[] {
+  if (!isValidTaskId(taskId)) return []
+  const eventsDir = resolve(options?.eventsDir ?? DEFAULT_EVENTS_DIR)
+  const filePath = pathInside(eventsDir, `${taskId}.jsonl`)
   if (!existsSync(filePath)) return []
   try {
     const content = readFileSync(filePath, 'utf-8')
@@ -135,14 +143,24 @@ function readEvents(taskId: string, sinceSeq?: number): TaskEventLog[] {
         if (sinceSeq === undefined || event.seq > sinceSeq) {
           events.push(event)
         }
-      } catch {
-        // 损坏行跳过
+      } catch (err) {
+        serverLogger.warn('Skipping corrupt task event line', { taskId, ...errorContext(err) })
       }
     }
     return events
-  } catch {
+  } catch (err) {
+    serverLogger.warn('Failed to read task events', { taskId, ...errorContext(err) })
     return []
   }
+}
+
+function pathInside(root: string, fileName: string): string {
+  const target = resolve(root, fileName)
+  const rel = relative(root, target)
+  if (rel === '' || rel.startsWith('..') || rel.includes(`..${sep}`) || resolve(target) === root) {
+    throw new Error(`Path escapes event directory: ${fileName}`)
+  }
+  return target
 }
 
 // ─── Route Builders ───────────────────────────────────────────
@@ -152,30 +170,28 @@ export interface TaskRoutesDeps {
   apiToken?: string
   /** 通知策略，默认 state_changes */
   notifyPolicy?: NotifyPolicy
+  /** 测试/嵌入场景可覆盖 events 目录；默认 .rivet/tasks/events */
+  eventsDir?: string
 }
 
+const unauthorized = () => ({ status: 401, body: { error: 'Unauthorized' } })
+
 export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandler> {
-  const { registry, apiToken, notifyPolicy } = deps
+  const { registry, apiToken, notifyPolicy, eventsDir } = deps
 
   // 事件订阅：TaskRegistry 状态变化 → 按策略写 events.jsonl
   if (notifyPolicy) {
     registry.setNotifyPolicy(notifyPolicy)
   }
   registry.setEventCallback((event) => {
-    writeTaskEvent(event.taskId, event.type)
+    writeTaskEvent(event.taskId, event.type, undefined, { eventsDir })
   })
 
   return {
     'GET /tasks': async (body, _params, headers) => {
-      const token = extractToken(body, headers)
-      if (!checkAuth(token, apiToken)) {
-        return { status: 401, body: { error: 'Unauthorized' } }
-      }
+      if (!isAuthorizedRequest({ body, headers }, apiToken)) return unauthorized()
 
-      // 从 query string 解析过滤条件
-      // Note: params 从 router 传入，但 query 在 path 中
-      // 我们通过 body 的 _query 或在 handler 内无法直接取到 path
-      // Workaround: body 可携带查询参数
+      // createRouter 当前只把 body 传给 handler；测试与调用方可把 query 参数放 body 中。
       const filter = body && typeof body === 'object'
         ? parseTaskFilter(body as Record<string, string>)
         : {}
@@ -185,13 +201,10 @@ export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandl
     },
 
     'GET /tasks/:id': async (body, params, headers) => {
-      const token = extractToken(body, headers)
-      if (!checkAuth(token, apiToken)) {
-        return { status: 401, body: { error: 'Unauthorized' } }
-      }
+      if (!isAuthorizedRequest({ body, headers }, apiToken)) return unauthorized()
 
       const id = params?.id
-      if (!id) return { status: 400, body: { error: 'Missing task id' } }
+      if (!id || !isValidTaskId(id)) return { status: 400, body: { error: 'Invalid task id' } }
 
       const task = await registry.getTask(id)
       if (!task) return { status: 404, body: { error: 'Task not found' } }
@@ -200,13 +213,10 @@ export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandl
     },
 
     'POST /tasks/:id/cancel': async (body, params, headers) => {
-      const token = extractToken(body, headers)
-      if (!checkAuth(token, apiToken)) {
-        return { status: 401, body: { error: 'Unauthorized' } }
-      }
+      if (!isAuthorizedRequest({ body, headers }, apiToken)) return unauthorized()
 
       const id = params?.id
-      if (!id) return { status: 400, body: { error: 'Missing task id' } }
+      if (!id || !isValidTaskId(id)) return { status: 400, body: { error: 'Invalid task id' } }
 
       const cancelled = await registry.cancel(id)
       if (!cancelled) return { status: 404, body: { error: 'Task not found' } }
@@ -215,26 +225,21 @@ export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandl
     },
 
     'GET /tasks/:id/events': async (body, params, headers) => {
-      const token = extractToken(body, headers)
-      if (!checkAuth(token, apiToken)) {
-        return { status: 401, body: { error: 'Unauthorized' } }
-      }
+      if (!isAuthorizedRequest({ body, headers }, apiToken)) return unauthorized()
 
       const id = params?.id
-      if (!id) return { status: 400, body: { error: 'Missing task id' } }
+      if (!id || !isValidTaskId(id)) return { status: 400, body: { error: 'Invalid task id' } }
 
-      // 检查任务是否存在
       const task = await registry.getTask(id)
       if (!task) return { status: 404, body: { error: 'Task not found' } }
 
-      // 解析 since 游标（从 body 获取）
       let sinceSeq: number | undefined
       if (body && typeof body === 'object' && 'since' in body) {
         const s = Number((body as Record<string, unknown>).since)
         if (!isNaN(s) && s >= 0) sinceSeq = s
       }
 
-      const events = readEvents(id, sinceSeq)
+      const events = readEvents(id, sinceSeq, { eventsDir })
       return { status: 200, body: { events, count: events.length } }
     },
   }

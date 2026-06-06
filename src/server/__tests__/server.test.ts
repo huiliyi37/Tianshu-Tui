@@ -90,25 +90,25 @@ describe('createRouter', () => {
 
 describe('createRoutes', () => {
   it('GET /status returns running state', async () => {
-    const state: ServerState = { running: true, sessionId: 's-1' }
+    const state: ServerState = { running: true, sessionId: 's-1', apiToken: 'secret' }
     const routes = createRoutes(state)
-    const result = await routes['GET /status']!({})
+    const result = await routes['GET /status']!({}, undefined, { authorization: 'Bearer secret' })
     assert.equal(result.status, 200)
     assert.deepEqual(result.body, { running: true, sessionId: 's-1' })
   })
 
   it('GET /status returns null sessionId when not set', async () => {
-    const state: ServerState = { running: false }
+    const state: ServerState = { running: false, apiToken: 'secret' }
     const routes = createRoutes(state)
-    const result = await routes['GET /status']!({})
+    const result = await routes['GET /status']!({}, undefined, { authorization: 'Bearer secret' })
     assert.deepEqual((result.body as any).sessionId, null)
   })
 
   it('POST /abort invokes abort callback and sets running=false', async () => {
     let aborted = false
-    const state: ServerState = { running: true, abort: () => { aborted = true } }
+    const state: ServerState = { running: true, apiToken: 'secret', abort: () => { aborted = true } }
     const routes = createRoutes(state)
-    const result = await routes['POST /abort']!({})
+    const result = await routes['POST /abort']!({}, undefined, { authorization: 'Bearer secret' })
     assert.equal(result.status, 200)
     assert.deepEqual(result.body, { aborted: true })
     assert.ok(aborted)
@@ -116,9 +116,9 @@ describe('createRoutes', () => {
   })
 
   it('POST /abort works without abort callback', async () => {
-    const state: ServerState = { running: true }
+    const state: ServerState = { running: true, apiToken: 'secret' }
     const routes = createRoutes(state)
-    const result = await routes['POST /abort']!({})
+    const result = await routes['POST /abort']!({}, undefined, { authorization: 'Bearer secret' })
     assert.equal(result.status, 200)
     assert.equal(state.running, false)
   })
@@ -134,6 +134,40 @@ describe('createRoutes', () => {
     }
     const routes = createRoutes({ running: false }, deps)
     assert.ok(routes['POST /prompt'])
+  })
+
+  it('rejects status/abort when no server token is configured', async () => {
+    const routes = createRoutes({ running: true })
+    const status = await routes['GET /status']!({})
+    const abort = await routes['POST /abort']!({})
+
+    assert.equal(status.status, 401)
+    assert.equal(abort.status, 401)
+  })
+
+  it('rejects status/abort with wrong or missing bearer token', async () => {
+    const state: ServerState = { running: true, apiToken: 'secret', abort: () => { throw new Error('should not abort') } }
+    const routes = createRoutes(state)
+
+    const missing = await routes['GET /status']!({})
+    const wrong = await routes['POST /abort']!({}, undefined, { authorization: 'Bearer wrong' })
+
+    assert.equal(missing.status, 401)
+    assert.equal(wrong.status, 401)
+    assert.equal(state.running, true)
+  })
+
+  it('wraps /prompt with the same bearer-token auth gate', async () => {
+    const deps: PromptRouteDeps = {
+      createAgent: () => ({ run: async () => {}, abort: () => {} }),
+    }
+    const routes = createRoutes({ running: false, apiToken: 'secret' }, deps)
+
+    const unauthorized = await routes['POST /prompt']!({ prompt: 'x' })
+    const authorized = await routes['POST /prompt']!({ prompt: 'x' }, undefined, { authorization: 'Bearer secret' })
+
+    assert.equal(unauthorized.status, 401)
+    assert.equal(authorized.status, 200)
   })
 })
 

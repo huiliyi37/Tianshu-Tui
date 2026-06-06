@@ -750,7 +750,8 @@ async function main() {
     const { startServer } = await import('./server/index.js')
     const { createRoutes } = await import('./server/routes.js')
 
-    const state: import('./server/routes.js').ServerState = { running: false }
+    const apiToken = process.env.RIVET_SERVER_TOKEN
+    const state: import('./server/routes.js').ServerState = { running: false, apiToken }
     const routes = createRoutes(state)
     const server = startServer(port, routes)
 

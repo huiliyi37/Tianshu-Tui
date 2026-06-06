@@ -18,7 +18,6 @@
 import {
   type TaskRecord,
   type TaskStatus,
-  type TaskSource,
   type CreateTaskInput,
   type TaskStore,
   type TaskFilter,
@@ -27,6 +26,7 @@ import {
   generateTaskId,
   nowISO,
 } from './task-store.js'
+import { errorContext, serverLogger } from './logger.js'
 
 // ─── Runtime 池接口（来自姊妹 ingress spec，Phase 2 实施） ────
 
@@ -74,7 +74,7 @@ export interface TaskRegistryConfig {
   defaultTimeoutMs?: number
   /** cron 任务默认超时，默认 60 分钟 */
   cronTimeoutMs?: number
-  /** 事件回调（不受 notifyPolicy 影响） */
+  /** 事件回调（按 notifyPolicy 过滤后触发） */
   onEvent?: TaskEventCallback
   /** 通知策略：silent | state_changes | errors_only，默认 state_changes */
   notifyPolicy?: NotifyPolicy
@@ -146,7 +146,13 @@ export class TaskRegistry {
     // 如有 runtime 池，立即调度
     if (this.runtimePool) {
       this.scheduleExecution(record).catch(err => {
-        this.transition(record.id, 'failed', { error: String(err) }).catch(() => {})
+        this.transition(record.id, 'failed', { error: String(err) }).catch(transitionErr => {
+          serverLogger.error('Failed to mark task execution failure', {
+            taskId: record.id,
+            executionError: errorContext(err),
+            transitionError: errorContext(transitionErr),
+          })
+        })
       })
     }
 
@@ -195,14 +201,18 @@ export class TaskRegistry {
   async cancel(id: string): Promise<TaskRecord | null> {
     const ac = this.abortControllers.get(id)
     if (ac) {
-      try { ac.abort() } catch { /* abort 可安全多次调用 */ }
+      try {
+        ac.abort()
+      } catch (err) {
+        serverLogger.warn('AbortController.abort threw while cancelling task', { id, ...errorContext(err) })
+      }
     }
     return this.transition(id, 'cancelled')
   }
 
   // ─── 事件回调 ──────────────────────────────────────────────
 
-  /** 设置事件回调（用于 task-routes 接线 events.jsonl） */
+  /** 设置事件回调（用于 task-routes 接线 events.jsonl）。 */
   setEventCallback(cb: TaskEventCallback): void {
     this.onEvent = cb
   }
@@ -214,6 +224,11 @@ export class TaskRegistry {
 
   setNotifyPolicy(policy: NotifyPolicy): void {
     this.notifyPolicy = policy
+  }
+
+  /** 注入 runtime 池（延后接线，供 ingress spec Phase 2 就绪后使用）。 */
+  setRuntimePool(pool: RuntimePool): void {
+    this.runtimePool = pool
   }
 
   // ─── 查询 ──────────────────────────────────────────────────
@@ -272,7 +287,11 @@ export class TaskRegistry {
       default:
         break
     }
-    try { this.onEvent?.(event) } catch { /* 回调不应抛异常 */ }
+    try {
+      this.onEvent?.(event)
+    } catch (err) {
+      serverLogger.warn('Task event callback failed', { taskId: event.taskId, type: event.type, ...errorContext(err) })
+    }
   }
 
   private cleanup(id: string): void {
@@ -300,7 +319,9 @@ export class TaskRegistry {
     if (record.timeoutMs > 0) {
       const timer = setTimeout(() => {
         ac.abort()
-        this.transition(record.id, 'timed_out', { error: `Task timed out after ${record.timeoutMs}ms` }).catch(() => {})
+        this.transition(record.id, 'timed_out', { error: `Task timed out after ${record.timeoutMs}ms` }).catch(err => {
+          serverLogger.error('Failed to mark task timeout', { taskId: record.id, ...errorContext(err) })
+        })
       }, record.timeoutMs)
       this.timeoutTimers.set(record.id, timer)
     }

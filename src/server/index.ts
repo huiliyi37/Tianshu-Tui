@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { errorContext, serverLogger } from './logger.js'
 
 export interface RouteResponse {
   status: number
@@ -84,5 +85,10 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   for await (const chunk of req) chunks.push(chunk as Buffer)
   const raw = Buffer.concat(chunks).toString()
   if (!raw) return {}
-  try { return JSON.parse(raw) } catch { return {} }
+  try {
+    return JSON.parse(raw)
+  } catch (err) {
+    serverLogger.warn('Invalid JSON request body', { ...errorContext(err) })
+    return {}
+  }
 }

@@ -4,13 +4,15 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { rmSync } from 'node:fs'
+import { appendFileSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { createRouter } from '../index.js'
 import { buildTaskRoutes } from '../task-routes.js'
 import { TaskRegistry } from '../task-registry.js'
 import { JsonTaskStore } from '../task-store.js'
 
 const TEST_TASKS_DIR = '.test-tmp/task-routes-test'
+const TEST_EVENTS_DIR = '.test-tmp/task-routes-events-test'
 
 function setup() {
   rmSync(TEST_TASKS_DIR, { recursive: true, force: true })
@@ -29,12 +31,14 @@ describe('Task Routes', () => {
   beforeEach(() => {
     const s = setup()
     registry = s.registry
-    const taskRoutes = buildTaskRoutes({ registry, apiToken: 'test-token' })
+    rmSync(TEST_EVENTS_DIR, { recursive: true, force: true })
+    const taskRoutes = buildTaskRoutes({ registry, apiToken: 'test-token', eventsDir: TEST_EVENTS_DIR })
     router = createRouter({ ...taskRoutes })
   })
 
   afterEach(() => {
     rmSync(TEST_TASKS_DIR, { recursive: true, force: true })
+    rmSync(TEST_EVENTS_DIR, { recursive: true, force: true })
   })
 
   it('GET /tasks returns empty list', async () => {
@@ -99,6 +103,27 @@ describe('Task Routes', () => {
     const res = await router('GET', '/tasks/nonexistent/events', {}, H)
     assert.equal(res.status, 404)
   })
+
+  it('event seq uses durable sidecar and does not reset after a corrupt tail line', async () => {
+    const task = await registry.createTask({ prompt: 'test', source: 'manual', callerId: 'u1' })
+    const eventPath = join(TEST_EVENTS_DIR, `${task.id}.jsonl`)
+    appendFileSync(eventPath, '{bad-json-tail\n', 'utf-8')
+
+    await registry.transition(task.id, 'running')
+    const res = await router('GET', '/tasks/' + task.id + '/events', {}, H)
+
+    assert.equal(res.status, 200)
+    const body = res.body as { events: Array<{ seq: number; type: string }> }
+    const created = body.events.find(e => e.type === 'created')
+    const running = body.events.find(e => e.type === 'running')
+
+    assert.ok(created)
+    assert.ok(running)
+    assert.equal(created!.seq, 1)
+    assert.equal(running!.seq, 2)
+    assert.equal(readFileSync(join(TEST_EVENTS_DIR, `${task.id}.seq`), 'utf-8').trim(), '2')
+  })
+
   it('POST /tasks/:id/cancel cancels a running task', async () => {
     const task = await registry.createTask({ prompt: 'to cancel', source: 'api', callerId: 'u1' })
     await registry.transition(task.id, 'running')
@@ -114,14 +139,14 @@ describe('Task Routes', () => {
   })
 
   it('returns 401 when token not provided', async () => {
-    const taskRoutes = buildTaskRoutes({ registry, apiToken: 'secret' })
+    const taskRoutes = buildTaskRoutes({ registry, apiToken: 'secret', eventsDir: TEST_EVENTS_DIR })
     const authRouter = createRouter({ ...taskRoutes })
     const res = await authRouter('GET', '/tasks', {})
     assert.equal(res.status, 401)
   })
 
   it('accepts request with correct Bearer token', async () => {
-    const taskRoutes = buildTaskRoutes({ registry, apiToken: 'secret' })
+    const taskRoutes = buildTaskRoutes({ registry, apiToken: 'secret', eventsDir: TEST_EVENTS_DIR })
     const authRouter = createRouter({ ...taskRoutes })
     await registry.createTask({ prompt: 'test', source: 'api', callerId: 'u1' })
     const res = await authRouter('GET', '/tasks', {}, { authorization: 'Bearer secret' })
@@ -129,7 +154,7 @@ describe('Task Routes', () => {
   })
 
   it('rejects wrong token', async () => {
-    const taskRoutes = buildTaskRoutes({ registry, apiToken: 'secret' })
+    const taskRoutes = buildTaskRoutes({ registry, apiToken: 'secret', eventsDir: TEST_EVENTS_DIR })
     const authRouter = createRouter({ ...taskRoutes })
     const res = await authRouter('GET', '/tasks', {}, { authorization: 'Bearer wrong' })
     assert.equal(res.status, 401)

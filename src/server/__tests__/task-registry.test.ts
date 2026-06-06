@@ -12,7 +12,7 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { rmSync, mkdirSync } from 'node:fs'
+import { rmSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs'
 import {
   JsonTaskStore,
   buildIdempotencyKey,
@@ -122,6 +122,26 @@ describe('JsonTaskStore', () => {
     const list = await store.list({ limit: 2 })
     assert.equal(list.length, 2)
   })
+
+  it('rejects invalid task ids and never resolves outside the task directory', async () => {
+    await assert.rejects(
+      () => store.save(makeRecord('../evil')),
+      /Invalid task id/,
+    )
+
+    assert.equal(await store.load('../evil'), null)
+    await store.delete('../evil')
+  })
+
+  it('quarantines corrupt per-task JSON instead of clearing the whole table', async () => {
+    await store.save(makeRecord('good'))
+    writeFileSync(`${TEST_DIR}/bad.json`, '{not-json', 'utf-8')
+
+    const list = await store.list()
+    assert.equal(list.length, 1)
+    assert.equal(list[0]!.id, 'good')
+    assert.ok(readdirSync(TEST_DIR).some(f => f.startsWith('bad.json.corrupt-')))
+  })
 })
 
 // ─── canTransition ────────────────────────────────────────────
@@ -182,9 +202,10 @@ describe('canTransition', () => {
 
 describe('buildIdempotencyKey', () => {
   it('same prompt + caller + time bucket produces same key', () => {
-    const base = Date.now()
+    const bucketMs = 5 * 60 * 1000
+    const base = Math.floor(Date.now() / bucketMs) * bucketMs + 60_000
     const k1 = buildIdempotencyKey('hello', 'user1', base)
-    const k2 = buildIdempotencyKey('hello', 'user1', base + 60_000)
+    const k2 = buildIdempotencyKey('hello', 'user1', base + 1_000)
     assert.equal(k1, k2)
   })
 

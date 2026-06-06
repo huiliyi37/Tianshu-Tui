@@ -12,7 +12,8 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { rmSync, unlinkSync, existsSync, writeFileSync } from 'node:fs'
+import { rmSync, unlinkSync, existsSync, writeFileSync, readdirSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import {
   CronScheduler,
   computeNextTrigger,
@@ -56,6 +57,29 @@ describe('CronScheduler', () => {
     assert.equal(list.length, 1)
     assert.equal(list[0]!.prompt, 'test')
     assert.equal(list[0]!.trigger.type, 'oneshot')
+  })
+
+  it('list/get return defensive copies so callers cannot mutate scheduler state', () => {
+    const task = createScheduledTask('immutable', { type: 'interval', spec: '60000' })
+    scheduler.add(task)
+
+    const listed = scheduler.list()
+    listed[0]!.prompt = 'mutated outside'
+
+    assert.equal(scheduler.get(task.id)!.prompt, 'immutable')
+  })
+
+  it('supports multiple task-due subscribers without private-field rewiring', async () => {
+    const seen: string[] = []
+    const unsubscribe = scheduler.subscribeTaskDue(async (prompt) => { seen.push(`sub:${prompt}`) })
+    const task = createScheduledTask('due', { type: 'oneshot', spec: new Date(Date.now() - 1000).toISOString() })
+
+    scheduler.add(task)
+    await sleep(20)
+    unsubscribe()
+
+    assert.ok(firedTasks.some(t => t.prompt === 'due'))
+    assert.ok(seen.includes('sub:due'))
   })
 
   it('removes scheduled task by id', () => {
@@ -134,6 +158,28 @@ describe('CronScheduler', () => {
     assert.equal(list.length, 1)
     assert.equal(list[0]!.prompt, 'persisted')
 
+    scheduler2.stop()
+  })
+
+  it('quarantines a corrupt schedule file instead of silently clearing it', () => {
+    writeFileSync(TEST_SCHEDULE_PATH, '{not-json', 'utf-8')
+
+    const scheduler2 = new CronScheduler({ schedulePath: TEST_SCHEDULE_PATH })
+    scheduler2.start()
+
+    assert.equal(scheduler2.list().length, 0)
+    assert.ok(readdirSync('.test-tmp').some(f => f.startsWith('test-scheduled-tasks.json.corrupt-')))
+    scheduler2.stop()
+  })
+
+  it('drops invalid persisted schedule entries while keeping valid ones', () => {
+    const valid = createScheduledTask('valid', { type: 'interval', spec: '60000' })
+    writeFileSync(TEST_SCHEDULE_PATH, JSON.stringify([{ id: '../bad' }, valid]), 'utf-8')
+
+    const scheduler2 = new CronScheduler({ schedulePath: TEST_SCHEDULE_PATH })
+    scheduler2.start()
+
+    assert.deepEqual(scheduler2.list().map(t => t.id), [valid.id])
     scheduler2.stop()
   })
 

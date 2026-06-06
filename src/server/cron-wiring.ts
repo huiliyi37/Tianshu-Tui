@@ -5,7 +5,7 @@
  *
  * 链路：
  *   CronScheduler（时间触发 tick）
- *     → onCreateTask 回调
+ *     → task-due subscription
  *       → TaskRegistry.createTask(source: 'cron')
  *         → scheduleExecution()（如有 runtimePool）
  *           → RuntimePool.acquire() → AgentLoop（自带 maxTurns + AbortSignal + TurnHeartbeat）
@@ -16,7 +16,7 @@
  * - 多进程：先 CronLock.acquire()，仅 owner 启动 scheduler
  */
 
-import { CronScheduler } from './cron-scheduler.js'
+import { CronScheduler, type UnsubscribeTaskDue } from './cron-scheduler.js'
 import { CronLock } from './cron-lock.js'
 import { TaskRegistry, type RuntimePool } from './task-registry.js'
 
@@ -43,36 +43,38 @@ export class CronWiring {
   private scheduler: CronScheduler
   private registry: TaskRegistry
   private lock?: CronLock
+  private unsubscribeTaskDue: UnsubscribeTaskDue
+  private unsubscribeLockLost?: () => void
 
   constructor(config: CronWiringConfig) {
     this.scheduler = config.scheduler
     this.registry = config.registry
     this.lock = config.lock
+    this.unsubscribeLockLost = this.lock?.onLockLost(() => {
+      this.scheduler.stop()
+    })
 
-    // 接线：scheduler 触发 → TaskRegistry 创建 cron 任务
-    // 直接将 Scheduler 串行覆写 onCreateTask 是不安全的（失去 observer 语义），
-    // 但当前 CronScheduler 的单回调设计下这是唯一接法。若未来有多订阅者需求，改为 emitter 模式。
-    this.scheduler['onCreateTask'] = async (prompt: string, allowedTools: string[], agentId?: string) => {
+    // 接线：scheduler 触发 → TaskRegistry 创建 cron 任务。
+    // 使用显式订阅 API，避免方括号私有写入和单回调覆盖。
+    this.unsubscribeTaskDue = this.scheduler.subscribeTaskDue(async (prompt, allowedTools, agentId) => {
       await this.registry.createTask({
         prompt,
         source: 'cron',
         callerId: agentId ?? 'cron-scheduler',
         // 保留空数组语义（空=无工具，undefined=默认全量）
-        allowedTools: allowedTools,
+        allowedTools,
       })
-    }
+    })
 
-    // 如有 runtime 池，注入到 TaskRegistry（使 scheduleExecution 可用）
     if (config.runtimePool) {
-      this.registry['runtimePool'] = config.runtimePool
+      this.registry.setRuntimePool(config.runtimePool)
     }
   }
 
   /** 启动调度器。多进程部署时先抢锁。 */
   async start(): Promise<CronWiringStatus> {
-    // 如有锁，尝试获取
     if (this.lock) {
-      const lockState = this.lock.acquire()
+      this.lock.acquire()
       if (!this.lock.isOwner()) {
         return {
           schedulerRunning: false,
@@ -86,7 +88,6 @@ export class CronWiring {
     // 恢复陈旧任务（进程重启后 running → timed_out）
     await this.registry.recoverStaleTasks()
 
-    // 启动调度器
     this.scheduler.start()
 
     return this.getStatus()
@@ -98,9 +99,16 @@ export class CronWiring {
     this.lock?.release()
   }
 
+  /** 彻底断开接线。 */
+  dispose(): void {
+    this.unsubscribeTaskDue()
+    this.unsubscribeLockLost?.()
+    this.unsubscribeLockLost = undefined
+  }
+
   /** 注入 runtime 池（延后接线，供 ingress spec Phase 2 就绪后使用） */
   setRuntimePool(pool: RuntimePool): void {
-    this.registry['runtimePool'] = pool
+    this.registry.setRuntimePool(pool)
   }
 
   /** 获取当前状态 */
