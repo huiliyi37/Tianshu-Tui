@@ -99,6 +99,8 @@ import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
+import { classifyIntentRetrievalRoute } from './intent-retrieval-router.js'
+import { renderIntentRetrievalRoute } from './intent-retrieval-route.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
@@ -538,6 +540,31 @@ export class AgentLoop {
     return text.trim()
   }
 
+  private async buildIntentRetrievalRouteForTurn(userInput: string, actionable: boolean): Promise<void> {
+    if (!actionable || !this.taskContract) {
+      this.config.promptEngine.setIntentRetrievalRoute(null)
+      return
+    }
+
+    try {
+      const route = await classifyIntentRetrievalRoute({
+        userMessage: userInput,
+        taskContract: this.taskContract,
+        config: this.config.intentRetrievalRouter,
+        client: this.config.client,
+        model: this.config.promptEngine.getModel(),
+        signal: this.abortController?.signal,
+        onTelemetry: telemetry => {
+          debugLog(`[intent-router] classifier=${telemetry.classifier} fallback=${telemetry.fallbackUsed} kinds=${telemetry.taskKinds.join(',')} sources=${telemetry.sources.join(',')} directions=${telemetry.directionCount} latencyMs=${telemetry.latencyMs}`)
+        },
+      })
+      this.config.promptEngine.setIntentRetrievalRoute(route ? renderIntentRetrievalRoute(route) : null)
+    } catch (err) {
+      debugLog(`[intent-router] failed: ${(err as Error).message}`)
+      this.config.promptEngine.setIntentRetrievalRoute(null)
+    }
+  }
+
   async maybePrewarm(text: string): Promise<void> {
     const intents = extractIntents(text)
     for (const intent of intents) {
@@ -975,6 +1002,8 @@ export class AgentLoop {
       this.taskContract = undefined
     }
     // else: non-actionable follow-up to active task → inherit existing contract
+
+    await this.buildIntentRetrievalRouteForTurn(userInput, actionable)
 
     if (this.config.autoReasoning && actionable) {
       this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)

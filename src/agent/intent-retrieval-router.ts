@@ -4,8 +4,10 @@ import type { TaskContract } from '../context/task-contract.js'
 import {
   buildHeuristicRetrievalRoute,
   normalizeRetrievalRoute,
+  type IntentTaskKind,
   type RetrievalRoute,
   type RetrievalRouteInput,
+  type RetrievalSource,
 } from './intent-retrieval-route.js'
 
 export interface IntentRetrievalRouterConfig {
@@ -26,11 +28,21 @@ export const DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG: IntentRetrievalRouterConfig
   temperature: 0,
 }
 
+export interface IntentRetrievalRouteTelemetry {
+  classifier: IntentRetrievalRouterConfig['classifier']
+  fallbackUsed: boolean
+  latencyMs: number
+  taskKinds: IntentTaskKind[]
+  sources: RetrievalSource[]
+  directionCount: number
+}
+
 export interface ClassifyIntentRetrievalRouteInput extends RetrievalRouteInput {
   config?: IntentRetrievalRouterConfigInput
   client: StreamClient
   model: string
   signal?: AbortSignal
+  onTelemetry?: (telemetry: IntentRetrievalRouteTelemetry) => void
 }
 
 export function normalizeIntentRetrievalRouterConfig(input: IntentRetrievalRouterConfigInput): IntentRetrievalRouterConfig {
@@ -52,6 +64,7 @@ export function buildIntentRouterPrompt(input: { userMessage: string, taskContra
   const objective = input.taskContract?.objective || input.userMessage.split('\n')[0]?.slice(0, 240) || ''
   const mentionedFiles = input.taskContract?.scope.mentionedFiles.slice(0, 5).join(', ') || 'none'
   const constraints = input.taskContract?.constraints.slice(0, 3).join(' | ') || 'none'
+  const snippet = input.userMessage.replace(/\s+/g, ' ').slice(0, 500)
 
   return [
     '你是天枢的轻量意图检索路由器。不要回答用户任务，不要调用工具，不要输出解释。',
@@ -64,7 +77,7 @@ export function buildIntentRouterPrompt(input: { userMessage: string, taskContra
     `objectiveSummary: ${objective}`,
     `mentionedFiles: ${mentionedFiles}`,
     `constraints: ${constraints}`,
-    `userMessageSnippet: ${input.userMessage.slice(0, 500)}`,
+    `userMessageSnippet: ${snippet}`,
   ].join('\n')
 }
 
@@ -72,8 +85,20 @@ export async function classifyIntentRetrievalRoute(input: ClassifyIntentRetrieva
   const config = normalizeIntentRetrievalRouterConfig(input.config)
   if (!config.enabled) return null
 
+  const startedAt = Date.now()
   const fallback = () => buildHeuristicRetrievalRoute({ userMessage: input.userMessage, taskContract: input.taskContract })
-  if (config.classifier === 'heuristic') return fallback()
+  const finalize = (route: RetrievalRoute, classifier: IntentRetrievalRouterConfig['classifier']): RetrievalRoute => {
+    input.onTelemetry?.({
+      classifier,
+      fallbackUsed: route.fallbackUsed,
+      latencyMs: Date.now() - startedAt,
+      taskKinds: route.taskKinds,
+      sources: route.directions.map(direction => direction.source),
+      directionCount: route.directions.length,
+    })
+    return route
+  }
+  if (config.classifier === 'heuristic') return finalize(fallback(), 'heuristic')
 
   try {
     const prompt = buildIntentRouterPrompt(input)
@@ -95,10 +120,11 @@ export async function classifyIntentRetrievalRoute(input: ClassifyIntentRetrieva
     }, combineWithTimeout(input.signal, config.timeoutMs))
 
     const parsed = parseJsonObject(extractJson(text))
-    if (!parsed) return fallback()
-    return normalizeRetrievalRoute({ ...parsed, fallbackUsed: false }, { userMessage: input.userMessage, taskContract: input.taskContract })
+    if (!parsed) return finalize(fallback(), 'llm')
+    const route = normalizeRetrievalRoute({ ...parsed, fallbackUsed: false }, { userMessage: input.userMessage, taskContract: input.taskContract })
+    return finalize(route, 'llm')
   } catch {
-    return fallback()
+    return finalize(fallback(), 'llm')
   }
 }
 

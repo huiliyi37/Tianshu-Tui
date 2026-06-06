@@ -512,6 +512,10 @@ describe('GWT salience and Top-K selection', () => {
       assert.equal(assignSalience('<task-progress current="step1">'), 0.7)
     })
 
+    it('returns 0.7 for intent-retrieval-route', () => {
+      assert.equal(assignSalience('<intent-retrieval-route advisory="true">'), 0.7)
+    })
+
     it('returns 0.7 for decisions', () => {
       assert.equal(assignSalience('<decisions>\n  <decision>d1</decision>\n</decisions>'), 0.7)
     })
@@ -578,6 +582,22 @@ describe('GWT salience and Top-K selection', () => {
       const single: SalientBlock[] = [{ content: '<git-status>status</git-status>', salience: 0.6 }]
       const selected = selectTopKBlocks(single, 10_000)
       assert.equal(selected.length, 1)
+    })
+  })
+
+  describe('intent retrieval route dynamic appendix', () => {
+    it('renders route inside context-update without stable leakage', () => {
+      const ctx: VolatileContext = {
+        cwd: '/repo',
+        intentRetrievalRoute: '<intent-retrieval-route advisory="true" scope="current-turn"><task-kinds>bug_fix</task-kinds></intent-retrieval-route>',
+      }
+
+      const stable = buildStableVolatileBlock(ctx)
+      const appendix = buildDynamicAppendix(ctx)
+
+      assert.doesNotMatch(stable, /intent-retrieval-route/)
+      assert.match(appendix, /<context-update>/)
+      assert.match(appendix, /<intent-retrieval-route advisory="true" scope="current-turn">/)
     })
   })
 

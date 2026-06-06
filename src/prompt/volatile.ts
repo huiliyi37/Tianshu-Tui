@@ -45,6 +45,10 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal — changes every turn. */
   policyGuidance?: string | null
+  /** Intent retrieval route for the current user turn.
+   *  Cache-safe: rendered ONLY into the dynamic appendix.
+   *  MUST stay out of buildVolatileBlockInternal and historical user-message injection. */
+  intentRetrievalRoute?: string | null
   /** Cross-session events formatted for injection (cache-safe: only in dynamic appendix) */
   crossSessionEvents?: string
   /**
@@ -145,6 +149,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     cerebellarHint: undefined,
     affordanceHint: undefined,
     policyGuidance: undefined,
+    intentRetrievalRoute: undefined,
     // gitStatus moved to dynamic appendix — changes every turn, breaks prefix cache
     gitStatus: undefined,
     // planModeState and worktreeReality rendered in buildVolatileBlockInternal
@@ -265,6 +270,12 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     }
   }
 
+  // Intent retrieval route: current-turn advisory, cache-safe dynamic appendix.
+  // Place after git/status awareness and before cognitive policy hints.
+  if (ctx.intentRetrievalRoute) {
+    parts.push(ctx.intentRetrievalRoute)
+  }
+
   // Session state: may change per-turn — keep at end
   if (ctx.sessionState) {
     parts.push(ctx.sessionState)
@@ -321,7 +332,7 @@ export interface SalientBlock {
  * Salience reflects information value per token:
  * - 1.0: identity-critical (star-domain)
  * - 0.8: directly actionable (repair-hint, historical-lessons)
- * - 0.7: task-relevant (task-progress, decisions)
+ * - 0.7: task-relevant (intent-retrieval-route, task-progress, decisions)
  * - 0.6: environmental awareness (git-status, recent-commits)
  * - 0.5: operational context (tool-history)
  * - 0.4: session housekeeping (session-state, cross-session-events)
@@ -333,6 +344,7 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
   if (blockContent.startsWith('<affordance-hint>')) return 0.7
   if (blockContent.startsWith('<policy-guidance>')) return 0.7
+  if (blockContent.startsWith('<intent-retrieval-route')) return 0.7
   if (blockContent.startsWith('<task-progress')) return 0.7
   if (blockContent.startsWith('<decisions>')) return 0.7
   if (blockContent.startsWith('<worktree-warning')) return 0.7

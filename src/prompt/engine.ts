@@ -69,6 +69,7 @@ export class PromptEngine {
   private cerebellarHint?: string | null
   private affordanceHint?: string | null
   private policyGuidance?: string | null
+  private intentRetrievalRoute?: string | null
   private decisions?: string[]
   private activeDomain?: VolatileContext['activeDomain']
   private activeClaims?: VolatileContext['activeClaims']
@@ -187,7 +188,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, routingReason: this.routingReason, cerebellarHint: this.cerebellarHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, intentRetrievalRoute: this.intentRetrievalRoute, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -494,6 +495,11 @@ export class PromptEngine {
     this.policyGuidance = guidance ?? undefined
   }
 
+  setIntentRetrievalRoute(route: string | null): void {
+    this.intentRetrievalRoute = route ?? undefined
+    this.invalidateFreshCache()
+  }
+
   setDecisions(decisions: string[]): void {
     this.decisions = decisions
   }
@@ -584,6 +590,9 @@ export class PromptEngine {
       impactHint: this.impactHint,
       routingReason: this.routingReason,
       cerebellarHint: this.cerebellarHint,
+      affordanceHint: this.affordanceHint,
+      policyGuidance: this.policyGuidance,
+      intentRetrievalRoute: this.intentRetrievalRoute,
       decisions: this.decisions,
       activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain,
       activeClaims: this.activeClaims ?? this.config.volatileCtx.activeClaims,

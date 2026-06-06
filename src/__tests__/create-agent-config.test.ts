@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createAgentConfig, createMainAgentConfigInput, type AgentConfigInput } from '../agent/create-agent-config.js'
+import { normalizeIntentRetrievalRouterConfig } from '../agent/intent-retrieval-router.js'
 import type { Config, ProviderConfig } from '../config/schema.js'
 
 const testProvider: ProviderConfig = {
@@ -29,6 +30,7 @@ const testConfig = {
     songlineEnabled: true,
     hearthObserveEnabled: false,
     antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 256 },
+    intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 100, maxTokens: 128, temperature: 0 },
     permissions: { allow: [], bash: { allowlist: [] } },
   },
   compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
@@ -113,10 +115,15 @@ describe('createAgentConfig', () => {
     assert.equal(input.songlineEnabled, true)
     assert.equal(input.antiAnchoring?.enabled, true)
     assert.equal(input.antiAnchoring?.branches, 2)
+    const inputRouter = normalizeIntentRetrievalRouterConfig(input.intentRetrievalRouter)
+    assert.equal(inputRouter.enabled, true)
+    assert.equal(inputRouter.classifier, 'heuristic')
 
     const cfg = createAgentConfig(input)
+    const cfgRouter = normalizeIntentRetrievalRouterConfig(cfg.intentRetrievalRouter)
     assert.equal(cfg.songlineEnabled, true)
     assert.equal(cfg.antiAnchoring?.enabled, true)
+    assert.equal(cfgRouter.enabled, true)
   })
 
   it('passes sessionMemoryBlock to promptEngine', () => {

@@ -100,6 +100,13 @@ export const DEFAULT_CONFIG: Config = {
       projectionThreshold: 0.4,
       seedMaxTokens: 512,
     },
+    intentRetrievalRouter: {
+      enabled: false,
+      classifier: 'llm',
+      timeoutMs: 4_000,
+      maxTokens: 600,
+      temperature: 0,
+    },
     permissions: {
       allow: [],
       bash: { allowlist: [] },

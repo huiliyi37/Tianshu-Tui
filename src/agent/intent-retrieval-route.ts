@@ -160,8 +160,8 @@ export function normalizeRetrievalRoute(raw: unknown, fallbackInput?: RetrievalR
 
   const rawDirections = Array.isArray(obj.directions) ? obj.directions : []
   const directionsFromRaw = rawDirections.flatMap(normalizeDirection)
-  const baselineDirections = taskKinds.flatMap(kind => TASK_KIND_BASELINES[kind])
-  const directions = mergeDirections([...directionsFromRaw, ...baselineDirections]).slice(0, MAX_DIRECTIONS)
+  const baselineDirections = taskKinds.flatMap(kind => baselineForKind(kind, fallbackInput?.taskContract))
+  const directions = mergeDirections([...baselineDirections, ...directionsFromRaw]).slice(0, MAX_DIRECTIONS)
 
   if (directions.length === 0) {
     return fallbackInput ? buildHeuristicRetrievalRoute(fallbackInput) : buildHeuristicRetrievalRoute({ userMessage: '' })
@@ -212,7 +212,7 @@ function inferTaskKinds(userMessage: string): IntentTaskKind[] {
   if (hasSecurityIntent(text)) add('security_safety')
   if (/(修复|报错|失败|异常|回归|bug|error|fail|failed|failure|exception|crash|broken|regression|重试|retry)/i.test(userMessage)) add('bug_fix')
   if (hasPerformanceIntent(text, userMessage)) add('performance_diagnosis')
-  if (/(审查|审核|风险|blast\s*radius|review|audit|p0|p1)/i.test(userMessage)) add('review_audit')
+  if (hasReviewIntent(userMessage)) add('review_audit')
   if (/(重构|迁移|拆分|整理|refactor|migrate|migration|cleanup|split)/i.test(userMessage)) add('refactor')
   if (/(新增|支持|实现功能|feature|add\s+support|implement)/i.test(userMessage)) add('new_feature')
   if (/(设计|架构|方案|选型|architecture|architect|design|strategy)/i.test(userMessage)) add('architecture_design')
@@ -235,6 +235,10 @@ function hasSecurityIntent(text: string): boolean {
   return /(权限|越权|安全|泄露|密钥|路径穿越|命令执行|token 泄露|secret|api key|security|permission|authz|path traversal|command injection|rce|leak|expose)/i.test(text)
 }
 
+function hasReviewIntent(userMessage: string): boolean {
+  return /(审查|审核|风险|blast\s*radius|review|audit)/i.test(userMessage)
+}
+
 function baselineForKind(kind: IntentTaskKind, contract?: TaskContract): RetrievalDirection[] {
   const base = TASK_KIND_BASELINES[kind]
   const mentioned = contract?.scope.mentionedFiles ?? []
@@ -253,7 +257,7 @@ function mergeDirections(directions: RetrievalDirection[]): RetrievalDirection[]
   const bySource = new Map<RetrievalSource, RetrievalDirection>()
   for (const direction of directions) {
     const current = bySource.get(direction.source)
-    if (!current || PRIORITY_RANK[direction.priority] < PRIORITY_RANK[current.priority]) {
+    if (!current || PRIORITY_RANK[direction.priority] <= PRIORITY_RANK[current.priority]) {
       bySource.set(direction.source, {
         source: direction.source,
         priority: direction.priority,

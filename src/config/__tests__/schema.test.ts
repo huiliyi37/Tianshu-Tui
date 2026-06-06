@@ -85,6 +85,8 @@ describe('config permissions schema', () => {
     assert.equal(parsed.agent.songlineEnabled, false)
     assert.equal(agent.antiAnchoring.enabled, false)
     assert.equal(parsed.agent.antiAnchoring.enabled, false)
+    assert.equal(agent.intentRetrievalRouter.enabled, false)
+    assert.equal(parsed.agent.intentRetrievalRouter.enabled, false)
   })
 
   it('parses explicit Songline runtime opt-in', () => {
@@ -100,6 +102,18 @@ describe('config permissions schema', () => {
     assert.equal(agent.antiAnchoring.blindExploration, true)
     assert.equal(agent.antiAnchoring.mctsPlanning, true)
     assert.equal(agent.antiAnchoring.branches, 3)
+  })
+
+  it('parses explicit intent retrieval router opt-in and boolean shorthand', () => {
+    const fromBoolean = agentSchema.parse({ intentRetrievalRouter: true })
+    const fromObject = agentSchema.parse({ intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 123 } })
+
+    assert.equal(fromBoolean.intentRetrievalRouter.enabled, true)
+    assert.equal(fromBoolean.intentRetrievalRouter.classifier, 'llm')
+    assert.equal(fromBoolean.intentRetrievalRouter.timeoutMs, 4_000)
+    assert.equal(fromObject.intentRetrievalRouter.enabled, true)
+    assert.equal(fromObject.intentRetrievalRouter.classifier, 'heuristic')
+    assert.equal(fromObject.intentRetrievalRouter.timeoutMs, 123)
   })
 
   it('routes repo summarization workers to V4 Flash by default', () => {

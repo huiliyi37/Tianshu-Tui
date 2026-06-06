@@ -16,6 +16,7 @@ import type { ResourceSensorOptions } from './resource-sensor.js'
 import type { ProviderHealthTracker } from './provider-health.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
+import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router.js'
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
@@ -71,6 +72,8 @@ export interface AgentConfig {
   hearthObserveEnabled?: boolean
   /** Explicit opt-in for anti-anchoring harness hooks. Disabled by default. */
   antiAnchoring?: AntiAnchoringConfig
+  /** Optional current-turn intent retrieval route guidance. Disabled by default. */
+  intentRetrievalRouter?: IntentRetrievalRouterConfigInput
   /** Optional OwnershipLedger for real-time file ownership — updated on every file_write. */
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
   /** Optional Meridian code graph indexer for structural context. */
