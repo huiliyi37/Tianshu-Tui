@@ -5,7 +5,6 @@ function addRisk(risks: string[], risk: string): string[] {
   return risks.includes(risk) ? risks : [...risks, risk]
 }
 
-const READ_ONLY_PROFILES = ['code_scout', 'doc_scout', 'planner', 'reviewer']
 const WRITE_PROFILES_ADVISORY = ['patcher']
 
 /**
@@ -26,11 +25,15 @@ const WRITE_PROFILES_ADVISORY = ['patcher']
  * @param transcript - Optional worker transcript for behavior-backed verifier gating
  */
 export function verifyWorkerEvidence(result: WorkerResult, profile?: string, transcript?: WorkerTranscript): WorkerResult {
-  if (profile === 'adversarial_verifier' && result.evidenceStatus === 'verified' && transcript && !transcript.toolUses.includes('run_tests')) {
-    return {
-      ...result,
-      evidenceStatus: 'unverified',
-      risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
+  if (profile === 'adversarial_verifier' && result.evidenceStatus === 'verified') {
+    // Fail-closed: no transcript = cannot prove tests were run = unverified
+    const hasRunTests = transcript && transcript.toolUses.includes('run_tests')
+    if (!hasRunTests) {
+      return {
+        ...result,
+        evidenceStatus: 'unverified',
+        risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
+      }
     }
   }
 

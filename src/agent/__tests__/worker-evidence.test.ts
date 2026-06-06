@@ -162,6 +162,18 @@ test('adversarial_verifier verified verdict requires run_tests in transcript', (
   assert.ok(checked.risks.some(r => r.includes('without running run_tests')))
 })
 
+test('adversarial_verifier verified verdict without transcript is fail-closed', () => {
+  // No transcript provided = cannot prove tests were run = downgrade
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'adversarial_verifier')
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('without running run_tests')))
+})
+
 test('adversarial_verifier keeps verified verdict when run_tests was actually used', () => {
   const checked = verifyWorkerEvidence(result({
     changedFiles: [],
