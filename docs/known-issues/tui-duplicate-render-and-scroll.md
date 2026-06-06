@@ -175,3 +175,32 @@ npm test
 - `docs/superpowers/plans/2026-06-04-tui-static-sync-and-context-pressure.md` — Static 同步计划
 - 关键 commit:`07b9990`(拆护栏)、`2d87543`(progressive flush)、`b3f9532`(dedup)、
   `b723930`(批量 ref)、`6cc6105`(动态区超高闪烁)
+
+---
+
+## 附:症状映射 —— "流式回复乱码/吞字/粘连" 就是真凶②(2026-06-06 诊断)
+
+**用户报告:** 长回复"有时候像是被截断和乱码",示例里出现 `Node167起`(应 `Node 16.7 起`)、
+`prearm-file`(应 `prewarm-file`)、`任务 1 →/345独立`(空格/顿号丢失)、表格 `|---|` 语法漏进散文、
+末尾混入 thinking 碎片(`我现在还是？`)。
+
+**结论:这不是新 bug,是真凶②(动态区超终端高度,Ink 擦不净)的视觉表现。** 别去查解码/拼接/markdown 解析。
+
+**排除链(逐层证明数据无损,故乱码只能是终端重绘伪影):**
+| 层 | 文件 | 判定 |
+|---|---|---|
+| SSE 解码 | `api/*-client.ts` | `decoder.decode(value,{stream:true})` 正确处理 UTF-8 跨 chunk ✓ 无损 |
+| reasoning/content 分流 | `openai-client.ts:414-419` | reasoning_content 与 content 各自缓冲,promotion 仅 GLM 且有守卫 ✓ 不交叉 |
+| RenderBatcher | `tui/render-batch.ts` | FIFO 队列 + `join('')`,microtask 整批 drain ✓ 无损、保序 |
+| BlockStreamWriter | `tui/block-stream-writer.ts` | `slice(0,pos)`+`slice(pos)` 干净切分,块拼回==原文 ✓ 无损 |
+| 内联 markdown 解析 | `tui/markdown-render.tsx:33` | 未闭合 delimiter 走 fall-through 当字面量,不 slice-drop;**28/28 测试通过** ✓ 无损 |
+
+**真因复用本文档真凶②:** `StreamOutput`(`stream.tsx:15` 注释明示 live 区高度*未*封顶)+ 动态区
+仅 `flexGrow={1}` spacer 无 `height/maxHeight/overflow`(`app.tsx:1383`)→ 长回复子树超 `termRows` →
+Ink `logUpdate` 只擦 `lastOutputHeight` 可见行 → 旧帧擦不净、新旧帧重叠 → 屏幕呈现吞字/粘连/错位。
+
+**为何"有时候":** 仅当 live 回复溢出终端可视高度时触发(长 plan 评估这类高 markdown 正中)。短回复正常。
+**重要:** scrollback/历史里的底层消息**是完整的**,只有 live 流式画面被破坏 —— 即归档内容无损,纯显示问题。
+
+**修复路径:** 见本文档"真凶②"节 + `HANDOFF-2026-06-05-steer-and-render-fixes.md`(方案 A 布局钉底 / 方案 B tail window)。
+2026-06-06 与用户确认:**先只诊断,暂不改代码**(方案选择待定,B 与既定偏好有冲突)。
