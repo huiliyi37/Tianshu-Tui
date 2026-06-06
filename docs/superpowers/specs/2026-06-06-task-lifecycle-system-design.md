@@ -352,3 +352,215 @@ Phase 2（调度 + 通知）
 
 **与 spec A 的交叉依赖**：本 spec Phase 2 的 scheduler 依赖 spec A 改造二的 nightcrawler max_turns 补丁。不补 max_turns，cron 触发的无人值守任务无限循环 → 应调整执行顺序：**先做 spec A 改造二的 P0-pre（nightcrawler max_turns），再做本 spec Phase 2**。
 
+---
+
+# 天枢补强复核（2026-06-06 · 独立代码核实 · 第四轮）
+
+> 方法：在上文三轮审查（天枢初查 / 天璇二次 / 天枢执中）之上再做一轮**独立**代码核实——重点验证本轮新出的两条 P0，并补两轮都没串起来的架构缝。核实者 Opus 4.8（执中复核之位）。
+> 结论先行：**P0-1 与代码不符，需重写**；并发现**跨 spec 的双任务系统主权未定**这一架构缝。
+
+## 一、独立复核结论
+
+| 前序声明 | 独立核实 | 锚点 | 判定 |
+|---|---|---|---|
+| AbortSignal 三层传播 | ✅ 真 | `coordinator.ts:81,144-148,257,271-287` | 成立 |
+| **P0-1：worker agent loop 不响应 AbortSignal / 每轮每工具前无 `if(aborted)`** | ❌ **证伪** | `loop.ts:1671` 流边界检查 + `tool-execution.ts:132` `if(input.abortSignal.aborted) break` 逐工具检查 + `worker-session.ts:144-148` parent abort→`agent.abort()` | **不成立，须重写**（补强一） |
+| TaskBoard 监听 WorkOrderQueue（非 TaskRegistry） | ✅ 真 | `task-board.ts` | 成立（P2-1 有效） |
+| SessionPersist 纯追加不适合 task 随机更新 | ✅ 真（前序已三方核实） | `session-persist.ts` | 成立 |
+
+## 二、🔴 补强一：证伪 P0-1 —— agent loop 已逐回合+逐工具协作 abort，真缺口在"在途单工具"
+
+P0-1 写"worker 内部 agent loop 不一定响应 AbortSignal……每轮循环、每个工具调用前没有 `if(signal.aborted)` 检查"。独立核实**与代码不符**：
+- 主循环每回合在流落定处检查：`loop.ts:1671` `if(this.abortController.signal.aborted){ …callbacks.onAbort(); return }`。
+- 批内**逐工具**检查：`executeBatch`（`tool-execution.ts:132`）`if (input.abortSignal.aborted) break`，并把 signal 透传子执行（`:183,:242`）。
+- parent abort 已接到 `agent.abort()`（`worker-session.ts:144-148`）。readonly 与 hands 两类 worker **都**最终经 `runWorkerSession`→`AgentLoop` 执行（hands 路径经 `coordinator.ts:346-355` 的 `runAgent` 闭包回落到 `this.runWorker`，`workerConfig.abortSignal` 经 `coordinator.ts:257` 注入）——所以 P0-1 担心的"只有 coordinator 入口做 guard"并不成立，信号一路传到了 AgentLoop。
+
+→ "loop 不检查 abort"是**误判**。真正停不下来的是**已在 `await` 中的单个长工具**：`bash.ts` 用 `spawn`+自身 timeout，`rg "abort|signal" bash.ts` **零命中** → 不订阅 AbortSignal。一个正跑 10 分钟的 `bash`，abort 触发后要等它自己 timeout/结束；executeBatch 的逐工具检查管不到"**已经在跑的那个**"。
+
+→ **正解（替换 P0-1 的"loop 加检查"，它修的是已存在的东西）：** 缺口是**工具级**，不是 loop 级。把 AbortSignal 接进长工具（首推 `bash.ts`：spawn 时监听 signal，abort→`gracefulKill`/`forceKill`，`platform.ts` 已有这俩、`run-tests.ts:6` 已在用）。loop/批层无需改动。
+> 价值：把一个"全 loop 重审"的伪工作量，收敛成"给 bash 接 signal"的真修法。
+
+## 三、🔴 补强二：跨 spec —— 两套任务状态机无主权边界（新增）
+
+两份 spec 各引入一个任务系统：
+- spec A 改造二扩展 `nightcrawler`：`BackgroundTask`，状态 `queued/running/completed/failed/timeout/cancelled`，**内存**，`src/agent/`。
+- 本 spec 引入 `TaskRegistry`：`TaskRecord`，状态 `pending/running/completed/failed/cancelled/timed_out`，**per-task JSON 持久化**，`src/server/`，并声明自己是任务生命周期**拥有者**。
+- 本 spec §2.2 又把调度**委托给** spec A 的 nightcrawler。
+
+→ 一个 cron 任务会**同时存在于两套登记**：nightcrawler 跑它、维护一份内存状态；TaskRegistry 又要持久化/审计同一个任务。两套状态 enum 还不一致（`timeout` vs `timed_out`）。**single source of truth 未定义** → 双重记账、状态漂移。
+
+→ **正解：定一条主权线。** 建议 TaskRegistry 为唯一 owner（持久化 + 审计 + 生命周期），nightcrawler **降级为纯触发器/runner**（"到点了、入队、还我一个可 abort 的执行句柄"），其 `BackgroundTask` 内存态不对外充当任务真相；或反之合并。**不能两个都自称 owner。** 本 spec P2-1（TaskBoard vs TaskRegistry 数据流）只是同一问题的下游表现。
+
+## 四、🟡 补强三：状态机优先级要落到"单点串行"（校准 P0-2）
+P0-2 的优先级 `cancelled > timed_out > failed > completed` 方向对。落代码需补一条：终态写入必须**单点串行**（TaskRegistry 内单 reducer），否则 abort 回调与 timeout 回调可能**并发改同一 record**。持久化复用现成原子写（`session-persist` 的 `writeFileAtomicSync`），内存态转换走单一 reducer。
+
+## 五、🟡 补强四：notify 游标用单调序号而非时间戳（校准 P1-3）
+P1-3 的 `GET /tasks/:id/events?since=<ts>` 方向对。补：`since` 用**单调递增序号**而非 timestamp —— 同毫秒多事件 + 时钟回拨都会漏/重。`events.jsonl` 每行带 `seq`，调用方传 `since=seq`。
+
+## 六、🟢 补强五：idempotency 桶边界（次要）
+P1-1 的 `time_bucket_5min` 有**硬分桶边界**问题：9:04:59 与 9:05:01 落不同桶 → 2 秒内重复不去重；桶内又可能误并。在意就用"滑动窗口 + 最近提交时间戳"，不在意按现状即可（已有 `force` 兜底）。
+
+## 七、修正实施顺序（增补）
+- **Phase 0 删除**"agent loop AbortSignal 检查点（循环前+工具前）★新增★" —— 该能力**已存在**（补强一）；替换为"长工具（bash）接 AbortSignal"，归属工具层/spec A，不阻塞本 spec。
+- **Phase 0 增**"TaskRegistry vs nightcrawler 主权裁定"（补强二）为**架构前置**，否则 Phase 2 调度落地即双登记。
+- 文末"与 spec A 的交叉依赖"那段基于"max_turns 不补→无限循环"——该前提已被 spec A 补强三校准（AgentLoop 自带 maxTurns）；真正的跨 spec 依赖是 **nightcrawler 的 abort 句柄**（spec A 补强三），而非 max_turns 终止条件。
+
+## 净结论
+前三轮已覆盖持久化 / 状态导出 / 超时去重。本轮独立核实**证伪 P0-1 的 loop 判断**（loop 与 batch 已逐回合逐工具协作 abort，真缺口在 in-flight 单工具如 bash），并指出**跨 spec 双任务系统主权未定**（补强二）这一两轮都没串起来的架构缝。其余为精度校准。修法不碰认知本体，符合 §0 公理。
+
+
+---
+
+# 双任务系统主权裁定（2026-06-06，天枢 + Opus 联合裁决）
+
+> 触发：前三轮审查未串起来的架构缝——nightcrawler（P3 认知子系统）与拟建 TaskRegistry（server daemon）
+> 之间的关系从未被明确定义。spec A 改造二假设「扩展 nightcrawler 为 cron scheduler」，经代码核实发现这是跨层侵入。
+> 本节永久裁决主权，并据此修正 spec A 改造二的落点。
+
+## 0. 代码核实的事实基线
+
+本轮独立核实，直接读 `nightcrawler.ts` + `p3-integration.ts` + `loop.ts`：
+
+```
+nightcrawler.ts:2         — "P3-F: Background Agent (Nightcrawler)" 自标注为 P3 认知子系统
+p3-integration.ts:27      — readonly nightcrawler: Nightcrawler（与 miner/shadow-queue/idle-spec/bandit/jit 同捆）
+p3-integration.ts:44-46   — new Nightcrawler({ execute: config.backgroundExecute ?? (async () => '') }) — executor 默认 no-op
+p3-integration.ts:8       — import from './nightcrawler.js'（agent 层内依赖）
+loop.ts:276               — 每个 AgentLoop 创建自己的 P3Integration → 自己的 Nightcrawler 实例
+```
+
+**关键推论**：
+
+| 事实 | 推论 |
+|------|------|
+| nightcrawler 是 per-AgentLoop 实例 | "哪个 nightcrawler 拥有 cron 表" 根本无定义——每个 loop 各有一个 |
+| nightcrawler 是 P3Integration 的成员 | 与 miner/bandit/jit 同级，是认知子系统，受 §0 公理保护 |
+| executor 默认 no-op（`async () => ''`) | nightcrawler 今天不执行任何 daemon 级任务，它是为会话内 background task 设计的 |
+| loop.ts 创建 P3Integration 时不传 backgroundExecute | nightcrawler 的 execute 从未被接上真实 AgentLoop——机器在，不跑活 |
+
+## 1. 裁决：旁路 nightcrawler（选项 1）
+
+**cron/调度/租约锁/持久化全归 server 层 TaskRegistry；执行 = 在 pooled runtime 上直接启动 AgentLoop。nightcrawler 完全不动。**
+
+理由（按权重排序）：
+
+### 1.1 §0 公理 — 认知本体不可侵
+
+nightcrawler 标注为 `P3-F`，与 miner（P3-A）、shadow-queue（P3-B）、idle-spec（P3-C）、notebook（P3-D）、plan-cache（P3-E）、bandit（P3-G）、jit（P3-H）同级，全部受 `[[cognitive-pipeline-is-substrate-not-feature]]` §0 保护。
+
+把 daemon 层的 cron + PID 租约锁 + 持久化 schedule 表塞进 nightcrawler，等于在认知子系统的代码里嵌入基础设施逻辑——违反 §0。即便"只扩展不重写"，也是往 P3 代码里加 `setInterval`/`O_EXCL`/`kill(pid,0)` 等非认知逻辑，污染认知本体。
+
+### 1.2 生命周期根本不匹配
+
+nightcrawler 的生命周期 = AgentLoop 的生命周期。loop 创建 → P3Integration 创建 → nightcrawler 创建；loop 结束 → 全部销毁。TaskRegistry 的生命周期 = 进程的生命周期（daemon 常驻）。两者不可能共享所有权。
+
+这意味着：**spec A 改造二「扩展 nightcrawler」的落点在架构上不可行**——不是"不够好"，是"不该做"。每个 loop 各有一个 nightcrawler，cron 表只有一个，两者之间的所有权关系在现有架构中不存在合法映射。
+
+### 1.3 nightcrawler 的 checkpoint/resume 对 daemon 执行非必需
+
+nightcrawler 的 checkpoint 是被动存储（executor 主动调 `nightcrawler.checkpoint()`），resume 从 completed 数组找有 checkpoint 的任务重新入队。这套机制为**会话内 background task** 设计——任务在同一 nightcrawler 实例的生命周期内被暂停和恢复。
+
+daemon 执行走 pooled runtime：每个任务拿到一个 runtime → 在 runtime 上启动 AgentLoop → AgentLoop 自带 maxTurns + AbortSignal + TurnHeartbeat（watchdog）。执行完成后 runtime 归还池。不需要 checkpoint/resume——如果任务失败/超时，TaskRegistry 标记状态，不重试（或可选地新建 task 重跑）。
+
+### 1.4 nightcrawler 的 queue/FIFO/maxConcurrent 对 daemon 执行是错误抽象
+
+nightcrawler 的 queue 是进程内 FIFO + maxConcurrent=3。daemon 的调度需求是：
+- 跨会话持久化（schedule 表在进程重启后恢复）
+- 时间触发（cron 表达式，不是 FIFO）
+- 优先级（未来可能需要）
+- 资源感知（runtime 池有空闲才分配，不是简单的 maxConcurrent）
+
+把 daemon 调度塞进 nightcrawler queue = 用一个为 P3 认知子系统设计的简单队列，硬套 daemon 级调度需求。抽象不匹配。
+
+## 2. 选项 2「nightcrawler 仅作 runner」为何被否决
+
+选项 2 提议：TaskRegistry 拥有生命周期，只把「执行」委托给 nightcrawler。
+
+否决理由：**nightcrawler 的 execute 接口是 `(task: BackgroundTask) => Promise<string>`——一个函数。不存在"把执行委托给 nightcrawler"这个概念——nightcrawler 不启动 AgentLoop，它只是调用传入的 execute 函数。** 真正要执行的是在 pooled runtime 上启动 AgentLoop，这和 nightcrawler 的 execute 回调是完全不同的抽象层次。
+
+此外，即使强行让 daemon 持有一个 nightcrawler 实例做 runner：
+- nightcrawler 是 per-loop 的 —— daemon 层持有一个 nightcrawler = daemon 自己跑一个 AgentLoop → 语义混乱
+- nightcrawler 的 execute 是单个函数 → 无法区分"用 runtime A 执行任务 1" 和 "用 runtime B 执行任务 2"
+- daemon 的执行应该直接操作 runtime 池，不是通过 P3 子系统的 queue 绕一圈
+
+## 3. 新架构：旁路后的三层主权
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      server 层（daemon）                         │
+│                                                                 │
+│  cron-scheduler.ts    TaskRegistry       TaskStore              │
+│  ├─ PID 租约锁        ├─ 生命周期          ├─ per-task JSON      │
+│  ├─ 时间触发 tick     ├─ 超时/取消         ├─ TaskStore 接口     │
+│  ├─ schedule 表持久化 ├─ 去重/幂等         └─ 审计查询          │
+│  └─ 触发 → 创建 task  └─ source 字段                             │
+│         │                                                        │
+│         ▼                                                        │
+│  ┌──────────────────┐                                           │
+│  │   runtime 池      │  ← 来自姊妹 spec（ingress）               │
+│  │   (pooled)        │                                           │
+│  └──────┬───────────┘                                           │
+│         │ 分配 runtime                                            │
+│         ▼                                                        │
+└─────────────────────────────────────────────────────────────────┘
+          │
+          │ 在 runtime 上启动 AgentLoop
+          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      agent 层（认知本体）                         │
+│                                                                 │
+│  AgentLoop（执行单元）                                           │
+│  ├─ maxTurns（loop 自带 turn 上限）                              │
+│  ├─ AbortSignal（TaskRegistry 传入，loop 在关键点检查）           │
+│  ├─ TurnHeartbeat（watchdog，loop 自带）                         │
+│  └─ 正常执行 → 结果回写 TaskRegistry                             │
+│                                                                 │
+│  P3Integration（认知子系统，不受 daemon 侵扰）                     │
+│  ├─ miner / shadow-queue / idle-spec / notebook                 │
+│  ├─ plan-cache / bandit / jit                                   │
+│  └─ nightcrawler（不动——会话内 background task，P3-F）           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**关键边界**：
+- server 层**不 import** agent 层的任何内部模块（AgentLoop 的启动接口是"使用"不是"修改"）
+- agent 层的 nightcrawler **不知道** server 层的存在
+- TaskRegistry 通过 runtime 池间接使用 AgentLoop——AgentLoop 不知道自己是被 cron 触发还是被 API 触发
+
+## 4. 对 spec A 改造二的连锁修正
+
+spec A 改造二的落点「扩展 nightcrawler」被此裁决推翻。修正后：
+
+| spec A 原案 | 修正后 |
+|------------|--------|
+| cron-tasks.ts 扩展 nightcrawler | cron-scheduler.ts 独立在 server 层 |
+| cron-lock.ts 嫁接 nightcrawler | cron-lock.ts 独立在 server 层（PID 租约锁不碰 agent） |
+| nightcrawler 扩展：时间触发 tick → 入队 | 删除此项——nightcrawler 不动 |
+| 与 task-lifecycle 衔接：cron 产生 task → 走 TaskRegistry 或 nightcrawler 队列 | cron 产生 task → 走 TaskRegistry → 分配 runtime → 启动 AgentLoop。nightcrawler 不在路径上 |
+
+**spec A 改造二的正确落点**：
+
+```
+改造二（Cron 租约锁 · 修正后）
+  P0-pre └─ nightcrawler: 补 max_turns 终止条件（仍做——保护会话内 background task）
+  P0 ├─ 新 src/server/cron-scheduler.ts: 持久化 schedule 表 + 时间触发 tick
+  P1 ├─ 新 src/server/cron-lock.ts: PID 租约锁（含 zombie 探测）
+  P2 └─ cron-scheduler 触发 → TaskRegistry.createTask → runtime 池分配 → 启动 AgentLoop
+     验证：多会话单调度 + 锁接管 + 重启恢复
+```
+
+## 5. nightcrawler 的保留价值
+
+nightcrawler 不动，并不意味着它没价值。它在 P3 认知子系统内有明确的职责：
+
+- **会话内 background task**：当 agent 在对话中需要异步执行某个子任务时（如"后台查一下这个 API 文档"），nightcrawler 提供 queue + timeout + cancel
+- **P3 认知实验的载体**：未来 P3 的 idle-spec/miner 可能通过 nightcrawler 在会话内自动触发探索性操作
+- **checkpoint/resume**：会话内长时间任务的中断恢复（与 daemon 的跨会话不同，这里是同一会话内的暂停/继续）
+
+这些是 P3 认知子系统的内部事务，与 daemon 层无关。nightcrawler 的 executor 今天是 no-op，是因为 P3 尚未落地到需要它的阶段——这是正常的渐进式开发，不是缺陷。
+
+## 6. 一句话
+
+> **双任务系统主权：server 层 TaskRegistry 拥有 daemon 级任务的全部生命周期（cron/调度/持久化/租约锁/超时/取消/通知），执行通过 pooled runtime 直接启动 AgentLoop；agent 层 nightcrawler 保持为 P3-F 认知子系统，仅服务会话内 background task，不受 daemon 侵扰。** 两者互不知道对方存在——server 不 import agent 内部模块，agent 不感知 daemon 调度。这是符合 §0 公理的唯一合法分层。
+
