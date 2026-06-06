@@ -1,7 +1,8 @@
-# 天枢常驻协作者 · 任务 Ingress 拓扑设计
+# 天枢 HTTP Runtime 接入 · Ingress + Runtime 池 + Cache
 
-> 日期：2026-06-05
-> 状态：设计稿（待评审）
+> 日期：2026-06-05（2026-06-06 据天枢审查 + 领航星裁定修订）
+> 状态：设计稿（已收天枢外部对照审查，见文末「审查回应与决议」）
+> **拆分说明**：本 spec 是「常驻协作者」目标的**其一**，只覆盖 ingress 接线 + 长驻 runtime 池 + cache。任务生命周期系统（状态机/取消/审计/定时）经天枢审查确认为独立盲区，已拆为姊妹 spec：`2026-06-06-task-lifecycle-system-design.md`。本 spec 不再自称「常驻协作者」全集——它只交付「HTTP 可达的 runtime 池」，协作者头衔由两份 spec 合并兑现。
 > 作者：天璇 · Opus 4.6（领航星会话）
 > 触发：领航星要求「从 OpenClaw 原生融合 gateway 路由 + 外部工具调用，让天枢更自然使用自己的本体」
 > 外部参照：OpenClaw（Gateway 常驻进程「只路由不思考」+ 独立 agent runtime + per-agent tool policy + SOUL.md 身份外化）
@@ -42,8 +43,12 @@
 1. `serve` 调 `createRoutes(state)` 不传 `deps` → `POST /prompt` 不注册。
 2. `buildPromptHandler` 是桩 → 即便注册也只回显，不驱动 agent loop。
 3. 没有「长驻 runtime 池」——worker 是 per-delegate 现造现弃，不在任务间存活。
+4. **Session 持久化未接到 runtime**（天枢审查补）：`SessionPersist` 机制已存在并服务主会话（`loop.ts:420`），但 `worker-session.ts` 未接它。长驻 runtime 跨进程重启存活需要它——**是「接线现成 SessionPersist」而非从零造**。
+5. **Auth**（见 §7）：网络暴露入口的前置门槛，与接线同批。
 
-**缺口②：无 MCP。** 天枢能拉 HTTP/GitHub（`import-resource`），但没有标准化外部工具协议。独立于①，见 §5。
+**划归姊妹 spec**：任务生命周期（状态机/取消/审计/定时）经天枢审查确认为独立盲区，本 spec 不覆盖 → `2026-06-06-task-lifecycle-system-design.md`。本 spec 只做「接通 + 池化 + cache 隔离」。
+
+**MCP（可选增量，非缺口）**：天枢能拉 HTTP/GitHub（`import-resource`），无 MCP；但 OpenClaw 也无 MCP，故非缺口而是锦上添花，见 §5。
 
 **topology 对照**：
 
@@ -77,6 +82,8 @@
 
 **张力**：OpenClaw 每 session 独立、不在乎 cache；天枢的命是 prefix cache（P1 修复打到 84–95%，见 [[cache-aware-fusion-spec]]）。常驻多 runtime 若共用 prompt 前缀会互相踩 cache。
 
+**cache 的适用边界（领航星 2026-06-06 裁定，收窄）**：cache 优势**不泛化到所有弱模型**。天枢终端的目标模型集 = **GLM5.1 / MiMo-v2.5pro / DeepSeek-v4**；其中**只保 DeepSeek 的 OpenAI 兼容前缀 cache**，其他模型的 cache 不管。所以本节论证的「cache 是命根子」精确限定为：**面向 DeepSeek 的前缀 cache 是护城河**——这是天枢相对 OpenClaw（站在强模型肩上、可忽略 cache）的真实差异化。天枢审查 2.3 担心的「cache 被高估」对天枢不在意的模型成立，但对 DeepSeek 不成立。两者不矛盾，靠这条边界划清。
+
 **解法（架构已支持，无需新机制）**：cache 隔离单元 = **PromptEngine 实例**，而**每个 worker/runtime 早已各持独立 PromptEngine**（`worker-session.ts:26`）。所以：
 
 - 每个长驻 runtime 维持**自己的** frozen prefix + cache 锚点，互不干扰。
@@ -87,11 +94,11 @@
 
 需实测确认的一点（实施期）：runtime 池的驱逐策略（LRU？空闲超时？）不能频繁销毁 runtime，否则丢失跨任务 cache——驱逐阈值要对齐 cache 价值。
 
-## 5. 缺口②：MCP（独立的第二增量）
+## 5. MCP（可选增量，非缺口 — 经审查降级）
 
-OpenClaw 的「interact with external services」靠标准协议接任意外部工具；天枢只有硬编码的 HTTP/GitHub 拉取（`import-resource`）。MCP（Model Context Protocol）是事实标准，接上后天枢能复用整个 MCP 工具生态，而非每个外部服务手写一个 tool。
+**降级说明**：先前把 MCP 列为「真缺口②」是过度加权。天枢审查 2.4 指出 **OpenClaw 自己也没有内置 MCP**——它工具全自建。所以 MCP 不是「天枢落后于对手的缺口」，是「锦上添花的可选增量」。
 
-**定位**：与 ingress 拓扑**正交**，可独立实施。建议作为 ingress 落地后的下一增量，不在本 spec 主线。落点会是新 `src/tools/mcp-client.ts` + 注册进 `ToolRegistry`，天然受现有 `allowedTools` 策略约束（即 MCP 工具也按 per-runtime tool policy 隔离）。本节仅登记，不展开。
+OpenClaw 的「interact with external services」靠自建工具集；天枢有硬编码的 HTTP/GitHub 拉取（`import-resource`）。MCP 对天枢的价值在于**作为编码 agent 接入外部数据源/服务**（而非 OpenClaw 的 chat 生态），优先级低。落点若做：新 `src/tools/mcp-client.ts` + 注册进 `ToolRegistry`，天然受现有 `allowedTools` 策略约束。**本节仅登记，明确不在 ingress 主线，可任意推后。**
 
 ---
 
@@ -104,6 +111,7 @@ OpenClaw 的「interact with external services」靠标准协议接任意外部�
 | 长驻 runtime 池 | 新 `src/server/runtime-pool.ts` | 新增（编排已有 PromptEngine + agent loop） |
 | 路由入站任务到 runtime | 复用 `adaptive-routing.ts`、`session-registry.ts` | 接线 |
 | runtime 驱逐策略（对齐 cache 价值） | `runtime-pool.ts` | 新增，实施期实测调参 |
+| **runtime 接 SessionPersist**（跨重启存活） | `worker-session.ts` + `session-persist.ts`（已有类） | 接线（非新造，天枢审查补） |
 
 **不动**：认知本体全部（affordance/EFE/policy/cognitive-mirror/belief）、PromptEngine 内部 P1 冻结机制、worker 工具隔离机制（`filterToolRegistry`）。本设计只在它们**外面**加一层常驻编排。
 
@@ -151,16 +159,17 @@ Phase 1（安全前置门槛 · 与 Phase 0 同批，不可拆后）
 
 Phase 2（长驻 runtime 池 · 核心）
   ├─ runtime-pool.ts：按 session key 维护长驻 runtime（各持 PromptEngine）
+  ├─ runtime 接 SessionPersist（已有类）→ 跨进程重启存活
   ├─ AdaptiveRouter 接入路由
   └─ 驱逐策略对齐 cache 价值
-     验证：跨任务 cache 命中 ≥84% + per-runtime 隔离
+     验证：DeepSeek 跨任务 cache 命中 ≥84% + per-runtime 隔离 + 重启后 runtime 可恢复
 
-Phase 3（MCP · 正交独立增量）
+Phase 3（MCP · 可选增量，可任意推后）
   └─ mcp-client.ts + 注册进 ToolRegistry（受 allowedTools 约束）
      验证：MCP 工具可调用且受 tool policy 隔离
 ```
 
-依赖：Phase 0+1 必须同批（安全是前置门槛）。Phase 2 依赖 0+1。Phase 3 完全独立，可任意时点插入。
+依赖：Phase 0+1 必须同批（安全是前置门槛）。Phase 2 依赖 0+1。Phase 3 完全可选、独立。**Task 生命周期系统不在本 spec 阶段内——见姊妹 spec `2026-06-06-task-lifecycle-system-design.md`。**
 
 ---
 
@@ -308,3 +317,38 @@ OpenClaw 9687 文件 vs 天枢 1204 文件。差距不在 agent 核心循环（�
 ## 五、一句话评价
 
 > **方向正确，差距比自评大但聚焦合理。** spec 的核心动作（接线 ingress → 真 handler → runtime 池）是正确的最小可行路径。但 (1) session 持久化是长驻 runtime 的隐性前提，spec 未提；(2) task 生命周期管理（取消/重试/状态追踪）缺失，后续应补；(3) 安全设计在 per-runtime policy 上比 OpenClaw 更优。总体可推进，但 Phase 0 前应先解决 session 持久化方案（或明确 Phase 0 的 runtime 不跨进程重启存活——降低 scope）。
+
+---
+
+# 审查回应与决议（2026-06-06，天璇 + 领航星裁定）
+
+逐条回应天枢审查，附领航星裁定：
+
+**① Task 生命周期系统缺失 —— 接受。** 天枢对：本 spec 是「一次性异步调用」≈ `/v1/chat/completions`，不是 task system，「常驻协作者」标题过度承诺。补充事实：天枢非零基础——已有 `task-board.ts`/`task-state.ts`/`turn-heartbeat.ts`/`nightcrawler.ts` + coordinator 完整 `AbortSignal`（`coordinator.ts:81,144`，取消已有）。缺的是把这些提升到 daemon 级生命周期。**裁定：拆姊妹 spec `2026-06-06-task-lifecycle-system-design.md`，本 spec 收窄为 ingress+runtime 池+cache（已 retitle）。**
+
+**② Session 持久化 —— 部分修正天枢自评。** 天枢审查表标「❌ 无持久化 session」不准确：`SessionPersist` 类**存在且在跑**，服务主会话（`loop.ts:420`）、slash-commands、use-global-input（原子写 JSONL）。只是 `worker-session.ts` 未接它。**所以这道线比天枢估的轻——是「把现成 SessionPersist 接到 runtime 池」，非从零造。** 仍承认是本 spec 漏写的前提，补入 §2/§6 与 Phase 2 依赖。
+
+**③ cache 是否被高估 —— 领航星收窄裁定。** 我原主张「cache 是弱模型护城河」说宽了，天枢「cache 被高估」也说宽了。裁定：**只保 DeepSeek 的 OpenAI 兼容前缀 cache**；目标模型集 = GLM5.1 / MiMo-v2.5pro / DeepSeek-v4，其余开源模型 cache 不管。§4 已按此收窄。
+
+**④ MCP —— 接受降级。** OpenClaw 也没 MCP，非缺口，是可选增量。§5 已降级。
+
+**⑤ SOUL.md / 跨任务本体演化 —— 领航星裁定：放着不动。** §10 维持「待研究、严格不实施」。不开独立 spec，不深入。
+
+**⑥ per-runtime tool policy 动态分级（READ_ONLY/WRITE）—— 天枢确认为天枢真实优势。** 保持，作为相对 OpenClaw（仅配置级）的差异点。
+
+**净结论**：天枢审查使本 spec scope 更诚实（拆 task、补 session 持久化前提），领航星裁定使 cache 定位更精确（DeepSeek-only）。本 spec 现交付范围明确：HTTP 可达的、cache 隔离的长驻 runtime 池；task 生命周期与本体演化各有归属。
+
+
+---
+
+# 天枢二次审查附注 (2026-06-06)
+
+> 本注针对修订后的两份姊妹 spec（A: 本 ingress spec，B: `2026-06-06-task-lifecycle-system-design.md`）做最终核实。详细修订已写入 spec B 末尾（含跨会话记忆核实、SessionPersist 接线精度、task 持久化格式等问题），此处不重复。
+>
+> **关键纠正**：天枢的跨会话记忆是结构化 claim 数据库（`ContextClaimStore` + `remember`/`recall` 工具，durable claims 跨会话存活），**不是** SOUL.md 式的连续身份文件。spec A §10 已正确标记为待研究，两 spec 其余部分对标实际能力无过度承诺。
+>
+> **spec A 额外注**：`worker-session.ts` 目前未接 SessionPersist，Phase 2 接入需要 `PromptEngine` 支持状态导出/注入（当前不存在），不止调 API。cache 基线 84-95% 是单会话内测量，不应写死为跨任务保证值。
+>
+> spe**c B 额外注**：task 记录需要随机读写（状态更新），SessionPersist 的 JSONL 追加模式不适合，建议 KV 存储。scheduler 需持久化 schedule 表，否则重启全丢。缺少 task 超时和去重设计。
+>
+> **净结论**：两份 spec 架构方向正确，scope 拆解合理。以上为精度修正——用代码实际能力校准隐性承诺。
