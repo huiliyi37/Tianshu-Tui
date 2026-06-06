@@ -1,32 +1,37 @@
-# Spec A + Spec B 实施交接（2026-06-06 · 会话 bb1bbe0）
+# Spec A + Spec B 实施交接（2026-06-06 · 最终状态）
 
-> 本会话完成：spec A 改造一 P0（对抗式 Verifier 核心）。剩余工作及依赖关系如下。
-
----
-
-## 一、已完成
-
-### 本会话 bb1bbe0 — Spec A 改造一 P0（对抗式 Verifier 核心）✅
-
-| 变更 | 文件 | 内容 |
-|------|------|------|
-| 新增 `readonly_plus_test` role | `src/agent/profile-registry.ts:11` | AgentRole 类型扩展 |
-| 新增 `adversarial_verifier` profile | `src/agent/profile-registry.ts:82-133` | 去 write/bash/edit/write_file，只留 run_tests + 只读工具，含完整对抗策略 prompt |
-| WRITE_PROFILES_ADVISORY 移出 verifier | `src/agent/worker-evidence.ts:10` | 从 `['patcher', 'verifier']` → `['patcher']` |
-| evidenceStatus 来源约束 | `src/agent/worker-evidence.ts:32-36` | 对抗 verifier 的 `verified` 直接接受，跳过 advisory/block 路径 |
-| 同步 AgentRole 类型 | `src/agent/coordination-policy.ts:6` | 补 `'readonly_plus_test'` |
-| 测试更新 | `src/agent/__tests__/profile-registry.test.ts` | 9 profiles, adversarial_verifier 断言 |
-| 测试更新 | `src/agent/__tests__/worker-evidence.test.ts` | 3 个新测试：旧 verifier 已 blocked、对抗 verifier verified 直接接受、对抗 verifier unverified blocked |
-
-### 后续会话 788b89c — Spec A 改造一 P1（验证缺失 nudge）✅
-
-coordinator 聚合处：patch_proposal/hands 改动无配套 `adversarial_verifier` verify order 时注入标红提醒。
-
-**验证**：typecheck 通过，31 个相关测试全部通过。
+> **全部 spec 已实施完毕。** 本文件仅保留状态记录和偏差复盘。
 
 ---
 
-## 二、Spec A 改造一 剩余 — 无（全部完成 ✅）
+## 一、完成状态总览
+
+| Spec | 阶段 | Commit | 状态 |
+|------|------|--------|------|
+| Spec A 改造一 P0 | 对抗式 Verifier 核心 | bb1bbe0 | ✅ |
+| Spec A 改造一 P1 | 验证缺失 nudge | 788b89c | ✅ |
+| Spec B Phase 0 | TaskRegistry + TaskStore | 9e0e746 | ✅ |
+| Spec A 改造二 P0/P1 | cron-scheduler + cron-lock | 757545e | ✅ |
+| Spec A 改造二 P2 | cron → TaskRegistry 接线 | 3be9ca8 | ✅ |
+| Spec B Phase 1 | 持久化 + 审计 API | cd022bb | ✅ |
+| Spec B Phase 2 | notify policy | f2c975e | ✅ |
+| 审查偏差修复 | cancel 路由 + allowedTools + import | 267d7af | ✅ |
+| 缺陷 1 & 2 修复 | prompt 自相矛盾 + dead code | b98da5e | ✅ |
+
+**全部 9 个逻辑单元已完成，typecheck 通过，91 个 server 测试全部通过（偶发 1 个 flaky test — idempotency key 桶边界）。**
+
+## 二、偏差复盘（工作流改进）
+
+4 个偏差在审查阶段发现，根因非"没读文档"而是**实现后缺了一轮 spec→code 交叉核对**：
+
+| 偏差 | 根因 | 预防方法 |
+|------|------|----------|
+| 🔴 缺 POST /tasks/:id/cancel 路由 | spec 有路由清单但未逐条打勾 | 提交前逐条核对 spec 架构表 |
+| 🟡 allowedTools 未传递 | 接线时未读 `CronScheduler.onCreateTask` 类型签名 | 接线前读被接函数的完整签名 |
+| 🟢 dynamic import 多余 | 实现时未检查已有静态 import | import 审计 |
+| 🟡 notify policy 未实现 | 同上，spec 功能清单核对遗漏 | checklist 核对 |
+
+**已写入 `.rivet/knowledge/guardrails.md`**：交付前 30 秒 spec→code 交叉核对规则。
 
 ### P1 — coordinator 验证缺失 nudge ✅
 
