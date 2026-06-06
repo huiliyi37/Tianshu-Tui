@@ -52,7 +52,7 @@
 
 **2.2 调度器（cron，新增）** — `src/server/scheduler.ts`
 - 定时触发任务（cron 表达式或间隔）。最小实现：`setInterval` + **持久化 schedule 表**。
-- **具体落地方案见** `2026-06-06-cc-borrowings-adversarial-verifier-and-cron-lease.md` §2（cron 租约锁，移植 CC cronTasksLock 的 PID 租约锁 + 多会话单调度器选举 + `.rivet/scheduled_tasks.json` 持久化，扩展现有 nightcrawler）。
+- **具体落地方案见** `2026-06-06-cc-borrowings-adversarial-verifier-and-cron-lease.md` §2（cron 租约锁，server 层独立 cron-scheduler + cron-lock，PID 租约锁 + 多会话单调度器选举 + `.rivet/scheduled_tasks.json` 持久化，**不碰 agent 层 nightcrawler**）。
 - **schedule 必须持久化（天枢二次审查强调）**：写入文件/KV，否则进程重启后所有定时任务全丢。这是硬要求，不是可选。
 - 用途示例：天枢可被设定「每晚跑一次仓库健康检查」——这才是「常驻协作者」而非「被动应答」。
 
@@ -73,7 +73,7 @@
 | 变更 | 文件 | 性质 |
 |------|------|------|
 | TaskRegistry（拥有式任务生命周期 + 超时 + 去重） | 新 `src/server/task-registry.ts` | 新增（复用 BoardTaskStatus + AbortSignal） |
-| 调度器（cron/间隔 + 持久 schedule 表） | 新 `src/server/scheduler.ts` | 新增（setInterval + 持久化 schedule，重启可恢复） |
+| 调度器（cron/间隔 + 持久 schedule 表） | 新 `src/server/cron-scheduler.ts` | 新增（tick + 持久化 schedule，重启可恢复，对接 spec A 的 PID 租约锁） |
 | 任务记录持久化（KV，非 SessionPersist 追加） | 新 `.rivet/tasks/{id}.json` 或 SQLite | 新增（随机读写，区别于 runtime 的 SessionPersist） |
 | ingress 改为创建 task | `server/prompt-route.ts`（姊妹 spec 的 handler） | 衔接（task id 替代直接 loop） |
 | 任务路由 API | `server/routes.ts`（+`/tasks` `/tasks/:id` `/tasks/:id/cancel`） | 新增路由 |
@@ -111,7 +111,7 @@ Phase 1（持久化 + 审计）
      验证：重启后任务记录可见 + 无 token 被拒
 
 Phase 2（调度 + 通知）
-  ├─ scheduler.ts：cron/间隔触发 + 持久 schedule 表（重启可恢复，定时任务 allowedTools 更严）
+  ├─ cron-scheduler.ts：cron/间隔触发 + 持久 schedule 表（重启可恢复，定时任务 allowedTools 更严）
   └─ notify policy: silent/state_changes/errors_only
      验证：定时触发正确 + 通知符合策略
 ```
@@ -350,7 +350,9 @@ Phase 2（调度 + 通知）
   └─ notify policy：state_changes 写 events.jsonl ★补充★
 ```
 
-**与 spec A 的交叉依赖**：本 spec Phase 2 的 scheduler 依赖 spec A 改造二的 nightcrawler max_turns 补丁。不补 max_turns，cron 触发的无人值守任务无限循环 → 应调整执行顺序：**先做 spec A 改造二的 P0-pre（nightcrawler max_turns），再做本 spec Phase 2**。
+**与 spec A 的交叉依赖**：~~本 spec Phase 2 的 scheduler 依赖 spec A 改造二的 nightcrawler max_turns 补丁。不补 max_turns，cron 触发的无人值守任务无限循环 → 应调整执行顺序：先做 spec A 改造二的 P0-pre（nightcrawler max_turns），再做本 spec Phase 2。~~
+
+**已作废（双任务系统主权裁定）**：cron 执行不再经过 nightcrawler，而是 cron-scheduler → TaskRegistry → runtime → AgentLoop（自带 maxTurns + AbortSignal + TurnHeartbeat）。本 spec Phase 2 的交叉依赖改为：依赖 spec A 改造二的 cron-scheduler + cron-lock 就绪（P0/P1），以及姊妹 ingress spec 的 runtime 池就绪。
 
 ---
 
@@ -403,7 +405,7 @@ P1-1 的 `time_bucket_5min` 有**硬分桶边界**问题：9:04:59 与 9:05:01 �
 ## 七、修正实施顺序（增补）
 - **Phase 0 删除**"agent loop AbortSignal 检查点（循环前+工具前）★新增★" —— 该能力**已存在**（补强一）；替换为"长工具（bash）接 AbortSignal"，归属工具层/spec A，不阻塞本 spec。
 - **Phase 0 增**"TaskRegistry vs nightcrawler 主权裁定"（补强二）为**架构前置**，否则 Phase 2 调度落地即双登记。
-- 文末"与 spec A 的交叉依赖"那段基于"max_turns 不补→无限循环"——该前提已被 spec A 补强三校准（AgentLoop 自带 maxTurns）；真正的跨 spec 依赖是 **nightcrawler 的 abort 句柄**（spec A 补强三），而非 max_turns 终止条件。
+- ~~文末"与 spec A 的交叉依赖"那段基于"max_turns 不补→无限循环"——该前提已被 spec A 补强三校准（AgentLoop 自带 maxTurns）；真正的跨 spec 依赖是 **nightcrawler 的 abort 句柄**（spec A 补强三），而非 max_turns 终止条件。~~ **已作废（双任务系统主权裁定超越）**：daemon cron 路径现在直接走 AgentLoop（abort 本就工作），不经 nightcrawler。nightcrawler 的 abort 句柄降级为延后的 P3 卫生项。
 
 ## 净结论
 前三轮已覆盖持久化 / 状态导出 / 超时去重。本轮独立核实**证伪 P0-1 的 loop 判断**（loop 与 batch 已逐回合逐工具协作 abort，真缺口在 in-flight 单工具如 bash），并指出**跨 spec 双任务系统主权未定**（补强二）这一两轮都没串起来的架构缝。其余为精度校准。修法不碰认知本体，符合 §0 公理。
@@ -527,6 +529,8 @@ nightcrawler 的 queue 是进程内 FIFO + maxConcurrent=3。daemon 的调度需
 - server 层**不 import** agent 层的任何内部模块（AgentLoop 的启动接口是"使用"不是"修改"）
 - agent 层的 nightcrawler **不知道** server 层的存在
 - TaskRegistry 通过 runtime 池间接使用 AgentLoop——AgentLoop 不知道自己是被 cron 触发还是被 API 触发
+- **依赖注记（缺口 4）**：runtime 复用（同一 runtime 跑多个 cron task）需要 `PromptEngine` 状态重置/导出能力——当前 `prompt/engine.ts` 无 `exportState`/`importState`（天璇二次审查 §2.1 核实）。全新 cron task = 起新 AgentLoop 不卡此点；暖 cache 场景才需要。**Phase 2 实现时若启用 runtime 复用，需先给 PromptEngine 加状态导出/注入。**
+- **PID 租约锁部署假设（缺口 5）**：锁仅在「多个 rivet 进程各起 server」场景生效。单 daemon 进程则锁 YAGNI——scheduler 是进程内单例，不存在选举需求。保留实现以支持多进程部署，但 MVP 可降级为单进程无锁调度。
 
 ## 4. 对 spec A 改造二的连锁修正
 
@@ -543,11 +547,12 @@ spec A 改造二的落点「扩展 nightcrawler」被此裁决推翻。修正后
 
 ```
 改造二（Cron 租约锁 · 修正后）
-  P0-pre └─ nightcrawler: 补 max_turns 终止条件（仍做——保护会话内 background task）
+  P0-pre └─ （已删除）~~nightcrawler: 补 max_turns 终止条件~~ — nightcrawler 不在 daemon 路径上，此项退化为延后的 P3 卫生
   P0 ├─ 新 src/server/cron-scheduler.ts: 持久化 schedule 表 + 时间触发 tick
   P1 ├─ 新 src/server/cron-lock.ts: PID 租约锁（含 zombie 探测）
   P2 └─ cron-scheduler 触发 → TaskRegistry.createTask → runtime 池分配 → 启动 AgentLoop
-     验证：多会话单调度 + 锁接管 + 重启恢复
+
+延后 P3 卫生 └─ nightcrawler: 补充 abort 句柄（timeout/cancel 真能停 executor）— 会话内 background task 的健壮性改进，不阻塞 daemon 路径
 ```
 
 ## 5. nightcrawler 的保留价值
