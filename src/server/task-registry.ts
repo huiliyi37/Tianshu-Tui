@@ -90,6 +90,8 @@ export class TaskRegistry {
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 30 * 60 * 1000
     this.cronTimeoutMs = config.cronTimeoutMs ?? 60 * 60 * 1000
     this.onEvent = config.onEvent
+    this.cronTimeoutMs = config.cronTimeoutMs ?? 60 * 60 * 1000
+    this.onEvent = config.onEvent
   }
 
   // ─── 创建任务 ─────────────────────────────────────────────
@@ -179,6 +181,13 @@ export class TaskRegistry {
       try { ac.abort() } catch { /* abort 可安全多次调用 */ }
     }
     return this.transition(id, 'cancelled')
+  }
+
+  // ─── 事件回调 ──────────────────────────────────────────────
+
+  /** 设置事件回调（用于 task-routes 接线 events.jsonl） */
+  setEventCallback(cb: TaskEventCallback): void {
+    this.onEvent = cb
   }
 
   // ─── 查询 ──────────────────────────────────────────────────

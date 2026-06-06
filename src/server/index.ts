@@ -6,14 +6,56 @@ export interface RouteResponse {
   headers?: Record<string, string>
 }
 
-export type RouteHandler = (body: unknown) => RouteResponse | Promise<RouteResponse>
+export type RouteHandler = (body: unknown, params?: Record<string, string>) => RouteResponse | Promise<RouteResponse>
 
 export function createRouter(routes: Record<string, RouteHandler>) {
+  // Build exact match map + parameterized routes
+  const exact = new Map<string, RouteHandler>()
+  const parameterized: Array<{ pattern: RegExp; paramNames: string[]; handler: RouteHandler }> = []
+
+  for (const [key, handler] of Object.entries(routes)) {
+    const parts = key.split(' ')
+    const method = parts[0]
+    const path = parts.slice(1).join(' ')
+    if (path.includes(':')) {
+      // Parameterized route: /tasks/:id → capture group
+      const paramNames: string[] = []
+      const regexStr = path.replace(/:(\w+)/g, (_, name) => {
+        paramNames.push(name)
+        return '([^/]+)'
+      })
+      parameterized.push({
+        pattern: new RegExp('^' + regexStr + '$'),
+        paramNames,
+        handler,
+      })
+    } else {
+      exact.set(key, handler)
+    }
+  }
+
   return async (method: string, path: string, body: unknown): Promise<RouteResponse> => {
-    const key = `${method} ${path}`
-    const handler = routes[key]
-    if (!handler) return { status: 404, body: { error: 'Not found' } }
-    return await handler(body)
+    // Strip query string from path
+    const cleanPath = path.split('?')[0] ?? path
+
+    // Try exact match first
+    const exactKey = method + ' ' + cleanPath
+    const exactHandler = exact.get(exactKey)
+    if (exactHandler) return await exactHandler(body)
+
+    // Try parameterized routes
+    for (const { pattern, paramNames, handler } of parameterized) {
+      const match = cleanPath.match(pattern)
+      if (match) {
+        const params: Record<string, string> = {}
+        for (let i = 0; i < paramNames.length; i++) {
+          params[paramNames[i]!] = match[i + 1]!
+        }
+        return await handler(body, params)
+      }
+    }
+
+    return { status: 404, body: { error: 'Not found' } }
   }
 }
 
