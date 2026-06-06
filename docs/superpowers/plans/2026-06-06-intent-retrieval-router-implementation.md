@@ -356,14 +356,14 @@ node --import tsx --test src/agent/__tests__/loop-*.test.ts
 - ✅ **遵守边界**：router 内零 `grep/git/recall/web_fetch` 调用（风险6）；route 仅进 dynamic appendix，不入 stable/system/fingerprint（风险1）；非 `injectUserMessage`（风险5）。
 - ✅ **默认关闭**：`config/default.ts` `intentRetrievalRouter.enabled = false`。
 - ✅ **测试强制**：`engine-cache-stability`（缓存不炸）、`intent-retrieval-anti-anchor`（+110）、`loop-intent-retrieval-router`（+165）、`schema`（+14）全绿；`tsc --noEmit` 通过。
-- ⚠️ **未逐行核验项**：风险2（LLM 流式文本重复）、风险4（`TASK_KIND_BASELINES` 兜底 normalize）均在 **LLM 分类器路径**上，该路径默认关闭，go-live 不阻塞。
+- ⚠️ ~~未逐行核验项~~：风险2（LLM 流式文本重复）、风险4（`TASK_KIND_BASELINES` 兜底 normalize）——**已复验通过（2026-06-07）。**
 
 ### 🚦 opt-in Gate — 启用 LLM 分类器（`classifier: 'llm'` + `enabled: true`）前必须先做
 
 将 `intentRetrievalRouter.enabled` 切为 `true` 之前，必须先核验默认关闭期间未被覆盖的两条 LLM 路径风险，否则不得启用：
 
-- [ ] **风险2 复验**：用 mock `StreamClient` 断言 LLM 分类器不同时消费 `onTextDelta` 与 text `onContentBlock`，确认无文本重复拼接。
-- [ ] **风险4 复验**：构造「LLM 合法 JSON 但遗漏该任务类型 baseline `must` 源」用例，断言 `normalizeRetrievalRoute` 用 `TASK_KIND_BASELINES` 补回，LLM 不能重新制造漏查源。
-- [ ] 两条均绿后，方可在配置中开启 `enabled: true`。
+- [x] **风险2 复验**：用 mock `StreamClient` 断言 LLM 分类器不同时消费 `onTextDelta` 与 text `onContentBlock`，确认无文本重复拼接。→ `intent-retrieval-router.test.ts:79` `assert.ok(!route.directions.some(... 'duplicated'))` ✅
+- [x] **风险4 复验**：构造「LLM 合法 JSON 但遗漏该任务类型 baseline `must` 源」用例，断言 `normalizeRetrievalRoute` 用 `TASK_KIND_BASELINES` 补回，LLM 不能重新制造漏查源。→ `intent-retrieval-route.test.ts:89` `assert.equal(priorityFor(route, 'tests'), 'must')` ✅
+- [x] 两条均绿后，方可在配置中开启 `enabled: true`。→ **opt-in gate 已清，可安全启用 LLM 分类器。**
 
 > 默认 heuristic 路径已由现有测试覆盖；本 gate 只约束 LLM 路径的首次启用。

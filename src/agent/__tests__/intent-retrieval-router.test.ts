@@ -103,6 +103,9 @@ describe('classifyIntentRetrievalRoute', () => {
     assert.ok(route.directions.some(direction => direction.source === 'tests'))
     assert.ok(route.directions.some(direction => direction.source === 'git'))
     assert.equal(client.calls, 1)
+    // 风险2：确认 onContentBlock 的 text 没有参与最终 route（防止 Anthropic 适配层重复拼接）
+    assert.ok(!route.directions.some(direction => direction.query.includes('duplicated')))
+    assert.ok(!route.directions.some(direction => direction.reason.includes('duplicated')))
   })
 
   it('falls back to heuristic on invalid JSON', async () => {

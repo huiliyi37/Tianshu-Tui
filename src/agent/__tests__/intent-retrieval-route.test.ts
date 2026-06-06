@@ -106,6 +106,10 @@ describe('intent retrieval route normalization and rendering', () => {
     assert.ok(sources(route).includes('tests'))
     assert.ok(sources(route).includes('git'))
     assert.ok(sources(route).includes('memory'))
+    // 风险4：LLM 只返回 codebase 一个方向时，normalize 必须补回 review_audit 的基线 must 源（tests）
+    // LLM 不能通过省略 directions 来绕过必查源。
+    assert.equal(priorityFor(route, 'tests'), 'must')
+    assert.equal(priorityFor(route, 'codebase'), 'must')
   })
 
   it('limits unknown values and falls back to heuristic when raw route is unusable', () => {
