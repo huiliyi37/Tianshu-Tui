@@ -120,6 +120,11 @@ export class OpenAIClient implements StreamClient {
       const hasToolCalls = Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
       if (this.config.thinking === 'enabled' && hasToolCalls) return m
       const { reasoning_content: _, ...rest } = m
+      // DeepSeek requires assistant messages to have `content` or `tool_calls`.
+      // After stripping reasoning_content, ensure `content` exists.
+      if (!('content' in rest) && !hasToolCalls) {
+        (rest as Record<string, unknown>).content = ''
+      }
       return rest
     })
 
@@ -248,10 +253,12 @@ export class OpenAIClient implements StreamClient {
 
       // Inject previous reasoning into messages on retry so the model can
       // resume from where it left off instead of restarting from scratch.
+      // DeepSeek requires assistant messages to have `content` or `tool_calls`.
       let effectiveBody = body
       if (isThinking && reasoningRef.content) {
         const msgs = [...(body.messages as unknown[]), {
           role: 'assistant',
+          content: '',
           reasoning_content: reasoningRef.content,
         }]
         effectiveBody = { ...body, messages: msgs }
