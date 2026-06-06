@@ -47,6 +47,7 @@ export const workerProfileSchema = z.enum([
   'planner',
   'reviewer',
   'verifier',
+  'adversarial_verifier',
   'patcher',
 ])
 

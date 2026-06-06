@@ -155,4 +155,103 @@ describe('aggregateResults', () => {
     assert.equal(aggregated.length, 1)
     assert.equal(aggregated[0]!.workOrderId, 'b')
   })
+
+  // ── Spec A 改造一 P1: 验证缺失 nudge ─────────────────────────
+
+  const NUDGE = '存在未验证的改动，应 delegate 一个对抗 verifier；你不能靠在汇总里列 caveat 自封通过。'
+
+  function patcherResult(id: string, changedFiles: string[]): WorkerResult {
+    return {
+      workOrderId: id,
+      status: 'passed',
+      summary: 'applied patch',
+      findings: [{ claim: 'changed files', evidence: 'diff', confidence: 'high' }],
+      artifacts: [],
+      changedFiles,
+      risks: [],
+      nextActions: [],
+      evidenceStatus: changedFiles.length > 0 ? 'unverified' : 'verified',
+    }
+  }
+
+  it('injects verification nudge when patcher changes files without adversarial_verifier', () => {
+    const results = [patcherResult('wo_1', ['src/a.ts'])]
+    const profiles = new Map([['wo_1', 'patcher']])
+    const aggregated = aggregateResults(results, 'primary_decides', profiles)
+
+    // Patcher without verification → should get advisory risk
+    // Then nudge injected because no adversarial_verifier present
+    assert.ok(aggregated[0]!.risks.some(r => r.includes('advisory')))
+    assert.ok(aggregated[0]!.risks.some(r => r === NUDGE))
+    // Nudge is soft — status unchanged
+    assert.equal(aggregated[0]!.status, 'passed')
+  })
+
+  it('no nudge when adversarial_verifier is present alongside patcher changes', () => {
+    const results = [
+      patcherResult('wo_1', ['src/a.ts']),
+      {
+        workOrderId: 'wo_2',
+        status: 'passed' as const,
+        summary: 'verified the patch',
+        findings: [],
+        artifacts: [],
+        changedFiles: [],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'verified' as const,
+      },
+    ]
+    const profiles = new Map([['wo_1', 'patcher'], ['wo_2', 'adversarial_verifier']])
+    const aggregated = aggregateResults(results, 'primary_decides', profiles)
+
+    assert.ok(aggregated[0]!.risks.some(r => r.includes('advisory')))
+    // No nudge because adversarial_verifier is present
+    assert.ok(!aggregated.some(r => r.risks.some(rr => rr === NUDGE)))
+  })
+
+  it('no nudge when no files were changed', () => {
+    const results = [patcherResult('wo_1', [])]
+    const profiles = new Map([['wo_1', 'patcher']])
+    const aggregated = aggregateResults(results, 'primary_decides', profiles)
+
+    // No changedFiles → passes through clean
+    assert.equal(aggregated[0]!.status, 'passed')
+    assert.ok(!aggregated.some(r => r.risks.some(rr => rr === NUDGE)))
+  })
+
+  it('no nudge when only adversarial_verifier runs (no write changes)', () => {
+    const results = [{
+      workOrderId: 'wo_1',
+      status: 'passed' as const,
+      summary: 'all tests pass',
+      findings: [],
+      artifacts: [],
+      changedFiles: [],
+      risks: [],
+      nextActions: [],
+      evidenceStatus: 'verified' as const,
+    }]
+    const profiles = new Map([['wo_1', 'adversarial_verifier']])
+    const aggregated = aggregateResults(results, 'primary_decides', profiles)
+
+    assert.equal(aggregated.length, 1)
+    assert.equal(aggregated[0]!.status, 'passed')
+    assert.ok(!aggregated.some(r => r.risks.some(rr => rr === NUDGE)))
+  })
+
+  it('nudge injected with weighted_confidence policy when verification gap exists', () => {
+    const results = [
+      { ...patcherResult('wo_1', ['src/a.ts']), findings: [{ claim: 'ok', evidence: 'diff', confidence: 'high' as const }] },
+      { ...patcherResult('wo_2', ['src/b.ts']), findings: [{ claim: 'ok', evidence: 'diff', confidence: 'low' as const }] },
+    ]
+    const profiles = new Map([['wo_1', 'patcher'], ['wo_2', 'patcher']])
+    const aggregated = aggregateResults(results, 'weighted_confidence', profiles)
+
+    // weighted_confidence picks highest confidence result
+    assert.equal(aggregated.length, 1)
+    assert.equal(aggregated[0]!.workOrderId, 'wo_1')
+    // Nudge still injected
+    assert.ok(aggregated[0]!.risks.some(r => r === NUDGE))
+  })
 })
