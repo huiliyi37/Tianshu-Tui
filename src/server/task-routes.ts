@@ -14,31 +14,33 @@
 import type { RouteHandler } from './index.js'
 import type { TaskRegistry, NotifyPolicy } from './task-registry.js'
 import type { TaskFilter, TaskStatus } from './task-store.js'
+import { timingSafeEqual } from 'node:crypto'
 
 // ─── Auth ─────────────────────────────────────────────────────
 
-function extractToken(body: unknown): string | null {
-  // Body-based token（POST 兼容）
-  if (body && typeof body === 'object' && 'token' in body) {
-    return String((body as Record<string, unknown>).token)
+function extractToken(_body: unknown, headers?: Record<string, string>): string | null {
+  // Authorization: Bearer <token> header（优先）
+  const authHeader = headers?.['authorization']
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7)
+  }
+  // fallback: body-based token（POST 兼容）
+  if (_body && typeof _body === 'object' && 'token' in _body) {
+    return String((_body as Record<string, unknown>).token)
   }
   return null
 }
 
 function checkAuth(token: string | null, expectedToken?: string): boolean {
-  if (!expectedToken) return true // 无 token 配置 → 开放访问
+  // 未配置 token → 拒绝所有请求（fail-closed）
+  if (!expectedToken) return false
   if (!token) return false
-  // 恒定时间比较避免时序攻击
-  return timingSafeEqual(token, expectedToken)
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let result = 0
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  }
-  return result === 0
+  // 长度不同直接拒绝（避免 timingSafeEqual 抛异常）
+  if (token.length !== expectedToken.length) return false
+  return timingSafeEqual(
+    Buffer.from(token),
+    Buffer.from(expectedToken),
+  )
 }
 
 // ─── Query String Parser ──────────────────────────────────────
@@ -164,8 +166,8 @@ export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandl
   })
 
   return {
-    'GET /tasks': async (body, _params) => {
-      const token = extractToken(body)
+    'GET /tasks': async (body, _params, headers) => {
+      const token = extractToken(body, headers)
       if (!checkAuth(token, apiToken)) {
         return { status: 401, body: { error: 'Unauthorized' } }
       }
@@ -182,8 +184,8 @@ export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandl
       return { status: 200, body: { tasks, count: tasks.length } }
     },
 
-    'GET /tasks/:id': async (body, params) => {
-      const token = extractToken(body)
+    'GET /tasks/:id': async (body, params, headers) => {
+      const token = extractToken(body, headers)
       if (!checkAuth(token, apiToken)) {
         return { status: 401, body: { error: 'Unauthorized' } }
       }
@@ -197,8 +199,8 @@ export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandl
       return { status: 200, body: { task } }
     },
 
-    'POST /tasks/:id/cancel': async (body, params) => {
-      const token = extractToken(body)
+    'POST /tasks/:id/cancel': async (body, params, headers) => {
+      const token = extractToken(body, headers)
       if (!checkAuth(token, apiToken)) {
         return { status: 401, body: { error: 'Unauthorized' } }
       }
@@ -212,8 +214,8 @@ export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandl
       return { status: 200, body: { task: cancelled } }
     },
 
-    'GET /tasks/:id/events': async (body, params) => {
-      const token = extractToken(body)
+    'GET /tasks/:id/events': async (body, params, headers) => {
+      const token = extractToken(body, headers)
       if (!checkAuth(token, apiToken)) {
         return { status: 401, body: { error: 'Unauthorized' } }
       }

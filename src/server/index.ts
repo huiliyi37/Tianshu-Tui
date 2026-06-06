@@ -6,7 +6,7 @@ export interface RouteResponse {
   headers?: Record<string, string>
 }
 
-export type RouteHandler = (body: unknown, params?: Record<string, string>) => RouteResponse | Promise<RouteResponse>
+export type RouteHandler = (body: unknown, params?: Record<string, string>, headers?: Record<string, string>) => RouteResponse | Promise<RouteResponse>
 
 export function createRouter(routes: Record<string, RouteHandler>) {
   // Build exact match map + parameterized routes
@@ -34,14 +34,14 @@ export function createRouter(routes: Record<string, RouteHandler>) {
     }
   }
 
-  return async (method: string, path: string, body: unknown): Promise<RouteResponse> => {
+  return async (method: string, path: string, body: unknown, reqHeaders?: Record<string, string>): Promise<RouteResponse> => {
     // Strip query string from path
     const cleanPath = path.split('?')[0] ?? path
 
     // Try exact match first
     const exactKey = method + ' ' + cleanPath
     const exactHandler = exact.get(exactKey)
-    if (exactHandler) return await exactHandler(body)
+    if (exactHandler) return await exactHandler(body, undefined, reqHeaders)
 
     // Try parameterized routes
     for (const { pattern, paramNames, handler } of parameterized) {
@@ -51,7 +51,7 @@ export function createRouter(routes: Record<string, RouteHandler>) {
         for (let i = 0; i < paramNames.length; i++) {
           params[paramNames[i]!] = match[i + 1]!
         }
-        return await handler(body, params)
+        return await handler(body, params, reqHeaders)
       }
     }
 
@@ -64,13 +64,18 @@ export function startServer(port: number, routes: Record<string, RouteHandler>):
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const body = await readBody(req)
-    const result = await router(req.method ?? 'GET', req.url ?? '/', body)
+    const reqHeaders: Record<string, string> = {}
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (typeof v === 'string') reqHeaders[k.toLowerCase()] = v
+      else if (Array.isArray(v)) reqHeaders[k.toLowerCase()] = v[0] ?? ''
+    }
+    const result = await router(req.method ?? 'GET', req.url ?? '/', body, reqHeaders)
     const headers: Record<string, string> = { 'Content-Type': 'application/json', ...result.headers }
     res.writeHead(result.status, headers)
     res.end(result.body ? JSON.stringify(result.body) : '')
   })
 
-  server.listen(port)
+  server.listen(port, '127.0.0.1')
   return { close: () => server.close() }
 }
 
