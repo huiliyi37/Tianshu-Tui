@@ -139,4 +139,18 @@ describe('BlockStreamWriter', () => {
     await w.flush()
     assert.equal(out.join(''), 'Z'.repeat(40), 'all chars drained exactly once')
   })
+
+  it('peek() returns the current unemitted tail', () => {
+    const w = new BlockStreamWriter({ minChars: 100, maxChars: 200, idleMs: 100, maxBufferSize: 64 * 1024 }, () => {})
+    w.push('short tail') // below minChars → not emitted
+    assert.equal(w.peek(), 'short tail')
+  })
+
+  it('peek() shrinks as blocks are emitted', () => {
+    const out: string[] = []
+    const w = new BlockStreamWriter({ minChars: 10, maxChars: 20, idleMs: 100, maxBufferSize: 64 * 1024 }, (t) => out.push(t))
+    w.push('a'.repeat(25) + ' tail') // forces an emit at maxChars
+    assert.ok(out.length >= 1, 'should have emitted at least one block')
+    assert.ok(w.peek().length < 30, 'tail should be smaller than total pushed')
+  })
 })

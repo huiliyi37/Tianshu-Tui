@@ -49,7 +49,9 @@ import { createGlanceBus } from './surface/glance-bus.js'
 import { glanceOnToolStart, glanceOnToolResult } from './surface/tool-domain.js'
 import { GlanceBar } from './glance-bar.js'
 import { appendStreamWindow } from './stream-window.js'
+import { capLiveTail } from './live-tail-cap.js'
 import { createRingBuffer, type RingBuffer } from './ring-buffer.js'
+import { createCommittedLog } from './committed-log.js'
 import { RenderBatcher } from './render-batch.js'
 import { SteerBuffer } from './steer-buffer.js'
 import {
@@ -195,8 +197,32 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const { stdout } = useStdout()
   const supportsAnsiEscapes = (stdout as NodeJS.WriteStream & { supportsAnsiEscapes?: boolean }).supportsAnsiEscapes ?? process.stdout.isTTY
   const { rows: termRows } = useTerminalSize()
+  /**
+   * Stream-commit strategy gate (真凶②).
+   * - DeepSeek (and other providers that separate reasoning_content / content
+   *   cleanly): commit each completed block to scrollback DURING streaming, so
+   *   the live region only ever holds the small unemitted tail → can't overflow
+   *   the viewport. Earlier blocks are immediately scrollable.
+   * - glm: mandatory-thinking promotion dumps the whole reply as reasoning_content
+   *   then promotes it to text at stream end (see openai-client.ts). Incremental
+   *   commit would race that promotion, so glm keeps the original turn-end commit
+   *   path (the `else` branches below are byte-identical to the previous code).
+   */
+  const incrementalCommit = currentProvider !== 'glm'
+  // Synced ref so the once-captured textBatcher closure sees provider switches
+  // (model/provider can change mid-session via onModelSwitch without remount).
+  const incrementalCommitRef = useRef(incrementalCommit)
+  incrementalCommitRef.current = incrementalCommit
   const projectName = basename(process.cwd())
   const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
+  /**
+   * Monotonic append-only source for Ink's <Static> (真凶① fix). Replaces the
+   * old `historyItems.slice(start)` which shrank after ring-buffer wrap and
+   * desynced Static's internal index → duplication / silent loss. Ring buffer
+   * is retained for pager/transcript + rewind reconstruction; committed-log is
+   * the render source. See committed-log.ts.
+   */
+  const committedLogRef = useRef(createCommittedLog())
   const [historyVersion, setHistoryVersion] = useState(0)
   const historyItems = useMemo(() => historyBufferRef.current.items(), [historyVersion])
   /**
@@ -209,18 +235,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
    */
   const totalItemsPushedRef = useRef(0)
   const staticItemsForInk = useMemo(() => {
-    const all = historyItems
-    // totalItemsPushedRef tracks every push across all paths. When the ring
-    // buffer wraps, all.length caps at HISTORY_MAX_ITEMS while the ref keeps
-    // growing. The difference is the wrapped count to skip so <Static> only
-    // sees new entries.
-    // Defensive: if the ref fell behind the buffer (shouldn't happen), clamp.
-    // If start >= all.length (ref way ahead), return empty — transient when
-    // pushStaticBatch bumps the ref before ring buffer flush completes.
-    const start = Math.max(0, totalItemsPushedRef.current - all.length)
-    if (start >= all.length) return []
-    return all.slice(start)
-  }, [historyItems])
+    // committed-log is append-only → Ink <Static>'s index never desyncs.
+    // (Previously: historyItems.slice(start) shrank after ring-buffer wrap →
+    //  duplication + silent loss. 真凶①.)
+    return committedLogRef.current.items()
+  }, [historyVersion])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const liveToolsRef = useRef<LogEntry[]>([])
 
@@ -289,22 +308,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
    *  notification is deferred to the next microtask. */
   const staticBatchRef = useRef<LogEntry[]>([])
   const staticBatchScheduled = useRef(false)
-  /** Dedup fingerprints: last 16 entries' type+content-prefix hashes.
-   *  Prevents the same LogEntry from being pushed into the ring buffer
-   *  multiple times, which causes duplicate rendering in <Static>. */
-  const staticDedupRef = useRef<Set<string>>(new Set())
-
   const pushStatic = useCallback((entry: LogEntry) => {
-    const fp = `${entry.type}:${entry.content.slice(0, 120)}`
-    if (staticDedupRef.current.has(fp)) return
-    staticDedupRef.current.add(fp)
-    if (staticDedupRef.current.size > 16) {
-      // Rotate: keep only last 8 to bound memory
-      const entries = [...staticDedupRef.current]
-      staticDedupRef.current = new Set(entries.slice(-8))
-      staticDedupRef.current.add(fp)
-    }
-    historyBufferRef.current.push(entry)
+    // committed-log owns dedup + is the <Static> render source. Gate the ring
+    // buffer / counter on its result so both stay in sync (dup → skip both).
+    if (!committedLogRef.current.append(entry)) return
+    historyBufferRef.current.push(entry) // retained for pager/transcript + rewind
     totalItemsPushedRef.current++
     staticBatchRef.current.push(entry)
     if (!staticBatchScheduled.current) {
@@ -339,9 +347,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     const grouped = groupLogs(entries)
     for (const entry of grouped) {
-      const fp = `${entry.type}:${entry.content.slice(0, 120)}`
-      if (staticDedupRef.current.has(fp)) continue
-      staticDedupRef.current.add(fp)
+      if (!committedLogRef.current.append(entry)) continue
       historyBufferRef.current.push(entry)
       totalItemsPushedRef.current++
     }
@@ -389,9 +395,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     blockWriterRef.current?.flush()
     blockWriterRef.current = null
     textBatcher.current.flushNow()
-    if (streamBuf.current || thinkBuf.current) {
+    if (incrementalCommit) {
+      // streamBuf is already committed block-by-block; the flush() above committed
+      // the tail. Only commit thinking that never got a content block.
+      if (!thinkingCommittedRef.current && thinkBuf.current) {
+        pushStatic(createLogEntry({ type: 'thinking_message', content: appendStreamWindow('', thinkBuf.current, STATIC_THINKING_CAP) }))
+      }
+      flushStaticBatch()
+    } else if (streamBuf.current || thinkBuf.current) {
       pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
     }
+    thinkingCommittedRef.current = false
     streamBuf.current = ''
     streamLiveBuf.current = ''
     setStreamingText('')
@@ -400,7 +414,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setIsThinkingActive(false)
     if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
     lastFlushedThink.current = ''
-  }, [pushAssistantEntry])
+  }, [pushAssistantEntry, incrementalCommit, pushStatic, flushStaticBatch])
 
   const streamStartRef = useRef(0)
   const thinkStartRef = useRef(0)
@@ -412,10 +426,41 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const lastFlushedThink = useRef('')
   const streamLiveBuf = useRef('')
   const blockWriterRef = useRef<BlockStreamWriter | null>(null)
+  /** Incremental-commit mode: whether this turn's thinking box has already been
+   *  committed to scrollback (committed lazily before the first content block so
+   *  the thinking box sits above the reply). Reset per stream/step. */
+  const thinkingCommittedRef = useRef(false)
   const textBatcher = useRef(new RenderBatcher<string>((texts) => {
     const combined = texts.join('')
     streamBuf.current += combined
-    streamLiveBuf.current = appendStreamWindow(streamLiveBuf.current, combined, LIVE_STREAM_MAX_CHARS)
+    const cols = process.stdout.columns ?? 80
+    const rows = process.stdout.rows ?? 24
+    const capRows = Math.max(1, Math.floor(rows * 0.5))
+    if (incrementalCommitRef.current) {
+      // DeepSeek path: each emitted block is "done" → commit it to scrollback now.
+      // Commit the thinking box first (once), so it sits above the reply. DeepSeek
+      // streams all reasoning_content before content, so thinkBuf is complete here.
+      if (!thinkingCommittedRef.current && thinkBuf.current) {
+        pushStatic(createLogEntry({ type: 'thinking_message', content: appendStreamWindow('', thinkBuf.current, STATIC_THINKING_CAP) }))
+        thinkingCommittedRef.current = true
+      }
+      // Strip the interview-marker HTML comment from the committed text; its STATE
+      // is still parsed from streamBuf at turn-end.
+      const clean = combined.replace(INTERVIEW_MARKER_RE, '')
+      if (clean) pushStatic(createLogEntry({ type: 'assistant_message', content: clean }))
+      // Commit before the next live update so Static renders ahead of StreamOutput.
+      flushStaticBatch()
+      // Live region shows only the still-unemitted tail (small, bounded by the
+      // block writer's maxChars) — committed blocks live in scrollback, no overlap.
+      const tail = (blockWriterRef.current?.peek() ?? '').replace(INTERVIEW_MARKER_RE, '')
+      streamLiveBuf.current = capLiveTail(tail, cols, capRows)
+      setStreamingText(streamLiveBuf.current)
+      return
+    }
+    // glm path (unchanged): accumulate full reply, commit at turn-end. Live region
+    // shows only the bounded tail of the reply-so-far so it can't overflow viewport.
+    const tailSlice = streamBuf.current.slice(-(capRows * cols * 2 + cols))
+    streamLiveBuf.current = capLiveTail(tailSlice, cols, capRows)
     setStreamingText(streamLiveBuf.current)
   }))
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -582,7 +627,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   // --- Rewind ---
   const { getRewindEntries, handleRewind } = useRewind({
-    session, historyBufferRef, totalItemsPushedRef, setHistoryVersion, inputBarRef, pushStatic,
+    session, historyBufferRef, committedLogRef, totalItemsPushedRef, setHistoryVersion, inputBarRef, pushStatic,
   })
 
   const handleSubmit = useCallback((_userInput: string) => {
@@ -620,6 +665,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     blockWriterRef.current = new BlockStreamWriter({}, (text) => {
       textBatcher.current.push(text)
     })
+    thinkingCommittedRef.current = false // fresh thinking box for this turn
 
     streamStartRef.current = Date.now()
     thinkStartRef.current = 0
@@ -782,6 +828,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         projectActivity(now)
         blockWriterRef.current?.push(text)
+        // Incremental mode: update the live tail every delta (not just on block
+        // emit) so streaming stays smooth in the ~180ms gaps between emits.
+        if (incrementalCommit) {
+          const cols = process.stdout.columns ?? 80
+          const rows = process.stdout.rows ?? 24
+          const tail = (blockWriterRef.current?.peek() ?? '').replace(INTERVIEW_MARKER_RE, '')
+          setStreamingText(capLiveTail(tail, cols, Math.max(1, Math.floor(rows * 0.5))))
+        }
       },
       onThinkingDelta: (thinking) => {
         setHeartbeatStatus(null)
@@ -962,18 +1016,31 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Intermediate turn: update activity, freeze tools, reset thinking — but keep writer alive
         if (isFinal === false) {
           textBatcher.current.flushNow()
-          // Archive intermediate turn text to Static and clear stream buffers
-          // to prevent cross-turn text accumulation in StreamOutput (P2 fix).
-          const midText = streamBuf.current
-          if (midText) {
-            const midThinking = thinkBuf.current || undefined
-            // When model promotes thinking verbatim to visible text (DeepSeek/GLM),
-            // suppress the assistant_message — the thinking tab already renders it.
-            // Progress visibility is preserved via tools + thinking tab expansion.
-            if (midThinking && isThinkingPromotedToText(midThinking, midText)) {
-              pushStaticBatch([createLogEntry({ type: 'thinking_message', content: midThinking })])
-            } else {
-              pushAssistantEntry(midText, midThinking)
+          if (incrementalCommit) {
+            // This step's content is already committed block-by-block. Flush the
+            // unemitted tail into scrollback, then reset for the next step.
+            blockWriterRef.current?.flush()
+            textBatcher.current.flushNow()
+            // A thinking-only step (reasoning but no content) never triggered the
+            // lazy thinking commit — flush it now so it isn't lost.
+            if (!thinkingCommittedRef.current && thinkBuf.current) {
+              pushStatic(createLogEntry({ type: 'thinking_message', content: appendStreamWindow('', thinkBuf.current, STATIC_THINKING_CAP) }))
+            }
+            thinkingCommittedRef.current = false
+            flushStaticBatch()
+          } else {
+            // Archive intermediate turn text to Static and clear stream buffers
+            // to prevent cross-turn text accumulation in StreamOutput (P2 fix).
+            const midText = streamBuf.current
+            if (midText) {
+              const midThinking = thinkBuf.current || undefined
+              // When model promotes thinking verbatim to visible text (GLM),
+              // suppress the assistant_message — the thinking tab already renders it.
+              if (midThinking && isThinkingPromotedToText(midThinking, midText)) {
+                pushStaticBatch([createLogEntry({ type: 'thinking_message', content: midThinking })])
+              } else {
+                pushAssistantEntry(midText, midThinking)
+              }
             }
           }
           streamBuf.current = ''
@@ -1040,8 +1107,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           : (thinkBuf.current || undefined)
         // Stop streaming FIRST so StreamOutput unmounts before Static entry appears,
         // preventing duplicate content visible simultaneously in terminal.
-        // Clear live text BEFORE flipping isStreaming so that StreamOutput renders
-        // nothing in the same React batch — prevents flash-frame duplication.
         streamBuf.current = ''
         streamLiveBuf.current = ''
         setStreamingText('')
@@ -1051,7 +1116,26 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // synchronous pushStaticBatch below (真凶① double-safety, see HANDOFF doc).
         flushStaticBatch()
         setIsStreaming(false); isStreamingRef.current = false
-        if (finalText || thinkingForArchive) {
+        if (incrementalCommit) {
+          // finalText is already committed block-by-block. Commit any thinking that
+          // never got a content block (thinking-only reply), then extract interview
+          // STATE from the full text (the marker was stripped from committed blocks).
+          if (!thinkingCommittedRef.current && thinkBuf.current) {
+            pushStatic(createLogEntry({ type: 'thinking_message', content: appendStreamWindow('', thinkBuf.current, STATIC_THINKING_CAP) }))
+          }
+          thinkingCommittedRef.current = false
+          if (finalText) {
+            const parsed = parseInterviewMarker(finalText)
+            if (parsed) {
+              setInterviewState(parsed.state)
+              setClarityHistory(prev => [...prev.slice(-49), parsed.state.clarity])
+              if (parsed.state.confirmed) {
+                setSummaryState(prev => ({ ...prev, phase: 'interview' }))
+              }
+            }
+          }
+          flushStaticBatch()
+        } else if (finalText || thinkingForArchive) {
           if (finalText) {
             const parsed = parseInterviewMarker(finalText)
             if (parsed) {
@@ -1309,7 +1393,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         queueMicrotask(() => handleSubmitRef.current?.(next))
       }
     })
-  }, [agent, session, pushStatic, pushStaticBatch, flushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+  }, [agent, session, pushStatic, pushStaticBatch, flushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory, incrementalCommit])
 
   // Keep a ref to the latest handleSubmit so the deferred-submit drain (in the
   // run().finally above) can replay queued interrupt-window messages without
@@ -1335,7 +1419,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
       <Static
-        items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? staticItemsForInk : []}
+        items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? (staticItemsForInk as LogEntry[]) : []}
         key="static-history"
       >
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}

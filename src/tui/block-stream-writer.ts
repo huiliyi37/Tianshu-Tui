@@ -42,6 +42,13 @@ export class BlockStreamWriter {
     await this.sending
   }
 
+  /** The text received but not yet emitted as a block — i.e. the live tail.
+   *  Structurally bounded by maxChars/maxBufferSize, so it stays small enough
+   *  to render in the live region without exceeding the viewport (真凶②). */
+  peek(): string {
+    return this.buffer
+  }
+
   private resetIdleTimer(): void {
     this.clearIdleTimer()
     this.idleTimer = setTimeout(() => { this.flush() }, this.config.idleMs)
