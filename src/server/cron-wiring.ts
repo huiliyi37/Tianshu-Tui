@@ -50,11 +50,14 @@ export class CronWiring {
     this.lock = config.lock
 
     // 接线：scheduler 触发 → TaskRegistry 创建 cron 任务
+    // 直接将 Scheduler 串行覆写 onCreateTask 是不安全的（失去 observer 语义），
+    // 但当前 CronScheduler 的单回调设计下这是唯一接法。若未来有多订阅者需求，改为 emitter 模式。
     this.scheduler['onCreateTask'] = async (prompt: string, allowedTools: string[], agentId?: string) => {
       await this.registry.createTask({
         prompt,
         source: 'cron',
         callerId: agentId ?? 'cron-scheduler',
+        allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
       })
     }
 

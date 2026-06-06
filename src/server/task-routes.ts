@@ -197,6 +197,21 @@ export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandl
       return { status: 200, body: { task } }
     },
 
+    'POST /tasks/:id/cancel': async (body, params) => {
+      const token = extractToken(body)
+      if (!checkAuth(token, apiToken)) {
+        return { status: 401, body: { error: 'Unauthorized' } }
+      }
+
+      const id = params?.id
+      if (!id) return { status: 400, body: { error: 'Missing task id' } }
+
+      const cancelled = await registry.cancel(id)
+      if (!cancelled) return { status: 404, body: { error: 'Task not found' } }
+
+      return { status: 200, body: { task: cancelled } }
+    },
+
     'GET /tasks/:id/events': async (body, params) => {
       const token = extractToken(body)
       if (!checkAuth(token, apiToken)) {

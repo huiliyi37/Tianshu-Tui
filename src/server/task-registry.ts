@@ -128,6 +128,7 @@ export class TaskRegistry {
       callerId,
       idempotencyKey,
       force: input.force ?? false,
+      allowedTools: input.allowedTools,
     }
 
     await this.store.save(record)

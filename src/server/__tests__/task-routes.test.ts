@@ -117,6 +117,23 @@ describe('Task Routes', () => {
     assert.equal(res.status, 404)
   })
 
+  // ── POST /tasks/:id/cancel ──────────────────────────────
+
+  it('POST /tasks/:id/cancel cancels a running task', async () => {
+    const task = await registry.createTask({ prompt: 'to cancel', source: 'api', callerId: 'u1' })
+    await registry.transition(task.id, 'running')
+
+    const res = await router('POST', '/tasks/' + task.id + '/cancel', {})
+    assert.equal(res.status, 200)
+    const body = res.body as { task: { status: string } }
+    assert.equal(body.task.status, 'cancelled')
+  })
+
+  it('POST /tasks/:id/cancel returns 404 for unknown task', async () => {
+    const res = await router('POST', '/tasks/nonexistent/cancel', {})
+    assert.equal(res.status, 404)
+  })
+
   // ── Auth ──────────────────────────────────────────────────
 
   it('returns 401 when token required but not provided', async () => {

@@ -6,7 +6,7 @@
  * 未来换 SQLite 只需换实现，不动 TaskRegistry 逻辑。
  */
 
-import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -53,6 +53,8 @@ export interface TaskRecord {
     exitCode?: number
   }
   error?: string
+  /** cron 任务的工具白名单 */
+  allowedTools?: string[]
 }
 
 export interface CreateTaskInput {
@@ -63,6 +65,8 @@ export interface CreateTaskInput {
   force?: boolean
   /** 自定义 idempotency key（不传则自动基于 prompt+caller+bucket 生成） */
   idempotencyKey?: string
+  /** cron 任务的工具白名单（默认空 = 无工具限制） */
+  allowedTools?: string[]
 }
 
 // ─── TaskStore 接口 ───────────────────────────────────────────
@@ -100,8 +104,6 @@ export class JsonTaskStore implements TaskStore {
     const tmpPath = join(this.dir, `${task.id}.tmp`)
     const finalPath = join(this.dir, `${task.id}.json`)
     writeFileSync(tmpPath, JSON.stringify(task, null, 2), 'utf-8')
-    // 原子 rename
-    const { renameSync } = await import('node:fs')
     renameSync(tmpPath, finalPath)
   }
 
