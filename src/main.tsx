@@ -642,6 +642,9 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
           _fileHistoryRef.getAllSnapshots(),
         )
       }
+      // Flush debounced stigmergy deposits synchronously — a pheromone deposited
+      // within the 200ms debounce window would otherwise be lost on exit.
+      agent.flushStigmergySync()
       // agent.abort() already triggers killAll() internally (loop.ts); a second
       // killAll() here is dead on the exit path (its setTimeout SIGKILL never
       // fires before process.exit). gracefulShutdown's killAllSync() does the

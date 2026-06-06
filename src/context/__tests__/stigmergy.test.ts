@@ -106,6 +106,19 @@ describe('StigmergyStore', () => {
     assert.equal(entries.length, 2)
   })
 
+  it('flushSync persists pending debounced deposits without awaiting (exit path)', async () => {
+    const store1 = new StigmergyStore(storePath)
+    await store1.deposit({ path: 'a.ts', signal: 'entry-point', strength: 0.4 })
+    await store1.deposit({ path: 'b.ts', signal: 'fragile', strength: 0.8 })
+    // Simulate the process-exit path: deposits are still inside the 200ms
+    // debounce window. flushSync must persist them synchronously.
+    store1.flushSync()
+
+    const store2 = new StigmergyStore(storePath)
+    const entries = await store2.load()
+    assert.equal(entries.length, 2)
+  })
+
   it('query returns entries matching path', async () => {
     const store = new StigmergyStore(storePath)
     await store.deposit({ path: 'a.ts', signal: 'well-tested', strength: 0.6 })

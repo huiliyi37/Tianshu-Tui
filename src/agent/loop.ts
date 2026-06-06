@@ -567,6 +567,19 @@ export class AgentLoop {
   }
 
   /**
+   * Synchronously persist pending stigmergy deposits. Called from the exit
+   * path (main.tsx shutdownCallback) so deposits inside the 200ms debounce
+   * window survive Ctrl+C / shutdown. Best-effort: never throw on the exit path.
+   */
+  flushStigmergySync(): void {
+    try {
+      this.stigmergyStore.flushSync()
+    } catch {
+      // exit-path persistence is best-effort; a failure must not block exit
+    }
+  }
+
+  /**
    * System-initiated abort (hard-stall watchdog) — breaks a wedged turn
    * WITHOUT incrementing `_turnInterruptCount`. That counter feeds the
    * recovery-trigger's "repeatedly interrupted" classification (see

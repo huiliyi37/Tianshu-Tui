@@ -1,7 +1,8 @@
 import { readFile, mkdir } from 'node:fs/promises'
+import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import { writeFileAtomicAsync } from '../fs-atomic.js'
+import { writeFileAtomicAsync, writeFileAtomicSync } from '../fs-atomic.js'
 
 import type { PheromoneSignal } from '../agent/sensorium.js'
 
@@ -166,6 +167,24 @@ export class StigmergyStore {
     }
     if (this._dirty && this._cache !== null) {
       await this._persist(this._cache)
+    }
+  }
+
+  /**
+   * Synchronous force-flush for the process-exit path, where async work is
+   * abandoned by process.exit(). Mirrors _persist() with the sync atomic
+   * writer so a deposit landing inside the 200ms debounce window is not lost
+   * on Ctrl+C / shutdown. No-op when nothing is pending.
+   */
+  flushSync(): void {
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer)
+      this._flushTimer = null
+    }
+    if (this._dirty && this._cache !== null) {
+      mkdirSync(dirname(this.filePath), { recursive: true })
+      writeFileAtomicSync(this.filePath, JSON.stringify(this._cache, null, 2))
+      this._dirty = false
     }
   }
 
