@@ -1017,7 +1017,9 @@ async function main() {
 
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),
-    { exitOnCtrlC: false },
+    // incrementalRendering: per-line diff + CSI 2026 synchronized output (Ink 6.8.0)
+    // — less flicker than the default whole-block eraseLines renderer.
+    { exitOnCtrlC: false, incrementalRendering: true },
   )
 
   process.on('SIGINT', gracefulShutdown)
