@@ -195,4 +195,160 @@ spec B §2.2 的 cron 调度器若不在进程重启后恢复 schedule，每次�
 - §4 cache：84-95% 明确标注为**单会话内基线**，跨任务目标改为「不劣于该值、池化后重测」，不写死为保证值。
 - §10：以 ContextClaimStore 事实**强化**——天枢跨会话记忆只有结构化 claim 库，无任何持续身份/人格记忆，「跨任务本体演化」确认待研究。
 
-**对称记录**：上一轮我代码核实纠正了天枢「无 session 持久化」的自评（其实有，服务主会话）；这一轮天枢代码核实纠正了我「接线非从零造」的轻描（其实 PromptEngine 状态导出不存在，是新能力）。两轮都用代码校准了对方的隐性偏差——这正是双向审查该有的样子。设计路线不变，精度提升。
+
+---
+
+# 天枢执中审查（2026-06-06，天枢 + Opus 联合评估）
+
+> 审查方法：先读 spec，再派 scout 代码核实（task-board、coordinator、session-persist、nightcrawler），
+> 基于真实代码做缺口比对。spec 已有的天枢审查修订和天璇二次审查回应已经覆盖了大量关键问题。
+> 以下聚焦前两轮审查**仍未覆盖或低估**的点。
+
+## 🔴 P0（阻塞实施）
+
+### P0-1：取消机制依赖 AbortSignal，但 worker agent loop 内部不一定会响应
+
+**代码核实**：`coordinator.ts:79-81, 144-165, 228, 252-270` — AbortSignal 传播分三层：
+
+1. `DelegationCoordinatorConfig.abortSignal` — 构造时注入
+2. `delegate()` per-call abortSignal 覆盖 — savedSignal/finally 模式
+3. `wrapAbort()` — AbortSignal 与 Promise 竞态包装
+
+信号传播到 worker session 层面（`workerConfig.abortSignal = this.config.abortSignal`），但 **worker 内部的 agent loop 需要在关键点显式检查 AbortSignal**。当前信号只用于：
+- coordinator 在 delegate 入口做 abort guard（`coordinator.ts:170-177`）
+- coordinator 的 wrapAbort 在 Promise 落定后移除监听器
+
+**缺失**：agent loop 的每轮循环、每个工具调用前，没有 `if (signal.aborted) throw ...` 检查。如果 worker 正在执行一个长时间运行的工具（如 `bash` 跑 10 分钟编译），AbortSignal 触发后 worker 不会立即停止——它要等当前工具执行完才在下一轮循环检测到（如果有检测的话）。
+
+**修正建议**：spec §2.1 补充：
+
+> 任务取消的可靠性取决于 agent loop 在两个关键点显式检查 AbortSignal：
+> 1. 每轮循环开始前（若已 aborted，立即返回 cancelled 结果）
+> 2. 每个工具调用前（若已 aborted，跳过工具执行）
+> 工具执行中（如长时间 bash）的取消依赖工具自身的超时/信号传播，不在 task 层面解决。
+
+### P0-2：超时和手动取消的交互未定义
+
+spec 补了任务超时（`running → timed_out`），但一个任务可能同时被手动取消（`POST /cancel`）和超时触发。`AbortController.abort()` 可安全多次调用（第二次是 no-op），但状态转换需要定义：
+
+- 任务已 `cancelled` → 超时触发 → 应保持 `cancelled`，不被覆盖为 `timed_out`
+- 任务已 `timed_out` → 手动取消 → 应保持 `timed_out`（或转为 `cancelled`？需明确）
+
+**修正建议**：状态转换规则加一条：
+
+```
+cancelled 是终态，不可被任何其他转换覆盖。
+转换优先级：cancelled > timed_out > failed > completed
+```
+
+即：任何非 cancelled 状态可被取消打断转为 cancelled；任何非 cancelled/timed_out 状态可被超时打断转为 timed_out。
+
+## 🟡 P1（重要）
+
+### P1-1：prompt hash 作为唯一幂等 key 过于激进
+
+同一 prompt 在不同时间、不同上下文下提交，可能需要确实是不同的 task。例如：
+- 用户早 9 点问「检查仓库健康」→ 下午 3 点再问同样的话，应该是两个独立 task
+- 两个不同 runtime 同时提交同一 prompt，可能是两个合法请求
+
+**修正建议**：用复合幂等 key：
+
+```
+idempotency_key = hash(prompt + caller_id + time_bucket_5min)
+```
+
+- `time_bucket_5min`：把时间舍入到 5 分钟窗口。窗口外的重复 prompt 视为新 task。
+- `caller_id`：来自姊妹 spec 的 ingress auth。不同调用方即使 prompt 相同也不去重。
+- 保留 `force` 参数：显式跳过幂等检查，强制创建新 task。
+
+### P1-2：KV 方案选型需要更具体的 MVP 决策
+
+spec 说「SQLite 或 per-task JSON 文件」，两者取舍不同：
+
+| 维度 | per-task JSON | SQLite |
+|------|-------------|--------|
+| 零依赖 | ✅ | ❌（better-sqlite3 native addon） |
+| 并发安全 | ❌（同文件多写需锁） | ✅（WAL 模式） |
+| 查询（列全部 task） | ❌（需 readdir + 逐个读） | ✅（SELECT） |
+| MVP 适合度 | ✅（TaskRegistry 单例在进程内） | ⚠️（过度工程） |
+
+**修正建议**：spec 明确 MVP 选 per-task JSON（`.rivet/tasks/{id}.json`），通过 `TaskStore` 接口抽象：
+
+```typescript
+interface TaskStore {
+  save(task: TaskRecord): Promise<void>
+  load(id: string): Promise<TaskRecord | null>
+  list(filter?: TaskFilter): Promise<TaskRecord[]>
+  delete(id: string): Promise<void>
+}
+```
+
+未来换 SQLite 只需换实现，不动 TaskRegistry 逻辑。
+
+### P1-3：notify policy 仅 log 级，调用方无主动感知路径
+
+异步 task 模型下，调用方通过 `POST /prompt` 拿到 task id 后，唯一获取结果的方式是**主动轮询** `GET /tasks/:id`。log 级通知对自动化集成无用。
+
+**修正建议**：notify policy 三档含义明确：
+
+- `silent`：仅写 task 记录，无任何主动输出
+- `state_changes`：状态变化时写一条结构化 log（JSON 行到 `.rivet/tasks/events.jsonl`），调用方可通过 `GET /tasks/:id/events?since=<timestamp>` 拉取
+- `errors_only`：同 state_changes，但仅记录 failed/timed_out 事件
+
+所有 notify 都走 task 记录持久化——"通知"本质上是「可查询的状态变化历史」，而非 push 机制（webhook 是后续优化）。
+
+### P1-4：cron 触发 task 与手动 task 的区分
+
+cron 触发的任务和 API/手动创建的任务在 TaskRegistry 中混在一起。审计时需要区分来源。
+
+**修正建议**：TaskRecord 加 `source` 字段：
+
+```typescript
+type TaskSource = 'api' | 'cron' | 'manual' | 'internal'
+```
+
+cron 触发的 task 在 scheduler 创建时设 `source: 'cron'`，API 创建的设 `source: 'api'`。
+
+## 🟢 P2（次要）
+
+### P2-1：TaskBoard 投影层与 TaskRegistry 的数据流
+
+spec 说「TaskBoard 继续做 UI 投影，TaskRegistry 作为其数据源」。当前 TaskBoard 监听 `WorkOrderQueue` 的事件（`task-board.ts:28-31`），而非 TaskRegistry。两个数据源需要合并或分层：
+
+- **短期**（MVP）：TaskBoard 继续监听 WorkOrderQueue（TUI 任务），TaskRegistry 独立运行（daemon 任务）。两者在 MVP 不合并——TUI 的 TaskBoard 显示当前会话的 worker 调度，HTTP API 的 `/tasks` 显示 TaskRegistry 管理的 daemon 任务。
+- **长期**：TaskRegistry 成为唯一数据源，TaskBoard 通过 TaskRegistry 获取数据（WorkOrderQueue 事件转发到 TaskRegistry）。
+
+建议 spec 明确这个分层，避免实施时强行合并导致耦合。
+
+### P2-2：任务超时默认值
+
+spec 补了超时但未给默认值。建议：API 创建的 task 默认 30 分钟超时，cron 创建的 60 分钟。两者均可配置。
+
+---
+
+## 净结论
+
+前两轮审查（天枢初查 + 天璇二次审查）已经覆盖了大量关键问题——SessionPersist 不适用、PromptEngine 无状态导出、任务超时/去重/持久化缺失。本轮发现的两项 P0（取消可靠性、超时-取消交互）是「有了设计但没想清楚边界」的类型，补上状态转换规则和 AbortSignal 检查点即可。P1 四项是精度优化，让方案从「可行」到「好用」。
+
+**实施顺序微调**：
+
+```
+Phase 0（依赖姊妹 spec runtime 池就绪）
+  ├─ TaskRegistry：生命周期 + 取消 + 超时（含状态转换优先级规则）★补充★
+  │   + 去重（复合幂等 key：prompt + caller_id + time_bucket）★补充★
+  │   + TaskStore 接口 + per-task JSON MVP 实现 ★补充★
+  └─ agent loop：AbortSignal 检查点（循环前 + 工具前）★新增★
+
+Phase 1（持久化 + 审计）
+  ├─ TaskStore per-task JSON 实现
+  ├─ TaskRecord.source 字段（api/cron/manual/internal）★补充★
+  └─ GET /tasks /tasks/:id /tasks/:id/events 审计 API
+
+Phase 2（调度 + 通知）
+  ├─ scheduler.ts：cron/间隔 + 持久 schedule 表
+  │   依赖 spec A 改造二的 nightcrawler max_turns 补丁 ★关键依赖★
+  └─ notify policy：state_changes 写 events.jsonl ★补充★
+```
+
+**与 spec A 的交叉依赖**：本 spec Phase 2 的 scheduler 依赖 spec A 改造二的 nightcrawler max_turns 补丁。不补 max_turns，cron 触发的无人值守任务无限循环 → 应调整执行顺序：**先做 spec A 改造二的 P0-pre（nightcrawler max_turns），再做本 spec Phase 2**。
+
