@@ -10,6 +10,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { hostname as osHostname } from 'node:os'
 import { dirname } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { CronLock, type LockInfo, type LockState } from '../cron-lock.js'
@@ -76,7 +77,7 @@ describe('CronLock P0 regressions', () => {
     writeOwner(TEST_LOCK_PATH, {
       pid: 999_999_999,
       acquiredAt: new Date().toISOString(),
-      hostname: 'dead-owner',
+      hostname: osHostname(),
     })
 
     const contenders = Array.from({ length: 8 }, () => startContender(TEST_LOCK_PATH, TEST_RELEASE_PATH))
@@ -154,6 +155,21 @@ describe('CronLock P0 regressions', () => {
     )
     assert.equal(ownerStatuses.length, 1, JSON.stringify(statuses))
     assert.ok(statuses.some(status => status.status === 'contended'), JSON.stringify(statuses))
+  })
+
+  it('does not recover a dead-looking owner from a different hostname', () => {
+    writeOwner(TEST_LOCK_PATH, {
+      pid: 999_999_999,
+      acquiredAt: new Date().toISOString(),
+      hostname: `${osHostname()}-remote`,
+    })
+
+    const lock = new CronLock({ lockPath: TEST_LOCK_PATH, healthCheckIntervalMs: 99999 })
+    const state = lock.acquire()
+
+    assert.equal(state.status, 'contended')
+    assert.equal((state as Extract<LockState, { status: 'contended' }>).owner.hostname, `${osHostname()}-remote`)
+    lock.release()
   })
 
   it('notifies onLockLost when the lock file is no longer owned by this process', async () => {

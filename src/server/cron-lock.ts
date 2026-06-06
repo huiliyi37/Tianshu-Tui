@@ -25,7 +25,7 @@ import {
 } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { execSync } from 'node:child_process'
+import { hostname as osHostname } from 'node:os'
 import { isMainThread } from 'node:worker_threads'
 
 // ─── Types ────────────────────────────────────────────────────
@@ -68,14 +68,10 @@ const DEFAULT_HEALTH_CHECK_MS = 10_000
  * macOS/Linux: ps -p <pid> -o state= | grep -v Z
  */
 export function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
   try {
-    const output = execSync(`ps -p ${pid} -o state= 2>/dev/null`, {
-      encoding: 'utf-8',
-      timeout: 2000,
-    })
-    const state = output.trim()
-    // 空输出 → 进程不存在；Z → zombie
-    return state.length > 0 && !state.includes('Z')
+    process.kill(pid, 0)
+    return true
   } catch {
     return false
   }
@@ -174,6 +170,12 @@ export class CronLock {
       return this.state
     }
 
+    if (owner.hostname !== this.getHostname()) {
+      // 跨主机共享锁不能用本机 PID 判定 owner 死亡；保守视为占用。
+      this.state = { status: 'contended', owner }
+      return this.state
+    }
+
     if (!isPidAlive(owner.pid)) {
       // owner 已死 → 陈旧锁回收
       return this.recoverStaleLock(owner)
@@ -234,11 +236,7 @@ export class CronLock {
   // ─── Internal ──────────────────────────────────────────────
 
   private getHostname(): string {
-    try {
-      return execSync('hostname', { encoding: 'utf-8', timeout: 1000 }).trim()
-    } catch {
-      return 'unknown'
-    }
+    return osHostname() || 'unknown'
   }
 
   private buildLockInfo(): LockInfo {
