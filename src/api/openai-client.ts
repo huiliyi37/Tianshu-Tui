@@ -201,6 +201,12 @@ export class OpenAIClient implements StreamClient {
     if (request.reasoning_effort && this.config.effortFormat !== 'none') {
       body.reasoning_effort = request.reasoning_effort
     }
+    // Codex (served via cliproxy) tops out at 'xhigh', not Rivet's canonical
+    // 'max'. Map at the wire so the global ReasoningEffort enum stays unchanged
+    // and other providers keep receiving 'max'.
+    if (this.config.providerName === 'codex' && body.reasoning_effort === 'max') {
+      body.reasoning_effort = 'xhigh'
+    }
 
     // Apply stable system suffix (Chinese thinking instruction) — computed once at construction.
     if (this.systemSuffix) {
