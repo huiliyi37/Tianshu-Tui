@@ -19,13 +19,13 @@ function result(overrides: Partial<WorkerResult>): WorkerResult {
   }
 }
 
-function transcript(toolUses: string[]): WorkerTranscript {
+function transcript(toolUses: string[], errors: string[] = []): WorkerTranscript {
   return {
     text: '',
     thinking: '',
     toolUses,
     toolResults: [],
-    errors: [],
+    errors,
     repairAttempts: 0,
   }
 }
@@ -193,6 +193,17 @@ test('adversarial_verifier with unchanged evidenceStatus still passes through', 
 
   assert.equal(checked.status, 'passed')
   assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('adversarial_verifier downgrades verified when run_tests errored', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'adversarial_verifier', transcript(['read_file', 'run_tests'], ['run_tests: Test run failed']))
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('errored')))
 })
 
 test('blocks write worker with changedFiles and examinedFiles but no verification', () => {

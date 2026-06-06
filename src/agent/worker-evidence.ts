@@ -27,12 +27,31 @@ const WRITE_PROFILES_ADVISORY = ['patcher']
 export function verifyWorkerEvidence(result: WorkerResult, profile?: string, transcript?: WorkerTranscript): WorkerResult {
   if (profile === 'adversarial_verifier' && result.evidenceStatus === 'verified') {
     // Fail-closed: no transcript = cannot prove tests were run = unverified
-    const hasRunTests = transcript && transcript.toolUses.includes('run_tests')
-    if (!hasRunTests) {
+    if (!transcript) {
       return {
         ...result,
         evidenceStatus: 'unverified',
         risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
+      }
+    }
+    const runTestsIdx = transcript.toolUses.lastIndexOf('run_tests')
+    if (runTestsIdx === -1) {
+      return {
+        ...result,
+        evidenceStatus: 'unverified',
+        risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
+      }
+    }
+    // Defense in depth: check that run_tests didn't error out
+    // toolResults[i] corresponds to toolUses[i] — same order in runOnce callbacks
+    const testsErrored = transcript.errors.some(e =>
+      e.includes('run_tests') || e.includes('Test run failed'),
+    )
+    if (testsErrored) {
+      return {
+        ...result,
+        evidenceStatus: 'unverified',
+        risks: addRisk(result.risks, 'adversarial_verifier ran run_tests but it errored — verdict not trustworthy'),
       }
     }
   }

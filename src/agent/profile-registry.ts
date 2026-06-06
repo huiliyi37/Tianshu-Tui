@@ -306,6 +306,12 @@ function parseAgentMarkdown(content: string): ProfileDefinition {
   if (!Array.isArray(fm.tools) || fm.tools.length === 0) {
     throw new Error('tools must be a non-empty array')
   }
+  // Fail-fast: reject unknown tool names at load time instead of at dispatch
+  const knownToolNames = new Set(BUILTIN_PROFILES.flatMap(p => p.allowedTools))
+  const unknownTools = (fm.tools as string[]).filter(t => !knownToolNames.has(t))
+  if (unknownTools.length > 0) {
+    throw new Error(`Unknown tool(s) in allowedTools: ${unknownTools.join(', ')}. Known tools: ${[...knownToolNames].sort().join(', ')}`)
+  }
 
   return {
     name: fm.name,
