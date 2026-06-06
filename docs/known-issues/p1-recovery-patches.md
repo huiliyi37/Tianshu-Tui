@@ -1,5 +1,13 @@
 # P1 Recovery 修复补丁
 
+> **状态：✅ 全部已落地（2026-06-06 确认）**
+>
+> - 压#7: `session-persist.ts:200,204` — `repairOrphanToolCalls()` (commit `edd2935`)
+> - 中#5: `loop.ts:141,561,677-694,708,725,869` — `_turnInterruptCount` + `detectPendingTools()` + `computeSessionIntegrity()`
+> - 网#1: `openai-client.ts:79,245,448-451,529,604` — `_textAccum` + `tryParseToolJsonFromContent()`
+>
+> 以下设计记录保留供参考。
+
 以下 3 个修复因共享工作区并发编辑冲突未能直接应用到代码。
 变更以 diff 形式记录，可在无并发编辑时通过 `git apply` 应用。
 

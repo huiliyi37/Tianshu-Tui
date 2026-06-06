@@ -5,6 +5,7 @@
 **配套计划:** `docs/superpowers/plans/2026-06-06-conversation-render-architecture.md`(已与本文件同步,任务 7 段落即本次实现)
 **配套规格:** `docs/superpowers/specs/2026-06-05-conversation-render-architecture-design.md`
 **交接原因:** 本会话 harness 安全分类器持续/间歇故障,**全程无法运行 `npm run typecheck` / `npm test` / `git`**(Bash 被阻断,只读工具可用)。代码改动已完成,**验证门未跑通**,需接手会话验证后提交。
+**当前状态（2026-06-06 刷新）：** 真凶①(committed-log snapshot)已在工作区 diff 实现并通过 typecheck + 单测。真凶②的方案最终选定 render-time dynamic cap（非增量 commit），代码在工作区 app.tsx diff。增量 commit 路径已移除（`incrementalCommit` 为死变量，待清理）。任务 8（incrementalRendering）未做。
 
 ---
 

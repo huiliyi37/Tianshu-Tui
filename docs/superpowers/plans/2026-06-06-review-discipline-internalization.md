@@ -401,90 +401,153 @@ git add src/prompt/static.ts
 git commit -m "feat(prompt): inject review disciplines into base workflow prompt"
 ```
 
-### 任务 4：delivery-gate 在修复提交时调用 ReviewRouter（核心，无条件）
+### 任务 4：把 ReviewRouter 挂进 deliver_task 的 async execute（核心，无条件）
 
-> 把 gate 从「自我断言即 GREEN」改成「修复类提交 → 调 `routeReviewWorkflow` → 按 outcome 定 GREEN/RED」。先读 `src/agent/delivery-gate-v2.ts:76`（构造参数）与 `:219-275`（判定分支）。
+> **架构裁定（基于实读 2026-06-06）：不改 gate async。** `assess()`/`getReport()` 是同步的，改 async 会波及 `main.tsx` 与整个接口契约。但 `deliver-task.ts:142 async execute()` **本来就是 async**，`message`/`files`/`commit` 参数齐全（正好是 ChangeSet 来源），且**已在分层挂门禁**（commit-cohesion 是个 RED 门，见 `:287` 的拒绝模式）。所以 router 挂进 deliver_task，gate 不动——改动收敛在一个本就 async 的 handler。
+
+**先读：** `src/agent/deliver-task.ts`（`:142 execute`、`:147 getReport`、`:287` RED 返回模式）、`src/agent/commit-cohesion.ts`（既有 RED 门怎么写）、`src/main.tsx:207`（gate/deliver_task 装配处）。
 
 **文件：**
-- 修改：`src/agent/delivery-gate-v2.ts`（判定分支前插入修复门，调 router）
-- 测试：`src/agent/__tests__/delivery-gate-v2.test.ts`（追加）
+- 修改：`src/agent/deliver-task.ts`（`execute` 内 `commit===true` 分支，cohesion 检查前插 router 门）
+- 修改：`src/agent/deliver-task.ts` deps 接口（注入 `reviewRouter` + `reviewDepth`）
+- 测试：`src/agent/__tests__/deliver-task.test.ts`（追加）
 
 - [ ] **步骤 1：编写失败的测试**
 
 ```typescript
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDeliveryGateV2 } from '../delivery-gate-v2.js'
+import { createDeliverTaskTool } from '../deliver-task.js'
 
-// 注入 router 桩：verified → GREEN；escalated → RED
-test('fix commit: router verified → GREEN with evidence', async () => {
-  const gate = createDeliveryGateV2({
-    reviewRouter: async () => ({ tier: 'L2', verdict: 'verified', evidence: 'ran: npx test → 27/27' }),
-    /* 其余按文件 76 行现有参数补全 */
+// router 桩 + 最小 gate/ownership 桩（按 deliver-task.ts deps 接口补全）
+function makeTool(routerStub: unknown, depth = 0) {
+  return createDeliverTaskTool({
+    gate: { assess: () => ({ state: 'GREEN' } as never), getReport: () => ({} as never) },
+    routeReviewWorkflow: routerStub as never,
+    reviewDepth: depth,
+    /* commitOwnedFiles / dirtyFiles 等按需补桩 */
   } as never)
-  const r = await gate({ commitMessage: 'fix(server): H4 回归修复', ownedVerifications: [] } as never)
-  assert.equal(r.state, 'GREEN')
+}
+
+test('fix commit: router escalated → RED, commit not executed', async () => {
+  let committed = false
+  const tool = createDeliverTaskTool({
+    gate: { assess: () => ({ state: 'GREEN' } as never), getReport: () => ({} as never) },
+    routeReviewWorkflow: async () => ({ tier: 'L2', verdict: 'rejected', escalated: true, rounds: 3, evidence: 'still broken' }),
+    reviewDepth: 0,
+    commitOwnedFiles: () => { committed = true; return {} as never },
+  } as never)
+  const r = await tool.execute({ input: { commit: true, message: 'fix(server): H4 回归修复', files: ['x.ts'] } } as never)
+  assert.match(JSON.stringify(r), /review|squadron|verifier/i)
+  assert.equal(committed, false) // RED：不提交
 })
 
-test('fix commit: router escalated (loop未收敛) → RED', async () => {
-  const gate = createDeliveryGateV2({
-    reviewRouter: async () => ({ tier: 'L2', verdict: 'rejected', escalated: true, rounds: 3 }),
-  } as never)
-  const r = await gate({ commitMessage: 'fix(server): H4 回归修复', ownedVerifications: [] } as never)
-  assert.equal(r.state, 'RED')
-  assert.ok(r.shortestNextStep?.includes('adversarial_verifier'))
+test('fix commit: router verified → falls through to existing gate/commit', async () => {
+  let routerCalled = false
+  const tool = makeTool(async () => { routerCalled = true; return { tier: 'L2', verdict: 'verified', evidence: 'ran: npx test → ok', rounds: 1 } })
+  await tool.execute({ input: { commit: true, message: 'fix: x', files: ['x.ts'] } } as never)
+  assert.equal(routerCalled, true)
 })
 
-test('non-fix commit: router not invoked, existing logic unchanged', async () => {
-  let called = false
-  const gate = createDeliveryGateV2({ reviewRouter: async () => { called = true; return { tier: 'L1' } } } as never)
-  await gate({ commitMessage: 'feat: add route', ownedVerifications: [{ command: 'x', status: 'passed' }] } as never)
-  assert.equal(called, false)
+test('non-fix commit: router NOT invoked', async () => {
+  let routerCalled = false
+  const tool = makeTool(async () => { routerCalled = true; return { tier: 'L1', verdict: 'nudge' } })
+  await tool.execute({ input: { commit: true, message: 'feat: add route', files: ['x.ts'] } } as never)
+  assert.equal(routerCalled, false)
+})
+
+test('re-entrancy guard: reviewDepth>0 (子代理上下文) skips router', async () => {
+  let routerCalled = false
+  const tool = makeTool(async () => { routerCalled = true; return { tier: 'L2', verdict: 'verified', evidence: 'x' } }, 1)
+  await tool.execute({ input: { commit: true, message: 'fix: x', files: ['x.ts'] } } as never)
+  assert.equal(routerCalled, false) // 防审查自我递归
 })
 ```
 
-- [ ] **步骤 2：运行验证失败** — `npx tsx --test src/agent/__tests__/delivery-gate-v2.test.ts` → 新分支未实现。
+- [ ] **步骤 2：运行验证失败** — `npx tsx --test src/agent/__tests__/deliver-task.test.ts` → 新分支/deps 未实现。
 
 - [ ] **步骤 3：编写最少实现**
 
 ```typescript
-// delivery-gate-v2.ts，判定分支最前面
-import { isFixContext } from './review-discipline.js'
+// deliver-task.ts —— deps 接口追加
+import { routeReviewWorkflow, type ReviewRouterDeps } from './review-router.js'
+import { isFixContext, type ChangeSet } from './review-discipline.js'
 
-if (isFixContext(input.commitMessage)) {
-  const outcome = await deps.reviewRouter(toChangeSet(input)) // toChangeSet 由 owned files 构造
-  if (outcome.escalated || outcome.verdict === 'rejected') {
-    return { state: 'RED', shortestNextStep: '修复类提交：spawn adversarial_verifier 取命令+输出证据后再交付',
-      /* 对齐 DeliveryGateResult 其余必填字段 */ } as never
+export interface DeliverTaskDeps {
+  gate: DeliveryGateV2
+  routeReviewWorkflow?: typeof routeReviewWorkflow  // 可注入（测试桩）
+  reviewDeps?: ReviewRouterDeps                       // 真实 coordinator deps（任务5 提供）
+  reviewDepth?: number                                // 重入护栏：子代理上下文 >0 时跳过
+  // ...既有字段
+}
+
+// execute() 内，commit===true 分支，cohesion 检查之前：
+if (params.input.commit && (ctx.reviewDepth ?? 0) === 0 && isFixContext(params.input.message ?? '')) {
+  const change: ChangeSet = {
+    files: params.input.files ?? ownedFiles,
+    crossModule: isCrossModule(params.input.files ?? ownedFiles), // 见任务5 步骤0
+    isFix: true,
   }
-  // verified → 落入下方既有 GREEN 逻辑（带 outcome.evidence）
+  const route = ctx.routeReviewWorkflow ?? routeReviewWorkflow
+  const outcome = await route(change, ctx.reviewDeps!)
+  if (outcome.escalated || outcome.verdict === 'rejected') {
+    return redResult(  // 复用 deliver-task.ts:287 的 RED 返回模式
+      `审查门 RED（${outcome.tier}）：${outcome.evidence ?? '未通过对抗审查'}\n` +
+      `  → spawn adversarial_verifier 取命令+输出证据修复后，re-run deliver_task。`,
+    )
+  }
+  // verified → 落入下方既有 cohesion/gate/commit 逻辑
 }
 ```
 
-> ⚠️ `createDeliveryGateV2` 当前可能是同步的（见文件 76 行）。引入 `await reviewRouter` 需把 gate 改 async——这会触及所有调用方（`deliver_task`）。实现前 grep `createDeliveryGateV2(` 调用处，确认改 async 的波及面；若波及大，router 调用可前移到 `deliver_task` 内、gate 仅消费 outcome 字段（保持 gate 同步）。**这是实现期的真实决策点，按调用面定。**
+> **重入护栏（任务4 最关键设计）：** router 会 spawn verifier/patcher 子代理；子代理若也调 deliver_task，会再触发 router → 审查自我递归。`reviewDepth` 由 spawn 子代理时 +1 注入（在任务5 的 `createCoordinatorReviewDeps` 里，spawn 时把 `reviewDepth: depth+1` 传进子代理 ctx）。`reviewDepth>0` → 跳过 router。参照 `immune-hook.ts` 的重入思路。
 
-- [ ] **步骤 4：运行验证通过 + 回归既有 gate 测试**
+- [ ] **步骤 4：运行验证通过 + 回归既有 deliver-task 测试**
 
-运行：`npx tsx --test src/agent/__tests__/delivery-gate-v2.test.ts`（**全量**，不只新增——本计划自身遵守纪律3：改 X 跑覆盖 X 的既有测试）
-预期：新 3 测试 PASS，既有测试不回归。
+运行：`npx tsx --test src/agent/__tests__/deliver-task.test.ts`（**全量**——纪律3：改 X 跑覆盖 X 的既有测试，防相邻回归）
+预期：新 4 测试 PASS，既有 deliver-task 测试不回归。
 
 - [ ] **步骤 5：commit**
 
 ```bash
-npm run typecheck && npx tsx --test src/agent/__tests__/delivery-gate-v2.test.ts
-git add src/agent/delivery-gate-v2.ts src/agent/__tests__/delivery-gate-v2.test.ts
-git commit -m "feat(agent): delivery-gate routes fix commits through ReviewRouter"
+npm run typecheck && npx tsx --test src/agent/__tests__/deliver-task.test.ts
+git add src/agent/deliver-task.ts src/agent/__tests__/deliver-task.test.ts
+git commit -m "feat(agent): deliver_task routes fix commits through ReviewRouter (with re-entrancy guard)"
 ```
 
 ---
 
-### 任务 5：把 ReviewRouter 的 spawn 依赖接到真实 coordinator（核心，无条件）
+### 任务 5：ReviewRouter 的 spawn 依赖接到真实 coordinator + crossModule 判定（核心，无条件）
 
-> 任务2 的 `spawnVerifier`/`spawnPatcher`/`spawnSquadron` 是注入抽象，本任务接到真实 delegate 系统。先读 `coordinator.ts` 如何 `createWriteWorkOrder`/`delegateOrder`、worker 结果里 `evidenceStatus` 的形态。
+> 任务2 的 `spawnVerifier`/`spawnPatcher`/`spawnSquadron` 是注入抽象，本任务接真实 delegate 系统，并把任务5 的 deps + 任务4 的护栏 + crossModule 判定一次性接全。
 
-- [ ] **步骤 1-2：测试** — 注入一个 fake coordinator，断言 `spawnVerifier` 产出的 work order `profile==='adversarial_verifier'`，且回报的 `verdict` 由 worker 的 `evidenceStatus==='verified'` 映射而来；`spawnPatcher` 用 `patcher` profile。
-- [ ] **步骤 3：实现** `createCoordinatorReviewDeps(coordinator)`：把三个 spawn 函数映射到 `coordinator.delegate(...)` 调用，profile 分别为 `adversarial_verifier`/`patcher`/squadron 多 Inspector，`evidence` 取自 worker 结果的命令+输出。
-- [ ] **步骤 4-5：** 跑测试 + 在 `deliver_task`（或 gate 构造处）用真实 coordinator deps 装配 router + commit。
+**先读：** `src/agent/coordinator.ts`（`delegate`/work order 创建、worker 结果里 `evidenceStatus` 与命令+输出的形态）、`src/agent/profile-registry.ts:83`（`adversarial_verifier`）、确认有无 `patcher` profile（无则本任务先加，或复用通用 writer profile）。
+
+- [ ] **步骤 0：crossModule 判定（待裁决规则，先给默认实现）**
+
+```typescript
+// review-discipline.ts 追加
+/** 默认规则：owned files 落在 ≥2 个 src/<module>/ 顶层模块 → 跨模块 */
+export function isCrossModule(files: readonly string[]): boolean {
+  const modules = new Set(
+    files.map(f => f.match(/(?:^|\/)src\/([^/]+)\//)?.[1]).filter(Boolean),
+  )
+  return modules.size >= 2
+}
+```
+> ⚠️ 这是**待团队裁决**的默认规则（见决策表新增行）。若团队选别的口径（如按 import 图、按 owner），替换此函数即可，调用方不变。
+
+- [ ] **步骤 1-2：测试** — 注入 fake coordinator，断言：`spawnVerifier` 产出 work order `profile==='adversarial_verifier'`；回报的 `verdict` 由 worker `evidenceStatus==='verified'` 映射；`evidence` 取自 worker 命令+输出；spawn 时 `reviewDepth` 递增传入子代理 ctx（护栏）。`isCrossModule(['src/a/x.ts','src/b/y.ts'])===true`、`(['src/a/x.ts','src/a/y.ts'])===false`。
+
+- [ ] **步骤 3：实现** `createCoordinatorReviewDeps(coordinator, parentDepth)`：三个 spawn 映射到 `coordinator.delegate(...)`，profile 分别 `adversarial_verifier`/patcher/squadron；spawn 子代理时注入 `reviewDepth: parentDepth+1`；`evidence`/`verdict` 从 worker 结果的 `evidenceStatus` + 命令输出映射。
+
+- [ ] **步骤 4：装配** — 在 `src/main.tsx:207`（deliver_task 装配处）用真实 coordinator 构造 `reviewDeps = createCoordinatorReviewDeps(coordinator, 0)`，注入 deliver_task ctx。
+
+- [ ] **步骤 5：** 跑测试（含任务4 全量）+ typecheck + commit。
+
+```bash
+git commit -m "feat(agent): wire ReviewRouter to coordinator (adversarial_verifier/patcher/squadron) + crossModule"
+```
 
 ---
 
@@ -492,7 +555,7 @@ git commit -m "feat(agent): delivery-gate routes fix commits through ReviewRoute
 
 > C=C1 → config 开关（默认开）；C=C2 → 注册为可选 skill；C=C3 → 仅文档，跳过代码。
 
-- [ ] **C=C1 步骤：** 创建 `src/config/review-discipline-config.ts`，导出 `isReviewDisciplineEnabled()`（读 env `RIVET_REVIEW_DISCIPLINE`，默认 `true`）；hook（任务2）与 gate（任务4）在生效前查此开关。测试覆盖开/关两态。commit。
+- [ ] **C=C1 步骤：** 创建 `src/config/review-discipline-config.ts`，导出 `isReviewDisciplineEnabled()`（读 env `RIVET_REVIEW_DISCIPLINE`，默认 `true`）；deliver_task（任务4）在调 router 前查此开关，关闭时跳过审查门。测试覆盖开/关两态。commit。
 - [ ] **C=C2 步骤：** 在 skill 注册表加 `review-discipline` skill，默认不启用，文档说明 opt-in 方式。
 - [ ] **C=C3 步骤：** 仅在开源 README/CONTRIBUTING 写最佳实践，无代码任务。
 
@@ -511,8 +574,9 @@ git commit -m "feat(agent): delivery-gate routes fix commits through ReviewRoute
 | 核心架构（原分叉 A 强制力） | 自动路由器 + 自动 spawn verifier + 自动闭环重审 | **已裁决** | 团队 / 2026-06-06 | 按规模分级、审查主体下沉子代理，主控只派单+看结论+闭环失败兜底 |
 | B 注入面 | B1运行时hook / B2 static / B3不进提示词 | **B3 不进提示词** | 团队 / 2026-06-06 | 避免 static prompt 与 runtime hook 注入的 prefix-cache 代价；L1 nudge 由 router/tool 输出承载，L2/L3 靠子代理 objective 携带 |
 | C 开源默认 | C1内置可关 / C2可插拔 / C3仅文档 | **待定** | | |
+| crossModule 判定（任务5 步骤0） | 按 src/<module> 顶层目录跨度 / 按 import 图 / 按 owner | **待定（默认：≥2 个 src/<module>）** | | 已给默认实现 `isCrossModule`，团队可换口径，调用方不变 |
 
-> 解锁规则：核心任务 1/2/4/5/7 无条件可执行；B 定后确定任务3形态（hook / 改static / 跳过）；C 定后确定任务6形态。
+> 解锁规则：核心任务 1/2/4/5/7 无条件可执行（任务3 因 B=B3 跳过）；C 定后确定任务6形态；crossModule 用默认实现先行，团队裁决后替换 `isCrossModule` 即可。
 
 ---
 
@@ -538,4 +602,25 @@ git commit -m "feat(agent): delivery-gate routes fix commits through ReviewRoute
 2. **内联执行** — 当前会话用 executing-plans 批量执行并设检查点。
 
 **当前执行入口：先完成核心任务 1+2；B3 已定，提示词/运行时 hook 注入暂不做。**
+
+---
+
+## 进度追踪（2026-06-06，对抗复核逐提交验证）
+
+| 任务 | 状态 | 提交 / 落点 | 复核 |
+|------|------|-------------|------|
+| 任务1 纪律+识别+分级 | ✅ 已合 | `f9fc02b` | 实跑绿；`classifyChangeScale` L1/L2/L3 边界正确 |
+| 任务2 ReviewRouter+有界闭环 | ✅ 已合 | `f9fc02b`→`e684b74` | `e684b74` 修了 M1（squadron findings 丢弃）+ L1（.json trivial）+ L2（patcher patched:false）；闭环 `Math.max(1,…)` 真有界；测试改为断言效果非调用 |
+| 任务4 router 挂进 deliver_task | ✅ 已合 | `8381c8b` | RED `return isError` 在 commit 之前，真拦提交；未接 reviewDeps 时优雅 no-op |
+| 任务5 接真实 coordinator + crossModule | ✅ 已合 | `b62d533` | deps 映射正确；**初版重入护栏只到 prompt 文本（M2 缺陷）** |
+| 任务5 后续 · M2 重入护栏结构化 | 🔶 工作区未提交 | 17 文件 + `docs/reviews/2026-06-06-review-router-reentrancy-guard.md` | 数值 depth 结构性穿到子代理 deliver_task ctx；测试覆盖跨边界跳过；待 **scoped commit** |
+| 任务3（L1 nudge 注入面） | ⏭️ 跳过 | — | B=B3 不进提示词 |
+| 任务6（开源默认姿态） | ⏳ 待裁决 | — | C 分叉未定 |
+| 任务7（开源文档） | ⏳ 未开始 | — | — |
+
+**复核记录：** [`../../reviews/2026-06-06-review-router-reentrancy-guard.md`](../../reviews/2026-06-06-review-router-reentrancy-guard.md)（M2 修复 + 独立复核确认）。
+
+**M2 提交注意：** 17 文件须显式列出，排除游离改动 `src/tools/plan-close.ts` / `src/tools/bash.ts` / `src/tools/gitignore.ts`（不属本次，勿 `git add .` 搭车）。
+
+**已知既有失败（与本计划无关）：** `src/tools/__tests__/file-info.test.ts`（1）、`plan-close.test.ts`（3）——干净 HEAD 上即红，非 reviewDepth 回归。
 

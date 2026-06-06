@@ -46,3 +46,4 @@ docs/sessions/
 # AI agent temp files
 .tmp_*
 截图/
+.omx/

@@ -2,8 +2,9 @@
 
 **审计文档:** `docs/known-issues/perf-and-recovery-audit-2026-06-05.md`
 **审计提交:** `57273c7`
-**对照截止:** `fe14ad0` (当前 HEAD)
-**审计后提交数:** ~50
+**对照截止:** `ccd4ae9` (当前 HEAD)
+**审计后提交数:** ~80
+**最后刷新:** 2026-06-06
 
 ---
 
@@ -23,20 +24,20 @@
 
 | # | 发现 | 状态 | 证据 |
 |---|------|------|------|
-| 中#5 | recovery-trigger 两条腿是死的 | ❌ 未修 | `loop.ts:657-682` 硬编码 `orphanToolUseCount:0`, `totalInterruptsThisSession:0` 未改 |
+| 中#5 | recovery-trigger 两条腿是死的 | ✅ **已修** | `loop.ts:141,561,677-694,708,725,869` — `_turnInterruptCount` + `detectPendingTools()` + `computeSessionIntegrity()` 替换硬编码值 |
 | 网#2 | anthropic/codex 缺硬超时 | ✅ **已修** | `24625ee` + `anthropic-client.ts:336` / `codex-client.ts:248` 均有 10min hard timeout |
 | 压#2 | 1M 窗口压缩无断路器 | ✅ **审计前已修** | `a2880d6` fix(compaction,perf): circuit breaker + token baseline — `recordCompactFailure`/`recordCompactSuccess` 已在 `compaction-controller.ts:287,292,380`。**审计遗漏此提交。** |
-| 网#1 | DeepSeek tool-JSON-in-content 无消费者 | ❌ 未修 | `provider.ts:52` flag 存在但无兜底解析 |
-| 压#7 | 会话恢复孤立 tool_call | ❌ 未修 | `session-persist.ts:185-256` 无配对校验 |
+| 网#1 | DeepSeek tool-JSON-in-content 无消费者 | ✅ **已修** | `openai-client.ts:79,245,448-451,529,604` — `_textAccum` 累积 + `tryParseToolJsonFromContent()` 在 finish_reason 时兜底解析 |
+| 压#7 | 会话恢复孤立 tool_call | ✅ **已修** | `session-persist.ts:200,204` — `repairOrphanToolCalls()` 配对校验，commit `edd2935` |
 
 ---
 
 ## P1 — perf 热路径（3 项）
 
 | # | 发现 | 状态 | 证据 |
+|---|------|------|------|
 | 网#5 | 每 turn 全量深拷贝+NFC 扫描请求体 | ✅ **审计前已修** | `a2880d6` incremental sanitize — `_sanitizedCount` 跟踪已 sanitize 位置，只处理新增消息。**审计遗漏此提交。** |
 | 压#1+#3 | token 估算系统性偏低 + 丢 reasoning | ✅ **审计前已修** | `a2880d6` — `prefixOverhead` 加入 system prompt + tools + volatile 基线（`context.ts` + `compaction-controller.ts:225`）；`micro.ts:27-28` 已累加 `reasoning_content`。**审计遗漏此提交。** |
-| 压#1+#3 | token 估算系统性偏低 + 丢 reasoning | ❌ 未修 | `agent/context.ts` + `micro.ts:25-33` 未改 |
 
 ---
 
@@ -62,13 +63,12 @@
 | 优先级 | 总数 | 已修 | 未修 | 完成率 |
 |--------|------|------|------|--------|
 | P0 | 3 | 3 | 0 | **100%** |
-| P1 (recovery) | 5 | 3 | 2 | **60%** |
-| P1 (perf) | 3 | 3 | 0 | **100%** |
+| P1 (recovery) | 5 | 5 | 0 | **100%** |
+| P1 (perf) | 2 | 2 | 0 | **100%** |
 | P2 | 11 | 0 | 11 | 0% |
-| **合计** | **22** | **9** | **13** | **41%** |
+| **合计** | **21** | **10** | **11** | **48%** |
 
-> **注:** 压#1/#2/#3 和网#5 在审计提交 `57273c7` 之前已由 `a2880d6` 修复，审计时遗漏。P1 perf 全部完成。P1 recovery 剩余中#5（recovery-trigger 盲输入）、网#1（DeepSeek tool-JSON）、压#7（孤立 tool_call）。
-| **合计** | **22** | **6** | **16** | **27%** |
+> **注:** P0 + P1 全部完成。P2 均为低风险性能优化，无 recovery 影响。
 
 ## 审计后额外修复（不在审计列表中）
 
