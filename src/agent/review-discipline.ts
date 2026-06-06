@@ -51,3 +51,13 @@ export function classifyChangeScale(change: ChangeSet): ReviewScale {
   }
   return 'L2'
 }
+
+/** Default rule: files spanning at least two src/<module>/ top-level modules are cross-module. */
+export function isCrossModule(files: readonly string[]): boolean {
+  const modules = new Set<string>()
+  for (const file of files) {
+    const moduleName = file.match(/(?:^|\/)src\/([^/]+)\//)?.[1]
+    if (moduleName) modules.add(moduleName)
+  }
+  return modules.size >= 2
+}

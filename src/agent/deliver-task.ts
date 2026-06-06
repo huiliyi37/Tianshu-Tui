@@ -30,6 +30,8 @@ import { summarizeOwnershipHealth } from './ownership-health.js'
 import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
+import { isCrossModule, isFixContext, type ChangeSet } from './review-discipline.js'
+import { routeReviewWorkflow, type ReviewRouterDeps } from './review-router.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -45,6 +47,12 @@ export interface B1Context {
   getProjectMemoryContent?: (cwd: string) => string | undefined
   /** Test hook / alternate runtime executor for scoped commits. */
   commitOwnedFiles?: (cwd: string, files: string[], message: string) => ScopedCommitResult
+  /** Review router entry point. Defaults to routeReviewWorkflow when reviewDeps is provided. */
+  routeReviewWorkflow?: typeof routeReviewWorkflow
+  /** Dependencies used by the review router to spawn verifier/patcher/squadron workers. */
+  reviewDeps?: ReviewRouterDeps
+  /** Re-entrancy guard: child review contexts must not recursively trigger review routing. */
+  reviewDepth?: number
 }
 
 function parseNulFileList(output: string): string[] {
@@ -344,6 +352,31 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
         } else if (requestedFiles && Array.isArray(requestedFiles) && requestedFiles.length === 0) {
           lines.push('', '❌ No files specified for commit. Provide non-empty files array or omit to commit all owned files.')
           return { content: lines.join('\n'), isError: true }
+        }
+
+        // Review discipline gate: fix commits must pass an independent review route when wired.
+        // The reviewDepth guard prevents verifier/patcher child contexts from recursively reviewing themselves.
+        if ((ctx.reviewDepth ?? 0) === 0 && isFixContext(message)) {
+          const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
+          if (route && ctx.reviewDeps) {
+            const change: ChangeSet = {
+              files: filesToCommit,
+              crossModule: isCrossModule(filesToCommit),
+              isFix: true,
+            }
+            const outcome = await route(change, ctx.reviewDeps)
+            if (outcome.verdict === 'rejected' || outcome.escalated) {
+              lines.push('', `❌ ReviewRouter RED (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this fix commit'}`)
+              if (typeof outcome.rounds === 'number') lines.push(`   Rounds: ${outcome.rounds}`)
+              lines.push('   → Fix the review finding, collect command + observed output evidence, then re-run deliver_task.')
+              return { content: lines.join('\n'), isError: true }
+            }
+            if (outcome.verdict === 'verified') {
+              lines.push('', `✅ ReviewRouter verified (${outcome.tier}): ${outcome.evidence ?? 'verified'}`)
+            } else if (outcome.verdict === 'nudge') {
+              lines.push('', `⚠️ ReviewRouter nudge (${outcome.tier}): apply review disciplines before committing.`)
+            }
+          }
         }
 
         // Cohesion gate: RED if files span too many areas (unless force=true)

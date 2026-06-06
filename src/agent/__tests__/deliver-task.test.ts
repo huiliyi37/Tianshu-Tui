@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process'
 import { createDeliverTaskTool, detectSymptomPatch } from '../deliver-task.js'
 import { createTaskLedger } from '../task-ledger.js'
 import { createOwnershipLedger } from '../ownership-ledger.js'
+import type { ChangeSet } from '../review-discipline.js'
+import type { ReviewOutcome, ReviewRouterDeps, ReviewRouterOptions } from '../review-router.js'
 import { createWorktreeBaseline } from '../worktree-baseline.js'
 import { createDeliveryGateV2 } from '../delivery-gate-v2.js'
 import { createVerificationAttribution } from '../verification-attribution.js'
@@ -22,6 +24,9 @@ function makeContext(opts: {
   verifications?: Array<{ command: string; status: 'passed' | 'failed' | 'blocked'; meta?: Record<string, unknown> }>
   projectMemory?: string
   commitOwnedFiles?: (cwd: string, files: string[], message: string) => { ok: boolean; output: string }
+  routeReviewWorkflow?: (change: ChangeSet, deps: ReviewRouterDeps, options?: ReviewRouterOptions) => Promise<ReviewOutcome>
+  reviewDeps?: ReviewRouterDeps
+  reviewDepth?: number
   sessionRegistry?: SessionRegistry
   sessionId?: string
 }) {
@@ -49,6 +54,9 @@ function makeContext(opts: {
     getCurrentDirtyFiles: () => opts.dirtyFiles,
     getProjectMemoryContent: () => opts.projectMemory,
     commitOwnedFiles: opts.commitOwnedFiles,
+    routeReviewWorkflow: opts.routeReviewWorkflow,
+    reviewDeps: opts.reviewDeps,
+    reviewDepth: opts.reviewDepth,
   }))
 
   const params: ToolCallParams = {
@@ -198,12 +206,107 @@ describe('deliver-task — semantic task delivery tool', () => {
       },
     })
 
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
+
+    assert.equal(result.isError ?? false, false)
+    assert.deepEqual(calls, [{ files: ['src/a.ts'], message: 'feat: scoped delivery' }])
+    assert.match(result.content, /Scoped commit created/)
+    assert.match(result.content, /commit abc123/)
+  })
+
+  it('routes fix commits through ReviewRouter before scoped commit', async () => {
+    const calls: Array<{ files: string[]; message: string }> = []
+    let routedChange: ChangeSet | undefined
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async change => {
+        routedChange = change
+        return { tier: 'L2', verdict: 'verified', evidence: 'ran: npx tsc --noEmit → ok', rounds: 1 }
+      },
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: (_cwd, files, message) => {
+        calls.push({ files, message })
+        return { ok: true, output: 'commit abc123' }
+      },
+    })
+
     const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: scoped delivery' } })
 
     assert.equal(result.isError ?? false, false)
+    assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: true })
     assert.deepEqual(calls, [{ files: ['src/a.ts'], message: 'fix: scoped delivery' }])
+    assert.match(result.content, /ReviewRouter verified \(L2\)/)
+  })
+
+  it('blocks fix commit when ReviewRouter rejects or escalates', async () => {
+    let committed = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => ({ tier: 'L2', verdict: 'rejected', escalated: true, rounds: 3, evidence: 'still broken' }),
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => {
+        committed = true
+        return { ok: true, output: 'commit abc123' }
+      },
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: scoped delivery' } })
+
+    assert.equal(result.isError, true)
+    assert.equal(committed, false)
+    assert.match(result.content, /ReviewRouter RED \(L2\)/)
+    assert.match(result.content, /still broken/)
+  })
+
+  it('does not route non-fix commits through ReviewRouter', async () => {
+    let routerCalled = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => {
+        routerCalled = true
+        return { tier: 'L1', verdict: 'nudge' }
+      },
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
+
+    assert.equal(result.isError ?? false, false)
+    assert.equal(routerCalled, false)
     assert.match(result.content, /Scoped commit created/)
-    assert.match(result.content, /commit abc123/)
+  })
+
+  it('skips ReviewRouter when reviewDepth indicates child review context', async () => {
+    let routerCalled = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      reviewDepth: 1,
+      routeReviewWorkflow: async () => {
+        routerCalled = true
+        return { tier: 'L2', verdict: 'verified', evidence: 'ran: should not happen', rounds: 1 }
+      },
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: scoped delivery' } })
+
+    assert.equal(result.isError ?? false, false)
+    assert.equal(routerCalled, false)
+    assert.match(result.content, /Scoped commit created/)
   })
 
   it('rejects commit=true without message before running executor', async () => {

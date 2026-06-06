@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { REVIEW_DISCIPLINES, classifyChangeScale, isFixContext } from '../review-discipline.js'
+import { REVIEW_DISCIPLINES, classifyChangeScale, isCrossModule, isFixContext } from '../review-discipline.js'
 
 describe('review disciplines', () => {
   it('contains all four review disciplines', () => {
@@ -40,5 +40,11 @@ describe('review disciplines', () => {
     assert.equal(classifyChangeScale({ files: ['package-lock.json'], crossModule: false, isFix: false }), 'L2')
     assert.equal(classifyChangeScale({ files: ['packages/app/tsconfig.build.json'], crossModule: false, isFix: false }), 'L2')
     assert.equal(classifyChangeScale({ files: ['yarn.lock'], crossModule: false, isFix: false }), 'L2')
+  })
+
+  it('detects cross-module changes by src top-level module span', () => {
+    assert.equal(isCrossModule(['src/agent/a.ts', 'src/tools/b.ts']), true)
+    assert.equal(isCrossModule(['src/agent/a.ts', 'src/agent/b.ts']), false)
+    assert.equal(isCrossModule(['README.md', 'docs/notes.md']), false)
   })
 })
