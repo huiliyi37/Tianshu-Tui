@@ -1,6 +1,8 @@
 # Spec A + Spec B 实施交接（2026-06-06 · 最终状态）
 
 > **全部 spec 已实施完毕。** 本文件仅保留状态记录和偏差复盘。
+>
+> ⚠️ **完成度更正**：server 子系统作为独立模块可合，但**作为"已交付特性"尚未到位**——cron→AgentLoop 链止于 interface（无 RuntimePool 实现），`/prompt` 的 `handlePromptSSE` 未接进 router。上线前必清的门禁清单见 **`docs/known-issues/2026-06-06-server-subsystem-go-live-gate.md`**（A 已闭环 / B 接线前必清 / C 架构真相 / D 测试卫生）。
 
 ---
 
