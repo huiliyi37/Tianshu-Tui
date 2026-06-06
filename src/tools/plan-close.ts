@@ -1,4 +1,5 @@
-import { readFile, writeFile, stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
+import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { relative } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { validatePath } from './path-validate.js'
@@ -97,7 +98,7 @@ export const PLAN_CLOSE_TOOL: Tool = {
 
       const action = closureAction(result)
       if (params.input.apply === true) {
-        await writeFile(filePath, result.content, 'utf-8')
+        await writeFileAtomicAsync(filePath, result.content)
         return {
           content: [
             `Plan closed: ${relativePath}`,

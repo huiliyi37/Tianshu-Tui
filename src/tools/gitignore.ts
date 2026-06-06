@@ -17,9 +17,8 @@ const DEFAULT_IGNORE = [
 export class GitignoreFilter {
   private patterns: string[]
 
-  constructor(cwd: string, patterns?: string[]) {
+  constructor(_cwd: string, patterns?: string[]) {
     this.patterns = patterns ?? [...DEFAULT_IGNORE]
-    if (!patterns) this.loadGitignoreSync(cwd)
   }
 
   static async create(cwd: string): Promise<GitignoreFilter> {
@@ -38,19 +37,6 @@ export class GitignoreFilter {
     return new GitignoreFilter(cwd, patterns)
   }
 
-  private loadGitignoreSync(cwd: string): void {
-    const gitignorePath = join(cwd, '.gitignore')
-    if (!existsSync(gitignorePath)) return
-    try {
-      const { readFileSync } = require('fs') as typeof import('fs')
-      const content = readFileSync(gitignorePath, 'utf-8')
-      for (const line of content.split('\n')) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith('#')) continue
-        this.patterns.push(trimmed)
-      }
-    } catch { /* ignore */ }
-  }
 
   isIgnored(cwd: string, filePath: string): boolean {
     const absPath = resolve(cwd, filePath)
