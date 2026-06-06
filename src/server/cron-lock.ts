@@ -15,7 +15,16 @@
  * - MVP 可降级为单进程无锁调度
  */
 
-import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs'
+import {
+  readFileSync,
+  writeFileSync,
+  unlinkSync,
+  existsSync,
+  mkdirSync,
+  linkSync,
+} from 'node:fs'
+import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { execSync } from 'node:child_process'
 import { isMainThread } from 'node:worker_threads'
 
@@ -32,6 +41,8 @@ export interface CronLockConfig {
   lockPath?: string
   /** PID 存活检查间隔（毫秒） */
   healthCheckIntervalMs?: number
+  /** 锁丢失回调：锁被删除或被其他进程抢占时触发 */
+  onLockLost?: (state: LockState) => void
 }
 
 export type LockState =
@@ -39,6 +50,11 @@ export type LockState =
   | { status: 'contended'; owner: LockInfo }
   | { status: 'stale_recovered'; previousOwner: LockInfo; info: LockInfo }
   | { status: 'error'; reason: string }
+
+type CreateLockResult =
+  | { ok: true }
+  | { ok: false; reason: 'exists' }
+  | { ok: false; reason: 'error'; message: string }
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -77,19 +93,36 @@ function readLockFile(path: string): LockInfo | null {
   }
 }
 
-function writeLockFile(path: string, info: LockInfo): void {
-  writeFileSync(path, JSON.stringify(info, null, 2), 'utf-8')
+/** O_EXCL 创建锁文件；写入完成后用 hard-link 发布，避免读到半写内容。 */
+function createLockFileExclusive(path: string, info: LockInfo): CreateLockResult {
+  mkdirSync(dirname(path), { recursive: true })
+  const tmpPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(tmpPath, JSON.stringify(info, null, 2), { encoding: 'utf-8', flag: 'wx' })
+    linkSync(tmpPath, path)
+    unlinkSync(tmpPath)
+    return { ok: true }
+  } catch (error) {
+    try {
+      unlinkSync(tmpPath)
+    } catch {
+      // 清理尽力而为
+    }
+    if (errorCode(error) === 'EEXIST') return { ok: false, reason: 'exists' }
+    return { ok: false, reason: 'error', message: errorMessage(error) }
+  }
 }
 
-/** O_EXCL 创建锁文件。成功返回 fd，失败返回 null */
-function createLockFileExclusive(path: string): number | null {
-  try {
-    // O_EXCL | O_CREAT | O_WRONLY
-    const fd = openSync(path, 'wx')
-    return fd
-  } catch {
-    return null
+function errorCode(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code
+    return typeof code === 'string' ? code : undefined
   }
+  return undefined
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 // ─── Cron Lock ────────────────────────────────────────────────
@@ -99,36 +132,55 @@ export class CronLock {
   private healthCheckIntervalMs: number
   private state: LockState | null = null
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null
+  private lockLostHandlers = new Set<(state: LockState) => void>()
 
   constructor(config?: CronLockConfig) {
     this.lockPath = config?.lockPath ?? DEFAULT_LOCK_PATH
     this.healthCheckIntervalMs = config?.healthCheckIntervalMs ?? DEFAULT_HEALTH_CHECK_MS
+    if (config?.onLockLost) {
+      this.lockLostHandlers.add(config.onLockLost)
+    }
   }
 
   /** 尝试获取锁。返回锁状态 */
   acquire(): LockState {
-    const fd = createLockFileExclusive(this.lockPath)
+    const info = this.buildLockInfo()
+    const created = createLockFileExclusive(this.lockPath, info)
 
-    if (fd !== null) {
+    if (created.ok) {
       // 成功创建 → 获得锁
-      const info: LockInfo = {
-        pid: process.pid,
-        acquiredAt: new Date().toISOString(),
-        hostname: this.getHostname(),
-      }
-      writeLockFile(this.lockPath, info)
-      closeSync(fd)
       this.state = { status: 'acquired', info }
       this.startHealthCheck()
+      return this.state
+    }
+
+    if (created.reason === 'error') {
+      this.state = { status: 'error', reason: created.message }
       return this.state
     }
 
     // 锁文件已存在 → 检查 owner
     const owner = readLockFile(this.lockPath)
     if (!owner) {
-      // 锁文件损坏 → 清理后重试
+      // 锁文件损坏 → 清理后重试；重试仍需走 O_EXCL，避免与其他进程脑裂
       this.forceRelease()
-      return this.acquire()
+      const retryInfo = this.buildLockInfo()
+      const retried = createLockFileExclusive(this.lockPath, retryInfo)
+      if (retried.ok) {
+        this.state = { status: 'acquired', info: retryInfo }
+        this.startHealthCheck()
+        return this.state
+      }
+      if (retried.reason === 'error') {
+        this.state = { status: 'error', reason: retried.message }
+        return this.state
+      }
+      const currentOwner = readLockFile(this.lockPath)
+      this.state = {
+        status: 'contended',
+        owner: currentOwner ?? { pid: -1, acquiredAt: '', hostname: '' },
+      }
+      return this.state
     }
 
     // 检查 owner PID 是否存活
@@ -141,15 +193,7 @@ export class CronLock {
 
     if (!isPidAlive(owner.pid)) {
       // owner 已死 → 陈旧锁回收
-      const newInfo: LockInfo = {
-        pid: process.pid,
-        acquiredAt: new Date().toISOString(),
-        hostname: this.getHostname(),
-      }
-      writeLockFile(this.lockPath, newInfo)
-      this.state = { status: 'stale_recovered', previousOwner: owner, info: newInfo }
-      this.startHealthCheck()
-      return this.state
+      return this.recoverStaleLock(owner)
     }
 
     // owner 存活 → 锁被占用
@@ -191,6 +235,14 @@ export class CronLock {
     return this.state
   }
 
+  /** 注册锁丢失回调。返回取消注册函数。 */
+  onLockLost(handler: (state: LockState) => void): () => void {
+    this.lockLostHandlers.add(handler)
+    return () => {
+      this.lockLostHandlers.delete(handler)
+    }
+  }
+
   /** 是否持有锁 */
   isOwner(): boolean {
     return this.state?.status === 'acquired' || this.state?.status === 'stale_recovered'
@@ -203,6 +255,102 @@ export class CronLock {
       return execSync('hostname', { encoding: 'utf-8', timeout: 1000 }).trim()
     } catch {
       return 'unknown'
+    }
+  }
+
+  private buildLockInfo(): LockInfo {
+    return {
+      pid: process.pid,
+      acquiredAt: new Date().toISOString(),
+      hostname: this.getHostname(),
+    }
+  }
+
+  private recoverStaleLock(previousOwner: LockInfo): LockState {
+    const reclaimLock = this.acquireReclaimLock()
+    if (!reclaimLock.ok) {
+      this.state = {
+        status: 'contended',
+        owner: readLockFile(this.lockPath) ?? previousOwner,
+      }
+      return this.state
+    }
+
+    try {
+      const currentOwner = readLockFile(this.lockPath)
+      if (currentOwner && currentOwner.pid !== previousOwner.pid) {
+        this.state = { status: 'contended', owner: currentOwner }
+        return this.state
+      }
+      if (currentOwner && isPidAlive(currentOwner.pid)) {
+        this.state = { status: 'contended', owner: currentOwner }
+        return this.state
+      }
+
+      try {
+        unlinkSync(this.lockPath)
+      } catch {
+        // 其他进程可能已经删除旧锁；继续走 O_EXCL 竞争
+      }
+
+      const info = this.buildLockInfo()
+      const recovered = createLockFileExclusive(this.lockPath, info)
+      if (recovered.ok) {
+        this.state = { status: 'stale_recovered', previousOwner, info }
+        this.startHealthCheck()
+        return this.state
+      }
+      if (recovered.reason === 'error') {
+        this.state = { status: 'error', reason: recovered.message }
+        return this.state
+      }
+
+      const owner = readLockFile(this.lockPath)
+      this.state = {
+        status: 'contended',
+        owner: owner ?? previousOwner,
+      }
+      return this.state
+    } catch (error) {
+      this.state = { status: 'error', reason: errorMessage(error) }
+      return this.state
+    } finally {
+      this.releaseReclaimLock()
+    }
+  }
+
+  private reclaimLockPath(): string {
+    return `${this.lockPath}.reclaim`
+  }
+
+  private acquireReclaimLock(): CreateLockResult {
+    const path = this.reclaimLockPath()
+    const created = createLockFileExclusive(path, this.buildLockInfo())
+    if (created.ok) return created
+    if (created.reason === 'error') return created
+
+    const owner = readLockFile(path)
+    if (owner?.pid === process.pid) return { ok: true }
+    if (owner && !isPidAlive(owner.pid)) {
+      try {
+        unlinkSync(path)
+      } catch {
+        // 其他进程可能已经接管 reclaim lock
+      }
+      return createLockFileExclusive(path, this.buildLockInfo())
+    }
+    return created
+  }
+
+  private releaseReclaimLock(): void {
+    const path = this.reclaimLockPath()
+    try {
+      const owner = readLockFile(path)
+      if (owner?.pid === process.pid) {
+        unlinkSync(path)
+      }
+    } catch {
+      // 清理尽力而为
     }
   }
 
@@ -226,8 +374,24 @@ export class CronLock {
     // 验证锁文件仍归自己所有
     const owner = readLockFile(this.lockPath)
     if (!owner || owner.pid !== process.pid) {
-      // 锁被意外篡改/丢失 → 标记 contended
-      this.state = { status: 'contended', owner: owner ?? { pid: -1, acquiredAt: '', hostname: '' } }
+      // 锁被意外篡改/丢失 → 标记 contended，并通知上层停掉 scheduler
+      this.markLockLost(owner ?? { pid: -1, acquiredAt: '', hostname: '' })
+    }
+  }
+
+  private markLockLost(owner: LockInfo): void {
+    const wasOwner = this.isOwner()
+    const lostState: LockState = { status: 'contended', owner }
+    this.state = lostState
+    this.stopHealthCheck()
+    if (!wasOwner) return
+
+    for (const handler of this.lockLostHandlers) {
+      try {
+        handler(lostState)
+      } catch {
+        // lock-loss handlers are best-effort; one bad observer must not restart the scheduler
+      }
     }
   }
 }
