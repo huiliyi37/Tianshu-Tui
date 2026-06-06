@@ -1414,7 +1414,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   })
 
   return (
-    <>
+    <Box flexDirection="column" height={termRows}>
       {historyItems.length === 0 && !isStreaming && (
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
@@ -1567,6 +1567,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           </Box>
         )}
       </Box>
-    </>
+    </Box>
   )
 }
