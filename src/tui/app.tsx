@@ -255,10 +255,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [streamingThinking, setStreamingThinking] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [isThinkingActive, setIsThinkingActive] = useState(false)
-  /** Last completed reply — kept in the live frame so the user sees it on the same
-   *  screen as the input bar. Cleared when the next stream starts. The full reply
-   *  is ALSO committed to <Static> scrollback (scroll up for history). */
-  const [lastReplyPreview, setLastReplyPreview] = useState('')
   /** Generation counter: incremented on each new stream start. A run's onAbort/onError/catch only flips isStreaming when its captured generation still matches — prevents a stale run from killing a newer one. */
   const streamGenRef = useRef(0)
   const [fluencyStale, setFluencyStale] = useState<{ message: string; level: 'info' | 'warn' | 'action' } | null>(null)
@@ -622,7 +618,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setIsThinkingActive(false)
     setStreamingText('')
     setStreamingThinking('')
-    setLastReplyPreview('')
     setLiveTools([])
     liveToolsRef.current = []
     setFluencyStale(null)
@@ -1090,11 +1085,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
               }
               if (parsed.cleanText) {
                 pushAssistantEntry(parsed.cleanText, thinkingForArchive)
-                setLastReplyPreview(parsed.cleanText)
               }
             } else {
               pushAssistantEntry(finalText, thinkingForArchive)
-              setLastReplyPreview(finalText)
             }
           } else {
             // Only thinking, no visible text — push thinking-only entry
@@ -1387,7 +1380,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       </Static>
       <Box flexDirection="column">
         {/* Welcome screen in live frame — disappears once conversation starts */}
-        {historyItems.length === 0 && !isStreaming && !lastReplyPreview && (
+        {historyItems.length === 0 && !isStreaming && (
           <WelcomeScreen model={model} cwd={process.cwd()} />
         )}
         {activeOverlay === 'starmap' && (
@@ -1422,14 +1415,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && (!!streamingThinking || isThinkingActive)} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
           <StreamOutput text={displayStreamingText} isStreaming={isStreaming} />
-        )}
-        {/* Last reply preview: keeps the completed reply visible in the live frame
-            so it's on the same screen as the input bar. Cleared on next stream start.
-            The full reply is also in <Static> scrollback (scroll up for history). */}
-        {!isStreaming && !streamingText && lastReplyPreview && (
-          <Box paddingX={2} flexDirection="column">
-            <Text>{capLiveTail(lastReplyPreview, liveCols, liveCapRows)}</Text>
-          </Box>
         )}
         {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
           <Box paddingX={2}>
