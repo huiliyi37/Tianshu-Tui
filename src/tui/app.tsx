@@ -1414,7 +1414,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   })
 
   return (
-    <Box flexDirection="column" height={termRows}>
+    // Natural-scroll layout: <Static> writes committed history to real terminal
+    // scrollback, and the live frame renders BELOW it at its natural height. Do
+    // NOT wrap in <Box height={termRows}> — that makes the live frame full-screen
+    // every render, which visually buries all <Static> history above the viewport
+    // ("丢回复": replies committed but never visible). The flexGrow spacer below
+    // harmlessly collapses to 0 here; the input sits right under the latest output
+    // (Claude-Code-style), which is the intended "pinned" feel without full-screen.
+    <>
       {historyItems.length === 0 && !isStreaming && (
         <WelcomeScreen model={model} cwd={process.cwd()} />
       )}
@@ -1567,6 +1574,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           </Box>
         )}
       </Box>
-    </Box>
+    </>
   )
 }
