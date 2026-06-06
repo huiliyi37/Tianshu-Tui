@@ -13,7 +13,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { hostname as osHostname } from 'node:os'
 import { dirname } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { CronLock, type LockInfo, type LockState } from '../cron-lock.js'
+import { CronLock, isPidAlive, isProcStatZombie, type LockInfo, type LockState } from '../cron-lock.js'
 import { CronScheduler } from '../cron-scheduler.js'
 import { CronWiring } from '../cron-wiring.js'
 import { TaskRegistry } from '../task-registry.js'
@@ -307,3 +307,40 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
     if (timer) clearTimeout(timer)
   })
 }
+
+describe('isPidAlive — liveness without blocking subprocess (S-6)', () => {
+  it('reports the current process as alive', () => {
+    assert.equal(isPidAlive(process.pid), true)
+  })
+
+  it('rejects invalid pids without throwing', () => {
+    assert.equal(isPidAlive(0), false)
+    assert.equal(isPidAlive(-1), false)
+    assert.equal(isPidAlive(1.5), false)
+    assert.equal(isPidAlive(Number.NaN), false)
+  })
+
+  it('reports an unused high pid as dead', () => {
+    // 2^22 is above the default Linux pid_max and is extremely unlikely to be
+    // a live process; process.kill(pid, 0) → ESRCH → dead.
+    assert.equal(isPidAlive(4_194_303), false)
+  })
+})
+
+describe('isProcStatZombie — /proc state parsing (S-6 zombie exclusion)', () => {
+  it('detects a zombie (state Z)', () => {
+    assert.equal(isProcStatZombie('1234 (node) Z 1 1234 1234 0 -1 4194560'), true)
+  })
+
+  it('treats running/sleeping states as not-zombie', () => {
+    assert.equal(isProcStatZombie('1234 (node) R 1 1234 1234'), false)
+    assert.equal(isProcStatZombie('1234 (node) S 1 1234 1234'), false)
+  })
+
+  it('parses correctly when comm contains spaces and parentheses', () => {
+    // The kernel does not escape ) inside comm — split on the LAST ) so the
+    // state field is read correctly even for adversarial process names.
+    assert.equal(isProcStatZombie('1234 (weird )( name) Z 1 1234'), true)
+    assert.equal(isProcStatZombie('1234 (weird )( name) R 1 1234'), false)
+  })
+})

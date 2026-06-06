@@ -75,10 +75,40 @@ export function isPidAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
-    return true
-  } catch {
+  } catch (error) {
+    // EPERM = process exists but is owned by another user → still alive. Treat
+    // it as alive so we never reclaim a lock from a process that may be live
+    // (the safe direction for split-brain avoidance). Any other code (ESRCH
+    // "no such process", etc.) means dead.
+    if (errorCode(error) === 'EPERM') return true
     return false
   }
+  // `kill(pid, 0)` succeeds for zombie processes too (the PID still occupies a
+  // slot until reaped), but a zombie can no longer run the scheduler — treating
+  // it as alive would block failover forever. On Linux, read /proc/<pid>/stat
+  // (non-blocking, no subprocess) to exclude zombies, matching the old
+  // `ps -o state=` behaviour. Other platforms fall through as alive.
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8')
+      if (isProcStatZombie(stat)) return false
+    } catch {
+      // /proc unavailable (e.g. container without procfs) → fall through alive.
+    }
+  }
+  return true
+}
+
+/**
+ * True if a `/proc/<pid>/stat` line reports a zombie (state `Z`).
+ *
+ * The state char is the first field after the comm field. comm is wrapped in
+ * parentheses and may itself contain `)` (e.g. `(foo) bar`), so we split after
+ * the LAST `)` to skip comm reliably — matching how the kernel/procps parse it.
+ */
+export function isProcStatZombie(statLine: string): boolean {
+  const afterComm = statLine.slice(statLine.lastIndexOf(')') + 1).trimStart()
+  return afterComm[0] === 'Z'
 }
 
 // ─── Lock File Operations ─────────────────────────────────────
