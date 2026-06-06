@@ -4,9 +4,9 @@
 
 ---
 
-## 一、已完成（本会话 bb1bbe0）
+## 一、已完成
 
-### Spec A 改造一 P0 — 对抗式 Verifier ✅
+### 本会话 bb1bbe0 — Spec A 改造一 P0（对抗式 Verifier 核心）✅
 
 | 变更 | 文件 | 内容 |
 |------|------|------|
@@ -18,24 +18,19 @@
 | 测试更新 | `src/agent/__tests__/profile-registry.test.ts` | 9 profiles, adversarial_verifier 断言 |
 | 测试更新 | `src/agent/__tests__/worker-evidence.test.ts` | 3 个新测试：旧 verifier 已 blocked、对抗 verifier verified 直接接受、对抗 verifier unverified blocked |
 
+### 后续会话 788b89c — Spec A 改造一 P1（验证缺失 nudge）✅
+
+coordinator 聚合处：patch_proposal/hands 改动无配套 `adversarial_verifier` verify order 时注入标红提醒。
+
 **验证**：typecheck 通过，31 个相关测试全部通过。
 
 ---
 
-## 二、Spec A 改造一 剩余（P1）
+## 二、Spec A 改造一 剩余 — 无（全部完成 ✅）
 
-### P1 — coordinator 验证缺失 nudge
+### P1 — coordinator 验证缺失 nudge ✅
 
-**目标**：当一批 work-order 含 patch_proposal/hands 改动但无配套 verify order 时，注入提醒。
-
-**落点**：coordinator 的 delegate 聚合处（`src/agent/coordinator.ts` 或 `src/agent/delegate-aggregator.ts`）。
-
-**设计要点**：
-- 检查提交的 work-order 批：如果任何 order 的 kind 是 `patch_proposal` 或 profile 是 `hands`，但没有对应的 `verify` kind order（profile 为 `adversarial_verifier`）→ 在聚合结果中注入 nudge
-- 这是**软推动**——不硬阻断，只标红提醒
-- nudge 文本参考 spec A §1.2(c)：`"存在未验证的改动，应 delegate 一个对抗 verifier；你不能靠在汇总里列 caveat 自封通过。"`
-
-**依赖**：无。独立改动，不阻塞任何其他工作。
+**已完成**：提交 `788b89c`。coordinator 在聚合 work-order 批时，若存在 patch_proposal/hands 改动但无配套 `adversarial_verifier` verify order，注入标红提醒。
 
 ---
 
@@ -108,8 +103,9 @@
 ## 五、建议执行顺序
 
 ```
-1. [可立即做] Spec A 改造一 P1 — coordinator 验证缺失 nudge
-   └─ 独立改动，无依赖
+1. [✅ 已完成] Spec A 改造一 P0 + P1 — 对抗式 Verifier 全套
+   └─ P0: adversarial_verifier profile + evidenceStatus 来源约束 (bb1bbe0)
+   └─ P1: coordinator 验证缺失 nudge (788b89c)
 
 2. [阻塞项] Spec B Phase 0 — TaskRegistry + TaskStore
    └─ 需要 ingress runtime 池先就绪（或至少接口已定义）
