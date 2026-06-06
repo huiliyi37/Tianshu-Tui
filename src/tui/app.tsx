@@ -395,14 +395,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     blockWriterRef.current?.flush()
     blockWriterRef.current = null
     textBatcher.current.flushNow()
-    if (incrementalCommit) {
-      // streamBuf is already committed block-by-block; the flush() above committed
-      // the tail. Only commit thinking that never got a content block.
-      if (!thinkingCommittedRef.current && thinkBuf.current) {
-        pushStatic(createLogEntry({ type: 'thinking_message', content: appendStreamWindow('', thinkBuf.current, STATIC_THINKING_CAP) }))
-      }
-      flushStaticBatch()
-    } else if (streamBuf.current || thinkBuf.current) {
+    if (streamBuf.current || thinkBuf.current) {
       pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
     }
     thinkingCommittedRef.current = false
@@ -436,32 +429,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     const cols = process.stdout.columns ?? 80
     const rows = process.stdout.rows ?? 24
     const capRows = Math.max(1, Math.floor(rows * 0.5))
-    if (incrementalCommitRef.current) {
-      // DeepSeek path: each emitted block is "done" → commit it to scrollback now.
-      // Commit the thinking box first (once), so it sits above the reply. DeepSeek
-      // streams all reasoning_content before content, so thinkBuf is complete here.
-      if (!thinkingCommittedRef.current && thinkBuf.current) {
-        pushStatic(createLogEntry({ type: 'thinking_message', content: appendStreamWindow('', thinkBuf.current, STATIC_THINKING_CAP) }))
-        thinkingCommittedRef.current = true
-      }
-      // Strip the interview-marker HTML comment from the committed text; its STATE
-      // is still parsed from streamBuf at turn-end.
-      const clean = combined.replace(INTERVIEW_MARKER_RE, '')
-      if (clean) pushStatic(createLogEntry({ type: 'assistant_message', content: clean }))
-      // Commit before the next live update so Static renders ahead of StreamOutput.
-      flushStaticBatch()
-      // Live region shows only the still-unemitted tail (small, bounded by the
-      // block writer's maxChars) — committed blocks live in scrollback, no overlap.
-      const tail = (blockWriterRef.current?.peek() ?? '').replace(INTERVIEW_MARKER_RE, '')
-      streamLiveBuf.current = capLiveTail(tail, cols, capRows)
-      setStreamingText(streamLiveBuf.current)
-      return
-    }
-    // glm path (unchanged): accumulate full reply, commit at turn-end. Live region
-    // shows only the bounded tail of the reply-so-far so it can't overflow viewport.
+    // Unified path: accumulate full reply, commit at turn-end. Live region
+    // shows only the bounded display-row tail so it never overflows the viewport
+    // (真凶② fix). The full text is committed to <Static> at turn-end so the
+    // reply is visible on screen (not scrolled off via mid-stream commits).
     const tailSlice = streamBuf.current.slice(-(capRows * cols * 2 + cols))
     streamLiveBuf.current = capLiveTail(tailSlice, cols, capRows)
     setStreamingText(streamLiveBuf.current)
+    // reply is visible on screen (not scrolled off via mid-stream commits).
   }))
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -828,14 +803,6 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         }
         projectActivity(now)
         blockWriterRef.current?.push(text)
-        // Incremental mode: update the live tail every delta (not just on block
-        // emit) so streaming stays smooth in the ~180ms gaps between emits.
-        if (incrementalCommit) {
-          const cols = process.stdout.columns ?? 80
-          const rows = process.stdout.rows ?? 24
-          const tail = (blockWriterRef.current?.peek() ?? '').replace(INTERVIEW_MARKER_RE, '')
-          setStreamingText(capLiveTail(tail, cols, Math.max(1, Math.floor(rows * 0.5))))
-        }
       },
       onThinkingDelta: (thinking) => {
         setHeartbeatStatus(null)
@@ -1016,31 +983,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Intermediate turn: update activity, freeze tools, reset thinking — but keep writer alive
         if (isFinal === false) {
           textBatcher.current.flushNow()
-          if (incrementalCommit) {
-            // This step's content is already committed block-by-block. Flush the
-            // unemitted tail into scrollback, then reset for the next step.
-            blockWriterRef.current?.flush()
-            textBatcher.current.flushNow()
-            // A thinking-only step (reasoning but no content) never triggered the
-            // lazy thinking commit — flush it now so it isn't lost.
-            if (!thinkingCommittedRef.current && thinkBuf.current) {
-              pushStatic(createLogEntry({ type: 'thinking_message', content: appendStreamWindow('', thinkBuf.current, STATIC_THINKING_CAP) }))
-            }
-            thinkingCommittedRef.current = false
-            flushStaticBatch()
-          } else {
-            // Archive intermediate turn text to Static and clear stream buffers
-            // to prevent cross-turn text accumulation in StreamOutput (P2 fix).
-            const midText = streamBuf.current
-            if (midText) {
-              const midThinking = thinkBuf.current || undefined
-              // When model promotes thinking verbatim to visible text (GLM),
-              // suppress the assistant_message — the thinking tab already renders it.
-              if (midThinking && isThinkingPromotedToText(midThinking, midText)) {
-                pushStaticBatch([createLogEntry({ type: 'thinking_message', content: midThinking })])
-              } else {
-                pushAssistantEntry(midText, midThinking)
-              }
+          // Archive intermediate turn text to Static and clear stream buffers
+          // to prevent cross-turn text accumulation in StreamOutput (P2 fix).
+          const midText = streamBuf.current
+          if (midText) {
+            const midThinking = thinkBuf.current || undefined
+            // When model promotes thinking verbatim to visible text (GLM),
+            // suppress the assistant_message — the thinking tab already renders it.
+            if (midThinking && isThinkingPromotedToText(midThinking, midText)) {
+              pushStaticBatch([createLogEntry({ type: 'thinking_message', content: midThinking })])
+            } else {
+              pushAssistantEntry(midText, midThinking)
             }
           }
           streamBuf.current = ''
@@ -1105,47 +1058,20 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         const thinkingForArchive = (finalText && thinkBuf.current && isThinkingPromotedToText(thinkBuf.current, finalText))
           ? undefined
           : (thinkBuf.current || undefined)
-        // For incremental-commit (DeepSeek): all blocks are already in scrollback
-        // via committed-log. Clearning streamingText would leave the live zone
-        // empty, making the reply appear to vanish. Keep the last few lines of
-        // the full text visible so the user sees a smooth transition — streaming
-        // tail → final reply tail (content above is in scrollback, scrollable).
-        if (incrementalCommit && finalText) {
-          const cols = process.stdout.columns ?? 80
-          const rows = process.stdout.rows ?? 24
-          const tailRows = Math.max(3, Math.min(8, Math.floor(rows * 0.25)))
-          streamLiveBuf.current = capLiveTail(finalText, cols, tailRows)
-          setStreamingText(streamLiveBuf.current)
-        } else {
-          streamLiveBuf.current = ''
-          setStreamingText('')
-        }
+        // Stop streaming FIRST so StreamOutput unmounts before Static entry appears,
+        // preventing duplicate content visible simultaneously in terminal.
+        // Clear live text BEFORE flipping isStreaming so that StreamOutput renders
+        // nothing in the same React batch — prevents flash-frame duplication.
+        streamBuf.current = ''
+        streamLiveBuf.current = ''
+        setStreamingText('')
         setStreamingThinking('')
         // Flush any pending microtask-batched Static entries before isStreaming
         // flips — prevents late tool-result pushStatic from colliding with the
         // synchronous pushStaticBatch below (真凶① double-safety, see HANDOFF doc).
         flushStaticBatch()
         setIsStreaming(false); isStreamingRef.current = false
-        if (incrementalCommit) {
-          // finalText is already committed block-by-block. Commit any thinking that
-          // never got a content block (thinking-only reply), then extract interview
-          // STATE from the full text (the marker was stripped from committed blocks).
-          if (!thinkingCommittedRef.current && thinkBuf.current) {
-            pushStatic(createLogEntry({ type: 'thinking_message', content: appendStreamWindow('', thinkBuf.current, STATIC_THINKING_CAP) }))
-          }
-          thinkingCommittedRef.current = false
-          if (finalText) {
-            const parsed = parseInterviewMarker(finalText)
-            if (parsed) {
-              setInterviewState(parsed.state)
-              setClarityHistory(prev => [...prev.slice(-49), parsed.state.clarity])
-              if (parsed.state.confirmed) {
-                setSummaryState(prev => ({ ...prev, phase: 'interview' }))
-              }
-            }
-          }
-          flushStaticBatch()
-        } else if (finalText || thinkingForArchive) {
+        if (finalText || thinkingForArchive) {
           if (finalText) {
             const parsed = parseInterviewMarker(finalText)
             if (parsed) {
