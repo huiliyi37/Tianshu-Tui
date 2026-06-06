@@ -26,3 +26,19 @@ Rule — 每个逻辑单元提交前，做一轮结构化核对（30 秒）：
 4. **import 审计**：新增的动态 import 是否可以用静态 import 替代
 
 这不是重读文档，是结构化验证。偏差 1 可被 checklist 捕获，偏差 3 只需读一行类型签名。
+
+### 强制机制（不靠自觉）
+
+**提交前必须 spawn 一个 adversarial_verifier 做 spec→code 交叉核对。** 这不是可选的"建议"，是交付流程的固定步骤：
+
+1. 实现完一个逻辑单元后，先 typecheck + 跑相关测试
+2. **然后 delegate 一个 `adversarial_verifier` worker**，objective 为：
+   > "对照 spec（路径: docs/superpowers/specs/<spec>.md）逐条核实本次实现：
+   > 1. 所有路由/端点是否存在（spec 架构表逐条打勾）
+   > 2. 所有接口签名是否对齐（接线函数参数是否完整传递）
+   > 3. 新增 guard/分支是否有不可达死代码
+   > 4. import 是否有可消除的动态导入
+   > 报告偏差为 failed，全部通过为 verified"
+3. **verifier 返回 verified 后才能 deliver_task**。若返回 failed/blocked，先修偏差再重审。
+
+这样偏差不是在 code review 时才发现——是在提交前就被对抗 verifier 拦截。靠的是子代理独立核对，不是主模型自觉读检查清单。
