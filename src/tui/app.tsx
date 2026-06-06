@@ -255,6 +255,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [streamingThinking, setStreamingThinking] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [isThinkingActive, setIsThinkingActive] = useState(false)
+  /** Last completed reply — kept in the live frame so the user sees it on the same
+   *  screen as the input bar. Cleared when the next stream starts. The full reply
+   *  is ALSO committed to <Static> scrollback (scroll up for history). */
+  const [lastReplyPreview, setLastReplyPreview] = useState('')
   /** Generation counter: incremented on each new stream start. A run's onAbort/onError/catch only flips isStreaming when its captured generation still matches — prevents a stale run from killing a newer one. */
   const streamGenRef = useRef(0)
   const [fluencyStale, setFluencyStale] = useState<{ message: string; level: 'info' | 'warn' | 'action' } | null>(null)
@@ -428,15 +432,18 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     streamBuf.current += combined
     const cols = process.stdout.columns ?? 80
     const rows = process.stdout.rows ?? 24
-    const capRows = Math.max(1, Math.floor(rows * 0.5))
-    // Unified path: accumulate full reply, commit at turn-end. Live region
-    // shows only the bounded display-row tail so it never overflows the viewport
-    // (真凶② fix). The full text is committed to <Static> at turn-end so the
-    // reply is visible on screen (not scrolled off via mid-stream commits).
-    const tailSlice = streamBuf.current.slice(-(capRows * cols * 2 + cols))
-    streamLiveBuf.current = capLiveTail(tailSlice, cols, capRows)
+    // Store a generous viewport-bounded tail here; the AUTHORITATIVE chrome-aware
+    // cap happens at RENDER time (`displayStreamingText`, see the return below),
+    // where the CURRENT thinking-box and running-tool heights are known. Capping
+    // only in this delta closure misses chrome that appears between deltas (e.g. a
+    // tool card rendering after the last text delta) — and any live region that
+    // reaches terminal height trips Ink fullscreen mode (\x1B[2J clear+redraw,
+    // confirmed via an isolated Ink 6.8 repro), which trashes scrollback and
+    // separates the reply from the input.
+    const windowRows = Math.max(3, rows)
+    const tailSlice = streamBuf.current.slice(-(windowRows * cols * 2 + cols))
+    streamLiveBuf.current = capLiveTail(tailSlice, cols, windowRows)
     setStreamingText(streamLiveBuf.current)
-    // reply is visible on screen (not scrolled off via mid-stream commits).
   }))
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -615,6 +622,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setIsThinkingActive(false)
     setStreamingText('')
     setStreamingThinking('')
+    setLastReplyPreview('')
     setLiveTools([])
     liveToolsRef.current = []
     setFluencyStale(null)
@@ -1082,9 +1090,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
               }
               if (parsed.cleanText) {
                 pushAssistantEntry(parsed.cleanText, thinkingForArchive)
+                setLastReplyPreview(parsed.cleanText)
               }
             } else {
               pushAssistantEntry(finalText, thinkingForArchive)
+              setLastReplyPreview(finalText)
             }
           } else {
             // Only thinking, no visible text — push thinking-only entry
@@ -1349,25 +1359,37 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     activeOverlay, surfaceRouter, surfacePush, surfacePop, isSurfaceVisible,
   })
 
+  // Authoritative live-region cap (真凶②). The live (non-Static) output MUST stay
+  // strictly under the terminal height or Ink fires fullscreen mode (\x1B[2J
+  // clear+redraw — confirmed via an isolated Ink 6.8 repro), which trashes the
+  // scrollback and puts the reply a full screen above the input. Reserve rows for
+  // every OTHER live element (thinking box, running tool cards, ground zone) —
+  // measured live here at render time — and trim the streaming tail to what's left.
+  const liveCols = process.stdout.columns ?? 80
+  const liveGroundRows = 5 // GlanceBar + InputBar + margin
+  const liveThinkRows = streamingThinking ? Math.min(10, streamingThinking.split('\n').length) + 3 : 0
+  const liveToolRows = liveTools.reduce((s, t) => s + Math.min(12, (t.content ? t.content.split('\n').length : 1) + 2), 0)
+  const liveCapRows = Math.max(2, termRows - liveGroundRows - liveThinkRows - liveToolRows - 2)
+  const displayStreamingText = streamingText ? capLiveTail(streamingText, liveCols, liveCapRows) : streamingText
+
   return (
-    // Natural-scroll layout: <Static> writes committed history to real terminal
-    // scrollback, and the live frame renders BELOW it at its natural height. Do
-    // NOT wrap in <Box height={termRows}> — that makes the live frame full-screen
-    // every render, which visually buries all <Static> history above the viewport
-    // ("丢回复": replies committed but never visible). The flexGrow spacer below
-    // harmlessly collapses to 0 here; the input sits right under the latest output
-    // (Claude-Code-style), which is the intended "pinned" feel without full-screen.
+    // Natural-flow layout: live Box has NO height constraint. Content flows top-down,
+    // input sits right after the latest content. No spacer = no gap between content
+    // and input. <Static> writes committed history to real terminal scrollback.
+    // Pin-to-bottom (height={termRows-1}) was attempted 3x and rejected — it makes
+    // the live frame fill the viewport, pushing all Static content off-screen.
     <>
-      {historyItems.length === 0 && !isStreaming && (
-        <WelcomeScreen model={model} cwd={process.cwd()} />
-      )}
       <Static
         items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? (staticItemsForInk as LogEntry[]) : []}
         key="static-history"
       >
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
       </Static>
-      <Box flexDirection="column" height={termRows}>
+      <Box flexDirection="column">
+        {/* Welcome screen in live frame — disappears once conversation starts */}
+        {historyItems.length === 0 && !isStreaming && !lastReplyPreview && (
+          <WelcomeScreen model={model} cwd={process.cwd()} />
+        )}
         {activeOverlay === 'starmap' && (
           <StarmapView
             activePhase={phaseFromSummary(summaryState)}
@@ -1399,15 +1421,21 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         ))}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && (!!streamingThinking || isThinkingActive)} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
-          <StreamOutput text={streamingText} isStreaming={isStreaming} />
+          <StreamOutput text={displayStreamingText} isStreaming={isStreaming} />
+        )}
+        {/* Last reply preview: keeps the completed reply visible in the live frame
+            so it's on the same screen as the input bar. Cleared on next stream start.
+            The full reply is also in <Static> scrollback (scroll up for history). */}
+        {!isStreaming && !streamingText && lastReplyPreview && (
+          <Box paddingX={2} flexDirection="column">
+            <Text>{capLiveTail(lastReplyPreview, liveCols, liveCapRows)}</Text>
+          </Box>
         )}
         {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
           <Box paddingX={2}>
             <Text>◌ {heartbeatStatus}</Text>
           </Box>
         )}
-        {/* Spacer: pushes ground zone (GlanceBar + InputBar) to terminal bottom */}
-        <Box flexGrow={1} minHeight={0} />
         {/* Zone 2: Dialog — conditional items that need user attention */}
         {fluencyStale && termRows >= 24 && (
           <Box paddingX={1}>

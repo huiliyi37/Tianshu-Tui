@@ -40,6 +40,18 @@ export function createCommittedLog(): CommittedLog {
   const arr: LogEntry[] = []
   let dedup = new Set<string>()
   const MAX_DEDUP = 256
+  // CRITICAL: Ink 6.8's <Static> memoizes `items.slice(index)` keyed on the items
+  // REFERENCE (node_modules/ink/build/components/Static.js:12 — `useMemo(() =>
+  // items.slice(index), [items, index])`). If items() returns the SAME array
+  // reference after we append (mutate in place), that memo never invalidates and
+  // newly-appended entries are NEVER rendered — the entire conversation silently
+  // fails to appear in scrollback (reply lives only in the live region, then
+  // "vanishes" when committed). So items() must return a NEW reference whenever the
+  // log changes. We cache the snapshot so repeated items() calls BETWEEN mutations
+  // return the same reference (one copy per change, not per call) — that stability
+  // is what keeps Ink's high-water `index` from desyncing (the original 真凶① goal),
+  // while the change-on-mutation is what makes new entries actually render.
+  let snapshot: readonly LogEntry[] | null = null
 
   return {
     append(entry: LogEntry): boolean {
@@ -55,20 +67,25 @@ export function createCommittedLog(): CommittedLog {
         dedup.add(id)
       }
       arr.push(entry)
+      snapshot = null // reference must change so Ink's <Static> memo re-renders
       return true
     },
     items(): readonly LogEntry[] {
-      return arr
+      if (snapshot === null) snapshot = arr.slice()
+      return snapshot
     },
     releaseRendered(keepLast: number): void {
       const cutoff = arr.length - Math.max(0, keepLast)
+      let changed = false
       for (let i = 0; i < cutoff; i++) {
         const e = arr[i]!
         if (e.content !== '') {
           // Mutate in place: empty heavy content, keep id/type for stable memo key.
           arr[i] = { ...e, content: '' }
+          changed = true
         }
       }
+      if (changed) snapshot = null
     },
     get length(): number {
       return arr.length
@@ -76,6 +93,7 @@ export function createCommittedLog(): CommittedLog {
     reset(): void {
       arr.length = 0
       dedup = new Set()
+      snapshot = null
     },
   }
 }

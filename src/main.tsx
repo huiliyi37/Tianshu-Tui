@@ -1020,6 +1020,24 @@ async function main() {
       }, SLOW_RENDER_MS).unref()
     : undefined
 
+  // Gated diagnostic — no-op unless RIVET_DEBUG_FULLSCREEN=1 AND stderr is
+  // redirected to a file/pipe (never writes to an interactive terminal, which
+  // would itself corrupt Ink frames). Detects when Ink enters fullscreen mode
+  // (it writes \x1B[2J\x1B[H and redraws from the top because the live output
+  // reached terminal height) so any remaining live-region overflow is provable:
+  //   RIVET_DEBUG_FULLSCREEN=1 node dist/main.js 2>layout.log
+  if (process.env.RIVET_DEBUG_FULLSCREEN === '1' && !process.stderr.isTTY) {
+    const origWrite = process.stdout.write.bind(process.stdout)
+    let clears = 0
+    process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
+      if (typeof chunk === 'string' && chunk.includes('\x1B[2J')) {
+        clears++
+        process.stderr.write(`[fullscreen-clear] #${clears} rows=${process.stdout.rows} cols=${process.stdout.columns} — Ink cleared screen (live output >= terminal height)\n`)
+      }
+      return (origWrite as (...a: unknown[]) => boolean)(chunk, ...rest)
+    }) as typeof process.stdout.write
+  }
+
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),
     { exitOnCtrlC: false },
