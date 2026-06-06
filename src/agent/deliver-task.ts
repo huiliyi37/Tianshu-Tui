@@ -105,7 +105,7 @@ export function collectCurrentDirtyFiles(cwd: string): string[] | undefined {
   return [...files].sort()
 }
 
-export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
+export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) => B1Context): Tool {
   return {
     definition: {
       name: 'deliver_task',
@@ -148,7 +148,8 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
     },
 
     async execute(params: ToolCallParams): Promise<ToolResult> {
-      const ctx = getB1Context()
+      const ctx = getB1Context(params)
+      const reviewDepth = params.reviewDepth ?? ctx.reviewDepth ?? 0
       ctx.ownership.autoOwnFromLedger()
       const currentDirtyFiles = ctx.getCurrentDirtyFiles?.(params.cwd) ?? collectCurrentDirtyFiles(params.cwd)
       if (currentDirtyFiles) ctx.ownership.autoOwnFromBaseline(currentDirtyFiles)
@@ -356,7 +357,7 @@ export function createDeliverTaskTool(getB1Context: () => B1Context): Tool {
 
         // Review discipline gate: fix commits must pass an independent review route when wired.
         // The reviewDepth guard prevents verifier/patcher child contexts from recursively reviewing themselves.
-        if ((ctx.reviewDepth ?? 0) === 0 && isFixContext(message)) {
+        if (reviewDepth === 0 && isFixContext(message)) {
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
           if (route && ctx.reviewDeps) {
             const change: ChangeSet = {

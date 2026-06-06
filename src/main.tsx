@@ -210,12 +210,13 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       ownership: _b1Ownership,
       attribution: _b1Attribution,
     })
-    reg.register(createDeliverTaskTool(() => ({
+    reg.register(createDeliverTaskTool((params) => ({
       taskLedger: _b1TaskLedger,
       ownership: _b1Ownership,
       gate: _b1Gate,
       sessionRegistry: _sessionRegistryRef ?? undefined,
       sessionId: _sessionIdRef ?? undefined,
+      reviewDepth: params?.reviewDepth ?? 0,
       reviewDeps: createCoordinatorReviewDeps({
         delegate: async (request, abortSignal) => {
           if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
@@ -225,7 +226,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
           if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
           return _coordinatorRef.delegateBatch(requests, policy, abortSignal, onProgress)
         },
-      }),
+      }, { reviewDepth: params?.reviewDepth ?? 0 }),
     })))
 
     return reg

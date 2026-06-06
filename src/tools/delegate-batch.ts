@@ -161,6 +161,7 @@ export function createDelegateBatchTool(
         kind: t.kind ?? 'code_search',
         profile: (t.profile ?? 'code_scout') as import('../agent/work-order.js').WorkerProfile,
         scope: { files: t.files, symbols: t.symbols },
+        reviewDepth: params.reviewDepth,
       }))
 
       // Progressive task cap: trim to the allowed slice on early turns

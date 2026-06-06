@@ -102,6 +102,7 @@ export function createDelegateTaskTool(
           files: parsed.data.files,
           symbols: parsed.data.symbols,
         },
+        reviewDepth: params.reviewDepth,
       }, params.abortSignal)
 
       // Extract worker findings into claim store

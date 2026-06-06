@@ -309,6 +309,28 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /Scoped commit created/)
   })
 
+  it('skips ReviewRouter when ToolCallParams reviewDepth indicates child worker context', async () => {
+    let routerCalled = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => {
+        routerCalled = true
+        return { tier: 'L2', verdict: 'verified', evidence: 'ran: should not happen', rounds: 1 }
+      },
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+    })
+
+    const result = await tool.execute({ ...params, reviewDepth: 1, input: { commit: true, message: 'fix: scoped delivery' } })
+
+    assert.equal(result.isError ?? false, false)
+    assert.equal(routerCalled, false)
+    assert.match(result.content, /Scoped commit created/)
+  })
+
   it('rejects commit=true without message before running executor', async () => {
     const { tool, params } = makeContext({
       taskId: 't1',

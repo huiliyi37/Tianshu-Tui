@@ -33,6 +33,8 @@ export interface DelegationRequest {
   kind: WorkOrderKind
   profile: WorkerProfile
   scope: WorkOrderScope
+  /** Review-router re-entrancy depth to pass into worker tool contexts. */
+  reviewDepth?: number
 }
 
 export interface CoordinatorRun {
@@ -163,6 +165,7 @@ export class DelegationCoordinator {
             profile: request.profile,
             objective: request.objective,
             scope: request.scope,
+            reviewDepth: request.reviewDepth,
           })
         : createReadOnlyWorkOrder({
             parentTurnId: request.parentTurnId,
@@ -170,6 +173,7 @@ export class DelegationCoordinator {
             profile: request.profile,
             objective: request.objective,
             scope: request.scope,
+            reviewDepth: request.reviewDepth,
           })
 
       return await this.delegateOrder(order)
@@ -251,6 +255,7 @@ export class DelegationCoordinator {
     // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
+    workerConfig.reviewDepth = order.reviewDepth
     // Propagate parent abort signal so worker stops immediately on abort
     // instead of waiting for its internal budget timeout (中间层 #1).
     workerConfig.abortSignal = this.config.abortSignal
@@ -418,6 +423,7 @@ export class DelegationCoordinator {
             profile: r.profile,
             objective: r.objective,
             scope: r.scope,
+            reviewDepth: r.reviewDepth,
           })
         : createReadOnlyWorkOrder({
             parentTurnId: r.parentTurnId,
@@ -425,6 +431,7 @@ export class DelegationCoordinator {
             profile: r.profile,
             objective: r.objective,
             scope: r.scope,
+            reviewDepth: r.reviewDepth,
           })
       if (queue.enqueue(order)) {
         orders.push(order)

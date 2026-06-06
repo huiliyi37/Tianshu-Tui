@@ -95,6 +95,7 @@ export const workOrderSchema = z.object({
   budget: workerBudgetSchema,
   domain: domainAreaSchema.optional(),
   workerCwd: z.string().optional(),
+  reviewDepth: z.number().int().min(0).optional(),
 })
 
 export type WorkOrder = z.infer<typeof workOrderSchema>
@@ -184,6 +185,8 @@ export interface CreateReadOnlyWorkOrderInput {
   aggregationPolicy?: AggregationPolicy
   budget?: Partial<WorkerBudget>
   domain?: DomainArea
+  /** Review-router re-entrancy depth propagated across delegation boundaries. */
+  reviewDepth?: number
 }
 
 export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): WorkOrder {
@@ -224,6 +227,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
       maxRetries: input.budget?.maxRetries ?? 2,
     },
     domain: input.domain,
+    reviewDepth: input.reviewDepth,
   })
 }
 
@@ -261,6 +265,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
       maxRetries: input.budget?.maxRetries ?? 1,
     },
     domain: input.domain,
+    reviewDepth: input.reviewDepth,
   })
 }
 

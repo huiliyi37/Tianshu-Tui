@@ -47,6 +47,7 @@ describe('DELEGATE_BATCH_TOOL', () => {
       toolUseId: 'tu_batch',
       cwd: '/repo',
       sessionTurnCount: 5,
+      reviewDepth: 2,
       input: {
         tasks: [{ objective: 'Verify the unit test seam thoroughly.', kind: 'verify', profile: 'verifier' }],
         policy: 'weighted_confidence',
@@ -56,5 +57,6 @@ describe('DELEGATE_BATCH_TOOL', () => {
     assert.equal(result.isError, false)
     assert.equal(calls[0]?.policy, 'weighted_confidence')
     assert.equal(calls[0]?.requests[0]?.kind, 'verify')
+    assert.equal(calls[0]?.requests[0]?.reviewDepth, 2)
   })
 })

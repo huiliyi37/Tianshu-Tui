@@ -37,6 +37,7 @@ describe('DELEGATE_TASK_TOOL', () => {
     const result = await tool.execute({
       toolUseId: 'tu_delegate',
       cwd: '/repo',
+      reviewDepth: 2,
       input: {
         objective: 'Find routing seams across the runtime modules.',
         files: ['src/main.tsx', 'src/agent/loop.ts'],
@@ -48,6 +49,7 @@ describe('DELEGATE_TASK_TOOL', () => {
     assert.equal(calls[0]!.kind, 'code_search')
     assert.equal(calls[0]!.profile, 'code_scout')
     assert.deepEqual(calls[0]!.scope.files, ['src/main.tsx', 'src/agent/loop.ts'])
+    assert.equal(calls[0]!.reviewDepth, 2)
     assert.equal(result.isError, false)
     assert.ok(result.content.includes('<worker_results>'))
     assert.ok(result.uiContent!.includes('delegate_task completed'))

@@ -522,6 +522,45 @@ describe('CompactionController', () => {
     assert.equal(refreshed, false)
   })
 
+  it('A-1c: maybeCompact (1M window LLM compact) skips checkpoint mutation when abort lands after LLM compact returns', async () => {
+    const session = new SessionContext()
+    // 1M window LLM-compact path fires at ratio >= 0.75. 12 messages ×
+    // ~65K tokens ≈ 780K tokens → 78% → reaches the L279 abort guard.
+    const chunk = 'x'.repeat(260_000) // 260K chars / 4 ≈ 65K tokens
+    session.replaceMessages(
+      Array.from({ length: 12 }, (_, i) => ({
+        role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: chunk,
+      })),
+    )
+    assert.ok(
+      session.getEstimatedTokens() / 1_000_000 >= 0.75,
+      'setup: tokens must exceed 75% of 1M window to reach the LLM-compact path',
+    )
+    const before = session.getMessages().map(m => m.content)
+    const abortController = new AbortController()
+    let refreshed = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('late micro compact summary')
+        abortController.abort()
+      },
+    }
+
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getAbortSignal: () => abortController.signal,
+      refreshLedger: () => { refreshed = true },
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+
+    assert.equal(result.compacted, false)
+    assert.deepEqual(session.getMessages().map(m => m.content), before)
+    assert.equal(refreshed, false)
+  })
+
   it('P4: enforceContextCeiling handoff also benefits from trajectory data', async () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(200_000 * 4)

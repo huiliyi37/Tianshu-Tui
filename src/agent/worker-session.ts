@@ -30,6 +30,8 @@ export interface WorkerSessionConfig {
   contextWindow: number
   compact: CompactionConfig
   activeClaims?: import('../context/claims.js').ContextClaim[]
+  /** Review-router re-entrancy depth propagated to worker tool calls. */
+  reviewDepth?: number
   /** Parent abort signal — propagated to worker AgentLoop for immediate abort. */
   abortSignal?: AbortSignal
 }
@@ -134,6 +136,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     contextWindow: config.contextWindow,
     compact: config.compact,
     sessionId: `worker-${config.order.id}`,
+    reviewDepth: config.reviewDepth,
   }, session, config.cwd)
 
   const timeoutMs = config.order.budget.timeoutMs

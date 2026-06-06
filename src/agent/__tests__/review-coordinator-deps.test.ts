@@ -54,6 +54,7 @@ describe('createCoordinatorReviewDeps', () => {
     assert.equal(captured?.parentTurnId, 'turn-1')
     assert.equal(captured?.profile, 'adversarial_verifier')
     assert.equal(captured?.kind, 'verify')
+    assert.equal(captured?.reviewDepth, 3)
     assert.deepEqual(captured?.scope.files, ['src/agent/deliver-task.ts'])
     assert.match(captured?.objective ?? '', /Review depth: 3/)
     assert.match(captured?.objective ?? '', /Do not call deliver_task/)
@@ -96,6 +97,7 @@ describe('createCoordinatorReviewDeps', () => {
 
     assert.equal(requests[0]?.profile, 'patcher')
     assert.equal(requests[0]?.kind, 'patch_proposal')
+    assert.equal(requests[0]?.reviewDepth, 1)
     assert.match(requests[0]?.objective ?? '', /missing review gate/)
     assert.equal(result.patched, true)
   })
@@ -123,6 +125,7 @@ describe('createCoordinatorReviewDeps', () => {
     assert.equal(capturedRequests.length, 4)
     assert.ok(capturedRequests.every(request => request.profile === 'reviewer'))
     assert.ok(capturedRequests.every(request => request.kind === 'review'))
+    assert.ok(capturedRequests.every(request => request.reviewDepth === 1))
     assert.deepEqual(capturedRequests[0]?.scope.files, ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'])
     assert.equal(result.findings[0]?.severity, 'HIGH')
     assert.match(result.findings[0]?.claim ?? '', /race/)

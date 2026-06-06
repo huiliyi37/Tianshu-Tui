@@ -396,6 +396,7 @@ export async function executeToolUse(
     contextWindow: deps.config.contextWindow,
     providerProfile: deps.config.providerProfile,
     sessionTurnCount: deps.sessionTurnCount,
+    reviewDepth: deps.config.reviewDepth,
     abortSignal: deps.abortSignal,
  }
 

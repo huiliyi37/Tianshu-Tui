@@ -18,7 +18,7 @@ export interface ReviewCoordinator {
 export interface CoordinatorReviewDepsOptions {
   /** Stable parent id for generated work orders; defaults to deliver_task. */
   parentTurnId?: string
-  /** Parent review depth. Child review workers receive parent+1 in their objective. */
+  /** Parent review depth. Child review workers receive parent+1 as request metadata and in their objective. */
   reviewDepth?: number
   /** Optional parent abort signal propagated to coordinator calls. */
   abortSignal?: AbortSignal
@@ -45,16 +45,18 @@ function request(input: {
   kind: WorkOrderKind
   profile: WorkerProfile
 }): DelegationRequest {
+  const reviewDepth = childReviewDepth(input.options)
   return {
     parentTurnId: input.options.parentTurnId ?? REVIEW_PARENT_TURN_ID,
     objective: [
       input.objective,
       '',
-      `Review depth: ${childReviewDepth(input.options)}. Do not call deliver_task from review workers; report verdict/evidence only.`,
+      `Review depth: ${reviewDepth}. Do not call deliver_task from review workers; report verdict/evidence only.`,
     ].join('\n'),
     kind: input.kind,
     profile: input.profile,
     scope: scope(input.change),
+    reviewDepth,
   }
 }
 

@@ -32,6 +32,8 @@ export interface AgentConfig {
   primaryClient?: StreamClient
   approvalMode?: ApprovalMode
   sessionId?: string
+  /** Review-router re-entrancy depth. Worker contexts spawned by review routing use depth > 0. */
+  reviewDepth?: number
   /** Optional session registry for cross-session event communication. */
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   transcriptPath?: string

@@ -86,6 +86,50 @@ describe('DelegationCoordinator', () => {
     assert.equal(shouldDelegateObjective('inspect files', { files: ['a.ts', 'b.ts'] }), true)
   })
 
+  it('propagates reviewDepth from delegation request into worker runtime config', async () => {
+    let orderDepth: number | undefined
+    let configDepth: number | undefined
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        orderDepth = order.reviewDepth
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => {
+        configDepth = config.reviewDepth
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    await coordinator.delegate({
+      parentTurnId: 'turn-review-depth',
+      objective: 'Verify structural review depth propagation across worker runtime config',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/agent/coordinator.ts', 'src/agent/deliver-task.ts'] },
+      reviewDepth: 1,
+    })
+
+    assert.equal(orderDepth, 1)
+    assert.equal(configDepth, 1)
+  })
+
   it('routes patcher profile through injected hands runner seam', async () => {
     let handsCalled = false
     let workerCalled = false
