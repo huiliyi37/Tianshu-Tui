@@ -21,6 +21,7 @@ import {
   type TaskStatus,
 } from '../task-store.js'
 import { TaskRegistry } from '../task-registry.js'
+import type { NotifyPolicy } from '../task-registry.js'
 
 const TEST_DIR = '.test-tmp/task-registry-test'
 
@@ -395,6 +396,134 @@ describe('TaskRegistry', () => {
 
     await registry2.transition(task.id, 'completed')
     assert.ok(events.some(e => e.taskId === task.id && e.type === 'completed'))
+  })
+
+  // ── Notify Policy ──────────────────────────────────────────
+
+  it('silent policy suppresses all events', async () => {
+    const events: string[] = []
+    const store2 = setupStore()
+    const registry2 = new TaskRegistry({
+      taskStore: store2,
+      notifyPolicy: 'silent',
+      onEvent: (e) => events.push(e.type),
+    })
+
+    await registry2.createTask({ prompt: 'test', source: 'manual' })
+    assert.equal(events.length, 0) // created event suppressed
+  })
+
+  it('errors_only policy emits only failed/timed_out events', async () => {
+    const events: string[] = []
+    const store2 = setupStore()
+    const registry2 = new TaskRegistry({
+      taskStore: store2,
+      notifyPolicy: 'errors_only',
+      onEvent: (e) => events.push(e.type),
+    })
+
+    const task = await registry2.createTask({ prompt: 'test', source: 'manual' })
+    // created event should be suppressed
+    assert.equal(events.length, 0)
+
+    await registry2.transition(task.id, 'running')
+    // running event should be suppressed
+    assert.equal(events.length, 0)
+
+    await registry2.transition(task.id, 'completed')
+    // completed event should be suppressed
+    assert.equal(events.length, 0)
+
+    // Create another task and fail it
+    const task2 = await registry2.createTask({ prompt: 'test2', source: 'manual', force: true })
+    await registry2.transition(task2.id, 'failed', { error: 'boom' })
+
+    // failed event should be emitted
+    assert.ok(events.includes('failed'))
+
+    // Create another task and time it out
+    const task3 = await registry2.createTask({ prompt: 'test3', source: 'manual', force: true })
+    await registry2.transition(task3.id, 'timed_out')
+
+    // timed_out event should be emitted
+    assert.ok(events.includes('timed_out'))
+
+    // Only error events
+    for (const e of events) {
+      assert.ok(e === 'failed' || e === 'timed_out')
+    }
+  })
+
+  it('state_changes policy emits all events', async () => {
+    const events: string[] = []
+    const store2 = setupStore()
+    const registry2 = new TaskRegistry({
+      taskStore: store2,
+      notifyPolicy: 'state_changes',
+      onEvent: (e) => events.push(e.type),
+    })
+
+    const task = await registry2.createTask({ prompt: 'test', source: 'manual' })
+    assert.ok(events.includes('created'))
+
+    await registry2.transition(task.id, 'running')
+    assert.ok(events.includes('running'))
+
+    await registry2.transition(task.id, 'completed')
+    assert.ok(events.includes('completed'))
+  })
+
+  it('default policy is state_changes when not specified', async () => {
+    const events: string[] = []
+    const store2 = setupStore()
+    const registry2 = new TaskRegistry({
+      taskStore: store2,
+      onEvent: (e) => events.push(e.type),
+    })
+
+    const task = await registry2.createTask({ prompt: 'test', source: 'manual' })
+    assert.ok(events.includes('created'))
+
+    await registry2.transition(task.id, 'completed')
+    assert.ok(events.includes('completed'))
+  })
+
+  it('setNotifyPolicy changes behavior dynamically', async () => {
+    const events: string[] = []
+    const store2 = setupStore()
+    const registry2 = new TaskRegistry({
+      taskStore: store2,
+      notifyPolicy: 'state_changes',
+      onEvent: (e) => events.push(e.type),
+    })
+
+    // First task with state_changes
+    const t1 = await registry2.createTask({ prompt: 't1', source: 'manual' })
+    await registry2.transition(t1.id, 'completed')
+    assert.ok(events.includes('completed'))
+
+    // Switch to errors_only
+    registry2.setNotifyPolicy('errors_only')
+    events.length = 0
+
+    const t2 = await registry2.createTask({ prompt: 't2', source: 'manual', force: true })
+    await registry2.transition(t2.id, 'completed')
+    // completed suppressed
+    assert.equal(events.length, 0)
+
+    const t3 = await registry2.createTask({ prompt: 't3', source: 'manual', force: true })
+    await registry2.transition(t3.id, 'failed', { error: 'x' })
+    // failed emitted
+    assert.ok(events.includes('failed'))
+
+    // Switch to silent
+    registry2.setNotifyPolicy('silent')
+    events.length = 0
+
+    const t4 = await registry2.createTask({ prompt: 't4', source: 'manual', force: true })
+    await registry2.transition(t4.id, 'failed', { error: 'x' })
+    // even failed is suppressed in silent mode
+    assert.equal(events.length, 0)
   })
 })
 

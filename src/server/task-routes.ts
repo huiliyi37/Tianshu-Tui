@@ -12,7 +12,7 @@
  */
 
 import type { RouteHandler } from './index.js'
-import type { TaskRegistry } from './task-registry.js'
+import type { TaskRegistry, NotifyPolicy } from './task-registry.js'
 import type { TaskFilter, TaskStatus } from './task-store.js'
 
 // ─── Auth ─────────────────────────────────────────────────────
@@ -148,12 +148,17 @@ function readEvents(taskId: string, sinceSeq?: number): TaskEventLog[] {
 export interface TaskRoutesDeps {
   registry: TaskRegistry
   apiToken?: string
+  /** 通知策略，默认 state_changes */
+  notifyPolicy?: NotifyPolicy
 }
 
 export function buildTaskRoutes(deps: TaskRoutesDeps): Record<string, RouteHandler> {
-  const { registry, apiToken } = deps
+  const { registry, apiToken, notifyPolicy } = deps
 
-  // 事件订阅：TaskRegistry 状态变化 → 写 events.jsonl
+  // 事件订阅：TaskRegistry 状态变化 → 按策略写 events.jsonl
+  if (notifyPolicy) {
+    registry.setNotifyPolicy(notifyPolicy)
+  }
   registry.setEventCallback((event) => {
     writeTaskEvent(event.taskId, event.type)
   })

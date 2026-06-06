@@ -50,6 +50,12 @@ export interface RuntimePool {
   size: number
 }
 
+// ─── Notify Policy ─────────────────────────────────────────────
+
+export type NotifyPolicy = 'silent' | 'state_changes' | 'errors_only'
+
+const ERROR_EVENTS = new Set(['failed', 'timed_out'])
+
 // ─── TaskRegistry ──────────────────────────────────────────────
 
 /** 任务事件回调 */
@@ -68,7 +74,10 @@ export interface TaskRegistryConfig {
   defaultTimeoutMs?: number
   /** cron 任务默认超时，默认 60 分钟 */
   cronTimeoutMs?: number
+  /** 事件回调（不受 notifyPolicy 影响） */
   onEvent?: TaskEventCallback
+  /** 通知策略：silent | state_changes | errors_only，默认 state_changes */
+  notifyPolicy?: NotifyPolicy
 }
 
 export class TaskRegistry {
@@ -77,6 +86,7 @@ export class TaskRegistry {
   private defaultTimeoutMs: number
   private cronTimeoutMs: number
   private onEvent?: TaskEventCallback
+  private notifyPolicy: NotifyPolicy
 
   /** 活跃任务的 AbortController 映射 */
   private abortControllers = new Map<string, AbortController>()
@@ -90,10 +100,8 @@ export class TaskRegistry {
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 30 * 60 * 1000
     this.cronTimeoutMs = config.cronTimeoutMs ?? 60 * 60 * 1000
     this.onEvent = config.onEvent
-    this.cronTimeoutMs = config.cronTimeoutMs ?? 60 * 60 * 1000
-    this.onEvent = config.onEvent
+    this.notifyPolicy = config.notifyPolicy ?? 'state_changes'
   }
-
   // ─── 创建任务 ─────────────────────────────────────────────
 
   /** 创建任务并立即调度执行（如有 runtime 池） */
@@ -190,6 +198,15 @@ export class TaskRegistry {
     this.onEvent = cb
   }
 
+  /** 获取/设置通知策略 */
+  getNotifyPolicy(): NotifyPolicy {
+    return this.notifyPolicy
+  }
+
+  setNotifyPolicy(policy: NotifyPolicy): void {
+    this.notifyPolicy = policy
+  }
+
   // ─── 查询 ──────────────────────────────────────────────────
 
   async getTask(id: string): Promise<TaskRecord | null> {
@@ -220,6 +237,17 @@ export class TaskRegistry {
   // ─── 内部方法 ──────────────────────────────────────────────
 
   private emit(event: TaskEvent): void {
+    // 按 notify policy 过滤
+    switch (this.notifyPolicy) {
+      case 'silent':
+        return
+      case 'errors_only':
+        if (!ERROR_EVENTS.has(event.type)) return
+        break
+      case 'state_changes':
+      default:
+        break
+    }
     try { this.onEvent?.(event) } catch { /* 回调不应抛异常 */ }
   }
 
