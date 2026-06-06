@@ -5,6 +5,21 @@
 > 关联：[`2026-06-06-server-subsystem-go-live-gate.md`](2026-06-06-server-subsystem-go-live-gate.md)（H6 原始定义 §3、接线缺口 §70-74）
 > 范围：这是 server 子系统从「脚手架」转为「活系统」前剩余的最后两道门
 
+## ✅ 状态：两单均已交付并复核通过（2026-06-07）
+
+| 工单 | 实现提交 | 复核 |
+|------|----------|------|
+| **WO-1** H6 断连护栏 | `0070c5b` | ✅ `res.on('close')→abort` + `closed` 标志 + 写前 `destroyed/writableEnded` 守卫 + 两路径 `removeListener` |
+| **WO-2** /prompt 接 SSE + 鉴权 | `0070c5b` + `fdfa5b2` | ✅ 双层鉴权（`index.ts` 入口 401 + `routes.ts` `withAuth`）；`handled:true` 防双写；`buildPromptHandler` 收 `res` 分发 SSE |
+
+**超出工单要求的加分项：** ① `main.tsx` 无 `RIVET_SERVER_TOKEN` 直接 `process.exit(1)`（fail-closed 启动，不可能裸奔）；② 413 请求体上限（DoS 防护）；③ `SENSITIVE_KEY` 脱敏正则（token/secret 不进 SSE 流）。
+
+**测试覆盖（按名核验，全绿）：** `aborts the agent and suppresses late writes when the client disconnects`（H6）、`removes the close listener on normal completion`（清理边界）、`wraps /prompt with the same bearer-token auth gate`（鉴权）、crash 路径 + SSE 幂等关闭 + close 后 no-op write。
+
+**结论：** server 子系统从「脚手架」转为「活系统」，无回修缺陷。下方为原始工单内容（保留作背景）。
+
+---
+
 ## 现状校正（实读结论）
 
 - `handlePromptSSE`（`prompt-route.ts:26-66`）**已存在**：spawn agent + SSE 流式输出，且 error / abort / 正常完成 / crash 四条路径都已 `sse.close()`。

@@ -45,6 +45,8 @@
 
 ## 3. B 上线门禁（8 项，接线前必清）
 
+> ✅ **闭环状态（2026-06-07 复核）：本节门禁全部已清。** H6 → `0070c5b`（`res.on('close')→abort` + 写守卫，复核通过）；M6/M2/M4/M5/L1 → `2e79809`（双层鉴权 / sidecar 单调 seq / 坏记录隔离 / logger 接入 / id allowlist + path 包含，逐项核验在边界真调用，非装饰）。`/prompt` SSE 接线已由 `0070c5b`+`fdfa5b2` 完成并带 fail-closed 启动。详见 [`2026-06-06-server上线收尾工单-H6断连与prompt接线.md`](2026-06-06-server上线收尾工单-H6断连与prompt接线.md)。下表保留作原始定义与修法记录。
+
 > 这些缺陷现在部分“不活”，是因为 §4.C 的 RuntimePool / `/prompt` SSE 两条接线尚未完成。**一旦接 RuntimePool 或接 `handlePromptSSE`，本节会立即变成可利用/可观测风险。上线前必须全部清掉。**
 
 | # | 锚点 | 风险 | 修法 | 关联 spec / 方法章节 |
@@ -93,7 +95,7 @@ const base = Math.floor(Date.now() / bucketMs) * bucketMs + 60_000
 | 层级 | 判定 |
 |---|---|
 | Server 子系统作为独立模块 | **可合入分支**：A 类 12 项已闭环，cron-scheduler 27/27，全 server 112/113（唯一 flaky 已定位） |
-| Server 子系统作为已交付特性 | **未到位**：RuntimePool 与 `/prompt` SSE 未接，当前是脚手架不是活系统 |
-| 真正 go-live | **阻塞**：必须先完成 §3 八项门禁 + §4.D flaky 修复，再接 RuntimePool / `handlePromptSSE` |
+| Server 子系统作为已交付特性 | ✅ **已到位（2026-06-07）**：`/prompt` SSE 接线完成（`0070c5b`+`fdfa5b2`），无 RuntimePool 依赖（该组件不存在，agent 工厂复用现有 `createAgent`）。从脚手架转为活系统 |
+| 真正 go-live | ✅ **门禁已清**：§3 八项门禁全清（H6→`0070c5b`，M6/M2/M4/M5/L1→`2e79809`），§4.D flaky 已修，`handlePromptSSE` 已接并带 fail-closed 启动 + 双层鉴权。无已知回修缺陷 |
 
 > 审查方法底线：读≠验；删除行与新增行同等审视；改 X 必跑覆盖 X 的既有测试；任何“全绿/已修复”声明若无命令+输出证据，按未验证处理。来源：`docs/superpowers/specs/2026-06-06-review-squadron-design.md` §5。
