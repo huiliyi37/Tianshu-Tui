@@ -1633,6 +1633,10 @@ export class AgentLoop {
         // TTSR: stream rule triggered — inject reminder and retry
         if (streamResult.triggeredRule) {
           this.session.addUserMessage(streamResult.triggeredRule.inject)
+          // Archive any streamed text to prevent duplication on retry:
+          // TUI's streamBuf accumulates across loop iterations; without
+          // flushing, the next stream appends on top of existing content.
+          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
           continue
         }
 
@@ -1766,6 +1770,8 @@ export class AgentLoop {
         this.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
         if (thinkingResult.shouldRetry) {
           this.session.addUserMessage(thinkingResult.retryMessage)
+          // Archive any partial streamed text before retrying (same rationale as TTSR above)
+          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
           continue
         }
 
