@@ -42,8 +42,9 @@ export function verifyWorkerEvidence(result: WorkerResult, profile?: string, tra
         risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
       }
     }
-    // Defense in depth: check that run_tests didn't error out
-    // toolResults[i] corresponds to toolUses[i] — same order in runOnce callbacks
+    // Defense in depth: check that run_tests didn't error out. We match on the
+    // recorded error strings rather than index-correlating toolResults[i] with
+    // toolUses[i] — coupled to the error message format, but robust to reorder.
     const testsErrored = transcript.errors.some(e =>
       e.includes('run_tests') || e.includes('Test run failed'),
     )
