@@ -212,11 +212,10 @@ PY
 | 现象 | 含义 / 处理 |
 |------|------|
 | `401 Missing API key` | 本地 key 没带对，或 Rivet 侧 `auth` 没置 null（落到了 CodexClient） |
-| `502 unknown provider for model gpt-5.5` | 用了 `gpt-5.5` 而非 `claude-opus-4-5` |
-| `400 level "max" not supported` | §5.3 的映射没生效（源码改动丢了 / 没编译） |
-| `502 unknown provider for model gpt-5.5` | **请求里用了别名 `claude-opus-4-5`，但账号池里没有可用账号**——cliproxy 把别名解析回真名 `gpt-5.5` 后找不到能服务它的活账号。日志会刷 `auth unavailable, reselected`。→ 见 §7.3 / §7.5 |
+| `502 unknown provider for model gpt-5.5` | 请求用了别名 `claude-opus-4-5`，但**账号池里没有可用账号**——cliproxy 把别名解析回真名 `gpt-5.5` 后找不到活账号。日志刷 `auth unavailable, reselected`。→ 补号见 §7.3 / §7.4 |
 | `502 unknown provider for model claude-opus-4-5` | 请求里直接用了真名 `gpt-5.5`（应改用别名），或别名映射配错 |
-| `400 level "max" not supported` | §5.3 的映射没生效（源码改动丢了 / 没编译） |
+| `400 level "max" not supported` | §5.3 的 `max → xhigh` 映射没生效（源码改动丢了 / 没编译） |
+| `500 empty_stream: upstream stream closed before first payload` | **账号池耗尽在流式模式下的表现**：流式请求命中一个正在限流/掉线的账号，上游 ChatGPT 不回干净的 429、直接把 SSE 流掐断（0 payload），cliproxy 报 500。属**间歇性**——轮询转到活号即恢复，重试通常即可。`max-retry-credentials` 对这种「流级关闭」不触发自动换号。治本同样是补额度大的号。→ 见 §7.3 探活 / §7.4 补号 |
 
 > 排障必看 cliproxy 日志：`tail -f ~/.cli-proxy-api/logs/main.log`。
 > `auth unavailable, reselected` 把每个 codex 账号挨个试一遍都失败 = 池子空了。
