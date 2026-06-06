@@ -35,15 +35,17 @@ export interface ChangeSet {
 }
 
 const TRIVIAL_FILE_PATTERN = /(?:^|\/)(?:README|CHANGELOG)(?:\.[^/]*)?$|\.(?:md|mdx|txt|json)$/i
+const DEPENDENCY_OR_COMPILER_CONFIG_PATTERN = /(?:^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock|tsconfig(?:\.[^/]*)?\.json|[^/]+\.lock)$/i
 
 /**
  * Classify a change set into the review workflow scale:
  * - L3: new/cross-module/large changes → Review Squadron
- * - L2: fix or code changes → single adversarial verifier
- * - L1: tiny non-fix docs/config changes → nudge only
+ * - L2: fix, code, dependency, or compiler config changes → single adversarial verifier
+ * - L1: tiny non-fix docs/trivial data changes → nudge only
  */
 export function classifyChangeScale(change: ChangeSet): ReviewScale {
   if (change.crossModule || change.files.length >= 4) return 'L3'
+  if (change.files.some(file => DEPENDENCY_OR_COMPILER_CONFIG_PATTERN.test(file))) return 'L2'
   if (!change.isFix && change.files.length > 0 && change.files.every(file => TRIVIAL_FILE_PATTERN.test(file))) {
     return 'L1'
   }

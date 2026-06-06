@@ -32,6 +32,13 @@ describe('review disciplines', () => {
 
   it('routes trivial non-fix documentation changes to L1', () => {
     assert.equal(classifyChangeScale({ files: ['README.md'], crossModule: false, isFix: false }), 'L1')
-    assert.equal(classifyChangeScale({ files: ['docs/notes.txt', 'package.json'], crossModule: false, isFix: false }), 'L1')
+    assert.equal(classifyChangeScale({ files: ['docs/notes.txt', 'docs/example.json'], crossModule: false, isFix: false }), 'L1')
+  })
+
+  it('routes dependency and compiler config changes to L2 even when they are json or lock files', () => {
+    assert.equal(classifyChangeScale({ files: ['package.json'], crossModule: false, isFix: false }), 'L2')
+    assert.equal(classifyChangeScale({ files: ['package-lock.json'], crossModule: false, isFix: false }), 'L2')
+    assert.equal(classifyChangeScale({ files: ['packages/app/tsconfig.build.json'], crossModule: false, isFix: false }), 'L2')
+    assert.equal(classifyChangeScale({ files: ['yarn.lock'], crossModule: false, isFix: false }), 'L2')
   })
 })

@@ -83,12 +83,48 @@ describe('routeReviewWorkflow', () => {
       { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts'], crossModule: false, isFix: false },
       {
         ...okDeps,
-        spawnSquadron: async () => { squadronCalls++; return { findings: [{ severity: 'HIGH', claim: 'race' }] } },
+        spawnSquadron: async () => { squadronCalls++; return { findings: [] } },
       },
     )
 
     assert.equal(outcome.tier, 'L3')
     assert.equal(outcome.verdict, 'verified')
     assert.equal(squadronCalls, 1)
+  })
+
+  it('rejects L3 when squadron reports high-severity findings before verifier can pass it', async () => {
+    let verifierCalls = 0
+    const outcome = await routeReviewWorkflow(
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts'], crossModule: false, isFix: false },
+      {
+        ...okDeps,
+        spawnVerifier: async () => { verifierCalls++; return { verdict: 'verified', evidence: 'ran: should not matter' } },
+        spawnSquadron: async () => ({ findings: [{ severity: 'HIGH', claim: 'race' }] }),
+      },
+    )
+
+    assert.equal(outcome.tier, 'L3')
+    assert.equal(outcome.verdict, 'rejected')
+    assert.equal(outcome.escalated, true)
+    assert.match(outcome.evidence ?? '', /squadron/i)
+    assert.equal(verifierCalls, 0)
+  })
+
+  it('escalates immediately when patcher reports it did not patch a verifier rejection', async () => {
+    let verifierCalls = 0
+    let patcherCalls = 0
+    const outcome = await routeReviewWorkflow(fixChange, {
+      ...okDeps,
+      spawnVerifier: async () => { verifierCalls++; return { verdict: 'rejected', evidence: 'broken' } },
+      spawnPatcher: async () => { patcherCalls++; return { patched: false } },
+    }, { maxRounds: 3 })
+
+    assert.equal(outcome.tier, 'L2')
+    assert.equal(outcome.verdict, 'rejected')
+    assert.equal(outcome.escalated, true)
+    assert.equal(outcome.rounds, 1)
+    assert.equal(outcome.evidence, 'broken')
+    assert.equal(verifierCalls, 1)
+    assert.equal(patcherCalls, 1)
   })
 })

@@ -12,8 +12,15 @@ export interface PatcherResult {
   patched: boolean
 }
 
+export type ReviewFindingSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+
+export interface ReviewFinding {
+  severity?: ReviewFindingSeverity | Lowercase<ReviewFindingSeverity> | string
+  claim?: string
+}
+
 export interface SquadronResult {
-  findings: unknown[]
+  findings: ReviewFinding[]
 }
 
 export interface ReviewRouterDeps {
@@ -45,6 +52,24 @@ function normalizeVerifierResult(result: VerifierResult): VerifierResult {
   return result
 }
 
+function hasBlockingSquadronFinding(result: SquadronResult): boolean {
+  return result.findings.some(finding => {
+    const severity = finding.severity?.toUpperCase()
+    return severity === 'CRITICAL' || severity === 'HIGH'
+  })
+}
+
+function summarizeSquadronFindings(result: SquadronResult): string {
+  const blocking = result.findings.filter(finding => {
+    const severity = finding.severity?.toUpperCase()
+    return severity === 'CRITICAL' || severity === 'HIGH'
+  })
+  const summary = blocking
+    .map(finding => `${finding.severity ?? 'UNKNOWN'}: ${finding.claim ?? 'review finding'}`)
+    .join('; ')
+  return summary.length > 0 ? `squadron blocking findings: ${summary}` : 'squadron blocking findings'
+}
+
 /**
  * Route a change set through the review workflow selected by its scale.
  *
@@ -61,7 +86,16 @@ export async function routeReviewWorkflow(
   if (tier === 'L1') return { tier, verdict: 'nudge' }
 
   if (tier === 'L3') {
-    await deps.spawnSquadron(change)
+    const squadron = await deps.spawnSquadron(change)
+    if (hasBlockingSquadronFinding(squadron)) {
+      return {
+        tier,
+        verdict: 'rejected',
+        evidence: summarizeSquadronFindings(squadron),
+        escalated: true,
+        rounds: 0,
+      }
+    }
   }
 
   const maxRounds = Math.max(1, options.maxRounds ?? 3)
@@ -72,7 +106,16 @@ export async function routeReviewWorkflow(
     if (last.verdict === 'verified') {
       return { tier, verdict: 'verified', evidence: last.evidence, rounds: round }
     }
-    await deps.spawnPatcher(change, last)
+    const patcher = await deps.spawnPatcher(change, last)
+    if (!patcher.patched) {
+      return {
+        tier,
+        verdict: 'rejected',
+        evidence: last.evidence,
+        escalated: true,
+        rounds: round,
+      }
+    }
   }
 
   return {
