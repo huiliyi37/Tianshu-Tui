@@ -20,6 +20,10 @@ Provider 是「模型接入点」——你告诉天枢从哪里调用模型、�
 | `minimax` | MiniMax M2.7 | OpenAI-compatible | API Key | 204.8K tokens | 需过滤 `top_k/metadata/cache_control` 参数 |
 | `codex` | GPT-5.5 (ChatGPT 订阅) | Codex Responses | OAuth PKCE | 1M tokens | 使用 ChatGPT 订阅（非 API 计费），自动 token 刷新 |
 
+> 📌 上表 `codex` 行为**预设默认**（直连 ChatGPT OAuth）。本机实际已把 codex 改走本地
+> **cliproxy 账号池**（GPT-5.5 / `claude-opus-4-5`）——配置、排障、账号池维护与自动刷新
+> 见 [`docs/codex-cliproxy-account-pool.md`](./codex-cliproxy-account-pool.md)。
+
 ---
 
 ## 配置方式概览
