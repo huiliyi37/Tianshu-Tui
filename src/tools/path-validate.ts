@@ -47,7 +47,7 @@ export function validatePathSafe(cwd: string, inputPath: string): PathValidation
   try {
     real = realpathSync(realResolved)
   } catch {
-    real = resolveNearestExisting(realResolved)
+    real = resolveNearestExisting(realResolved, realCwd)
   }
   const realRel = relative(realCwd, real)
   if (realRel.startsWith('..') || isAbsolute(realRel)) {
@@ -63,13 +63,18 @@ export function validatePathSafe(cwd: string, inputPath: string): PathValidation
  * non-existent tail. Lets new-file writes be validated while still resolving any
  * symlink in the existing portion of the path.
  */
-function resolveNearestExisting(target: string): string {
+function resolveNearestExisting(target: string, floor: string): string {
   const segments: string[] = []
   let current = target
   while (!existsSync(current)) {
+    // Stop the walk at the project root (floor). Climbing above it would resolve
+    // ancestors outside the project — e.g. on macOS /home is a synthetic symlink
+    // to /System/Volumes/Data/home — and false-flag legitimate in-project paths
+    // as escapes. floor (realCwd) is already canonicalized and validated above.
+    if (current === floor) return join(floor, ...segments)
     segments.unshift(basename(current))
     const parent = dirname(current)
-    if (parent === current) return target // reached root without finding existing
+    if (parent === current) return target // reached fs root without finding existing
     current = parent
   }
   try {
