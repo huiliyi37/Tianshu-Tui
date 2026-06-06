@@ -208,11 +208,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
    *   commit would race that promotion, so glm keeps the original turn-end commit
    *   path (the `else` branches below are byte-identical to the previous code).
    */
-  const incrementalCommit = currentProvider !== 'glm'
-  // Synced ref so the once-captured textBatcher closure sees provider switches
-  // (model/provider can change mid-session via onModelSwitch without remount).
-  const incrementalCommitRef = useRef(incrementalCommit)
-  incrementalCommitRef.current = incrementalCommit
+
   const projectName = basename(process.cwd())
   const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
   /**
@@ -407,7 +403,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setIsThinkingActive(false)
     if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
     lastFlushedThink.current = ''
-  }, [pushAssistantEntry, incrementalCommit, pushStatic, flushStaticBatch])
+  }, [pushAssistantEntry, pushStatic, flushStaticBatch])
 
   const streamStartRef = useRef(0)
   const thinkStartRef = useRef(0)
@@ -1332,7 +1328,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         queueMicrotask(() => handleSubmitRef.current?.(next))
       }
     })
-  }, [agent, session, pushStatic, pushStaticBatch, flushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory, incrementalCommit])
+  }, [agent, session, pushStatic, pushStaticBatch, flushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
 
   // Keep a ref to the latest handleSubmit so the deferred-submit drain (in the
   // run().finally above) can replay queued interrupt-window messages without

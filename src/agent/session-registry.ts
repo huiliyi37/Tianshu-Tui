@@ -230,7 +230,6 @@ export class SessionRegistry {
       sessionId, filePath, claimType, now
     )
     return changes > 0
-    return true
   }
 
   releaseClaim(sessionId: string, filePath: string): void {
