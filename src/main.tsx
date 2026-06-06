@@ -1000,7 +1000,12 @@ async function main() {
   const monitorStart = Date.now()
   let slowRenderTick = monitorStart + SLOW_RENDER_GRACE_MS
   let slowRenderLogCount = 0
-  const slowRenderMonitor = process.env.NODE_ENV !== 'production'
+  // Only emit when stderr is NOT an interactive TTY (redirected to a file/pipe).
+  // Raw process.stderr.write to a live terminal interleaves with Ink's frame —
+  // Ink's patchConsole only intercepts console.*, not raw writes — corrupting
+  // logUpdate's line accounting and stranding duplicate frames (e.g. the input
+  // bar) in scrollback. Diagnostic is still captured when you run `2>log`.
+  const slowRenderMonitor = (process.env.NODE_ENV !== 'production' && !process.stderr.isTTY)
     ? setInterval(() => {
         const now = Date.now()
         const gap = now - slowRenderTick
@@ -1017,9 +1022,7 @@ async function main() {
 
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),
-    // incrementalRendering: per-line diff + CSI 2026 synchronized output (Ink 6.8.0)
-    // — less flicker than the default whole-block eraseLines renderer.
-    { exitOnCtrlC: false, incrementalRendering: true },
+    { exitOnCtrlC: false },
   )
 
   process.on('SIGINT', gracefulShutdown)
