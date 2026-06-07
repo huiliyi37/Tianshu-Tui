@@ -53,27 +53,41 @@ fireworks 输出 inline SVG，能做玻璃拟态、渐变、3D、自定义字体
 | 异步 / 事件 | `A -.-> B` |
 | 带标签 | `A --富化--> B` |
 
-### 第 2 层 · 风格调色板（classDef，扁平真实可做）
+### 第 2 层 · 风格调色板（纯 classDef，三器实测可移植）
 
-每套风格 = 一组 `classDef`。agent 套用，输出一致：
+> **实测校准（2026-06-07，见 mermaid-compat-test.md）**：调色板**以纯 classDef 进基线**——
+> 不依赖 `%%{init}%%`。关键证据=GitHub 图2(无 init 纯 classDef)实测通过；GitHub 是历史
+> 风险点（会剥离 init 指令），已证伪 classDef 本身。`%%{init}%%` 主题/字体降级为**可选增强**
+> （Obsidian/VSCode 享，GitHub 回退默认主题，语义不丢）。
+
+每套风格 = 一组 `classDef`，**类名对齐第 1 层语义**（model/agent/store/io/decision）。agent 套用即输出一致：
 
 ```mermaid
-%%{init: {'theme':'base', 'themeVariables': {'fontFamily':'monospace'}}}%%
 flowchart TD
     U(用户消息) --> R[[意图路由]]
     R --> LLM{{LLM 分类器}}
     R --> DB[(上下文存储)]
     LLM --富化--> OUT([路由结果])
 
-    classDef model fill:#1e293b,stroke:#38bdf8,color:#e0f2fe
+    classDef model fill:#1e293b,stroke:#38bdf8,color:#e0f2fe,stroke-width:2px
     classDef agent fill:#0f172a,stroke:#818cf8,color:#e0e7ff
     classDef store fill:#1e1b4b,stroke:#a78bfa,color:#ede9fe
+    classDef io fill:#022c22,stroke:#34d399,color:#d1fae5
     class LLM model
     class R agent
     class DB store
+    class U,OUT io
 ```
 
-提供 3-4 套：`light`（Notion-clean）/ `dark`（Dark Terminal）/ `blueprint`（蓝图）/ `mono`（极简黑白）。**不超出 classDef 能力**。
+基线一套 `dark`（上方，实测通过的色值），另备 `mono`（极简黑白，最保守）：
+
+```
+classDef box fill:#ffffff,stroke:#333333,color:#111111
+```
+
+**约束**：只用 `fill`/`stroke`/`color`/`stroke-width`（classDef 跨器仅这几项稳）。
+**可选增强**（非基线）：`%%{init: {'theme':'base','themeVariables':{...}}}%%` 控字体/全局主题——
+仅 Obsidian/VSCode 生效，写时放首行、可被 GitHub 安全剥离而不破图。
 
 ### 第 3 层 · 图型骨架模板
 

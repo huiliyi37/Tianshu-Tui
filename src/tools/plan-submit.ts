@@ -21,13 +21,33 @@ Call this tool once you have fully explored the codebase and designed a solution
 
 ### Plan quality — your plan should be a polished design document:
 
-Use Mermaid diagrams for architecture/flow visualization:
+Use Mermaid diagrams for architecture/flow. **Use the semantic shape vocabulary below**
+(renderer-portable core syntax — works on GitHub/VSCode/Obsidian, verified 2026-06-07):
+
+Shapes carry meaning — pick by role, don't default everything to [rect]:
+- \`{{hexagon}}\` = LLM / model    \`[[subroutine]]\` = agent / processor
+- \`[(cylinder)]\` = data store / DB    \`{rhombus}\` = decision / branch
+- \`(rounded)\` = external input / user    \`([stadium])\` = entry / terminal    \`[rect]\` = plain module
+
+Edges: \`-->\` sync/read · \`==>\` write/strong · \`-.->\` async/event · \`--label-->\` labeled
+
+Color by class (pure classDef — portable baseline; do NOT rely on \`%%{init}%%\`, GitHub strips it):
 \`\`\`mermaid
 flowchart TD
-    A[Current State] --> B{Decision Point}
-    B -->|Option 1| C[Implementation]
-    B -->|Option 2| D[Alternative]
+    U(用户输入) --> R[[意图路由]]
+    R --> LLM{{LLM 分类器}}
+    R --> DB[(上下文存储)]
+    LLM --富化--> OUT([结果])
+    classDef model fill:#1e293b,stroke:#38bdf8,color:#e0f2fe,stroke-width:2px
+    classDef agent fill:#0f172a,stroke:#818cf8,color:#e0e7ff
+    classDef store fill:#1e1b4b,stroke:#a78bfa,color:#ede9fe
+    classDef io fill:#022c22,stroke:#34d399,color:#d1fae5
+    class LLM model
+    class R agent
+    class DB store
+    class U,OUT io
 \`\`\`
+(Full template library + skeletons: docs/superpowers/plans/2026-06-07-mermaid-diagram-template-library.md)
 
 Include these sections:
 1. **Problem description** — what's broken or missing, with concrete examples
