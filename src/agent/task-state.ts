@@ -1,5 +1,6 @@
 import type { TrajectoryEntry } from './trajectory.js'
 import type { TodoItem } from '../tools/todo-store.js'
+import { detectDependencies, findExecutable } from '../tools/todo-deps.js'
 
 export interface TaskState {
   completed: string[]
@@ -54,8 +55,20 @@ export function extractTaskState(entries: TrajectoryEntry[], lastModelText: stri
  */
 export function taskStateFromTodos(todos: TodoItem[], decisions: string[]): TaskState {
   const completed = todos.filter(t => t.status === 'completed').map(t => t.content)
-  const pending = todos.filter(t => t.status === 'pending').map(t => t.content)
+
+  // Dependency-aware executable filtering: only surface items whose
+  // dependencies are all completed. This narrows the model's working
+  // set without adding prompt text — it sees only actionable items.
+  const deps = detectDependencies(todos)
+  const executable = findExecutable(todos, deps)
+
   const inProgress = todos.find(t => t.status === 'in_progress')
-  const current = inProgress?.content ?? pending[0] ?? 'working'
-  return { completed, current, remaining: pending, decisions }
+  const current = inProgress?.content ?? executable[0]?.content ?? 'working'
+  // remaining = all executable items that are NOT the current focus
+  // (handles both in_progress focus and executable[0] focus)
+  const currentId = inProgress?.id ?? executable[0]?.id
+  const remaining = executable
+    .filter(t => t.id !== currentId)
+    .map(t => t.content)
+  return { completed, current, remaining, decisions }
 }
