@@ -93,7 +93,14 @@ export class AnthropicClient implements StreamClient {
       }
 
       await this.processSSEStream(response, callbacks, signal)
-    }, signal, { maxTotalDurationMs: 10 * 60_000 })
+    }, signal, {
+      maxTotalDurationMs: 10 * 60_000,
+      onRetry: (info) => {
+        if (info.classified.category === 'rate_limit') {
+          callbacks.onRateLimit?.(info.classified.retryDelayMs)
+        }
+      },
+    })
   }
 
   /** Exposed for testing. */
