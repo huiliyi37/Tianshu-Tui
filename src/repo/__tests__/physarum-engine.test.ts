@@ -62,6 +62,39 @@ describe('PhysarumEngine', () => {
     assert.ok(edge.direction !== 0)
   })
 
+  it('records file access sequences before prediction, including reverse lexicographic direction', () => {
+    const engine = new PhysarumEngine(stubDb)
+    engine.recordFileAccess('src/b.ts', 1)
+    engine.recordFileAccess('src/a.ts', 2)
+
+    const edge = engine.getEdge('src/a.ts', 'src/b.ts')!
+    assert.ok(edge)
+    assert.ok(edge.direction < 0, 'reverse lexicographic b.ts→a.ts sequence must be negative on a.ts|b.ts')
+    assert.equal(engine.predictNext('src/b.ts')[0]?.file, 'src/a.ts')
+  })
+
+  it('filters legacy tool-name physarum edges when loading and saving', () => {
+    let stored: any[] = [
+      { fileA: 'read_file', fileB: 'src/a.ts', weight: 10, flow: 1, consolidated: true, activationCount: 9, lastActivatedTurn: 3, direction: 0 },
+      { fileA: 'src/a.ts', fileB: 'src/b.ts', weight: 2, flow: 0, consolidated: false, activationCount: 1, lastActivatedTurn: 4, direction: 0.2 },
+      { fileA: 'src/a.ts', fileB: 'docs/note.md', weight: 2, flow: 0, consolidated: false, activationCount: 1, lastActivatedTurn: 4, direction: 0 },
+    ]
+    const mockDb = {
+      savePhysarumEdges: (edges: any[]) => { stored = edges },
+      loadPhysarumEdges: () => stored,
+    } as any
+
+    const engine = new PhysarumEngine(mockDb)
+    engine.loadFromDb()
+
+    assert.equal(engine.getEdge('read_file', 'src/a.ts'), undefined)
+    assert.equal(engine.getEdge('src/a.ts', 'docs/note.md'), undefined)
+    assert.ok(engine.getEdge('src/a.ts', 'src/b.ts'))
+
+    engine.save()
+    assert.deepEqual(stored.map(e => [e.fileA, e.fileB]), [['src/a.ts', 'src/b.ts']])
+  })
+
   it('freeze prevents evolution', () => {
     const engine = new PhysarumEngine(stubDb)
     engine.recordFlow('a.ts', 'b.ts', 1)

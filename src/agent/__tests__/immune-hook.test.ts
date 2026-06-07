@@ -77,17 +77,15 @@ describe('ImmuneHook', () => {
     assert.equal(memory.response.type, 'quarantine')
   })
 
-  it('feeds flow data to Physarum engine', () => {
+  it('registers normal behavior without feeding tool-name nodes to Physarum', () => {
     const physarum = new PhysarumEngine(stubDb)
     const hook = new ImmuneHook({ physarum })
 
     hook.run({ toolName: 'read_file', fingerprint: 'fp1', turn: 1, doomLevel: 'none', targetFile: 'src/a.ts' })
     hook.run({ toolName: 'edit_file', fingerprint: 'fp2', turn: 1, doomLevel: 'none', targetFile: 'src/a.ts' })
 
-    // Physarum should have recorded flow for read_file→src/a.ts edge
-    const edge = physarum.getEdge('read_file', 'src/a.ts')
-    assert.ok(edge)
-    assert.ok(edge.weight > 0)
+    assert.equal(physarum.getEdge('read_file', 'src/a.ts'), undefined)
+    assert.equal(physarum.edgeCount(), 0)
   })
 
   it('runs batch maintenance periodically', () => {
@@ -100,6 +98,23 @@ describe('ImmuneHook', () => {
     }
     // Should not throw
     assert.ok(true)
+  })
+
+  it('surfaces internal immune failures as danger signals instead of silent no-op', () => {
+    const physarum = new PhysarumEngine(stubDb)
+    physarum.detectAnomaly = () => { throw new Error('graph unavailable') }
+    const hook = new ImmuneHook({ physarum })
+
+    const result = hook.run({
+      toolName: 'read_file', fingerprint: 'fp-fail-open', turn: 1,
+      doomLevel: 'none', targetFile: 'src/a.ts',
+    })
+
+    assert.equal(result.activated, false)
+    assert.equal(result.signals.length, 1)
+    assert.equal(result.signals[0]?.kind, 'immune_hook_error')
+    assert.match(result.signals[0]?.context ?? '', /graph unavailable/)
+    assert.ok(hook.getDangerLevel(1) >= 0.8)
   })
 
   it('getDangerLevel reflects accumulated signals', () => {

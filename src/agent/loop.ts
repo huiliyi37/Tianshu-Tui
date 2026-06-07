@@ -356,6 +356,7 @@ export class AgentLoop {
         },
       } : {}),
       meridianIndexer: this.config.meridianIndexer,
+      physarumFileAccess: { getPhysarum: () => this.immuneHook.getPhysarum() },
     }))
     this.perception = new TurnPerceptionController({
       cwd: this.cwd,

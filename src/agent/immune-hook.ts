@@ -1,12 +1,16 @@
 /**
  * Immune Hook — wires Physarum + Immune layers into the agent loop.
  *
- * Runs as a postTool hook:
- * 1. Feeds flow data to Physarum engine
+ * Runs as a deferred post-tool immune pass:
+ * 1. Registers successful tool fingerprints as normal behavior
  * 2. Collects danger signals from innate layer + Physarum anomaly detection
  * 3. APC dual-signal gating
  * 4. Adaptive immune response (memory lookup or new learning)
  * 5. Feedback to Physarum (quarantine, prune, boost)
+ *
+ * Physarum file→file sequence learning is handled by
+ * hooks/physarum-file-access-hook.ts so this immune pass does not feed
+ * tool-name nodes into the file topology graph.
  */
 
 import { InnateLayer } from './immune-innate.js'
@@ -60,10 +64,10 @@ export class ImmuneHook {
   /** Main entry point — called after each tool execution */
   run(ctx: ImmuneHookContext): ImmuneHookResult {
     try {
-      // 0. Feed Physarum flow data
+      // 0. Register normal behavior for negative selection. File-sequence
+      // topology learning is handled by the dedicated physarum-file-access hook;
+      // targetFile here may be a directory, command preview, or tool fallback.
       if (ctx.targetFile) {
-        this.deps.physarum.recordFlow(ctx.toolName, ctx.targetFile, ctx.turn)
-        // Register as normal behavior for negative selection
         this.adaptive.registerNormal(ctx.fingerprint)
       }
 
@@ -158,10 +162,20 @@ export class ImmuneHook {
 
       this.maybeRunMaintenance(ctx.turn)
       return { activated: true, response, signals: innateSignals, contextHint }
-    } catch {
-      // Immune failure must never crash the agent loop.
-      // Return a silent no-op result — tool results must still be delivered.
-      return { activated: false, signals: [] }
+    } catch (error) {
+      // Immune failure must never crash the agent loop, but it also must not be
+      // silent: surface the degraded immune state as a danger signal so APC state
+      // and telemetry preserve anomaly visibility.
+      const message = error instanceof Error ? error.message : String(error)
+      const signal: DangerSignal = {
+        kind: 'immune_hook_error',
+        severity: 0.8,
+        turn: ctx.turn,
+        source: 'immune-hook',
+        context: message.slice(0, 200),
+      }
+      try { this.apc.collect(signal) } catch { /* keep the fail-open boundary */ }
+      return { activated: false, signals: [signal] }
     }
   }
 

@@ -12,6 +12,7 @@ import { createCourageHook } from './hooks/courage-hook.js'
 import { createRadioHook, type RadioHookDeps } from './hooks/radio-hook.js'
 import { createConsistencyCheckHook } from './hooks/consistency-check-hook.js'
 import { createMeridianHook, type MeridianHookDeps } from './hooks/meridian-hook.js'
+import { createPhysarumFileAccessHook, type PhysarumFileAccessHookDeps } from './hooks/physarum-file-access-hook.js'
 import { createSonglineRuntimeHook } from './hooks/songline-hook.js'
 import { createHearthObserveHook } from './hooks/hearth-observe-hook.js'
 import { createBlindExplorationHook } from './hooks/blind-exploration-hook.js'
@@ -60,6 +61,8 @@ export interface RuntimeHookDeps {
   getFileObservations?: () => Array<Pick<ContextClaim, 'id' | 'text' | 'evidence'>>
   /** Meridian code graph indexer (optional). */
   meridianIndexer?: MeridianIndexer | null
+  /** Physarum topology learner for canonical file access sequences. */
+  physarumFileAccess?: PhysarumFileAccessHookDeps
   /** Explicit opt-in for Songline substrate post-session deposit. Default: false. */
   songlineEnabled?: boolean
   /** Task summary source for Songline substrate. Required only when songlineEnabled is true. */
@@ -159,6 +162,10 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   if (deps.meridianIndexer !== undefined) {
     const indexerRef = deps.meridianIndexer
     hooks.push(createMeridianHook({ getIndexer: () => indexerRef }))
+  }
+
+  if (deps.physarumFileAccess) {
+    hooks.push(createPhysarumFileAccessHook(deps.physarumFileAccess))
   }
 
   if (deps.songlineEnabled && deps.getTaskSummary) {

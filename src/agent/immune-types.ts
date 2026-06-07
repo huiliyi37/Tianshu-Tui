@@ -14,6 +14,7 @@ export type DangerSignalKind =
   | 'repair_exhaustion'
   | 'sycophancy_detected'
   | 'tdd_violation'
+  | 'immune_hook_error'
 
 export interface DangerSignal {
   kind: DangerSignalKind

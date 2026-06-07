@@ -34,6 +34,22 @@ describe('createDefaultRuntimeHooks', () => {
     ])
   })
 
+  it('appends physarum file access hook when deps are provided', () => {
+    const hooks = createDefaultRuntimeHooks({
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0, toolCallCount: 0, lastThetaAt: 0, phase: 0, cycleCount: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      physarumFileAccess: { getPhysarum: () => null },
+    })
+
+    assert.equal(hooks.at(-1)?.name, 'physarum-file-access')
+    assert.equal(hooks.at(-1)?.phase, 'postTool')
+  })
+
   it('appends playbook reflect hook when playbook deps are provided', () => {
     const hooks = createDefaultRuntimeHooks({
       stigmergyDeposit: async () => {},

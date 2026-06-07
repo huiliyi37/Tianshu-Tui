@@ -28,6 +28,7 @@ const SUGGESTIONS: Record<DangerSignalKind, string> = {
   repair_exhaustion: 'Multiple repair attempts failed — try a different approach.',
   sycophancy_detected: 'You may be in sycophancy mode — challenge assumptions.',
   tdd_violation: 'No test file touched yet. Write tests before implementation.',
+  immune_hook_error: 'Immune analysis degraded — inspect recent tool and graph signals before relying on anomaly response.',
 }
 
 function severityToLevel(dangerScore: number): 'warning' | 'danger' | 'ban' {

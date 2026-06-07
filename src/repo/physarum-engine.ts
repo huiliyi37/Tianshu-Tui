@@ -12,6 +12,26 @@ import type {
 } from './physarum-types.js'
 import { DEFAULT_PHYSARUM_CONFIG } from './physarum-types.js'
 
+const PHYSARUM_INDEXABLE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go'] as const
+const PHYSARUM_IGNORED_SEGMENTS = new Set(['node_modules', 'dist', '.git', '.rivet'])
+
+export function isIndexablePhysarumFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/')
+  if (!normalized || normalized.startsWith('/')) return false
+
+  const segments = normalized.split('/')
+  if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) return false
+  if (segments.some(segment => PHYSARUM_IGNORED_SEGMENTS.has(segment))) return false
+
+  return PHYSARUM_INDEXABLE_EXTENSIONS.some(ext => normalized.endsWith(ext))
+}
+
+function isLoadablePhysarumEdge(edge: Pick<PhysarumEdgeState, 'fileA' | 'fileB'>): boolean {
+  return edge.fileA !== edge.fileB
+    && isIndexablePhysarumFile(edge.fileA)
+    && isIndexablePhysarumFile(edge.fileB)
+}
+
 export class PhysarumEngine {
   private edges = new Map<string, PhysarumEdgeState>()
   private frozen = new Set<string>() // quarantined nodes
@@ -19,6 +39,7 @@ export class PhysarumEngine {
   private turnPruneHistory: number[] = []
   private turnGrowthHistory: number[] = []
   private currentTurn = 0
+  private lastFileAccess: { filePath: string; turn: number } | null = null
 
   constructor(
     private db: MeridianDb | undefined,
@@ -27,6 +48,23 @@ export class PhysarumEngine {
 
   private edgeKey(a: string, b: string): string {
     return a < b ? `${a}|${b}` : `${b}|${a}`
+  }
+
+  /** Record a canonical file access and learn the previous→current sequence. */
+  recordFileAccess(filePath: string, turn: number): void {
+    if (!isIndexablePhysarumFile(filePath)) return
+
+    this.currentTurn = turn
+    const previous = this.lastFileAccess
+    this.lastFileAccess = { filePath, turn }
+
+    if (!previous || previous.filePath === filePath) return
+
+    const dtTurns = Math.max(1, turn - previous.turn)
+    if (dtTurns > this.config.stdpWindow) return
+
+    this.recordFlow(previous.filePath, filePath, turn)
+    this.recordSequentialEdit(previous.filePath, filePath, dtTurns)
   }
 
   /** Record flow on an edge (called on file access/co-edit) */
@@ -287,7 +325,7 @@ export class PhysarumEngine {
   /** Persist all edges to MeridianDb */
   save(): void {
     if (!this.db?.savePhysarumEdges) return
-    this.db.savePhysarumEdges([...this.edges.values()])
+    this.db.savePhysarumEdges([...this.edges.values()].filter(isLoadablePhysarumEdge))
   }
 
   /** Load edges from MeridianDb (call once at startup) */
@@ -295,6 +333,7 @@ export class PhysarumEngine {
     if (!this.db?.loadPhysarumEdges) return
     const edges = this.db.loadPhysarumEdges()
     for (const e of edges) {
+      if (!isLoadablePhysarumEdge(e)) continue
       this.edges.set(this.edgeKey(e.fileA, e.fileB), e)
     }
   }
