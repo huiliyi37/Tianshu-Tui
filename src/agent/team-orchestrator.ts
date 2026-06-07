@@ -1,6 +1,6 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
 import type { AggregationPolicy } from './work-order.js'
-import { parseTeamTaskDrafts, type TeamTaskDraft } from './team-plan.js'
+import { parseTeamTaskDrafts, hasOverlappingFiles, type TeamTaskDraft } from './team-plan.js'
 
 export interface TeamOrchestratorDeps {
   delegateBatch(
@@ -29,10 +29,8 @@ export interface TeamRunSummary {
   run?: CoordinatorRun
 }
 
-function patcherFileKey(task: TeamTaskDraft): string | null {
-  if (task.profile !== 'patcher') return null
-  if (task.files.length === 0) return null
-  return [...task.files].sort().join('\n')
+function isFileScopedPatcher(task: TeamTaskDraft): boolean {
+  return task.profile === 'patcher' && task.files.length > 0
 }
 
 function buildExecutionObjective(task: TeamTaskDraft): string {
@@ -43,7 +41,7 @@ function buildExecutionObjective(task: TeamTaskDraft): string {
 export function selectDispatchableTeamTasks(tasks: TeamTaskDraft[], maxParallel = 3): { selected: TeamTaskDraft[]; blocked: string[] } {
   const selected: TeamTaskDraft[] = []
   const blocked: string[] = []
-  const seenPatcherScopes = new Set<string>()
+  const selectedPatchers: TeamTaskDraft[] = []
 
   for (const task of tasks) {
     if (selected.length >= maxParallel) {
@@ -56,12 +54,17 @@ export function selectDispatchableTeamTasks(tasks: TeamTaskDraft[], maxParallel 
       continue
     }
 
-    const key = patcherFileKey(task)
-    if (key && seenPatcherScopes.has(key)) {
-      blocked.push(`${task.id}: overlapping patcher file scope; serialize later`)
-      continue
+    // Block patcher tasks whose file scope intersects an already-selected
+    // patcher (any shared file, not just identical sets) — they must serialize
+    // to avoid parallel writes to the same file.
+    if (isFileScopedPatcher(task)) {
+      const conflict = selectedPatchers.find(prev => hasOverlappingFiles(prev, task))
+      if (conflict) {
+        blocked.push(`${task.id}: overlapping patcher file scope with ${conflict.id}; serialize later`)
+        continue
+      }
+      selectedPatchers.push(task)
     }
-    if (key) seenPatcherScopes.add(key)
 
     selected.push(task)
   }

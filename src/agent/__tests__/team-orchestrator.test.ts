@@ -36,8 +36,33 @@ describe('team orchestrator skeleton', () => {
     assert.deepEqual(selected.map(t => t.id), ['T1', 'T4'])
     assert.deepEqual(blocked, [
       'T2: patcher task has no file scope',
-      'T3: overlapping patcher file scope; serialize later',
+      'T3: overlapping patcher file scope with T1; serialize later',
     ])
+  })
+
+  it('blocks patchers with PARTIAL file overlap, not just identical sets', () => {
+    // T1=[a,b], T2=[b,c] share b.ts but are different sets — must still serialize.
+    const { selected, blocked } = selectDispatchableTeamTasks([
+      task('T1', ['src/a.ts', 'src/b.ts']),
+      task('T2', ['src/b.ts', 'src/c.ts']),
+      task('T3', ['src/d.ts']),
+    ], 3)
+
+    assert.deepEqual(selected.map(t => t.id), ['T1', 'T3'])
+    assert.deepEqual(blocked, [
+      'T2: overlapping patcher file scope with T1; serialize later',
+    ])
+  })
+
+  it('does not treat read-only workers as file-conflicting even on shared files', () => {
+    // A reviewer reading the same file a patcher writes is not a write conflict.
+    const { selected, blocked } = selectDispatchableTeamTasks([
+      task('T1', ['src/a.ts']),
+      task('T2', ['src/a.ts'], 'reviewer'),
+    ], 3)
+
+    assert.deepEqual(selected.map(t => t.id), ['T1', 'T2'])
+    assert.deepEqual(blocked, [])
   })
 
   it('maps patcher tasks to 天梁 execution objectives', () => {
