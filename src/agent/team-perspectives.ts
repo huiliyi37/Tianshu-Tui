@@ -98,8 +98,14 @@ export function mergePerspectives(
   tianfu: TeamPerspectivePlan,
   tianxuan?: TeamPerspectivePlan,
 ): MergedPlan {
-  // Step 1: Start with 天权 tasks as base graph
-  const tasks = [...tianquan.tasks]
+  // Step 1: Deep-clone 天权 tasks as base graph (avoid polluting caller's objects)
+  const tasks = tianquan.tasks.map(t => ({
+    ...t,
+    files: [...t.files],
+    touchSet: [...t.touchSet],
+    dependsOn: [...t.dependsOn],
+    verification: [...t.verification],
+  }))
   const taskIndex = new Map(tasks.map(t => [t.id, t]))
 
   const accepted: MergedPlan['accepted'] = []
@@ -142,11 +148,43 @@ export function mergePerspectives(
       }),
   ]
 
-  // Step 4: Process 天璇 alternatives
+  // Step 4: Process 天璇 alternatives and detect conflicts
   if (tianxuan) {
     // Check for conflicts between perspectives
     const tianquanTaskIds = new Set(tianquan.tasks.map(t => t.id))
     const tianxuanExtraTasks = tianxuan.tasks.filter(t => !tianquanTaskIds.has(t.id))
+
+    // Detect risk conflicts: 天府 and 天璇 disagree on severity
+    for (const tianfuRisk of tianfu.risks) {
+      const tianxuanAlt = tianxuan.alternatives.find(a =>
+        a.title.toLowerCase().includes(tianfuRisk.taskId?.toLowerCase() ?? '')
+      )
+      if (tianxuanAlt && tianxuanAlt.recommendation === 'accept') {
+        // 天府 says risky, 天璇 says accept → conflict
+        conflicts.push({
+          description: `Risk vs alternative conflict on ${tianfuRisk.taskId ?? 'unknown'}`,
+          tianquan: 'no position',
+          tianfu: tianfuRisk.claim,
+          tianxuan: tianxuanAlt.tradeoff,
+        })
+      }
+    }
+
+    // Detect task ordering conflicts: 天璇 proposes different deps than 天权
+    for (const tianxuanTask of tianxuan.tasks) {
+      const tianquanTask = tianquan.tasks.find(t => t.id === tianxuanTask.id)
+      if (tianquanTask && tianxuanTask.dependsOn.join(',') !== tianquanTask.dependsOn.join(',')) {
+        const hasDepConflict = tianxuanTask.dependsOn.length > 0 || tianquanTask.dependsOn.length > 0
+        if (hasDepConflict) {
+          conflicts.push({
+            description: `Dependency conflict on ${tianxuanTask.id}`,
+            tianquan: `depends: [${tianquanTask.dependsOn.join(', ')}]`,
+            tianfu: '(no position)',
+            tianxuan: `depends: [${tianxuanTask.dependsOn.join(', ')}]`,
+          })
+        }
+      }
+    }
 
     for (const extraTask of tianxuanExtraTasks) {
       // Extra tasks from 天璇 are deferred unless explicitly smaller

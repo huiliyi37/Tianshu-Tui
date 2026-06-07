@@ -162,8 +162,15 @@ export class DelegationCoordinator {
       }
 
       const isWrite = classifyProfile(request.profile) === 'hands'
+      // Derive stable WorkOrder ID from parentTurnId when it follows the
+      // pattern "prefix:team:T1" — this lets WorkOrderQueue resolve
+      // dependencies that reference stable team task IDs.
+      const stableId = /\bteam:/.test(request.parentTurnId)
+        ? request.parentTurnId.split(':').slice(-2).join(':')
+        : undefined
       const order = isWrite
         ? createWriteWorkOrder({
+            id: stableId,
             parentTurnId: request.parentTurnId,
             kind: request.kind,
             profile: request.profile,
@@ -173,6 +180,7 @@ export class DelegationCoordinator {
             dependencies: request.dependencies,
           })
         : createReadOnlyWorkOrder({
+            id: stableId,
             parentTurnId: request.parentTurnId,
             kind: request.kind,
             profile: request.profile,
@@ -422,8 +430,12 @@ export class DelegationCoordinator {
     const orders: WorkOrder[] = []
     for (const r of runnables) {
       const isWrite = classifyProfile(r.profile) === 'hands'
+      const stableId = /\bteam:/.test(r.parentTurnId)
+        ? r.parentTurnId.split(':').slice(-2).join(':')
+        : undefined
       const order = isWrite
         ? createWriteWorkOrder({
+            id: stableId,
             parentTurnId: r.parentTurnId,
             kind: r.kind,
             profile: r.profile,
@@ -433,6 +445,7 @@ export class DelegationCoordinator {
             dependencies: r.dependencies,
           })
         : createReadOnlyWorkOrder({
+            id: stableId,
             parentTurnId: r.parentTurnId,
             kind: r.kind,
             profile: r.profile,

@@ -104,15 +104,27 @@ function extractFiles(text: string): string[] {
   return unique(files)
 }
 
-function classifyTask(text: string): Pick<TeamTaskDraft, 'profile' | 'kind'> {
-  const lower = text.toLowerCase()
+/**
+ * Classify task by TITLE ONLY — never by body/verification lines.
+ *
+ * Priority order (first match wins):
+ * 1. Title contains review/审查/验收  → reviewer
+ * 2. Title contains verify/验证-only → adversarial_verifier
+ * 3. Title contains scout/调研/搜索   → code_scout
+ * 4. Everything else                  → patcher (default executor)
+ *
+ * Implementation tasks that mention "test" or "验证" in their body
+ * must NOT be reclassified — those lines go into verification[] instead.
+ */
+function classifyTask(title: string): Pick<TeamTaskDraft, 'profile' | 'kind'> {
+  const lower = title.toLowerCase()
   if (/审查|验收|review|squadron|inspector/.test(lower)) {
     return { profile: 'reviewer', kind: 'review' }
   }
-  if (/验证|测试|test|tsc|typecheck|verify|verification/.test(lower)) {
+  if (/^验证$|^verify$|^verification$|验证任务|verify task/i.test(lower)) {
     return { profile: 'adversarial_verifier', kind: 'verify' }
   }
-  if (/调研|搜索|查找|read|grep|scout|research|定位/.test(lower)) {
+  if (/调研|搜索|查找|scout|research|定位/.test(lower)) {
     return { profile: 'code_scout', kind: 'code_search' }
   }
   return { profile: 'patcher', kind: 'patch_proposal' }
@@ -152,7 +164,7 @@ function extractDependencies(lines: string[]): string[] {
 function sectionToDraft(section: Section): TeamTaskDraft {
   const content = section.content.join('\n').trim()
   const objective = [section.title, content].filter(Boolean).join('\n').trim() || section.id
-  const classification = classifyTask(objective)
+  const classification = classifyTask(section.title || section.id)
   return {
     id: section.id,
     title: section.title || section.id,

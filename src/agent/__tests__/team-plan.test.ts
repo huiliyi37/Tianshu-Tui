@@ -27,31 +27,53 @@ describe('parseTeamTaskDrafts', () => {
     assert.equal(tasks[0]!.id, 'Step 6a')
     assert.match(tasks[0]!.title, /initializeRun/)
     assert.deepEqual(tasks[0]!.files, ['src/agent/loop.ts', 'src/agent/__tests__/loop.test.ts'])
-    assert.equal(tasks[0]!.profile, 'adversarial_verifier')
-    assert.equal(tasks[0]!.kind, 'verify')
+    // Implementation tasks are ALWAYS patcher, even when body mentions tests
+    assert.equal(tasks[0]!.profile, 'patcher')
+    assert.equal(tasks[0]!.kind, 'patch_proposal')
+    // Verification commands are captured separately
     assert.ok(tasks[0]!.verification.some(line => line.includes('npm exec')))
     assert.equal(tasks[1]!.id, 'Step 6b')
     assert.deepEqual(tasks[1]!.files, ['src/agent/compaction-controller.ts'])
+    assert.equal(tasks[1]!.profile, 'patcher')
   })
 
-  it('classifies review and verification tasks', () => {
+  it('classifies review and verification tasks by title', () => {
     const tasks = parseTeamTaskDrafts(`
 ### Task 1: 实现 parser
 修改 src/agent/team-plan.ts
+验证：npx tsc --noEmit
 
 ### Task 2: Review Squadron 审查
 审查 src/agent/team-plan.ts
 
-### Task 3: 验证测试
-运行 npx tsc --noEmit
+### Task 3: 验证
+验证所有变更
+`)
+
+    // Implementation task with verification in body → still patcher
+    assert.equal(tasks[0]!.profile, 'patcher')
+    assert.equal(tasks[0]!.kind, 'patch_proposal')
+    assert.ok(tasks[0]!.verification.some(v => v.includes('npx tsc')))
+
+    // Title contains "审查" → reviewer
+    assert.equal(tasks[1]!.profile, 'reviewer')
+    assert.equal(tasks[1]!.kind, 'review')
+
+    // Title is purely "验证" → adversarial_verifier
+    assert.equal(tasks[2]!.profile, 'adversarial_verifier')
+    assert.equal(tasks[2]!.kind, 'verify')
+  })
+
+  it('does not reclassify implementation tasks that mention tests in body', () => {
+    const tasks = parseTeamTaskDrafts(`
+### T1: Extract loop helper
+修改 src/agent/loop.ts
+运行测试：npm exec -- tsx --test src/agent/__tests__/loop.test.ts
 `)
 
     assert.equal(tasks[0]!.profile, 'patcher')
     assert.equal(tasks[0]!.kind, 'patch_proposal')
-    assert.equal(tasks[1]!.profile, 'reviewer')
-    assert.equal(tasks[1]!.kind, 'review')
-    assert.equal(tasks[2]!.profile, 'adversarial_verifier')
-    assert.equal(tasks[2]!.kind, 'verify')
+    assert.ok(tasks[0]!.verification.length > 0, 'verification commands captured')
   })
 
   it('returns empty list for documents without task headings', () => {

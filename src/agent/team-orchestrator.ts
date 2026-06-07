@@ -77,34 +77,42 @@ export function selectDispatchableTeamTasks(tasks: TeamTaskDraft[], maxParallel 
 
 export function teamTasksToDelegationRequests(tasks: TeamTaskDraft[], parentTurnId = 'team'): DelegationRequest[] {
   return tasks.map((task, index) => {
-    const req: DelegationRequest = {
-      parentTurnId: `${parentTurnId}:${task.id || index}`,
+    const stableId = `team:${task.id || index}`
+    // Propagate dependencies from enriched TeamTask if present
+    let deps: string[] | undefined
+    if ('dependsOn' in task && Array.isArray((task as any).dependsOn) && (task as any).dependsOn.length > 0) {
+      deps = (task as any).dependsOn.map((d: string) => `team:${d}`)
+    }
+    return {
+      parentTurnId: `${parentTurnId}:${stableId}`,
       objective: buildExecutionObjective(task),
       kind: task.kind,
       profile: task.profile,
       scope: { files: task.files },
+      dependencies: deps,
     }
-    // Propagate dependencies from enriched TeamTask if present
-    if ('dependsOn' in task && Array.isArray((task as any).dependsOn) && (task as any).dependsOn.length > 0) {
-      req.dependencies = (task as any).dependsOn
-    }
-    return req
   })
 }
 
-/** Convert wave task IDs to DelegationRequests using enriched task map. */
+/** Convert wave task IDs to DelegationRequests using enriched task map.
+ *  Uses stable `team:${taskId}` as parentTurnId so WorkOrder.dependencies
+ *  (which reference these same IDs) can be resolved by WorkOrderQueue. */
 function waveToRequests(wave: TeamWave, taskMap: Map<string, TeamTask>, parentTurnId: string): DelegationRequest[] {
   return wave.taskIds
     .map(id => taskMap.get(id))
     .filter((t): t is TeamTask => Boolean(t))
     .map(task => {
+      const stableId = `team:${task.id}`
+      const deps = task.dependsOn.length > 0
+        ? task.dependsOn.map(d => `team:${d}`)
+        : undefined
       const req: DelegationRequest = {
-        parentTurnId: `${parentTurnId}:${task.id}`,
+        parentTurnId: `${parentTurnId}:${stableId}`,
         objective: buildExecutionObjective(task),
         kind: task.kind,
         profile: task.profile,
         scope: { files: task.files },
-        dependencies: task.dependsOn.length > 0 ? task.dependsOn : undefined,
+        dependencies: deps,
       }
       return req
     })

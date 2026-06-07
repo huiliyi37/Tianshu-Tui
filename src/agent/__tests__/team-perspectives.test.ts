@@ -153,6 +153,52 @@ describe('mergePerspectives', () => {
     assert.ok(merged.accepted.some(a => a.title.includes('Blind spot')))
   })
 
+  it('does not pollute original 天权 task objects', () => {
+    const originalTask = makeTask('T1', 'low')
+    const tianquan = basePerspective({ tasks: [originalTask] })
+    const tianfu = normalizePerspective('tianfu', {
+      risks: [{ taskId: 'T1', severity: 'high', claim: 'Auth', mitigation: 'Serial' }],
+    })
+
+    mergePerspectives(tianquan, tianfu)
+
+    // Original task must NOT be mutated
+    assert.equal(originalTask.riskTier, 'low')
+  })
+
+  it('detects conflicts when 天府 and 天璇 disagree', () => {
+    const tianquan = basePerspective({
+      tasks: [makeTask('T1', 'low'), makeTask('T2', 'low')],
+    })
+    const tianfu = normalizePerspective('tianfu', {
+      risks: [{ taskId: 'T1', severity: 'high', claim: 'Auth risk', mitigation: 'Serial' }],
+    })
+    const tianxuan = normalizePerspective('tianxuan', {
+      alternatives: [
+        { title: 'T1 shortcut', tradeoff: 'Faster but risky', recommendation: 'accept' },
+      ],
+    })
+
+    const merged = mergePerspectives(tianquan, tianfu, tianxuan)
+
+    assert.ok(merged.conflicts.length > 0, 'Should detect risk vs alternative conflict')
+    assert.ok(merged.conflicts.some(c => c.description.includes('Risk vs alternative')))
+  })
+
+  it('detects dependency ordering conflicts between 天权 and 天璇', () => {
+    const tianquan = basePerspective({
+      tasks: [{ ...makeTask('T1'), dependsOn: ['T0'] }, makeTask('T2')],
+    })
+    const tianfu = normalizePerspective('tianfu', {})
+    const tianxuan = normalizePerspective('tianxuan', {
+      tasks: [{ ...makeTask('T1'), dependsOn: ['T2'] }],
+    })
+
+    const merged = mergePerspectives(tianquan, tianfu, tianxuan)
+
+    assert.ok(merged.conflicts.some(c => c.description.includes('Dependency conflict')), 'Should detect dep ordering conflict')
+  })
+
   it('works without 天璇 (two-perspective merge)', () => {
     const tianquan = basePerspective()
     const tianfu = normalizePerspective('tianfu', {})

@@ -66,7 +66,7 @@ describe('team orchestrator skeleton', () => {
   it('maps patcher tasks to 天梁 execution objectives', () => {
     const [request] = teamTasksToDelegationRequests([task('T1', ['src/a.ts'])], 'parent')
 
-    assert.equal(request!.parentTurnId, 'parent:T1')
+    assert.equal(request!.parentTurnId, 'parent:team:T1')
     assert.equal(request!.kind, 'patch_proposal')
     assert.equal(request!.profile, 'patcher')
     assert.deepEqual(request!.scope.files, ['src/a.ts'])
