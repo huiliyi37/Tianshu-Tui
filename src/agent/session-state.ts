@@ -63,7 +63,24 @@ export interface SessionState {
 const MAX_DECISIONS = 20
 const MAX_VERIFICATIONS = 30
 const MAX_FACTS = 15
+const MAX_TASK_ITEMS = 30
 const VOLATILE_MAX_CHARS = 500
+
+// Status markers an assistant may emit inline next to a task line.
+// Order matters: more specific / terminal states are checked first.
+const STATUS_MARKERS: Array<{ status: TaskListItem['status']; test: RegExp }> = [
+  { status: 'completed', test: /(✓|✔|✅|\[x\]|\bdone\b|完成|已完成)/i },
+  { status: 'blocked', test: /(⊗|🚫|\bblocked\b|阻塞|受阻|卡住)/i },
+  { status: 'in_progress', test: /(◼|⏳|\[~\]|\bwip\b|\bin[ -]?progress\b|进行中|正在)/i },
+]
+
+/** Detect an explicit status marker on a task line; null means no signal. */
+function detectStatusMarker(line: string): TaskListItem['status'] | null {
+  for (const { status, test } of STATUS_MARKERS) {
+    if (test.test(line)) return status
+  }
+  return null
+}
 
 export class SessionStateManager {
   private state: SessionState
@@ -155,16 +172,22 @@ export class SessionStateManager {
   // Task List — extracted from assistant replies, persisted across turns
   // ---------------------------------------------------------------------------
 
-  /** 从 Assistant 回复文本中提取任务列表（支持 Markdown 列表、编号、粗体等格式） */
+  /**
+   * 从 Assistant 回复文本中提取任务列表（支持 Markdown 列表、编号、粗体等格式）。
+   *
+   * 合并语义（非覆盖）：已存在的 id 保留其 status/turnCreated，仅在检测到显式状态
+   * 标记时更新 status，并刷新 content/turnUpdated；新 id 追加到尾部。这样跨多轮的
+   * 计划不会被后续含新编号的回复整体冲掉。
+   */
   extractTaskList(text: string, turn: number): TaskListItem[] {
-    const items: TaskListItem[] = []
+    const parsed: Array<{ id: string; content: string; status: TaskListItem['status'] | null }> = []
     const lines = text.split('\n')
 
     // 匹配 Markdown 列表/编号模式: - P1: content, 1. P2: content, **P1**: content, ### P1. content
     const patterns = [
-      /^[\s*\-\\d\\.\\#]*\*?\*?([PpTtSs]\d+)\*?\*?[\s\\:\\-\\.]+(.+)/i,
-      /^\s*\*?\*?([PpTtSs]\d+)\*?\*?[\s\\:\\-\\.]+(.+)/i,
-      /\b([PpTtSs]\d+)\b\s*(?:-|=>|->|:|：)\s*(.+)/i,
+      /^[\s*\-\d.#]*\*?\*?([PpTtSs]\d+)\*?\*?[\s:\-.]+(.+)/,
+      /^\s*\*?\*?([PpTtSs]\d+)\*?\*?[\s:\-.]+(.+)/,
+      /\b([PpTtSs]\d+)\b\s*(?:-|=>|->|:|：)\s*(.+)/,
     ]
 
     for (const line of lines) {
@@ -174,26 +197,49 @@ export class SessionStateManager {
           const id = match[1].toUpperCase()
           const content = match[2].trim()
           // 过滤过短或纯符号内容
-          if (content.replace(/[`*_\\-\\s]/g, '').length > 3 && !items.some(it => it.id === id)) {
-            items.push({
-              id,
-              content: content.slice(0, 160),
-              status: 'pending',
-              turnCreated: turn,
-              turnUpdated: turn,
-            })
+          if (content.replace(/[`*_\-\s]/g, '').length > 3 && !parsed.some(it => it.id === id)) {
+            parsed.push({ id, content: content.slice(0, 160), status: detectStatusMarker(line) })
           }
           break // 一行只匹配第一个命中的模式
         }
       }
     }
 
-    if (items.length > 0) {
-      this.state.taskList = items
-      this.state.updatedAt = Date.now()
+    if (parsed.length === 0) return [...this.state.taskList]
+
+    // 合并：保留既有项的 status/turnCreated（除非检测到显式状态标记），追加新项。
+    const existingById = new Map(this.state.taskList.map(it => [it.id, it]))
+    const merged: TaskListItem[] = this.state.taskList.map(it => ({ ...it }))
+
+    for (const p of parsed) {
+      const existing = existingById.get(p.id)
+      if (existing) {
+        const idx = merged.findIndex(m => m.id === p.id)
+        merged[idx] = {
+          ...existing,
+          content: p.content,
+          status: p.status ?? existing.status,
+          turnUpdated: turn,
+        }
+      } else {
+        merged.push({
+          id: p.id,
+          content: p.content,
+          status: p.status ?? 'pending',
+          turnCreated: turn,
+          turnUpdated: turn,
+        })
+      }
     }
 
-    return items
+    // 容量上限：保留最近更新的项
+    const capped = merged.length > MAX_TASK_ITEMS
+      ? [...merged].sort((a, b) => b.turnUpdated - a.turnUpdated).slice(0, MAX_TASK_ITEMS)
+      : merged
+
+    this.state.taskList = capped
+    this.state.updatedAt = Date.now()
+    return [...capped]
   }
 
   /** 获取当前持久化的任务列表 */
@@ -201,12 +247,13 @@ export class SessionStateManager {
     return this.state.taskList
   }
 
-  /** 更新单个任务项的状态 */
+  /** 更新单个任务项的状态（不可变：返回新数组替换，不原地改写） */
   updateTaskListItem(id: string, status: TaskListItem['status'], turn: number): boolean {
-    const item = this.state.taskList.find(it => it.id === id)
-    if (!item) return false
-    item.status = status
-    item.turnUpdated = turn
+    const idx = this.state.taskList.findIndex(it => it.id === id)
+    if (idx < 0) return false
+    this.state.taskList = this.state.taskList.map((it, i) =>
+      i === idx ? { ...it, status, turnUpdated: turn } : it
+    )
     this.state.updatedAt = Date.now()
     return true
   }

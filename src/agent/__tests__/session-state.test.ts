@@ -126,4 +126,62 @@ describe('SessionStateManager', () => {
     // New snapshot should see it
     assert.ok(mgr.getSnapshot().fileIndex['/x.ts'])
   })
+
+  describe('task list', () => {
+    const PLAN = [
+      '我建议按以下顺序：',
+      '- P1: 修复 loop.ts 中的内存泄露',
+      '- P2: 重写 buildIntentRouterPrompt 单元测试',
+    ].join('\n')
+
+    it('extracts task items from an assistant reply', () => {
+      const mgr = new SessionStateManager('sid')
+      const items = mgr.extractTaskList(PLAN, 1)
+      assert.equal(items.length, 2)
+      assert.equal(items[0]?.id, 'P1')
+      assert.equal(items[0]?.content, '修复 loop.ts 中的内存泄露')
+      assert.equal(items[0]?.status, 'pending')
+      assert.equal(items[0]?.turnCreated, 1)
+    })
+
+    it('MERGES across turns instead of overwriting (fix for wipe bug)', () => {
+      const mgr = new SessionStateManager('sid')
+      mgr.extractTaskList(PLAN, 1)
+      // A later reply mentions a brand-new id S3 — must NOT wipe P1/P2.
+      mgr.extractTaskList('- S3: 检查 S3 bucket 配置', 3)
+      const list = mgr.getTaskList()
+      assert.deepEqual(list.map(t => t.id).sort(), ['P1', 'P2', 'S3'])
+    })
+
+    it('preserves a completed status when a later turn re-lists the item without a marker', () => {
+      const mgr = new SessionStateManager('sid')
+      mgr.extractTaskList(PLAN, 1)
+      mgr.updateTaskListItem('P1', 'completed', 2)
+      // Re-listing P1 plainly in turn 4 must not downgrade it back to pending.
+      mgr.extractTaskList('- P1: 修复 loop.ts 中的内存泄露', 4)
+      assert.equal(mgr.getTaskList().find(t => t.id === 'P1')?.status, 'completed')
+    })
+
+    it('detects an explicit status marker on the task line', () => {
+      const mgr = new SessionStateManager('sid')
+      mgr.extractTaskList('- P1: 修复内存泄露 ✓ 已完成', 1)
+      assert.equal(mgr.getTaskList().find(t => t.id === 'P1')?.status, 'completed')
+    })
+
+    it('does not mutate items in place — getTaskList result is stable across updates', () => {
+      const mgr = new SessionStateManager('sid')
+      mgr.extractTaskList(PLAN, 1)
+      const before = mgr.getTaskList()
+      const beforeP1 = before.find(t => t.id === 'P1')
+      mgr.updateTaskListItem('P1', 'in_progress', 2)
+      // The previously-returned object reference must be untouched (immutability).
+      assert.equal(beforeP1?.status, 'pending')
+      assert.equal(mgr.getTaskList().find(t => t.id === 'P1')?.status, 'in_progress')
+    })
+
+    it('updateTaskListItem returns false for unknown id', () => {
+      const mgr = new SessionStateManager('sid')
+      assert.equal(mgr.updateTaskListItem('P9', 'completed', 1), false)
+    })
+  })
 })

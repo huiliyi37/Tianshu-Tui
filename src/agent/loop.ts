@@ -563,6 +563,17 @@ export class AgentLoop {
       if (lastAssistant && this.sessionStateManager) {
         this.sessionStateManager.extractTaskList(lastAssistant, this.session.getTurnCount())
       }
+      // 用户引用某个任务编号（如"做 P1"）时，将其标记为 in_progress —
+      // 让持久化状态机活起来，TUI 任务条得以反映进度而非永远 pending。
+      if (this.sessionStateManager) {
+        const referenced = userInput.match(/\b([PpTtSs]\d+)\b/g)
+        if (referenced) {
+          const turn = this.session.getTurnCount()
+          for (const ref of new Set(referenced.map(r => r.toUpperCase()))) {
+            this.sessionStateManager.updateTaskListItem(ref, 'in_progress', turn)
+          }
+        }
+      }
       const route = await classifyIntentRetrievalRoute({
         userMessage: userInput,
         lastAssistantMessage: lastAssistant,
