@@ -267,6 +267,119 @@ MVP 行为：
 
 ---
 
+## Phase 3.5 — 依赖划分、任务分组、视角合并（下一批天梁执行规格）
+
+**目标**：在不碰自动 merge / TUI 面板的前提下，把 `/team` 从“能派 worker 的骨架”推进到“能形成可靠执行波次”的 planning core。
+
+### 前置依赖
+
+| 依赖 | 状态 | 说明 |
+|------|------|------|
+| Slash workflow + skeleton orchestrator | ✅ 已有 | `/team` 入口、弱 parser、`runTeamSkeleton` 已可作为基础。 |
+| `TeamTaskDraft` 扩展为 `TeamTask` | 待做 | 增加 `dependsOn`、`riskTier`、`touchSet`、`groupId`、`routeHint`。 |
+| 任务分组函数 | 待做 | 纯函数输入 `TeamTask[]`，输出 waves/groups；不直接调 worker。 |
+| 视角计划 schema | 待做 | `/team max` 三视角 worker 必须输出同构结构，避免自由文本难合并。 |
+| 视角合并函数 | 待做 | 天权主图 + 天府风险门 + 天璇反证/备选，生成 `unified_plan`。 |
+| model route hint | 待做 | max 规划默认强模型；执行阶段才允许 cheap/flash。 |
+
+### 任务分组规则（第一版）
+
+先做确定性规则，不做复杂优化：
+
+1. **硬依赖边**：显式 `dependsOn`、测试依赖实现、生成物依赖消费者。
+2. **文件冲突边**：两个 patcher 修改同一文件 → 默认串行；只读 review/scout 不阻塞 patcher。
+3. **风险边**：涉及 auth/security/concurrency/persistence/public API/config/schema 的任务标为 high risk，高风险 patcher 不与同模块 patcher 并行。
+4. **波次生成**：拓扑排序成 `Wave[]`；每个 wave 内最多 2-3 个 patcher，review/scout 可额外并行。
+5. **降级策略**：无法解析依赖时不要猜并行；放入 `blocked` 或单独 serial wave。
+
+建议类型：
+
+```ts
+interface TeamTask extends TeamTaskDraft {
+  dependsOn: string[]
+  riskTier: 'low' | 'medium' | 'high'
+  touchSet: string[]
+  groupId?: string
+  routeHint?: 'planner_strong' | 'review_strong' | 'executor_cheap' | 'executor_strong'
+}
+
+interface TeamWave {
+  id: string
+  tasks: TeamTask[]
+  reason: string
+  parallelLimit: number
+}
+```
+
+### `/team max` 视角输出 schema
+
+max 模式不是让三个 worker 自由发挥，而是让三种视角填同一张表：
+
+```ts
+interface TeamPerspectivePlan {
+  perspective: 'tianquan' | 'tianfu' | 'tianxuan'
+  summary: string
+  tasks: TeamTask[]
+  dependencyNotes: Array<{ from: string; to: string; reason: string }>
+  risks: Array<{ taskId?: string; severity: 'low' | 'medium' | 'high'; claim: string; mitigation: string }>
+  verification: Array<{ taskId?: string; command: string; expected: string }>
+  blockers: string[]
+  alternatives: Array<{ title: string; tradeoff: string; recommendation: 'accept' | 'defer' | 'reject' }>
+}
+```
+
+### 视角合并规则
+
+不要只把三个 worker 文本拼接，也不要直接 `primary_decides` 吞掉少数意见。合并分三层：
+
+1. **天权为主图**：任务拆解、依赖方向、执行顺序以天权输出为主。
+2. **天府加门禁**：风险、验证命令、回归测试、review tier 由天府覆盖或提升；天府提出 high risk 时不得静默降级。
+3. **天璇做反证/备选**：天璇发现的盲区进入 `alternatives` 或 `blockers`；只有满足“可验证、低破坏、收益明确”才并入主图。
+
+合并输出必须包含：
+
+- `accepted`: 被并入统一计划的建议。
+- `rejected`: 明确拒绝的建议和理由。
+- `deferred`: 有价值但不进入本轮执行的建议。
+- `conflicts`: 三视角之间的冲突点，需要主控裁决。
+
+推荐合并算法：
+
+1. normalize task id/files/title。
+2. 以天权 tasks 建初始 graph。
+3. 把天府风险映射到 task；提升 `riskTier` 和 verification。
+4. 把天璇 alternatives 逐项分类为 accepted/deferred/rejected。
+5. 对同文件 patcher 加串行边。
+6. 输出 `TeamWave[]`，再交给执行阶段。
+
+### max 规划模型策略
+
+`/team max` 的规划 worker **不用 flash**。理由：规划阶段决定任务边界和风险门，错误会被执行阶段放大；便宜模型适合执行清晰 spec，不适合生成 spec。
+
+推荐 route hint：
+
+| 阶段 | 星域/角色 | routeHint | 默认模型策略 |
+|------|-----------|-----------|--------------|
+| max 规划 | 天权 planner | `planner_strong` | primary / 强推理 OpenAI-compatible 模型 |
+| max 风险 | 天府 risk reviewer | `review_strong` | 稳定强模型 / reviewer 模型 |
+| max 反证 | 天璇 adversarial planner | `planner_strong` | 强推理或创意模型，不用 flash |
+| 执行 | 天梁 patcher | `executor_cheap` 或 `executor_strong` | 低风险可 cheap/flash，高风险用 strong |
+| 验收 | 天府/Review Squadron | `review_strong` | 强模型 + evidence mandate |
+
+当前项目已支持多模型 OpenAI-compatible provider，因此第一版不要硬编码模型名；只传 `routeHint`，由 config 映射到 provider/model。缺失配置时 fallback 到 primary，**不要 fallback 到 flash for max planning**。
+
+### 给天梁的可执行任务包
+
+| Task | 文件 | 内容 | 验证 |
+|------|------|------|------|
+| 3.5a | `src/agent/team-plan.ts` | 扩展 `TeamTaskDraft` → `TeamTask` 类型，新增 risk/touch/route 字段，保持兼容 | `team-plan.test.ts` |
+| 3.5b | `src/agent/team-grouping.ts` | 新增纯函数 `groupTeamTasks(tasks, options): TeamWave[]`，实现同文件串行 + maxParallel | 新建 `team-grouping.test.ts` |
+| 3.5c | `src/agent/team-perspectives.ts` | 定义 `TeamPerspectivePlan`，新增 schema/normalizer | 新建 `team-perspectives.test.ts` |
+| 3.5d | `src/agent/team-merge.ts` | 实现天权主图 + 天府风险 + 天璇 alternatives 的 deterministic merge | 新建 `team-merge.test.ts` |
+| 3.5e | `src/agent/team-orchestrator.ts` | `runTeamSkeleton` 改为先 group waves；max 模式只派 planning workers，不派 patcher | `team-orchestrator.test.ts` |
+
+---
+
 ## Phase 4 — 执行集成：从 slash prompt 过渡到内部编排
 
 **目标**：当 Phase 2/3 稳定后，让 `/team` prompt 明确调用 `runTeamSkeleton` 对应的 agent 流程；如需工具化，再新增 `team_orchestrate` tool。
@@ -336,9 +449,9 @@ MVP 行为：
 
 ---
 
-## Phase 6 — 天梁 profile 与 flash 路由（后置）
+## Phase 6 — 天梁 profile 与多模型路由（后置）
 
-**目标**：把“天梁=精准执行/低成本模型”从 prompt 约定变成配置能力。
+**目标**：把“天梁=精准执行”和“规划/审查使用强模型”从 prompt 约定变成配置能力。执行 worker 可按任务风险选择 flash/cheap model；`/team max` 的规划 worker 默认不用 flash。
 
 ### Task 6.1 — 先用 patcher，不急着新 profile
 
@@ -375,17 +488,20 @@ objective 前缀写清：
 - allowedTools: 同 patcher
 - prompt 强约束“不规划、不扩展、不自我审查”
 
-### Task 6.3 — flash 路由不要硬编码
+### Task 6.3 — 多模型路由策略
 
-当前默认 model card 不会把 patcher 自动路由到 flash。后续有两种实现：
+当前默认 model card 不会把 patcher 自动路由到 flash。后续路线：
 
-1. 用户配置 `config.workers.routing`，把 patch/refactor 任务映射到 flash profile。
-2. 新增 per-profile routing：`tianliang_executor -> flash`。
+1. 用户配置 `config.workers.routing`，把低风险 patch/refactor 任务映射到便宜模型。
+2. 新增 per-profile routing：`tianliang_executor -> flash/cheap executor`。
+3. `/team max` 的规划 worker 明确不用 flash：天权/天府/天璇规划阶段应使用主模型或配置中的强推理 OpenAI-compatible 模型。
+4. 视角规划可走多模型 OpenAI-compatible provider：例如天权=primary reasoning，天府=stability/review model，天璇=creative/adversarial model。不要把三视角规划降成同一个 flash worker。
 
 验收：
 
-- 测试覆盖：没有 flash/无凭证时自动 fallback，不阻塞 `/team`。
-- 不牺牲验证：flash 执行后仍由主控/ReviewRouter 验收。
+- 测试覆盖：没有指定模型/无凭证时自动 fallback，不阻塞 `/team`。
+- 不牺牲验证：便宜模型执行后仍由主控/ReviewRouter 验收。
+- max 规划请求能携带 `profile/modelRoute` 或等价 routing hint；默认不选择 flash。
 
 ---
 
