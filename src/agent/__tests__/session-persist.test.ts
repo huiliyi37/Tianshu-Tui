@@ -58,6 +58,124 @@ describe('SessionPersist', () => {
     assert.ok(serialized.length <= MAX_SESSION_MESSAGE_JSON_CHARS + 512)
     assert.match(serialized, /session-message-truncated/)
   })
+})
+
+describe('SessionPersist — metadata (P1)', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'rivet-meta-test-'))
+    process.env.RIVET_SESSION_DIR = tempDir
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+    delete process.env.RIVET_SESSION_DIR
+  })
+
+  it('initMetadata creates metadata file with defaults', () => {
+    const persist = new SessionPersist('meta-init-001')
+    persist.initMetadata({ model: 'deepseek-v4' })
+
+    const meta = persist.loadMetadata()
+    assert.ok(meta)
+    assert.equal(meta!.model, 'deepseek-v4')
+    assert.equal(meta!.status, 'active')
+    assert.equal(meta!.turnCount, 0)
+    assert.equal(meta!.toolCallCount, 0)
+    assert.ok(meta!.createdAt > 0)
+    assert.ok(meta!.tokenUsage)
+    assert.equal(meta!.tokenUsage!.prompt, 0)
+    assert.equal(meta!.tokenUsage!.completion, 0)
+    assert.equal(meta!.tokenUsage!.total, 0)
+  })
+
+  it('initMetadata is idempotent — does not overwrite existing', () => {
+    const persist = new SessionPersist('meta-idempotent')
+    persist.initMetadata({ model: 'model-v1' })
+    persist.updateMetadata({ turnCount: 5 })
+    // Second init should be a no-op
+    persist.initMetadata({ model: 'model-v2' })
+
+    const meta = persist.loadMetadata()
+    assert.equal(meta!.model, 'model-v1')
+    assert.equal(meta!.turnCount, 5)
+  })
+
+  it('updateMetadata merges partial fields', () => {
+    const persist = new SessionPersist('meta-patch')
+    persist.initMetadata({ model: 'deepseek-v4' })
+    persist.updateMetadata({ turnCount: 3, toolCallCount: 10 })
+    persist.updateMetadata({ turnCount: 4, title: 'Fix the bug' })
+
+    const meta = persist.loadMetadata()
+    assert.equal(meta!.model, 'deepseek-v4')
+    assert.equal(meta!.turnCount, 4)
+    assert.equal(meta!.toolCallCount, 10)
+    assert.equal(meta!.title, 'Fix the bug')
+  })
+
+  it('updateMetadata merges tokenUsage without losing existing fields', () => {
+    const persist = new SessionPersist('meta-tokens')
+    persist.initMetadata()
+    persist.updateMetadata({ tokenUsage: { prompt: 100, completion: 50, total: 150 } })
+    persist.updateMetadata({ tokenUsage: { prompt: 200, completion: 60, total: 260 } })
+
+    const meta = persist.loadMetadata()
+    assert.equal(meta!.tokenUsage!.prompt, 200)
+    assert.equal(meta!.tokenUsage!.completion, 60)
+    assert.equal(meta!.tokenUsage!.total, 260)
+  })
+
+  it('updateMetadata preserves createdAt', () => {
+    const persist = new SessionPersist('meta-created')
+    persist.initMetadata()
+    const originalCreatedAt = persist.loadMetadata()!.createdAt
+
+    // Wait a tiny bit and update
+    persist.updateMetadata({ turnCount: 1 })
+    const meta = persist.loadMetadata()
+    assert.equal(meta!.createdAt, originalCreatedAt)
+    assert.ok(meta!.updatedAt >= originalCreatedAt)
+  })
+
+  it('loadMetadata returns undefined when no metadata file exists', () => {
+    const persist = new SessionPersist('meta-noexist')
+    assert.equal(persist.loadMetadata(), undefined)
+  })
+
+  it('listSessionsWithMetadata returns sorted results', async () => {
+    // Create sessions with .jsonl files (required by listSessions) + metadata
+    const p1 = new SessionPersist('meta-list-1')
+    await p1.appendOaiWithChecksum({ role: 'user', content: 'hello' })
+    p1.initMetadata()
+    p1.updateMetadata({ title: 'older session' })
+
+    const p2 = new SessionPersist('meta-list-2')
+    await p2.appendOaiWithChecksum({ role: 'user', content: 'hello2' })
+    p2.initMetadata()
+    p2.updateMetadata({ title: 'newer session', turnCount: 1 })
+
+    const sessions = SessionPersist.listSessionsWithMetadata()
+    const ourSessions = sessions.filter(s => s.id.startsWith('meta-list-'))
+    assert.equal(ourSessions.length, 2)
+    // Most recent first
+    assert.ok(ourSessions[0]!.updatedAt >= ourSessions[1]!.updatedAt)
+  })
+})
+
+describe('SessionPersist — persisted messages', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'rivet-msg-test-'))
+    process.env.RIVET_SESSION_DIR = tempDir
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+    delete process.env.RIVET_SESSION_DIR
+  })
 
   it('persists truncated oversized messages as loadable JSON', async () => {
     const persist = new SessionPersist('test-session-large-message')

@@ -421,6 +421,11 @@ export class AgentLoop {
     if (this.config.sessionId) {
       this.persist = new SessionPersist(this.config.sessionId)
 
+      // P1: Initialize session metadata with model info
+      this.persist.initMetadata({
+        model: this.config.promptEngine.getModel(),
+      })
+
       // P0-1: Mirror every in-memory message change to disk so non-/exit
       // shutdowns (Ctrl+C, crash, network drop) don't lose the session.
       // - append: serialize via a single promise chain to keep file order
@@ -436,6 +441,26 @@ export class AgentLoop {
             .then(() => {
               // P0-1 trace: verify every message triggers persistence
               debugLog(`[persist] append message role=${msg.role}`)
+              // P1: Update metadata on every append — cheap sync write
+              try {
+                const patch: Partial<import('../context/types.js').SessionMetadata> = {}
+                if (msg.role === 'user' && typeof msg.content === 'string' && !persist.loadMetadata()?.title) {
+                  patch.title = msg.content.slice(0, 120)
+                }
+                if (msg.role === 'user') {
+                  patch.turnCount = (persist.loadMetadata()?.turnCount ?? 0) + 1
+                }
+                if (msg.role === 'assistant' && msg.tool_calls) {
+                  patch.toolCallCount = (persist.loadMetadata()?.toolCallCount ?? 0) + msg.tool_calls.length
+                }
+                const usage = this.session.getTotalUsage()
+                patch.tokenUsage = {
+                  prompt: usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens,
+                  completion: usage.output_tokens,
+                  total: usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens + usage.output_tokens,
+                }
+                persist.updateMetadata(patch)
+              } catch { /* metadata update failures are non-critical */ }
             })
             .catch(err => {
               // Persistence failures must not crash the agent loop.

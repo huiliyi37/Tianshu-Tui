@@ -157,7 +157,28 @@ export interface SessionMemoryState {
 
 export interface SessionMetadata {
   sessionId: string
+  /** ISO timestamp when the session was first created */
+  createdAt: number
+  /** ISO timestamp of the last mutation (append/compact) */
   updatedAt: number
   compactEvents: CompactEvent[]
   lastLedger?: ContextLedger
+  /** Primary model used for this session */
+  model?: string
+  /** Provider profile name (e.g. 'deepseek', 'openai') */
+  provider?: string
+  /** Running token usage aggregate */
+  tokenUsage?: {
+    prompt: number
+    completion: number
+    total: number
+  }
+  /** First user message — used as session title / summary */
+  title?: string
+  /** Session lifecycle status */
+  status?: 'active' | 'completed' | 'archived'
+  /** Number of turns (user messages) processed */
+  turnCount?: number
+  /** Total tool calls executed */
+  toolCallCount?: number
 }

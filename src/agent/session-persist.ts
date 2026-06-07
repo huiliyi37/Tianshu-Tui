@@ -320,6 +320,40 @@ export class SessionPersist {
     writeFileAtomicSync(this.metadataPath, JSON.stringify(metadata, null, 2) + '\n')
   }
 
+  /** Upsert specific metadata fields without overwriting others */
+  updateMetadata(patch: Partial<SessionMetadata>): void {
+    const existing = this.loadMetadata()
+    const merged: SessionMetadata = {
+      sessionId: this.sessionId,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+      compactEvents: existing?.compactEvents ?? [],
+      ...existing,
+      ...patch,
+      // Preserve nested objects by merging, not replacing
+      tokenUsage: existing?.tokenUsage || patch.tokenUsage
+        ? { prompt: 0, completion: 0, total: 0, ...existing?.tokenUsage, ...patch.tokenUsage }
+        : undefined,
+    }
+    this.writeMetadata(merged)
+  }
+
+  /** Initialize metadata for a new session if not already present */
+  initMetadata(init?: Partial<SessionMetadata>): void {
+    if (existsSync(this.metadataPath)) return
+    this.writeMetadata({
+      sessionId: this.sessionId,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      compactEvents: [],
+      status: 'active',
+      turnCount: 0,
+      toolCallCount: 0,
+      tokenUsage: { prompt: 0, completion: 0, total: 0 },
+      ...init,
+    })
+  }
+
   loadMetadata(): SessionMetadata | undefined {
     if (!existsSync(this.metadataPath)) return undefined
     try {
@@ -399,6 +433,29 @@ export class SessionPersist {
     } catch {
       return []
     }
+  }
+
+  /** List sessions with metadata, sorted by updatedAt descending (most recent first) */
+  static listSessionsWithMetadata(): Array<SessionMetadata & { id: string }> {
+    const ids = SessionPersist.listSessions()
+    const results: Array<SessionMetadata & { id: string }> = []
+    for (const id of ids) {
+      try {
+        const p = new SessionPersist(id)
+        const meta = p.loadMetadata()
+        results.push({
+          id,
+          sessionId: id,
+          createdAt: meta?.createdAt ?? 0,
+          updatedAt: meta?.updatedAt ?? 0,
+          compactEvents: meta?.compactEvents ?? [],
+          ...meta,
+        })
+      } catch {
+        // Skip corrupted sessions
+      }
+    }
+    return results.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
   }
 }
 
