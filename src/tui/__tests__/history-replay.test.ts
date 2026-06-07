@@ -31,6 +31,20 @@ describe('replayMessagesToLogEntries', () => {
     assert.equal(result.entries[1]!.content, 'Hello!')
   })
 
+  it('renders system-reminder-wrapped user messages as system entries, not user bubbles', () => {
+    const messages: OaiMessage[] = [
+      { role: 'user', content: 'hi' },
+      { role: 'user', content: '<system-reminder>\nSTOP: Never pipe curl output directly to a shell.\n</system-reminder>' },
+    ]
+    const result = replayMessagesToLogEntries(messages)
+    assert.equal(result.entries.length, 2)
+    assert.equal(result.entries[0]!.type, 'user_message')
+    // The injected guardrail must not become a user bubble or bump turnCount.
+    assert.equal(result.entries[1]!.type, 'system')
+    assert.equal(result.entries[1]!.content, 'STOP: Never pipe curl output directly to a shell.')
+    assert.equal(result.turnCount, 1, 'guardrail reminder must not count as a user turn')
+  })
+
   it('replays tool results', () => {
     const messages: OaiMessage[] = [
       { role: 'user', content: 'do it' },

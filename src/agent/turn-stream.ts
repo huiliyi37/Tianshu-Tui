@@ -5,9 +5,13 @@ import type { ContentBlock, Usage } from '../api/types.js'
 import { stripIntraTurnRepetition } from './dedup.js'
 
 export interface StreamRule {
-  /** Regex pattern to match against the accumulated text stream.
-   *  When matched, the stream is aborted and the rule's inject message
-   *  is appended as a system reminder before retrying. */
+  /** Regex pattern matched against a bash tool-call's `command` argument.
+   *  When the model emits a bash command matching this, the stream is aborted
+   *  and the rule's inject message is appended before retrying.
+   *
+   *  NOTE: matched against the bash `command` argument only — NOT the model's
+   *  prose. This avoids self-triggering when the model legitimately *discusses*
+   *  or documents a dangerous pattern (e.g. a security task about `curl | sh`). */
   pattern: string
   /** System reminder injected into the conversation when the rule triggers. */
   inject: string
@@ -50,8 +54,10 @@ export interface TurnStreamInput {
   turn: number
   lastTurnTextFingerprint: string
   callbacks: TurnStreamCallbacks
-  /** Optional stream rules — abort and inject when accumulated text matches a pattern. */
+  /** Optional stream rules — abort and inject when a bash command matches a pattern. */
   streamRules?: StreamRule[]
+  /** Rule patterns to skip this turn (disabled after exceeding the retry cap). */
+  disabledRulePatterns?: ReadonlySet<string>
 }
 
 export interface TurnStreamResult {
@@ -97,6 +103,7 @@ export class TurnStreamController {
 
     // TTSR: compile stream rule patterns once â default rules always active
     const rules = [...DEFAULT_STREAM_RULES, ...(input.streamRules ?? [])]
+      .filter(r => !input.disabledRulePatterns?.has(r.pattern))
     const compiledRules = rules.map(r => ({ ...r, regex: new RegExp(r.pattern, 'si') }))
     let triggeredRule: StreamRule | undefined
 
@@ -121,16 +128,6 @@ export class TurnStreamController {
           }
         }
         input.callbacks.onTextDelta(text)
-
-        // TTSR: check accumulated text against stream rules
-        if (!triggeredRule && compiledRules.length > 0) {
-          for (const rule of compiledRules) {
-            if (rule.regex.test(turnDisplayBuffer)) {
-              triggeredRule = { pattern: rule.pattern, inject: rule.inject }
-              throw new RuleTriggeredError(triggeredRule)
-            }
-          }
-        }
       },
       onThinkingDelta: (thinking) => {
         thinkingAccum += thinking
@@ -152,6 +149,21 @@ export class TurnStreamController {
         if (isToolUse(block)) {
           toolUses.push({ id: block.id, name: block.name, input: block.input })
           input.callbacks.onToolUse(block.id, block.name, block.input)
+
+          // TTSR: match stream rules against the bash command the model is about
+          // to run — NOT its prose. Aborts before a dangerous command executes,
+          // while leaving discussion/documentation of the pattern untouched.
+          if (!triggeredRule && compiledRules.length > 0 && block.name === 'bash') {
+            const command = typeof block.input.command === 'string' ? block.input.command : ''
+            if (command) {
+              for (const rule of compiledRules) {
+                if (rule.regex.test(command)) {
+                  triggeredRule = { pattern: rule.pattern, inject: rule.inject }
+                  throw new RuleTriggeredError(triggeredRule)
+                }
+              }
+            }
+          }
         }
       },
       onStopReason: (reason, usage) => {

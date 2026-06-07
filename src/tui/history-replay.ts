@@ -25,6 +25,16 @@ export function replayMessagesToLogEntries(messages: OaiMessage[]): ReplayResult
   for (const msg of messages) {
     // User text message
     if (msg.role === 'user') {
+      // TTSR injects guardrail reminders as system-reminder-wrapped user
+      // messages (user role keeps the prompt-cache prefix intact). Render
+      // these as system notices, not user bubbles.
+      if (typeof msg.content === 'string' && msg.content.startsWith('<system-reminder>')) {
+        const inner = msg.content
+          .replace(/^<system-reminder>\n?/, '')
+          .replace(/\n?<\/system-reminder>$/, '')
+        entries.push(createLogEntry({ type: 'system', content: inner, turnNumber: turnCount }))
+        continue
+      }
       turnCount++
       entries.push(createLogEntry({ type: 'user_message', content: msg.content, turnNumber: turnCount }))
       continue

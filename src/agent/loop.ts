@@ -1530,6 +1530,16 @@ export class AgentLoop {
     // because the user message no longer exists at the top of the stack.
     let userMessageConsumed = false
 
+    // TTSR retry governor: cap how many times each stream rule may abort+retry
+    // within a single run(). Without a cap, a model that keeps emitting a
+    // matched command loops until maxTurns, spamming injected reminders. After
+    // the cap, the rule is disabled for the rest of the run so the turn can
+    // proceed.
+    const ruleTriggerCounts = new Map<string, number>()
+    const disabledRulePatterns = new Set<string>()
+    const MAX_RULE_RETRIES = 2
+    let lastInjectedReminder = ''
+
     try {
       for (let turn = 0; turn < this.config.maxTurns; turn++) {
         this.thetaRequestsThisTurn = 0
@@ -1638,6 +1648,7 @@ export class AgentLoop {
           turn,
           lastTurnTextFingerprint: this.lastTurnTextFingerprint,
           streamRules: this.config.streamRules,
+          disabledRulePatterns,
           callbacks: {
             onTextDelta: (text) => {
               turnTextAccum += text
@@ -1704,12 +1715,34 @@ export class AgentLoop {
           if (this.recentTextFingerprints.length > 8) this.recentTextFingerprints.shift()
         }
 
-        // TTSR: stream rule triggered — inject reminder and retry
+        // TTSR: stream rule triggered — inject reminder and retry, governed
+        // by a per-run retry cap so a self-matching task can't loop forever.
         if (streamResult.triggeredRule) {
-          this.session.addUserMessage(streamResult.triggeredRule.inject)
-          // Archive any streamed text to prevent duplication on retry:
-          // TUI's streamBuf accumulates across loop iterations; without
-          // flushing, the next stream appends on top of existing content.
+          const rule = streamResult.triggeredRule
+          const count = (ruleTriggerCounts.get(rule.pattern) ?? 0) + 1
+          ruleTriggerCounts.set(rule.pattern, count)
+
+          if (count > MAX_RULE_RETRIES) {
+            // Cap exceeded: disable this rule for the rest of the run and let
+            // the turn proceed normally (the bash tool's own exec-time guard
+            // remains as defense-in-depth). Re-enter the loop without injecting.
+            disabledRulePatterns.add(rule.pattern)
+            debugLog(`[ttsr] rule disabled after ${count - 1} retries: ${rule.pattern}`)
+            continue
+          }
+
+          // Wrap as a system reminder (not a bare user message) so it is not
+          // rendered as a user bubble, and dedup identical consecutive injects.
+          // Kept as a trailing user-role append: the expensive cache prefix
+          // (tools/system/first-user-message) sits at the head and is never
+          // touched, so prompt-cache reuse is preserved across the retry.
+          const reminder = `<system-reminder>\n${rule.inject}\n</system-reminder>`
+          if (reminder !== lastInjectedReminder) {
+            this.session.addUserMessage(reminder)
+            lastInjectedReminder = reminder
+          }
+          // Flush streamed text so the next stream doesn't append on top of
+          // existing TUI streamBuf content.
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
           continue
         }
