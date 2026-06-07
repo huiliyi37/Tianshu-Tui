@@ -10,16 +10,15 @@ import { ThinkingMessage } from './thinking-message.js'
 import { SystemMessage } from './system-message.js'
 import { StreamOutput } from './stream.js'
 import { QuestionCard } from './question-card.js'
-import { useTerminalSize } from './use-terminal-size.js'
-import { horizontalRule } from './separator.js'
 
 const TurnSummary = memo(function TurnSummary({ content }: { content: string }) {
   const theme = getTheme()
-  const { columns } = useTerminalSize()
+  // No rule line (the footer GlanceBar owns the divider). Right-aligned, dim —
+  // a quiet end-of-turn ledger mark, not a banner. justifyContent pushes it to
+  // the right edge so it reads as a margin note on the turn that just closed.
   return (
-    <Box paddingX={1} marginTop={1} flexDirection="column">
-      <Text color={theme.dim}>{horizontalRule(columns, 'thin')}</Text>
-      <Text color={theme.muted}><Text color={theme.dim}>◇ </Text>{content}</Text>
+    <Box paddingX={1} marginTop={1} justifyContent="flex-end">
+      <Text color={theme.dim}>✦ {content}</Text>
     </Box>
   )
 })

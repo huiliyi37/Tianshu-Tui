@@ -1360,7 +1360,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   // every OTHER live element (thinking box, running tool cards, ground zone) —
   // measured live here at render time — and trim the streaming tail to what's left.
   const liveCols = process.stdout.columns ?? 80
-  const liveGroundRows = 5 // GlanceBar + InputBar + margin
+  const liveGroundRows = 7 // GlanceBar(rule+line) + InputBar(bordered, +2) + margin
   const liveThinkRows = streamingThinking ? Math.min(10, streamingThinking.split('\n').length) + 3 : 0
   const liveToolRows = liveTools.reduce((s, t) => s + Math.min(12, (t.content ? t.content.split('\n').length : 1) + 2), 0)
   const liveCapRows = Math.max(2, termRows - liveGroundRows - liveThinkRows - liveToolRows - 2)
@@ -1504,6 +1504,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           branch={gitBranch}
           estimatedTokens={session.getEstimatedTokens()}
           maxTokens={maxTokens}
+          elapsedMs={summaryState.elapsedMs}
         />
         <InputBar onSubmit={(text: string) => {
           // Evaluate routing INSIDE the event handler, not at render time.

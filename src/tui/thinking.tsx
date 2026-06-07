@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { getTheme } from './theme.js'
-import { brailleSpinnerFrame } from './braille-spinner.js'
+import { circleSpinnerFrame } from './braille-spinner.js'
 import { gutterGlyph } from './gutter.js'
 
 interface ThinkingStatusOptions {
@@ -170,7 +170,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
 
   if (!isStreaming) return null
 
-  const spinner = brailleSpinnerFrame(frame)
+  const spinner = circleSpinnerFrame(frame)
   const statusLabel = thinkingStatusLabel({ isStreaming, elapsedMs: elapsed, completedDurationMs, stale })
   const theme = getTheme()
 
@@ -211,15 +211,7 @@ export function ThinkingCollapser({ thinking, isStreaming, focused = false, comp
         {` (${formatThinkingSize(thinking.length)})`}
         {focused ? ' (Tab to collapse)' : ''}
       </Text>
-      <Box
-        paddingLeft={1}
-        borderStyle="single"
-        borderColor={theme.dim}
-        borderLeft={true}
-        borderRight={false}
-        borderTop={false}
-        borderBottom={false}
-      >
+      <Box paddingLeft={2}>
         <Text color={theme.muted}>{visibleThinking}</Text>
       </Box>
     </Box>

@@ -4,6 +4,7 @@ import { BaseTextInput } from './base-text-input.js'
 import { loadHistory, appendHistory, nextHistoryAfterSubmit } from './history.js'
 import { SlashHint } from './slash-hint.js'
 import { getPaletteCommands, filterCommands } from './command-palette.js'
+import { getTheme } from './theme.js'
 
 const COMMANDS = getPaletteCommands()
 
@@ -26,7 +27,8 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
 
   useEffect(() => {
     if (!steerMode) return
-    const id = setInterval(() => setPulseIdx(i => (i + 1) % PULSE_FRAMES.length), 800)
+    // 1200ms/frame → 4.8s full cycle: a slow breath, not a loading spinner.
+    const id = setInterval(() => setPulseIdx(i => (i + 1) % PULSE_FRAMES.length), 1200)
     return () => clearInterval(id)
   }, [steerMode])
 
@@ -42,6 +44,11 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
 
   const isSlash = value.startsWith('/') && !value.includes('\n')
   const filtered = isSlash ? filterCommands(COMMANDS, value.slice(1)) : []
+  const theme = getTheme()
+  // Border color carries mode meaning: slash=primary, steer=warning, idle=dim.
+  // The rounded frame gives the input body instead of a lone prompt glyph.
+  const borderColor = isSlash ? theme.primary : steerMode ? theme.warning : theme.dim
+  const promptColor = isSlash ? theme.primary : steerMode ? theme.warning : theme.success
 
   const handleTabComplete = useCallback(() => {
     if (isSlash && filtered.length > 0) {
@@ -63,8 +70,14 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
       {isSlash && filtered.length > 0 && (
         <SlashHint input={value} selectedIdx={Math.min(slashIdx, filtered.length - 1)} commands={COMMANDS} />
       )}
-      <Box flexDirection="row" paddingX={1} paddingY={0}>
-        <Text bold color={isSlash ? 'cyan' : steerMode ? 'yellow' : 'green'}>{steerMode ? PULSE_FRAMES[pulseIdx] : '❯'} </Text>
+      <Box
+        flexDirection="row"
+        paddingX={1}
+        borderStyle="round"
+        borderColor={borderColor}
+        borderDimColor={!isSlash && !steerMode}
+      >
+        <Text bold color={promptColor}>{steerMode ? PULSE_FRAMES[pulseIdx] : '❯'} </Text>
         <BaseTextInput
           value={value}
           onChange={handleChange}

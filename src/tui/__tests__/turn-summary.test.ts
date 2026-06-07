@@ -17,13 +17,15 @@ describe('formatTurnSummary', () => {
     assert.match(out, /⭐.*→.*🔨.*→.*⚔️/)
     assert.match(out, /读5 改3/)
     assert.match(out, /✓1/)
-    assert.match(out, /2m14s/)
+    // Turn number and elapsed are intentionally NOT in this marker — the live
+    // footer (GlanceBar) owns elapsed; the turn count is sequential noise.
+    assert.ok(!/Turn/.test(out))
+    assert.ok(!/2m14s/.test(out))
   })
 
-  it('falls back to a marker when no segments', () => {
+  it('falls back to a file marker when no segments', () => {
     const out = formatTurnSummary({ turnNumber: 1, segments: [], filesRead: 0, filesModified: 0, verifiedCount: 0, elapsedMs: 1000 })
-    assert.match(out, /·/) // still a single-line anchor, no crash
-    assert.match(out, /1s/)
+    assert.match(out, /读0 改0/) // still a single-line anchor, no crash
   })
 
   it('omits the verify token when verifiedCount is 0', () => {

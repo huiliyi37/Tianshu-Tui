@@ -7,6 +7,7 @@ import { useTerminalSize } from './use-terminal-size.js'
 import type { GlancePulse } from './surface/types.js'
 import { horizontalRule, type SeparatorStyle } from './separator.js'
 import { STAR_DOMAINS } from '../agent/star-domain.js'
+import { formatToolElapsed } from './tool-elapsed.js'
 
 interface GlanceBarProps {
   pulses: readonly GlancePulse[]
@@ -24,14 +25,32 @@ interface GlanceBarProps {
   estimatedTokens: number
   /** Model context window size in tokens */
   maxTokens: number
+  /** Live elapsed time of the current/last turn (ms) — flows on the far right */
+  elapsedMs?: number
+}
+
+function findDomain(domainName: string | undefined) {
+  if (!domainName) return undefined
+  for (const [id, domain] of Object.entries(STAR_DOMAINS)) {
+    if (domain.name === domainName || id === domainName) return domain
+  }
+  return undefined
 }
 
 function getDomainColor(domainName: string | undefined, theme: RivetTheme): string {
-  // Polish pass: collapse all domains to the refined silver (theme.secondary)
-  // for a calm, single-tone identity marker on the black/gray UI. Per-domain
-  // distinct qi (seals/accents) is a separate, deferred task — not loud colors.
-  if (!domainName) return theme.dim
-  return theme.secondary
+  // Per-domain qi: resolve uiPersona.accent (a theme color-key) through the
+  // active theme so 天枢/天璇 read as distinct identities, while still adapting
+  // to starfield/midnight. Paired with a per-domain glyph (see getDomainGlyph)
+  // for a color+symbol dual channel — domains stay distinguishable even on
+  // colorblind / low-contrast terminals (WCAG color-not-only).
+  const domain = findDomain(domainName)
+  if (!domain) return theme.dim
+  return theme[domain.uiPersona.accent]
+}
+
+/** Per-domain star glyph (the symbol half of the dual channel). */
+function getDomainGlyph(domainName: string | undefined): string {
+  return findDomain(domainName)?.uiPersona.glyph ?? '☆'
 }
 
 
@@ -47,7 +66,7 @@ export function getDomainSeparatorStyle(domainName: string | undefined): Separat
 }
 const MOON_PHASES = ['◐', '◑', '◒', '◓'] as const
 
-export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens }: GlanceBarProps) {
+export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens, elapsedMs }: GlanceBarProps) {
   const theme = getTheme()
   const [moonIdx, setMoonIdx] = useState(0)
 
@@ -80,9 +99,11 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
     : theme.success
 
   const domainColor = getDomainColor(domain, theme)
+  const domainGlyph = getDomainGlyph(domain)
 
   // ── Single-line cohesive status bar — │ separators, no spatial gaps ──
   const modelLabel = narrow ? model.slice(0, 12) : model.slice(0, 20)
+  const elapsedLabel = elapsedMs !== undefined ? formatToolElapsed(elapsedMs) : ''
 
   // Full-width rule: pass columns as maxWidth to remove the 72-char cap
   const rule = horizontalRule(columns, getDomainSeparatorStyle(domain), columns)
@@ -91,40 +112,48 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
     <Box flexDirection="column" marginTop={1}>
       {/* Full-width separator line */}
       <Text color={domainColor}>{rule}</Text>
-      {/* Single cohesive status line: identity │ phase │ metrics */}
+      {/* Single cohesive status line: identity │ phase │ metrics ……… elapsed */}
       <Box flexDirection="row" width="100%">
-        {/* Left: identity — star domain (bold + domain color) + branch */}
+        {/* Zone 1 · identity — star domain (bold + domain color) + branch */}
         {domain
-          ? <Text bold color={domainColor}>☆ {domain}</Text>
+          ? <Text bold color={domainColor}>{domainGlyph} {domain}</Text>
           : <Text color={theme.dim}>☆ —</Text>
         }
         {branchLabel && !narrow && <Text color={theme.secondary}> ⎇ {branchLabel}</Text>}
 
-        <Text color={theme.dim}> │ </Text>
+        <Text color={theme.secondary} bold>{'  ┃  '}</Text>
 
-        {/* Center: phase + streaming indicator */}
+        {/* Zone 2 · phase + streaming indicator */}
         {phaseGlyph
           ? <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>
           : <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>
         }
         {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
 
-        <Text color={theme.dim}> │ </Text>
+        <Text color={theme.secondary} bold>{'  ┃  '}</Text>
 
-        {/* Right: metrics — model (bold), cache, cost, tokens */}
+        {/* Zone 3 · metrics — model (bold), cache, cost, tokens */}
         <Text bold color={theme.primary}>「{modelLabel}」</Text>
         <Text color={theme.dim}> </Text>
-        <Text color={cacheColor}>{cachePct}%</Text>
+        <Text color={cacheColor}>⚡{cachePct}%</Text>
         <Text color={theme.dim}> · </Text>
         <Text color={theme.muted}>${cost.toFixed(2)}</Text>
         {!narrow && <Text color={theme.dim}> · </Text>}
-        {!narrow && <Text color={tokenColor}>{estimatedK}k/{maxK}k ({pct}%)</Text>}
+        {!narrow && <Text color={tokenColor}>◧ {estimatedK}k/{maxK}k ({pct}%)</Text>}
         {narrow && <Text color={tokenColor}> · {pct}%</Text>}
         {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
         {historyCount !== undefined && !narrow && (
           <Text color={theme.muted}> · {historyCount} msgs</Text>
         )}
         {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
+
+        {/* Flexible spacer pushes elapsed to the far right edge */}
+        <Box flexGrow={1} />
+
+        {/* Zone 4 · elapsed — flows live on the far right */}
+        {elapsedLabel && (
+          <Text color={isStreaming ? theme.primary : theme.dim}>⧗ {elapsedLabel}</Text>
+        )}
       </Box>
     </Box>
   )

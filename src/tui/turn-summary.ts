@@ -10,20 +10,15 @@ export interface TurnSummaryInput {
   elapsedMs: number
 }
 
-function fmtDuration(ms: number): string {
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  return `${Math.floor(s / 60)}m${s % 60}s`
-}
-
-/** One-line git-log-style anchor: phase trail · files · verify · duration. */
+/** Compact per-turn history marker: phase trail · files · verify.
+ *  Turn number and elapsed are intentionally omitted here — the live footer
+ *  (GlanceBar) owns elapsed, and the turn count is sequential noise in
+ *  scrollback. What remains is the durable "what this turn touched" anchor. */
 export function formatTurnSummary(input: TurnSummaryInput): string {
   const trail = input.segments.map(s => PHASE_GLYPHS[s.phase]).join(' → ')
   const parts: string[] = []
-  parts.push(`Turn ${input.turnNumber}`)
   if (trail) parts.push(trail)
   parts.push(`读${input.filesRead} 改${input.filesModified}`)
   if (input.verifiedCount > 0) parts.push(`✓${input.verifiedCount}`)
-  parts.push(fmtDuration(input.elapsedMs))
   return parts.join(' · ')
 }
