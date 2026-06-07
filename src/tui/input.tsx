@@ -45,10 +45,12 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
   const isSlash = value.startsWith('/') && !value.includes('\n')
   const filtered = isSlash ? filterCommands(COMMANDS, value.slice(1)) : []
   const theme = getTheme()
-  // Border color carries mode meaning: slash=primary, steer=warning, idle=dim.
-  // The rounded frame gives the input body instead of a lone prompt glyph.
-  const borderColor = isSlash ? theme.primary : steerMode ? theme.warning : theme.dim
-  const promptColor = isSlash ? theme.primary : steerMode ? theme.warning : theme.success
+  // Border carries mode meaning: slash=primary, idle=silver/dim. While the
+  // agent is thinking (steerMode) we drop the frame entirely — just the
+  // breathing icon — so there's no long glaring box; the pulse is calm silver,
+  // not warning-yellow.
+  const borderColor = isSlash ? theme.primary : theme.dim
+  const promptColor = isSlash ? theme.primary : steerMode ? theme.secondary : theme.success
 
   const handleTabComplete = useCallback(() => {
     if (isSlash && filtered.length > 0) {
@@ -73,9 +75,9 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
       <Box
         flexDirection="row"
         paddingX={1}
-        borderStyle="round"
+        borderStyle={steerMode ? undefined : 'round'}
         borderColor={borderColor}
-        borderDimColor={!isSlash && !steerMode}
+        borderDimColor={!isSlash}
       >
         <Text bold color={promptColor}>{steerMode ? PULSE_FRAMES[pulseIdx] : '❯'} </Text>
         <BaseTextInput

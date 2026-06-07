@@ -114,10 +114,12 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
       <Text color={domainColor}>{rule}</Text>
       {/* Single cohesive status line: identity │ phase │ metrics ……… elapsed */}
       <Box flexDirection="row" width="100%">
-        {/* Zone 1 · identity — star domain (bold + domain color) + branch */}
+        {/* Zone 1 · identity — star domain (bold + domain color) + branch.
+            Idle (no worker domain active) = 天枢, the navigator/pivot star,
+            in calm silver. Worker domains carry their own qi (color+glyph). */}
         {domain
           ? <Text bold color={domainColor}>{domainGlyph} {domain}</Text>
-          : <Text color={theme.dim}>☆ —</Text>
+          : <Text bold color={theme.secondary}>❂ 天枢</Text>
         }
         {branchLabel && !narrow && <Text color={theme.secondary}> ⎇ {branchLabel}</Text>}
 
