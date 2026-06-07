@@ -1,7 +1,7 @@
 # 仓库智能层考古 — 死代码三件套 + 黏菌引擎接线裂缝
 
 - **日期**：2026-06-07
-- **性质**：架构考古 + 工程定位规划 / 背景纪要（非实施计划、非审查结论、非修复清单）
+- **性质**：架构考古 + 工程定位规划 / 背景纪要；含 2026-06-07 天权审查修订（§14-19）
 - **范围**：`src/repo/`（全项目最老的源码区，2026-05-15 奠基）+ 其在认知本体中的设计弧线
 - **结构**：第一部 = 代码事实考古（§1-6）；第二部 = 深层设计意图与给天枢团队的规划判别（§7-13）
 - **核查方式**：直接文件读取 + 全仓 grep（code-review-graph MCP 本会话未挂载）+ 6 份关联设计文档交叉验证。下文「活/死」判定均以 grep 调用面为证，已含测试目录复核。
@@ -156,7 +156,7 @@ Phase 4 (05-24)  Physarum + 免疫        把静态图升级为「自适应演�
 
 文档结论原文：「B 臂能逐轮自适应且零 cache 代价，正是因为它走的是**非 prompt 通道**……这是设计该学习的范式。」
 
-**这条范式直接定位了 physarum 的 `predictNext`→prewarm 链**：它走**文件 IO 通道**（把文件读进 PrewarmCache），完全不碰 prompt 字节。**它天生是 B 臂式基础设施**——可以逐轮自适应、跨 session 学习、零 prefix-cache 代价。这与 Rivet 的核心宪法（[[prefix-cache-invariant-registry-ref]]：prompt 结构不可动）**零冲突**。这是它最大的战略价值：一条可以无限学习而永不威胁缓存的预测通道。
+**这条范式直接定位了 physarum 的 `predictNext`→prewarm 链**：它走**文件 IO 通道**（当前可作为 OS/page-cache 预热与异步文件读取；若要重新作为 `read_file` 结果缓存，必须引入 contextWindow-aware key/metadata），完全不碰 prompt 字节。**它天生是 B 臂式基础设施**——可以逐轮自适应、跨 session 学习、零 prefix-cache 代价。这与 Rivet 的核心宪法（[[prefix-cache-invariant-registry-ref]]：prompt 结构不可动）**零冲突**。这是它最大的战略价值：一条可以无限学习而永不威胁缓存的预测通道。
 
 ## 9. Prewarm 现状：四个反应式驱动，缺一个预测式驱动
 
@@ -236,6 +236,8 @@ physarum 现在学的是垃圾，因为 `recordFlow(toolName, file)` 喂的不�
 
 ## 13. 一句话总结（瑶光视角）
 
+> 天权审查补注（2026-06-07）：§14-19 对本结论做了工程接线修订。核心判断保留，但实施顺序应更细：先修输入语义与观测，再接 `predictNext` 的消费者；且当前 `PrewarmCache` 不再直接服务 `read_file` model content，预测出口的近期落点应按 OS/page-cache 预热、P3 `IdleSpec`、或重新设计 contextWindow-aware prewarm 三者区分。
+
 这块基础设施的真相不是「有 bug 待修」，也不是「净负担该摘除」——那两个都是没看懂。真相是：**Meridian 长出了一个会无监督学习项目时空结构的引擎（physarum），但它的输入接错了（学工具名不学文件序列）、出口只开了最弱的半个（免疫 anomaly 喂垃圾图）。** 这是一个**有用但当前空转的引擎**，不是冗余器官、不是死代码。
 
 harness 能力最大化的做法：喂对输入（真实文件访问序列）→ 开多个输出（前瞻 prewarm / repo_map 时序边 / HEARTH 漂移 / 任务序列预测），全部落在已是跨 session 学习底座的 MeridianDb 上。前瞻式时序预测是 harness 目前缺的能力维度，physarum 是唯一来源——所以是「接对让它干活」，不是「证明划算再接」。
@@ -243,3 +245,165 @@ harness 能力最大化的做法：喂对输入（真实文件访问序列）→
 真正该「丢在那里」的只有三死文件（symbol-index/import-graph/context-bundle）——它们的能力被 meridian-parser 完整取代，无复用价值，不必删不必动。
 
 > 瑶光复发归族提示：本次最该记住的不是任何单个发现，是**判别框架本身差点用错**——第一版用「成本/净负担/投入产出」判了 physarum 死刑，被领航星纠正：天枢不计成本，唯一标准是能力最大化。这一族错误（拿成本思维评判能力资产）会在任何「要不要保留/接通某个半成品系统」的决策里复发。记牢：**有用就想怎么复用，没用就丢在那里——成本不进这个判断。**
+
+---
+
+# 第三部 · 天权审查修订（2026-06-07）
+
+> 结论先行：本文第一、二部的核心考古判断成立——三死文件是真死；`recordFlow(toolName, targetFile)` 是数据维度错接；`predictNext`/STDP 预测出口未接通；`repo_graph`/Meridian 行为边是活路径。需要修订的是**接线方案的工程落点**：当前 prewarm 已不再作为 `read_file` model-content 缓存命中路径，Physarum 的第一消费者不应被简单写成「读进 PrewarmCache → 下一次 read_file 命中」。应改为「文件访问序列学习 → contextWindow 安全的文件预取 / P3 IdleSpec / repo_graph 时序边 / HEARTH observe 信号」这四条分层出口。
+
+## 14. 复核后的成立项
+
+| 断言 | 审查结论 | 证据 |
+|---|---|---|
+| 三死文件零生产调用 | **成立** | 全仓 grep 只见 `src/repo/__tests__/*` 引用 `buildSymbolIndexFromText` / `buildImportEdgesFromText` / `buildContextBundle`；生产路径无 import。 |
+| `recordFlow(ctx.toolName, ctx.targetFile)` 维度错接 | **成立** | `src/agent/immune-hook.ts:65` 将工具名作为 `fileA`；`src/repo/physarum-engine.ts:33` 的签名与注释要求 file/access co-edit 边。 |
+| `predictNext()` 未被生产消费 | **成立** | `src/repo/physarum-engine.ts:272` 定义存在；全仓无生产调用。 |
+| `recordSequentialEdit()` 未被生产调用 | **成立** | 仅 `src/repo/__tests__/physarum-engine.test.ts:60` 调用；生产中 `direction` 基本保持 0。 |
+| `physarumForWarmup` 只加载不预测 | **成立** | `src/agent/loop.ts:301` 保存引用，`src/agent/loop.ts:966` `loadFromDb()`；未见后续 `predictNext`。 |
+| `repo_graph` 是活路径 | **成立** | `src/main.tsx:207` 注册 `createRepoGraphTool` → `src/tools/repo-graph.ts:54` 调 `indexer.query` → `src/repo/meridian-indexer.ts:90-97` → `buildRepoMap`。 |
+| Meridian 行为边是活路径 | **成立，且比原文可再加强** | `src/agent/hooks/meridian-hook.ts:20-23` 在 write/edit 后 `recordEdit`；`src/agent/loop.ts:1890/1928` turn 边界 `flushTurn()`；`src/repo/meridian-graph.ts:59-66` 注入 co-edit 边。 |
+
+## 15. 必须修订的关键点：Prewarm 不是当前 `read_file` 内容缓存出口
+
+原文 §8-9 把 `predictNext → prewarm` 描述为「把文件读进 PrewarmCache，下一次 `read_file` 命中」。这在历史意图上合理，但与当前实现不完全一致：
+
+- `src/agent/prewarm-file.ts:39-54` 的 `batchPrewarm()` 确实会读取文件并写入 `PrewarmCache`。
+- `src/agent/loop.ts:629-646`、`src/agent/tool-pipeline.ts:908-915`、`src/agent/turn-stream.ts`、`prewarmRecentReads()` 都会填充或触发预热。
+- 但 `src/agent/tool-pipeline.ts:615-619` 明确写着：`read_file` **必须总是走真实 execute**，因为 PrewarmCache 可能在不同 contextWindow 下被填充，直接返回缓存内容会重引入截断回归。
+- 因此，当前 PrewarmCache 更接近「文件预取 / OS page-cache warmup / 遗留待重接缓存」，而不是可直接宣称的 `read_file` tool-result 缓存命中路径。
+
+修订后的表述应是：
+
+| 出口 | 当前安全含义 | 若要增强为内容缓存，需要补的语义 |
+|---|---|---|
+| `predictNext → batchPrewarm` | 提前读文件，可能让 OS page cache 变热；不改变 prompt，不改变工具结果 | 需要 contextWindow/providerProfile/read cap 纳入 cache key 或 payload metadata，并在读取时验证兼容性 |
+| `predictNext → P3 IdleSpec` | 更自然：`P3Integration` 已有 `ShadowQueue` + `checkSpeculativeCache()`，生产路径会在 `read_file`/`grep`/`glob` 前查投机结果 | 必须保证预测目标与未来 tool target 精确匹配；只对只读工具启用 |
+| `predictNext → repo_graph` | pull 型：把时序边作为相关性补充，不主动塞 prompt | 需要在 `buildRepoMap`/`spreadingActivation` 增加有向时序边权，保持 token budget |
+| `predictNext → HEARTH observe` | 作为图突变/漂移诊断信号，不直接干预 | 先接现有 observe/gated hook，不直接做 prompt 注入 |
+
+所以，§9 的「四个反应式 prewarm 驱动」可以保留为历史/机制分类，但实施计划不能再以「下一次 `read_file` 命中 PrewarmCache」作为成功标准；成功标准应改为：预测命中率、投机结果命中、文件读取延迟变化、以及 repo_graph 相关性提升。
+
+## 16. 接线方案的工程修订
+
+### 16.1 输入源：不要再让 ImmuneHook 负责构造文件序列
+
+`ImmuneHookContext.targetFile` 当前来自通用 tool target 提取：`file_path`、`path`、`command.slice(0, 50)`、甚至工具名兜底都可能进入这条线。`src/agent/tool-history-recorder.ts:13-21` 与 `src/agent/tool-execution.ts:323-331` 的 target 抽取是为了展示/历史记录，不是严格文件语义。继续用它直接喂 Physarum，会把目录、命令、工具名、grep 搜索路径混进文件图。
+
+修订：新增或复用一个**文件访问观察器**，只接受成功工具事件里的真实文件路径：
+
+1. `read_file`：`input.file_path`，规范化为 repo-relative canonical file。
+2. `write_file` / `edit_file` / `hash_edit`：`input.file_path`，规范化后同时作为访问与编辑事件。
+3. `grep`：不要把 `path` 当文件；若要学习 grep 命中文件，必须从 grep 结果中结构化提取文件路径后逐个记录，且与「用户真正读取/编辑」分开标注。
+4. `bash`：默认不记录；只有未来有结构化文件事件时再接。
+5. 所有事件必须过滤：非项目内路径、目录、工具名、空串、黑名单文件、不可索引扩展。
+
+`ImmuneHook` 应保留为消费者：调用 `detectAnomaly()`、根据免疫响应 `freezeNode` / `forcePrune` / `boostEdges`。它不应继续拥有「工具轨迹 → 文件图」的原始输入权。
+
+### 16.2 学习顺序：先建边，再更新 STDP 方向
+
+`recordSequentialEdit(first, second, dtTurns)` 当前只更新已有边；如果没有先 `recordFlow(first, second, turn)`，它会静默返回。正确序列应是：
+
+```ts
+if (prevFile && prevFile !== currentFile && dtTurns <= stdpWindow) {
+  physarum.recordFlow(prevFile, currentFile, turn)
+  physarum.recordSequentialEdit(prevFile, currentFile, dtTurns)
+}
+```
+
+这同时保留无向共访强度（`weight`）与有向时序偏置（`direction`）。需要测试两个方向：`a.ts → b.ts` 与 `b.ts → a.ts`，因为 `PhysarumEngine.edgeKey()` 用字典序存储边，`direction > 0` 表示 `fileA → fileB`，反向序列会写成负方向。
+
+### 16.3 先清洗历史污染，再开启预测出口
+
+因为错误的 `recordFlow(toolName, targetFile)` 已被持久化到 `MeridianDb.physarum_edges`，修接线前必须考虑旧数据污染：
+
+- 旧边可能形如 `read_file|src/a.ts`、`grep|src/b.ts`、`bash|src/c.ts`。
+- `loadFromDb()` 会无条件加载这些边。
+- 如果直接开启 `predictNext()`，候选里可能出现工具名，或者工具名 hub 继续影响 ubiquity/homeostatic scaling。
+
+修订：第一阶段必须加一层污染防线，二选一或同时做：
+
+1. **加载过滤**：`PhysarumEngine.loadFromDb()` 或上层调用处过滤非文件节点。
+2. **一次性迁移/清理**：删除 `physarum_edges` 中任一端不是合法项目文件的边；可以保守地按 `src/`、扩展名、存在性、indexable predicate 过滤。
+
+这不是成本问题，是正确性前置条件；否则预测出口会把历史垃圾放大。
+
+### 16.4 与 MeridianBehavior 的关系：互补成立，但边界要写死
+
+原文「STDP 与 meridian-behavior 互补」成立，但实现上要避免第二次混淆：
+
+| 系统 | 学什么 | 输入事件 | 输出 |
+|---|---|---|---|
+| `MeridianBehavior` | 同一 turn 内共同编辑的**对称关系** | write/edit/hash_edit 成功后的编辑集合 | `repo_graph` relevance boost、impact/test hints |
+| `Physarum STDP` | 跨 turn/工具序列的**有向时序关系** | 规范化文件访问序列，特别是 read→edit、edit→test、source→test | `predictNext`、投机预取、repo_graph 时序边、漂移信号 |
+
+不要把 `MeridianBehavior.recordEdit()` 直接替换成 Physarum，也不要把 Physarum 的有向序列边塞回 co-edit 表；两者共享 MeridianDb，但语义不同。
+
+## 17. 未来能力接线的推荐顺序
+
+按「能力最大化」而不是「成本最小化」排序，但每步都必须有正确性闸门：
+
+### P0：数据语义修复与污染隔离
+
+- 停止 `recordFlow(toolName, targetFile)` 继续写入工具名边。
+- 新增文件访问观察器，产出 canonical repo-relative file events。
+- 对既有 `physarum_edges` 做加载过滤或迁移清洗。
+- 保持 DB 不可用时 no-op：`MeridianDb` 当前允许 `better-sqlite3` 缺失并降级，新的接线不能破坏这一点。
+
+### P1：Shadow 观测，不阻断能力接通
+
+Shadow 模式的目的不是「证明这个能力值不值得存在」，而是校准和防污染：
+
+- 记录 `currentFile → predictNext()` 的 top-K。
+- 下一次真实文件访问到来时计算 hit@1 / hit@3、平均提前 turn 数、误报文件类型。
+- 不注入 prompt，不改变工具选择，只写 telemetry / MeridianDb。
+
+### P2：第一个真实消费者优先接 P3 IdleSpec 或 OS/page-cache 预取
+
+当前最小可承重消费者不是旧式 PrewarmCache 命中，而是以下二者之一：
+
+1. **P3 IdleSpec**：`src/agent/p3-integration.ts` 已有 `ShadowQueue`，`src/agent/tool-pipeline.ts:608-614` 会消费只读工具投机结果。Physarum 可以给它补「文件目标预测」。
+2. **OS/page-cache 预取**：沿用 `batchPrewarm()`，但把成功标准写成读取延迟/后续真实读取存在性，而不是 PrewarmCache hit。
+
+如果要恢复 `read_file` 内容缓存命中，必须先完成 contextWindow-aware cache key，否则会违反 `tool-pipeline.ts:615-619` 的 P5+P6 约束。
+
+### P3：repo_graph 时序边
+
+在 `src/repo/meridian-graph.ts` 的 spreading activation 中引入 Physarum 的有向时序边，但只作为 score boost，不改变现有结构边逻辑。注意：`buildRepoMap()` 当前只拿 `MeridianDb` + `MeridianBehavior`，若要读 Physarum 边，需要明确依赖注入，避免让 graph 层偷偷 new engine。
+
+### P4：HEARTH / drift 信号
+
+`cognitive-system-gap-analysis.md` 对 HEARTH 的状态已经滞后：当前代码里已有 `src/prompt/anchor-graph.ts` 与 `src/agent/hooks/hearth-observe-hook.ts`，并通过 `hearthObserveEnabled` 显式门控接入。Physarum 图突变应先作为 observe/diagnostic 信号进入这条 gated 通道，不能直接变成 prompt 注入或强干预。
+
+## 18. 验证清单（后续实施用）
+
+| 层 | 必测项 | 目的 |
+|---|---|---|
+| Physarum 单元 | `recordFlow(prev,curr)` 后 `recordSequentialEdit(prev,curr,dt)` 使 `predictNext(prev)` 排名 `curr`；反向序列 direction 为负且预测反向成立 | 防止字典序边存储导致方向语义误写 |
+| 污染过滤 | 加载包含 `read_file|src/a.ts` 的旧边后，预测候选不出现工具名；合法文件边保留 | 防止历史垃圾放大 |
+| 文件事件观察器 | read/write/edit/hash_edit 记录文件；grep path、bash command、目录、空 target 不记录 | 防止再次把非文件维度喂进图 |
+| ImmuneHook 回归 | 免疫仍能收集 danger signal、触发 response、调用 `freezeNode`/`boostEdges`；但不再断言工具名边存在 | 保留免疫消费者，移除错误生产者 |
+| Meridian 回归 | `meridian-behavior` co-edit、`repo_graph`、`impact` 测试不退化 | 确认对称共编辑边未被 STDP 替代 |
+| Prewarm/P3 | 预测驱动的预取不会绕过 `read_file` contextWindow cap；若接 IdleSpec，只对只读工具投机 | 防止重引入 P5+P6 截断回归 |
+| DB 降级 | `better-sqlite3` 不可用时所有新增路径 no-op、不抛错 | 保持开源/可选依赖兼容 |
+
+最小验证命令建议：
+
+```bash
+npx tsc --noEmit
+npm exec -- tsx --test \
+  src/repo/__tests__/physarum-engine.test.ts \
+  src/repo/__tests__/meridian-behavior.test.ts \
+  src/repo/__tests__/meridian-graph.test.ts \
+  src/agent/__tests__/immune-hook.test.ts \
+  src/agent/__tests__/prewarm-file.test.ts \
+  src/agent/__tests__/p3-integration.test.ts
+```
+
+## 19. 修订后的净判断
+
+- **能力判断不变**：Physarum 不是死代码；它是未接对的系统级行为学习底座。
+- **接线判断修订**：第一出口不应被写死为旧式 `PrewarmCache` 命中；应按 P3 IdleSpec / 文件预取 / repo_graph 时序边 / HEARTH observe 四类消费者分层接。
+- **实施前置新增**：必须先解决文件事件语义与历史污染过滤，否则任何预测消费者都会放大旧错接。
+- **共编辑关系确认**：`MeridianBehavior` 与 Physarum STDP 互补，不归并。
+- **三死文件判断不变**：无独立能力价值，删除只是卫生级清理，优先级最低。
