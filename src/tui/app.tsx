@@ -761,7 +761,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         },
         reasoningEffort: agent.getReasoningEffort() ?? 'medium',
       }
-      if (handleSlashCommand(slashCtx)) return
+      if (await handleSlashCommand(slashCtx)) return
     }
 
     const promptInput = resolveAppPromptInput(userInput, process.cwd())

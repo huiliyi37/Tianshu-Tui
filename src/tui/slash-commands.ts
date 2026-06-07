@@ -23,6 +23,7 @@ import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
+import { listPlans, approvePlan, deletePlan, readPlan } from '../plan/plan-store.js'
 
 const HELP_TEXT = `Available commands:
 /help — Show this help
@@ -181,7 +182,7 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   return null
 }
 
-export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
+export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<boolean> {
   const { parts, pushStatic, setIsStreaming } = ctx
   const cmd = parts[0]!.toLowerCase()
 
@@ -353,14 +354,84 @@ export function handleSlashCommand(ctx: SlashHandlerContext): boolean {
 
     case '/plan-mode': {
       ctx.agent.enterPlanMode()
-      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked. Explore the codebase and produce a plan. Use /plan-approve to exit.' }))
+      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked. Explore the codebase and produce a plan.\n\nWhen ready, call `plan_submit` with your plan. Then:\n  /plan-list — list submitted plans\n  /plan-approve <slug> — approve and start execution\n  /plan-reject <slug> — reject with feedback' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/plan-list': {
+      const cwd = process.cwd()
+      const plans = await listPlans(cwd)
+      if (plans.length === 0) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No plans found. Use /plan-mode to enter plan mode and create a plan.' }))
+      } else {
+        const lines = plans.map(p => {
+          const statusIcon = p.status === 'approved' ? '✅' : p.status === 'rejected' ? '❌' : p.status === 'executed' ? '🏁' : '📋'
+          return `  ${statusIcon} \`${p.slug}\` — ${p.title} (${p.status}, ${p.createdAt.toLocaleString()})`
+        })
+        pushStatic(createLogEntry({ type: 'system', content: `Plans (.rivet/plans/):\n\n${lines.join('\n')}\n\nUse /plan-approve <slug> to approve, /plan-reject <slug> to reject.` }))
+      }
       setIsStreaming(false)
       return true
     }
 
     case '/plan-approve': {
+      const slug = parts[1]?.toLowerCase()
+      if (!slug) {
+        // No slug — list plans and hint
+        const cwd = process.cwd()
+        const plans = await listPlans(cwd)
+        if (plans.length === 0) {
+          pushStatic(createLogEntry({ type: 'system', content: 'No plans to approve. Use /plan-mode to create one.' }))
+        } else {
+          const submitted = plans.filter(p => p.status === 'submitted')
+          if (submitted.length === 0) {
+            pushStatic(createLogEntry({ type: 'system', content: `No submitted plans awaiting approval.\n\nUse /plan-list to see all plans.` }))
+          } else {
+            const hint = submitted.map(p => `  /plan-approve ${p.slug} — ${p.title}`).join('\n')
+            pushStatic(createLogEntry({ type: 'system', content: `Submitted plans awaiting approval:\n\n${hint}` }))
+          }
+        }
+        setIsStreaming(false)
+        return true
+      }
+
+      const cwd = process.cwd()
+      const approved = await approvePlan(cwd, slug)
+      if (!approved) {
+        pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
+        setIsStreaming(false)
+        return true
+      }
+
+      // Inject plan context as session memory so agent can see it
+      ctx.agent.updateSessionMemory(
+        `<approved-plan slug="${slug}">\n${approved.content}\n</approved-plan>\n\nYou are now executing the approved plan above. Follow it step by step. Use /plan-list to review, call plan_close when done.`
+      )
       ctx.agent.exitPlanMode()
-      pushStatic(createLogEntry({ type: 'system', content: '✅ Plan Mode exited. All operations are now allowed.' }))
+      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)\n\nPlan content has been loaded into context. Plan Mode exited — execution may now begin.\n\nUse /plan-list to view all plans.` }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/plan-reject': {
+      const slug = parts[1]?.toLowerCase()
+      if (!slug) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /plan-reject <slug>\n\nUse /plan-list to see available plans.', isError: true }))
+        setIsStreaming(false)
+        return true
+      }
+
+      const cwd = process.cwd()
+      const plan = await readPlan(cwd, slug)
+      if (!plan) {
+        pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
+        setIsStreaming(false)
+        return true
+      }
+
+      await deletePlan(cwd, slug)
+      pushStatic(createLogEntry({ type: 'system', content: `❌ Plan rejected and removed: **${plan.title}** (\`${slug}\`)\n\nYou may now provide feedback for the agent to revise the plan.` }))
       setIsStreaming(false)
       return true
     }

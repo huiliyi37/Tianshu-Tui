@@ -518,7 +518,26 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   if (ctx.planModeState === 'planning') {
     parts.push(`<plan-mode>
-You are in PLAN MODE. You may ONLY read files and explore the codebase — do NOT write, edit, or execute commands that modify state. Produce a detailed plan first. The user will approve before execution begins.
+You are in PLAN MODE. You may ONLY read files and explore the codebase — do NOT write, edit, or execute commands that modify state.
+
+WORKFLOW:
+1. Explore the codebase using read_file, grep, glob, repo_map, inspect_project
+2. Understand the full scope: which files need changes, what existing patterns to follow
+3. When your plan is complete, call \`plan_submit\` with a polished design document
+
+PLAN QUALITY STANDARD — your plan should be a comprehensive design document:
+- Use Mermaid diagrams (flowchart/graph) for architecture and data flow visualization
+- Include root cause analysis, not just surface symptoms
+- Reference files with full paths like \`src/agent/loop.ts:643\`
+- Show proposed code with diff/pseudocode per file
+- Compare alternatives in a table when design decisions exist
+- Include a verification plan with test cases and manual verification steps
+
+4. After submitting plan_submit, WAIT for the user to approve or reject. Do not proceed without approval.
+
+The user will respond with:
+- /plan-approve <slug> — approved, start execution
+- /plan-reject <slug> — rejected, revise
 </plan-mode>`)
   }
 
