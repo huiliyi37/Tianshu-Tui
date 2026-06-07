@@ -194,6 +194,21 @@ export interface CreateReadOnlyWorkOrderInput {
   authority?: string
 }
 
+function toolsForAuthority(tools: string[], authority?: string): string[] {
+  if (!authority) return tools
+
+  const domainDef = starDomainRegistry.get(authority)
+  if (!domainDef) {
+    // Fail closed: an authority layer is an extra restriction. If the domain
+    // id is misspelled or not loaded, do not silently fall back to the profile
+    // tool set — that makes the restriction disappear without a signal.
+    return []
+  }
+
+  const whitelist = new Set(domainDef.toolWhitelist)
+  return tools.filter(t => whitelist.has(t))
+}
+
 export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): WorkOrder {
   const id = input.id ?? `wo_${randomUUID()}`
   return workOrderSchema.parse({
@@ -217,16 +232,8 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
         ]),
     allowedTools: (() => {
       const profileDef = profileRegistry.get(input.profile)
-      let tools = profileDef?.allowedTools ?? [...READ_ONLY_WORKER_TOOLS]
-      // V3 Component A: intersect with domain toolWhitelist when authority set
-      if (input.authority) {
-        const domainDef = starDomainRegistry.get(input.authority)
-        if (domainDef) {
-          const whitelist = new Set(domainDef.toolWhitelist)
-          tools = tools.filter(t => whitelist.has(t))
-        }
-      }
-      return tools
+      const tools = profileDef?.allowedTools ? [...profileDef.allowedTools] : [...READ_ONLY_WORKER_TOOLS]
+      return toolsForAuthority(tools, input.authority)
     })(),
     disallowedTools: input.profile === 'adversarial_verifier'
       ? ['bash', 'write_file', 'edit_file', 'delegate_task', 'delegate_batch'] // run_tests NOT disallowed — it's the verifier's primary weapon
@@ -267,16 +274,8 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     allowedTools: (() => {
       const writeProfile = input.profile ?? 'patcher'
       const profileDef = profileRegistry.get(writeProfile)
-      let tools = profileDef?.allowedTools ?? [...WRITE_WORKER_TOOLS]
-      // V3 Component A: intersect with domain toolWhitelist when authority set
-      if (input.authority) {
-        const domainDef = starDomainRegistry.get(input.authority)
-        if (domainDef) {
-          const whitelist = new Set(domainDef.toolWhitelist)
-          tools = tools.filter(t => whitelist.has(t))
-        }
-      }
-      return tools
+      const tools = profileDef?.allowedTools ? [...profileDef.allowedTools] : [...WRITE_WORKER_TOOLS]
+      return toolsForAuthority(tools, input.authority)
     })(),
     disallowedTools: ['delegate_task', 'delegate_batch'],
     dedupeKey: `write:${input.scope.files?.join(',') || input.objective}`,

@@ -1,7 +1,7 @@
 /**
  * Star Domain Registry — extensible domain management.
  *
- * Mirrors profile-registry.ts pattern: built-in 6 domains + user-loaded
+ * Mirrors profile-registry.ts pattern: built-in domains + user-loaded
  * domains from .rivet/domains/<id>/card.md. Replaces the hardcoded
  * STAR_DOMAINS Record and parallel lists (glance-bus ALL_DOMAINS).
  *
@@ -142,13 +142,14 @@ function sanitizeString(value: unknown, fieldName: string): string {
   return value.slice(0, MAX_STRING_FIELD_LENGTH).trim()
 }
 
-/** Sanitize an array of strings: cap items and each item's length */
+/** Sanitize an array of strings: cap items, trim, and remove empty strings */
 function sanitizeStringArray(value: unknown, fieldName: string): string[] {
   if (!Array.isArray(value)) return []
   return value
     .filter((v): v is string => typeof v === 'string')
     .slice(0, MAX_ARRAY_ITEMS)
     .map(v => v.trim())
+    .filter(v => v.length > 0)
 }
 
 // ─── Card parser ─────────────────────────────────────────────────
@@ -182,15 +183,9 @@ function parseDomainCard(content: string, fallbackId: string): StarDomain {
     }
   }
 
-  // Validate required fields
+  // Validate required fields whose raw type carries semantic meaning.
   if (typeof fm.name !== 'string' || !fm.name.trim()) {
     throw new Error('Missing required field: name')
-  }
-  if (!Array.isArray(fm.keywords) || fm.keywords.length === 0) {
-    throw new Error('keywords must be a non-empty array')
-  }
-  if (!Array.isArray(fm.toolWhitelist) || fm.toolWhitelist.length === 0) {
-    throw new Error('toolWhitelist must be a non-empty array')
   }
 
   // Validate & sanitize id
@@ -217,9 +212,17 @@ function parseDomainCard(content: string, fallbackId: string): StarDomain {
     throw new Error(`Invalid separator "${separator}". Must be: ${VALID_SEPARATORS.join(', ')}`)
   }
 
-  // Sanitize array fields
-  const keywords = sanitizeStringArray(fm.keywords, 'keywords')
-  const toolWhitelist = sanitizeStringArray(fm.toolWhitelist, 'toolWhitelist')
+  // Sanitize array fields first, then validate the values that will actually
+  // take effect. Raw-array checks are not enough: [1,2,3] sanitizes to [], and
+  // [''] sanitizes to an empty tool name that would fail closed silently later.
+  const keywords = sanitizeStringArray(fm.keywords, 'keywords').filter(Boolean)
+  const toolWhitelist = sanitizeStringArray(fm.toolWhitelist, 'toolWhitelist').filter(Boolean)
+  if (keywords.length === 0) {
+    throw new Error('keywords must contain at least one non-empty string value')
+  }
+  if (toolWhitelist.length === 0) {
+    throw new Error('toolWhitelist must contain at least one non-empty string value')
+  }
 
   // Sanitize string fields
   const name = sanitizeString(fm.name, 'name')

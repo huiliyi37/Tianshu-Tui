@@ -291,4 +291,43 @@ describe('work-order contract', () => {
     assert.equal(order.domain, 'prompt')
     assert.equal(order.profile, 'patcher')
   })
+
+  // ─── P0-A1 fail-closed: authority typo → deny-all ──────────
+  it('authority typo (read-only) → deny-all (empty allowedTools), NOT profile full set', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_auth_typo',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Search something.',
+      scope: {},
+      authority: 'tianfuu',  // typo — no such domain
+    })
+    assert.equal(order.allowedTools.length, 0, 'unknown authority should produce empty allowedTools (deny-all)')
+  })
+
+  it('authority typo (write) → deny-all (empty allowedTools)', () => {
+    const order = createWriteWorkOrder({
+      id: 'wo_auth_typo_write',
+      parentTurnId: 'turn_1',
+      kind: 'patch_proposal',
+      objective: 'Patch something.',
+      scope: {},
+      authority: 'nonexistent_domain',
+    })
+    assert.equal(order.allowedTools.length, 0, 'unknown authority should produce empty allowedTools (deny-all)')
+  })
+
+  it('valid authority intersects with profile tools correctly', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_auth_valid',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Search something.',
+      scope: {},
+      authority: 'tianquan',  // valid built-in domain
+    })
+    assert.ok(order.allowedTools.length > 0, 'valid authority should produce non-empty intersection')
+  })
 })

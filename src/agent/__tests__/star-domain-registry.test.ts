@@ -7,9 +7,9 @@ import { STAR_DOMAINS } from '../star-domain.js'
 import { StarDomainRegistry, starDomainRegistry } from '../star-domain-registry.js'
 
 describe('StarDomainRegistry — built-in domains', () => {
-  test('has all 6 built-in domains', () => {
+  test('has all 7 built-in domains', () => {
     const reg = new StarDomainRegistry()
-    assert.equal(reg.getDomainIds().length, 6)
+    assert.equal(reg.getDomainIds().length, 7)
     for (const id of Object.keys(STAR_DOMAINS) as Array<keyof typeof STAR_DOMAINS>) {
       assert.ok(reg.has(id), `missing built-in domain: ${id}`)
       assert.equal(reg.get(id)!.isCustom, false)
@@ -67,7 +67,7 @@ describe('StarDomainRegistry — built-in domains', () => {
 
   test('list() returns all domains', () => {
     const reg = new StarDomainRegistry()
-    assert.equal(reg.list().length, 6)
+    assert.equal(reg.list().length, 7)
   })
 })
 
@@ -243,6 +243,41 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
+  test('rejects arrays whose sanitized values are empty', () => {
+    const dir = join(tmpBase, 'test-sanitized-empty')
+    mkdirSync(join(dir, 'empty-tools'), { recursive: true })
+    writeFileSync(join(dir, 'empty-tools', 'card.md'), [
+      '---',
+      'name: Empty Tools',
+      "keywords: ['valid']",
+      "toolWhitelist: ['']",
+      '---',
+      '',
+      'suffix',
+    ].join('\n'))
+    mkdirSync(join(dir, 'numeric-keywords'), { recursive: true })
+    writeFileSync(join(dir, 'numeric-keywords', 'card.md'), [
+      '---',
+      'name: Numeric Keywords',
+      'keywords: [1, 2, 3]',
+      "toolWhitelist: ['read_file']",
+      '---',
+      '',
+      'suffix',
+    ].join('\n'))
+
+    try {
+      const reg = new StarDomainRegistry()
+      const { loaded, errors } = reg.loadFromDirectory(dir)
+      assert.equal(loaded.length, 0)
+      assert.equal(errors.length, 2)
+      assert.ok(errors.some(e => e.includes('toolWhitelist must contain')))
+      assert.ok(errors.some(e => e.includes('keywords must contain')))
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true })
+    }
+  })
+
   test('reports parse errors gracefully', () => {
     const dir = join(tmpBase, 'test-error')
     mkdirSync(join(dir, 'bad-domain'), { recursive: true })
@@ -272,7 +307,88 @@ describe('starDomainRegistry singleton', () => {
     assert.ok(starDomainRegistry instanceof StarDomainRegistry)
   })
 
-  test('has the 6 built-in domains', () => {
-    assert.equal(starDomainRegistry.getDomainIds().length, 6)
+  test('has the 7 built-in domains', () => {
+    assert.equal(starDomainRegistry.getDomainIds().length, 7)
+  })
+})
+
+// ─── P0-A2 fail-closed: sanitize-then-validate ────────────────
+describe('parseDomainCard — P0-A2 fail-closed validation', () => {
+  const tmpBase = join(tmpdir(), `rivet-p0a2-test-${Date.now()}`)
+
+  test('toolWhitelist:[1,2,3] → rejected (all non-string items filtered, empty after sanitize)', () => {
+    const dir = join(tmpBase, 'test-nonstring-wl')
+    mkdirSync(join(dir, 'numwhitelist'), { recursive: true })
+    // The YAML parser parses [1,2,3] as an array of numbers
+    writeFileSync(join(dir, 'numwhitelist', 'card.md'), [
+      '---',
+      'name: NumberWL',
+      'motto: test',
+      "keywords: ['test']",
+      'toolWhitelist: [1, 2, 3]',
+      '---',
+      '',
+      'suffix',
+    ].join('\n'))
+
+    try {
+      const reg = new StarDomainRegistry()
+      const { loaded, errors } = reg.loadFromDirectory(dir)
+      assert.equal(loaded.length, 0, 'should not load domain with non-string toolWhitelist')
+      assert.equal(errors.length, 1)
+      assert.match(errors[0]!, /toolWhitelist must contain at least one non-empty string/)
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true })
+    }
+  })
+
+  test("keywords:[''] → rejected (empty string filtered, no real keywords)", () => {
+    const dir = join(tmpBase, 'test-empty-kw')
+    mkdirSync(join(dir, 'emptykw'), { recursive: true })
+    writeFileSync(join(dir, 'emptykw', 'card.md'), [
+      '---',
+      'name: EmptyKW',
+      'motto: test',
+      "keywords: ['']",
+      "toolWhitelist: ['read_file']",
+      '---',
+      '',
+      'suffix',
+    ].join('\n'))
+
+    try {
+      const reg = new StarDomainRegistry()
+      const { loaded, errors } = reg.loadFromDirectory(dir)
+      assert.equal(loaded.length, 0, 'should not load domain with empty-string keywords')
+      assert.equal(errors.length, 1)
+      assert.match(errors[0]!, /keywords must contain at least one non-empty string/)
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true })
+    }
+  })
+
+  test("toolWhitelist:[''] → rejected (empty string filtered)", () => {
+    const dir = join(tmpBase, 'test-empty-wl')
+    mkdirSync(join(dir, 'emptywl'), { recursive: true })
+    writeFileSync(join(dir, 'emptywl', 'card.md'), [
+      '---',
+      'name: EmptyWL',
+      'motto: test',
+      "keywords: ['test']",
+      "toolWhitelist: ['']",
+      '---',
+      '',
+      'suffix',
+    ].join('\n'))
+
+    try {
+      const reg = new StarDomainRegistry()
+      const { loaded, errors } = reg.loadFromDirectory(dir)
+      assert.equal(loaded.length, 0, 'should not load domain with empty-string toolWhitelist')
+      assert.equal(errors.length, 1)
+      assert.match(errors[0]!, /toolWhitelist must contain at least one non-empty string/)
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true })
+    }
   })
 })
