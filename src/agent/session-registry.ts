@@ -69,8 +69,10 @@ CREATE INDEX IF NOT EXISTS idx_claims_file ON claims(file_path);
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,
-  type TEXT NOT NULL,
-  payload TEXT,
+  event_type TEXT NOT NULL,
+  file_path TEXT,
+  detail TEXT,
+  priority INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);

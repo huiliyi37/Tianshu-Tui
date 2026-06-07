@@ -45,7 +45,14 @@ function normalizeFiles(cwd: string, files: string[]): string[] {
 }
 
 function runGit(cwd: string, args: string[]): ScopedCommitResult {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf-8', timeout: 10_000 })
+  // Force C locale so git's porcelain/error text stays in parseable English
+  // regardless of the user's system locale (e.g. zh_CN would print 无文件要提交).
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    timeout: 10_000,
+    env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+  })
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim()
   if (result.status !== 0) return { ok: false, output: output || `git ${args[0] ?? 'command'} failed` }
   return { ok: true, output }
