@@ -13,6 +13,24 @@ export const REVIEW_DISCIPLINES: readonly string[] = [
   '“测试全过/已修复”是最高优先级的自我审查对象，fail-closed：无“实际运行的命令+观察到的关键输出”的绿声明，一律按未验证处理。',
 ]
 
+/**
+ * 外部 Claude Code Opus 审查经验内化出的客观审查姿态。
+ *
+ * 目的不是长期依赖外部模型，而是在外部辅助不在场时，让本地
+ * ReviewRouter / verifier / squadron 仍能带着“别信绿灯、主动找反例、
+ * 区分亲测证据与沿用声明”的视角审查主控交付。
+ */
+export const OBJECTIVE_REVIEW_STANCE: readonly string[] = [
+  '把自己当作外部审查者：不要替实现者补意图；提交存在、测试绿、作者声称已修，都只是待验证输入。',
+  '区分亲自观察的证据与沿用他人声明；未运行命令、未看到输出、未复核调用链时，必须标记为 unverified/blocked。',
+  '主动构造反例：畸形输入、缺失字段、换序集合、并发交错、错误路径、删除行相邻回归。',
+  '查“定义”是否接到真实边界：常量、allowlist、guard 存在不等于调用链生效；沿调用方确认。',
+]
+
+export function formatObjectiveReviewStance(): string {
+  return OBJECTIVE_REVIEW_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
+}
+
 const FIX_PATTERNS = [
   /\bfix(?:\(|:|\b)/i,
   /\bbugfix\b/i,
@@ -50,6 +68,11 @@ export function classifyChangeScale(change: ChangeSet): ReviewScale {
     return 'L1'
   }
   return 'L2'
+}
+
+/** Route any non-empty delivery through ReviewRouter; L1 remains a non-blocking nudge. */
+export function shouldRouteReviewWorkflow(change: ChangeSet): boolean {
+  return change.files.length > 0
 }
 
 /** Default rule: files spanning at least two src/<module>/ top-level modules are cross-module. */

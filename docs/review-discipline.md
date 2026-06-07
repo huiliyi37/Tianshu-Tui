@@ -2,7 +2,13 @@
 
 > 实证来源：2026-06-06 三轮对抗审查  
 > 实现计划：[`docs/superpowers/plans/2026-06-06-review-discipline-internalization.md`](../superpowers/plans/2026-06-06-review-discipline-internalization.md)  
-> 代码入口：`src/agent/review-discipline.ts`、`src/agent/review-router.ts`、`src/config/review-discipline-config.ts`
+> 代码入口：`src/agent/review-discipline.ts`、`src/agent/review-router.ts`、`src/agent/review-coordinator-deps.ts`、`src/config/review-discipline-config.ts`
+
+## 定位校准（2026-06-07）
+
+外部 Claude Code Opus 的审查能力不能假设长期在场；本机制的目标是把它暴露出的客观、彻底、敢于不信绿灯的视角内化到天枢自己的工作流中。它不是替代交付侧 TDD 自闭环，而是辅助主控在「提交存在、测试绿、作者声称已修」之后继续做独立复核。
+
+因此当前运行时策略是：有文件要交付时即进入 ReviewRouter。L1 文档/轻量数据改动仍只是 nudge；L2/L3 通过 adversarial verifier / squadron 提供阻断式独立证据。
 
 ## 四条纪律（实证驱动）
 
@@ -34,15 +40,26 @@
 
 ## 审查工作流（三档自动路由）
 
-`deliver_task` 检测到 fix 类提交时，自动按变更规模路由到不同审查档位：
+`deliver_task` 对有文件的交付提交自动按变更规模路由到不同审查档位（可用 `RIVET_REVIEW_DISCIPLINE=0` 关闭）：
 
 | 档位 | 触发条件 | 工作流 | 行为 |
 |------|---------|--------|------|
 | **L3 Squadron** | ≥4 文件 / 跨模块 / 架构改动 | 多 Inspector 并行审查 | RED 拦截 + 合议 |
-| **L2 单对抗子代理** | 单/双文件修复 / fix 类提交 | 1 个 `adversarial_verifier` | RED 拦截 / GREEN 放行 |
-| **L1 nudge** | 仅文档/数据文件 | 提示注入 | 提醒但不阻塞 |
+| **L2 单对抗子代理** | 单/双文件代码/依赖/配置改动，包含但不限于 fix | 1 个 `adversarial_verifier` | RED 拦截 / GREEN 放行 |
+| **L1 nudge** | 仅文档/轻量数据文件 | 提示注入 | 提醒但不阻塞 |
 
 审查闭环有界（默认 3 轮），verifier 与 patcher 为不同子代理。
+
+### 客观审查姿态
+
+`src/agent/review-discipline.ts` 额外集中定义 `OBJECTIVE_REVIEW_STANCE`，并由 `src/agent/review-coordinator-deps.ts` 注入到 verifier / squadron objective：
+
+1. 把自己当外部审查者，不替实现者补意图。
+2. 区分亲自观察的证据与沿用他人声明。
+3. 主动构造畸形输入、并发交错、错误路径、删除行相邻回归等反例。
+4. 复核“定义”是否真的接入调用边界。
+
+这部分来自外部 Opus 审查视角，但目标是让天枢在没有外部辅助时也能自带这把尺。
 
 ---
 

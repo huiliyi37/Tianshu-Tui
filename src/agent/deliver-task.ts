@@ -30,7 +30,7 @@ import { summarizeOwnershipHealth } from './ownership-health.js'
 import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
-import { isCrossModule, isFixContext, type ChangeSet } from './review-discipline.js'
+import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet } from './review-discipline.js'
 import { routeReviewWorkflow, type ReviewRouterDeps } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
@@ -400,20 +400,21 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           return { content: lines.join('\n'), isError: true }
         }
 
-        // Review discipline gate: fix commits must pass an independent review route when wired.
+        // Review discipline gate: deliverable commits pass through the review route when wired.
+        // L1 stays advisory, while L2/L3 require independent evidence before commit.
         // The reviewDepth guard prevents verifier/patcher child contexts from recursively reviewing themselves.
         // RIVET_REVIEW_DISCIPLINE=0 / false / off / no disables the gate (default: enabled).
-        if (reviewDepth === 0 && isFixContext(message) && isReviewDisciplineEnabled()) {
+        const change: ChangeSet = {
+          files: filesToCommit,
+          crossModule: isCrossModule(filesToCommit),
+          isFix: isFixContext(message),
+        }
+        if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
           if (route && ctx.reviewDeps) {
-            const change: ChangeSet = {
-              files: filesToCommit,
-              crossModule: isCrossModule(filesToCommit),
-              isFix: true,
-            }
             const outcome = await route(change, ctx.reviewDeps)
             if (outcome.verdict === 'rejected' || outcome.escalated) {
-              lines.push('', `❌ ReviewRouter RED (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this fix commit'}`)
+              lines.push('', `❌ ReviewRouter RED (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this delivery'}`)
               if (typeof outcome.rounds === 'number') lines.push(`   Rounds: ${outcome.rounds}`)
               lines.push('   → Fix the review finding, collect command + observed output evidence, then re-run deliver_task.')
               return { content: lines.join('\n'), isError: true }

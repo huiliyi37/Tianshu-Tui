@@ -1,5 +1,5 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
-import type { ChangeSet } from './review-discipline.js'
+import { formatObjectiveReviewStance, type ChangeSet } from './review-discipline.js'
 import type { PatcherResult, ReviewFinding, ReviewRouterDeps, SquadronResult, VerifierResult } from './review-router.js'
 import type { AggregationPolicy, WorkerProfile, WorkerResult, WorkOrderKind } from './work-order.js'
 
@@ -28,6 +28,13 @@ const REVIEW_PARENT_TURN_ID = 'deliver_task:review-router'
 
 function files(change: ChangeSet): string[] {
   return [...change.files]
+}
+
+function objectiveReviewStanceBlock(): string {
+  return [
+    'Objective review stance (internalized from external Claude Code Opus audits; do not depend on external assistance being present):',
+    formatObjectiveReviewStance(),
+  ].join('\n')
 }
 
 function childReviewDepth(options: CoordinatorReviewDepsOptions): number {
@@ -136,16 +143,19 @@ function patcherResult(run: CoordinatorRun): PatcherResult {
 
 function verifierObjective(change: ChangeSet): string {
   return [
-    'Independently adversarially verify this fix before delivery.',
+    'Independently adversarially verify this change before delivery.',
+    objectiveReviewStanceBlock(),
     `Files: ${files(change).join(', ') || '(none)'}`,
     'Run targeted existing tests when possible and return command + observed output evidence.',
-    'Return JSON WorkerResult with evidenceStatus="verified" only when the verification actually ran and passed.',
+    'Do not stop at green tests: try at least one counterexample or boundary/error-path probe relevant to the changed files.',
+    'Return JSON WorkerResult with evidenceStatus="verified" only when the verification actually ran, passed, and no counterexample was found.',
   ].join('\n')
 }
 
 function patcherObjective(change: ChangeSet, verifier: VerifierResult): string {
   return [
-    'Patch the fix rejected by the adversarial verifier, in an isolated worker worktree.',
+    'Patch the change rejected by the adversarial verifier, in an isolated worker worktree.',
+    'Fix the root cause shown by the verifier; do not weaken tests or merely silence the symptom.',
     `Files: ${files(change).join(', ') || '(none)'}`,
     `Verifier verdict: ${verifier.verdict}`,
     `Verifier evidence: ${verifier.evidence}`,
@@ -168,6 +178,7 @@ function squadronRequests(change: ChangeSet, options: CoordinatorReviewDepsOptio
     profile: 'reviewer',
     objective: [
       `${inspector.name} Inspector: ${inspector.objective}`,
+      objectiveReviewStanceBlock(),
       `Files: ${files(change).join(', ') || '(none)'}`,
       'Report each finding with severity CRITICAL/HIGH/MEDIUM/LOW, claim, evidence, and minimal fix suggestion.',
     ].join('\n'),

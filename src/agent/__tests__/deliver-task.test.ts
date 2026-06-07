@@ -264,16 +264,16 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /still broken/)
   })
 
-  it('does not route non-fix commits through ReviewRouter', async () => {
-    let routerCalled = false
+  it('routes non-fix code commits through ReviewRouter as objective review assistance', async () => {
+    let routedChange: ChangeSet | undefined
     const { tool, params } = makeContext({
       taskId: 't1',
       ownedFiles: ['src/a.ts'],
       dirtyFiles: ['src/a.ts'],
       verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
-      routeReviewWorkflow: async () => {
-        routerCalled = true
-        return { tier: 'L1', verdict: 'nudge' }
+      routeReviewWorkflow: async change => {
+        routedChange = change
+        return { tier: 'L2', verdict: 'verified', evidence: 'ran: targeted tests and boundary probe → ok', rounds: 1 }
       },
       reviewDeps: {} as ReviewRouterDeps,
       commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
@@ -282,7 +282,8 @@ describe('deliver-task — semantic task delivery tool', () => {
     const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
 
     assert.equal(result.isError ?? false, false)
-    assert.equal(routerCalled, false)
+    assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: false })
+    assert.match(result.content, /ReviewRouter verified \(L2\)/)
     assert.match(result.content, /Scoped commit created/)
   })
 

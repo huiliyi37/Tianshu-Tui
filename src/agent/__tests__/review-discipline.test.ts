@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { REVIEW_DISCIPLINES, classifyChangeScale, isCrossModule, isFixContext } from '../review-discipline.js'
+import { OBJECTIVE_REVIEW_STANCE, REVIEW_DISCIPLINES, classifyChangeScale, formatObjectiveReviewStance, isCrossModule, isFixContext, shouldRouteReviewWorkflow } from '../review-discipline.js'
 
 describe('review disciplines', () => {
   it('contains all four review disciplines', () => {
@@ -10,6 +10,15 @@ describe('review disciplines', () => {
     assert.match(joined, /adversarial_verifier/)
     assert.match(joined, /既有测试/)
     assert.match(joined, /fail-closed/)
+  })
+
+  it('captures the objective external-review stance as reusable workflow text', () => {
+    assert.equal(OBJECTIVE_REVIEW_STANCE.length, 4)
+    const text = formatObjectiveReviewStance()
+    assert.match(text, /外部审查者/)
+    assert.match(text, /亲自观察的证据/)
+    assert.match(text, /主动构造反例/)
+    assert.match(text, /定义.*真实边界/)
   })
 
   it('detects fix contexts from English and Chinese signals', () => {
@@ -33,6 +42,11 @@ describe('review disciplines', () => {
   it('routes trivial non-fix documentation changes to L1', () => {
     assert.equal(classifyChangeScale({ files: ['README.md'], crossModule: false, isFix: false }), 'L1')
     assert.equal(classifyChangeScale({ files: ['docs/notes.txt', 'docs/example.json'], crossModule: false, isFix: false }), 'L1')
+  })
+
+  it('routes any non-empty delivery through review workflow while leaving L1 advisory', () => {
+    assert.equal(shouldRouteReviewWorkflow({ files: ['README.md'], crossModule: false, isFix: false }), true)
+    assert.equal(shouldRouteReviewWorkflow({ files: [], crossModule: false, isFix: false }), false)
   })
 
   it('routes dependency and compiler config changes to L2 even when they are json or lock files', () => {
