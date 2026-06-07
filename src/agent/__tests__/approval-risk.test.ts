@@ -464,6 +464,42 @@ describe('INJECTION_PATTERNS', () => {
     const result = assessToolRisk('bash', { command: 'powershell -enc xyz' }, 'none', [], undefined)
     assert.ok(result.reasons.some(r => r.includes('injection')))
   })
+
+  it('detects source /etc/profile', () => {
+    const result = assessToolRisk('bash', { command: 'source /etc/profile' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')), `Expected injection for source /etc, got: ${result.reasons.join(', ')}`)
+    assert.equal(result.level, 'high')
+  })
+
+  it('detects env LD_PRELOAD override', () => {
+    const result = assessToolRisk('bash', { command: 'env LD_PRELOAD=/tmp/malicious.so /bin/bash' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')), `Expected injection for env LD_PRELOAD, got: ${result.reasons.join(', ')}`)
+    assert.equal(result.level, 'high')
+  })
+
+  it('detects python -c inline execution', () => {
+    const result = assessToolRisk('bash', { command: "python -c 'import os; os.system(\"rm -rf /\")'" }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')))
+    assert.equal(result.level, 'high')
+  })
+
+  it('detects perl -e inline execution', () => {
+    const result = assessToolRisk('bash', { command: "perl -e 'system(\"rm -rf /\")'" }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')))
+    assert.equal(result.level, 'high')
+  })
+
+  it('detects crontab modification', () => {
+    const result = assessToolRisk('bash', { command: 'crontab -l | { cat; echo "*/5 * * * * malicious"; } | crontab -' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')), `Expected injection for crontab, got: ${result.reasons.join(', ')}`)
+    assert.equal(result.level, 'high')
+  })
+
+  it('detects systemctl enable', () => {
+    const result = assessToolRisk('bash', { command: 'systemctl enable malicious.service' }, 'none', [], undefined)
+    assert.ok(result.reasons.some(r => r.includes('injection')))
+    assert.equal(result.level, 'high')
+  })
 })
 
 describe('DESTRUCTIVE_EXTENDED_PATTERNS', () => {
@@ -495,6 +531,50 @@ describe('DESTRUCTIVE_EXTENDED_PATTERNS', () => {
   it('detects mkfs', () => {
     const result = assessToolRisk('bash', { command: 'mkfs.ext4 /dev/sda1' }, 'none', [], undefined)
     assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+})
+
+describe('DANGEROUS_BASH_PATTERNS — extended coverage', () => {
+  it('detects shutdown', () => {
+    const result = assessToolRisk('bash', { command: 'shutdown -h now' }, 'none', [], undefined)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects reboot', () => {
+    const result = assessToolRisk('bash', { command: 'reboot' }, 'none', [], undefined)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects npm publish', () => {
+    const result = assessToolRisk('bash', { command: 'npm publish --access public' }, 'none', [], undefined)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects npm unpublish', () => {
+    const result = assessToolRisk('bash', { command: 'npm unpublish my-package@1.0.0' }, 'none', [], undefined)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects xargs rm mass deletion', () => {
+    const result = assessToolRisk('bash', { command: 'find /tmp -name "*.log" | xargs rm -f' }, 'none', [], undefined)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('detects base64 piped to shell', () => {
+    const result = assessToolRisk('bash', { command: 'echo cm0gLXJmIC8= | base64 -d | bash' }, 'none', [], undefined)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('destructive')))
+  })
+
+  it('still detects force push after new patterns added', () => {
+    const result = assessToolRisk('bash', { command: 'git push --force origin main' }, 'none', [], undefined)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('force push')))
   })
 })
 

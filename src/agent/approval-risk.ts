@@ -20,6 +20,10 @@ export interface RiskAssessment {
  * - Minimize false positives (sudo ls should not trigger)
  * - Catch destructive, irreversible, or privilege-escalating commands
  */
+/** Force-push detection pattern — used by assessToolRisk for clearer reason text. */
+const FORCE_PUSH_PATTERN = /\bgit\s+push\b[^\n]*\s--force(?:-with-lease)?\b/i
+
+// Destructive commands — uses shared pattern list
 export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\brm\s+-(?:[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\b/,  // rm -rf, rm -fr
   /\bgit\s+reset\s+--hard\b/,
@@ -32,7 +36,11 @@ export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\bwget\b.*\|\s*(?:sh|bash|zsh|fish)\b/,
   /\bcurl\b.*\|\s*(?:sh|bash|zsh|fish)\b/,
   /\beval\b.*\$[({]/,                   // eval "$(curl ...)" or eval $(...)
-  /\bgit\s+push\b[^\n]*\s--force(?:-with-lease)?\b/i,
+  FORCE_PUSH_PATTERN,                         // force push (reference shared for reason detection)
+  /\b(?:shutdown|reboot|halt|poweroff)\b/,                    // system control — disruptive even without sudo
+  /\bnpm\s+(?:publish|unpublish)\b/,                          // irreversible registry operations
+  /\bxargs\b.*\brm\b/,                                        // mass deletion via xargs pipe
+  /\bbase64\b[^\n]*\|\s*(?:sh|bash|zsh|fish)\b/,             // obfuscated execution via base64 decode
 ]
 
 /**
@@ -60,6 +68,11 @@ export const INJECTION_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\bsysopen\b/,                            // zsh sysopen
   /\bpowershell\s+-enc/i,                   // PowerShell encoded execution
   /\beval\b.*\bexec\b/,                     // eval + exec chain
+  /\bsource\b.*\/etc\/|^\.\s+\/etc\//,     // sourcing system config files
+  /\benv\b.*\b(?:SHELL|PATH|HOME|LD_PRELOAD|DYLD_INSERT_LIBRARIES)=/, // env var override for privilege escalation
+  /\b(?:python|perl|ruby|node)\s+-[ec]\s/, // inline code execution interpreters
+  /\bcrontab\b/,                            // cron modification — persistence mechanism
+  /\bsystemctl\b.*\b(?:enable|start|stop|restart|mask)\b/, // systemd service manipulation
 ]
 
 /** Extended destructive commands beyond the base DANGEROUS_BASH_PATTERNS */
@@ -156,7 +169,7 @@ export function assessToolRisk(
     for (const pattern of DANGEROUS_BASH_PATTERNS) {
       if (pattern.test(cmd)) {
         // Distinguish force push for clearer reason
-        if (pattern === DANGEROUS_BASH_PATTERNS[DANGEROUS_BASH_PATTERNS.length - 1]) {
+        if (pattern === FORCE_PUSH_PATTERN) {
           reasons.push('force push can overwrite shared remote history')
         } else {
           reasons.push('destructive shell command')
