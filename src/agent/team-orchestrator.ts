@@ -2,6 +2,7 @@ import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
 import type { AggregationPolicy } from './work-order.js'
 import { parseTeamTaskDrafts, parseTeamTasks, buildUnifiedTeamPlan, hasOverlappingFiles, type TeamTaskDraft, type TeamTask, type UnifiedTeamPlan } from './team-plan.js'
 import { groupTeamTasks, type TeamWave } from './team-grouping.js'
+import { buildPlannerObjective, mergePerspectives, normalizePerspective, parsePerspectiveResult, type TeamPerspectivePlan } from './team-perspectives.js'
 
 export interface TeamOrchestratorDeps {
   delegateBatch(
@@ -127,16 +128,69 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
     : []
   const enrichedTasks = input.planMarkdown ? parseTeamTasks(input.planMarkdown) : []
 
-  // max mode: stop after planning brief, don't dispatch execution workers
+  // max mode: fan out 3 perspective planners, merge deterministically, then
+  // group + dispatch the first wave like standard mode.
   if (input.mode === 'max') {
+    const perspectives = ['tianquan', 'tianfu', 'tianxuan'] as const
+    const plannerRequests: DelegationRequest[] = perspectives.map(perspective => ({
+      parentTurnId: `team:planner-${perspective}`,
+      objective: buildPlannerObjective(perspective, input.objective),
+      kind: 'plan',
+      profile: 'reviewer',
+      scope: {},
+    }))
+    const plannerRun = await deps.delegateBatch(plannerRequests, 'all_required', input.abortSignal)
+
+    const planFor = (perspective: TeamPerspectivePlan['perspective']): TeamPerspectivePlan => {
+      const result = plannerRun.results.find(r => r.workOrderId.includes(`planner-${perspective}`))
+      return result ? parsePerspectiveResult(perspective, result) : normalizePerspective(perspective, {})
+    }
+    const merged = mergePerspectives(planFor('tianquan'), planFor('tianfu'), planFor('tianxuan'))
+    const mergedTasks = merged.tasks
+    const waves = groupTeamTasks(mergedTasks)
+    const taskMap = new Map(mergedTasks.map(t => [t.id, t]))
+
+    if (waves.length === 0) {
+      return {
+        mode: input.mode,
+        planned: [],
+        tasks: mergedTasks,
+        waves: [],
+        dispatched: 0,
+        blocked: ['max planning produced no dispatchable tasks'],
+        packet: 'team max: planners returned no tasks to dispatch.',
+        run: plannerRun,
+      }
+    }
+
+    const firstWave = waves[0]!
+    const remainingBlocked = waves.slice(1).map(w =>
+      `${w.taskIds.join(', ')}: waiting for wave ${w.id} to complete`
+    )
+    const requests = waveToRequests(firstWave, taskMap, input.parentTurnId ?? 'team')
+    if (requests.length === 0) {
+      return {
+        mode: input.mode,
+        planned: [],
+        tasks: mergedTasks,
+        waves,
+        dispatched: 0,
+        blocked: remainingBlocked,
+        packet: 'team max: first wave produced no dispatchable requests.',
+        run: plannerRun,
+      }
+    }
+
+    const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
     return {
       mode: input.mode,
-      planned: drafts,
-      tasks: enrichedTasks,
-      waves: [],
-      dispatched: 0,
-      blocked: ['max mode skeleton stops after planning brief; planner-worker fanout is a later phase'],
-      packet: 'team max skeleton: planning-first mode is not auto-dispatching execution workers yet.',
+      planned: [],
+      tasks: mergedTasks,
+      waves,
+      dispatched: requests.length,
+      blocked: remainingBlocked,
+      packet: run.packet,
+      run,
     }
   }
 

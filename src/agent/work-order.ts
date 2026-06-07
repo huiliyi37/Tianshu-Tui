@@ -315,7 +315,7 @@ function extractBalancedJsonCandidates(text: string): string[] {
   return candidates
 }
 
-function extractJsonCandidates(text: string): string[] {
+export function extractJsonCandidates(text: string): string[] {
   const candidates = [...extractFencedJsonCandidates(text), ...extractBalancedJsonCandidates(text)]
   if (candidates.length > 0) return candidates
 

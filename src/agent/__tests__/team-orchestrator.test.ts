@@ -103,18 +103,53 @@ describe('team orchestrator skeleton', () => {
     ])
   })
 
-  it('does not auto-dispatch execution workers in max skeleton mode', async () => {
-    let called = false
-    const summary = await runTeamSkeleton({ mode: 'max', objective: 'design from scratch' }, {
-      delegateBatch: async () => {
-        called = true
-        return run()
+  it('max mode fans out 3 perspective planners then dispatches merged waves', async () => {
+    const calls: DelegationRequest[][] = []
+    const summary = await runTeamSkeleton({ mode: 'max', objective: 'design the subsystem from scratch' }, {
+      delegateBatch: async (requests) => {
+        calls.push(requests)
+        const isPlannerBatch = requests.some(r => r.parentTurnId.includes('planner-'))
+        if (isPlannerBatch) {
+          const plan = {
+            perspective: 'tianquan',
+            tasks: [{
+              id: 'T1',
+              title: 'impl',
+              objective: 'impl',
+              files: ['src/x.ts'],
+              profile: 'patcher',
+              kind: 'patch_proposal',
+              verification: [],
+              dependsOn: [],
+              riskTier: 'low',
+              touchSet: ['src/x.ts'],
+            }],
+          }
+          return {
+            status: 'completed',
+            packet: 'planned',
+            results: requests.map(r => ({
+              workOrderId: r.parentTurnId.includes('tianquan') ? 'team:planner-tianquan'
+                : r.parentTurnId.includes('tianfu') ? 'team:planner-tianfu' : 'team:planner-tianxuan',
+              status: 'passed' as const,
+              summary: 'p',
+              findings: [],
+              artifacts: r.parentTurnId.includes('tianquan') ? [{ kind: 'note' as const, title: 'perspective-plan', content: JSON.stringify(plan) }] : [],
+              changedFiles: [],
+              risks: [],
+              nextActions: [],
+              evidenceStatus: 'verified' as const,
+            })),
+          }
+        }
+        return { status: 'completed', results: [], packet: 'executed' }
       },
     })
 
-    assert.equal(called, false)
-    assert.equal(summary.dispatched, 0)
-    assert.ok(summary.blocked[0]!.includes('planning brief'))
+    assert.equal(calls.length, 2)
+    assert.ok(calls[0]!.some(r => r.parentTurnId.includes('planner-tianquan')))
+    assert.ok(summary.dispatched >= 1)
+    assert.equal(summary.tasks.length, 1)
   })
 })
 

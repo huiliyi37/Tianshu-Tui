@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizePerspective, mergePerspectives } from '../team-perspectives.js'
+import { buildPlannerObjective, normalizePerspective, mergePerspectives, parsePerspectiveResult } from '../team-perspectives.js'
 import type { TeamPerspectivePlan } from '../team-perspectives.js'
 import type { TeamTask } from '../team-plan.js'
+import type { WorkerResult } from '../work-order.js'
 
 function makeTask(id: string, riskTier: TeamTask['riskTier'] = 'low'): TeamTask {
   return {
@@ -32,6 +33,81 @@ function basePerspective(overrides?: Partial<TeamPerspectivePlan>): TeamPerspect
     ...overrides,
   }
 }
+
+describe('planner fanout helpers', () => {
+  it('buildPlannerObjective carries perspective + schema instruction', () => {
+    const objective = buildPlannerObjective('tianquan', 'refactor the loop')
+
+    assert.match(objective, /天权/)
+    assert.match(objective, /perspective-plan/)
+    assert.match(objective, /refactor the loop/)
+  })
+
+  it('parsePerspectiveResult extracts embedded plan from artifact', () => {
+    const plan = {
+      perspective: 'tianquan',
+      summary: 's',
+      tasks: [makeTask('T1')],
+    }
+    const result: WorkerResult = {
+      workOrderId: 'team:planner-tianquan',
+      status: 'passed',
+      summary: 'done',
+      findings: [],
+      artifacts: [{ kind: 'note', title: 'perspective-plan', content: JSON.stringify(plan) }],
+      changedFiles: [],
+      risks: [],
+      nextActions: [],
+      evidenceStatus: 'verified',
+    }
+
+    const parsed = parsePerspectiveResult('tianquan', result)
+
+    assert.equal(parsed.tasks.length, 1)
+    assert.equal(parsed.tasks[0]!.id, 'T1')
+  })
+
+  it('parsePerspectiveResult extracts fenced JSON perspective plan from artifact', () => {
+    const result: WorkerResult = {
+      workOrderId: 'team:planner-tianquan',
+      status: 'passed',
+      summary: 'done',
+      findings: [],
+      artifacts: [{
+        kind: 'note',
+        title: 'perspective-plan',
+        content: `Plan:\n\n\`\`\`json\n${JSON.stringify({ perspective: 'tianquan', tasks: [makeTask('T1')] })}\n\`\`\``,
+      }],
+      changedFiles: [],
+      risks: [],
+      nextActions: [],
+      evidenceStatus: 'verified',
+    }
+
+    const parsed = parsePerspectiveResult('tianquan', result)
+
+    assert.equal(parsed.tasks[0]!.id, 'T1')
+  })
+
+  it('parsePerspectiveResult degrades gracefully without artifact', () => {
+    const result: WorkerResult = {
+      workOrderId: 'x',
+      status: 'passed',
+      summary: 'sum',
+      findings: [],
+      artifacts: [],
+      changedFiles: [],
+      risks: ['r1'],
+      nextActions: [],
+      evidenceStatus: 'verified',
+    }
+
+    const parsed = parsePerspectiveResult('tianfu', result)
+
+    assert.equal(parsed.perspective, 'tianfu')
+    assert.deepEqual(parsed.blockers, ['r1'])
+  })
+})
 
 describe('normalizePerspective', () => {
   it('fills missing fields with defaults', () => {

@@ -1,3 +1,4 @@
+import { extractJsonCandidates, type WorkerResult } from './work-order.js'
 import type { TeamTask, RiskItem } from './team-plan.js'
 
 // ── Perspective output schema ──────────────────────────────────────────────
@@ -277,4 +278,57 @@ function riskSeverityRank(severity: 'low' | 'medium' | 'high'): number {
     case 'medium': return 1
     case 'high': return 2
   }
+}
+
+// ── Planner fanout helpers (max mode) ───────────────────────────────────────
+
+const PERSPECTIVE_BRIEFS: Record<TeamPerspectivePlan['perspective'], string> = {
+  tianquan: '你是天权 planner。职责：依赖分析、任务拆解、执行顺序，产出任务主图。',
+  tianfu: '你是天府 risk reviewer。职责：风险评估、验证门禁、回归测试、串行约束；遇歧义 fail-closed。',
+  tianxuan: '你是天璇 challenger。职责：定向反证、盲区发现、备选方案；质疑前提。',
+}
+
+/** Build the objective for one perspective planner. The stance rides in the
+ *  objective text; the worker is read-only and embeds its plan as an artifact. */
+export function buildPlannerObjective(
+  perspective: TeamPerspectivePlan['perspective'],
+  mission: string,
+): string {
+  return [
+    PERSPECTIVE_BRIEFS[perspective],
+    '',
+    `Mission: ${mission}`,
+    '',
+    'Read the relevant code, then return a JSON WorkerResult whose `artifacts` contains ONE entry:',
+    '{ "kind": "note", "title": "perspective-plan", "content": "<a JSON string of your TeamPerspectivePlan>" }',
+    '',
+    'TeamPerspectivePlan = { perspective, summary, tasks, dependencyNotes, risks, verification, blockers, alternatives }.',
+    'Each task = { id, title, objective, files, profile, kind, verification, dependsOn, riskTier, touchSet }.',
+    `Set perspective to "${perspective}".`,
+  ].join('\n')
+}
+
+/** Parse a planner WorkerResult back into a TeamPerspectivePlan. Reads the
+ *  embedded `perspective-plan` artifact; falls back to a degraded plan that
+ *  carries the worker summary + risks as blockers (graceful degradation). */
+export function parsePerspectiveResult(
+  perspective: TeamPerspectivePlan['perspective'],
+  result: WorkerResult,
+): TeamPerspectivePlan {
+  const artifact = result.artifacts.find(a => a.title === 'perspective-plan')
+  if (artifact) {
+    try {
+      for (const candidate of extractJsonCandidates(artifact.content)) {
+        try {
+          const raw = JSON.parse(candidate) as Parameters<typeof normalizePerspective>[1]
+          return normalizePerspective(perspective, raw)
+        } catch {
+          // Try the next candidate — model output may include prose or malformed examples.
+        }
+      }
+    } catch {
+      // No JSON object found — fall through to degraded plan.
+    }
+  }
+  return normalizePerspective(perspective, { summary: result.summary, blockers: result.risks })
 }
