@@ -14,6 +14,9 @@ import {
 } from './work-order.js'
 import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
 import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
+import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
+import { precipitateDomainLessons } from './domain-lesson-precipitate.js'
+import { DomainKnowledgeStore } from './domain-knowledge-store.js'
 
 /** Max transient-retry attempts for network/API errors during worker execution.
  *  Independent of order.budget.maxRetries (which covers output parse failures). */
