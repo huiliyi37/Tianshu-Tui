@@ -43,9 +43,11 @@ describe('filterCommands', () => {
     )
   })
 
-  it('includes plan close command entry', () => {
+  it('includes plan close and team command entries', () => {
     const commands = getPaletteCommands().map(c => c.name)
 
     assert.ok(commands.includes('/plan-close'))
+    assert.ok(commands.includes('/team'))
+    assert.ok(commands.includes('/team max'))
   })
 })

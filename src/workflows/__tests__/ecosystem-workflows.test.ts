@@ -84,6 +84,33 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(writePlan?.prompt.includes('writing-plans'))
   })
 
+  it('resolves /team into a team-mode workflow prompt', () => {
+    const resolved = resolveEcosystemWorkflowInput('/team docs/superpowers/plans/loop-split-v3.md')
+
+    assert.equal(resolved?.command, '/team')
+    assert.ok(resolved?.prompt.includes('团队模式核心骨架'))
+    assert.ok(resolved?.prompt.includes('delegate_batch'))
+    assert.ok(resolved?.prompt.includes('patcher workers as 天梁 executors'))
+    assert.ok(resolved?.prompt.includes('verification'))
+    assert.ok(resolved?.prompt.includes('deliver_task'))
+  })
+
+  it('resolves /team max into planning-first team workflow prompt', () => {
+    const resolved = resolveEcosystemWorkflowInput('/team max refactor loop pipeline')
+
+    assert.equal(resolved?.command, '/team')
+    assert.ok(resolved?.prompt.includes('/team max'))
+    assert.ok(resolved?.prompt.includes('multi-perspective planning'))
+    assert.ok(resolved?.prompt.includes('risk audit'))
+  })
+
+  it('returns usage prompt for empty /team args', () => {
+    const resolved = resolveEcosystemWorkflowInput('/team')
+
+    assert.equal(resolved?.command, '/team')
+    assert.ok(resolved?.prompt.includes('Team usage:'))
+  })
+
   it('resolves /plan close into a plan_close tool prompt', () => {
     const resolved = resolveEcosystemWorkflowInput('/plan close docs/superpowers/plans/demo.md --tasks 1-7 --verified npx tsc --noEmit --delivery YELLOW --note external files present')
 

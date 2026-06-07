@@ -18,8 +18,14 @@ export interface WorkflowResolveResult {
   prompt: string
 }
 
+export interface TeamWorkflowPromptOptions {
+  mode: 'standard' | 'max'
+  objective: string
+}
+
 const WRITING_PLAN_COMMANDS = new Set(['/plan', '/write-plan'])
 const PLAN_CLOSE_COMMANDS = new Set(['/plan-close'])
+const TEAM_COMMANDS = new Set(['/team'])
 
 export function isWritingPlanCommand(command: string): boolean {
   return WRITING_PLAN_COMMANDS.has(command.toLowerCase())
@@ -255,9 +261,60 @@ export function buildPlanClosePrompt(options: PlanClosePromptOptions): string {
 
 const PLAN_CLOSE_USAGE = 'Plan close usage: /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply] [--verified <command>] [--delivery GREEN|YELLOW|RED] [--note <text>]'
 
+export const TEAM_USAGE = 'Team usage: /team <task|docs/superpowers/plans/file.md> or /team max <task>'
+
+export function buildTeamWorkflowPrompt(options: TeamWorkflowPromptOptions): string {
+  const objective = options.objective.trim()
+  const modeLabel = options.mode === 'max' ? '/team max' : '/team'
+  const planInstruction = options.mode === 'standard'
+    ? '- If the input is a Markdown plan path, read it first and treat it as the task contract. Do not invent a new plan unless the file is missing or insufficient.'
+    : '- Start with multi-perspective planning: delegate read-only planners/reviewers for dependency analysis, risk audit, and adversarial blind-spot search before any patcher executes.'
+
+  return `我正在使用 ${modeLabel} 团队模式核心骨架执行任务。
+
+User objective:
+${objective}
+
+Operating contract:
+- User explicitly triggered team mode; do not ask whether to use it.
+${planInstruction}
+- Main controller (current session) owns planning, grouping, review, verification, integration, and final deliver_task.
+- Execution workers are bounded helpers. Use delegate_batch/delegate_task only when the task has at least 2 independent fronts or a clear patch/review split.
+- Use patcher workers as 天梁 executors for precise implementation: objective must say "只执行本 task，不扩展范围，不重写计划".
+- MVP safety boundary: do not claim workers auto-committed or auto-merged. Treat worker output as patchSummary/diff evidence; the main controller must inspect and integrate changes.
+- Default execution parallelism: 2-3 workers. If files overlap or scope is unclear, serialize or keep work in the main session.
+- Do not implement a full DAG parser in this turn unless the user specifically asks. Dependencies/grouping can be coarse and explicitly documented.
+- After execution, run targeted tests for changed files plus npx tsc --noEmit. Every green claim needs command + observed output.
+- For >=4 files, cross-module, architecture, or high-risk changes, run an independent review pass (Review Squadron/L3 style or adversarial_verifier) before deliver_task.
+
+Suggested phases:
+1. Read the referenced plan/spec/code and extract a small task list.
+2. Dispatch only safe, scoped workers; keep ambiguous tasks in the main controller.
+3. Inspect worker findings/diffs and integrate deliberately.
+4. Verify with evidence, review independently, then deliver_task with checklist.
+`
+}
+
+export function parseTeamWorkflowArgs(args: string): TeamWorkflowPromptOptions | null {
+  const trimmed = args.trim()
+  if (!trimmed) return null
+  const lower = trimmed.toLowerCase()
+  if (lower === 'max') return null
+  if (lower.startsWith('max ')) {
+    const objective = trimmed.slice(trimmed.match(/^max\s+/i)![0].length).trim()
+    return objective ? { mode: 'max', objective } : null
+  }
+  return { mode: 'standard', objective: trimmed }
+}
+
 export function resolveEcosystemWorkflowInput(input: string, opts?: { date?: Date }): WorkflowResolveResult | null {
   const parsed = parseSlashInput(input)
   if (!parsed) return null
+
+  if (TEAM_COMMANDS.has(parsed.command)) {
+    const team = parseTeamWorkflowArgs(parsed.args)
+    return { command: parsed.command, prompt: team ? buildTeamWorkflowPrompt(team) : TEAM_USAGE }
+  }
 
   if (PLAN_CLOSE_COMMANDS.has(parsed.command)) {
     const planClose = parsePlanCloseArgs(parsed.args)

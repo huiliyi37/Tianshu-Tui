@@ -115,6 +115,25 @@ describe('resolveAppPromptInput', () => {
   it('returns null for empty /plan (handled by handleSlashCommand before resolver)', () => {
     assert.equal(resolveAppPromptInput('/plan', '/cwd'), null)
   })
+
+  it('resolves /team into a team workflow prompt', () => {
+    const resolved = resolveAppPromptInput('/team docs/superpowers/plans/loop-split-v3.md', '/cwd')
+    assert.ok(resolved !== null)
+
+    assert.ok(resolved.includes('团队模式核心骨架'))
+    assert.ok(resolved.includes('delegate_batch'))
+    assert.ok(resolved.includes('patcher workers as 天梁 executors'))
+    assert.ok(resolved.includes('deliver_task'))
+  })
+
+  it('resolves /team max into a planning-first prompt', () => {
+    const resolved = resolveAppPromptInput('/team max refactor loop pipeline', '/cwd')
+    assert.ok(resolved !== null)
+
+    assert.ok(resolved.includes('/team max'))
+    assert.ok(resolved.includes('multi-perspective planning'))
+    assert.ok(resolved.includes('risk audit'))
+  })
 })
 
 describe('handleSlashCommand', () => {
@@ -129,6 +148,8 @@ describe('handleSlashCommand', () => {
     assert.ok(entries[0]!.includes('/exit'))
     assert.ok(entries[0]!.includes('/compact'))
     assert.ok(entries[0]!.includes('/plan close'))
+    assert.ok(entries[0]!.includes('/team <task|plan>'))
+    assert.ok(entries[0]!.includes('/team max <task>'))
   })
 
   it('/clear returns true', () => {
@@ -150,6 +171,20 @@ describe('handleSlashCommand', () => {
     assert.deepEqual(streaming, [false])
   })
 
+  it('/team without objective shows usage and returns true', () => {
+    const entries: string[] = []
+    const streaming: boolean[] = []
+    const ctx = makeCtx({
+      parts: ['/team'],
+      pushStatic: (entry) => entries.push(entry.content),
+      setIsStreaming: (v) => streaming.push(v),
+    })
+
+    assert.equal(handleSlashCommand(ctx), true)
+    assert.ok(entries[0]!.includes('Usage: /team <task|docs/superpowers/plans/file.md>'))
+    assert.deepEqual(streaming, [false])
+  })
+
   it('/plan with feature falls through to agent prompt resolution', () => {
     const ctx = makeCtx({ parts: ['/plan', 'add', 'workflow', 'aliases'] })
     assert.equal(handleSlashCommand(ctx), false)
@@ -157,6 +192,11 @@ describe('handleSlashCommand', () => {
 
   it('/write-plan with feature falls through to agent prompt resolution', () => {
     const ctx = makeCtx({ parts: ['/write-plan', 'add', 'workflow', 'aliases'] })
+    assert.equal(handleSlashCommand(ctx), false)
+  })
+
+  it('/team with objective falls through to agent prompt resolution', () => {
+    const ctx = makeCtx({ parts: ['/team', 'docs/superpowers/plans/demo.md'] })
     assert.equal(handleSlashCommand(ctx), false)
   })
 

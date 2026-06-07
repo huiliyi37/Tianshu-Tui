@@ -129,6 +129,8 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/effort', description: 'Set reasoning effort (off|low|medium|high|max)' },
     { name: '/domain', description: '查看或切换星域人格 (list|<name>|auto|off)' },
     { name: '/interview', description: 'Deep interview to clarify requirements' },
+    { name: '/team', description: 'Run team-mode workflow skeleton' },
+    { name: '/team max', description: 'Run team-mode planning-first workflow' },
     { name: '/plan-close', description: 'Preview or apply implementation plan closure' },
     { name: '/exit', description: 'Save session and exit' },
   ]
