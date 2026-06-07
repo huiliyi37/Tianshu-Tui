@@ -8,7 +8,7 @@
 import type { MeridianDb } from './meridian-db.js'
 import type {
   PhysarumEdgeState, PhysarumConfig, PhysarumStats,
-  Criticality, AvalancheStats,
+  Criticality, AvalancheStats, PhysarumPredictionObservation,
 } from './physarum-types.js'
 import { DEFAULT_PHYSARUM_CONFIG } from './physarum-types.js'
 
@@ -40,6 +40,12 @@ export class PhysarumEngine {
   private turnGrowthHistory: number[] = []
   private currentTurn = 0
   private lastFileAccess: { filePath: string; turn: number } | null = null
+  private pendingPrediction: {
+    sourceFile: string
+    predictedAtTurn: number
+    predictions: Array<{ file: string; score: number }>
+  } | null = null
+  private predictionObservations: PhysarumPredictionObservation[] = []
 
   constructor(
     private db: MeridianDb | undefined,
@@ -55,16 +61,59 @@ export class PhysarumEngine {
     if (!isIndexablePhysarumFile(filePath)) return
 
     this.currentTurn = turn
+    this.observePrediction(filePath, turn)
+
     const previous = this.lastFileAccess
     this.lastFileAccess = { filePath, turn }
 
-    if (!previous || previous.filePath === filePath) return
+    if (!previous || previous.filePath === filePath) {
+      this.startShadowPrediction(filePath, turn)
+      return
+    }
 
     const dtTurns = Math.max(1, turn - previous.turn)
-    if (dtTurns > this.config.stdpWindow) return
+    if (dtTurns > this.config.stdpWindow) {
+      this.startShadowPrediction(filePath, turn)
+      return
+    }
 
     this.recordFlow(previous.filePath, filePath, turn)
     this.recordSequentialEdit(previous.filePath, filePath, dtTurns)
+    this.startShadowPrediction(filePath, turn)
+  }
+
+  private startShadowPrediction(filePath: string, turn: number): void {
+    const predictions = this.predictNext(filePath, 3)
+    if (predictions.length === 0) {
+      this.pendingPrediction = null
+      return
+    }
+    this.pendingPrediction = { sourceFile: filePath, predictedAtTurn: turn, predictions }
+  }
+
+  private observePrediction(observedFile: string, observedAtTurn: number): void {
+    const pending = this.pendingPrediction
+    if (!pending || pending.sourceFile === observedFile) return
+
+    const hitIndex = pending.predictions.findIndex(p => p.file === observedFile)
+    const observation: PhysarumPredictionObservation = {
+      sourceFile: pending.sourceFile,
+      predictedAtTurn: pending.predictedAtTurn,
+      predictions: pending.predictions,
+      observedFile,
+      observedAtTurn,
+      hitRank: hitIndex >= 0 ? hitIndex + 1 : null,
+      leadTurns: Math.max(1, observedAtTurn - pending.predictedAtTurn),
+    }
+    this.predictionObservations.push(observation)
+    if (this.predictionObservations.length > 100) this.predictionObservations.shift()
+    if (this.db?.recordPhysarumPredictionObservation) {
+      try { this.db.recordPhysarumPredictionObservation(observation) } catch { /* shadow telemetry only */ }
+    }
+  }
+
+  getPredictionObservations(): PhysarumPredictionObservation[] {
+    return [...this.predictionObservations]
   }
 
   /** Record flow on an edge (called on file access/co-edit) */

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
 import type { ModuleSummaryEntry, CliEntry } from './meridian-types.js'
-import type { PhysarumEdgeState } from './physarum-types.js'
+import type { PhysarumEdgeState, PhysarumPredictionObservation } from './physarum-types.js'
 import type { ImmuneMemory } from '../agent/immune-types.js'
 import type { MistakeEntry } from '../agent/mistake-notebook.js'
 
@@ -63,6 +63,20 @@ CREATE TABLE IF NOT EXISTS physarum_edges (
   direction REAL NOT NULL DEFAULT 0,
   PRIMARY KEY(file_a, file_b)
 );
+
+CREATE TABLE IF NOT EXISTS physarum_prediction_observations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_file TEXT NOT NULL,
+  predicted_at_turn INTEGER NOT NULL,
+  predictions_json TEXT NOT NULL,
+  observed_file TEXT NOT NULL,
+  observed_at_turn INTEGER NOT NULL,
+  hit_rank INTEGER,
+  lead_turns INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_physarum_prediction_source ON physarum_prediction_observations(source_file);
+CREATE INDEX IF NOT EXISTS idx_physarum_prediction_observed ON physarum_prediction_observations(observed_file);
 
 CREATE TABLE IF NOT EXISTS immune_memory (
   id TEXT PRIMARY KEY,
@@ -384,6 +398,50 @@ export class MeridianDb {
       lastActivatedTurn: r.last_activated_turn as number,
       direction: r.direction as number,
     }))
+  }
+
+  recordPhysarumPredictionObservation(observation: PhysarumPredictionObservation): void {
+    if (!this._available) return
+    try {
+      this.db.prepare(`
+        INSERT INTO physarum_prediction_observations
+          (source_file, predicted_at_turn, predictions_json, observed_file, observed_at_turn, hit_rank, lead_turns)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        observation.sourceFile,
+        observation.predictedAtTurn,
+        JSON.stringify(observation.predictions),
+        observation.observedFile,
+        observation.observedAtTurn,
+        observation.hitRank,
+        observation.leadTurns,
+      )
+    } catch {
+      // Shadow telemetry must never affect tool execution.
+    }
+  }
+
+  getPhysarumPredictionObservations(limit = 100): PhysarumPredictionObservation[] {
+    if (!this._available) return []
+    try {
+      const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)))
+      const rows = this.db.prepare(`
+        SELECT * FROM physarum_prediction_observations
+        ORDER BY id DESC
+        LIMIT ${safeLimit}
+      `).all() as Array<Record<string, unknown>>
+      return rows.map(r => ({
+        sourceFile: r.source_file as string,
+        predictedAtTurn: r.predicted_at_turn as number,
+        predictions: JSON.parse(r.predictions_json as string) as Array<{ file: string; score: number }>,
+        observedFile: r.observed_file as string,
+        observedAtTurn: r.observed_at_turn as number,
+        hitRank: (r.hit_rank as number | null) ?? null,
+        leadTurns: r.lead_turns as number,
+      }))
+    } catch {
+      return []
+    }
   }
 
   // ─── Immune memory persistence ───────────────────────────────────────

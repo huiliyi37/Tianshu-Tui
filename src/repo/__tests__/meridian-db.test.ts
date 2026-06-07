@@ -106,6 +106,33 @@ describe('meridian db', () => {
     assert.equal(first.direction, 0.4)
   })
 
+  it('records and retrieves physarum prediction observations newest first', () => {
+    db.recordPhysarumPredictionObservation({
+      sourceFile: 'src/a.ts',
+      predictedAtTurn: 1,
+      predictions: [{ file: 'src/b.ts', score: 2.5 }],
+      observedFile: 'src/b.ts',
+      observedAtTurn: 2,
+      hitRank: 1,
+      leadTurns: 1,
+    })
+    db.recordPhysarumPredictionObservation({
+      sourceFile: 'src/b.ts',
+      predictedAtTurn: 2,
+      predictions: [{ file: 'src/a.ts', score: 1.2 }],
+      observedFile: 'src/c.ts',
+      observedAtTurn: 3,
+      hitRank: null,
+      leadTurns: 1,
+    })
+
+    const loaded = db.getPhysarumPredictionObservations(10)
+    assert.equal(loaded.length, 2)
+    assert.equal(loaded[0]!.sourceFile, 'src/b.ts')
+    assert.equal(loaded[0]!.hitRank, null)
+    assert.deepEqual(loaded[1]!.predictions, [{ file: 'src/b.ts', score: 2.5 }])
+  })
+
   it('does not create meridian.db on construction (lazy open)', () => {
     const lazyDir = mkdtempSync(join(tmpdir(), 'meridian-lazy-'))
     try {

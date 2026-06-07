@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { PhysarumEngine } from '../physarum-engine.js'
-import { DEFAULT_PHYSARUM_CONFIG } from '../physarum-types.js'
+import { DEFAULT_PHYSARUM_CONFIG, type PhysarumPredictionObservation } from '../physarum-types.js'
 
 // Stub MeridianDb — PhysarumEngine only uses it for future persistence
 const stubDb = {} as any
@@ -71,6 +71,38 @@ describe('PhysarumEngine', () => {
     assert.ok(edge)
     assert.ok(edge.direction < 0, 'reverse lexicographic b.ts→a.ts sequence must be negative on a.ts|b.ts')
     assert.equal(engine.predictNext('src/b.ts')[0]?.file, 'src/a.ts')
+  })
+
+  it('records shadow prediction observations on the next distinct file access', () => {
+    const persisted: any[] = []
+    const engine = new PhysarumEngine({
+      recordPhysarumPredictionObservation: (observation: PhysarumPredictionObservation) => { persisted.push(observation) },
+    } as any)
+
+    engine.recordFileAccess('src/b.ts', 1)
+    engine.recordFileAccess('src/a.ts', 2)
+    engine.recordFileAccess('src/b.ts', 3)
+
+    const observations = engine.getPredictionObservations()
+    assert.equal(observations.length, 1)
+    assert.equal(observations[0]!.sourceFile, 'src/a.ts')
+    assert.equal(observations[0]!.observedFile, 'src/b.ts')
+    assert.equal(observations[0]!.hitRank, 1)
+    assert.equal(observations[0]!.leadTurns, 1)
+    assert.equal(persisted.length, 1)
+  })
+
+  it('records shadow prediction misses without altering the next prediction cycle', () => {
+    const engine = new PhysarumEngine(stubDb)
+    engine.recordFileAccess('src/a.ts', 1)
+    engine.recordFileAccess('src/b.ts', 2)
+    engine.recordFileAccess('src/c.ts', 3)
+
+    const observations = engine.getPredictionObservations()
+    assert.equal(observations.length, 1)
+    assert.equal(observations[0]!.sourceFile, 'src/b.ts')
+    assert.equal(observations[0]!.observedFile, 'src/c.ts')
+    assert.equal(observations[0]!.hitRank, null)
   })
 
   it('filters legacy tool-name physarum edges when loading and saving', () => {

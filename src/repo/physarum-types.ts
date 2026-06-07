@@ -16,6 +16,16 @@ export interface PhysarumEdgeState {
   direction: number         // STDP directionality [-1, 1], 0 = symmetric
 }
 
+export interface PhysarumPredictionObservation {
+  sourceFile: string
+  predictedAtTurn: number
+  predictions: Array<{ file: string; score: number }>
+  observedFile: string
+  observedAtTurn: number
+  hitRank: number | null
+  leadTurns: number
+}
+
 export interface PhysarumConfig {
   growthRate: number         // flow-driven growth coefficient
   gamma: number             // flow exponent (>1 = winner-take-all)
