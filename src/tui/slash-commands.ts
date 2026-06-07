@@ -1,7 +1,8 @@
 import type { AgentLoop } from '../agent/loop.js'
 import type { SessionContext } from '../agent/context.js'
 import { SessionPersist } from '../agent/session-persist.js'
-import { STAR_DOMAINS, type StarDomainId } from '../agent/star-domain.js'
+import { type StarDomainId } from '../agent/star-domain.js'
+import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
@@ -311,7 +312,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       } else if (sub === 'list' || sub === 'ls') {
         const current = ctx.agent.getSessionDomain()
         const currentId = current?.id
-        const lines = (Object.values(STAR_DOMAINS) as Array<{ id: StarDomainId; name: string; keywords: string[]; decisionStyle: string; motto: string }>).map(d => {
+        const lines = (starDomainRegistry.list() as Array<{ id: StarDomainId; name: string; keywords: string[]; decisionStyle: string; motto: string }>).map(d => {
           const marker = d.id === currentId ? ' ← current' : ''
           return `  ${d.name} (${d.id}) [${d.decisionStyle}]${marker}\n    ${d.motto}\n    keywords: ${d.keywords.join(', ')}`
         })
@@ -324,7 +325,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         pushStatic(createLogEntry({ type: 'system', content: '星域已关闭。本会话将不激活任何星域人格。' }))
       } else {
         // Try to match by id or Chinese name
-        const allDomains = Object.values(STAR_DOMAINS) as Array<(typeof STAR_DOMAINS)[StarDomainId]>
+        const allDomains = starDomainRegistry.list()
         const matched = allDomains.find(d => d.id === sub || d.name === parts[1] || d.id === parts[1]?.toLowerCase())
         if (matched) {
           const domain = { id: matched.id, name: matched.name, volatileBlock: matched.volatileBlock, motto: matched.motto }
