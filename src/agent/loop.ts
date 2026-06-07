@@ -1,6 +1,6 @@
 import type { StreamClient } from '../api/stream-client.js'
 import type { Usage } from '../api/types.js'
-import type { OaiChatRequest } from '../api/oai-types.js'
+import type { OaiChatRequest, OaiMessage } from '../api/oai-types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
@@ -540,6 +540,16 @@ export class AgentLoop {
     return text.trim()
   }
 
+  private getLastAssistantMessageContent(messages: OaiMessage[]): string | null {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg?.role === 'assistant' && typeof msg.content === 'string') {
+        return msg.content
+      }
+    }
+    return null
+  }
+
   private async buildIntentRetrievalRouteForTurn(userInput: string, actionable: boolean): Promise<void> {
     if (!actionable || !this.taskContract) {
       this.config.promptEngine.setIntentRetrievalRoute(null)
@@ -547,8 +557,16 @@ export class AgentLoop {
     }
 
     try {
+      const messages = this.session.getMessages()
+      const lastAssistant = this.getLastAssistantMessageContent(messages) || undefined
+      // 从上一轮 Assistant 回复中持久化提取任务列表，支持跨多轮回溯
+      if (lastAssistant && this.sessionStateManager) {
+        this.sessionStateManager.extractTaskList(lastAssistant, this.session.getTurnCount())
+      }
       const route = await classifyIntentRetrievalRoute({
         userMessage: userInput,
+        lastAssistantMessage: lastAssistant,
+        taskList: this.sessionStateManager?.getTaskList(),
         taskContract: this.taskContract,
         config: this.config.intentRetrievalRouter,
         client: this.config.client,
@@ -813,6 +831,9 @@ export class AgentLoop {
   getCognitiveSnapshot(): CognitivePhaseSnapshot | undefined { return this.latestCognitiveSnapshot }
 
   getTaskContract(): TaskContract | undefined { return this.taskContract }
+
+  /** 获取持久化的任务列表（从 Assistant 回复中提取），用于 TUI 固定显示和多轮回溯 */
+  getTaskList() { return this.sessionStateManager?.getTaskList() ?? [] }
 
   addAnchor(kind: ContextAnchor['kind'], text: string): void {
     this.contextInjection.addAnchor(kind, text)

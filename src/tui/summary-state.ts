@@ -1,5 +1,6 @@
 import type { Phase, LastAction } from './phase-tracker.js'
 import { PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
+import type { TaskListItem } from '../agent/session-state.js'
 
 export interface SummaryState {
   task: string
@@ -23,6 +24,8 @@ export interface SummaryState {
   starPhaseLabel?: string
   alchemyConfidence?: number
   recentToolSummary?: string[]
+  /** 持久化的任务列表（从 Assistant 回复中提取），用于底部固定面板显示 */
+  taskList?: readonly TaskListItem[]
 }
 
 export function phaseFromSummary(state: SummaryState): StarPhase {

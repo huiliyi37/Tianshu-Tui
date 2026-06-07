@@ -48,6 +48,7 @@ import { createSurfaceDefinitions } from './surface/registry.js'
 import { createGlanceBus } from './surface/glance-bus.js'
 import { glanceOnToolStart, glanceOnToolResult } from './surface/tool-domain.js'
 import { GlanceBar } from './glance-bar.js'
+import { TaskListBar } from './task-list-bar.js'
 import { appendStreamWindow } from './stream-window.js'
 import { capLiveTail } from './live-tail-cap.js'
 import { createRingBuffer, type RingBuffer } from './ring-buffer.js'
@@ -1138,7 +1139,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           foldedCountRef.current = 0
         }
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
-        setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current, tokenHistory: pushTokenHistory(tcPct) }))
+        setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current, tokenHistory: pushTokenHistory(tcPct), taskList: agent.getTaskList() }))
 
         const usage = session.getTotalUsage()
         const normalInput = Math.max(0, usage.input_tokens - usage.cache_read_input_tokens)
@@ -1485,7 +1486,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             onCancel={() => surfacePop()}
           />
         )}
-        {/* Zone 3: Ground — GlanceBar + InputBar always adjacent */}
+        {/* Zone 3: Ground — TaskListBar + GlanceBar + InputBar always adjacent */}
+        <TaskListBar items={summaryState.taskList ?? []} />
         <GlanceBar
           pulses={glancePulses}
           phase={phaseFromSummary(summaryState)}

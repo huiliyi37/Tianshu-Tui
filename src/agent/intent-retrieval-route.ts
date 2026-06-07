@@ -1,4 +1,12 @@
 import type { TaskContract } from '../context/task-contract.js'
+import type { TaskListItem } from './session-state.js'
+import {
+  resolveContextualIdentifier,
+  enrichUserMessageWithContext,
+  sanitizeForIntentClassification,
+  extractSemanticVerb,
+  disambiguateByVerb,
+} from './intent-sanitizer.js'
 
 export type RetrievalSource = 'codebase' | 'git' | 'memory' | 'docs' | 'external' | 'tests'
 export type RetrievalPriority = 'must' | 'should' | 'optional' | 'avoid'
@@ -32,6 +40,9 @@ export interface RetrievalRoute {
 
 export interface RetrievalRouteInput {
   userMessage: string
+  lastAssistantMessage?: string
+  /** 跨轮持久化的任务列表，用于多轮回溯解析编号引用 */
+  taskList?: readonly TaskListItem[]
   taskContract?: TaskContract
 }
 
@@ -132,7 +143,7 @@ export const TASK_KIND_BASELINES: Record<IntentTaskKind, RetrievalDirection[]> =
 }
 
 export function buildHeuristicRetrievalRoute(input: RetrievalRouteInput): RetrievalRoute {
-  const taskKinds = inferTaskKinds(input.userMessage)
+  const taskKinds = inferTaskKinds(input.userMessage, input.lastAssistantMessage, input.taskList)
   const objectiveSummary = summarizeObjective(input)
   const directions = mergeDirections(taskKinds.flatMap(kind => baselineForKind(kind, input.taskContract)))
   return {
@@ -202,26 +213,40 @@ export function renderIntentRetrievalRoute(route: RetrievalRoute): string {
   return lines.join('\n')
 }
 
-function inferTaskKinds(userMessage: string): IntentTaskKind[] {
-  const text = userMessage.toLowerCase()
+function inferTaskKinds(userMessage: string, lastAssistantMessage?: string, taskList?: readonly TaskListItem[]): IntentTaskKind[] {
+  // Step 1: 解析上一轮回复中的关联任务计划（如 P1/P2/T1 等），含持久化 taskList 回溯
+  const resolvedContexts = resolveContextualIdentifier(userMessage, lastAssistantMessage, taskList)
+  // Step 2: 将任务详情富化到用户输入中，为正则提供强意图信号
+  const enriched = enrichUserMessageWithContext(userMessage, resolvedContexts)
+  // Step 3: 对富化后的消息进行编号脱敏与词语净化，提取语义动词
+  const { sanitized } = sanitizeForIntentClassification(enriched)
+  const verb = extractSemanticVerb(sanitized)
+  const text = sanitized.toLowerCase()
+
   const kinds: IntentTaskKind[] = []
   const add = (kind: IntentTaskKind) => {
     if (!kinds.includes(kind)) kinds.push(kind)
   }
 
   if (hasSecurityIntent(text)) add('security_safety')
-  if (/(修复|报错|失败|异常|回归|bug|error|fail|failed|failure|exception|crash|broken|regression|重试|retry)/i.test(userMessage)) add('bug_fix')
-  if (hasPerformanceIntent(text, userMessage)) add('performance_diagnosis')
-  if (hasReviewIntent(userMessage)) add('review_audit')
-  if (/(重构|迁移|拆分|整理|refactor|migrate|migration|cleanup|split)/i.test(userMessage)) add('refactor')
-  if (/(新增|支持|实现功能|feature|add\s+support|implement)/i.test(userMessage)) add('new_feature')
-  if (/(设计|架构|方案|选型|architecture|architect|design|strategy)/i.test(userMessage)) add('architecture_design')
-  if (/(验证|跑测试|确认是否完成|verify|verification|test this|run tests)/i.test(userMessage)) add('verification')
-  if (/(怎么用|如何用|配置|命令|api|usage|how\s+to|configure|command)/i.test(userMessage)) add('usage_question')
-  if (/(解释|看一下|分析|说明|explain|describe|walk through|read)/i.test(userMessage)) add('code_explanation')
+  if (/(修复|报错|失败|异常|回归|bug|error|fail|failed|failure|exception|crash|broken|regression|重试|retry)/i.test(sanitized)) add('bug_fix')
+  if (hasPerformanceIntent(text, sanitized)) add('performance_diagnosis')
+  if (hasReviewIntent(sanitized)) add('review_audit')
+  if (/(重构|迁移|拆分|整理|refactor|migrate|migration|cleanup|split)/i.test(sanitized)) add('refactor')
+  if (/(新增|支持|实现功能|feature|add\s+support|implement)/i.test(sanitized)) add('new_feature')
+  if (/(设计|架构|方案|选型|architecture|architect|design|strategy)/i.test(sanitized)) add('architecture_design')
+  if (/(验证|跑测试|确认是否完成|verify|verification|test this|run tests)/i.test(sanitized)) add('verification')
+  if (/(怎么用|如何用|配置|命令|api|usage|how\s+to|configure|command)/i.test(sanitized)) add('usage_question')
+  if (/(解释|看一下|分析|说明|explain|describe|walk through|read)/i.test(sanitized)) add('code_explanation')
 
   if (kinds.length === 0) add('new_feature')
-  return kinds.sort((a, b) => KIND_RANK[a] - KIND_RANK[b]).slice(0, MAX_TASK_KINDS)
+  
+  // Step 4: 动词消歧 — 当多种匹配时，动词语义优先
+  let result = kinds.sort((a, b) => KIND_RANK[a] - KIND_RANK[b]).slice(0, MAX_TASK_KINDS)
+  if (result.length > 1 && verb) {
+    result = disambiguateByVerb(result, verb)
+  }
+  return result
 }
 
 function hasPerformanceIntent(text: string, original: string): boolean {

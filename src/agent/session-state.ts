@@ -34,6 +34,14 @@ export interface FactEntry {
   verifiedAt: number
 }
 
+export interface TaskListItem {
+  id: string           // e.g., "P1", "T2"
+  content: string      // e.g., "修复 loop.ts 中的内存泄露"
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked'
+  turnCreated: number
+  turnUpdated: number
+}
+
 export interface SessionState {
   version: 1
   sessionId: string
@@ -44,6 +52,8 @@ export interface SessionState {
     plan?: string[]
     currentStep?: number
   }
+  /** 从 Assistant 回复中提取的用户可感知任务列表，跨轮持久化，支持多轮回溯 */
+  taskList: TaskListItem[]
   knownFacts: FactEntry[]
   decisions: DecisionEntry[]
   fileIndex: Record<string, FileEntry>
@@ -64,6 +74,7 @@ export class SessionStateManager {
       sessionId,
       updatedAt: Date.now(),
       task: { objective: '', status: 'exploring' },
+      taskList: [],
       knownFacts: [],
       decisions: [],
       fileIndex: {},
@@ -138,6 +149,66 @@ export class SessionStateManager {
       this.state.knownFacts = this.state.knownFacts.slice(-MAX_FACTS)
     }
     this.state.updatedAt = Date.now()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Task List — extracted from assistant replies, persisted across turns
+  // ---------------------------------------------------------------------------
+
+  /** 从 Assistant 回复文本中提取任务列表（支持 Markdown 列表、编号、粗体等格式） */
+  extractTaskList(text: string, turn: number): TaskListItem[] {
+    const items: TaskListItem[] = []
+    const lines = text.split('\n')
+
+    // 匹配 Markdown 列表/编号模式: - P1: content, 1. P2: content, **P1**: content, ### P1. content
+    const patterns = [
+      /^[\s*\-\\d\\.\\#]*\*?\*?([PpTtSs]\d+)\*?\*?[\s\\:\\-\\.]+(.+)/i,
+      /^\s*\*?\*?([PpTtSs]\d+)\*?\*?[\s\\:\\-\\.]+(.+)/i,
+      /\b([PpTtSs]\d+)\b\s*(?:-|=>|->|:|：)\s*(.+)/i,
+    ]
+
+    for (const line of lines) {
+      for (const pattern of patterns) {
+        const match = line.match(pattern)
+        if (match?.[1] && match?.[2]) {
+          const id = match[1].toUpperCase()
+          const content = match[2].trim()
+          // 过滤过短或纯符号内容
+          if (content.replace(/[`*_\\-\\s]/g, '').length > 3 && !items.some(it => it.id === id)) {
+            items.push({
+              id,
+              content: content.slice(0, 160),
+              status: 'pending',
+              turnCreated: turn,
+              turnUpdated: turn,
+            })
+          }
+          break // 一行只匹配第一个命中的模式
+        }
+      }
+    }
+
+    if (items.length > 0) {
+      this.state.taskList = items
+      this.state.updatedAt = Date.now()
+    }
+
+    return items
+  }
+
+  /** 获取当前持久化的任务列表 */
+  getTaskList(): Readonly<TaskListItem[]> {
+    return this.state.taskList
+  }
+
+  /** 更新单个任务项的状态 */
+  updateTaskListItem(id: string, status: TaskListItem['status'], turn: number): boolean {
+    const item = this.state.taskList.find(it => it.id === id)
+    if (!item) return false
+    item.status = status
+    item.turnUpdated = turn
+    this.state.updatedAt = Date.now()
+    return true
   }
 
   // ---------------------------------------------------------------------------

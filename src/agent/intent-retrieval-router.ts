@@ -1,6 +1,7 @@
 import type { StreamClient } from '../api/stream-client.js'
 import type { OaiChatRequest } from '../api/oai-types.js'
 import type { TaskContract } from '../context/task-contract.js'
+import type { TaskListItem } from './session-state.js'
 import {
   buildHeuristicRetrievalRoute,
   normalizeRetrievalRoute,
@@ -9,6 +10,11 @@ import {
   type RetrievalRouteInput,
   type RetrievalSource,
 } from './intent-retrieval-route.js'
+import {
+  resolveContextualIdentifier,
+  enrichUserMessageWithContext,
+  sanitizeForIntentClassification,
+} from './intent-sanitizer.js'
 
 export interface IntentRetrievalRouterConfig {
   enabled: boolean
@@ -60,11 +66,28 @@ export function normalizeIntentRetrievalRouterConfig(input: IntentRetrievalRoute
   }
 }
 
-export function buildIntentRouterPrompt(input: { userMessage: string, taskContract?: TaskContract }): string {
+export function buildIntentRouterPrompt(input: {
+  userMessage: string
+  lastAssistantMessage?: string
+  taskList?: readonly TaskListItem[]
+  taskContract?: TaskContract
+}): string {
+  const resolvedContexts = resolveContextualIdentifier(input.userMessage, input.lastAssistantMessage, input.taskList)
+  const enriched = enrichUserMessageWithContext(input.userMessage, resolvedContexts)
+  const { sanitized, strippedTokens } = sanitizeForIntentClassification(enriched)
+
   const objective = input.taskContract?.objective || input.userMessage.split('\n')[0]?.slice(0, 240) || ''
   const mentionedFiles = input.taskContract?.scope.mentionedFiles.slice(0, 5).join(', ') || 'none'
   const constraints = input.taskContract?.constraints.slice(0, 3).join(' | ') || 'none'
-  const snippet = input.userMessage.replace(/\s+/g, ' ').slice(0, 500)
+  const snippet = sanitized.replace(/\s+/g, ' ').slice(0, 500)
+
+  const contextLines: string[] = []
+  if (resolvedContexts.length > 0) {
+    contextLines.push('## 上下文关联任务 (Contextual Resolved Tasks)')
+    for (const ctx of resolvedContexts) {
+      contextLines.push(`- 用户说的 ${ctx.identifier} 实际对应上一轮回复中的任务: "${ctx.resolvedContent}"`)
+    }
+  }
 
   return [
     '你是天枢的轻量意图检索路由器。不要回答用户任务，不要调用工具，不要输出解释。',
@@ -74,11 +97,18 @@ export function buildIntentRouterPrompt(input: { userMessage: string, taskContra
     '允许的 direction.source: codebase, git, memory, docs, external, tests。priority: must, should, optional, avoid。',
     '不要自动执行检索；source 只是给主模型的建议。不要记录或复述用户全文。',
     'JSON schema: {"taskKinds":[...],"directions":[{"source":"codebase","priority":"must","query":"...","reason":"..."}],"antiAnchorNote":"...","confidence":0.0}',
+    '',
+    '## 关键规则',
+    '1. 文档编号（P0/P1/T1/TASK-xxx/ISSUE-xxx/#123）是引用标签，本身不是任务分类信号。必须关注其指向的上下文任务。',
+    '2. 用户消息中的核心动词与关联上下文任务决定类型："做 P1 (上下文关联任务: 修复内存泄露)" → 真实任务是"修复"→ bug_fix，而非 review_audit。',
+    '',
+    ...contextLines,
     `objectiveSummary: ${objective}`,
     `mentionedFiles: ${mentionedFiles}`,
     `constraints: ${constraints}`,
     `userMessageSnippet: ${snippet}`,
-  ].join('\n')
+    strippedTokens.length > 0 ? `注意：已脱敏的编号标签 [${strippedTokens.join(', ')}] 是文档/任务引用，不是任务分类依据。` : '',
+  ].filter(Boolean).join('\n')
 }
 
 export async function classifyIntentRetrievalRoute(input: ClassifyIntentRetrievalRouteInput): Promise<RetrievalRoute | null> {
@@ -86,7 +116,12 @@ export async function classifyIntentRetrievalRoute(input: ClassifyIntentRetrieva
   if (!config.enabled) return null
 
   const startedAt = Date.now()
-  const fallback = () => buildHeuristicRetrievalRoute({ userMessage: input.userMessage, taskContract: input.taskContract })
+  const fallback = () => buildHeuristicRetrievalRoute({
+    userMessage: input.userMessage,
+    lastAssistantMessage: input.lastAssistantMessage,
+    taskList: input.taskList,
+    taskContract: input.taskContract,
+  })
   const finalize = (route: RetrievalRoute, classifier: IntentRetrievalRouterConfig['classifier']): RetrievalRoute => {
     input.onTelemetry?.({
       classifier,
@@ -121,7 +156,7 @@ export async function classifyIntentRetrievalRoute(input: ClassifyIntentRetrieva
 
     const parsed = parseJsonObject(extractJson(text))
     if (!parsed) return finalize(fallback(), 'llm')
-    const route = normalizeRetrievalRoute({ ...parsed, fallbackUsed: false }, { userMessage: input.userMessage, taskContract: input.taskContract })
+    const route = normalizeRetrievalRoute({ ...parsed, fallbackUsed: false }, { userMessage: input.userMessage, taskList: input.taskList, taskContract: input.taskContract })
     return finalize(route, 'llm')
   } catch {
     return finalize(fallback(), 'llm')
