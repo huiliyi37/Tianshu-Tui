@@ -66,3 +66,55 @@ test('team_orchestrate passes fromWave through and reports the next wave value',
   assert.ok(!captured.some(r => r.parentTurnId.includes('T1')))
   assert.match(result.content, /fromWave: 2/)
 })
+
+test('team_orchestrate runs the review gate on a cross-module final wave', async () => {
+  let squadronInvoked = false
+  const tool = createTeamOrchestrateTool({
+    delegate: async () => ({
+      status: 'completed',
+      packet: 'verified',
+      results: [{
+        workOrderId: 'verifier',
+        status: 'passed',
+        summary: 'verified',
+        findings: [],
+        artifacts: [],
+        changedFiles: [],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'verified',
+      }],
+    }),
+    delegateBatch: async (requests) => {
+      if (requests.every(r => r.kind === 'review')) {
+        squadronInvoked = true
+        return { status: 'completed', results: [], packet: 'reviewed' }
+      }
+      return {
+        status: 'completed',
+        packet: 'executed',
+        results: [{
+          workOrderId: 'w',
+          status: 'passed',
+          summary: 's',
+          findings: [],
+          artifacts: [],
+          changedFiles: ['src/agent/a.ts', 'src/tui/b.ts', 'src/tools/c.ts', 'src/api/d.ts'],
+          risks: [],
+          nextActions: [],
+          evidenceStatus: 'verified',
+        }],
+      }
+    },
+  })
+  const md = '### T1: change\n修改 `src/agent/a.ts`'
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'feature work', planMarkdown: md, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-rev',
+  })
+
+  assert.equal(result.isError, false)
+  assert.match(result.content, /Review gate/)
+  assert.equal(squadronInvoked, true)
+})

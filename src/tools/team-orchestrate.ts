@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
+import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
+import { isCrossModule, isFixContext, type ChangeSet } from '../agent/review-discipline.js'
+import { routeReviewWorkflow } from '../agent/review-router.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import { validatePathSafe } from './path-validate.js'
@@ -17,6 +20,11 @@ export interface TeamOrchestrateCoordinator {
     onProgress?: (completed: number, total: number) => void,
   ): Promise<CoordinatorRun>
   delegate?(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
+}
+
+function requireDelegate(coordinator: TeamOrchestrateCoordinator): Required<Pick<TeamOrchestrateCoordinator, 'delegate'>>['delegate'] {
+  if (!coordinator.delegate) throw new Error('team_orchestrate review gate requires coordinator.delegate')
+  return coordinator.delegate
 }
 
 const inputSchema = z.object({
@@ -98,8 +106,38 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
         return { content: `team_orchestrate failed: ${msg}`, isError: true }
       }
 
+      let reviewNote = ''
+      const effectiveFromWave = fromWave ?? 0
+      const isLastWave = summary.waves.length > 0 && effectiveFromWave >= summary.waves.length - 1
+      const changedFiles = summary.run
+        ? [...new Set(summary.run.results.flatMap(result => result.changedFiles))]
+        : []
+      if (isLastWave && changedFiles.length > 0) {
+        try {
+          const delegate = requireDelegate(coordinator)
+          const change: ChangeSet = {
+            files: changedFiles,
+            crossModule: isCrossModule(changedFiles),
+            isFix: isFixContext(objective),
+          }
+          const reviewDeps = createCoordinatorReviewDeps(
+            {
+              delegate: (request, abortSignal) => delegate(request, abortSignal),
+              delegateBatch: (requests, policy, abortSignal, onProgress) =>
+                coordinator.delegateBatch(requests, policy, abortSignal, onProgress),
+            },
+            { reviewDepth: params.reviewDepth ?? 0, abortSignal: params.abortSignal, parentTurnId: `${params.toolUseId}:review` },
+          )
+          const outcome = await routeReviewWorkflow(change, reviewDeps, { maxRounds: 3 })
+          reviewNote = `\n\nReview gate [${outcome.tier}]: ${outcome.verdict}${outcome.evidence ? ` — ${outcome.evidence}` : ''}`
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          return { content: `team_orchestrate review gate failed: ${msg}`, isError: true }
+        }
+      }
+
       return {
-        content: formatTeamSummary(summary, fromWave ?? 0),
+        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote,
         uiContent: `team ${mode}: ${summary.dispatched} dispatched / ${summary.blocked.length} blocked`,
         isError: false,
       }
