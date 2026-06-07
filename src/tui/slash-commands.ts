@@ -23,7 +23,7 @@ import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
-import { listPlans, approvePlan, deletePlan, readPlan } from '../plan/plan-store.js'
+import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 
 const HELP_TEXT = `Available commands:
 /help — Show this help
@@ -360,7 +360,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
     }
 
     case '/plan-list': {
-      const cwd = process.cwd()
+      const cwd = ctx.agent.cwd
       const plans = await listPlans(cwd)
       if (plans.length === 0) {
         pushStatic(createLogEntry({ type: 'system', content: 'No plans found. Use /plan-mode to enter plan mode and create a plan.' }))
@@ -379,7 +379,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const slug = parts[1]?.toLowerCase()
       if (!slug) {
         // No slug — list plans and hint
-        const cwd = process.cwd()
+        const cwd = ctx.agent.cwd
         const plans = await listPlans(cwd)
         if (plans.length === 0) {
           pushStatic(createLogEntry({ type: 'system', content: 'No plans to approve. Use /plan-mode to create one.' }))
@@ -396,7 +396,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         return true
       }
 
-      const cwd = process.cwd()
+      const cwd = ctx.agent.cwd
       const approved = await approvePlan(cwd, slug)
       if (!approved) {
         pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
@@ -422,16 +422,15 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         return true
       }
 
-      const cwd = process.cwd()
-      const plan = await readPlan(cwd, slug)
-      if (!plan) {
+      const cwd = ctx.agent.cwd
+      const rejected = await rejectPlan(cwd, slug)
+      if (!rejected) {
         pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
         setIsStreaming(false)
         return true
       }
 
-      await deletePlan(cwd, slug)
-      pushStatic(createLogEntry({ type: 'system', content: `❌ Plan rejected and removed: **${plan.title}** (\`${slug}\`)\n\nYou may now provide feedback for the agent to revise the plan.` }))
+      pushStatic(createLogEntry({ type: 'system', content: `❌ Plan rejected: **${rejected.title}** (\`${slug}\`)\n\nThe plan was marked REJECTED but kept on disk. Provide feedback and the agent can revise it in place.` }))
       setIsStreaming(false)
       return true
     }

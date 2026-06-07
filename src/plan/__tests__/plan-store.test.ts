@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { writePlan, readPlan, listPlans, approvePlan, deletePlan, slugify } from '../plan-store.js'
+import { writePlan, readPlan, listPlans, approvePlan, rejectPlan, deletePlan, slugify } from '../plan-store.js'
 import { checked, checkedAt } from '../../utils/guard.js'
 
 describe('slugify', () => {
@@ -87,6 +87,31 @@ describe('plan-store CRUD', () => {
       const approved = await approvePlan(dir, 'my-plan')
       assert.ok(approved)
       assert.equal(checked(approved).status, 'approved')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('rejectPlan marks plan as rejected without deleting it', async () => {
+    const { dir, cleanup } = setup()
+    try {
+      await writePlan(dir, 'doomed-plan', '# Doomed Plan\n\nContent.')
+      const rejected = await rejectPlan(dir, 'doomed-plan')
+      assert.ok(rejected)
+      assert.equal(checked(rejected).status, 'rejected')
+      // File is kept on disk so the agent can revise it in place.
+      const reread = await readPlan(dir, 'doomed-plan')
+      assert.ok(reread)
+      assert.equal(checked(reread).status, 'rejected')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('rejectPlan returns null for non-existent plan', async () => {
+    const { dir, cleanup } = setup()
+    try {
+      assert.equal(await rejectPlan(dir, 'ghost'), null)
     } finally {
       cleanup()
     }

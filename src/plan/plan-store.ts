@@ -117,11 +117,27 @@ export async function listPlans(cwd: string): Promise<PlanDocument[]> {
 
 /** 标记计划为已批准（在文件头部插入状态标记） */
 export async function approvePlan(cwd: string, slug: string): Promise<PlanDocument | null> {
+  return markPlanStatus(cwd, slug, 'APPROVED')
+}
+
+/**
+ * 拒绝计划:写入 REJECTED 状态标记而非删除文件,保留原稿供 agent 在其上修订。
+ * 返回更新后的文档,计划不存在时返回 null。
+ */
+export async function rejectPlan(cwd: string, slug: string): Promise<PlanDocument | null> {
+  return markPlanStatus(cwd, slug, 'REJECTED')
+}
+
+/** 在第一个 H1 前插入状态标记并回写,返回更新后的文档。 */
+async function markPlanStatus(
+  cwd: string,
+  slug: string,
+  status: 'APPROVED' | 'REJECTED' | 'EXECUTED',
+): Promise<PlanDocument | null> {
   const plan = await readPlan(cwd, slug)
   if (!plan) return null
 
-  // 在第一个 H1 前插入状态标记
-  const statusLine = `> **Status: APPROVED** — ${new Date().toISOString()}\n\n`
+  const statusLine = `> **Status: ${status}** — ${new Date().toISOString()}\n\n`
   let newContent: string
   const h1Match = plan.content.match(/^#\s+.*$/m)
   if (h1Match) {
