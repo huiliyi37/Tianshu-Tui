@@ -79,6 +79,91 @@ ChatGPT 后端 (codex Responses)  → 真正的 GPT-5.5
 
 ---
 
+## 3.5 账号池更新记录（2026-06-07）
+
+### 变更摘要
+
+| 项目 | 旧值 | 新值 |
+|------|------|------|
+| 账号数量 | 9（5 可用 / 2 配额耗尽 / 2 死） | 1000（全部 team 计划） |
+| 来源 | 手动收集 | 1000TEAM-sub2api-20260607.json（微信传输） |
+| plan_type | free × 4 + plus × 3 + dead × 2 | team × 1000 |
+| token 过期 | ~2026-06-16 | ~2026-06-13（JWT exp ≈ 10 天） |
+
+### 新账号文件格式（cliproxy 兼容）
+
+来源 JSON 格式（1000TEAM-sub2api）→ 转换为 cliproxy 格式：
+
+```json
+{
+  "access_token": "eyJ...",
+  "account_id": "a4e523ff-bf2f-4212-ba8d-f1028c79e07a",
+  "disabled": false,
+  "email": "xxx@edu.aiceo.dev",
+  "expired": "2026-06-13T06:00:00+08:00",
+  "id_token": "eyJ...",
+  "last_refresh": "2026-06-07T...",
+  "refresh_token": "rt.1.AAD...",
+  "type": "codex"
+}
+```
+
+文件名规则：`codex-{email}-team.json`
+
+### 备份与恢复
+
+**旧账号备份位置**：`~/.cli-proxy-api/backup-original-9-20260607/`
+
+```
+backup-original-9-20260607/
+├── _manifest.json                              ← 标注文件（备份时间 + 9 个账号摘要）
+├── codex-AlleneYundteq@outlook.com-plus.json   ← dead (refresh_token_reused)
+├── codex-TobinJacobsubshw@outlook.com-plus.json← dead (refresh_token_reused)
+├── codex-bromfieldplacido@gmail.com-free.json  ← 可用
+├── codex-echo17years@163.com-free.json         ← 可用
+├── codex-fatinhanogueira396@gmail.com-plus.json← 配额耗尽
+├── codex-gilsonallosia@gmail.com-plus.json     ← 配额耗尽
+├── codex-yishines@163.com-free.json            ← 可用
+├── codex-yiyum037@163.com-free.json            ← 可用
+└── codex-yuese096@163.com-free.json            ← 可用
+```
+
+**恢复旧账号**（如果 1000 个 team 账号全部失效）：
+
+```bash
+# 1. 备份当前 team 池（可选）
+mkdir -p ~/.cli-proxy-api/backup-team-1000
+cp ~/.cli-proxy-api/codex-*.json ~/.cli-proxy-api/backup-team-1000/
+
+# 2. 恢复旧 9 账号
+cp ~/.cli-proxy-api/backup-original-9-20260607/codex-*.json ~/.cli-proxy-api/
+
+# 3. cliproxy 会在 ~10s 内热加载新文件
+#    也可手动触发刷新：
+/usr/bin/python3 ~/.cli-proxy-api/refresh-codex-tokens.py
+```
+
+**查看备份标注**：
+
+```bash
+python3 -c "
+import json
+m = json.load(open('$HOME/.cli-proxy-api/backup-original-9-20260607/_manifest.json'))
+print(f\"备份时间: {m['backup_date']}\")
+for a in m['accounts']:
+    flag = '⛔' if a['disabled'] else '✅'
+    print(f\"  {flag} {a['email']:40} expired={a.get('expired','?')}\")
+"
+```
+
+### 注意事项
+
+- **刷新脚本兼容性**：`refresh-codex-tokens.py` 处理 1000 个账号时，每轮会对每个账号发 1 次刷新 + 1 次探测。建议将 launchd 间隔从 6h 改为 12h，降低探测开销。
+- **文件数量**：1000 个 `codex-*.json` 文件在目录中，`ls` 和 glob 仍可接受，但如果后续扩到 10000+ 需考虑目录性能。
+- **token 过期**：新账号 JWT exp 约 10 天，需确保刷新脚本正常运行（§9）。
+
+---
+
 ## 4. cliproxy 侧配置（`~/.cli-proxy-api/config.yaml`）
 
 相关片段：
@@ -181,12 +266,16 @@ PY
 > 一直发过期 token → 上游 401 → 标记 `auth unavailable` → 最终 `502 unknown provider`。
 > 这是 2026-06-06 那次故障的根因。
 >
-> **快照（2026-06-06 恢复后）：9 个账号 → 5 可用 / 2 配额耗尽 / 2 死。**
-> - 5 可用：`bromfieldplacido / echo17years / yishines / yiyum037 / yuese096`
-> - 2 配额耗尽(429 usage_limit)：`fatinhanogueira396 / gilsonallosia`，约 **2026-07-06** 重置
-> - 2 死(refresh_token_reused)：`AlleneYundteq / TobinJacobsubshw`
+> **快照（2026-06-07 更新）：1000 个 team 账号，全部来自 1000TEAM-sub2api 池。**
+> - 旧 9 账号已备份至 `~/.cli-proxy-api/backup-original-9-20260607/`，详见 §3.5。
+> - 新账号文件名格式：`codex-{email}-team.json`，全部 `disabled=false`。
+> - token 约 **2026-06-13** 到期 → 刷新脚本 §9 必须正常运行。
 >
-> token 都在 **2026-06-16** 到期 → 见 §7.5「cliproxy 不会自动刷新」。
+> **历史快照（2026-06-06，已被替换）：**
+> - 旧 9 账号：5 可用 / 2 配额耗尽 / 2 死
+> - 5 可用：`bromfieldplacido / echo17years / yishines / yiyum037 / yuese096`
+> - 2 配额耗尽(429 usage_limit)：`fatinhanogueira396 / gilsonallosia`，约 2026-07-06 重置
+> - 2 死(refresh_token_reused)：`AlleneYundteq / TobinJacobsubshw`
 
 ### 7.2 端到端验证（不碰进程，只 curl）
 
@@ -358,8 +447,9 @@ token 寿命只有 ~10 天且 cliproxy 不自管（§7.5#3），所以用一个�
 由此实现：续期临期 token、自动**重新启用**配额已重置的账号、自动**禁用**配额耗尽 / 失效的账号。
 （三个关键约束——bearer 用 access_token、必须 in-place 写、expired 写真实 exp——都已内建，见 §7.5。）
 
-> **代价提醒**：每次运行会对全部 9 个账号各发 1 个极小探测请求（含已禁用的——用于探测是否恢复）。
-> 对正常账号可忽略；对额度极紧的免费号，这点探测也算一次调用。每 6h 一轮，可接受。
+> **代价提醒**：每次运行会对全部账号各发 1 个极小探测请求（含已禁用的——用于探测是否恢复）。
+> 旧池 9 个账号时每轮 9 次探测，可忽略。新池 1000 个 team 账号时每轮 1000 次，建议
+> 将 launchd 间隔从 6h 调至 12h（或对 disabled 账号降频探测）。
 > 已死账号（`refresh_token_reused`）每轮会浪费 1 次刷新调用，无害。
 
 ### 9.3 运维命令
@@ -392,6 +482,7 @@ rm "$PLIST"
 - 改频率：编辑 plist 的 `StartCalendarInterval`，然后按 §9.3 重新 bootstrap。
 - 脚本写 `~/.cli-proxy-api/codex-*.json`，是这些文件的**唯一**写入者（cliproxy 只自刷新 kim-*.json，
   不碰 codex），所以无写竞争；flock 仅防 launchd 运行重叠。
+- 1000 个账号下刷新脚本次约 1000 次探测，建议将定时器间隔从 6h 调至 12h 降低开销。
 - 这是个人本机运维脚本，不属于 Rivet 仓库构建链路；纳入文档仅为可维护与可复现。
 
 ---
@@ -412,7 +503,8 @@ rm "$PLIST"
 |------|------|
 | `~/.rivet/config.json`（chmod 600） | Rivet 的 `codex` provider（指向 cliproxy）。§3 |
 | `~/.cli-proxy-api/config.yaml` | cliproxy 配置（别名映射 / 路由 / payload）。§4，热加载 |
-| `~/.cli-proxy-api/codex-*.json` | codex OAuth 账号池（每文件一账号）。§7 |
+| `~/.cli-proxy-api/codex-*.json` | codex OAuth 账号池（每文件一账号）。§7。当前 1000 个 team 账号 |
+| `~/.cli-proxy-api/backup-original-9-20260607/` | 旧 9 账号备份（含 `_manifest.json` 标注）。§3.5 |
 | `~/.cli-proxy-api/logs/main.log` `error-*.log` | cliproxy 运行日志 / 单条错误详情。§7.2 |
 | `~/.cli-proxy-api/refresh-codex-tokens.py` | 账号池自动刷新脚本。§9 |
 | `~/Library/LaunchAgents/com.banxia.cliproxy.refresh-codex.plist` | launchd 定时器（每 6h）。§9 |
