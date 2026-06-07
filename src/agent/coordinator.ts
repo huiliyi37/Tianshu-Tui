@@ -35,6 +35,10 @@ export interface DelegationRequest {
   scope: WorkOrderScope
   /** Review-router re-entrancy depth to pass into worker tool contexts. */
   reviewDepth?: number
+  /** Work order IDs this task depends on — propagated to WorkOrder.dependencies. */
+  dependencies?: string[]
+  /** Logical group identifier for related tasks (e.g. team wave). */
+  groupId?: string
 }
 
 export interface CoordinatorRun {
@@ -166,6 +170,7 @@ export class DelegationCoordinator {
             objective: request.objective,
             scope: request.scope,
             reviewDepth: request.reviewDepth,
+            dependencies: request.dependencies,
           })
         : createReadOnlyWorkOrder({
             parentTurnId: request.parentTurnId,
@@ -174,6 +179,7 @@ export class DelegationCoordinator {
             objective: request.objective,
             scope: request.scope,
             reviewDepth: request.reviewDepth,
+            dependencies: request.dependencies,
           })
 
       return await this.delegateOrder(order)
@@ -424,6 +430,7 @@ export class DelegationCoordinator {
             objective: r.objective,
             scope: r.scope,
             reviewDepth: r.reviewDepth,
+            dependencies: r.dependencies,
           })
         : createReadOnlyWorkOrder({
             parentTurnId: r.parentTurnId,
@@ -432,6 +439,7 @@ export class DelegationCoordinator {
             objective: r.objective,
             scope: r.scope,
             reviewDepth: r.reviewDepth,
+            dependencies: r.dependencies,
           })
       if (queue.enqueue(order)) {
         orders.push(order)

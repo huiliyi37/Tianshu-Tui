@@ -73,13 +73,20 @@ export function selectDispatchableTeamTasks(tasks: TeamTaskDraft[], maxParallel 
 }
 
 export function teamTasksToDelegationRequests(tasks: TeamTaskDraft[], parentTurnId = 'team'): DelegationRequest[] {
-  return tasks.map((task, index) => ({
-    parentTurnId: `${parentTurnId}:${task.id || index}`,
-    objective: buildExecutionObjective(task),
-    kind: task.kind,
-    profile: task.profile,
-    scope: { files: task.files },
-  }))
+  return tasks.map((task, index) => {
+    const req: DelegationRequest = {
+      parentTurnId: `${parentTurnId}:${task.id || index}`,
+      objective: buildExecutionObjective(task),
+      kind: task.kind,
+      profile: task.profile,
+      scope: { files: task.files },
+    }
+    // Propagate dependencies from enriched TeamTask if present
+    if ('dependsOn' in task && Array.isArray((task as any).dependsOn) && (task as any).dependsOn.length > 0) {
+      req.dependencies = (task as any).dependsOn
+    }
+    return req
+  })
 }
 
 export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestratorDeps): Promise<TeamRunSummary> {
