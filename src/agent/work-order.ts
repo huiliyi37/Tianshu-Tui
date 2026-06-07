@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { CapabilityTask } from '../model/capability.js'
 import type { VerificationMetadata } from '../tools/types.js'
 import { profileRegistry } from './profile-registry.js'
+import { starDomainRegistry } from './star-domain-registry.js'
 
 export const READ_ONLY_WORKER_TOOLS = ['read_file', 'read_section', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'repo_graph', 'related_tests'] as const
 
@@ -96,6 +97,8 @@ export const workOrderSchema = z.object({
   domain: domainAreaSchema.optional(),
   workerCwd: z.string().optional(),
   reviewDepth: z.number().int().min(0).optional(),
+  /** Star domain authority for cognitive injection (V3 Component A). */
+  authority: z.string().optional(),
 })
 
 export type WorkOrder = z.infer<typeof workOrderSchema>
@@ -187,6 +190,8 @@ export interface CreateReadOnlyWorkOrderInput {
   domain?: DomainArea
   /** Review-router re-entrancy depth propagated across delegation boundaries. */
   reviewDepth?: number
+  /** Star domain authority for cognitive injection (V3 Component A). */
+  authority?: string
 }
 
 export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): WorkOrder {
@@ -212,7 +217,16 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
         ]),
     allowedTools: (() => {
       const profileDef = profileRegistry.get(input.profile)
-      return profileDef?.allowedTools ?? [...READ_ONLY_WORKER_TOOLS]
+      let tools = profileDef?.allowedTools ?? [...READ_ONLY_WORKER_TOOLS]
+      // V3 Component A: intersect with domain toolWhitelist when authority set
+      if (input.authority) {
+        const domainDef = starDomainRegistry.get(input.authority)
+        if (domainDef) {
+          const whitelist = new Set(domainDef.toolWhitelist)
+          tools = tools.filter(t => whitelist.has(t))
+        }
+      }
+      return tools
     })(),
     disallowedTools: input.profile === 'adversarial_verifier'
       ? ['bash', 'write_file', 'edit_file', 'delegate_task', 'delegate_batch'] // run_tests NOT disallowed — it's the verifier's primary weapon
@@ -228,6 +242,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     },
     domain: input.domain,
     reviewDepth: input.reviewDepth,
+    authority: input.authority,
   })
 }
 
@@ -252,7 +267,16 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     allowedTools: (() => {
       const writeProfile = input.profile ?? 'patcher'
       const profileDef = profileRegistry.get(writeProfile)
-      return profileDef?.allowedTools ?? [...WRITE_WORKER_TOOLS]
+      let tools = profileDef?.allowedTools ?? [...WRITE_WORKER_TOOLS]
+      // V3 Component A: intersect with domain toolWhitelist when authority set
+      if (input.authority) {
+        const domainDef = starDomainRegistry.get(input.authority)
+        if (domainDef) {
+          const whitelist = new Set(domainDef.toolWhitelist)
+          tools = tools.filter(t => whitelist.has(t))
+        }
+      }
+      return tools
     })(),
     disallowedTools: ['delegate_task', 'delegate_batch'],
     dedupeKey: `write:${input.scope.files?.join(',') || input.objective}`,
@@ -266,6 +290,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     },
     domain: input.domain,
     reviewDepth: input.reviewDepth,
+    authority: input.authority,
   })
 }
 

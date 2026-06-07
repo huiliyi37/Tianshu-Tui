@@ -39,6 +39,10 @@ export interface DelegationRequest {
   dependencies?: string[]
   /** Logical group identifier for related tasks (e.g. team wave). */
   groupId?: string
+  /** Star domain authority for cognitive injection (V3 Component A).
+   *  When set, the domain's systemPromptSuffix is injected into the worker prompt
+   *  and allowedTools are intersected with the domain's toolWhitelist. */
+  authority?: import('./star-domain.js').StarDomainId
 }
 
 export interface CoordinatorRun {
@@ -178,6 +182,7 @@ export class DelegationCoordinator {
             scope: request.scope,
             reviewDepth: request.reviewDepth,
             dependencies: request.dependencies,
+            authority: request.authority,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -188,6 +193,7 @@ export class DelegationCoordinator {
             scope: request.scope,
             reviewDepth: request.reviewDepth,
             dependencies: request.dependencies,
+            authority: request.authority,
           })
 
       return await this.delegateOrder(order)
@@ -443,6 +449,7 @@ export class DelegationCoordinator {
             scope: r.scope,
             reviewDepth: r.reviewDepth,
             dependencies: r.dependencies,
+            authority: r.authority,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -453,6 +460,7 @@ export class DelegationCoordinator {
             scope: r.scope,
             reviewDepth: r.reviewDepth,
             dependencies: r.dependencies,
+            authority: r.authority,
           })
       if (queue.enqueue(order)) {
         orders.push(order)

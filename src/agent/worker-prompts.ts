@@ -1,6 +1,7 @@
 import { READ_ONLY_WORKER_TOOLS, type WorkOrder, type WorkerResult, type WorkerProfile } from './work-order.js'
 import { buildMemoryKnowledgePacket, needsMemoryKnowledgePacket } from './worker-knowledge-packet.js'
 import { profileRegistry } from './profile-registry.js'
+import { starDomainRegistry } from './star-domain-registry.js'
 
 // ─── Profile-specific expertise prompts ────────────────────────────
 // Each profile gets targeted guidance on HOW to do its job,
@@ -185,6 +186,9 @@ function buildWriteResultShape(): string {
 }
 
 export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): string {
+  // V3 Component A: if order has authority, derive suffix from domain registry
+  const effectiveSuffix = authoritySuffix
+    ?? (order.authority ? starDomainRegistry.get(order.authority)?.systemPromptSuffix : undefined)
   const hasWriteTools = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
   const capability = hasWriteTools ? 'write-capable' : 'read-only'
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
@@ -244,8 +248,8 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
     resultShape,
   )
 
-  if (authoritySuffix) {
-    parts.push('', '## 权域指令', '', authoritySuffix)
+  if (effectiveSuffix) {
+    parts.push('', '## 权域指令', '', effectiveSuffix)
   }
 
   return parts.join('\n')
