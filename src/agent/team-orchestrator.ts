@@ -1,6 +1,7 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
 import type { AggregationPolicy } from './work-order.js'
-import { parseTeamTaskDrafts, hasOverlappingFiles, type TeamTaskDraft } from './team-plan.js'
+import { parseTeamTaskDrafts, parseTeamTasks, buildUnifiedTeamPlan, hasOverlappingFiles, type TeamTaskDraft, type TeamTask, type UnifiedTeamPlan } from './team-plan.js'
+import { groupTeamTasks, type TeamWave } from './team-grouping.js'
 
 export interface TeamOrchestratorDeps {
   delegateBatch(
@@ -23,6 +24,8 @@ export interface TeamRunInput {
 export interface TeamRunSummary {
   mode: 'standard' | 'max'
   planned: TeamTaskDraft[]
+  tasks: TeamTask[]
+  waves: TeamWave[]
   dispatched: number
   blocked: string[]
   packet: string
@@ -89,42 +92,114 @@ export function teamTasksToDelegationRequests(tasks: TeamTaskDraft[], parentTurn
   })
 }
 
+/** Convert wave task IDs to DelegationRequests using enriched task map. */
+function waveToRequests(wave: TeamWave, taskMap: Map<string, TeamTask>, parentTurnId: string): DelegationRequest[] {
+  return wave.taskIds
+    .map(id => taskMap.get(id))
+    .filter((t): t is TeamTask => Boolean(t))
+    .map(task => {
+      const req: DelegationRequest = {
+        parentTurnId: `${parentTurnId}:${task.id}`,
+        objective: buildExecutionObjective(task),
+        kind: task.kind,
+        profile: task.profile,
+        scope: { files: task.files },
+        dependencies: task.dependsOn.length > 0 ? task.dependsOn : undefined,
+      }
+      return req
+    })
+}
+
 export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestratorDeps): Promise<TeamRunSummary> {
   const maxParallel = Math.max(1, Math.min(input.maxParallel ?? 3, 5))
-  const planned = input.mode === 'standard' && input.planMarkdown
+
+  // Parse plan if available
+  const drafts = input.mode === 'standard' && input.planMarkdown
     ? parseTeamTaskDrafts(input.planMarkdown)
     : []
+  const enrichedTasks = input.planMarkdown ? parseTeamTasks(input.planMarkdown) : []
 
+  // max mode: stop after planning brief, don't dispatch execution workers
   if (input.mode === 'max') {
     return {
       mode: input.mode,
-      planned,
+      planned: drafts,
+      tasks: enrichedTasks,
+      waves: [],
       dispatched: 0,
       blocked: ['max mode skeleton stops after planning brief; planner-worker fanout is a later phase'],
       packet: 'team max skeleton: planning-first mode is not auto-dispatching execution workers yet.',
     }
   }
 
-  const { selected, blocked } = selectDispatchableTeamTasks(planned, maxParallel)
-  if (selected.length === 0) {
+  // Group tasks into waves
+  const waves = groupTeamTasks(enrichedTasks)
+  const taskMap = new Map(enrichedTasks.map(t => [t.id, t]))
+
+  // Dispatch first wave only (subsequent waves need prior wave results)
+  if (waves.length === 0) {
+    // Fallback to legacy behavior for unstructured plans
+    const { selected, blocked } = selectDispatchableTeamTasks(drafts, maxParallel)
+    if (selected.length === 0) {
+      return {
+        mode: input.mode,
+        planned: drafts,
+        tasks: enrichedTasks,
+        waves: [],
+        dispatched: 0,
+        blocked,
+        packet: blocked.length > 0 ? `team skeleton blocked:\n${blocked.join('\n')}` : 'team skeleton: no task drafts found to dispatch.',
+      }
+    }
+
+    const requests = teamTasksToDelegationRequests(selected, input.parentTurnId ?? 'team')
+    const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
+
     return {
       mode: input.mode,
-      planned,
-      dispatched: 0,
+      planned: drafts,
+      tasks: enrichedTasks,
+      waves: [],
+      dispatched: requests.length,
       blocked,
-      packet: blocked.length > 0 ? `team skeleton blocked:\n${blocked.join('\n')}` : 'team skeleton: no task drafts found to dispatch.',
+      packet: run.packet,
+      run,
     }
   }
 
-  const requests = teamTasksToDelegationRequests(selected, input.parentTurnId ?? 'team')
+  // Wave-based dispatch: dispatch first wave
+  const firstWave = waves[0]!
+  const remainingBlocked = waves.slice(1).map(w =>
+    `${w.taskIds.join(', ')}: waiting for wave ${w.id} to complete`
+  )
+
+  const requests = waveToRequests(firstWave, taskMap, input.parentTurnId ?? 'team')
+  if (requests.length === 0) {
+    return {
+      mode: input.mode,
+      planned: drafts,
+      tasks: enrichedTasks,
+      waves,
+      dispatched: 0,
+      blocked: remainingBlocked,
+      packet: 'team skeleton: first wave produced no dispatchable requests.',
+    }
+  }
+
   const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
 
   return {
     mode: input.mode,
-    planned,
+    planned: drafts,
+    tasks: enrichedTasks,
+    waves,
     dispatched: requests.length,
-    blocked,
+    blocked: remainingBlocked,
     packet: run.packet,
     run,
   }
 }
+
+/** Re-export buildUnifiedTeamPlan for convenience. */
+export { buildUnifiedTeamPlan }
+export type { UnifiedTeamPlan, TeamWave }

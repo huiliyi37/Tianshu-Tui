@@ -41,7 +41,6 @@ describe('team orchestrator skeleton', () => {
   })
 
   it('blocks patchers with PARTIAL file overlap, not just identical sets', () => {
-    // T1=[a,b], T2=[b,c] share b.ts but are different sets — must still serialize.
     const { selected, blocked } = selectDispatchableTeamTasks([
       task('T1', ['src/a.ts', 'src/b.ts']),
       task('T2', ['src/b.ts', 'src/c.ts']),
@@ -55,7 +54,6 @@ describe('team orchestrator skeleton', () => {
   })
 
   it('does not treat read-only workers as file-conflicting even on shared files', () => {
-    // A reviewer reading the same file a patcher writes is not a write conflict.
     const { selected, blocked } = selectDispatchableTeamTasks([
       task('T1', ['src/a.ts']),
       task('T2', ['src/a.ts'], 'reviewer'),
@@ -117,5 +115,100 @@ describe('team orchestrator skeleton', () => {
     assert.equal(called, false)
     assert.equal(summary.dispatched, 0)
     assert.ok(summary.blocked[0]!.includes('planning brief'))
+  })
+})
+
+describe('team orchestrator wave dispatch', () => {
+  it('produces waves for tasks with dependencies', async () => {
+    let captured: DelegationRequest[] = []
+    const summary = await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'wave test',
+      planMarkdown: `
+### T1: Base
+修改 src/a.ts
+
+### T2: Depends on T1
+修改 src/b.ts
+depends: T1
+`,
+    }, {
+      delegateBatch: async (requests, policy) => {
+        captured = requests
+        return run('wave-done')
+      },
+    })
+
+    // Should have waves (T1 first, then T2)
+    assert.ok(summary.waves.length >= 1, `Expected ≥1 wave, got ${summary.waves.length}`)
+    // First wave should contain T1
+    assert.ok(summary.waves[0]!.taskIds.includes('T1'), 'First wave should include T1')
+    // T2 should be in a later wave or blocked
+    const t2WaveIdx = summary.waves.findIndex(w => w.taskIds.includes('T2'))
+    if (t2WaveIdx >= 0) {
+      const t1WaveIdx = summary.waves.findIndex(w => w.taskIds.includes('T1'))
+      assert.ok(t1WaveIdx < t2WaveIdx, 'T1 wave must be before T2 wave')
+    }
+    // First wave dispatched
+    assert.ok(summary.dispatched >= 1)
+    assert.equal(summary.packet, 'wave-done')
+  })
+
+  it('serializes same-file tasks across waves', async () => {
+    const summary = await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'serialize test',
+      planMarkdown: `
+### T1: First edit
+修改 src/a.ts
+
+### T2: Second edit
+修改 src/a.ts
+`,
+    }, {
+      delegateBatch: async (requests) => run(`dispatched ${requests.length}`),
+    })
+
+    // Same file → should serialize into different waves
+    assert.ok(summary.waves.length >= 2, `Expected ≥2 waves for same-file tasks, got ${summary.waves.length}`)
+  })
+
+  it('returns empty waves for plan with no tasks', async () => {
+    const summary = await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'empty',
+      planMarkdown: '# Just a design\nNo tasks here.',
+    }, {
+      delegateBatch: async () => run(),
+    })
+
+    assert.equal(summary.waves.length, 0)
+    assert.equal(summary.dispatched, 0)
+    assert.equal(summary.tasks.length, 0)
+  })
+
+  it('enriched tasks carry risk and dependency info', async () => {
+    const summary = await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'enrichment test',
+      planMarkdown: `
+### T1: Security fix
+修改 src/auth.ts
+
+### T2: Depends on T1
+修改 src/other.ts
+depends: T1
+`,
+    }, {
+      delegateBatch: async () => run(),
+    })
+
+    assert.equal(summary.tasks.length, 2)
+    const t1 = summary.tasks.find(t => t.id === 'T1')
+    const t2 = summary.tasks.find(t => t.id === 'T2')
+    assert.ok(t1)
+    assert.ok(t2)
+    assert.equal(t1!.riskTier, 'high')
+    assert.deepEqual(t2!.dependsOn, ['T1'])
   })
 })
