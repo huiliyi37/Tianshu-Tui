@@ -33,6 +33,7 @@ import { checkCommitCohesion } from './commit-cohesion.js'
 import { isCrossModule, isFixContext, type ChangeSet } from './review-discipline.js'
 import { routeReviewWorkflow, type ReviewRouterDeps } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
+import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -272,6 +273,19 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
 
       lines.push('', `Attribution: ${report.attributionSummary}`)
 
+      // Recovery journal: detect files that were restored (undo/git checkout) during this session.
+      // A clean file after restore may hide unfinished intent — surface it explicitly.
+      const recoveries = readUnacknowledged(params.cwd)
+      if (recoveries.length > 0) {
+        lines.push('', '--- Recovery Journal ---')
+        lines.push('  Files restored during this session (edit failure → restore):')
+        for (const r of recoveries) {
+          lines.push(`  ⚠️  ${r.file} (${r.action}, ~${r.linesLost} lines lost at ${r.ts.slice(11, 19)})`)
+        }
+        lines.push('', '  ⚠️  Verify no intended changes were lost in these recoveries.')
+        lines.push('  If all recovered changes have been re-applied, this warning will clear on next deliver_task.')
+      }
+
       const commit = params.input.commit === true
       const message = params.input.message as string | undefined
 
@@ -441,6 +455,8 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           lines.push('', '--- actual changes (git show --stat) ---')
           lines.push(readback.stdout.trim())
         }
+        // Acknowledge recovery journal entries — the commit confirms intent was preserved.
+        if (recoveries.length > 0) acknowledgeAll(params.cwd)
       }
 
       return { content: lines.join('\n') }
