@@ -47,3 +47,35 @@ export interface RepoMapResult {
   totalSymbols: number
   graphSize: number
 }
+
+// ─── Codebase index types (project perception layer) ──────────────────
+
+export interface ModuleSummaryEntry {
+  /** Directory path relative to cwd, e.g. "src/agent/" */
+  dirPath: string
+  /** One-line responsibility summary */
+  summary: string
+  /** Key exported symbol names */
+  keyExports: string[]
+  /** Number of source files in this module */
+  fileCount: number
+  /** active | deprecated | experimental */
+  status: string
+  /** Aggregate content hash of all files in dir (for incremental detection) */
+  contentHash: string
+  /** Git commit SHA when this entry was last verified */
+  verifiedAtCommit?: string
+}
+
+export interface CliEntry {
+  /** CLI flag, e.g. "--print" or "-p" */
+  flag: string
+  /** Handler location, e.g. "main.tsx:998" */
+  handler: string
+  /** Whether the flag is wired to actual logic */
+  wired: boolean
+  /** Git commit SHA when this entry was last verified */
+  verifiedAtCommit?: string
+  /** Source file where the flag is defined */
+  sourceFile: string
+}

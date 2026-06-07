@@ -756,6 +756,9 @@ export class AgentLoop {
 
   getLatestPheromones() { return this.loadedPheromones }
 
+  /** Expose MeridianIndexer for /index command */
+  getIndexer() { return this.config.meridianIndexer ?? null }
+
   getDecisions(): string[] { return this.decisions }
 
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }

@@ -4,6 +4,7 @@ import { gitStatusCache } from './volatile-git.js'
 import { summarizeGitStatus } from './git-status-summary.js'
 import { loadProjectMemory } from '../context/project-memory-loader.js'
 import { renderCapsuleIndexBlock } from '../agent/seed-capsule-store.js'
+import { generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import type { VolatileContext } from './volatile.js'
 
 export interface SnapshotInput {
@@ -14,6 +15,10 @@ export interface SnapshotInput {
   workingSet?: string[]
   activeDomain?: VolatileContext['activeDomain']
   projectMemoryBlock?: string
+  /** Optional pre-built codebase index block. If not provided, generated from MeridianDB. */
+  projectIndexBlock?: string
+  /** Optional MeridianDb instance for codebase index generation. */
+  meridianDb?: import('../repo/meridian-db.js').MeridianDb
 }
 
 function readRivetMdOnce(cwd: string): string | undefined {
@@ -48,6 +53,14 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
   // 冻结前缀只留极小索引：稳定、可缓存、随星数线性极慢膨胀。
   const seedCapsuleBlock = renderCapsuleIndexBlock(input.cwd)
 
+  // Codebase index — generated from MeridianDB at snapshot time.
+  // Frozen: placed in stable prefix alongside projectMemoryBlock.
+  const projectIndexBlock = input.projectIndexBlock ?? (
+    input.meridianDb
+      ? generateCodebaseIndexBlock(input.meridianDb, getHeadSha())
+      : undefined
+  )
+
   return Object.freeze({
     cwd: input.cwd,
     rivetMd,
@@ -57,5 +70,6 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
     sessionMemoryBlock: input.sessionMemoryBlock,
     projectMemoryBlock,
     seedCapsuleBlock,
+    projectIndexBlock,
   }) as VolatileContext
 }

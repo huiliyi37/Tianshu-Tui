@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
+import type { ModuleSummaryEntry, CliEntry } from './meridian-types.js'
 import type { PhysarumEdgeState } from './physarum-types.js'
 import type { ImmuneMemory } from '../agent/immune-types.js'
 import type { MistakeEntry } from '../agent/mistake-notebook.js'
@@ -95,6 +96,26 @@ CREATE TABLE IF NOT EXISTS sensorimotor_log (
 );
 CREATE INDEX IF NOT EXISTS idx_sm_context ON sensorimotor_log(context_hash, tool_name);
 CREATE INDEX IF NOT EXISTS idx_sm_tool ON sensorimotor_log(tool_name);
+
+CREATE TABLE IF NOT EXISTS module_summaries (
+  dir_path TEXT PRIMARY KEY,
+  summary TEXT NOT NULL,
+  key_exports_json TEXT NOT NULL DEFAULT '[]',
+  file_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  content_hash TEXT NOT NULL DEFAULT '',
+  verified_at_commit TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cli_entries (
+  flag TEXT NOT NULL,
+  handler TEXT NOT NULL,
+  wired INTEGER NOT NULL DEFAULT 1,
+  verified_at_commit TEXT,
+  source_file TEXT NOT NULL,
+  PRIMARY KEY(flag, source_file)
+);
 `
 
 export class MeridianDb {
@@ -294,6 +315,46 @@ export class MeridianDb {
     this.db.prepare(
       'INSERT OR REPLACE INTO edges (source_id, target_id, kind, weight, confidence) VALUES (?, ?, ?, ?, ?)'
     ).run(sourceId, targetId, kind, weight, confidence)
+  }
+
+  // ─── Codebase index (module summaries + CLI entries) ────────────────
+
+  upsertModuleSummary(entry: ModuleSummaryEntry): void {
+    this.db.prepare(`INSERT OR REPLACE INTO module_summaries (dir_path, summary, key_exports_json, file_count, status, content_hash, verified_at_commit, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`).run(
+      entry.dirPath, entry.summary, JSON.stringify(entry.keyExports), entry.fileCount, entry.status, entry.contentHash, entry.verifiedAtCommit ?? null,
+    )
+  }
+
+  getModuleSummaries(): ModuleSummaryEntry[] {
+    const rows = this.db.prepare('SELECT * FROM module_summaries ORDER BY dir_path').all() as Array<Record<string, unknown>>
+    return rows.map(r => ({
+      dirPath: r.dir_path as string,
+      summary: r.summary as string,
+      keyExports: JSON.parse(r.key_exports_json as string) as string[],
+      fileCount: r.file_count as number,
+      status: r.status as string,
+      contentHash: r.content_hash as string,
+      verifiedAtCommit: (r.verified_at_commit as string | null) ?? undefined,
+    }))
+  }
+
+  upsertCliEntry(entry: CliEntry): void {
+    this.db.prepare(`INSERT OR REPLACE INTO cli_entries (flag, handler, wired, verified_at_commit, source_file)
+      VALUES (?, ?, ?, ?, ?)`).run(
+      entry.flag, entry.handler, entry.wired ? 1 : 0, entry.verifiedAtCommit ?? null, entry.sourceFile,
+    )
+  }
+
+  getCliEntries(): CliEntry[] {
+    const rows = this.db.prepare('SELECT * FROM cli_entries ORDER BY flag').all() as Array<Record<string, unknown>>
+    return rows.map(r => ({
+      flag: r.flag as string,
+      handler: r.handler as string,
+      wired: (r.wired as number) === 1,
+      verifiedAtCommit: (r.verified_at_commit as string | null) ?? undefined,
+      sourceFile: r.source_file as string,
+    }))
   }
 
   // ─── Physarum persistence ───────────────────────────────────────────

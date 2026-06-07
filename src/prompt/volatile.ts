@@ -69,6 +69,10 @@ export interface VolatileContext {
   planModeState?: 'off' | 'planning' | 'approved'
   /** Project memory loaded from .rivet/knowledge/memory.jsonl (frozen: changes only on file update) */
   projectMemoryBlock?: string
+  /** Codebase index — module summaries + CLI entries from MeridianDB.
+   *  Rendered into frozen base after projectMemoryBlock for prefix cache stability.
+   *  Generated at snapshot time from DB, not stored as flat file. */
+  projectIndexBlock?: string
   /** 种子胶囊 L1 核心文本（来自天璇/天府等前辈星域的封存经验）。
    *  渲染到 frozen base 中，session 全程稳定，prefix cache safe。
    *  Phase 1: 仅天璇胶囊。后续可扩展为多星域胶囊数组。 */
@@ -429,6 +433,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   // Rendered into frozen base so it benefits from prefix cache (turn 2+ cost = 0).
   if (ctx.seedCapsuleBlock) {
     parts.push(ctx.seedCapsuleBlock)
+  }
+
+  // Codebase index — module summaries + CLI entries.
+  // Rendered into frozen base after projectMemoryBlock for prefix cache stability.
+  if (ctx.projectIndexBlock) {
+    parts.push(ctx.projectIndexBlock)
   }
 
   // Only render git status if explicitly provided — no cache fallback here.
