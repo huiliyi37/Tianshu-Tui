@@ -155,6 +155,37 @@ export function renderAllCapsulesBlock(cwd: string): string | undefined {
 }
 
 /**
+ * 跨星域核心硬护栏——从 5 星 principles 提炼去重的高频行为约束。
+ * 置顶常驻，不依赖 agent 主动 recall：护栏起作用的时刻正是 agent
+ * 没意识到在跑偏的时刻，按需加载对护栏无效（见 V3.1 回归：撤入 recall
+ * 后行动跑偏）。措辞取自各星胶囊原话。
+ */
+export const CORE_GUARDRAILS: string[] = [
+  '复现才算验证——绿非证明，RED→GREEN 才采信；声称"已修/已验证"前先能复现原缺陷。',
+  '改代码前先读完代码——不猜、不假设；grep 调用方，理解真实数据流。',
+  '意图高于指令——用户要的是问题被解决，不是指令被字面执行。',
+  '中性归因——补正确语义，不写灾难叙事，不加多余兜底。',
+  '以全貌定向——改一行前先理解它在文件/模块/架构中的位置。',
+]
+
+/**
+ * 常驻胶囊块 = 核心护栏置顶 + 5 星 principles 全文。
+ * 注入冻结前缀（会话内字节稳定，prefix-cache safe）。
+ * ledger（缺陷族历史）不在此——仍经 recall_capsule 按需拉取。
+ */
+export function renderResidentCapsuleBlock(cwd: string): string | undefined {
+  const capsules = loadAllCapsules(cwd)
+  if (capsules.length === 0) return undefined
+  const guardrails = [
+    '<core-guardrails note="跨星域硬护栏，常驻，无条件适用。">',
+    ...CORE_GUARDRAILS.map(g => `  - ${g}`),
+    '</core-guardrails>',
+  ].join('\n')
+  const bodies = capsules.map(c => c.block).join('\n\n')
+  return `${guardrails}\n\n${bodies}`
+}
+
+/**
  * 渲染**极小的 L1 索引**（仅星名 + gist 一行），用于注入冻结前缀。
  * 替代 renderAllCapsulesBlock 的全文注入：膨胀从"每星一胶囊"降到"每星一行"，
  * 稳定、可缓存、可无限加星。完整正文经 recall_capsule 工具按需拉取
