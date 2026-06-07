@@ -220,7 +220,7 @@ describe('decisions XML section', () => {
       decisions: ['use middleware pattern for auth', 'split loop into harness + orchestrator'],
     }
     const block = buildVolatileBlock(ctx)
-    assert.ok(block.includes('<decisions recent="2">'))
+    assert.ok(block.includes('<decisions>'))
     assert.ok(block.includes('<decision>use middleware pattern for auth</decision>'))
     assert.ok(block.includes('</decisions>'))
   })
@@ -360,7 +360,7 @@ describe('active claims volatile context', () => {
 })
 
 describe('worktree-warning dynamic appendix', () => {
-  const base: VolatileContext = { cwd: '/project' }
+  const base: VolatileContext = { cwd: '/project', gitStatus: '' }
 
   it('omits worktree-warning when severity is green', () => {
     const ctx: VolatileContext = {

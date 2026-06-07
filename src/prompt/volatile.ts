@@ -238,7 +238,7 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
       if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
       return `  <tool-summary ${attrs.join(' ')} />`
     }).join('\n')
-    parts.push(`<tool-history>\n${entries}\n</tool-history>`)
+    parts.push(`<tool-history recent="${recent.length}">\n${entries}\n</tool-history>`)
   }
 
   // Read-file dedup hint: single-line snapshot for cache stability
@@ -301,6 +301,14 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
   // Repair hint: ephemeral — keep at very end
   if (ctx.repairHint) {
     parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
+  }
+
+  // Worktree warning: cache-safe — rendered ONLY into dynamic appendix
+  if (ctx.worktreeReality && ctx.worktreeReality.severity !== 'green') {
+    const reasons = ctx.worktreeReality.mismatchReasons
+      .map(r => `  ${escapeXml(r)}`)
+      .join('\n')
+    parts.push(`<worktree-warning severity="${escapeXml(ctx.worktreeReality.severity)}">\n${reasons}\n</worktree-warning>`)
   }
 
   if (parts.length === 0) return ''
@@ -507,13 +515,6 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
   }
 
-
-  if (ctx.worktreeReality && ctx.worktreeReality.severity !== 'green') {
-    const reasons = ctx.worktreeReality.mismatchReasons
-      .map(r => `  ${escapeXml(r)}`)
-      .join('\n')
-    parts.push(`<worktree-warning severity="${escapeXml(ctx.worktreeReality.severity)}">\n${reasons}\n</worktree-warning>`)
-  }
 
   if (ctx.planModeState === 'planning') {
     parts.push(`<plan-mode>

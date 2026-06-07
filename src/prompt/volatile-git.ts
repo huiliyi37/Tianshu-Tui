@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { promisify } from 'node:util'
 
 const execFileP = promisify(execFile)
@@ -55,7 +56,7 @@ export function createGitStatusCache(options: GitStatusCacheOptions) {
 
   return {
     get(cwd: string): string | undefined {
-      if (!isFresh(cwd) && !refreshing.has(cwd)) {
+      if (!isFresh(cwd) && !refreshing.has(cwd) && existsSync(cwd)) {
         void this.refresh(cwd)
       }
       trimCache(values, options.ttlMs)
