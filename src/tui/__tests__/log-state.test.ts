@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendLog, appendLogInPlace, summarizeToolOutput, updateToolLog, visibleLogs, createLogEntry, type LogEntry } from '../log-state.js'
+import { appendLog, appendLogInPlace, summarizeToolOutput, updateToolLog, visibleLogs, createLogEntry, MAX_LOG_STORE, type LogEntry } from '../log-state.js'
 
 describe('TUI log state helpers', () => {
   it('updates an existing tool log instead of appending a duplicate', () => {
@@ -84,11 +84,11 @@ describe('TUI log state helpers', () => {
     assert.equal(original.length, 0)
     assert.equal(logs.length, 1)
 
-    for (let i = 0; i < 250; i++) {
+    for (let i = 0; i < MAX_LOG_STORE + 100; i++) {
       logs = appendLog(logs, { type: 'user_message', id: `l${i}`, content: String(i) })
     }
 
-    assert.ok(logs.length < 250)
+    assert.ok(logs.length <= MAX_LOG_STORE)
     assert.ok(logs.length > 0)
   })
 
