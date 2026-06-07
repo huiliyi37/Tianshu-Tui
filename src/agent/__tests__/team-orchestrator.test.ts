@@ -151,6 +151,40 @@ describe('team orchestrator skeleton', () => {
     assert.ok(summary.dispatched >= 1)
     assert.equal(summary.tasks.length, 1)
   })
+
+  it('max mode routes planners via kind=plan and executors via kind=patch_proposal', async () => {
+    const kinds: string[] = []
+    await runTeamSkeleton({ mode: 'max', objective: 'design a coherent subsystem now' }, {
+      delegateBatch: async (requests) => {
+        for (const r of requests) {
+          const role = r.parentTurnId.includes('planner-') ? 'planner' : 'exec'
+          kinds.push(`${role}:${r.kind}`)
+        }
+        const isPlanner = requests.some(r => r.parentTurnId.includes('planner-'))
+        if (isPlanner) {
+          const plan = {
+            perspective: 'tianquan', summary: 's',
+            tasks: [{ id: 'T1', title: 'x', objective: 'x', files: ['src/x.ts'], profile: 'patcher', kind: 'patch_proposal', verification: [], dependsOn: [], riskTier: 'low', touchSet: ['src/x.ts'] }],
+          }
+          return {
+            status: 'completed', packet: 'p',
+            results: requests.map(r => ({
+              workOrderId: r.parentTurnId.includes('tianquan') ? 'team:planner-tianquan'
+                : r.parentTurnId.includes('tianfu') ? 'team:planner-tianfu' : 'team:planner-tianxuan',
+              status: 'passed' as const, summary: 'p', findings: [],
+              artifacts: r.parentTurnId.includes('tianquan')
+                ? [{ kind: 'note' as const, title: 'perspective-plan', content: JSON.stringify(plan) }] : [],
+              changedFiles: [], risks: [], nextActions: [], evidenceStatus: 'verified' as const,
+            })),
+          }
+        }
+        return { status: 'completed', results: [], packet: 'e' }
+      },
+    })
+
+    assert.ok(kinds.some(k => k === 'planner:plan'), `expected planner:plan in ${kinds}`)
+    assert.ok(kinds.some(k => k === 'exec:patch_proposal'), `expected exec:patch_proposal in ${kinds}`)
+  })
 })
 
 describe('team orchestrator wave dispatch', () => {

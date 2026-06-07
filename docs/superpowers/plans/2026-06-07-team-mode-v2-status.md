@@ -115,4 +115,31 @@ max 模式在 `groupTeamTasks` 之后直接返回，不进入 `delegateBatch`。
 
 V1/V2 是编排层基线（天权规划、天机/天府落地），目标是 team 模式**可用**，不触及 worker 星域化。
 
-team 可用之后的最大化强化方向，见 **`2026-06-07-team-mode-v3-worker-stardomain.md`**：worker 星域化（马超/关羽等可派发专精认知）+ 星域知识库 + 经验沉淀升级。核心结论——剥洋葱后真缺口只剩**认知层两根线**（星域认知注入 worker + 星域知识库），harness/循环/上下文/记忆全套要么已共享要么不需要。**严格后置**，不得插队 V2 的 P0/P1。
+## 7. 模型路由（V2 落地）
+
+team 的规划与执行经现有 CapabilityTask 路由天然分流，按 `config.workers.routing` 映射：
+
+| 阶段 | WorkOrderKind | CapabilityTask | 建议路由 |
+|------|--------------|----------------|---------|
+| max 规划 (天权/天府/天璇) | plan | code_edit | 强模型 (primary) |
+| 执行 (天梁/patcher) | patch_proposal | risky_refactor | 可配 flash/cheap |
+| 审查 (squadron/verifier) | review/verify | risky_refactor/test_failure_diagnosis | 强模型 |
+
+**路由机制**：`runTeamSkeleton` max 分支派 planner 时用 `kind: 'plan'`，执行波用 `kind: 'patch_proposal'`。`mapWorkOrderKindToCapabilityTask` 把 `plan` 映射到 `code_edit`、`patch_proposal` 映射到 `risky_refactor`。现有 `recommendModelForTask` 已把 `code_edit`/`risky_refactor` 路由到 capable 模型，flash 仅接 `summarization`。
+
+示例 `config.workers`：
+
+```yaml
+workers:
+  profiles:
+    strong: { provider: deepseek, model: deepseek-v4-pro }
+    cheap:  { provider: deepseek, model: deepseek-chat-flash }
+  routing:
+    code_edit: strong          # max 规划用强模型
+    risky_refactor: strong     # 执行/审查默认强；如需省成本可改 cheap
+    test_failure_diagnosis: strong
+```
+
+缺省（无 routing）时规划/执行默认都用强模型，要省成本须显式配 cheap。不改此默认以免影响非 team 委派。
+
+**回归测试**：`team-orchestrator.test.ts` 的 `max mode routes planners via kind=plan and executors via kind=patch_proposal` 锁定此分流行为。
