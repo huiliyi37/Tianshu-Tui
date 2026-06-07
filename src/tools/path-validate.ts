@@ -29,7 +29,22 @@ export function validatePathSafe(cwd: string, inputPath: string): PathValidation
     realCwd = resolve(cwd)
   }
   const realResolved = resolve(realCwd, inputPath)
-  const rel = relative(realCwd, realResolved)
+
+  // Canonicalize the target (resolving symlinks in its existing ancestry) BEFORE
+  // the containment check. An absolute inputPath reached through a symlinked root
+  // (macOS /var→/private/var temp dirs, symlinked home/mount/repo) would otherwise
+  // keep the unresolved prefix and compare against the realpath'd cwd, false-flagging
+  // every legitimate in-project absolute path as an escape. For a not-yet-existing
+  // file realpathSync throws, so we resolve the nearest existing ancestor instead —
+  // this still catches a symlinked parent that escapes the project (e.g. ./evil ->
+  // /etc, write evil/new).
+  let real: string
+  try {
+    real = realpathSync(realResolved)
+  } catch {
+    real = resolveNearestExisting(realResolved, realCwd)
+  }
+  const rel = relative(realCwd, real)
 
   if (rel === '') {
     return { ok: true, path: resolved }
@@ -37,21 +52,6 @@ export function validatePathSafe(cwd: string, inputPath: string): PathValidation
 
   if (rel.startsWith('..') || isAbsolute(rel)) {
     return { ok: false, error: `Path outside project directory: ${inputPath}` }
-  }
-
-  // Symlink traversal guard: resolve symlinks and verify the real path is still
-  // within cwd. For a new file (not yet on disk) realpathSync would throw, so we
-  // resolve the nearest existing ancestor instead — this still catches a symlinked
-  // parent directory that escapes the project (e.g. ./evil -> /etc, write evil/new).
-  let real: string
-  try {
-    real = realpathSync(realResolved)
-  } catch {
-    real = resolveNearestExisting(realResolved, realCwd)
-  }
-  const realRel = relative(realCwd, real)
-  if (realRel.startsWith('..') || isAbsolute(realRel)) {
-    return { ok: false, error: `Symlink escapes project directory: ${inputPath} → ${realRel}` }
   }
 
   return { ok: true, path: resolved }
