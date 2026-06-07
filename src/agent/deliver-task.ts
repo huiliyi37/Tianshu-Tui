@@ -65,7 +65,7 @@ function readProjectMemory(cwd: string): string | undefined {
 }
 
 function gitNameList(cwd: string, args: string[]): string[] | null {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf-8', timeout: 5000 })
+  const result = spawnSync('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf-8', timeout: 5000 })
   if (result.status !== 0) return null
   return parseNulFileList(result.stdout)
 }
@@ -76,7 +76,7 @@ function gitNameList(cwd: string, args: string[]): string[] | null {
  * reflex — patch the last hop, not the root. Returns a stance hint, or null.
  */
 export function detectSymptomPatch(cwd: string): string | null {
-  const res = spawnSync('git', ['diff', '--numstat', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 })
+  const res = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', '--numstat', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 })
   if (res.status !== 0) return null
   const rows = res.stdout.split('\n').filter(Boolean)
     .map(l => l.split('\t'))
@@ -85,7 +85,7 @@ export function detectSymptomPatch(cwd: string): string | null {
   const row = rows[0]!
   const added = Number(row[0]) || 0
   if (added > 2) return null
-  const patch = spawnSync('git', ['diff', 'HEAD', '--', row[2]!], { cwd, encoding: 'utf-8', timeout: 5000 })
+  const patch = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', 'HEAD', '--', row[2]!], { cwd, encoding: 'utf-8', timeout: 5000 })
   if (patch.status !== 0) return null
   const addedLines = patch.stdout.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++'))
   const fallbackOnly = addedLines.length > 0 && addedLines.every(l => /\?\?|\|\||=\s*['"`]?\w*['"`]?\s*$|fallback|default/.test(l))
@@ -407,7 +407,7 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         lines.push(`   Files: ${filesToCommit.join(', ') || '(none)'}`)
         if (commitResult.output) lines.push(`   ${commitResult.output}`)
         // Post-commit truth readback: verify actual landed changes + surface hash
-        const readback = spawnSync('git', ['show', '--stat', '--format=%h%d', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 10_000 })
+        const readback = spawnSync('git', ['-c', 'core.quotePath=false', 'show', '--stat', '--format=%h%d', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 10_000 })
         if (readback.status === 0 && readback.stdout.trim()) {
           lines.push('', '--- actual changes (git show --stat) ---')
           lines.push(readback.stdout.trim())

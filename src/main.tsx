@@ -60,10 +60,10 @@ import { createGotoDefinitionTool, createFindReferencesTool } from './lsp/tools.
 
 function captureGitBaseline(cwd: string): BaselineSnapshot {
   try {
-    const branch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
-    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
-    const dirty = spawnSync('git', ['diff', '--name-only'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
-    const untracked = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const branch = spawnSync('git', ['-c', 'core.quotePath=false', 'rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const head = spawnSync('git', ['-c', 'core.quotePath=false', 'rev-parse', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const dirty = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', '--name-only'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const untracked = spawnSync('git', ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
     return {
       branch,
       head,

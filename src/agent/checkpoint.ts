@@ -105,7 +105,7 @@ export function removeFromCheckpointIndex(cwd: string, sessionId: string): void 
 }
 
 async function gitLines(cwd: string, args: string[]): Promise<string[]> {
-  const { stdout } = await execFileP('git', args, { cwd, timeout: 5000, encoding: 'utf-8' })
+  const { stdout } = await execFileP('git', ['-c', 'core.quotePath=false', ...args], { cwd, timeout: 5000, encoding: 'utf-8' })
   return stdout.split('\n').map(s => s.trim()).filter(Boolean)
 }
 
