@@ -275,6 +275,24 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
       const commit = params.input.commit === true
       const message = params.input.message as string | undefined
 
+      // Task completion audit: surface incomplete items prominently.
+      // Prevents silent omissions where the agent claims X is done but only Y was implemented.
+      const auditList = params.input.checklist as Array<{ item: string; done: boolean; files?: string[] }> | undefined
+      if (auditList && Array.isArray(auditList) && auditList.length > 0) {
+        const incomplete = auditList.filter(entry => !entry.done)
+        const complete = auditList.filter(entry => entry.done)
+        lines.push('', '--- Task Completion Audit ---')
+        for (const entry of complete) {
+          lines.push(`  ✅ ${entry.item}` + (entry.files?.length ? ` (${entry.files.join(', ')})` : ''))
+        }
+        for (const entry of incomplete) {
+          lines.push(`  ⚠️  NOT DONE: ${entry.item}`)
+        }
+        if (incomplete.length > 0) {
+          lines.push('', '  ⚠️  Incomplete tasks detected. Verify these are intentionally deferred, not forgotten.')
+        }
+      }
+
       if (commit) {
         const forceGate = params.input.force === true
         if (report.state === 'RED') {
