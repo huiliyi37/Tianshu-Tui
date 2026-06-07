@@ -18,7 +18,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield'
 
 interface ColorSet {
   primary: string
@@ -141,6 +141,34 @@ const MIDNIGHT_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
+// Starfield theme — 星空/星座. Rivet's home aesthetic (the Big Dipper star-map).
+// Astronomy-semantic palette: every accent is a kind of star/sky phenomenon, all
+// tuned bright + slightly desaturated so they glow on deep-space black without the
+// vibration of pure neon. All text colors clear WCAG AA (8:1+) on near-black.
+const STARFIELD_TRUECOLOR: ColorSet = {
+  primary: '#8ab4ff',   // hot blue-white star (Vega/Rigel) — links, search/bash
+  secondary: '#c9a9ff', // nebula violet — edit/write, headers
+  success: '#7ee7c7',   // aurora teal-green — tests pass, return-home
+  warning: '#ffd479',   // stellar gold (Sol/Arcturus) — delegation/attention
+  error: '#ff8a9b',     // nova / red-giant flare — errors
+  dim: '#6b7394',       // cosmic dust lane — separators, decoration (4:1, visible)
+  pulseQuiet: '#2b3052', // deep space blue-gray — quiet pulse
+  pulseActive: '#8ab4ff', // star blue — active pulse
+  pulseAlert: '#ff8a9b',  // nova red — alert pulse
+}
+
+const STARFIELD_FALLBACK: ColorSet = {
+  primary: 'blue',
+  secondary: 'magenta',
+  success: 'cyan',
+  warning: 'yellow',
+  error: 'red',
+  dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'blue',
+  pulseAlert: 'red',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -161,10 +189,10 @@ function makeContextColor(c: Pick<ColorSet, 'primary' | 'warning' | 'error'>) {
   }
 }
 
-function buildTheme(colors: ColorSet, overrides?: { userColor?: string; assistantColor?: string }): RivetTheme {
+function buildTheme(colors: ColorSet, overrides?: { userColor?: string; assistantColor?: string; muted?: string }): RivetTheme {
   return {
     ...colors,
-    muted: '#9aa2b1',
+    muted: overrides?.muted ?? '#9aa2b1',
     userColor: overrides?.userColor ?? colors.primary,
     assistantColor: overrides?.assistantColor ?? colors.secondary,
     systemColor: '#9aa2b1',
@@ -189,6 +217,10 @@ const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetTheme }>
   midnight: {
     truecolor: buildTheme(MIDNIGHT_TRUECOLOR, { userColor: '#e6edf3', assistantColor: '#e6edf3' }),
     fallback: buildTheme(MIDNIGHT_FALLBACK, { userColor: 'white', assistantColor: 'white' }),
+  },
+  starfield: {
+    truecolor: buildTheme(STARFIELD_TRUECOLOR, { userColor: '#e8ecf8', assistantColor: '#c9a9ff', muted: '#aab4d4' }),
+    fallback: buildTheme(STARFIELD_FALLBACK, { userColor: 'white', assistantColor: 'magenta' }),
   },
 }
 
