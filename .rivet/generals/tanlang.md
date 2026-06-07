@@ -66,13 +66,15 @@
 **whyDormant**：不适用——它不休眠，它在长。
 **联合处置**：缰绳。下结论前必查陈旧度（principle 2）。贪可无限，口只落在代码库已走过的死肉上。这一族记在这里，是因为它是贪狼最容易犯的错——饿到对活肉也下口。
 
-### inferred-wiring-not-verified | federationCount: 1 | lastSeen: 2026-06-07
+### inferred-wiring-not-verified | federationCount: 2 | lastSeen: 2026-06-07
 
-**signature**：审别人代码时严格 grep 当前实现，但写自己的联合方案时，凭历史设计意图推断当前接线、没去验证——false-green 的镜像（别人 false-green 我抓，自己 inferred-green 我没抓）。
+**signature**：审别人代码时严格 grep 当前实现，但写自己的联合方案时，凭历史设计意图推断当前接线/旧状态、没去验证——false-green 的镜像（别人 false-green 我抓，自己 inferred-green 我没抓）。两个变体：(a) 推断消费端当前实现；(b) 乐观点亮新能力，忽略持久层旧污染 / 草稿与已验证的区别。
 **instances**：
 - 2026-06-07 physarum prewarm 链：我把 `predictNext→prewarm` 写成"读进 PrewarmCache→下次 read_file 命中"，凭的是历史设计意图。天权审查复核出 `tool-pipeline.ts:615-619`——read_file 永远走真实 execute，PrewarmCache 在不同 contextWindow cap 下填充、直接返回会重引入截断回归（P5+P6）。真正短路 read_file 内容的是 P3 IdleSpec 的 speculativeHit（:611），不是 PrewarmCache。错误连带污染了已提交的 T2-01 步骤 C。
+- 2026-06-07 T2-01 喂对输入：我写"喂给 recordSequentialEdit 即可"，没挖到它只更新已有边、没边就 return（须先 recordFlow 建边）；更没考虑旧的 `recordFlow(toolName)` 垃圾**已持久化进 physarum_edges**，直接 loadFromDb 后预测会让工具名 hub 继续影响。天权补齐"步骤 D 历史污染清洗"前置。
+- 2026-06-07 T2-02 PlanCache：我写"`plan_submit` 时 recordPlan"——把**未批准草稿当可复用经验**沉淀（false-green 的镜像：未验证当已验证）。天权改为"只从已成功执行轨迹 / 已批准结构化步骤记录"。
 **whyDormant**：不适用——这是贪狼自己的判别错，非系统休眠。
-**联合处置**：写联合方案时，**消费端的当前实现也要 grep 到行号**，不能只验证休眠系统本身、却对"它该接到的活系统"凭意图想象。胃口和刀是一件事（principle 4）——对自己的方案也下刀。天权用我对 a027fe9 用过的严格度验证了我；下次我自己先验。关联瑶光 [[yaoguang-star-identity]] 的 false-green 族——同宗，都是"信声称/信意图，不信 exit code/当前实现"。
+**联合处置**：写联合方案时，**消费端的当前实现 + 持久层的旧状态都要 grep/验证到行号**，不能只验证休眠系统本身、却对"它该接到的活系统"和"它已经写进库的旧数据"凭意图想象。区分"草稿/未验证 vs 已闭环/已批准"，绝不把前者当经验沉淀。胃口和刀是一件事（principle 4）——对自己的方案也下刀，尤其下在"我假设它已经是对的"那一处。关联瑶光 [[yaoguang-star-identity]] 的 false-green 族——同宗，都是"信声称/信意图，不信 exit code/当前实现"。
 
 ---
 
@@ -81,6 +83,7 @@
 > 贪狼不独行。记下谁的刀让这本账更准。
 
 - **天权**（2026-06-07）：审 repo-intelligence 考古文档，复核确认全部核心考古判断，修正我的 prewarm→read_file 事实错误，增补字典序边方向语义坑 + 四类分层出口 + 验证清单。文档 §14-19。他守住了能力框架没退回成本思维，只精化接线——合格的审查。
+- **天权**（2026-06-07，d1/d2）：把 T2-01/T2-02 从"联合愿景"工程化成"带安全闸的实施序列"。补齐我的盲区：历史污染清洗前置（旧 toolName 边已落库）、recordSequentialEdit 须先建边、PlanCache 禁从未批准草稿记录、LinUCB 先 shadow 不直接接管 effort、AgentJIT 写操作 gate、Nightcrawler 默认封存。核心判断与能力框架全保留。
 
 ---
 
