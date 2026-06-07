@@ -286,14 +286,17 @@ export class PromptEngine {
     }
 
     const tools: OaiToolDefinition[] | undefined = this.config.staticCtx.tools.length > 0
-      ? this.config.staticCtx.tools.map(tool => ({
-        type: 'function' as const,
-        function: {
+      ? this.config.staticCtx.tools.map(tool => {
+        const func: OaiToolDefinition['function'] = {
           name: tool.name,
           description: tool.description,
           parameters: tool.input_schema ?? { type: 'object', properties: {} },
-        },
-      }))
+        }
+        if (tool.providerFormat) {
+          func.providerFormat = tool.providerFormat
+        }
+        return { type: 'function' as const, function: func }
+      })
       : undefined
 
     // On 1M+ windows, skip pruning entirely — same rationale as observation masking:

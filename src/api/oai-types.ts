@@ -64,6 +64,8 @@ export interface OaiToolDefinition {
     name: string
     description: string
     parameters: Record<string, unknown>
+    /** Provider-specific configuration (e.g. GLM web_search native integration). */
+    providerFormat?: Record<string, unknown>
   }
 }
 
