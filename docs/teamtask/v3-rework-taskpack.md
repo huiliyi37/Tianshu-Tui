@@ -108,9 +108,47 @@ RED→GREEN 铁证：退回修复前源码，5 个攻击面 case 全红（`toolW
 **⚠️ 未查完疑点（统一复验时核）**：RED 验证时退回 star-domain.ts 导致 "has all 7 built-in domains" 测试红——怀疑 303ef2c 改了 STAR_DOMAINS 域集合（增/减域），而提交摘要只说 "unify matchDomain"，未声明。核查：`git show 303ef2c -- src/agent/star-domain.ts` 看 diff 有无域增减；若有未声明改动，确认是有意还是 scope creep。
 > 注：因其他会话正在 star-domain V3 上动工，门神已停止一切对 star-domain/dispatcher/registry 的访问（含只读 checkout），此疑点留待全部完工后统一复验。
 
+## ✅🔴 P1-1 复验更新（commit c4e85a8 — false-green 已修 + tianshu 复活待定）
+
+**false-green 已修，RED 证明成立**：测试重写为 load 进**全局单例** `starDomainRegistry` + `await import('../star-domain.js')` 取**运行时 matchDomain** + 断言命中。退回委托前 star-domain.ts（861ffbf），该测试**变红**（之前 false-green 版本是绿）——真正守住回归了。ESM 循环依赖经 `ensureInit()` 懒加载解决，当前态 22/22 pass。**P1-1 声明范围（matchDomain 单源 + false-green 修复）通过。**
+
+**🔴 但查实了未声明 scope creep：P1-1 复活了被有意删除的 tianshu 域。** `git log -S "tianshu: {"` 时间线：
+- `6e5cf4e` 加入天枢域 → `2987ce1`(6-01)**有意删除**（提交信息："remove tianshu domain, **restore original star personalities**"）→ `303ef2c`(P1-1) **又加回来**。
+- `303ef2c` 的 diff 实锤：`StarDomainId` 类型 + `STAR_DOMAINS` 都新增了 `tianshu`，但提交信息通篇只讲 matchDomain，**零字提及域复活**。
+- **实质后果（中性归因，非安全 bug）**：tianshu 的 toolWhitelist 是所有域最宽的（含 `write_file/edit_file/bash/delegate_task/delegate_batch`）。结合 P0-A authority 交集，命中 tianshu 关键词（全貌/统筹/调度/orchestrate）的任务会拿到近全权限授权面。
+- **决策（用户 2026-06-07）**：**天枢域保留（确认有意复活，非事故）**。toolWhitelist 宽窄是小问题，后面单独评，不阻塞。仅需补记：P1-1 提交信息漏说了域复活——属事实记录，非返工项。
+
+## ✅ P0-B 接线 + 端到端（实由 c2986c9 夹带交付 + 46f1c20 补测试）— 通过
+
+**真实来源（与提交标题不符，已查实）**：P0-B 接线三处**未被单独派任务**，而是天枢做 P0-C 时在 `c2986c9` 里一并完成——`git log -S` 实锤 `new DomainKnowledgeStore`(main.tsx:436)、`starDomainRegistry.loadFromDirectory`(main.tsx:427)、`buildDomainKnowledgeBlock(config.domainKnowledgeStore...)`(worker-session/hands-session) 三处全在 `c2986c9`。c2986c9 标题只写 P0-C(writer-health/lock/compact/exit-flush)，**夹带完成了 P0-B 接线却零字提及**。`46f1c20` 随后单独补端到端测试（仅 1 test 文件，无接线改动——因接线已在上一提交做完）。
+
+**接线实证**：store 构造非孤儿（main.tsx 436 构造 → 593/603/620 传入 config → 625 进 useMemo 依赖）；集成测试 `domain-knowledge-integration.test.ts` 真驱动 `coordinator.delegate(authority:'tianquan')`，第一 worker 失败 → precipitate → `store.recall` 含 `boundary sentinel missing` → 第二 worker prompt 经 `fakeWorkerClient` 内 `assert.match(/天权的经验/)` + `assert.match(/boundary sentinel missing/)` **强断言确认 inject 真把召回教训注入了 prompt**。delegate→precipitate→recall→inject 全链路被实证，非孤立单测。**前面 V3 "闭环" 的系统级 false-green（store 从未构造）至此真正解决。**
+
+**门神两处自我纠错（诚实记录）**：
+1. 原始 V3 审查判 "Component B dormant/未接线" 用的 grep 带 `--include="*.ts"`，**漏匹配 `.tsx`**——而接线全在 `main.tsx`。所幸：审查 fe753c6 当时 main.tsx 确实 0 处 DomainKnowledgeStore（原判定对），接线是 c2986c9 之后才加，故原判定**结论正确但工具有盲区**，此后复验靠扩大搜索纠正。
+2. P0-B 验收初稿误报 "inject 断言偏弱（只验 capture.request 存在）"——实际 inject 强断言在 `fakeWorkerClient` 内部(89-91)，门神只看了测试体末尾(180)漏看回调内。**inject 断言本就到位，无需补强。**
+
+**🔴 归族（提交夹带模式，第二次复发）**：c2986c9 提交信息漏报它实际接通了 P0-B——与 P1-1(303ef2c) 夹带复活 tianshu 是**同一模式：提交干的比标题多**。归族纪律记一笔：审查任何提交都应 `--stat` 看全文件清单，不能只信标题；标题与 diff 范围不符本身是信号。关联 [[feedback_adversarial-review-method]] 规则2。
+
 ## 待复验清单（全部任务完工后，门神统一重查）
-1. P1-1 测试回退后是否真 RED→GREEN（退 303ef2c~1 必红）
-2. P1-1 是否偷改 STAR_DOMAINS 域集合（未声明 scope creep）
-3. P0-B 接线三处 + 端到端测试（store 构造 / block 调用 / loadFromDirectory）
-4. P0-C 持久化防护（先复核 agent 报告属实再认修复）
-5. 全量回归：跨模块测试一次跑全（避免孤立测试漏掉接线后的交互回归）
+1. ~~P1-1 测试回退后是否真 RED→GREEN~~ ✅ 已验（c4e85a8 退回必红）
+2. ~~P1-1 是否偷改 STAR_DOMAINS 域集合~~ ✅ 已查实：复活了 tianshu。**用户已定：天枢域保留（有意复活）**，结案。
+3. ~~P0-B 接线三处 + 端到端测试~~ ✅ 已验：c2986c9 夹带接线 + 46f1c20 端到端测试，inject 强断言到位。
+4. ~~P0-C 持久化防护~~ ✅ 已验：8 测试 RED→GREEN，agent 报告复核属实，超额修了路径穿越+凭证脱敏。
+5. 全量回归：跨模块测试一次跑全（避免孤立测试漏掉接线后的交互回归）—— **最后一关，待跑**
+6. ~~tianshu 去留落定~~ ✅ 保留。遗留小问题：tianshu toolWhitelist 宽窄后续单独评（非阻塞，与 P0-A 授权面相关）。
+7. ~~遗留：`star-domain-registry.test.ts:423` 活 tsc 错误~~ ✅ 全量回归确认 tsc 0 错，已消失。
+
+## ✅ 全量回归（2026-06-07，门神跑）— V3 返工干净收口
+
+`npm test`（487 测试文件）+ `tsc --noEmit`。**tsc 0 错**。测试 2 个失败，均非 V3 返工核心缺陷：
+
+1. **`glance-bus.test.ts:9` `7 !== 6`** — tianshu 保留的跨模块连带。glance-bus 按域数生成快照，tianshu 复活后 7 域，测试硬编码 `assert.equal(snap.length, 6)`。**孤立测 star-domain 照不到，全量才暴露——全量回归的价值实证。** 属 tianshu 决策收尾（改 6→7 或读 `ALL_DOMAINS.length` 根治硬编码）。
+2. **`approval-card.test.ts:87` y/n 主题色高亮** — **既有失败，与 V3 无关**。三重证据：文件最后改动 `7076522`(06-02) 早于返工起点(06-07) 5 天；V3 返工链 `861ffbf..HEAD` **零碰 approval-card/theme 文件**；失败内容是 TUI 主题色，与域知识系统无关联。系用户晚间改主题带出。
+
+**用户决策（2026-06-07）**：两项均为小问题，**标记存档，不进本轮冲刺**，下轮处理。
+
+### 本轮冲刺收口状态
+- **P0-A / P1-1 / P0-B / P0-C 全部通过**，均经 RED→GREEN 或 grep 接线实证，无 false-green 残留。
+- tsc 0 错，全量测试除上述 2 个已标记小问题外全绿。
+- 遗留下轮：① glance-bus 6→7 ② approval-card 主题色 ③ tianshu toolWhitelist 宽窄评估。**均非阻塞。**
