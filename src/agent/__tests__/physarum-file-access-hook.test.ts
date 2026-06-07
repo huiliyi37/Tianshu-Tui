@@ -49,8 +49,18 @@ describe('physarum file access hook', () => {
       const engine = new PhysarumEngine(undefined)
       const hook = createPhysarumFileAccessHook({ getPhysarum: () => engine })
 
-      hook.run(makeCtx(cwd, 1), { name: 'read_file', success: true, target: 'src/b.ts' })
-      hook.run(makeCtx(cwd, 1), { name: 'edit_file', success: true, target: join(cwd, 'src', 'a.ts') })
+      hook.run(makeCtx(cwd, 1), {
+        name: 'read_file',
+        success: true,
+        target: 'read_file',
+        input: { file_path: 'src/b.ts' },
+      })
+      hook.run(makeCtx(cwd, 1), {
+        name: 'edit_file',
+        success: true,
+        target: 'edit_file',
+        input: { file_path: join(cwd, 'src', 'a.ts') },
+      })
 
       const edge = engine.getEdge('src/a.ts', 'src/b.ts')
       assert.ok(edge)
@@ -62,20 +72,22 @@ describe('physarum file access hook', () => {
     }
   })
 
-  it('ignores grep paths, failed tools, directories, and non-indexable targets', () => {
+  it('ignores grep paths, failed tools, directories, non-indexable targets, and display fallbacks', () => {
     const cwd = makeWorkspace()
     try {
       const engine = new PhysarumEngine(undefined)
       const hook = createPhysarumFileAccessHook({ getPhysarum: () => engine })
 
-      hook.run(makeCtx(cwd, 1), { name: 'read_file', success: true, target: 'src/a.ts' })
-      hook.run(makeCtx(cwd, 2), { name: 'grep', success: true, target: 'src' })
-      hook.run(makeCtx(cwd, 3), { name: 'edit_file', success: false, target: 'src/b.ts' })
-      hook.run(makeCtx(cwd, 4), { name: 'read_file', success: true, target: 'src/notes.md' })
+      hook.run(makeCtx(cwd, 1), { name: 'read_file', success: true, target: 'read_file' })
+      hook.run(makeCtx(cwd, 2), { name: 'read_file', success: true, target: 'read_file', input: { file_path: 'src/a.ts' } })
+      hook.run(makeCtx(cwd, 3), { name: 'grep', success: true, target: 'src', input: { path: 'src' } })
+      hook.run(makeCtx(cwd, 4), { name: 'edit_file', success: false, target: 'edit_file', input: { file_path: 'src/b.ts' } })
+      hook.run(makeCtx(cwd, 5), { name: 'read_file', success: true, target: 'read_file', input: { file_path: 'src/notes.md' } })
+      hook.run(makeCtx(cwd, 6), { name: 'hash_edit', success: true, target: 'hash_edit', input: { file_path: 'src' } })
 
       assert.equal(engine.edgeCount(), 0)
 
-      hook.run(makeCtx(cwd, 5), { name: 'hash_edit', success: true, target: 'src/b.ts' })
+      hook.run(makeCtx(cwd, 7), { name: 'hash_edit', success: true, target: 'hash_edit', input: { file_path: 'src/b.ts' } })
       assert.ok(engine.getEdge('src/a.ts', 'src/b.ts'))
     } finally {
       rmSync(cwd, { recursive: true, force: true })

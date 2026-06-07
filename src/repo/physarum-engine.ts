@@ -14,6 +14,12 @@ import { DEFAULT_PHYSARUM_CONFIG } from './physarum-types.js'
 import { aggregatePhysarumPredictionObservations } from './physarum-shadow-stats.js'
 import type { PhysarumShadowStats } from './physarum-shadow-stats.js'
 
+export interface PhysarumLoadStats {
+  loaded: number
+  discarded: number
+  discardedSamples: Array<{ fileA: string; fileB: string }>
+}
+
 const PHYSARUM_INDEXABLE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go'] as const
 const PHYSARUM_IGNORED_SEGMENTS = new Set(['node_modules', 'dist', '.git', '.rivet'])
 
@@ -48,6 +54,7 @@ export class PhysarumEngine {
     predictions: Array<{ file: string; score: number }>
   } | null = null
   private predictionObservations: PhysarumPredictionObservation[] = []
+  private lastLoadStats: PhysarumLoadStats = { loaded: 0, discarded: 0, discardedSamples: [] }
 
   constructor(
     private db: MeridianDb | undefined,
@@ -383,13 +390,38 @@ export class PhysarumEngine {
     this.db.savePhysarumEdges([...this.edges.values()].filter(isLoadablePhysarumEdge))
   }
 
+  /** Remove polluted persisted edges in-place after a filtered load. */
+  cleanupPersistedEdges(): PhysarumLoadStats {
+    this.save()
+    return this.getLastLoadStats()
+  }
+
+  getLastLoadStats(): PhysarumLoadStats {
+    return {
+      loaded: this.lastLoadStats.loaded,
+      discarded: this.lastLoadStats.discarded,
+      discardedSamples: [...this.lastLoadStats.discardedSamples],
+    }
+  }
+
   /** Load edges from MeridianDb (call once at startup) */
   loadFromDb(): void {
     if (!this.db?.loadPhysarumEdges) return
     const edges = this.db.loadPhysarumEdges()
+    let loaded = 0
+    let discarded = 0
+    const discardedSamples: Array<{ fileA: string; fileB: string }> = []
     for (const e of edges) {
-      if (!isLoadablePhysarumEdge(e)) continue
+      if (!isLoadablePhysarumEdge(e)) {
+        discarded++
+        if (discardedSamples.length < 5) {
+          discardedSamples.push({ fileA: e.fileA, fileB: e.fileB })
+        }
+        continue
+      }
       this.edges.set(this.edgeKey(e.fileA, e.fileB), e)
+      loaded++
     }
+    this.lastLoadStats = { loaded, discarded, discardedSamples }
   }
 }

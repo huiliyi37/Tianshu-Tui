@@ -2,6 +2,7 @@ export interface ToolPrediction {
   tool: string
   probability: number
   likelyTarget?: string
+  source?: 'tool-pattern' | 'physarum-file' | 'combined'
 }
 
 interface BigramEntry {

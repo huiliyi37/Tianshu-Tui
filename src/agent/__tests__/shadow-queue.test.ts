@@ -32,6 +32,21 @@ describe('ShadowQueue', () => {
     assert.equal(queue.pending(), 0)
   })
 
+  it('does not speculate non-read-only tools', () => {
+    const executed: string[] = []
+    const queue = new ShadowQueue({
+      execute: async (tool, target) => {
+        executed.push(`${tool}:${target}`)
+        return 'x'
+      },
+    })
+
+    queue.enqueue({ tool: 'edit_file', probability: 0.9, likelyTarget: 'src/foo.ts' })
+
+    assert.equal(queue.pending(), 0)
+    assert.deepEqual(executed, [])
+  })
+
   it('silently absorbs execution errors without unhandled rejection', async () => {
     let unhandledCount = 0
     const handler = () => { unhandledCount++ }

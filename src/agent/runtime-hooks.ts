@@ -10,6 +10,9 @@ export interface RuntimeToolEvent {
   name: string
   success: boolean
   target?: string
+  /** Original structured ToolUse input. Hooks that need file semantics must
+   *  prefer this over target because target is a display/history fallback. */
+  input?: Record<string, unknown>
   isError?: boolean
   /** Failure classification from failure-classifier.ts — enables vigor to distinguish
    *  semantic failures (type_error, assertion) from environment issues (timeout, api_error). */

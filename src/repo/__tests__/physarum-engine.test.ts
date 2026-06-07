@@ -132,8 +132,16 @@ describe('PhysarumEngine', () => {
     assert.equal(engine.getEdge('read_file', 'src/a.ts'), undefined)
     assert.equal(engine.getEdge('src/a.ts', 'docs/note.md'), undefined)
     assert.ok(engine.getEdge('src/a.ts', 'src/b.ts'))
+    assert.deepEqual(engine.getLastLoadStats(), {
+      loaded: 1,
+      discarded: 2,
+      discardedSamples: [
+        { fileA: 'read_file', fileB: 'src/a.ts' },
+        { fileA: 'src/a.ts', fileB: 'docs/note.md' },
+      ],
+    })
 
-    engine.save()
+    engine.cleanupPersistedEdges()
     assert.deepEqual(stored.map(e => [e.fileA, e.fileB]), [['src/a.ts', 'src/b.ts']])
   })
 

@@ -18,6 +18,16 @@ export interface P3Config {
   jitExecute?: (tool: string, args: Record<string, unknown>) => Promise<{ result: string; isError: boolean }>
 }
 
+export interface PhysarumFilePredictionInput {
+  afterToolName: string
+  predictions: Array<{ file: string; score: number }>
+}
+
+function physarumScoreToProbability(score: number): number {
+  if (!Number.isFinite(score) || score <= 0) return 0
+  return Math.min(0.9, score / (score + 1))
+}
+
 export class P3Integration {
   readonly miner: ToolPatternMiner
   readonly queue: ShadowQueue
@@ -28,7 +38,6 @@ export class P3Integration {
   readonly bandit: LinUCBBandit
   readonly jit: AgentJIT
   private lastTool: string | null = null
-  private lastTarget: string | null = null
 
   constructor(config: P3Config = {}) {
     this.miner = new ToolPatternMiner()
@@ -54,9 +63,9 @@ export class P3Integration {
     })
   }
 
-  onToolStart(toolName: string): void {
+  onToolStart(toolName: string, currentTarget?: string): void {
     if (this.lastTool) {
-      this.miner.record(this.lastTool, toolName, { targetPath: this.lastTarget ?? undefined })
+      this.miner.record(this.lastTool, toolName, { targetPath: currentTarget })
     }
     this.idleSpec.onToolStart(toolName)
   }
@@ -65,9 +74,26 @@ export class P3Integration {
     return this.idleSpec.checkCache(toolName, target)
   }
 
-  onToolComplete(toolName: string, target: string, _isError: boolean, _errorMsg?: string): void {
+  enqueuePhysarumFilePredictions(input: PhysarumFilePredictionInput): void {
+    const toolPredictions = this.miner.predict(input.afterToolName, 0)
+    const topToolPrediction = toolPredictions[0]
+    if (topToolPrediction && topToolPrediction.tool !== 'read_file') return
+
+    for (const prediction of input.predictions) {
+      const probability = physarumScoreToProbability(prediction.score)
+      this.queue.enqueue({
+        tool: 'read_file',
+        likelyTarget: prediction.file,
+        probability: topToolPrediction
+          ? Math.min(0.95, probability + topToolPrediction.probability * 0.2)
+          : probability,
+        source: topToolPrediction ? 'combined' : 'physarum-file',
+      })
+    }
+  }
+
+  onToolComplete(toolName: string, _target: string, _isError: boolean, _errorMsg?: string): void {
     this.lastTool = toolName
-    this.lastTarget = target
   }
 
   recordMistake(error: string, context: string, resolution: string, tags: string[] = []): void {

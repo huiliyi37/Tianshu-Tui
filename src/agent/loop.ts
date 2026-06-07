@@ -359,7 +359,13 @@ export class AgentLoop {
         },
       } : {}),
       meridianIndexer: this.config.meridianIndexer,
-      physarumFileAccess: { getPhysarum: () => this.immuneHook.getPhysarum() },
+      physarumFileAccess: {
+        getPhysarum: () => this.immuneHook.getPhysarum(),
+        onPredictions: batch => this.p3.enqueuePhysarumFilePredictions({
+          afterToolName: batch.afterToolName,
+          predictions: batch.predictions,
+        }),
+      },
     }))
     this.perception = new TurnPerceptionController({
       cwd: this.cwd,
@@ -972,6 +978,11 @@ export class AgentLoop {
     const db = this.meridianDbForWarmup
     if (!db) return
     this.physarumForWarmup?.loadFromDb()
+    const physarumLoadStats = this.physarumForWarmup?.getLastLoadStats()
+    if (physarumLoadStats && physarumLoadStats.discarded > 0) {
+      this.physarumForWarmup?.cleanupPersistedEdges()
+      debugLog(`[physarum] filtered ${physarumLoadStats.discarded} polluted persisted edges; loaded=${physarumLoadStats.loaded}; samples=${JSON.stringify(physarumLoadStats.discardedSamples)}`)
+    }
     try { this.immuneHook.importMemories(db.loadImmuneMemories()) } catch { /* non-critical */ }
     try { this.p3?.notebook.importEntries(db.loadMistakeEntries()) } catch { /* non-critical */ }
   }

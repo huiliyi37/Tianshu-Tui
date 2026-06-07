@@ -585,7 +585,7 @@ export async function executeToolUse(
     // P3-C: trigger speculative pre-execution for next likely tool
     const toolTarget = toolTargetFromInput(tu.name, tu.input)
     const priorReadLoopPlaceholders = countRecentReadLoopPlaceholders(deps.trajectory.getEntries(), toolTarget)
-    deps.p3?.onToolStart(tu.name)
+    deps.p3?.onToolStart(tu.name, toolTarget)
 
     // P3-C: check if we already have a speculative result for this tool call
     const speculativeHit = deps.p3?.checkSpeculativeCache(tu.name, toolTarget)

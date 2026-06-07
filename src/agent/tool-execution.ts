@@ -349,6 +349,7 @@ export class ToolExecutionController {
           success: !(result && 'is_error' in result && result.is_error === true),
           isError: result && 'is_error' in result ? result.is_error === true : false,
           target,
+          input: tu.input,
           // Classify failure for vigor: environment issues (timeout, api_error)
           // get reduced phasic penalty vs semantic failures (type_error, assertion).
           failureClass: result && 'is_error' in result && result.is_error === true

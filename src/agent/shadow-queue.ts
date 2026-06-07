@@ -1,5 +1,7 @@
 import type { ToolPrediction } from './tool-pattern-miner.js'
 
+const READ_ONLY_SPECULATIVE_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_dir'])
+
 export interface ShadowQueueDeps {
   execute: (tool: string, target: string) => Promise<string>
   minProbability?: number
@@ -22,6 +24,7 @@ export class ShadowQueue {
 
   enqueue(prediction: ToolPrediction): void {
     if (prediction.probability < this.minProbability) return
+    if (!READ_ONLY_SPECULATIVE_TOOLS.has(prediction.tool)) return
     if (!prediction.likelyTarget) return
     this.inflight++
     const target = prediction.likelyTarget

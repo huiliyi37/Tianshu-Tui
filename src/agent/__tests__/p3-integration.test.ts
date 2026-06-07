@@ -15,15 +15,53 @@ describe('P3Integration', () => {
     const p3 = new P3Integration()
     // Repeat pattern to build strong signal: grep → read_file
     for (let i = 0; i < 3; i++) {
-      p3.onToolStart('grep')
-      p3.onToolComplete('grep', 'src/foo.ts', false)
-      p3.onToolStart('read_file')
+      p3.onToolStart('grep', 'src/query.ts')
+      p3.onToolComplete('grep', 'src/query.ts', false)
+      p3.onToolStart('read_file', 'src/foo.ts')
       p3.onToolComplete('read_file', 'src/foo.ts', false)
     }
     const predictions = p3.miner.predict('grep')
     assert.ok(predictions.length > 0)
     const readFilePred = predictions.find(p => p.tool === 'read_file')
     assert.ok(readFilePred, 'should predict read_file after grep')
+    assert.equal(readFilePred.likelyTarget, 'src/foo.ts')
+  })
+
+  it('enqueues physarum file predictions as read_file speculation', () => {
+    const executed: string[] = []
+    const p3 = new P3Integration({
+      execute: async (tool, target) => {
+        executed.push(`${tool}:${target}`)
+        return 'prefetched'
+      },
+    })
+
+    p3.enqueuePhysarumFilePredictions({
+      afterToolName: 'read_file',
+      predictions: [{ file: 'src/next.ts', score: 2 }],
+    })
+
+    assert.equal(p3.queue.pending(), 1)
+    assert.deepEqual(executed, ['read_file:src/next.ts'])
+  })
+
+  it('does not enqueue physarum file predictions when tool pattern points away from read_file', () => {
+    const executed: string[] = []
+    const p3 = new P3Integration({
+      execute: async (tool, target) => {
+        executed.push(`${tool}:${target}`)
+        return 'prefetched'
+      },
+    })
+
+    p3.miner.record('read_file', 'bash')
+    p3.enqueuePhysarumFilePredictions({
+      afterToolName: 'read_file',
+      predictions: [{ file: 'src/next.ts', score: 2 }],
+    })
+
+    assert.equal(p3.queue.pending(), 0)
+    assert.deepEqual(executed, [])
   })
 
   it('records and retrieves mistakes', () => {
