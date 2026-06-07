@@ -13,7 +13,7 @@
  * - Index is generated from DB on demand — no shared flat files
  */
 
-import { readdirSync, existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 import type { MeridianDb } from './meridian-db.js'
@@ -33,23 +33,16 @@ export interface CodebaseIndexSnapshot {
 
 /**
  * Detect the project's indexing state.
- * - empty: no source files (or empty directory)
- * - cold: has source files but no module_summaries in DB
+ * - empty: no source files indexed in DB
+ * - cold: has source files in DB but no module_summaries
  * - indexed: module_summaries exist
  */
 export function detectProjectState(cwd: string, db: MeridianDb): ProjectState {
   const summaries = db.getModuleSummaries()
   if (summaries.length > 0) return 'indexed'
 
-  // Check if there are any source files at all
-  try {
-    const entries = readdirSync(cwd).filter(e => !e.startsWith('.'))
-    if (entries.length === 0) return 'empty'
-  } catch {
-    return 'empty'
-  }
-
-  // Has files, but no index
+  // Rely on DB as primary signal — it reflects actual indexed files,
+  // not just top-level directory contents (which may be src/ + configs).
   const stats = db.getStats()
   if (stats.files === 0) return 'empty'
 
@@ -108,46 +101,59 @@ export function discoverModules(db: MeridianDb): DiscoveredModule[] {
 // ─── Module summary seeding (static, no LLM) ────────────────────
 
 /**
- * Known module summaries from AGENTS.md architecture map.
- * Used for static seeding when no LLM is available.
- * These are only defaults — the DB entries will carry verifiedAtCommit
- * and can be overwritten by LLM-generated summaries via /index.
+ * Load module descriptions from AGENTS.md (or AGENTS.md equivalent) in the
+ * project root. Parses the architecture table format:
+ *
+ * | `src/agent/` | description text |
+ *
+ * Falls back to "module (top-export, next-export, ...)" for unmatched directories.
+ * This is project-agnostic — it reads the USER's AGENTS.md, not a hardcoded map.
  */
-export const KNOWN_MODULE_SUMMARIES: Record<string, string> = {
-  'src/agent/': '核心智能体循环、工具流水线、多模型协调、压缩、子智能体、验证、交付门禁',
-  'src/tools/': '工具实现（definition + execute）与注册',
-  'src/api/': 'API 客户端层（OpenAI 兼容、Codex OAuth、流式处理）',
-  'src/prompt/': '系统提示词工程（static / volatile / engine）',
-  'src/tui/': '终端 UI（Ink 6 / React）',
-  'src/compact/': '上下文压缩策略（修剪、微压缩、阈值）',
-  'src/cache/': '前缀缓存管理与命中诊断',
-  'src/repo/': '代码仓库分析（导入图、持久化索引）',
-  'src/config/': '配置管理（默认 → ~/.rivet → 项目多层加载）',
-  'src/artifact/': '大输出持久化',
-  'src/context/': '上下文管理（claims、rules、project memory）',
-  'src/plan/': '实现计划存储与审批',
-  'src/mcp/': 'MCP (Model Context Protocol) 服务器管理',
-  'src/workflows/': '生态系统工作流',
-  'src/commands/': '自定义命令加载器',
+function loadProjectModuleMap(cwd: string): Map<string, string> {
+  const result = new Map<string, string>()
+  for (const fileName of ['AGENTS.md', '.rivet.md']) {
+    const filePath = join(cwd, fileName)
+    if (!existsSync(filePath)) continue
+    try {
+      const content = readFileSync(filePath, 'utf-8')
+      // Match table rows: | `src/agent/` | description |
+      const rowRe = /\|\s*`([^`]+)`\s*\|\s*([^|]+)\s*\|/g
+      let m: RegExpExecArray | null
+      while ((m = rowRe.exec(content)) !== null) {
+        const dir = m[1]!.trim()
+        const desc = m[2]!.trim()
+        if (dir.includes('/') && desc.length > 0) {
+          result.set(dir, desc)
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  return result
 }
 
 /**
  * Seed module summaries from existing DB data.
- * Uses known descriptions from AGENTS.md for recognized directories,
- * falls back to top exported symbols for unknown modules.
+ * Reads AGENTS.md/.rivet.md for known descriptions (project-agnostic).
+ * Falls back to top exported symbols for unknown modules.
  *
  * Returns the number of modules seeded.
  */
-export function seedModuleSummaries(db: MeridianDb, headSha?: string): number {
+export function seedModuleSummaries(db: MeridianDb, headSha?: string, cwd?: string): number {
   const modules = discoverModules(db)
   if (modules.length === 0) return 0
 
   const commit = headSha ?? getHeadSha()
+  const projectMap = cwd ? loadProjectModuleMap(cwd) : new Map<string, string>()
   let seeded = 0
 
   for (const mod of modules) {
-    const summary = KNOWN_MODULE_SUMMARIES[mod.dirPath]
+    const summary = projectMap.get(mod.dirPath)
       ?? `module (${mod.exportedSymbols.slice(0, 3).map(s => s.name).join(', ')})`
+
+    // Aggregate hash from all file content hashes in this module
+    const fileHashes = mod.files
+      .map(f => db.getSymbolsForFile(f).map(s => s.contentHash).join(','))
+      .join(';')
 
     db.upsertModuleSummary({
       dirPath: mod.dirPath,
@@ -155,8 +161,8 @@ export function seedModuleSummaries(db: MeridianDb, headSha?: string): number {
       keyExports: mod.exportedSymbols.slice(0, 10).map(s => s.name),
       fileCount: mod.files.length,
       status: 'active',
-      contentHash: '',
-      verifiedAtCommit: commit,
+      contentHash: fileHashes,
+      verifiedAtCommit: commit || undefined,
     })
     seeded++
   }
@@ -170,9 +176,15 @@ export function seedModuleSummaries(db: MeridianDb, headSha?: string): number {
  * Extract CLI flag entries from main.tsx and headless.ts by scanning
  * for common patterns: args[0] ===, args.includes, args.indexOf.
  *
- * This is a pragmatic static extractor — not a full AST walk.
- * The plan notes 4 heterogeneous patterns in main.tsx alone;
- * this covers the most common ones.
+ * IMPORTANT: This records only the source FILE (not line number) as handler.
+ * The plan (1.3) explicitly warns that grep-derived line numbers are unreliable
+ * because the flag REFERENCE line ≠ the HANDLER line — args.includes('--goal')
+ * may appear at line 300 but the actual handler logic is at line 894.  Injecting
+ * grep-matched line numbers into the index would create the exact false-green the
+ * plan identifies as "陈旧即说谎" — a confidently wrong fact worse than no fact.
+ *
+ * wired is set to false (unverified) by default. The agent (or a future AST
+ * extractor) should verify and flip to true.
  */
 export function extractCliEntries(
   mainTsxSource: string,
@@ -183,66 +195,45 @@ export function extractCliEntries(
 ): CliEntry[] {
   const entries: CliEntry[] = []
   const commit = headSha ?? getHeadSha()
+  const seen = new Set<string>()
+
+  function addEntry(flag: string, sourceFile: string): void {
+    if (seen.has(flag)) return
+    seen.add(flag)
+    entries.push({
+      flag,
+      handler: sourceFile,
+      wired: false,
+      verifiedAtCommit: commit || undefined,
+      sourceFile,
+    })
+  }
 
   // Pattern 1: args[0] === 'serve' / args[0] === '--help' etc.
   const args0Re = /args\[0\]\s*===\s*['"]([^'"]+)['"]/g
   let match: RegExpExecArray | null
   while ((match = args0Re.exec(mainTsxSource)) !== null) {
-    const flag = match[1] ?? ''
-    const line = lineNumberAt(mainTsxSource, match.index ?? 0)
-    entries.push({
-      flag,
-      handler: `${mainTsxPath}:${line}`,
-      wired: true,
-      verifiedAtCommit: commit,
-      sourceFile: mainTsxPath,
-    })
+    addEntry(match[1] ?? '', mainTsxPath)
   }
 
   // Pattern 2: args.includes('--goal') / args.includes('-p')
   const includesRe = /args\.includes\(\s*['"](-[^'"]+)['"]\s*\)/g
   while ((match = includesRe.exec(mainTsxSource)) !== null) {
-    const flag = match[1] ?? ''
-    const line = lineNumberAt(mainTsxSource, match.index ?? 0)
-    entries.push({
-      flag,
-      handler: `${mainTsxPath}:${line}`,
-      wired: true,
-      verifiedAtCommit: commit,
-      sourceFile: mainTsxPath,
-    })
+    addEntry(match[1] ?? '', mainTsxPath)
   }
 
   // Pattern 3: args.indexOf('--port') / args.indexOf('--provider')
   const indexOfRe = /args\.indexOf\(\s*['"](-[^'"]+)['"]\s*\)/g
   while ((match = indexOfRe.exec(mainTsxSource)) !== null) {
-    const flag = match[1] ?? ''
-    const line = lineNumberAt(mainTsxSource, match.index ?? 0)
-    entries.push({
-      flag,
-      handler: `${mainTsxPath}:${line}`,
-      wired: true,
-      verifiedAtCommit: commit,
-      sourceFile: mainTsxPath,
-    })
+    addEntry(match[1] ?? '', mainTsxPath)
   }
 
-  // Pattern 4: headless.ts findIndex patterns
+  // Pattern 4: headless.ts flag references — detect presence only
   if (headlessSource) {
     const headlessFlags = ['--json', '--stream-json', '--print', '-p', '--goal', '-g']
     for (const flag of headlessFlags) {
       if (headlessSource.includes(`'${flag}'`) || headlessSource.includes(`"${flag}"`)) {
-        const idx = headlessSource.indexOf(`'${flag}'`) !== -1
-          ? headlessSource.indexOf(`'${flag}'`)
-          : headlessSource.indexOf(`"${flag}"`)
-        const line = lineNumberAt(headlessSource, idx)
-        entries.push({
-          flag,
-          handler: `${headlessPath}:${line}`,
-          wired: true,
-          verifiedAtCommit: commit,
-          sourceFile: headlessPath,
-        })
+        addEntry(flag, headlessPath)
       }
     }
   }
@@ -275,25 +266,29 @@ export function generateCodebaseIndexBlock(
 
   parts.push('<codebase-index>')
   parts.push(`Codebase: ${stats.files} files, ${stats.symbols} symbols, ${stats.edges} edges`)
+  if (!sha) {
+    parts.push('(no git — staleness tracking unavailable)')
+  }
 
   // Module summaries — compact table format
   if (modules.length > 0) {
     parts.push('')
     parts.push('Modules:')
     for (const m of modules) {
-      const stale = sha && m.verifiedAtCommit && sha !== m.verifiedAtCommit ? ' ⚠stale' : ''
+      const stale = isStale(sha, m.verifiedAtCommit) ? ' ⚠stale' : ''
       const exports = m.keyExports.length > 0 ? ` → ${m.keyExports.slice(0, 5).join(', ')}` : ''
       parts.push(`  ${m.dirPath} ${m.summary}${exports}${stale}`)
     }
   }
 
-  // CLI entries — compact
+  // CLI entries — compact; ❓=unverified, ✅=confirmed wired
   if (cliEntries.length > 0) {
     parts.push('')
     parts.push('CLI:')
     for (const e of cliEntries) {
-      const stale = sha && e.verifiedAtCommit && sha !== e.verifiedAtCommit ? ' ⚠stale' : ''
-      parts.push(`  ${e.flag} → ${e.handler} ✅${stale}`)
+      const stale = isStale(sha, e.verifiedAtCommit) ? ' ⚠stale' : ''
+      const icon = e.wired ? '✅' : '❓'
+      parts.push(`  ${e.flag} → ${e.handler} ${icon}${stale}`)
     }
   }
 
@@ -318,11 +313,12 @@ export function fullRebuild(
   headlessSource: string | null,
   mainTsxPath: string,
   headlessPath: string,
+  cwd?: string,
 ): string {
   const headSha = getHeadSha()
 
   // Seed module summaries
-  const moduleCount = seedModuleSummaries(db, headSha)
+  const moduleCount = seedModuleSummaries(db, headSha, cwd)
 
   // Clear and re-extract CLI entries
   // (We re-insert all, upsert handles dedup via PK)
@@ -344,6 +340,22 @@ export function getHeadSha(): string {
   } catch {
     return ''
   }
+}
+
+/**
+ * Check if a fact is stale relative to current HEAD.
+ * Returns true when:
+ *   1. We have a valid headSha (non-empty — we're in a git repo)
+ *   2. The fact has a verifiedAtCommit
+ *   3. They differ
+ *
+ * In non-git repos, headSha === '', and we conservatively return false
+ * (no staleness detection possible). This is documented in the index block
+ * as "no git — staleness tracking unavailable" when sha is empty.
+ */
+export function isStale(headSha: string | null | undefined, verifiedAtCommit: string | null | undefined): boolean {
+  if (!headSha || !verifiedAtCommit) return false
+  return headSha !== verifiedAtCommit
 }
 
 /** Compute 1-based line number from character offset */

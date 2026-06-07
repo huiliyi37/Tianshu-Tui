@@ -70,12 +70,14 @@ export interface ModuleSummaryEntry {
 export interface CliEntry {
   /** CLI flag, e.g. "--print" or "-p" */
   flag: string
-  /** Handler location, e.g. "main.tsx:998" */
+  /** Handler location — source file only (grep-derived line numbers are unreliable).
+   *  Agent should verify exact line via read_file before relying on this. */
   handler: string
-  /** Whether the flag is wired to actual logic */
+  /** Whether the flag is known to be wired to actual logic.
+   *  false = detected but not yet verified; true = agent has confirmed wiring. */
   wired: boolean
   /** Git commit SHA when this entry was last verified */
   verifiedAtCommit?: string
-  /** Source file where the flag is defined */
+  /** Source file where the flag is referenced */
   sourceFile: string
 }

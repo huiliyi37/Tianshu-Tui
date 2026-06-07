@@ -997,7 +997,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         headlessSource = readFileSync(join(cwd, headlessPath), 'utf-8')
       } catch { /* not found */ }
 
-      const result = fullRebuild(db, mainTsxSource, headlessSource, mainTsxPath, headlessPath)
+      const result = fullRebuild(db, mainTsxSource, headlessSource, mainTsxPath, headlessPath, cwd)
       const indexBlock = generateCodebaseIndexBlock(db, getHeadSha())
 
       pushStatic(createLogEntry({ type: 'system', content: `📚 Codebase Index Rebuilt\n\n${result}\n\nIndex will be injected into agent context on next turn.` }))

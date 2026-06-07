@@ -7,10 +7,10 @@ import {
   seedModuleSummaries,
   extractCliEntries,
   generateCodebaseIndexBlock,
-  KNOWN_MODULE_SUMMARIES,
+  isStale,
 } from '../codebase-index.js'
 import type { MeridianDb } from '../meridian-db.js'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -114,11 +114,12 @@ describe('discoverModules', () => {
 })
 
 describe('seedModuleSummaries', () => {
-  it('seeds known modules with descriptions from AGENTS.md', () => {
+  it('seeds modules — uses symbol fallback when no AGENTS.md available', () => {
     const { db, cleanup } = createTestDb()
     try {
       seedFileWithExports(db, 'src/agent/loop.ts', [
         { name: 'AgentLoop', kind: 'class', exported: true, line: 1 },
+        { name: 'runTurn', kind: 'function', exported: true, line: 10 },
       ])
 
       const count = seedModuleSummaries(db, 'deadbeef')
@@ -127,10 +128,40 @@ describe('seedModuleSummaries', () => {
       const summaries = db.getModuleSummaries()
       const agentSummary = summaries.find(s => s.dirPath === 'src/agent/')
       assert.ok(agentSummary)
-      assert.equal(agentSummary.summary, KNOWN_MODULE_SUMMARIES['src/agent/'])
+      // Without AGENTS.md, falls back to "module (top exports...)"
+      assert.ok(agentSummary.summary.includes('AgentLoop'))
       assert.equal(agentSummary.verifiedAtCommit, 'deadbeef')
+      // contentHash should not be empty
+      assert.ok(agentSummary.contentHash.length > 0)
     } finally {
       cleanup()
+    }
+  })
+
+  it('reads module descriptions from AGENTS.md when available', () => {
+    const { db, cleanup } = createTestDb()
+    const tempCwd = mkdtempSync(join(tmpdir(), 'rivet-agents-md-'))
+    try {
+      seedFileWithExports(db, 'src/agent/loop.ts', [
+        { name: 'AgentLoop', kind: 'class', exported: true, line: 1 },
+      ])
+      // Write an AGENTS.md with architecture table
+      writeFileSync(join(tempCwd, 'AGENTS.md'), [
+        '# Architecture',
+        '',
+        '| `src/agent/` | Core agent loop and tools |',
+        '| `src/tools/` | Tool implementations |',
+      ].join('\n'))
+
+      seedModuleSummaries(db, 'deadbeef', tempCwd)
+
+      const summaries = db.getModuleSummaries()
+      const agentSummary = summaries.find(s => s.dirPath === 'src/agent/')
+      assert.ok(agentSummary)
+      assert.equal(agentSummary.summary, 'Core agent loop and tools')
+    } finally {
+      cleanup()
+      rmSync(tempCwd, { recursive: true, force: true })
     }
   })
 })
@@ -146,6 +177,10 @@ describe('extractCliEntries', () => {
     assert.ok(entries.some(e => e.flag === '--help'))
     assert.ok(entries.every(e => e.sourceFile === 'src/main.tsx'))
     assert.ok(entries.every(e => e.verifiedAtCommit === 'abc123'))
+    // wired=false — unverified by default, not false-green
+    assert.ok(entries.every(e => e.wired === false))
+    // handler is file-only, no line number (grep-matched lines are unreliable)
+    assert.ok(entries.every(e => !e.handler.includes(':')))
   })
 
   it('extracts args.includes patterns', () => {
@@ -178,6 +213,16 @@ describe('extractCliEntries', () => {
     assert.ok(entries.some(e => e.flag === '--json' && e.sourceFile === 'src/headless.ts'))
     assert.ok(entries.some(e => e.flag === '--print' && e.sourceFile === 'src/headless.ts'))
   })
+
+  it('deduplicates flags across patterns', () => {
+    const source = `
+      if (args.includes('-p')) { }
+      const idx = args.indexOf('-p')
+    `
+    const entries = extractCliEntries(source, null, 'src/main.tsx', 'src/headless.ts')
+    const pFlags = entries.filter(e => e.flag === '-p')
+    assert.equal(pFlags.length, 1)
+  })
 })
 
 describe('generateCodebaseIndexBlock', () => {
@@ -200,12 +245,12 @@ describe('generateCodebaseIndexBlock', () => {
         keyExports: ['AgentLoop', 'runTurn'],
         fileCount: 5,
         status: 'active',
-        contentHash: '',
+        contentHash: 'abc',
         verifiedAtCommit: 'abc123',
       })
       db.upsertCliEntry({
         flag: '--print',
-        handler: 'main.tsx:998',
+        handler: 'src/main.tsx',
         wired: true,
         verifiedAtCommit: 'abc123',
         sourceFile: 'src/main.tsx',
@@ -217,7 +262,7 @@ describe('generateCodebaseIndexBlock', () => {
       assert.ok(block.includes('Core agent loop'))
       assert.ok(block.includes('AgentLoop'))
       assert.ok(block.includes('--print'))
-      assert.ok(block.includes('main.tsx:998'))
+      assert.ok(block.includes('src/main.tsx'))
       assert.ok(!block.includes('⚠stale'))
     } finally {
       cleanup()
@@ -233,7 +278,7 @@ describe('generateCodebaseIndexBlock', () => {
         keyExports: [],
         fileCount: 5,
         status: 'active',
-        contentHash: '',
+        contentHash: 'abc',
         verifiedAtCommit: 'oldsha',
       })
 
@@ -242,5 +287,73 @@ describe('generateCodebaseIndexBlock', () => {
     } finally {
       cleanup()
     }
+  })
+
+  it('does not mark stale when no git (empty headSha)', () => {
+    const { db, cleanup } = createTestDb()
+    try {
+      db.upsertModuleSummary({
+        dirPath: 'src/agent/',
+        summary: 'Core agent loop',
+        keyExports: [],
+        fileCount: 5,
+        status: 'active',
+        contentHash: 'abc',
+        verifiedAtCommit: 'oldsha',
+      })
+
+      // empty string = no git → no staleness detection
+      const block = generateCodebaseIndexBlock(db, '')
+      assert.ok(!block.includes('⚠stale'))
+      assert.ok(block.includes('no git'))
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('shows ❓ for unverified CLI entries, ✅ for confirmed', () => {
+    const { db, cleanup } = createTestDb()
+    try {
+      db.upsertCliEntry({
+        flag: '--print',
+        handler: 'src/main.tsx',
+        wired: false,
+        verifiedAtCommit: 'abc',
+        sourceFile: 'src/main.tsx',
+      })
+      db.upsertCliEntry({
+        flag: '--goal',
+        handler: 'src/main.tsx',
+        wired: true,
+        verifiedAtCommit: 'abc',
+        sourceFile: 'src/main.tsx',
+      })
+
+      const block = generateCodebaseIndexBlock(db, 'abc')
+      assert.ok(block.includes('--print'))
+      assert.ok(block.includes('❓'))
+      assert.ok(block.includes('--goal'))
+      assert.ok(block.includes('✅'))
+    } finally {
+      cleanup()
+    }
+  })
+})
+
+describe('isStale', () => {
+  it('returns false when headSha is empty (no git)', () => {
+    assert.equal(isStale('', 'oldsha'), false)
+  })
+
+  it('returns false when verifiedAtCommit is undefined', () => {
+    assert.equal(isStale('abc', undefined), false)
+  })
+
+  it('returns true when sha differs', () => {
+    assert.equal(isStale('newsha', 'oldsha'), true)
+  })
+
+  it('returns false when sha matches', () => {
+    assert.equal(isStale('abc', 'abc'), false)
   })
 })
