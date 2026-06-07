@@ -276,28 +276,39 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
       const message = params.input.message as string | undefined
 
       if (commit) {
+        const forceGate = params.input.force === true
         if (report.state === 'RED') {
-          lines.push('', '❌ Cannot commit: delivery gate is RED.')
-          lines.push('', 'Recovery:')
-          if (report.blockingReason) {
-            lines.push(`  Reason: ${report.blockingReason}`)
-          }
-          if (report.currentBlockingFailure) {
-            lines.push(`  Detail: ${report.currentBlockingFailure}`)
-          }
-          lines.push('')
-          // Unverified: guide to targeted verification instead of full suite
-          if (report.ownedFiles.length > 0 && report.verificationCount === 0) {
-            lines.push('  → Files are unverified. Run TARGETED tests first:')
-            lines.push('    Use run_tests with filter="test-file-name" for each changed file.')
-            lines.push('    Use related_tests(sourceFile) to find the right test file.')
-            lines.push('')
-            lines.push('    Do NOT run the full test suite as first step — it may timeout.')
+          // Stale failure candidates: failures that likely pre-date this change.
+          // force=true allows override when all blocking failures look pre-existing.
+          if (forceGate && report.staleFailureCandidates > 0) {
+            lines.push('', '⚠️  RED overridden (force=true): stale failure candidates detected.')
+            lines.push('   Verify these pre-existing failures are unrelated to your changes before proceeding.')
           } else {
-            lines.push('  → Fix the blocking issue above, then re-run deliver_task.')
-            lines.push('    If tests keep timing out, run them in smaller batches by directory.')
+            lines.push('', '❌ Cannot commit: delivery gate is RED.')
+            if (report.staleFailureCandidates > 0) {
+              lines.push('   (Stale failure candidates found — use force=true if pre-existing.)')
+            }
+            lines.push('', 'Recovery:')
+            if (report.blockingReason) {
+              lines.push(`  Reason: ${report.blockingReason}`)
+            }
+            if (report.currentBlockingFailure) {
+              lines.push(`  Detail: ${report.currentBlockingFailure}`)
+            }
+            lines.push('')
+            // Unverified: guide to targeted verification instead of full suite
+            if (report.ownedFiles.length > 0 && report.verificationCount === 0) {
+              lines.push('  → Files are unverified. Run TARGETED tests first:')
+              lines.push('    Use run_tests with filter="test-file-name" for each changed file.')
+              lines.push('    Use related_tests(sourceFile) to find the right test file.')
+              lines.push('')
+              lines.push('    Do NOT run the full test suite as first step — it may timeout.')
+            } else {
+              lines.push('  → Fix the blocking issue above, then re-run deliver_task.')
+              lines.push('    If tests keep timing out, run them in smaller batches by directory.')
+            }
+            return { content: lines.join('\n'), isError: true }
           }
-          return { content: lines.join('\n'), isError: true }
         }
         if (report.state === 'YELLOW') {
           const stanceHint = detectSymptomPatch(params.cwd)
@@ -386,14 +397,14 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         // Cohesion gate: RED if files span too many areas (unless force=true)
         // When files were adopted (cross-session takeover), auto-override cohesion
         // since the adoption scope is intentional.
-        const forceOverride = params.input.force === true
+        const cohesionOverride = forceGate
           || (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length > 0)
         const cohesion = checkCommitCohesion(filesToCommit)
-        if (cohesion.needsWarning && !forceOverride) {
+        if (cohesion.needsWarning && !cohesionOverride) {
           lines.push('', ...cohesion.warningLines.map(l => `  ${l}`))
           return { content: lines.join('\n'), isError: true }
         }
-        if (cohesion.needsWarning && forceOverride) {
+        if (cohesion.needsWarning && cohesionOverride) {
           lines.push('', '  ⚠️ Cohesion gate overridden with force=true. Verify this is truly one logical unit.')
         }
 
