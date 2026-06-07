@@ -26,6 +26,8 @@ import { CoordinatorState } from './coordinator-state.js'
 import { WorkOrderQueue } from './work-queue.js'
 import { CollaborationProtocol, type CollaborationConfig } from './collaboration-protocol.js'
 import type { LockIntent } from './semantic-lock.js'
+import { DomainKnowledgeStore } from './domain-knowledge-store.js'
+import { precipitateDomainLessons } from './domain-lesson-precipitate.js'
 
 export interface DelegationRequest {
   parentTurnId: string
@@ -89,6 +91,9 @@ export interface DelegationCoordinatorConfig {
    *  rejects the outer promise, so zombie workers are cleaned up immediately
    *  instead of waiting for their internal 180s timeout. */
   abortSignal?: AbortSignal
+  /** V3 Component B: domain knowledge store for precipitate/recall lifecycle.
+   *  When provided, coordinator auto-precipitates lessons from worker results. */
+  domainKnowledgeStore?: DomainKnowledgeStore
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -405,6 +410,15 @@ export class DelegationCoordinator {
     const profileMap = new Map([[order.id, order.profile]])
     const transcriptMap = run.transcript ? new Map([[order.id, run.transcript]]) : undefined
     const results = aggregateResults([run.result], 'primary_decides', profileMap, transcriptMap)
+
+    // V3 Component B-loop: precipitate domain lessons from results
+    if (order.authority && this.config.domainKnowledgeStore) {
+      precipitateDomainLessons(this.config.domainKnowledgeStore, {
+        domainId: order.authority,
+        results,
+        objective: order.objective,
+      })
+    }
 
     return {
       status: 'completed',
