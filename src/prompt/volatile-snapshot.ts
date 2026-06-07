@@ -3,7 +3,7 @@ import { join } from 'path'
 import { gitStatusCache } from './volatile-git.js'
 import { summarizeGitStatus } from './git-status-summary.js'
 import { loadProjectMemory } from '../context/project-memory-loader.js'
-import { renderAllCapsulesBlock } from '../agent/seed-capsule-store.js'
+import { renderCapsuleIndexBlock } from '../agent/seed-capsule-store.js'
 import type { VolatileContext } from './volatile.js'
 
 export interface SnapshotInput {
@@ -44,8 +44,9 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
 
   const projectMemoryBlock = input.projectMemoryBlock ?? loadProjectMemory(input.cwd).content
 
-  // 加载所有种子胶囊（天璇、天府等）— 前辈星域封存的认知方法
-  const seedCapsuleBlock = renderAllCapsulesBlock(input.cwd)
+  // 仅注入种子胶囊的 L1 索引（每星一行），完整正文经 recall_capsule 按需拉取。
+  // 冻结前缀只留极小索引：稳定、可缓存、随星数线性极慢膨胀。
+  const seedCapsuleBlock = renderCapsuleIndexBlock(input.cwd)
 
   return Object.freeze({
     cwd: input.cwd,

@@ -19,6 +19,8 @@ export interface SeedCapsule {
   star: string
   /** 封存日期 */
   sealedAt: string
+  /** 一行索引摘要（gist 属性；缺省时为空） */
+  gist?: string
   /** L1 核心文本（从 <seed-capsule> 标签内容提取） */
   raw: string
   /** 渲染后的完整 XML 块（可直接注入 volatile block） */
@@ -28,23 +30,37 @@ export interface SeedCapsule {
 interface ParsedTag {
   star: string
   sealed: string
+  gist?: string
   content: string
 }
 
 /**
  * 从 markdown 文档中提取 <seed-capsule> 标签。
  * 格式：
- *   <seed-capsule star="天璇" sealed="2026-05-21">
+ *   <seed-capsule star="天璇" sealed="2026-05-21" gist="跨域换视角">
  *     ...内容...
  *   </seed-capsule>
+ *
+ * 解析对**属性顺序与数量都容错**——先抓整个开标签，再逐属性提取。
+ * 这样未知/额外属性（如 gist、seal）不会让整个胶囊被静默丢弃。
+ * （根治"缺/多字段时解析退化"缺陷族——瑶光在自封胶囊时亲历过。）
  */
 function parseCapsuleTag(md: string): ParsedTag | null {
-  const openRe = /<seed-capsule\s+star="([^"]+)"\s+sealed="([^"]+)">/
+  const openRe = /<seed-capsule\b([^>]*)>/
   const match = md.match(openRe)
   if (!match) return null
 
-  const star = match[1]!
-  const sealed = match[2]!
+  const attrs = match[1] ?? ''
+  const attr = (name: string): string | undefined => {
+    const m = attrs.match(new RegExp(`\\b${name}="([^"]*)"`))
+    return m ? m[1] : undefined
+  }
+
+  const star = attr('star')
+  const sealed = attr('sealed')
+  if (!star || !sealed) return null // star + sealed 是必需的最小契约
+
+  const gist = attr('gist')
   const contentStart = match.index! + match[0].length
   const closeTag = '</seed-capsule>'
   const closeIdx = md.indexOf(closeTag, contentStart)
@@ -53,7 +69,7 @@ function parseCapsuleTag(md: string): ParsedTag | null {
   const content = md.slice(contentStart, closeIdx).trim()
   if (!content) return null
 
-  return { star, sealed, content }
+  return { star, sealed, gist, content }
 }
 
 function escapeXml(s: string): string {
@@ -81,6 +97,7 @@ function loadCapsuleFile(filePath: string): SeedCapsule | null {
   return {
     star: parsed.star,
     sealedAt: parsed.sealed,
+    gist: parsed.gist,
     raw: parsed.content,
     block: `<seed-capsule star="${escapeXml(parsed.star)}" sealed="${escapeXml(parsed.sealed)}">
 ${escapeXml(parsed.content)}
@@ -135,6 +152,34 @@ export function renderAllCapsulesBlock(cwd: string): string | undefined {
   const capsules = loadAllCapsules(cwd)
   if (capsules.length === 0) return undefined
   return capsules.map(c => c.block).join('\n\n')
+}
+
+/**
+ * 渲染**极小的 L1 索引**（仅星名 + gist 一行），用于注入冻结前缀。
+ * 替代 renderAllCapsulesBlock 的全文注入：膨胀从"每星一胶囊"降到"每星一行"，
+ * 稳定、可缓存、可无限加星。完整正文经 recall_capsule 工具按需拉取
+ * （落在工具结果通道 = anchor 之后，cache-safe，不篡改冻结前缀）。
+ */
+export function renderCapsuleIndexBlock(cwd: string): string | undefined {
+  const capsules = loadAllCapsules(cwd)
+  if (capsules.length === 0) return undefined
+  const lines = capsules.map(c => `  ${c.star} — ${c.gist ?? '（无摘要）'}`)
+  return [
+    '<seed-capsules note="前辈星域封存的方法索引。需要某位的完整原则时调用 recall_capsule(star)。">',
+    ...lines,
+    '</seed-capsules>',
+  ].join('\n')
+}
+
+/** 按星名取单个胶囊的完整 XML 块（供 recall_capsule 工具按需拉取）。 */
+export function getCapsuleByStar(cwd: string, star: string): SeedCapsule | undefined {
+  const q = star.trim().toLowerCase()
+  return loadAllCapsules(cwd).find(c => c.star.toLowerCase() === q)
+}
+
+/** 已加载胶囊的星名列表（供工具枚举可选值 / 模糊匹配兜底）。 */
+export function listCapsuleStars(cwd: string): string[] {
+  return loadAllCapsules(cwd).map(c => c.star)
 }
 
 // ─── 向后兼容（供旧调用方或 volatile-snapshot 迁移期使用） ───

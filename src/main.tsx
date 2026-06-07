@@ -26,6 +26,7 @@ import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
+import { createRecallCapsuleTool } from './tools/recall-capsule.js'
 import { createDeliverTaskTool } from './agent/deliver-task.js'
 import { createTaskLedger } from './agent/task-ledger.js'
 import { createOwnershipLedger } from './agent/ownership-ledger.js'
@@ -199,6 +200,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         return _coordinatorRef.delegateBatch(requests, policy, abortSignal, onProgress)
       },
     }))
+    reg.register(createRecallCapsuleTool(() => cwd))
     reg.register(ASK_USER_QUESTION_TOOL)
     reg.register(createRepoGraphTool(() => _meridianIndexerRef))
 
