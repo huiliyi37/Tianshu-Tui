@@ -17,7 +17,7 @@ interface SearchResult {
  *     <a class="result__snippet" href="URL">SNIPPET</a>
  *   </div>
  */
-function parseDuckDuckGoResults(html: string, maxCount: number): SearchResult[] {
+export function parseDuckDuckGoResults(html: string, maxCount: number): SearchResult[] {
   const results: SearchResult[] = []
 
   const titleBlocks = html.split('<h2 class="result__title">')
@@ -27,11 +27,12 @@ function parseDuckDuckGoResults(html: string, maxCount: number): SearchResult[] 
     const linkMatch = block.match(/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i)
     if (!linkMatch) continue
     const url = decodeHtmlEntities(linkMatch[1]!)
-    const title = stripHtml(linkMatch[2]!).trim()
+    // strip tags first, then decode entities → human-readable text for the model
+    const title = decodeHtmlEntities(stripHtml(linkMatch[2]!)).trim()
     if (!title || !url) continue
 
     const snippetMatch = block.match(/<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i)
-    const snippet = snippetMatch ? stripHtml(snippetMatch[1]!).trim() : ''
+    const snippet = snippetMatch ? decodeHtmlEntities(stripHtml(snippetMatch[1]!)).trim() : ''
 
     const actualUrl = extractActualUrl(url)
 
@@ -45,14 +46,27 @@ function stripHtml(text: string): string {
   return text.replace(/<[^>]+>/g, '').trim()
 }
 
-function decodeHtmlEntities(text: string): string {
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&#x2F;/g, '/')
+/**
+ * Decode HTML entities — named (&amp; &lt; …) and numeric (&#92; &#x27;).
+ * Single-pass: matched entities are replaced once and not re-scanned, so
+ * `&amp;#x27;` decodes to the literal `&#x27;`, never double-decoded to `'`.
+ */
+export function decodeHtmlEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos|#39);/g, (m, e: string) => {
+    switch (e) {
+      case 'amp': return '&'
+      case 'lt': return '<'
+      case 'gt': return '>'
+      case 'quot': return '"'
+      case 'apos':
+      case '#39': return "'"
+    }
+    // numeric: &#92; (decimal) or &#x27; (hex)
+    const code = e[1] === 'x' || e[1] === 'X'
+      ? parseInt(e.slice(2), 16)
+      : parseInt(e.slice(1), 10)
+    return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : m
+  })
 }
 
 /** Extract actual target URL from DuckDuckGo redirect wrappers. Validates http/https only. */
