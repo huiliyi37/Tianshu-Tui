@@ -85,8 +85,8 @@ describe('config permissions schema', () => {
     assert.equal(parsed.agent.songlineEnabled, false)
     assert.equal(agent.antiAnchoring.enabled, false)
     assert.equal(parsed.agent.antiAnchoring.enabled, false)
-    assert.equal(agent.intentRetrievalRouter.enabled, false)
-    assert.equal(parsed.agent.intentRetrievalRouter.enabled, false)
+    assert.equal(agent.intentRetrievalRouter.enabled, true)
+    assert.equal(parsed.agent.intentRetrievalRouter.enabled, true)
   })
 
   it('parses explicit Songline runtime opt-in', () => {

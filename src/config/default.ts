@@ -101,7 +101,7 @@ export const DEFAULT_CONFIG: Config = {
       seedMaxTokens: 512,
     },
     intentRetrievalRouter: {
-      enabled: false,
+      enabled: true,
       classifier: 'llm',
       timeoutMs: 4_000,
       maxTokens: 600,

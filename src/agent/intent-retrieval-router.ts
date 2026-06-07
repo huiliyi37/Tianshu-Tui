@@ -21,7 +21,7 @@ export interface IntentRetrievalRouterConfig {
 export type IntentRetrievalRouterConfigInput = Partial<IntentRetrievalRouterConfig> | boolean | undefined
 
 export const DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG: IntentRetrievalRouterConfig = {
-  enabled: false,
+  enabled: true,
   classifier: 'llm',
   timeoutMs: 4_000,
   maxTokens: 600,

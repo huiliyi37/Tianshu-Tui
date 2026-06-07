@@ -71,11 +71,12 @@ export const antiAnchoringSchema = z.object({
 export const intentRetrievalRouterSchema = z.preprocess(
   value => {
     if (value === true) return { enabled: true }
-    if (value === false || value === undefined) return { enabled: false }
+    if (value === false) return { enabled: false }
+    if (value === undefined) return { enabled: true }
     return value
   },
   z.object({
-    enabled: z.boolean().default(false),
+    enabled: z.boolean().default(true),
     classifier: z.enum(['heuristic', 'llm']).default('llm'),
     timeoutMs: z.number().int().positive().default(4_000),
     maxTokens: z.number().int().positive().default(600),
