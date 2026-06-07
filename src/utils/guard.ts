@@ -11,11 +11,12 @@
 
 /** Type-safe index access: narrows `T[]` to `T` without `!`. Throws on out-of-bounds. */
 export function checkedAt<T>(arr: readonly T[], index: number): T {
-  const val = arr[index]
-  if (val === undefined) {
+  // 越界用索引比较判定，不用 `val === undefined` 值哨兵——否则
+  // (T | undefined)[] 中合法位置的 undefined 会被误判为越界并抛出撒谎的错误。
+  if (index < 0 || index >= arr.length) {
     throw new Error(`Index ${index} out of bounds for array of length ${arr.length}`)
   }
-  return val
+  return arr[index] as T
 }
 
 /**
