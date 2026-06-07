@@ -164,3 +164,103 @@ flowchart TD
 ```
 
 回填规则：实测表里"图1 classDef 着色生效"三列全 ✅ → dark 调色板进；若 GitHub ⚠️（已知 GitHub mermaid 对 classDef 支持有限）→ 调色板降级为"可选增强"，形状词汇仍是强制基线（形状不依赖 classDef）。
+
+---
+
+## 附录二 · 第 3 层图型骨架模板（纯结构，可移植，已备好）
+
+> 状态：骨架只用第 1 层已定稿的语义形状 + mermaid 核心布局语法，不含 classDef，**跨渲染器可移植，现已定稿**。agent 选图型后填节点文字即可，不从零编排。`/diagram <type>` 命令（B 路）直接吐对应骨架。
+
+### architecture · 分层架构图
+
+```mermaid
+flowchart TD
+    subgraph IN["入口层"]
+        E1(用户/外部输入)
+        E2([CLI/API 入口])
+    end
+    subgraph LOGIC["逻辑层"]
+        A1[[核心处理器]]
+        A2{{LLM/模型}}
+        A3{关键决策}
+    end
+    subgraph STORE["存储层"]
+        S1[(主存储)]
+        S2[(缓存)]
+    end
+    E1 --> A1
+    E2 --> A1
+    A1 --> A2
+    A2 --> A3
+    A3 -->|命中| S1
+    A3 -.异步.-> S2
+```
+
+### dataflow · 数据流图（左→右）
+
+```mermaid
+flowchart LR
+    SRC(数据源) --> T1[清洗] --> T2[转换] --> T3{{推理}}
+    T3 ==> SINK[(落库)]
+    T3 -.旁路.-> LOG[(日志)]
+```
+
+### sequence · 时序图
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant S as 服务
+    participant L as LLM
+    participant D as 存储
+    U->>S: 请求
+    S->>D: 读上下文
+    D-->>S: 返回
+    S->>L: 调用
+    L-->>S: 结果
+    S->>U: 响应
+```
+
+### flowchart · 决策流（最常用）
+
+```mermaid
+flowchart TD
+    START([开始]) --> Q1{条件 A?}
+    Q1 -->|是| ACT1[动作 1]
+    Q1 -->|否| Q2{条件 B?}
+    Q2 -->|是| ACT2[动作 2]
+    Q2 -->|否| FALLBACK[兜底]
+    ACT1 --> END([结束])
+    ACT2 --> END
+    FALLBACK --> END
+```
+
+### comparison · 并列对比图
+
+```mermaid
+flowchart TB
+    subgraph OPT_A["方案 A"]
+        direction TB
+        A1[特性 1]
+        A2[特性 2]
+    end
+    subgraph OPT_B["方案 B"]
+        direction TB
+        B1[特性 1]
+        B2[特性 2]
+    end
+```
+
+### state · 状态机（可选第 6 型）
+
+```mermaid
+stateDiagram-v2
+    [*] --> 空闲
+    空闲 --> 处理中: 收到任务
+    处理中 --> 完成: 成功
+    处理中 --> 失败: 异常
+    失败 --> 空闲: 重试
+    完成 --> [*]
+```
+
+> 用法：agent/`/diagram` 取对应骨架 → 替换占位文字 → 套第 2 层调色板（若实测通过）。形状语义已内建，无需 agent 记忆。
