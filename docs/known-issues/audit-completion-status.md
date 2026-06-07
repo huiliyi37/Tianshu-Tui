@@ -2,9 +2,9 @@
 
 **审计文档:** `docs/known-issues/perf-and-recovery-audit-2026-06-05.md`
 **审计提交:** `57273c7`
-**对照截止:** `ccd4ae9` (当前 HEAD)
-**审计后提交数:** ~80
-**最后刷新:** 2026-06-06
+**对照截止:** `13a2664` (当前 HEAD)
+**权威进度来源:** `docs/known-issues/perf-and-recovery-audit-progress.md`
+**最后刷新:** 2026-06-07（P2 段与进度文档对齐 + 网#4 子缺口闭环）
 
 ---
 
@@ -41,34 +41,48 @@
 
 ---
 
-## P2 — perf 可缓存重算 / 低风险（8 项）
+## P2 — perf 可缓存重算 / 低风险（11 项）
 
-| # | 发现 | 状态 | 证据 |
+> **状态来源对齐 `perf-and-recovery-audit-progress.md`（权威进度文档）。**
+> 本表此前误列全部 ❌ 未修，已于 2026-06-07 校正：部分项已修，部分经验证判
+> NO-OP（无需改），部分 DEFERRED（需设计 / 影响面大）。
+
+| # | 发现 | 状态 | 证据 / 理由 |
 |---|------|------|------|
-| 中#4 | sensorimotor SHA-256 同步阻塞 | ❌ 未修 | |
-| 中#7 | turn-end 每 turn 全量 | ❌ 未修 | |
-| 中#8 | 每 turn git 子进程 | ❌ 未修 | |
-| 中#9 | hook pipeline 串行 | ❌ 未修 | |
-| 中#10 | snapshot 每次重建 | ❌ 未修 | |
-| 网#4 | onRateLimit 丢 retry-after | ❌ 未修 | |
-| 网#6 | Codex 缺 thinking-stall 短超时 | ❌ 未修 | |
-| 网#7 | classifier 408/425 漏判 retryable | ❌ 未修 | |
-| 压#4 | appendix 循环不注入 | ❌ 未修 | |
-| 压#5 | 请求时剪枝每 turn 全量 | ❌ 未修 | |
-| 压#8 | snapshot 活引用 | ❌ 未修 | |
+| 中#4 | sensorimotor SHA-256 同步阻塞 | ✅ **已修** | `c3a39f3` — defer to setImmediate |
+| 中#7 | turn-end 每 turn 全量 | 🔍 **NO-OP** | `getEntries()` 返回内部数组引用（`trajectory.ts:29-31`，非拷贝），3 次调用开销可忽略 |
+| 中#8 | 每 turn git 子进程 | 🔍 **NO-OP** | 已是 fire-and-forget（`.then()` 不 `await`），不阻塞主循环 |
+| 中#9 | hook pipeline 串行 | ⏳ **DEFERRED** | 需逐 hook 标记 `parallelSafe`，17 个 hook 影响面大，须先出设计 |
+| 中#10 | snapshot 每次重建 | ⏳ **DEFERRED** | 已是 shallow ref copy（`recentToolHistory.map()` 有界量小），开销可接受 |
+| 网#4 | onRateLimit 丢 retry-after | ✅ **已修** | 消费侧 `ef3d55c`（retryDelayMs→inter-turn delay）+ 发射侧 `2026-06-07`（anthropic/codex 补 `onRetry→onRateLimit`，原仅 openai-client 发射） |
+| 网#6 | Codex 缺 thinking-stall 短超时 | ✅ **已修** | `48efed7` — 90s stall detection（`codex-client.ts` THINKING_STALL_TIMEOUT_MS） |
+| 网#7 | classifier 408/425 漏判 retryable | ✅ **已修** | `866a80d` — `error-classifier.ts:98`(408) / `:110`(425) 新增分支 |
+| 压#4 | appendix 循环不注入 | ⏳ **DEFERRED** | cache-safe 尾部增量，架构级改动，需专门设计文档 |
+| 压#5 | 请求时剪枝每 turn 全量 | ⏳ **DEFERRED** | 架构级改动，需专门设计文档 |
+| 压#8 | snapshot 活引用 | ✅ **已修** | `e218fd6` — `session-state.ts:74` JSON deep copy |
 
 ---
 
 ## 汇总
-| 优先级 | 总数 | 已修 | 未修 | 完成率 |
-|--------|------|------|------|--------|
-| P0 | 3 | 3 | 0 | **100%** |
-| P1 (recovery) | 5 | 5 | 0 | **100%** |
-| P1 (perf) | 2 | 2 | 0 | **100%** |
-| P2 | 11 | 0 | 11 | 0% |
-| **合计** | **21** | **10** | **11** | **48%** |
+| 优先级 | 总数 | 已修 | NO-OP | DEFERRED | 完成率* |
+|--------|------|------|-------|----------|--------|
+| P0 | 3 | 3 | 0 | 0 | **100%** |
+| P1 (recovery) | 5 | 5 | 0 | 0 | **100%** |
+| P1 (perf) | 2 | 2 | 0 | 0 | **100%** |
+| P2 | 11 | 5 | 2 | 4 | **64%** |
+| **合计** | **21** | **15** | **2** | **4** | **81%** |
 
-> **注:** P0 + P1 全部完成。P2 均为低风险性能优化，无 recovery 影响。
+> *完成率 = (已修 + NO-OP) / 总数。NO-OP 项经验证确认无需改动，计入已处置。
+> **P0 + P1 全部完成。** P2 剩余 4 项 DEFERRED 均为低风险性能优化，无 recovery 影响：
+> 中#9（hook 并行）需逐 hook 标 parallelSafe 设计；中#10 已是 shallow ref copy 开销可接受；
+> 压#4 / 压#5 为架构级改动，需专门设计文档。
+
+> **2026-06-07 校正记录:** 本表 P2 段此前与 `perf-and-recovery-audit-progress.md` 冲突
+> （误列全部未修）。已对齐权威进度文档。其中 **网#4 发现一处子缺口**——`ef3d55c` 只修了
+> 消费侧（loop.ts retryDelayMs→inter-turn delay），但 `onRateLimit` 回调原本仅 openai-client
+> 发射，anthropic-client / codex-client 提取了 retry-after 却未触发回调；已于 2026-06-07
+> 补 `onRetry→onRateLimit`（对齐 openai-client，category==='rate_limit' 时回传 retryDelayMs），
+> `tsc --noEmit` 通过，三个活 provider 的 rate-limit 状态信号现已一致。
 
 ## 审计后额外修复（不在审计列表中）
 
