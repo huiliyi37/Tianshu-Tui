@@ -108,3 +108,11 @@ max 模式在 `groupTeamTasks` 之后直接返回，不进入 `delegateBatch`。
 - `groupId` 在 `DelegationRequest` 上定义了但未传到 `WorkOrder`——目前是 annotation only
 - `buildUnifiedTeamPlan` 里 `nonGoals` 需要调用方显式传，没有从 markdown 解析
 - `normalizePerspective` 的 graceful degradation 还没在真实 worker 输出上验证过
+
+---
+
+## 6. 后置方向：V3 强化（不插队 V2 基线）
+
+V1/V2 是编排层基线（天权规划、天机/天府落地），目标是 team 模式**可用**，不触及 worker 星域化。
+
+team 可用之后的最大化强化方向，见 **`2026-06-07-team-mode-v3-worker-stardomain.md`**：worker 星域化（马超/关羽等可派发专精认知）+ 星域知识库 + 经验沉淀升级。核心结论——剥洋葱后真缺口只剩**认知层两根线**（星域认知注入 worker + 星域知识库），harness/循环/上下文/记忆全套要么已共享要么不需要。**严格后置**，不得插队 V2 的 P0/P1。

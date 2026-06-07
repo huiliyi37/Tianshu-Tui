@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-06-07 — v2.9.2: Server Subsystem + Intent Retrieval Router + Review Discipline + Stall Root-Cause Closure
+
+Merge of `fix/stall-root-causes-abort-exit` into `main` (merge commit `6ac0c3d`). Pre-merge `main` is preserved at tag `v2.9.2` / branch `backup/v2.9.2-pre-merge` (see `docs/releases/v2.9.2-merge-record.md`). Verified at merge: `tsc --noEmit` clean.
+
+### Added — Server Subsystem
+
+- **`/prompt` SSE endpoint** (`feat(server): add prompt endpoint with streaming and SSE support`) — streaming prompt endpoint wired to the agent lifecycle (`feat(main): wire server prompt endpoint with agent lifecycle`).
+- **Go-live gate cleared** — server subsystem go-live gate + H6 disconnect guard closed (see `docs/known-issues/2026-06-06-server-subsystem-go-live-gate.md`).
+
+### Added — Intent Retrieval Router
+
+- **Intent retrieval router** (`feat(agent): wire intent retrieval router`) — heuristic + optional LLM classifier that routes which sources to consult per task kind. Pure-function route layer (`intent-retrieval-route.ts`) + orchestrator (`intent-retrieval-router.ts`), injected via PromptEngine dynamic appendix (cache-safe: excluded from stable volatile block).
+- **LLM classifier default-enabled** (`feat(agent): enable intent-retrieval LLM classifier by default`) — opt-in gate cleared after risk2 (no text-block duplication) + risk4 (baseline must-source fallback) re-verified. Config `agent.intentRetrievalRouter`.
+- **Anti-anchor coverage** — 31 test cases across 4 files assert the router is not locked by the first keyword (e.g. "慢慢解释" ≠ performance_diagnosis; "token refresh API 怎么用" ≠ security_safety).
+
+### Added — Review Discipline
+
+- **Review discipline default-enabled** (`feat(config): review discipline default-enabled with RIVET_REVIEW_DISCIPLINE env switch`) — ReviewRouter + re-entrancy guard + structural reviewDepth propagation. C=C1 default; `RIVET_REVIEW_DISCIPLINE` switch.
+
+### Fixed — Stall Root Causes / Abort / Sub-Agent Trust (T1 closure)
+
+- **cron-lock split-brain** — atomic hard-link publish + serialized `.reclaim`, cross-host owner guard, `execSync`→`process.kill(0)` (EPERM=alive, /proc zombie exclusion).
+- **Sub-agent evidence fail-closed** — adversarial_verifier without `run_tests` → unverified; missing transcript → unverified; `run_tests` errored detection.
+- **Turn-boundary abort** — `isAbortRequested()` guards on all three abort-after-await paths (maybeCompact / enforceContextCeiling / trySessionSplit).
+- **stigmergy persistence** — synchronous `flushSync` on session-end (closes the 200ms debounce loss window).
+- **rtkRewrite cache isolation** (`fix(tools): key rtkRewrite cache by toolUseId`) — prevents cross-worker cache bleed.
+
+### Changed — Async I/O + Cleanup
+
+- **18 tool files** converted sync I/O → async (`async-io-audit-2026-06-06.md`).
+- **Dead code removed** — `incrementalCommit` in app.tsx, unreachable return in session-registry.
+- **TUI render fixes** — committed-log reference stability, live-region height clamp.
+
 ## 2026-06-02 — Cache Optimization Journey + Convergence Detection + Seed Capsules + TUI Polish
 
 This is a consolidation release wrapping 10 days of intensive development (2026-05-22 → 2026-06-02), ~130 commits. The dominant theme is **prefix cache optimization** — a four-round iterative process that pushed DeepSeek V4 cache hit rate from 56% crash to 99.6% steady state.
