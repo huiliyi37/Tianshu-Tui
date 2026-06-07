@@ -1,0 +1,106 @@
+import { readFileSync } from 'node:fs'
+import { z } from 'zod'
+import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
+import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
+import type { AggregationPolicy } from '../agent/work-order.js'
+import { validatePathSafe } from './path-validate.js'
+import type { Tool, ToolCallParams, ToolResult } from './types.js'
+
+/** Coordinator surface the team tool needs. `delegateBatch` drives planner
+ *  fanout + wave dispatch. `delegate` is optional until the review gate is
+ *  enabled; Task-1 callers/tests may omit it. */
+export interface TeamOrchestrateCoordinator {
+  delegateBatch(
+    requests: DelegationRequest[],
+    policy?: AggregationPolicy,
+    abortSignal?: AbortSignal,
+    onProgress?: (completed: number, total: number) => void,
+  ): Promise<CoordinatorRun>
+  delegate?(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
+}
+
+const inputSchema = z.object({
+  mode: z.enum(['standard', 'max']).default('standard'),
+  objective: z.string().min(1),
+  planPath: z.string().optional(),
+  planMarkdown: z.string().optional(),
+  maxParallel: z.number().int().min(1).max(5).optional(),
+})
+
+export function formatTeamSummary(summary: TeamRunSummary): string {
+  const lines: string[] = [
+    `team ${summary.mode}: ${summary.dispatched} dispatched, ${summary.waves.length} waves, ${summary.blocked.length} blocked`,
+  ]
+  if (summary.waves.length > 0) {
+    lines.push('Waves:')
+    for (const w of summary.waves) lines.push(`  ${w.id} [${w.risk}] ${w.taskIds.join(', ')} — ${w.reason}`)
+  }
+  if (summary.blocked.length > 0) {
+    lines.push('Blocked:')
+    for (const b of summary.blocked) lines.push(`  - ${b}`)
+  }
+  lines.push('', summary.packet)
+  return lines.join('\n')
+}
+
+export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinator): Tool {
+  return {
+    definition: {
+      name: 'team_orchestrate',
+      description:
+        'Run the deterministic team orchestrator: parse a plan (standard), group tasks into waves respecting file conflicts and dependencies, and dispatch the first ready wave of workers. Returns the wave schedule and dispatch summary. Does NOT auto-commit — the main controller integrates worker diffs.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          mode: { type: 'string', enum: ['standard', 'max'], description: 'standard: execute an existing plan. max: multi-perspective planning first.' },
+          objective: { type: 'string', description: 'The mission statement.' },
+          planPath: { type: 'string', description: 'Optional path to a Markdown plan inside the project (standard mode).' },
+          planMarkdown: { type: 'string', description: 'Optional inline Markdown plan; takes precedence over planPath.' },
+          maxParallel: { type: 'number', description: 'Max parallel workers per wave (1-5, default 3).' },
+        },
+        required: ['objective'],
+      },
+    },
+    async execute(params: ToolCallParams): Promise<ToolResult> {
+      const parsed = inputSchema.safeParse(params.input)
+      if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
+      const { mode, objective, planPath, planMarkdown, maxParallel } = parsed.data
+
+      let markdown = planMarkdown
+      if (!markdown && planPath) {
+        const safe = validatePathSafe(params.cwd, planPath)
+        if (!safe.ok) return { content: `team_orchestrate blocked: ${safe.error}`, isError: true }
+        try {
+          markdown = readFileSync(safe.path, 'utf8')
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          return { content: `team_orchestrate blocked: cannot read planPath "${planPath}": ${msg}`, isError: true }
+        }
+      }
+
+      let summary: TeamRunSummary
+      try {
+        summary = await runTeamSkeleton(
+          { mode, objective, planMarkdown: markdown, maxParallel, parentTurnId: params.toolUseId, abortSignal: params.abortSignal },
+          {
+            delegateBatch: (requests, policy, abortSignal, onProgress) =>
+              coordinator.delegateBatch(requests, policy, abortSignal, onProgress),
+          },
+        )
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: `team_orchestrate failed: ${msg}`, isError: true }
+      }
+
+      return {
+        content: formatTeamSummary(summary),
+        uiContent: `team ${mode}: ${summary.dispatched} dispatched / ${summary.blocked.length} blocked`,
+        isError: false,
+      }
+    },
+    requiresApproval: () => false,
+    isConcurrencySafe: () => false,
+    isEnabled: () => true,
+    timeoutMs: () => 600_000,
+  }
+}
