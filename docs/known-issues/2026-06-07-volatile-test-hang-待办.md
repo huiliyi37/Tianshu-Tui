@@ -59,3 +59,27 @@
 - 6 处测试修复:1 个陈旧 fixture(`aggregation.test.ts`,补 `run_tests` 证据)+ 5 个 fire-and-forget cwd 泄漏(`loop` / `loop-evidence` / `loop-intent-retrieval-router` / `loop-warmup` / `reliability-integration`,改用 `mkdtempSync` 可写 temp cwd)。
 - 全 `agent/` 套:2027/2027 绿,0 失败。
 - 改动均未提交,在工作区。
+
+---
+
+## 待办:plan-store 两处设计缺口(2026-06-07 评审,用户排期)
+
+本轮只修了 cwd 一致性(gap 2)与非破坏性 reject(gap 3,见 commit `6703b30`)。以下两项留待排期:
+
+### Gap 4 — slug 覆盖(`writePlan` 静默覆写)
+
+`writePlan`(`src/plan/plan-store.ts:66-75`)无条件 `writeFile`。slug 由标题 `slugify` 而来,**两份不同计划标题相同 → 同一 slug → 后写者静默覆盖前者**,旧计划丢失无提示。
+
+修复方向:写入前检测同名文件 —— 要么追加去重后缀(`-2`/短哈希/时间戳),要么显式报错让调用方决定。注意 approve/reject 的 `markPlanStatus` 是**有意**回写同 slug(状态标记),去重逻辑要放在"新建"路径而非状态更新路径。
+
+### Gap 5 — `listPlans` 按 `birthtime` 排序不可靠
+
+`readPlan`(`:92`)用 `s.birthtime` 当 `createdAt`,`listPlans`(`:115`)据此降序。`birthtime` 在部分文件系统(Linux ext3/部分 ext4、某些容器挂载)**为 0 或不支持**,导致排序退化甚至全相等。
+
+修复方向:把创建时间写进计划内容的 frontmatter(或文件名前缀),解析它来排序,不依赖 fs 元数据;迁移期对旧文件 fallback 到 `mtime`/`birthtime`。
+
+---
+
+## 待办:`slash-commands.test.ts` 全文件转绿(同 volatile hang 根因)
+
+见上方"同族新发现"小节。await 修复已落地(commit `9f0be77`),全文件 35 个测试一起跑仍被同族 fire-and-forget 死锁挡住。与本 volatile hang 合并排期,用真实 temp git 目录 prime cache 一并消除。
