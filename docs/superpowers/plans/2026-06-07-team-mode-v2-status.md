@@ -44,65 +44,85 @@
 
 ## 2. 当前状态：能做什么、不能做什么
 
-### ✅ 已能工作
+### ✅ 已能工作（V2 落地后）
 
 1. **`/team standard`**：输入 markdown 计划 → 解析 tasks → 拓扑排序分组 → 派第一波 workers
-2. **`/team max`**：解析计划 + 生成 waves + 风险分类 → 但**不派** execution workers（skeleton stop）
+2. **`/team max`**：解析计划 + 3 视角 planner 扇出 + 合并 + 分波 + 派首波执行 workers
 3. **视角合并**：天权/天府/天璇三视角输出可以 deterministic merge
 4. **文件冲突安全**：同文件 write 串行、部分 overlap 检测、source+test 绑定
+5. **多波次续派**：`fromWave` 参数支持主控驱动重入，派后续波
+6. **审查门**：末波自动触发 `routeReviewWorkflow`（L1 nudge / L2 verifier / L3 squadron），feature/refactor 也被审查
+7. **模型路由**：planner `kind:'plan'` → `code_edit`、executor `kind:'patch_proposal'` → `risky_refactor` 天然分流
 
-### ❌ 尚未接线
+### ❌ 待办（后置，不阻塞基线）
 
-| 缺失 | 影响 | 难度 |
+| 缺失 | 影响 | 难度 | 归属 |
+|------|------|------|------|
+| TUI 面板 | `/team` 输出是纯文本，无进度可视化 | 大 | P2 延后 |
+| 自动 merge | 多 worker 写同一文件后需要合并策略 | 大 | Phase 7 后置 |
+| V3 worker 星域认知注入 | worker 不带星域认知，视角分化靠 prompt 而非系统性 | 中 | V3 后置，见 `team-mode-v3-worker-stardomain.md` |
+| Review Squadron 姿态轴 | 只有维度 Inspector，无认知姿态（马超/天权/天府） | 中 | 后置，见 `review-squadron-stance-axis-proposal.md` |
+
+---
+
+## 3. V2 已完成（2026-06-07 落地）
+
+V2 landing plan 5 个 Task 全部完成，67 tests pass，tsc clean。
+
+| Task | 内容 | 验证 |
 |------|------|------|
-| `/team max` 不派 planning workers | max 模式空转，需要接 `delegateBatch` 派 3 个 planner | 中 |
-| profile routing 未实现 | 所有 worker 走同一模型，无强弱模型分离 | 中 |
-| team review gate 独立于 `fix:` commit gate | feature/refactor 没有验收路径 | 小 |
-| 多波次执行 | orchestrator 只派第一波，后续波需要 loop 或 re-entry | 中 |
-| TUI 面板 | `/team` 输出是纯文本，无进度可视化 | 大（延后） |
-| 自动 merge | 多 worker 写同一文件后需要合并策略 | 大（延后） |
+| Task 1 | `team_orchestrate` 工具创建 + main.tsx 注册 + workflow prompt 改写 | 4 tool tests pass |
+| Task 2 | max 模式 3 planner 扇出 + `buildPlannerObjective` + `parsePerspectiveResult` + 视角合并 | orchestrator tests pass |
+| Task 3 | `fromWave` 多波次续派 + `dispatchWaveAt` + `WaveDispatchContext` | fromWave tests pass |
+| Task 4 | 审查门集成（`routeReviewWorkflow`，L1/L2/L3 按规模） | review gate test pass |
+| Task 5 | 模型路由文档化（`plan`→`code_edit`，`patch_proposal`→`risky_refactor`） | config 文档 + 回归测试 |
+
+## 4. 待办池（后置，按优先级）
+
+### P2: TUI 进度面板
+- `/team` 输出是纯文本，无进度可视化
+- 依赖：Ink 6 组件设计
+
+### P3: 自动 merge
+- 多 worker 写同一文件后需要合并策略
+- 当前：worker 返回 diff，主控手动集成
+- 最难的一项，Phase 7 后置
+
+### V3: worker 星域认知注入
+- worker 不带星域认知（马超/天权/天府），视角分化靠 prompt 而非系统性
+- `StarDomain.systemPromptSuffix` 已定义但 worker 侧零消费
+- 断点：`worker-prompts.ts:buildWorkerPrompt` 的 `authoritySuffix` 形参三个调用方都没传
+- 设计文档：`2026-06-07-team-mode-v3-worker-stardomain.md`
+- 前置：V2 基线稳定运行
+
+### Review Squadron 姿态轴
+- 现有 4 个维度 Inspector（Security/Lifecycle/DataFlow/Silence）解"看什么"
+- 缺"怎么想"——马超破坏/天权质疑/天府守护认知姿态
+- 姿态 × 维度复合用法
+- 设计文档：`2026-06-07-review-squadron-stance-axis-proposal.md`
+- 前置：V3 worker 星域注入
 
 ---
 
-## 3. V2 规划建议（天权视角）
-
-### 优先级排序
-
-```
-P0: max 模式接 planning workers        ← 天权 P0-1 的核心
-P0: 多波次执行 loop                     ← 没有这个 /team 只能做第一波
-P1: team review gate                    ← 验收闭环
-P1: profile routing                     ← 强弱模型分离
-P2: TUI 面板                            ← 体验优化，非功能缺失
-P3: 自动 merge                          ← 最难，最后做
-```
-
-### 关键设计决策待定
-
-1. **多波次执行**：是 orchestrator 内部 loop（async generator？），还是需要用户手动 `/team continue`？
-2. **max 模式 planning workers**：是 3 个 `delegate_batch` 并行调用，还是 3 个独立的 `delegate_task`？
-3. **profile routing**：走 config schema 扩展，还是走 `TeamTask.routeHint` 运行时映射？
-
----
-
-## 4. 数据流总结（V1 当前）
+## 5. 数据流总结（V2 当前）
 
 ```
 /team <objective>
   → slash-commands.ts: parseTeamCommand()
-  → ecosystem-workflows.ts: route to runTeamSkeleton()
-    → parseTeamTasks(markdown)        // team-plan.ts
-    → groupTeamTasks(tasks)           // team-grouping.ts → TeamWave[]
-    → waveToRequests(wave[0])         // → DelegationRequest[]
-    → coordinator.delegateBatch()     // → WorkOrder[] → WorkOrderQueue
-    → return TeamRunSummary
+  → ecosystem-workflows.ts: route to team_orchestrate tool
+    → team_orchestrate: parseTeamTasks / runTeamSkeleton
+      → standard: parseTeamTasks(markdown) → groupTeamTasks → dispatchWaveAt(0)
+      → max: 3 planner fanout → mergePerspectives → groupTeamTasks → dispatchWaveAt(0)
+    → dispatchWaveAt → coordinator.delegateBatch() → WorkOrder[] → WorkOrderQueue
+    → final wave: routeReviewWorkflow (L1/L2/L3 by scale)
+    → return TeamRunSummary + review outcome
 ```
 
-max 模式在 `groupTeamTasks` 之后直接返回，不进入 `delegateBatch`。
+多波次由主控驱动重入：`fromWave` 参数 → `dispatchWaveAt(fromWave)` 派下一波。
 
 ---
 
-## 5. 已知技术债
+## 6. 已知技术债
 
 - `TeamTaskDraft` 和 `TeamTask` 的继承关系用了 `extends`，但 `teamTasksToDelegationRequests` 里用 `(task as any).dependsOn` 逃逸检查——应该统一为 `TeamTask` 入口
 - `groupId` 在 `DelegationRequest` 上定义了但未传到 `WorkOrder`——目前是 annotation only
@@ -111,11 +131,11 @@ max 模式在 `groupTeamTasks` 之后直接返回，不进入 `delegateBatch`。
 
 ---
 
-## 6. 后置方向：V3 强化（不插队 V2 基线）
+## 7. 后置方向：V3 强化（不插队 V2 基线）
 
-V1/V2 是编排层基线（天权规划、天机/天府落地），目标是 team 模式**可用**，不触及 worker 星域化。
+V1/V2 是编排层基线（天权规划、天机/天府落地），目标是 team 模式**可用**，不触及 worker 星域化。V3 待办已收入 §4 待办池。
 
-## 7. 模型路由（V2 落地）
+## 8. 模型路由（V2 落地）
 
 team 的规划与执行经现有 CapabilityTask 路由天然分流，按 `config.workers.routing` 映射：
 
