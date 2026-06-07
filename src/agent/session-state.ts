@@ -72,7 +72,9 @@ export class SessionStateManager {
   }
 
   getSnapshot(): Readonly<SessionState> {
-    return this.state
+    // Return a frozen deep copy so callers cannot accidentally mutate
+    // internal state (violates immutability invariant for snapshots).
+    return JSON.parse(JSON.stringify(this.state)) as SessionState
   }
 
   // ---------------------------------------------------------------------------

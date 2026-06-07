@@ -80,6 +80,28 @@ export class McpManager {
     this.tools = []
   }
 
+  /**
+   * Synchronous force-kill of MCP child processes — for the process-exit path.
+   *
+   * `shutdown()` is async (`await transport.close()`); on `process.exit(0)` that
+   * promise is abandoned before it runs, so the spawned MCP server only receives
+   * stdin-EOF. Well-behaved servers exit on EOF, but misbehaving ones (e.g.
+   * lark-mcp) linger as PPID=1 orphans. StdioClientTransport exposes the child
+   * pid, so we SIGKILL the process group inline before exiting.
+   * (root-cause analysis 2026-06-05, Thread 1A)
+   */
+  killChildrenSync(): void {
+    for (const conn of this.connections.values()) {
+      const pid = (conn.transport as { pid?: number | null }).pid
+      if (typeof pid === 'number' && pid > 0) {
+        try { process.kill(-pid, 'SIGKILL') } catch {
+          try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
+        }
+      }
+    }
+    this.connections.clear()
+  }
+
   private async connectAndDiscover(serverId: string, serverConfig: McpServerConfig): Promise<void> {
     this.states.set(serverId, {
       serverId,

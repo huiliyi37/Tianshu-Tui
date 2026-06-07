@@ -196,7 +196,47 @@ export class SessionPersist {
         }
       } catch { /* skip malformed rows */ }
     }
-    return messages
+    // 压#7: Validate tool_call/tool_result pairing
+    return this.repairOrphanToolCalls(messages)
+  }
+
+  /** 压#7: Remove orphan tool_use/tool_result pairs left by corrupted/missing lines. */
+  private repairOrphanToolCalls(messages: OaiMessage[]): OaiMessage[] {
+    const toolCallIds = new Set<string>()
+    const toolResultIndices = new Map<string, number>()
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i]!
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) { if (tc.id) toolCallIds.add(tc.id) }
+      }
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        toolResultIndices.set(msg.tool_call_id, i)
+      }
+    }
+    const orphanResultIdx = new Set<number>()
+    for (const [id, idx] of toolResultIndices) {
+      if (!toolCallIds.has(id)) orphanResultIdx.add(idx)
+    }
+
+    // Pass 1: collect valid messages (strip orphan tool_calls, drop orphan results)
+    const result: OaiMessage[] = []
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i]!
+      // Drop orphan tool results
+      if (orphanResultIdx.has(i)) continue
+      // Strip orphan tool_calls from assistant messages
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        const valid = msg.tool_calls.filter(tc => tc.id && toolResultIndices.has(tc.id))
+        // Drop the message entirely if all tool_calls were orphan and content is empty
+        if (valid.length === 0 && !msg.content) continue
+        if (valid.length !== msg.tool_calls.length) {
+          result.push({ ...msg, tool_calls: valid })
+          continue
+        }
+      }
+      result.push(msg)
+    }
+    return result
   }
 
   /** Compact the session file with the given messages (with checksums) */

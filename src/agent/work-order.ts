@@ -41,14 +41,11 @@ export const workOrderKindSchema = z.enum([
 
 export type WorkOrderKind = z.infer<typeof workOrderKindSchema>
 
-export const workerProfileSchema = z.enum([
-  'code_scout',
-  'doc_scout',
-  'planner',
-  'reviewer',
-  'verifier',
-  'patcher',
-])
+/** Dynamic profile validation — accepts built-in + user-loaded profiles. */
+export const workerProfileSchema = z.string().refine(
+  (val) => profileRegistry.getProfileNames().includes(val),
+  (val) => ({ message: `Unknown worker profile "${val}". Available: ${profileRegistry.getProfileNames().join(', ')}` }),
+)
 
 export type WorkerProfile = z.infer<typeof workerProfileSchema>
 
@@ -98,6 +95,7 @@ export const workOrderSchema = z.object({
   budget: workerBudgetSchema,
   domain: domainAreaSchema.optional(),
   workerCwd: z.string().optional(),
+  reviewDepth: z.number().int().min(0).optional(),
 })
 
 export type WorkOrder = z.infer<typeof workOrderSchema>
@@ -187,6 +185,8 @@ export interface CreateReadOnlyWorkOrderInput {
   aggregationPolicy?: AggregationPolicy
   budget?: Partial<WorkerBudget>
   domain?: DomainArea
+  /** Review-router re-entrancy depth propagated across delegation boundaries. */
+  reviewDepth?: number
 }
 
 export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): WorkOrder {
@@ -198,16 +198,25 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     profile: input.profile,
     objective: input.objective,
     scope: input.scope,
-    constraints: input.constraints ?? [
-      'Return only evidence-backed claims.',
-      'Do not suggest edits as completed changes.',
-      'Do not request write, edit, bash, or test execution tools.',
-    ],
+    constraints: input.constraints ?? (input.profile === 'adversarial_verifier'
+      ? [
+          'Return only evidence-backed claims.',
+          'Do not suggest edits as completed changes.',
+          'Do not request write, edit, or bash tools.',
+          'Run tests whenever possible — your verdict requires command+evidence output.',
+        ]
+      : [
+          'Return only evidence-backed claims.',
+          'Do not suggest edits as completed changes.',
+          'Do not request write, edit, bash, or test execution tools.',
+        ]),
     allowedTools: (() => {
       const profileDef = profileRegistry.get(input.profile)
       return profileDef?.allowedTools ?? [...READ_ONLY_WORKER_TOOLS]
     })(),
-    disallowedTools: [...PHASE1_DISALLOWED_WORKER_TOOLS],
+    disallowedTools: input.profile === 'adversarial_verifier'
+      ? ['bash', 'write_file', 'edit_file', 'delegate_task', 'delegate_batch'] // run_tests NOT disallowed — it's the verifier's primary weapon
+      : [...PHASE1_DISALLOWED_WORKER_TOOLS],
     dedupeKey: `${input.kind}:${input.scope.files?.join(',') || input.objective}`,
     dependencies: input.dependencies ?? [],
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
@@ -218,6 +227,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
       maxRetries: input.budget?.maxRetries ?? 2,
     },
     domain: input.domain,
+    reviewDepth: input.reviewDepth,
   })
 }
 
@@ -255,6 +265,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
       maxRetries: input.budget?.maxRetries ?? 1,
     },
     domain: input.domain,
+    reviewDepth: input.reviewDepth,
   })
 }
 

@@ -2,7 +2,7 @@ import type { WorkerProfile } from './work-order.js'
 import { profileRegistry } from './profile-registry.js'
 
 // Re-export AgentRole from profile-registry for backward compatibility
-export type AgentRole = 'brain' | 'hands' | 'readonly'
+export type AgentRole = 'brain' | 'hands' | 'readonly' | 'readonly_plus_test'
 
 /** Brain: thinks, plans, delegates. No concrete file/code tools. */
 export const BRAIN_TOOLS = ['delegate_task', 'delegate_batch'] as const

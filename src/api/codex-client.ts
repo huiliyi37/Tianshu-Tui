@@ -214,16 +214,40 @@ export class CodexClient implements StreamClient {
     // GPT-5.5 thinking can exceed 3 min; match OpenAIClient slow-provider caps.
     const FIRST_BYTE_TIMEOUT_MS = 180_000
     const READ_TIMEOUT_MS = 300_000
+    // Thinking-stall timeout: once reasoning items have been received but no
+    // text content yet, use a shorter timeout to catch stalled thinking.
+    // Same rationale as OpenAIClient — Codex always reasons, so this is
+    // even more relevant here. 90s is generous for legitimate pauses.
+    const THINKING_STALL_TIMEOUT_MS = 90_000
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
+    let receivedThinking = false
+    let textReceived = false
 
     // Wire external abort signal to reader.cancel() (same fix as OpenAIClient).
-    const abortCleanup = signal ? wireAbortToReaderCancel(signal, reader) : null
+
+    // Hard timeout guarantee: ensures reader.read() is unblocked even if
+    // reader.cancel() alone cannot break the TCP connection (keep-alive hang).
+    // Matches the OpenAIClient pattern — max stream duration = 10 minutes.
+    const timeoutController = new AbortController()
+    const maxStreamMs = 10 * 60_000
+    const maxStreamTimer = setTimeout(() => timeoutController.abort(), maxStreamMs)
+
+    const signalCleanup = signal
+      ? wireAbortToReaderCancel(AbortSignal.any([signal, timeoutController.signal]), reader)
+      : wireAbortToReaderCancel(timeoutController.signal, reader)
 
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
-      const timeout = receivedFirstChunk ? READ_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
+      // Thinking-stall detection: once reasoning arrived but no text yet,
+      // use shorter timeout to catch stalled thinking streams.
+      const thinkingStallMs = (receivedThinking && !textReceived)
+        ? THINKING_STALL_TIMEOUT_MS
+        : null
+      const timeout = receivedFirstChunk
+        ? (thinkingStallMs ?? READ_TIMEOUT_MS)
+        : FIRST_BYTE_TIMEOUT_MS
       idleTimer = setTimeout(() => {
         streamTimedOut = true
         reader.cancel().catch(() => {})
@@ -233,7 +257,10 @@ export class CodexClient implements StreamClient {
     try {
       resetIdleTimer()
       while (true) {
-        if (signal?.aborted) break
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        if (timeoutController.signal.aborted) {
+          throw new Error('Codex SSE stream hard timeout (10min) — stream exceeded maximum duration')
+        }
 
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
@@ -265,6 +292,7 @@ export class CodexClient implements StreamClient {
           switch (type) {
             case 'response.output_text.delta': {
               seenTextDelta = true
+              textReceived = true
               // delta is a plain string, not { text: "..." }
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
@@ -276,6 +304,7 @@ export class CodexClient implements StreamClient {
             case 'response.reasoning_text.delta':
             case 'response.reasoning_summary_text.delta': {
               seenReasoningItem = true
+              receivedThinking = true
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
                 : (parsed.delta as Record<string, unknown>)?.text as string | undefined
@@ -390,7 +419,8 @@ export class CodexClient implements StreamClient {
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
-      if (abortCleanup) abortCleanup()
+      if (maxStreamTimer) clearTimeout(maxStreamTimer)
+      if (signalCleanup) signalCleanup()
       reader.releaseLock()
     }
 

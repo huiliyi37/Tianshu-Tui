@@ -5,6 +5,8 @@ import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { PressureMonitor } from '../../context/pressure-monitor.js'
 import type { TrajectoryEntry } from '../trajectory.js'
+import type { OaiChatRequest } from '../../api/oai-types.js'
+import type { StreamCallbacks, StreamClient } from '../../api/stream-client.js'
 
 function makeEngine(): PromptEngine {
   return new PromptEngine({
@@ -450,6 +452,115 @@ describe('CompactionController', () => {
     assert.equal(refreshed, true)
   })
 
+  it('A-1: trySessionSplit skips checkpoint mutation when abort lands after LLM compact returns', async () => {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(220_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+    ])
+    const before = session.getMessages().map(m => m.content)
+    const abortController = new AbortController()
+    let refreshed = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('late compact summary')
+        abortController.abort()
+      },
+    }
+
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getAbortSignal: () => abortController.signal,
+      refreshLedger: () => { refreshed = true },
+    })
+
+    const didSplit = await controller.trySessionSplit()
+
+    assert.equal(didSplit, false)
+    assert.deepEqual(session.getMessages().map(m => m.content), before)
+    assert.equal(refreshed, false)
+  })
+
+  it('A-1b: enforceContextCeiling skips checkpoint mutation when abort lands after LLM compact returns', async () => {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(200_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+    ])
+    const before = session.getMessages().map(m => m.content)
+    const abortController = new AbortController()
+    let refreshed = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('late ceiling compact summary')
+        abortController.abort()
+      },
+    }
+
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getAbortSignal: () => abortController.signal,
+      refreshLedger: () => { refreshed = true },
+    })
+
+    await controller.enforceContextCeiling()
+
+    assert.deepEqual(session.getMessages().map(m => m.content), before)
+    assert.equal(refreshed, false)
+  })
+
+  it('A-1c: maybeCompact (1M window LLM compact) skips checkpoint mutation when abort lands after LLM compact returns', async () => {
+    const session = new SessionContext()
+    // 1M window LLM-compact path fires at ratio >= 0.75. 12 messages ×
+    // ~65K tokens ≈ 780K tokens → 78% → reaches the L279 abort guard.
+    const chunk = 'x'.repeat(260_000) // 260K chars / 4 ≈ 65K tokens
+    session.replaceMessages(
+      Array.from({ length: 12 }, (_, i) => ({
+        role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: chunk,
+      })),
+    )
+    assert.ok(
+      session.getEstimatedTokens() / 1_000_000 >= 0.75,
+      'setup: tokens must exceed 75% of 1M window to reach the LLM-compact path',
+    )
+    const before = session.getMessages().map(m => m.content)
+    const abortController = new AbortController()
+    let refreshed = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('late micro compact summary')
+        abortController.abort()
+      },
+    }
+
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getAbortSignal: () => abortController.signal,
+      refreshLedger: () => { refreshed = true },
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+
+    assert.equal(result.compacted, false)
+    assert.deepEqual(session.getMessages().map(m => m.content), before)
+    assert.equal(refreshed, false)
+  })
+
   it('P4: enforceContextCeiling handoff also benefits from trajectory data', async () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(200_000 * 4)
@@ -517,9 +628,9 @@ describe('CompactionController', () => {
     let refreshed = false
     const controller = new CompactionController({
       session,
-      promptEngine: {} as PromptEngine,
+      promptEngine: makeEngine(),
       contextWindow: Math.max(tokens * 2, 100_000), // large enough to not ceiling
-      pressureMonitor: {} as PressureMonitor,
+      pressureMonitor: new PressureMonitor(Math.max(tokens * 2, 100_000)),
       getTrajectoryEntries: () => entries,
       getStreamedText: () => 'I will fix the bug. Next, add tests.',
       refreshLedger: () => { refreshed = true },

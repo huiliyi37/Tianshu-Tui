@@ -14,8 +14,15 @@
  * "still working — waiting on <last-activity> for N seconds" instead of a
  * frozen spinner.
  *
- * The heartbeat is purely informational — it does NOT abort or modify
- * agent state. Idle timeouts on tools and SSE handle real hangs.
+ * The heartbeat is informational for normal silent gaps (tool/SSE idle
+ * timeouts handle in-stream hangs). But the turn-boundary orchestration
+ * (postTurn hooks → compaction → prewarm → perception, between a tool result
+ * and the next model stream) is a watchdog blind spot: it neither ticks the
+ * heartbeat nor re-checks the abort signal, so a wedged await there freezes
+ * the UI with stale "still working" and ignores Ctrl+C. To cover that, the
+ * heartbeat ALSO acts as a watchdog with teeth: if silence exceeds
+ * `hardStallMs` (a ceiling well above any legitimate silent gap), it fires
+ * `onHardStall` exactly once so the loop can abort and break the wedge.
  */
 export interface TurnHeartbeatOptions {
   /** Milliseconds of silence before firing the first heartbeat. Default 15s. */
@@ -24,6 +31,15 @@ export interface TurnHeartbeatOptions {
   repeatMs?: number
   /** Called when silence threshold is crossed. */
   onHeartbeat: (elapsedMs: number, lastActivity: string) => void
+  /**
+   * Hard-stall ceiling: if no tick for this long, the turn is presumed wedged
+   * in a non-cooperative await (turn-boundary blind spot). Fires `onHardStall`
+   * once. Must be well above any legitimate silent gap (SSE read timeout,
+   * 1M-window LLM compact). Default 240s. Set 0 to disable the watchdog.
+   */
+  hardStallMs?: number
+  /** Called once when silence exceeds `hardStallMs`. Should abort the turn. */
+  onHardStall?: (elapsedMs: number, lastActivity: string) => void
 }
 
 export class TurnHeartbeat {
@@ -34,12 +50,17 @@ export class TurnHeartbeat {
   private stopped = false
   private readonly silentMs: number
   private readonly repeatMs: number
+  private readonly hardStallMs: number
+  private hardStallFired = false
   private readonly onHeartbeat: TurnHeartbeatOptions['onHeartbeat']
+  private readonly onHardStall: TurnHeartbeatOptions['onHardStall']
 
   constructor(opts: TurnHeartbeatOptions) {
     this.silentMs = opts.silentMs ?? 15_000
     this.repeatMs = opts.repeatMs ?? 10_000
+    this.hardStallMs = opts.hardStallMs ?? 240_000
     this.onHeartbeat = opts.onHeartbeat
+    this.onHardStall = opts.onHardStall
   }
 
   /** Start watching. Call once per turn. */
@@ -47,6 +68,7 @@ export class TurnHeartbeat {
     this.stopped = false
     this.lastTick = Date.now()
     this.firstFired = false
+    this.hardStallFired = false
     this.scheduleNext(this.silentMs)
   }
 
@@ -56,6 +78,7 @@ export class TurnHeartbeat {
     this.lastTick = Date.now()
     this.lastActivity = activity
     this.firstFired = false
+    this.hardStallFired = false
     this.scheduleNext(this.silentMs)
   }
 
@@ -80,6 +103,18 @@ export class TurnHeartbeat {
     if (elapsed < this.silentMs - 500) {
       this.scheduleNext(this.silentMs - elapsed)
       return
+    }
+    // Watchdog with teeth: silence past the hard ceiling means the turn is
+    // wedged in a non-cooperative await (turn-boundary blind spot). Fire the
+    // abort hook once so the loop can break out. Keep emitting heartbeats too,
+    // so the UI still updates while the abort propagates.
+    if (this.hardStallMs > 0 && !this.hardStallFired && elapsed >= this.hardStallMs) {
+      this.hardStallFired = true
+      try {
+        this.onHardStall?.(elapsed, this.lastActivity)
+      } catch {
+        // Watchdog callback errors must not break the agent.
+      }
     }
     try {
       this.onHeartbeat(elapsed, this.lastActivity)

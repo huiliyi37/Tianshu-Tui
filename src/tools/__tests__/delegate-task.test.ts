@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createDelegateTaskTool, type DelegateTaskCoordinator } from '../delegate-task.js'
 import type { CoordinatorRun, DelegationRequest } from '../../agent/coordinator.js'
+import { profileRegistry } from '../../agent/profile-registry.js'
 
 function makeRun(): CoordinatorRun {
   return {
@@ -36,6 +37,7 @@ describe('DELEGATE_TASK_TOOL', () => {
     const result = await tool.execute({
       toolUseId: 'tu_delegate',
       cwd: '/repo',
+      reviewDepth: 2,
       input: {
         objective: 'Find routing seams across the runtime modules.',
         files: ['src/main.tsx', 'src/agent/loop.ts'],
@@ -47,9 +49,20 @@ describe('DELEGATE_TASK_TOOL', () => {
     assert.equal(calls[0]!.kind, 'code_search')
     assert.equal(calls[0]!.profile, 'code_scout')
     assert.deepEqual(calls[0]!.scope.files, ['src/main.tsx', 'src/agent/loop.ts'])
+    assert.equal(calls[0]!.reviewDepth, 2)
     assert.equal(result.isError, false)
     assert.ok(result.content.includes('<worker_results>'))
     assert.ok(result.uiContent!.includes('delegate_task completed'))
+  })
+
+  it('exposes profile schema from the profile registry', () => {
+    const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
+    const profileSchema = tool.definition.input_schema!.properties.profile as { enum: string[] }
+
+    assert.deepEqual(profileSchema.enum, profileRegistry.getProfileNames())
+    assert.ok(profileSchema.enum.includes('adversarial_verifier'))
+    assert.ok(profileSchema.enum.includes('architect'))
+    assert.ok(profileSchema.enum.includes('troubleshooter'))
   })
 
   it('reports invalid input as a tool error', async () => {

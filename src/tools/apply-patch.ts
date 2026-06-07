@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process'
-import { writeFileSync, unlinkSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { writeFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Tool, ToolCallParams } from './types.js'
@@ -14,27 +14,44 @@ export interface ApplyPatchResult {
   error: string
 }
 
-export function applyPatch(cwd: string, input: ApplyPatchInput): ApplyPatchResult {
+export async function applyPatch(cwd: string, input: ApplyPatchInput, abortSignal?: AbortSignal): Promise<ApplyPatchResult> {
   const patchFile = join(tmpdir(), `rivet-patch-${process.pid}-${Date.now()}.patch`)
   try {
-    writeFileSync(patchFile, input.diff)
+    await writeFile(patchFile, input.diff)
     const args = ['apply', '--3way']
     if (input.checkOnly) args.push('--check')
     args.push(patchFile)
 
-    const result = spawnSync('git', args, {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+    const result = await new Promise<{status: number | null, stderr: string, stdout: string}>((resolve, reject) => {
+      const child = spawn('git', args, {
+        cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+      child.on('close', (status) => resolve({ status, stderr, stdout }))
+      child.on('error', reject)
+
+      if (abortSignal) {
+        const onAbort = () => { child.kill('SIGTERM') }
+        if (abortSignal.aborted) {
+          child.kill('SIGTERM')
+        } else {
+          abortSignal.addEventListener('abort', onAbort, { once: true })
+          child.on('close', () => { abortSignal.removeEventListener('abort', onAbort) })
+        }
+      }
     })
 
     if (result.status === 0) return { ok: true, error: '' }
-    const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : ''
-    const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : ''
-    return { ok: false, error: stderr || stdout || `git apply exited with status ${result.status}` }
+    const errTrimmed = result.stderr.trim()
+    const outTrimmed = result.stdout.trim()
+    return { ok: false, error: errTrimmed || outTrimmed || `git apply exited with status ${result.status}` }
   } finally {
     try {
-      unlinkSync(patchFile)
+      await unlink(patchFile)
     } catch {
       // Best effort cleanup.
     }
@@ -67,7 +84,7 @@ export const APPLY_PATCH_TOOL: Tool = {
       return { content: 'apply_patch requires a non-empty "diff" string.', isError: true }
     }
 
-    const result = applyPatch(params.cwd, {
+    const result = await applyPatch(params.cwd, {
       diff,
       checkOnly: params.input.check_only === true,
     })

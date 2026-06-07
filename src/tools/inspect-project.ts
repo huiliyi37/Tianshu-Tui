@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, readdirSync, statSync } from 'fs'
+import { readFile, stat, readdir } from 'node:fs/promises'
 import { join, relative } from 'path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
@@ -54,14 +54,18 @@ const CONFIG_FILE_PATTERNS = [
   'vitest.config.ts', 'vitest.config.js',
 ]
 
-function detectLanguage(cwd: string): string {
-  return existsSync(join(cwd, 'tsconfig.json')) ? 'TypeScript' : 'JavaScript'
+async function fileExists(path: string): Promise<boolean> {
+  try { await stat(path); return true } catch { return false }
 }
 
-function detectPackageManager(cwd: string): string {
-  if (existsSync(join(cwd, 'pnpm-lock.yaml'))) return 'pnpm'
-  if (existsSync(join(cwd, 'yarn.lock'))) return 'yarn'
-  if (existsSync(join(cwd, 'package-lock.json'))) return 'npm'
+async function detectLanguage(cwd: string): Promise<string> {
+  return (await fileExists(join(cwd, 'tsconfig.json'))) ? 'TypeScript' : 'JavaScript'
+}
+
+async function detectPackageManager(cwd: string): Promise<string> {
+  if (await fileExists(join(cwd, 'pnpm-lock.yaml'))) return 'pnpm'
+  if (await fileExists(join(cwd, 'yarn.lock'))) return 'yarn'
+  if (await fileExists(join(cwd, 'package-lock.json'))) return 'npm'
   return 'unknown'
 }
 
@@ -85,26 +89,27 @@ function detectTestFramework(pkg: PackageJson): string | null {
   return null
 }
 
-function detectLinters(cwd: string, pkg: PackageJson): string[] {
+async function detectLinters(cwd: string, pkg: PackageJson): Promise<string[]> {
   const allDeps = { ...pkg.dependencies, ...pkg.devDependencies }
   const found: string[] = []
   for (const linter of LINTERS) {
-    if (linter.files.some((f) => existsSync(join(cwd, f))) || linter.deps.some((d) => d in allDeps)) {
+    const hasFile = await Promise.all(linter.files.map(f => fileExists(join(cwd, f))))
+    if (hasFile.some(Boolean) || linter.deps.some((d) => d in allDeps)) {
       found.push(linter.name)
     }
   }
   return found
 }
 
-function findEntryFiles(cwd: string): string[] {
+async function findEntryFiles(cwd: string): Promise<string[]> {
   const entries: string[] = []
   for (const dir of ENTRY_DIRS) {
     const base = dir ? join(cwd, dir) : cwd
-    if (dir && !existsSync(base)) continue
+    if (dir && !(await fileExists(base))) continue
     for (const name of ENTRY_FILE_NAMES) {
       for (const ext of ENTRY_EXTENSIONS) {
         const fullPath = join(base, name + ext)
-        if (existsSync(fullPath)) {
+        if (await fileExists(fullPath)) {
           entries.push(relative(cwd, fullPath))
         }
       }
@@ -115,28 +120,28 @@ function findEntryFiles(cwd: string): string[] {
 
 const MAX_TEST_FILES = 50
 
-function findTestFiles(cwd: string): string[] {
+async function findTestFiles(cwd: string): Promise<string[]> {
   const files: string[] = []
 
-  function walk(dir: string): void {
+  async function walk(dir: string): Promise<void> {
     if (files.length >= MAX_TEST_FILES) return
     let names: string[]
     try {
-      names = readdirSync(dir)
+      names = await readdir(dir)
     } catch {
       return
     }
     for (const name of names) {
       const fullPath = join(dir, name)
-      let s: ReturnType<typeof statSync>
+      let s: Awaited<ReturnType<typeof stat>>
       try {
-        s = statSync(fullPath)
+        s = await stat(fullPath)
       } catch {
         continue
       }
       if (s.isDirectory()) {
         if (EXCLUDE_DIRS.has(name)) continue
-        walk(fullPath)
+        await walk(fullPath)
       } else if (s.isFile()) {
         if (files.length >= MAX_TEST_FILES) return
         if (name.includes('.test.') || name.includes('.spec.') || name === '__tests__') {
@@ -146,18 +151,16 @@ function findTestFiles(cwd: string): string[] {
     }
   }
 
-  walk(cwd)
+  await walk(cwd)
   return files
 }
 
-function findConfigFiles(cwd: string): string[] {
+async function findConfigFiles(cwd: string): Promise<string[]> {
   const found: string[] = []
   for (const pattern of CONFIG_FILE_PATTERNS) {
     if (pattern.includes('*')) {
-      // Handle glob-like patterns (e.g. tsconfig.*.json)
-      const dir = cwd
       try {
-        const names = readdirSync(dir)
+        const names = await readdir(cwd)
         const regexStr = pattern.replace(/\*/g, '[^.]*')
         const regex = new RegExp(`^${regexStr}$`)
         for (const name of names) {
@@ -169,7 +172,7 @@ function findConfigFiles(cwd: string): string[] {
         // skip
       }
     } else {
-      if (existsSync(join(cwd, pattern))) {
+      if (await fileExists(join(cwd, pattern))) {
         found.push(pattern)
       }
     }
@@ -199,9 +202,8 @@ Good: inspect_project() — get project overview`,
   async execute(params: ToolCallParams): Promise<ToolResult> {
     const cwd = params.cwd
 
-    // Read package.json
     const pkgPath = join(cwd, 'package.json')
-    if (!existsSync(pkgPath)) {
+    if (!(await fileExists(pkgPath))) {
       return {
         content: 'No package.json found in current directory. Not a Node.js project.',
         isError: true,
@@ -210,7 +212,7 @@ Good: inspect_project() — get project overview`,
 
     let pkg: PackageJson
     try {
-      pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as PackageJson
+      pkg = JSON.parse(await readFile(pkgPath, 'utf-8')) as PackageJson
     } catch {
       return {
         content: 'Failed to parse package.json.',
@@ -218,14 +220,16 @@ Good: inspect_project() — get project overview`,
       }
     }
 
-    const language = detectLanguage(cwd)
-    const packageManager = detectPackageManager(cwd)
+    const [language, packageManager, linters, entryFiles, testFiles, configFiles] = await Promise.all([
+      detectLanguage(cwd),
+      detectPackageManager(cwd),
+      detectLinters(cwd, pkg),
+      findEntryFiles(cwd),
+      findTestFiles(cwd),
+      findConfigFiles(cwd),
+    ])
     const framework = detectFramework(pkg)
     const testFramework = detectTestFramework(pkg)
-    const linters = detectLinters(cwd, pkg)
-    const entryFiles = findEntryFiles(cwd)
-    const testFiles = findTestFiles(cwd)
-    const configFiles = findConfigFiles(cwd)
 
     // Build output
     const lines: string[] = []

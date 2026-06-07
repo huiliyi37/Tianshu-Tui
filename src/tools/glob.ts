@@ -1,4 +1,4 @@
-import { readdirSync, existsSync, lstatSync, realpathSync } from 'fs'
+import { readdir, lstat, realpath, stat } from 'node:fs/promises'
 import { join, relative } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePathSafe } from './path-validate.js'
@@ -53,18 +53,18 @@ function globToRegex(pattern: string): RegExp {
   return new RegExp(`^${regex}$`)
 }
 
-function walkDir(
+async function walkDir(
   dir: string,
   results: string[],
   root: string,
   filter: RegExp | undefined,
   visited = new Set<string>(),
-): void {
+): Promise<void> {
   if (results.length >= MAX_RESULTS) return
 
   let real: string
   try {
-    real = realpathSync(dir)
+    real = await realpath(dir)
   } catch {
     return
   }
@@ -73,7 +73,7 @@ function walkDir(
 
   let names: string[]
   try {
-    names = readdirSync(dir)
+    names = await readdir(dir)
   } catch {
     return
   }
@@ -81,9 +81,9 @@ function walkDir(
   for (const name of names) {
     if (results.length >= MAX_RESULTS) return
     const fullPath = join(dir, name)
-    let s: ReturnType<typeof lstatSync>
+    let s: Awaited<ReturnType<typeof lstat>>
     try {
-      s = lstatSync(fullPath)
+      s = await lstat(fullPath)
     } catch {
       continue
     }
@@ -91,7 +91,7 @@ function walkDir(
     if (s.isSymbolicLink()) continue
     if (s.isDirectory()) {
       if (EXCLUDE_DIRS.has(name)) continue
-      walkDir(fullPath, results, root, filter, visited)
+      await walkDir(fullPath, results, root, filter, visited)
     } else if (s.isFile()) {
       const rel = relative(root, fullPath)
       if (!filter || filter.test(rel)) {
@@ -142,22 +142,20 @@ Bad: glob(pattern="node_modules/**") (excluded by default)`,
     }
     const searchRoot = validated.path
 
-    if (!existsSync(searchRoot)) {
+    let s: Awaited<ReturnType<typeof stat>>
+    try {
+      s = await stat(searchRoot)
+    } catch {
       return { content: `Error: Directory not found: ${searchRoot}`, isError: true }
     }
-    try {
-      const stat = lstatSync(searchRoot)
-      if (!stat.isDirectory()) {
-        return { content: `Error: Not a directory: ${searchRoot}`, isError: true }
-      }
-    } catch {
-      return { content: `Error: Cannot access path: ${searchRoot}`, isError: true }
+    if (!s.isDirectory()) {
+      return { content: `Error: Not a directory: ${searchRoot}`, isError: true }
     }
 
     const regex = globToRegex(pattern)
-    const gitignore = new GitignoreFilter(params.cwd)
+    const gitignore = await GitignoreFilter.create(params.cwd)
     const files: string[] = []
-    walkDir(searchRoot, files, searchRoot, regex)
+    await walkDir(searchRoot, files, searchRoot, regex)
 
     const matches = files
       .filter(f => !gitignore.isIgnored(params.cwd, join(searchRoot, f)))

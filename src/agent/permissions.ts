@@ -16,8 +16,15 @@ export interface PermissionConfig {
   bash?: BashAllowlistConfig
 }
 
+/** Characters that are NOT matched by the `*` wildcard in permission patterns.
+ *  Prevents cross-token matching: `git status*` must NOT match
+ *  `git status&&curl evil` — the wildcard must not cross shell operators.
+ *  Mirrors SHELL_OPERATOR_RE character set (whitespace excluded so normal
+ *  args like `--short` still match). */
+const WILDCARD_EXCLUDE = `[^&|;<>()$\\x60\\\\!"']`
+
 function patternMatches(pattern: string, value: string): boolean {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, `${WILDCARD_EXCLUDE}*`)
   return new RegExp(`^${escaped}$`).test(value)
 }
 
@@ -78,9 +85,12 @@ export function isBashCommandAllowlisted(command: string, allowlist: readonly st
     if (!trimmed.startsWith(entry)) return false
     if (entry.includes(' ')) {
       // Multi-word: "git status" matches "git status --porcelain" but NOT "git status&&rm"
-      return trimmed.length === entry.length ||
-        trimmed[entry.length] === ' ' ||
-        trimmed[entry.length] === '\t'
+      if (trimmed.length === entry.length) return true
+      const nextChar = trimmed[entry.length]
+      if (nextChar !== ' ' && nextChar !== '\t') return false
+      // Check remainder for shell operators — same guard as single-word path
+      const remainder = trimmed.slice(entry.length)
+      return !SHELL_OPERATOR_RE.test(remainder)
     }
     // Single-word: match the first token exactly AND verify the rest
     // of the command contains no shell operators.

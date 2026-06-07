@@ -57,7 +57,7 @@ export function createDelegateTaskTool(
         properties: {
           objective: { type: 'string', description: 'Specific objective for the worker.' },
           kind: { type: 'string', enum: ['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal'], description: 'Worker task type. Default: code_search.' },
-          profile: { type: 'string', enum: ['code_scout', 'doc_scout', 'planner', 'reviewer', 'verifier', 'patcher'], description: 'Worker profile. Default: code_scout.' },
+          profile: { type: 'string', enum: profileRegistry.getProfileNames(), description: 'Worker profile. Default: code_scout.' },
           files: { type: 'array', items: { type: 'string' }, description: 'Optional file paths to focus on.' },
           symbols: { type: 'array', items: { type: 'string' }, description: 'Optional symbols to focus on.' },
         },
@@ -102,6 +102,7 @@ export function createDelegateTaskTool(
           files: parsed.data.files,
           symbols: parsed.data.symbols,
         },
+        reviewDepth: params.reviewDepth,
       }, params.abortSignal)
 
       // Extract worker findings into claim store
@@ -125,7 +126,7 @@ export function createDelegateTaskTool(
                 text: claimText,
                 confidence,
                 fitness: confidence >= 0.85 ? 5 : confidence >= 0.7 ? 3 : 2,
-                source: { actor: 'worker', sessionId: sid, turn: 0, eventId: `${params.toolUseId}:worker` },
+                source: { actor: 'worker', sessionId: sid, turn: params.sessionTurnCount ?? 0, eventId: `${params.toolUseId}:worker` },
                 evidence: [{
                   id: `${params.toolUseId}:finding`,
                   kind: 'worker',

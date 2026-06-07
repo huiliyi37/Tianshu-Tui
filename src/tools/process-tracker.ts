@@ -3,13 +3,14 @@ import { killProcessTree } from './process-kill.js'
 
 const activeProcesses = new Set<ChildProcess>()
 
-export function track(child: ChildProcess): ChildProcess {
+export function track(child: ChildProcess, _loopId?: string): ChildProcess {
   activeProcesses.add(child)
   child.on('close', () => activeProcesses.delete(child))
   child.on('error', () => activeProcesses.delete(child))
   return child
 }
 
+/** Kill all tracked processes — for process.exit() cleanup only (main.tsx). */
 export function killAll(): void {
   for (const child of activeProcesses) {
     killProcessTree(child, 'SIGTERM')

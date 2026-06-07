@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { aggregateResults } from '../aggregation.js'
 import type { WorkerResult } from '../work-order.js'
+import type { WorkerTranscript } from '../worker-session.js'
 
 function makeResult(overrides: Partial<WorkerResult> = {}): WorkerResult {
   return {
@@ -16,6 +17,17 @@ function makeResult(overrides: Partial<WorkerResult> = {}): WorkerResult {
     nextActions: [],
     evidenceStatus: 'skipped',
     ...overrides,
+  }
+}
+
+function makeTranscript(toolUses: string[]): WorkerTranscript {
+  return {
+    text: '',
+    thinking: '',
+    toolUses,
+    toolResults: [],
+    errors: [],
+    repairAttempts: 0,
   }
 }
 
@@ -73,5 +85,40 @@ describe('aggregateResults with profile propagation', () => {
 
     assert.equal(results.length, 1)
     assert.equal(results[0]!.status, 'passed')
+  })
+
+  it('downgrades adversarial_verifier verified verdict when transcript lacks run_tests', () => {
+    const verifierResult = makeResult({
+      workOrderId: 'wo-verifier',
+      summary: 'Looks verified but only read files',
+      evidenceStatus: 'verified',
+      examinedFiles: ['src/a.ts'],
+    })
+    const profiles = new Map([['wo-verifier', 'adversarial_verifier']])
+    const transcripts = new Map([['wo-verifier', makeTranscript(['read_file', 'grep'])]])
+
+    const results = aggregateResults([verifierResult], 'primary_decides', profiles, transcripts)
+
+    assert.equal(results.length, 1)
+    assert.equal(results[0]!.status, 'passed')
+    assert.equal(results[0]!.evidenceStatus, 'unverified')
+    assert.ok(results[0]!.risks.some(r => r.includes('without running run_tests')))
+  })
+
+  it('accepts adversarial_verifier verified verdict when transcript includes run_tests', () => {
+    const verifierResult = makeResult({
+      workOrderId: 'wo-verifier',
+      summary: 'Verified with tests',
+      evidenceStatus: 'verified',
+    })
+    const profiles = new Map([['wo-verifier', 'adversarial_verifier']])
+    const transcripts = new Map([['wo-verifier', makeTranscript(['read_file', 'run_tests'])]])
+
+    const results = aggregateResults([verifierResult], 'primary_decides', profiles, transcripts)
+
+    assert.equal(results.length, 1)
+    assert.equal(results[0]!.status, 'passed')
+    assert.equal(results[0]!.evidenceStatus, 'verified')
+    assert.equal(results[0]!.risks.length, 0)
   })
 })

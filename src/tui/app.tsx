@@ -49,7 +49,9 @@ import { createGlanceBus } from './surface/glance-bus.js'
 import { glanceOnToolStart, glanceOnToolResult } from './surface/tool-domain.js'
 import { GlanceBar } from './glance-bar.js'
 import { appendStreamWindow } from './stream-window.js'
+import { capLiveTail } from './live-tail-cap.js'
 import { createRingBuffer, type RingBuffer } from './ring-buffer.js'
+import { createCommittedLog } from './committed-log.js'
 import { RenderBatcher } from './render-batch.js'
 import { SteerBuffer } from './steer-buffer.js'
 import {
@@ -195,8 +197,28 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const { stdout } = useStdout()
   const supportsAnsiEscapes = (stdout as NodeJS.WriteStream & { supportsAnsiEscapes?: boolean }).supportsAnsiEscapes ?? process.stdout.isTTY
   const { rows: termRows } = useTerminalSize()
+  /**
+   * Stream-commit strategy gate (真凶②).
+   * - DeepSeek (and other providers that separate reasoning_content / content
+   *   cleanly): commit each completed block to scrollback DURING streaming, so
+   *   the live region only ever holds the small unemitted tail → can't overflow
+   *   the viewport. Earlier blocks are immediately scrollable.
+   * - glm: mandatory-thinking promotion dumps the whole reply as reasoning_content
+   *   then promotes it to text at stream end (see openai-client.ts). Incremental
+   *   commit would race that promotion, so glm keeps the original turn-end commit
+   *   path (the `else` branches below are byte-identical to the previous code).
+   */
+
   const projectName = basename(process.cwd())
   const historyBufferRef = useRef<RingBuffer<LogEntry>>(createRingBuffer(HISTORY_MAX_ITEMS))
+  /**
+   * Monotonic append-only source for Ink's <Static> (真凶① fix). Replaces the
+   * old `historyItems.slice(start)` which shrank after ring-buffer wrap and
+   * desynced Static's internal index → duplication / silent loss. Ring buffer
+   * is retained for pager/transcript + rewind reconstruction; committed-log is
+   * the render source. See committed-log.ts.
+   */
+  const committedLogRef = useRef(createCommittedLog())
   const [historyVersion, setHistoryVersion] = useState(0)
   const historyItems = useMemo(() => historyBufferRef.current.items(), [historyVersion])
   /**
@@ -209,18 +231,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
    */
   const totalItemsPushedRef = useRef(0)
   const staticItemsForInk = useMemo(() => {
-    const all = historyItems
-    // totalItemsPushedRef tracks every push across all paths. When the ring
-    // buffer wraps, all.length caps at HISTORY_MAX_ITEMS while the ref keeps
-    // growing. The difference is the wrapped count to skip so <Static> only
-    // sees new entries.
-    // Defensive: if the ref fell behind the buffer (shouldn't happen), clamp.
-    // If start >= all.length (ref way ahead), return empty — transient when
-    // pushStaticBatch bumps the ref before ring buffer flush completes.
-    const start = Math.max(0, totalItemsPushedRef.current - all.length)
-    if (start >= all.length) return []
-    return all.slice(start)
-  }, [historyItems])
+    // committed-log is append-only → Ink <Static>'s index never desyncs.
+    // (Previously: historyItems.slice(start) shrank after ring-buffer wrap →
+    //  duplication + silent loss. 真凶①.)
+    return committedLogRef.current.items()
+  }, [historyVersion])
   const [liveTools, setLiveTools] = useState<LogEntry[]>([])
   const liveToolsRef = useRef<LogEntry[]>([])
 
@@ -289,31 +304,18 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
    *  notification is deferred to the next microtask. */
   const staticBatchRef = useRef<LogEntry[]>([])
   const staticBatchScheduled = useRef(false)
-  /** Dedup fingerprints: last 16 entries' type+content-prefix hashes.
-   *  Prevents the same LogEntry from being pushed into the ring buffer
-   *  multiple times, which causes duplicate rendering in <Static>. */
-  const staticDedupRef = useRef<Set<string>>(new Set())
-
   const pushStatic = useCallback((entry: LogEntry) => {
-    const fp = `${entry.type}:${entry.content.slice(0, 120)}`
-    if (staticDedupRef.current.has(fp)) return
-    staticDedupRef.current.add(fp)
-    if (staticDedupRef.current.size > 16) {
-      // Rotate: keep only last 8 to bound memory
-      const entries = [...staticDedupRef.current]
-      staticDedupRef.current = new Set(entries.slice(-8))
-      staticDedupRef.current.add(fp)
-    }
-    historyBufferRef.current.push(entry)
+    // committed-log owns dedup + is the <Static> render source. Gate the ring
+    // buffer / counter on its result so both stay in sync (dup → skip both).
+    if (!committedLogRef.current.append(entry)) return
+    historyBufferRef.current.push(entry) // retained for pager/transcript + rewind
+    totalItemsPushedRef.current++
     staticBatchRef.current.push(entry)
     if (!staticBatchScheduled.current) {
       staticBatchScheduled.current = true
       queueMicrotask(() => {
         staticBatchScheduled.current = false
         if (staticBatchRef.current.length > 0) {
-          // Increment totalItemsPushedRef atomically with setHistoryVersion
-          // to prevent staticItemsForInk computing a stale `start` offset.
-          totalItemsPushedRef.current += staticBatchRef.current.length
           staticBatchRef.current = []
           setHistoryVersion(v => v + 1)
         }
@@ -323,13 +325,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   /** Synchronously flush any pending microtask-batched static entries.
    *  Called at turn-end / error / abort to ensure all Static updates are
-   *  committed before isStreaming flips. */
+   *  committed before isStreaming flips.
+   *  ref++ is already synced in pushStatic — this only flushes the render batch. */
   const flushStaticBatch = useCallback(() => {
     if (staticBatchScheduled.current) {
       staticBatchScheduled.current = false
-      const count = staticBatchRef.current.length
-      if (count > 0) {
-        totalItemsPushedRef.current += count
+      if (staticBatchRef.current.length > 0) {
         staticBatchRef.current = []
         setHistoryVersion(v => v + 1)
       }
@@ -342,9 +343,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const pushStaticBatch = useCallback((entries: readonly LogEntry[]) => {
     const grouped = groupLogs(entries)
     for (const entry of grouped) {
-      const fp = `${entry.type}:${entry.content.slice(0, 120)}`
-      if (staticDedupRef.current.has(fp)) continue
-      staticDedupRef.current.add(fp)
+      if (!committedLogRef.current.append(entry)) continue
       historyBufferRef.current.push(entry)
       totalItemsPushedRef.current++
     }
@@ -395,6 +394,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     if (streamBuf.current || thinkBuf.current) {
       pushAssistantEntry(streamBuf.current, thinkBuf.current || undefined)
     }
+    thinkingCommittedRef.current = false
     streamBuf.current = ''
     streamLiveBuf.current = ''
     setStreamingText('')
@@ -403,7 +403,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     setIsThinkingActive(false)
     if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
     lastFlushedThink.current = ''
-  }, [pushAssistantEntry])
+  }, [pushAssistantEntry, pushStatic, flushStaticBatch])
 
   const streamStartRef = useRef(0)
   const thinkStartRef = useRef(0)
@@ -415,10 +415,26 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const lastFlushedThink = useRef('')
   const streamLiveBuf = useRef('')
   const blockWriterRef = useRef<BlockStreamWriter | null>(null)
+  /** Incremental-commit mode: whether this turn's thinking box has already been
+   *  committed to scrollback (committed lazily before the first content block so
+   *  the thinking box sits above the reply). Reset per stream/step. */
+  const thinkingCommittedRef = useRef(false)
   const textBatcher = useRef(new RenderBatcher<string>((texts) => {
     const combined = texts.join('')
     streamBuf.current += combined
-    streamLiveBuf.current = appendStreamWindow(streamLiveBuf.current, combined, LIVE_STREAM_MAX_CHARS)
+    const cols = process.stdout.columns ?? 80
+    const rows = process.stdout.rows ?? 24
+    // Store a generous viewport-bounded tail here; the AUTHORITATIVE chrome-aware
+    // cap happens at RENDER time (`displayStreamingText`, see the return below),
+    // where the CURRENT thinking-box and running-tool heights are known. Capping
+    // only in this delta closure misses chrome that appears between deltas (e.g. a
+    // tool card rendering after the last text delta) — and any live region that
+    // reaches terminal height trips Ink fullscreen mode (\x1B[2J clear+redraw,
+    // confirmed via an isolated Ink 6.8 repro), which trashes scrollback and
+    // separates the reply from the input.
+    const windowRows = Math.max(3, rows)
+    const tailSlice = streamBuf.current.slice(-(windowRows * cols * 2 + cols))
+    streamLiveBuf.current = capLiveTail(tailSlice, cols, windowRows)
     setStreamingText(streamLiveBuf.current)
   }))
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -457,6 +473,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   }, [])
 
   const promptQueueRef = useRef({ running: false })
+  // Deferred-submit queue: messages submitted during the window between an
+  // interrupt (isStreamingRef flipped false synchronously) and the aborted
+  // run actually settling (promptQueueRef.running still true). Without this,
+  // handleSubmit's queue guard silently dropped them — no echo, no agent send.
+  const pendingSubmitsRef = useRef<string[]>([])
+  const handleSubmitRef = useRef<((text: string) => void) | null>(null)
   const steerBuffer = useRef(new SteerBuffer())
   const isStreamingRef = useRef(false)
   const [steerPending, setSteerPending] = useState(false)
@@ -519,8 +541,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     // Welcome screen is rendered inline, no banner needed
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const initSubmittedRef = useRef(false)
   useEffect(() => {
-    if (initialInput) {
+    // One-shot guard: under React StrictMode this effect fires twice. Without
+    // the guard the second call would (now that the queue guard defers instead
+    // of dropping) be queued and replayed → agent receives initialInput twice.
+    if (initialInput && !initSubmittedRef.current) {
+      initSubmittedRef.current = true
       handleSubmit(initialInput)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -574,7 +601,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
 
   // --- Rewind ---
   const { getRewindEntries, handleRewind } = useRewind({
-    session, historyBufferRef, totalItemsPushedRef, setHistoryVersion, inputBarRef, pushStatic,
+    session, historyBufferRef, committedLogRef, totalItemsPushedRef, setHistoryVersion, inputBarRef, pushStatic,
   })
 
   const handleSubmit = useCallback((_userInput: string) => {
@@ -612,6 +639,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     blockWriterRef.current = new BlockStreamWriter({}, (text) => {
       textBatcher.current.push(text)
     })
+    thinkingCommittedRef.current = false // fresh thinking box for this turn
 
     streamStartRef.current = Date.now()
     thinkStartRef.current = 0
@@ -959,9 +987,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           const midText = streamBuf.current
           if (midText) {
             const midThinking = thinkBuf.current || undefined
-            // When model promotes thinking verbatim to visible text (DeepSeek/GLM),
+            // When model promotes thinking verbatim to visible text (GLM),
             // suppress the assistant_message — the thinking tab already renders it.
-            // Progress visibility is preserved via tools + thinking tab expansion.
             if (midThinking && isThinkingPromotedToText(midThinking, midText)) {
               pushStaticBatch([createLogEntry({ type: 'thinking_message', content: midThinking })])
             } else {
@@ -1038,6 +1065,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         streamLiveBuf.current = ''
         setStreamingText('')
         setStreamingThinking('')
+        // Flush any pending microtask-batched Static entries before isStreaming
+        // flips — prevents late tool-result pushStatic from colliding with the
+        // synchronous pushStaticBatch below (真凶① double-safety, see HANDOFF doc).
+        flushStaticBatch()
         setIsStreaming(false); isStreamingRef.current = false
         if (finalText || thinkingForArchive) {
           if (finalText) {
@@ -1092,10 +1123,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         phaseTracker.current.onTurnComplete()
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
-        // Drain any remaining steer guidance at turn boundary (pure-text turns)
-        const turnSteer = steerBuffer.current.drain()
-        if (turnSteer) {
-          agent.addAnchor('user_constraint', turnSteer)
+        // Preserve queued steer guidance at turn boundary. Do NOT drain into
+        // addAnchor — that API only updates the display ledger (userAnchors →
+        // setContextLedger), it never reaches the model prompt (buildProactiveContext
+        // has no production caller). The only working injection is onSteerDrain →
+        // tool_result. Leaving pending intact lets the next tool-using turn inject it.
+        const turnSteerCount = steerBuffer.current.getPending().length
+        if (turnSteerCount > 0) {
           pushStatic(createLogEntry({ type: 'system', content: 'Steering guidance will be applied on next turn.' }))
         }
         // Flush any remaining folded tools
@@ -1181,9 +1215,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolTargetMap.current.clear()
         toolStartMap.current.clear()
         toolCallTracker.current.clear()
-        const preservedSteer = steerBuffer.current.drain()
-        if (preservedSteer) {
-          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+        // Preserve queued guidance — do NOT drain. The interrupt handler already
+        // leaves pending intact; draining here would discard it (addAnchor is
+        // display-only). Next tool-using turn injects it via onSteerDrain.
+        const preservedSteer = steerBuffer.current.getPending().length
+        if (preservedSteer > 0) {
+          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer} queued message(s) preserved for next turn.` }))
         }
         liveToolsRef.current = []
         setLiveTools([])
@@ -1215,9 +1252,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         toolTargetMap.current.clear()
         toolStartMap.current.clear()
         toolCallTracker.current.clear()
-        const preservedSteer = steerBuffer.current.drain()
-        if (preservedSteer) {
-          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer.split('\n').length} queued message(s) preserved for next turn.` }))
+        // Preserve queued guidance — see onError above. Leaving pending intact
+        // lets the next tool-using turn inject it via onSteerDrain → tool_result.
+        const preservedSteer = steerBuffer.current.getPending().length
+        if (preservedSteer > 0) {
+          pushStatic(createLogEntry({ type: 'system', content: `📨 ${preservedSteer} queued message(s) preserved for next turn.` }))
         }
         liveToolsRef.current = []
         setLiveTools([])
@@ -1256,8 +1295,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     })
     } // end run
 
-    // Serialize via flag — if a run is already in progress, guard against double-submit
+    // Serialize via flag — if a run is already in progress, defer (do NOT drop).
+    // This covers the interrupt window: ESC/Ctrl+C flips isStreamingRef false
+    // synchronously, but the aborted run's promise is still settling (e.g. a
+    // hung tool waits up to 2s for SIGKILL), so promptQueueRef.running is still
+    // true. Queue the message and auto-submit it once the current run settles.
     if (promptQueueRef.current.running) {
+      pendingSubmitsRef.current.push(_userInput)
+      pushStatic(createLogEntry({ type: 'system', content: '⏳ Finishing previous turn — message queued, will send automatically.' }))
       return
     }
     promptQueueRef.current.running = true
@@ -1276,8 +1321,19 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       if (isStreamingRef.current && isCurrentGeneration(myGen, streamGenRef.current)) {
         isStreamingRef.current = false
       }
+      // Drain any messages deferred during this run (interrupt-window submits).
+      // Replay on a microtask so this run fully unwinds before the next starts.
+      if (pendingSubmitsRef.current.length > 0) {
+        const next = pendingSubmitsRef.current.shift()!
+        queueMicrotask(() => handleSubmitRef.current?.(next))
+      }
     })
   }, [agent, session, pushStatic, pushStaticBatch, flushStaticBatch, flushThink, flushTools, projectActivity, model, maxTokens, availableModels, onModelSwitch, currentSessionId, cost, cacheHitRate, setVerbose, setAutoSafe, pushTokenHistory])
+
+  // Keep a ref to the latest handleSubmit so the deferred-submit drain (in the
+  // run().finally above) can replay queued interrupt-window messages without
+  // capturing a stale closure or creating a useCallback self-dependency cycle.
+  handleSubmitRef.current = handleSubmit
 
   // Must be after handleSubmit (uses it in the closure chain)
   useGlobalInput({
@@ -1292,18 +1348,37 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     activeOverlay, surfaceRouter, surfacePush, surfacePop, isSurfaceVisible,
   })
 
+  // Authoritative live-region cap (真凶②). The live (non-Static) output MUST stay
+  // strictly under the terminal height or Ink fires fullscreen mode (\x1B[2J
+  // clear+redraw — confirmed via an isolated Ink 6.8 repro), which trashes the
+  // scrollback and puts the reply a full screen above the input. Reserve rows for
+  // every OTHER live element (thinking box, running tool cards, ground zone) —
+  // measured live here at render time — and trim the streaming tail to what's left.
+  const liveCols = process.stdout.columns ?? 80
+  const liveGroundRows = 5 // GlanceBar + InputBar + margin
+  const liveThinkRows = streamingThinking ? Math.min(10, streamingThinking.split('\n').length) + 3 : 0
+  const liveToolRows = liveTools.reduce((s, t) => s + Math.min(12, (t.content ? t.content.split('\n').length : 1) + 2), 0)
+  const liveCapRows = Math.max(2, termRows - liveGroundRows - liveThinkRows - liveToolRows - 2)
+  const displayStreamingText = streamingText ? capLiveTail(streamingText, liveCols, liveCapRows) : streamingText
+
   return (
+    // Natural-flow layout: live Box has NO height constraint. Content flows top-down,
+    // input sits right after the latest content. No spacer = no gap between content
+    // and input. <Static> writes committed history to real terminal scrollback.
+    // Pin-to-bottom (height={termRows-1}) was attempted 3x and rejected — it makes
+    // the live frame fill the viewport, pushing all Static content off-screen.
     <>
-      {historyItems.length === 0 && !isStreaming && (
-        <WelcomeScreen model={model} cwd={process.cwd()} />
-      )}
       <Static
-        items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? staticItemsForInk : []}
+        items={shouldUseStaticHistory(isStreaming, supportsAnsiEscapes) ? (staticItemsForInk as LogEntry[]) : []}
         key="static-history"
       >
         {(item) => <React.Fragment key={renderMemoKey(item)}>{renderStaticEntry(item, verbose)}</React.Fragment>}
       </Static>
       <Box flexDirection="column">
+        {/* Welcome screen in live frame — disappears once conversation starts */}
+        {historyItems.length === 0 && !isStreaming && (
+          <WelcomeScreen model={model} cwd={process.cwd()} />
+        )}
         {activeOverlay === 'starmap' && (
           <StarmapView
             activePhase={phaseFromSummary(summaryState)}
@@ -1335,15 +1410,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         ))}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && (!!streamingThinking || isThinkingActive)} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
-          <StreamOutput text={streamingText} isStreaming={isStreaming} />
+          <StreamOutput text={displayStreamingText} isStreaming={isStreaming} />
         )}
         {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
           <Box paddingX={2}>
             <Text>◌ {heartbeatStatus}</Text>
           </Box>
         )}
-        {/* Spacer: pushes ground zone (GlanceBar + InputBar) to terminal bottom */}
-        <Box flexGrow={1} minHeight={0} />
         {/* Zone 2: Dialog — conditional items that need user attention */}
         {fluencyStale && termRows >= 24 && (
           <Box paddingX={1}>

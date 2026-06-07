@@ -1,5 +1,8 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, mkdir } from 'node:fs/promises'
+import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+
+import { writeFileAtomicAsync, writeFileAtomicSync } from '../fs-atomic.js'
 
 import type { PheromoneSignal } from '../agent/sensorium.js'
 
@@ -74,9 +77,22 @@ export function computeCurrentStrength(
  * Pheromones decay exponentially over time and are pruned
  * when they fall below the strength threshold or exceed
  * the capacity limit (LRU eviction).
+ *
+ * Memory caching: avoids repeated disk reads during tool batches.
+ * Deposits are debounced (200ms) to batch rapid writes into one
+ * disk flush. On a batch of N tool calls, this reduces I/O from
+ * N×(read+write) to 1 read + at most 1 write.
  */
 export class StigmergyStore {
   private maxCapacity: number
+  /** In-memory cache to avoid repeated disk reads during tool batches. */
+  private _cache: Pheromone[] | null = null
+  /** True when cache has unsaved mutations. */
+  private _dirty = false
+  /** Debounce timer for batched writes. */
+  private _flushTimer: ReturnType<typeof setTimeout> | null = null
+  /** Debounce interval: batch writes within this window. */
+  private readonly _flushDelayMs = 200
 
   constructor(
     private filePath: string,
@@ -85,10 +101,10 @@ export class StigmergyStore {
     this.maxCapacity = maxCapacity
   }
 
-  // ── File I/O ────────────────────────────────────────────────
+  // ── Internal cache management ────────────────────────────────
 
-  /** Load all pheromones from disk. Returns [] if file missing or corrupt. */
-  async load(): Promise<Pheromone[]> {
+  /** Load pheromones from cache or disk. Returns [] if file missing or corrupt. */
+  private async _loadFromDisk(): Promise<Pheromone[]> {
     try {
       const raw = await readFile(this.filePath, 'utf-8')
       const parsed: unknown = JSON.parse(raw)
@@ -108,10 +124,89 @@ export class StigmergyStore {
     }
   }
 
-  /** Persist pheromones to disk. Creates parent directory if needed. */
-  async save(entries: Pheromone[]): Promise<void> {
+  /** Get entries — from cache if loaded, otherwise from disk. */
+  private async _getEntries(): Promise<Pheromone[]> {
+    if (this._cache === null) {
+      this._cache = await this._loadFromDisk()
+    }
+    return this._cache
+  }
+
+  /** Mark cache dirty and schedule a debounced flush. */
+  private _markDirty(entries: Pheromone[]): void {
+    this._cache = entries
+    this._dirty = true
+    if (this._flushTimer) clearTimeout(this._flushTimer)
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = null
+      if (this._dirty && this._cache !== null) {
+        void this._persist(this._cache)
+      }
+    }, this._flushDelayMs)
+  }
+
+  /** Write entries to disk atomically and clear dirty flag. */
+  private async _persist(entries: Pheromone[]): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true })
-    await writeFile(this.filePath, JSON.stringify(entries, null, 2), 'utf-8')
+    await writeFileAtomicAsync(this.filePath, JSON.stringify(entries, null, 2))
+    this._dirty = false
+  }
+
+  // ── Public API ───────────────────────────────────────────────
+
+  /** Load all pheromones from disk (bypasses cache). */
+  async load(): Promise<Pheromone[]> {
+    return this._getEntries()
+  }
+
+  /** Force-flush any pending writes. Call before process exit or compaction. */
+  async flush(): Promise<void> {
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer)
+      this._flushTimer = null
+    }
+    if (this._dirty && this._cache !== null) {
+      await this._persist(this._cache)
+    }
+  }
+
+  /**
+   * Synchronous force-flush for the process-exit path, where async work is
+   * abandoned by process.exit(). Mirrors _persist() with the sync atomic
+   * writer so a deposit landing inside the 200ms debounce window is not lost
+   * on Ctrl+C / shutdown. No-op when nothing is pending.
+   */
+  flushSync(): void {
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer)
+      this._flushTimer = null
+    }
+    if (this._dirty && this._cache !== null) {
+      mkdirSync(dirname(this.filePath), { recursive: true })
+      writeFileAtomicSync(this.filePath, JSON.stringify(this._cache, null, 2))
+      this._dirty = false
+    }
+  }
+
+  /** Persist pheromones to disk immediately (bypasses debounce). */
+  async save(entries: Pheromone[]): Promise<void> {
+    this._cache = entries
+    this._dirty = false
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer)
+      this._flushTimer = null
+    }
+    await this._persist(entries)
+  }
+
+  /** Force-flush pending writes and invalidate cache (e.g. for cross-session sync). */
+  invalidateCache(): void {
+    this._cache = null
+    this._dirty = false
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer)
+      this._flushTimer = null
+    }
   }
 
   // ── Core operations ──────────────────────────────────────────
@@ -122,10 +217,10 @@ export class StigmergyStore {
    * If a matching entry (same path + signal) exists, it is overwritten
    * with the new strength and timestamp. Otherwise a new entry is appended.
    *
-   * After deposition, LRU eviction and auto-prune are applied.
+   * After deposition, LRU eviction is applied. Write is debounced.
    */
   async deposit(deposit: PheromoneDeposit): Promise<void> {
-    const entries = await this.load()
+    const entries = await this._getEntries()
 
     const now = Date.now()
     const newEntry: Pheromone = {
@@ -150,7 +245,7 @@ export class StigmergyStore {
     // Enforce capacity (LRU: drop oldest)
     const capped = entries.slice(-this.maxCapacity)
 
-    await this.save(capped)
+    this._markDirty(capped)
   }
 
   /**
@@ -161,7 +256,7 @@ export class StigmergyStore {
    *          threshold are NOT excluded — use prune() for cleanup).
    */
   async query(path?: string): Promise<PheromoneQueryResult[]> {
-    const entries = await this.load()
+    const entries = await this._getEntries()
 
     const filtered = path ? entries.filter(e => e.path === path) : entries
     const now = Date.now()
@@ -178,10 +273,10 @@ export class StigmergyStore {
 
   /**
    * Remove entries whose decayed current strength falls below
-   * the prune threshold (0.05). Persists the result.
+   * the prune threshold (0.05). Persists the result via debounced write.
    */
   async prune(): Promise<void> {
-    const entries = await this.load()
+    const entries = await this._getEntries()
     const now = Date.now()
 
     const kept = entries.filter(e => {
@@ -190,7 +285,7 @@ export class StigmergyStore {
     })
 
     if (kept.length < entries.length) {
-      await this.save(kept)
+      this._markDirty(kept)
     }
   }
 }

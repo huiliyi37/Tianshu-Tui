@@ -58,7 +58,7 @@ export const SANDBOX_EXEC_TOOL: Tool = {
 
     return { content: body, isError }
   },
-  requiresApproval(): boolean { return false },
+  requiresApproval(): boolean { return true },
   isConcurrencySafe(): boolean { return true },
   isEnabled(): boolean { return true },
 }

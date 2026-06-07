@@ -3,11 +3,12 @@ import assert from 'node:assert/strict'
 import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, statSync } from 'fs'
 
 import { join } from 'path'
-import { tmpdir } from 'os'
 import { EDIT_FILE_TOOL } from '../edit.js'
 import type { ToolCallParams } from '../types.js'
 
-const TEST_DIR = join(tmpdir(), 'opencode-edit-test')
+// Use a directory inside the project tree so validatePath() doesn't reject
+// file operations (security hardening requires all paths within cwd).
+const TEST_DIR = join(process.cwd(), '.test-tmp', 'opencode-edit-test')
 
 function makeParams(input: Record<string, unknown>): ToolCallParams {
   return { input, toolUseId: 'test-id', cwd: TEST_DIR }

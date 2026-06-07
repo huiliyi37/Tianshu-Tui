@@ -36,11 +36,12 @@ import { createAuthProvider } from './auth/registry.js'
 import type { AuthProvider } from './auth/types.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
+import { createCoordinatorReviewDeps } from './agent/review-coordinator-deps.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { profileRegistry } from './agent/profile-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
-import { killAll, killAllSync } from './tools/process-tracker.js'
+import { killAllSync } from './tools/process-tracker.js'
 import { runConfigCLI, loadConfig as loadLayeredConfig } from './config/manager.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { createRecallTool } from './tools/recall.js'
@@ -131,15 +132,29 @@ let _perfCleanup: ReturnType<typeof setInterval> | null = null
 function gracefulShutdown() {
   if (isShuttingDown) return
   isShuttingDown = true
-  shutdownCallback?.()
-  if (_heartbeatInterval) clearInterval(_heartbeatInterval)
-  if (_perfCleanup) clearInterval(_perfCleanup)
-  void _mcpManager?.shutdown?.()
-  if (process.stdin.isTTY && process.stdin.setRawMode) {
-    process.stdin.setRawMode(false)
+  // The callback persists session state via SYNCHRONOUS writes (compactOai,
+  // persistFileHistory). On a full disk / permission error those throw — so it
+  // must not gate the kill+exit below, or the process hangs with all children
+  // alive ("卡死冻屏"). Everything that MUST run on exit goes in `finally`.
+  // (root-cause analysis 2026-06-05, Thread 1B)
+  try {
+    shutdownCallback?.()
+  } catch (err) {
+    try { process.stderr.write(`[shutdown] callback error: ${(err as Error)?.message}\n`) } catch { /* noop */ }
+  } finally {
+    if (_heartbeatInterval) clearInterval(_heartbeatInterval)
+    if (_perfCleanup) clearInterval(_perfCleanup)
+    // MCP children are spawned by the SDK (not via process-tracker), so
+    // killAllSync can't reach them. Force-kill them inline — the async
+    // shutdown() below would be abandoned by process.exit. (Thread 1A)
+    try { _mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
+    void _mcpManager?.shutdown?.()
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      process.stdin.setRawMode(false)
+    }
+    killAllSync()
+    process.exit(0)
   }
-  killAllSync()
-  process.exit(0)
 }
 
 function Root({ provider, apiKey, config, auth, initialModelId }: { provider: ProviderConfig; apiKey: string; config: Config; auth?: AuthProvider; initialModelId?: string }) {
@@ -195,12 +210,23 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       ownership: _b1Ownership,
       attribution: _b1Attribution,
     })
-    reg.register(createDeliverTaskTool(() => ({
+    reg.register(createDeliverTaskTool((params) => ({
       taskLedger: _b1TaskLedger,
       ownership: _b1Ownership,
       gate: _b1Gate,
       sessionRegistry: _sessionRegistryRef ?? undefined,
       sessionId: _sessionIdRef ?? undefined,
+      reviewDepth: params?.reviewDepth ?? 0,
+      reviewDeps: createCoordinatorReviewDeps({
+        delegate: async (request, abortSignal) => {
+          if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+          return _coordinatorRef.delegate(request, abortSignal)
+        },
+        delegateBatch: async (requests, policy, abortSignal, onProgress) => {
+          if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+          return _coordinatorRef.delegateBatch(requests, policy, abortSignal, onProgress)
+        },
+      }, { reviewDepth: params?.reviewDepth ?? 0 }),
     })))
 
     return reg
@@ -606,10 +632,9 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
   // Register shutdown callback for signal handlers
   useEffect(() => {
     shutdownCallback = () => {
-      agent.abort()
-      killAll()
-      _mcpManager?.shutdown().catch(() => {})
-      _meridianIndexerRef?.close()
+      // Persist session state FIRST — these synchronous writes are the most
+      // valuable work on exit and the most likely to throw (disk full). Do them
+      // before any cleanup so state is saved even if a later step fails.
       persist.compactOai(session.getMessages())
       if (_fileHistoryRef) {
         persistFileHistory(
@@ -617,6 +642,16 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
           _fileHistoryRef.getAllSnapshots(),
         )
       }
+      // Flush debounced stigmergy deposits synchronously — a pheromone deposited
+      // within the 200ms debounce window would otherwise be lost on exit.
+      agent.flushStigmergySync()
+      // agent.abort() already triggers killAll() internally (loop.ts); a second
+      // killAll() here is dead on the exit path (its setTimeout SIGKILL never
+      // fires before process.exit). gracefulShutdown's killAllSync() does the
+      // real synchronous reap. (root-cause analysis 2026-06-05, Thread 1C)
+      agent.abort()
+      _mcpManager?.shutdown().catch(() => {})
+      _meridianIndexerRef?.close()
     }
     return () => { shutdownCallback = null }
   }, [agent, persist, session, sessionId])
@@ -719,15 +754,108 @@ async function main() {
     const { startServer } = await import('./server/index.js')
     const { createRoutes } = await import('./server/routes.js')
 
-    const state: import('./server/routes.js').ServerState = { running: false }
-    const routes = createRoutes(state)
-    const server = startServer(port, routes)
+    const apiToken = process.env.RIVET_SERVER_TOKEN?.trim()
+    if (!apiToken) {
+      console.error('RIVET_SERVER_TOKEN is required for rivet serve')
+      process.exit(1)
+    }
 
-    process.on('SIGINT', () => { server.close(); process.exit(0) })
-    process.on('SIGTERM', () => { server.close(); process.exit(0) })
+    const config = loadConfig()
+    const provider = config.provider.providers[config.provider.default]
+    if (!provider) {
+      console.error(`Provider "${config.provider.default}" not configured`)
+      process.exit(1)
+    }
+
+    let auth: AuthProvider | undefined
+    let apiKey = ''
+    if (provider.auth?.type === 'oauth') {
+      auth = createAuthProvider(provider.auth, process.env, provider.apiKey)
+      if (!auth.isAuthenticated()) {
+        console.error(`Provider "${provider.name}" OAuth authentication is required before starting the server`)
+        process.exit(1)
+      }
+    } else {
+      apiKey = resolveApiKey(provider)
+    }
+
+    const model = provider.models[0]
+    if (!model) {
+      console.error(`Provider "${provider.name}" has no configured models`)
+      process.exit(1)
+    }
+
+    const activeAgents = new Set<AgentLoop>()
+    let activeAgent: AgentLoop | null = null
+    const state: import('./server/routes.js').ServerState = {
+      running: false,
+      apiToken,
+      abort: () => {
+        for (const agent of activeAgents) agent.abort()
+      },
+    }
+    const routes = createRoutes(state, {
+      createAgent: () => {
+        const sessionId = randomUUID()
+        const persist = new SessionPersist(sessionId)
+        const claimStore = persist.createClaimStore()
+        persist.injectDurableClaims(claimStore)
+        for (const rule of loadProjectRules(process.cwd())) claimStore.propose(rule)
+        const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
+        const playbookStore = new PlaybookStore(process.cwd())
+        const toolRegistry = createDefaultToolRegistry()
+        const agentCfg = createAgentConfig(createMainAgentConfigInput({
+          apiKey,
+          model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
+          cwd: process.cwd(),
+          provider,
+          config,
+          sessionId,
+          toolDefinitions: toolRegistry.getDefinitions(),
+          sessionMemoryBlock: persist.buildMemoryBlock(),
+          auth,
+        }))
+        const session = new SessionContext()
+        const agent = new AgentLoop({
+          ...agentCfg,
+          toolRegistry,
+          maxTurns: config.agent.maxTurns,
+          contextClaimStore: claimStore,
+          getSessionMemoryState: () => persist.getSessionMemoryState(),
+          fileHistory,
+          playbookStore,
+        }, session, process.cwd())
+        activeAgents.add(agent)
+        activeAgent = agent
+        state.running = true
+        state.sessionId = sessionId
+        return {
+          run: async (prompt, callbacks) => {
+            try {
+              await agent.run(prompt, callbacks)
+            } finally {
+              activeAgents.delete(agent)
+              if (activeAgent === agent) activeAgent = activeAgents.values().next().value ?? null
+              state.running = activeAgents.size > 0
+              state.sessionId = activeAgent?.config.sessionId
+            }
+          },
+          abort: () => agent.abort(),
+        }
+      },
+    })
+    const server = startServer(port, routes, apiToken)
+
+    const shutdownServer = () => {
+      for (const agent of activeAgents) agent.abort()
+      server.close()
+      process.exit(0)
+    }
+    process.on('SIGINT', shutdownServer)
+    process.on('SIGTERM', shutdownServer)
 
     console.log(`Rivet Runtime API listening on http://localhost:${port}`)
-    console.log('Endpoints: GET /status, POST /abort')
+    console.log('Endpoints: GET /status, POST /abort, POST /prompt')
     return
   }
 
@@ -891,7 +1019,7 @@ async function main() {
   // 心跳定时器
   const heartbeatInterval = setInterval(() => {
     try { registry.heartbeat(sessionId) } catch { /* ignore */ }
-  }, 10_000)
+  }, 10_000).unref()
   _heartbeatInterval = heartbeatInterval
 
   // 退出时清理
@@ -961,7 +1089,7 @@ async function main() {
   // performance entries indefinitely. Clear the buffer periodically.
   const perfCleanup = setInterval(() => {
     try { performance.clearMeasures() } catch { /* noop */ }
-  }, 60_000)
+  }, 60_000).unref()
   _perfCleanup = perfCleanup
 
   // Slow render monitor: track event-loop stalls.
@@ -980,7 +1108,12 @@ async function main() {
   const monitorStart = Date.now()
   let slowRenderTick = monitorStart + SLOW_RENDER_GRACE_MS
   let slowRenderLogCount = 0
-  const slowRenderMonitor = process.env.NODE_ENV !== 'production'
+  // Only emit when stderr is NOT an interactive TTY (redirected to a file/pipe).
+  // Raw process.stderr.write to a live terminal interleaves with Ink's frame —
+  // Ink's patchConsole only intercepts console.*, not raw writes — corrupting
+  // logUpdate's line accounting and stranding duplicate frames (e.g. the input
+  // bar) in scrollback. Diagnostic is still captured when you run `2>log`.
+  const slowRenderMonitor = (process.env.NODE_ENV !== 'production' && !process.stderr.isTTY)
     ? setInterval(() => {
         const now = Date.now()
         const gap = now - slowRenderTick
@@ -992,8 +1125,26 @@ async function main() {
           const ts = new Date(now).toISOString()
           process.stderr.write(`[slow-render] ${ts} gap=${gap}ms (threshold=${SLOW_RENDER_MS}ms)${slowRenderLogCount >= SLOW_RENDER_MAX_LOGS ? ' (silenced, max logs reached)' : ''}\n`)
         }
-      }, SLOW_RENDER_MS)
+      }, SLOW_RENDER_MS).unref()
     : undefined
+
+  // Gated diagnostic — no-op unless RIVET_DEBUG_FULLSCREEN=1 AND stderr is
+  // redirected to a file/pipe (never writes to an interactive terminal, which
+  // would itself corrupt Ink frames). Detects when Ink enters fullscreen mode
+  // (it writes \x1B[2J\x1B[H and redraws from the top because the live output
+  // reached terminal height) so any remaining live-region overflow is provable:
+  //   RIVET_DEBUG_FULLSCREEN=1 node dist/main.js 2>layout.log
+  if (process.env.RIVET_DEBUG_FULLSCREEN === '1' && !process.stderr.isTTY) {
+    const origWrite = process.stdout.write.bind(process.stdout)
+    let clears = 0
+    process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
+      if (typeof chunk === 'string' && chunk.includes('\x1B[2J')) {
+        clears++
+        process.stderr.write(`[fullscreen-clear] #${clears} rows=${process.stdout.rows} cols=${process.stdout.columns} — Ink cleared screen (live output >= terminal height)\n`)
+      }
+      return (origWrite as (...a: unknown[]) => boolean)(chunk, ...rest)
+    }) as typeof process.stdout.write
+  }
 
   const { waitUntilExit } = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),

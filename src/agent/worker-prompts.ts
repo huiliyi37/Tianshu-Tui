@@ -112,6 +112,11 @@ Critical rules:
 - NEVER rewrite a file when a targeted edit suffices
 - ALWAYS read the file first to understand current state
 - If a change affects multiple files, list all of them in changedFiles`,
+
+  adversarial_verifier: `## Adversarial Verifier
+
+See profile-registry for full adversarial verifier prompt. If you see this fallback,
+the registry prompt was not loaded — escalate as blocked.`,
 }
 
 // ─── Project self-discovery preamble ───────────────────────────────

@@ -74,6 +74,20 @@ describe('classifyApiError', () => {
     assert.equal(result.retryable, false)
   })
 
+  it('classifies 408 as timeout (retryable)', () => {
+    const result = classifyApiError(new FakeApiError('Request Timeout', 408))
+    assert.equal(result.category, 'timeout')
+    assert.equal(result.retryable, true)
+    assert.equal(result.maxRetries, 3)
+  })
+
+  it('classifies 425 as overloaded (retryable)', () => {
+    const result = classifyApiError(new FakeApiError('Too Early', 425))
+    assert.equal(result.category, 'overloaded')
+    assert.equal(result.retryable, true)
+    assert.equal(result.maxRetries, 3)
+  })
+
   it('classifies 413 as context_overflow', () => {
     const result = classifyApiError(new FakeApiError('Payload too large', 413))
     assert.equal(result.category, 'context_overflow')

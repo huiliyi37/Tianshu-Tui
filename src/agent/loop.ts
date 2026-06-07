@@ -6,7 +6,6 @@ import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { getGitInjectedContext } from '../prompt/volatile-git.js'
 import { ToolRegistry } from '../tools/registry.js'
-import { killAll } from '../tools/process-tracker.js'
 import { SessionContext } from './context.js'
 import { SessionPersist } from './session-persist.js'
 import { extractIntents } from './intent-extractor.js'
@@ -79,6 +78,7 @@ import { CacheAdvisor } from '../cache/advisor.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { TurnHeartbeat } from './turn-heartbeat.js'
+import { rejectOnAbort } from './turn-boundary-abort.js'
 import { createP3Integration, type P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
@@ -99,6 +99,8 @@ import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
+import { classifyIntentRetrievalRoute } from './intent-retrieval-router.js'
+import { renderIntentRetrievalRoute } from './intent-retrieval-route.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
@@ -137,6 +139,8 @@ export class AgentLoop {
     session!: SessionContext;
     config!: AgentConfig;
   abortController: AbortController | null = null
+  /** Count of user interrupts within the current turn (中#5). */
+  private _turnInterruptCount = 0
   cwd: string
   evidence: EvidenceTracker
   private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
@@ -536,11 +540,36 @@ export class AgentLoop {
     return text.trim()
   }
 
-  maybePrewarm(text: string): void {
+  private async buildIntentRetrievalRouteForTurn(userInput: string, actionable: boolean): Promise<void> {
+    if (!actionable || !this.taskContract) {
+      this.config.promptEngine.setIntentRetrievalRoute(null)
+      return
+    }
+
+    try {
+      const route = await classifyIntentRetrievalRoute({
+        userMessage: userInput,
+        taskContract: this.taskContract,
+        config: this.config.intentRetrievalRouter,
+        client: this.config.client,
+        model: this.config.promptEngine.getModel(),
+        signal: this.abortController?.signal,
+        onTelemetry: telemetry => {
+          debugLog(`[intent-router] classifier=${telemetry.classifier} fallback=${telemetry.fallbackUsed} kinds=${telemetry.taskKinds.join(',')} sources=${telemetry.sources.join(',')} directions=${telemetry.directionCount} latencyMs=${telemetry.latencyMs}`)
+        },
+      })
+      this.config.promptEngine.setIntentRetrievalRoute(route ? renderIntentRetrievalRoute(route) : null)
+    } catch (err) {
+      debugLog(`[intent-router] failed: ${(err as Error).message}`)
+      this.config.promptEngine.setIntentRetrievalRoute(null)
+    }
+  }
+
+  async maybePrewarm(text: string): Promise<void> {
     const intents = extractIntents(text)
     for (const intent of intents) {
       if (intent.type !== 'file') continue
-      const value = buildPrewarmValue(this.cwd, intent.value)
+      const value = await buildPrewarmValue(this.cwd, intent.value)
       if (!value) continue
       if (!this.prewarm.has(value.canonicalPath)) {
         this.prewarm.set(value.canonicalPath, value)
@@ -556,8 +585,37 @@ export class AgentLoop {
   }
 
   abort(): void {
+    this._turnInterruptCount++
     this.abortController?.abort()
-    killAll()
+    // NOTE: killAll() removed — it was a global hammer that killed processes
+    // from ALL AgentLoop instances, not just this one (中间层 #1).
+    // abortController.abort() + reader.cancel() handles in-flight operations.
+    // Process cleanup at exit is still handled by main.tsx's killAllSync().
+  }
+
+  /**
+   * Synchronously persist pending stigmergy deposits. Called from the exit
+   * path (main.tsx shutdownCallback) so deposits inside the 200ms debounce
+   * window survive Ctrl+C / shutdown. Best-effort: never throw on the exit path.
+   */
+  flushStigmergySync(): void {
+    try {
+      this.stigmergyStore.flushSync()
+    } catch {
+      // exit-path persistence is best-effort; a failure must not block exit
+    }
+  }
+
+  /**
+   * System-initiated abort (hard-stall watchdog) — breaks a wedged turn
+   * WITHOUT incrementing `_turnInterruptCount`. That counter feeds the
+   * recovery-trigger's "repeatedly interrupted" classification (see
+   * refreshReliabilityDecision); a watchdog stall-recovery is not a user
+   * interrupt and must not be mislabeled as one, especially when combined
+   * with a genuine earlier interrupt in the same run.
+   */
+  private abortStalledTurn(): void {
+    this.abortController?.abort()
   }
 
   setApprovalMode(mode: ApprovalMode): void {
@@ -656,8 +714,8 @@ export class AgentLoop {
     const disk = this.latestResourceSnapshot.disk
     const trigger = classifyRecoveryTrigger({
       interrupt: {
-        interruptCountThisTurn: 0,
-        hasPendingTools: false,
+        interruptCountThisTurn: this._turnInterruptCount,
+        hasPendingTools: this.detectPendingTools(),
         turn: this.session.getTurnCount(),
       },
       doomLoop: {
@@ -673,13 +731,7 @@ export class AgentLoop {
         contextWindow: this.config.contextWindow,
         lastCompactFailed: this.compactFailures.consecutiveFailures > 0,
       },
-      integrity: {
-        orphanToolUseCount: 0,
-        orphanToolResultCount: 0,
-        wasRepaired: false,
-        syntheticResultsInserted: 0,
-        messageCount: this.session.getMessages().length,
-      },
+      integrity: this.computeSessionIntegrity(),
       resourcePressure: {
         rssBytes: this.latestResourceSnapshot.memory.rssBytes,
         heapUsedBytes: this.latestResourceSnapshot.memory.heapUsedBytes,
@@ -690,6 +742,47 @@ export class AgentLoop {
       },
     })
     this.latestReliabilityDecision = modeForRecoveryTrigger(trigger)
+  }
+
+  /** 中#5: Check for tool_calls that have no matching tool_result. */
+  private detectPendingTools(): boolean {
+    const msgs = this.session.getMessages()
+    const pendingIds = new Set<string>()
+    for (const msg of msgs) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          if (tc.id) pendingIds.add(tc.id)
+        }
+      }
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        pendingIds.delete(msg.tool_call_id)
+      }
+    }
+    return pendingIds.size > 0
+  }
+
+  /** 中#5: Compute session integrity snapshot for recovery trigger. */
+  private computeSessionIntegrity() {
+    const msgs = this.session.getMessages()
+    const toolCallIds = new Set<string>()
+    const toolResultIds = new Set<string>()
+    for (const msg of msgs) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          if (tc.id) toolCallIds.add(tc.id)
+        }
+      }
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        toolResultIds.add(msg.tool_call_id)
+      }
+    }
+    return {
+      orphanToolUseCount: [...toolCallIds].filter(id => !toolResultIds.has(id)).length,
+      orphanToolResultCount: [...toolResultIds].filter(id => !toolCallIds.has(id)).length,
+      wasRepaired: false,
+      syntheticResultsInserted: 0,
+      messageCount: msgs.length,
+    }
   }
 
   requestThetaCheck(reason: string): void {
@@ -813,18 +906,31 @@ export class AgentLoop {
   private async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean }> {
     await this.warmupMemories()
     this.abortController = new AbortController()
+    this._turnInterruptCount = 0
     await this.startFsWatcher()
     // P7: heartbeat watchdog — surfaces "still working" signal during long
     // silent operations so the UI doesn't appear frozen and users don't
-    // interrupt the agent mid-task.
+    // interrupt the agent mid-task. ALSO acts as a watchdog with teeth: if
+    // silence exceeds hardStallMs (turn-boundary blind spot — postTurn hooks /
+    // compaction / prewarm hang with no abort cooperation), it aborts the turn
+    // so the loop's rejectOnAbort races break out instead of freezing forever.
     const heartbeat = new TurnHeartbeat({
       silentMs: 20_000,
       repeatMs: 15_000,
+      hardStallMs: 240_000,
       onHeartbeat: (elapsed, lastActivity) => {
         const seconds = Math.round(elapsed / 1000)
         callbacks.onPhaseChange?.('heartbeat', {
           reason: `still working — last activity: ${lastActivity} (${seconds}s ago)`,
         })
+      },
+      onHardStall: (elapsed, lastActivity) => {
+        const seconds = Math.round(elapsed / 1000)
+        debugLog(`[watchdog] hard stall after ${seconds}s (last activity: ${lastActivity}) — aborting wedged turn`)
+        callbacks.onPhaseChange?.('heartbeat', {
+          reason: `recovering — turn stalled ${seconds}s at "${lastActivity}", aborting`,
+        })
+        this.abortStalledTurn()
       },
     })
     callbacks = this.wrapCallbacksWithHeartbeat(callbacks, heartbeat)
@@ -896,6 +1002,8 @@ export class AgentLoop {
       this.taskContract = undefined
     }
     // else: non-actionable follow-up to active task → inherit existing contract
+
+    await this.buildIntentRetrievalRouteForTurn(userInput, actionable)
 
     if (this.config.autoReasoning && actionable) {
       this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
@@ -1412,7 +1520,11 @@ export class AgentLoop {
 
         // Step 6b: run compaction (session split, maybeCompact, stale rounds, heap)
         {
-          const compactionResult = await this.runCompaction(turn, snap)
+          const compactionResult = await rejectOnAbort(
+            this.runCompaction(turn, snap),
+            this.abortController!.signal,
+            'compaction',
+          )
           if (compactionResult.shouldAbort) {
             if (!assistantResponded && !compactionResult.userMessageConsumed) this.session.removeLastMessage()
             callbacks.onAbort()
@@ -1424,7 +1536,7 @@ export class AgentLoop {
         this.streamedText = ''
         this.lastPrewarmAt = 0
         let _tb = Date.now()
-        await this.prewarmRecentReads()
+        await rejectOnAbort(this.prewarmRecentReads(), this.abortController!.signal, 'prewarm')
         debugLog(`[turn-boundary] turn=${turn} prewarmRecentReads: ${Date.now() - _tb}ms`)
 
         // ── Git freshness: file change rate (Zeitgeber signal) ──
@@ -1436,17 +1548,33 @@ export class AgentLoop {
         this.latestFsWatcherState = this.fsWatcher?.getState() ?? { eventRate: 0, eventCount: 0, active: false }
 
         // Step 6c: run perception (sensorium, season, phase class, contract)
-        const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await this.runPerception(turn, estTokens, actionable, callbacks)
+        const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await rejectOnAbort(
+          this.runPerception(turn, estTokens, actionable, callbacks),
+          this.abortController!.signal,
+          'perception',
+        )
 
         // Step 6d: run convergence check
         {
-          const { action } = await this.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks)
+          // Wrapped for parity with the other boundary steps: convergence can
+          // call trySessionSplit → llmCompact (a network call) whose internal
+          // abort cooperation is exactly the unreliable mechanism this commit
+          // backstops. Without the race, a watchdog abort can't free a wedge here.
+          const { action } = await rejectOnAbort(
+            this.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
+            this.abortController!.signal,
+            'convergence',
+          )
           if (action === 'abort') return
         }
 
         _tb = Date.now()
         // Step 6f: build turn request (intent, repair, context ceiling, cross-session, prompt)
-        const turnRequest = await this.buildTurnRequest(turn, currentStrategy, currentSensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks)
+        const turnRequest = await rejectOnAbort(
+          this.buildTurnRequest(turn, currentStrategy, currentSensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
+          this.abortController!.signal,
+          'build-request',
+        )
         if (turnRequest.action === 'veto') continue
         if (turnRequest.action === 'abort') return
         const request = turnRequest.request!
@@ -1463,8 +1591,8 @@ export class AgentLoop {
 
         let turnTextAccum = ''
         let turnThinkingAccum = ''
-        let emittedTextThisTurn = ''
         let rateLimitOccurred = false
+        let rateLimitRetryMs = 0
         const prevThinkingFingerprint = this.lastTurnThinkingFingerprint
         let turnDedupState: 'tracking' | 'flushed' = 'tracking'
         let pendingFlush = ''
@@ -1480,32 +1608,13 @@ export class AgentLoop {
           streamRules: this.config.streamRules,
           callbacks: {
             onTextDelta: (text) => {
-              // Within-turn repetition detection: if the model repeats a
-              // substantial prefix (>100 chars) within the same turn, suppress.
-              const candidate = turnTextAccum + text
-              if (candidate.length > 200) {
-                const half = Math.floor(candidate.length / 2)
-                const prefixLen = Math.min(100, half)
-                const prefix = candidate.slice(0, prefixLen)
-                const rest = candidate.slice(half)
-                if (prefix.length >= 50 && rest.includes(prefix)) {
-                  return // suppress within-turn repetition
-                }
-              }
-              // Cross-turn repetition detection: if the model already emitted
-              // this content earlier in the turn, suppress the duplicate.
-              if (emittedTextThisTurn.length > 100 && emittedTextThisTurn.includes(text.slice(0, Math.min(80, text.length)))) {
-                return
-              }
               turnTextAccum += text
               if (turnDedupState === 'flushed') {
-                emittedTextThisTurn += text
                 callbacks.onTextDelta(text)
                 return
               }
               if (!prevFingerprint) {
                 turnDedupState = 'flushed'
-                emittedTextThisTurn += text
                 callbacks.onTextDelta(text)
                 return
               }
@@ -1516,7 +1625,6 @@ export class AgentLoop {
                 // and switch to pass-through. Do not suppress mid-stream: a full match so
                 // far may still be followed by new content in a later delta.
                 turnDedupState = 'flushed'
-                emittedTextThisTurn += pendingFlush
                 callbacks.onTextDelta(pendingFlush)
                 pendingFlush = ''
               }
@@ -1541,8 +1649,9 @@ export class AgentLoop {
               callbacks.onPhaseChange?.('working', { reason: 'waiting for first token' })
             },
             onError: callbacks.onError,
-            onRateLimit: () => {
+            onRateLimit: (retryDelayMs) => {
               rateLimitOccurred = true
+              rateLimitRetryMs = retryDelayMs ?? 0
             },
           },
         })
@@ -1566,6 +1675,10 @@ export class AgentLoop {
         // TTSR: stream rule triggered — inject reminder and retry
         if (streamResult.triggeredRule) {
           this.session.addUserMessage(streamResult.triggeredRule.inject)
+          // Archive any streamed text to prevent duplication on retry:
+          // TUI's streamBuf accumulates across loop iterations; without
+          // flushing, the next stream appends on top of existing content.
+          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
           continue
         }
 
@@ -1573,7 +1686,9 @@ export class AgentLoop {
         // add an inter-turn delay to avoid hitting the rate limit again
         // before the provider's rate window resets.
         if (rateLimitOccurred) {
-          await new Promise(r => setTimeout(r, 2000))
+          // Use server-provided retry delay when available, otherwise fall back to 2s
+          const delayMs = rateLimitRetryMs > 0 ? rateLimitRetryMs : 2000
+          await new Promise(r => setTimeout(r, delayMs))
         }
 
         // L0 telemetry: stream duration
@@ -1668,7 +1783,11 @@ export class AgentLoop {
             })
           }
           this.config.meridianIndexer?.flushTurn()
-          await this.turnCompletion.complete({ turn, isFinal: false, callbacks })
+          await rejectOnAbort(
+            this.turnCompletion.complete({ turn, isFinal: false, callbacks }),
+            this.abortController!.signal,
+            'post-turn',
+          )
           continue
         }
 
@@ -1693,6 +1812,8 @@ export class AgentLoop {
         this.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
         if (thinkingResult.shouldRetry) {
           this.session.addUserMessage(thinkingResult.retryMessage)
+          // Archive any partial streamed text before retrying (same rationale as TTSR above)
+          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
           continue
         }
 

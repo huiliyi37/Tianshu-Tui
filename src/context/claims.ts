@@ -202,6 +202,8 @@ export function renderActiveClaimsBlock(claims: ContextClaim[], options?: Active
 export interface ClaimSnapshot {
   version: 1
   createdAt: number
+  /** Highest event sequence included in this snapshot. Older snapshots omit it. */
+  lastEventSeq?: number
   claims: ContextClaim[]
 }
 
@@ -209,7 +211,7 @@ export interface ClaimSnapshot {
  * 导出当前活跃 claims 的快照。
  * 只包含 non-stale, non-expired claims — 溶解时丢弃已失效的信息。
  */
-export function checkpointClaims(claims: ContextClaim[], now = Date.now()): ClaimSnapshot {
+export function checkpointClaims(claims: ContextClaim[], now = Date.now(), lastEventSeq?: number): ClaimSnapshot {
   const alive = claims.filter(c => {
     if (c.status === 'stale' || c.status === 'quarantined') return false
     if (c.expiresAt !== undefined && c.expiresAt <= now) return false
@@ -218,6 +220,7 @@ export function checkpointClaims(claims: ContextClaim[], now = Date.now()): Clai
   return {
     version: 1,
     createdAt: now,
+    ...(lastEventSeq !== undefined ? { lastEventSeq } : {}),
     claims: alive,
   }
 }

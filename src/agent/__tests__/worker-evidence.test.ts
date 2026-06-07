@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { WorkerResult } from '../work-order.js'
+import type { WorkerTranscript } from '../worker-session.js'
 import { verifyWorkerEvidence } from '../worker-evidence.js'
 
 function result(overrides: Partial<WorkerResult>): WorkerResult {
@@ -15,6 +16,17 @@ function result(overrides: Partial<WorkerResult>): WorkerResult {
     nextActions: [],
     evidenceStatus: 'unverified',
     ...overrides,
+  }
+}
+
+function transcript(toolUses: string[], errors: string[] = []): WorkerTranscript {
+  return {
+    text: '',
+    thinking: '',
+    toolUses,
+    toolResults: [],
+    errors,
+    repairAttempts: 0,
   }
 }
 
@@ -127,15 +139,71 @@ test('patcher profile gets advisory risk instead of blocked', () => {
   assert.ok(checked.risks.some(r => r.includes('advisory')))
 })
 
-test('verifier profile gets advisory risk instead of blocked', () => {
+test('verifier profile (old verifier) now blocked instead of advisory', () => {
+  // Old verifier is no longer in WRITE_PROFILES_ADVISORY — treated as regular write worker
   const checked = verifyWorkerEvidence(result({
     changedFiles: ['src/a.ts'],
     evidenceStatus: 'unverified',
   }), 'verifier')
 
+  assert.equal(checked.status, 'blocked')
+  assert.equal(checked.evidenceStatus, 'blocked')
+  assert.ok(checked.risks.some(r => r.includes('unverified')))
+})
+
+test('adversarial_verifier verified verdict requires run_tests in transcript', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'adversarial_verifier', transcript(['read_file']))
+
   assert.equal(checked.status, 'passed')
   assert.equal(checked.evidenceStatus, 'unverified')
-  assert.ok(checked.risks.some(r => r.includes('advisory')))
+  assert.ok(checked.risks.some(r => r.includes('without running run_tests')))
+})
+
+test('adversarial_verifier verified verdict without transcript is fail-closed', () => {
+  // No transcript provided = cannot prove tests were run = downgrade
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'adversarial_verifier')
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('without running run_tests')))
+})
+
+test('adversarial_verifier keeps verified verdict when run_tests was actually used', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'adversarial_verifier', transcript(['read_file', 'run_tests']))
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'verified')
+  assert.equal(checked.risks.length, 0)
+})
+
+test('adversarial_verifier with unchanged evidenceStatus still passes through', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'unverified',
+  }), 'adversarial_verifier')
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('adversarial_verifier downgrades verified when run_tests errored', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'adversarial_verifier', transcript(['read_file', 'run_tests'], ['run_tests: Test run failed']))
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('errored')))
 })
 
 test('blocks write worker with changedFiles and examinedFiles but no verification', () => {

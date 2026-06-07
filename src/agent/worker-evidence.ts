@@ -1,11 +1,11 @@
 import type { WorkerResult } from './work-order.js'
+import type { WorkerTranscript } from './worker-session.js'
 
 function addRisk(risks: string[], risk: string): string[] {
   return risks.includes(risk) ? risks : [...risks, risk]
 }
 
-const READ_ONLY_PROFILES = ['code_scout', 'doc_scout', 'planner', 'reviewer']
-const WRITE_PROFILES_ADVISORY = ['patcher', 'verifier']
+const WRITE_PROFILES_ADVISORY = ['patcher']
 
 /**
  * Verify worker evidence for mutation safety.
@@ -22,10 +22,43 @@ const WRITE_PROFILES_ADVISORY = ['patcher', 'verifier']
  *
  * @param result - The worker result to verify
  * @param profile - Optional worker profile for profile-aware verification
+ * @param transcript - Optional worker transcript for behavior-backed verifier gating
  */
-export function verifyWorkerEvidence(result: WorkerResult, profile?: string): WorkerResult {
-  // Read-only profiles skip the verification gate when no files were changed.
-  // Without a profile, the same mutation-based rule still applies: examinedFiles are informational only.
+export function verifyWorkerEvidence(result: WorkerResult, profile?: string, transcript?: WorkerTranscript): WorkerResult {
+  if (profile === 'adversarial_verifier' && result.evidenceStatus === 'verified') {
+    // Fail-closed: no transcript = cannot prove tests were run = unverified
+    if (!transcript) {
+      return {
+        ...result,
+        evidenceStatus: 'unverified',
+        risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
+      }
+    }
+    const runTestsIdx = transcript.toolUses.lastIndexOf('run_tests')
+    if (runTestsIdx === -1) {
+      return {
+        ...result,
+        evidenceStatus: 'unverified',
+        risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
+      }
+    }
+    // Defense in depth: check that run_tests didn't error out. We match on the
+    // recorded error strings rather than index-correlating toolResults[i] with
+    // toolUses[i] — coupled to the error message format, but robust to reorder.
+    const testsErrored = transcript.errors.some(e =>
+      e.includes('run_tests') || e.includes('Test run failed'),
+    )
+    if (testsErrored) {
+      return {
+        ...result,
+        evidenceStatus: 'unverified',
+        risks: addRisk(result.risks, 'adversarial_verifier ran run_tests but it errored — verdict not trustworthy'),
+      }
+    }
+  }
+
+  // All workers with no changed files pass through — the evidence gate
+  // is only about write workers who mutate files.
   if (result.changedFiles.length === 0) return result
 
   if (profile && WRITE_PROFILES_ADVISORY.includes(profile)) {

@@ -40,7 +40,7 @@ describe('patcher e2e: untracked scope → worktree edit → diff → apply', ()
     rmSync(repoDir, { recursive: true, force: true })
   })
 
-  it('full patcher lifecycle produces applicable patch', () => {
+  it('full patcher lifecycle produces applicable patch', async () => {
     const scope = materializeScope(repoDir, wtDir, ['docs/plan.md', 'src/app.ts'])
     assert.ok(existsSync(join(wtDir, 'docs', 'plan.md')), 'plan.md materialized')
     assert.equal(scope.missing.length, 0)
@@ -74,10 +74,10 @@ describe('patcher e2e: untracked scope → worktree edit → diff → apply', ()
     const packet = buildPrimaryWorkerPacket([gated])
     assert.ok(packet.includes('broken = false'), 'packet preserves diff content')
 
-    const check = applyPatch(repoDir, { diff, checkOnly: true })
+    const check = await applyPatch(repoDir, { diff, checkOnly: true })
     assert.equal(check.ok, true, check.error)
 
-    const applied = applyPatch(repoDir, { diff })
+    const applied = await applyPatch(repoDir, { diff })
     assert.equal(applied.ok, true, applied.error)
     assert.equal(
       readFileSync(join(repoDir, 'src', 'app.ts'), 'utf-8').trim(),

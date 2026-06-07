@@ -33,6 +33,8 @@ export interface DelegationRequest {
   kind: WorkOrderKind
   profile: WorkerProfile
   scope: WorkOrderScope
+  /** Review-router re-entrancy depth to pass into worker tool contexts. */
+  reviewDepth?: number
 }
 
 export interface CoordinatorRun {
@@ -155,8 +157,7 @@ export class DelegationCoordinator {
         }
       }
 
-      const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
-      const isWrite = writeProfiles.includes(request.profile)
+      const isWrite = classifyProfile(request.profile) === 'hands'
       const order = isWrite
         ? createWriteWorkOrder({
             parentTurnId: request.parentTurnId,
@@ -164,6 +165,7 @@ export class DelegationCoordinator {
             profile: request.profile,
             objective: request.objective,
             scope: request.scope,
+            reviewDepth: request.reviewDepth,
           })
         : createReadOnlyWorkOrder({
             parentTurnId: request.parentTurnId,
@@ -171,6 +173,7 @@ export class DelegationCoordinator {
             profile: request.profile,
             objective: request.objective,
             scope: request.scope,
+            reviewDepth: request.reviewDepth,
           })
 
       return await this.delegateOrder(order)
@@ -252,10 +255,14 @@ export class DelegationCoordinator {
     // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
+    workerConfig.reviewDepth = order.reviewDepth
+    // Propagate parent abort signal so worker stops immediately on abort
+    // instead of waiting for its internal budget timeout (中间层 #1).
+    workerConfig.abortSignal = this.config.abortSignal
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
-    let run: { result: WorkerResult }
+    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript'] }
 
     // Wrap worker execution with abort signal so the caller unblocks immediately
     // when the tool-level timeout fires, instead of waiting for the worker's
@@ -353,7 +360,8 @@ export class DelegationCoordinator {
       }))
       run = { result: handsRun.result }
     } else {
-      run = await wrapAbort(this.runWorker(workerConfig))
+      const workerRun = await wrapAbort(this.runWorker(workerConfig))
+      run = { result: workerRun.result, transcript: workerRun.transcript }
     }
 
     // Release semantic lock after worker completes
@@ -375,7 +383,8 @@ export class DelegationCoordinator {
     }
 
     const profileMap = new Map([[order.id, order.profile]])
-    const results = aggregateResults([run.result], 'primary_decides', profileMap)
+    const transcriptMap = run.transcript ? new Map([[order.id, run.transcript]]) : undefined
+    const results = aggregateResults([run.result], 'primary_decides', profileMap, transcriptMap)
 
     return {
       status: 'completed',
@@ -401,13 +410,12 @@ export class DelegationCoordinator {
         return { status: 'skipped', results: [], packet: buildPrimaryWorkerPacket([]) }
       }
 
-    const writeProfiles: WorkerProfile[] = ['patcher', 'verifier']
     const queue = new WorkOrderQueue(this.config.maxWorkers)
 
     // Pre-create work orders for deduplication and dependency ordering
     const orders: WorkOrder[] = []
     for (const r of runnables) {
-      const isWrite = writeProfiles.includes(r.profile)
+      const isWrite = classifyProfile(r.profile) === 'hands'
       const order = isWrite
         ? createWriteWorkOrder({
             parentTurnId: r.parentTurnId,
@@ -415,6 +423,7 @@ export class DelegationCoordinator {
             profile: r.profile,
             objective: r.objective,
             scope: r.scope,
+            reviewDepth: r.reviewDepth,
           })
         : createReadOnlyWorkOrder({
             parentTurnId: r.parentTurnId,
@@ -422,6 +431,7 @@ export class DelegationCoordinator {
             profile: r.profile,
             objective: r.objective,
             scope: r.scope,
+            reviewDepth: r.reviewDepth,
           })
       if (queue.enqueue(order)) {
         orders.push(order)

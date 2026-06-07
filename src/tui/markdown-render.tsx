@@ -202,6 +202,19 @@ function parseBlocks(text: string): Block[] {
     }
     if (paraLines.length > 0) {
       blocks.push({ type: 'paragraph', content: paraLines.join('\n') })
+    } else {
+      // Guard against a non-advancing iteration. A line can fall through every
+      // block branch above yet still be EXCLUDED by the paragraph collector,
+      // leaving `i` unchanged → the outer while spins forever at 100% CPU and
+      // freezes the whole TUI (the loop is inside parseBlocks' useMemo, so it
+      // never returns). The known trigger: a `#`-prefixed line that is not a
+      // valid ATX header — the header branch requires `#{1,6}\s+`, but the
+      // paragraph collector excludes anything starting with `#`. So `#foo`,
+      // `####### x` (7+ hashes), or CJK headers without a space (`#标题`,
+      // `###结论`, very common) wedge the renderer. Emit the orphan line as a
+      // plain paragraph and advance — `i` is now guaranteed to move every pass.
+      blocks.push({ type: 'paragraph', content: line })
+      i++
     }
   }
 

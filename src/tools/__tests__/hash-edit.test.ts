@@ -2,13 +2,16 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 import { HASH_EDIT_TOOL } from '../hash-edit.js'
 import type { ToolCallParams } from '../types.js'
 
+// Use a directory inside the project tree so validatePath() doesn't reject
+// file operations (security hardening requires all paths within cwd).
+const TEST_BASE = join(process.cwd(), '.test-tmp')
+
 let dir: string
 function setup(files: Record<string, string>): string {
-  dir = join(tmpdir(), `rivet-test-hash-edit-${Date.now()}`)
+  dir = join(TEST_BASE, `hash-edit-${Date.now()}`)
   mkdirSync(dir, { recursive: true })
   for (const [name, content] of Object.entries(files)) {
     writeFileSync(join(dir, name), content, 'utf-8')

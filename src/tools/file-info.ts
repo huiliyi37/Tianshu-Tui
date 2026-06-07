@@ -1,4 +1,4 @@
-import { existsSync, statSync, lstatSync, readdirSync } from 'fs'
+import { stat, lstat, readdir } from 'node:fs/promises'
 import { extname, basename, relative, resolve, join } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePathSafe } from './path-validate.js'
@@ -32,28 +32,31 @@ export const FILE_INFO_TOOL: Tool = {
 
     const validated = validatePathSafe(params.cwd, inputPath)
     if (!validated.ok) {
-      // Still check existence for external paths — just don't resolve contents
       const resolved = resolve(inputPath)
-      if (existsSync(resolved)) {
+      try {
+        await stat(resolved)
         const rel = relative(params.cwd, resolved)
         return {
           content: `Path: ${rel}\nNote: outside project directory — use import_resource to bring it in.`,
           uiContent: `${rel} (outside project)`,
         }
+      } catch {
+        return { content: `Error: ${validated.error}`, isError: true }
       }
-      return { content: `Error: ${validated.error}`, isError: true }
     }
 
     const absPath = validated.path
 
-    if (!existsSync(absPath)) {
+    let ls: Awaited<ReturnType<typeof lstat>>
+    try {
+      ls = await lstat(absPath)
+    } catch {
       return {
         content: `Path: ${relative(params.cwd, absPath)}\nExists: false`,
         uiContent: `${relative(params.cwd, absPath)} — does not exist`,
       }
     }
 
-    const lstat = lstatSync(absPath)
     const relPath = relative(params.cwd, absPath)
     const ext = extname(absPath)
     const name = basename(absPath)
@@ -61,30 +64,28 @@ export const FILE_INFO_TOOL: Tool = {
     const lines: string[] = [
       `Path: ${relPath}`,
       `Exists: true`,
-      `Type: ${lstat.isDirectory() ? 'directory' : lstat.isSymbolicLink() ? 'symlink' : 'file'}`,
+      `Type: ${ls.isDirectory() ? 'directory' : ls.isSymbolicLink() ? 'symlink' : 'file'}`,
     ]
 
-    if (lstat.isFile()) {
-      lines.push(`Size: ${formatBytes(lstat.size)}`)
+    if (ls.isFile()) {
+      lines.push(`Size: ${formatBytes(ls.size)}`)
       if (ext) lines.push(`Extension: ${ext}`)
-      lines.push(`Modified: ${lstat.mtime.toISOString()}`)
-      lines.push(`Permissions: ${octalPermissions(lstat.mode)}`)
+      lines.push(`Modified: ${ls.mtime.toISOString()}`)
+      lines.push(`Permissions: ${octalPermissions(ls.mode)}`)
 
-      // Detect if it's a text file vs binary (cheap heuristic)
       const isText = isLikelyTextFile(name, ext)
       lines.push(`Encoding: ${isText ? 'text' : 'binary'}`)
-    } else if (lstat.isDirectory()) {
-      const dirInfo = scanDirectory(absPath)
+    } else if (ls.isDirectory()) {
+      const dirInfo = await scanDirectory(absPath)
       lines.push(`Files: ${dirInfo.fileCount}`)
       lines.push(`Total size: ${formatBytes(dirInfo.totalSize)}`)
-      lines.push(`Modified: ${lstat.mtime.toISOString()}`)
-    } else if (lstat.isSymbolicLink()) {
-      lines.push(`Modified: ${lstat.mtime.toISOString()}`)
-      // Try to resolve the target
+      lines.push(`Modified: ${ls.mtime.toISOString()}`)
+    } else if (ls.isSymbolicLink()) {
+      lines.push(`Modified: ${ls.mtime.toISOString()}`)
       try {
-        const stat = statSync(absPath)
-        lines.push(`Target type: ${stat.isDirectory() ? 'directory' : 'file'}`)
-        lines.push(`Target size: ${formatBytes(stat.size)}`)
+        const s = await stat(absPath)
+        lines.push(`Target type: ${s.isDirectory() ? 'directory' : 'file'}`)
+        lines.push(`Target size: ${formatBytes(s.size)}`)
       } catch {
         lines.push(`Target: broken symlink`)
       }
@@ -140,20 +141,21 @@ interface DirScanResult {
   totalSize: number
 }
 
-function scanDirectory(dir: string): DirScanResult {
+async function scanDirectory(dir: string): Promise<DirScanResult> {
   let fileCount = 0
   let totalSize = 0
   try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (entry.name.startsWith('.')) continue
       if (entry.isDirectory()) {
-        const sub = scanDirectory(join(dir, entry.name))
+        const sub = await scanDirectory(join(dir, entry.name))
         fileCount += sub.fileCount
         totalSize += sub.totalSize
       } else if (entry.isFile()) {
         fileCount++
         try {
-          totalSize += statSync(join(dir, entry.name)).size
+          const s = await stat(join(dir, entry.name))
+          totalSize += s.size
         } catch {
           // unreadable file — skip
         }

@@ -1,13 +1,17 @@
-import { existsSync } from 'fs'
+import { stat } from 'node:fs/promises'
 import { join, dirname, basename, extname } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
+
+async function fileExists(path: string): Promise<boolean> {
+  try { await stat(path); return true } catch { return false }
+}
 
 function isTestFile(filePath: string): boolean {
   const base = basename(filePath)
   return base.includes('.test.') || base.includes('.spec.')
 }
 
-function findTestsForSource(file: string, cwd: string): string[] {
+async function findTestsForSource(file: string, cwd: string): Promise<string[]> {
   const parsed = extname(file)
   const ext = parsed
   const baseName = basename(file, ext)
@@ -35,12 +39,13 @@ function findTestsForSource(file: string, cwd: string): string[] {
     join('tests', relDir, `${baseName}.spec.ts`),
   ]
 
-  return candidates
-    .filter((c) => existsSync(join(cwd, c)))
-    .sort()
+  const withExists = await Promise.all(
+    candidates.map(async (c) => ({ path: c, exists: await fileExists(join(cwd, c)) })),
+  )
+  return withExists.filter(c => c.exists).map(c => c.path).sort()
 }
 
-function findSourceForTest(file: string, cwd: string): string[] {
+async function findSourceForTest(file: string, cwd: string): Promise<string[]> {
   const parsed = extname(file)
   const ext = parsed
   // Strip test indicators: .test.ts -> .ts, .spec.ts -> .ts
@@ -69,9 +74,10 @@ function findSourceForTest(file: string, cwd: string): string[] {
   sourceDirs.push(dir)
 
   const candidates = sourceDirs.map((d) => join(d, baseName))
-  return candidates
-    .filter((c) => existsSync(join(cwd, c)))
-    .sort()
+  const withExists = await Promise.all(
+    candidates.map(async (c) => ({ path: c, exists: await fileExists(join(cwd, c)) })),
+  )
+  return withExists.filter(c => c.exists).map(c => c.path).sort()
 }
 
 export const RELATED_TESTS_TOOL: Tool = {
@@ -105,14 +111,14 @@ Good: related_tests(file="src/api/client.ts") — find tests for API client`,
     }
 
     if (isTestFile(file)) {
-      const sources = findSourceForTest(file, params.cwd)
+      const sources = await findSourceForTest(file, params.cwd)
       if (sources.length === 0) {
         return { content: 'No related source files found.' }
       }
       return { content: sources.join('\n') }
     }
 
-    const tests = findTestsForSource(file, params.cwd)
+    const tests = await findTestsForSource(file, params.cwd)
     if (tests.length === 0) {
       return { content: 'No related tests found.' }
     }

@@ -441,6 +441,24 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     assert.equal(freshVol, vol1, 'FROZEN volatile must stay stable — appendix is standalone')
   })
 
+  it('intent retrieval route invalidates only fresh appendix, not stable prefix', () => {
+    const engine = createEngine()
+
+    const first = engine.buildOaiRequest([{ role: 'user', content: 'fix bug' }])
+    const firstFresh = latestUserTrailer(first.messages).fresh
+    const firstUser = latestUserTrailer(first.messages).user
+    assert.doesNotMatch(firstFresh, /intent-retrieval-route/)
+    assert.doesNotMatch(firstUser, /intent-retrieval-route/)
+
+    engine.setIntentRetrievalRoute('<intent-retrieval-route advisory="true" scope="current-turn"><task-kinds>bug_fix</task-kinds></intent-retrieval-route>')
+    const second = engine.buildOaiRequest([{ role: 'user', content: 'fix bug' }])
+    const secondTrailer = latestUserTrailer(second.messages)
+
+    assert.equal(secondTrailer.fresh, firstFresh, 'Stable volatile prefix must stay byte-identical')
+    assert.match(secondTrailer.user, /<intent-retrieval-route advisory="true" scope="current-turn">/)
+    assert.equal(engine.checkDrift(), null)
+  })
+
   it('10 tool-call turns: volatile block never changes', () => {
     const engine = createEngine()
     engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'b', motto: 'm' })

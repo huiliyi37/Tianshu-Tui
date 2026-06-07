@@ -175,6 +175,12 @@ export class ToolExecutionController {
           artifactIdsEvicted,
           artifactIdsAccessed,
           lspManager: this.deps.lspManager,
+          // Thread the batch-level abort signal into per-tool deps. Without this,
+          // deps.abortSignal stays undefined, delegate_task passes undefined to
+          // coordinator.delegate, and the entire coordinator abort path becomes
+          // dead code — workers hang past the caller timeout ("No response 3m")
+          // and leak detached bash children. (root-cause analysis 2026-06-05)
+          abortSignal: input.abortSignal,
        })
 
         const results = await Promise.all(
@@ -231,6 +237,9 @@ export class ToolExecutionController {
           artifactIdsEvicted,
           artifactIdsAccessed,
           lspManager: this.deps.lspManager,
+          // See makeDeps above — same abort-signal threading for the sequential
+          // (non-safe) tool path. (root-cause analysis 2026-06-05)
+          abortSignal: input.abortSignal,
        }
 
         const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)
@@ -243,14 +252,19 @@ export class ToolExecutionController {
      }
    }
 
-    const steerText = input.callbacks.onSteerDrain?.()
-    if (steerText && toolResults.length > 0) {
-      const lastResult = toolResults[toolResults.length - 1]!
-      if (lastResult.type === 'tool_result') {
+    // Drain steer guidance ONLY when there is a tool_result to attach it to.
+    // onSteerDrain() empties the buffer, so calling it without a valid injection
+    // target (e.g. abort broke the loop before any result, or last block is not
+    // a tool_result) would discard the guidance. Peek the target first; if absent,
+    // leave the buffer intact so the next tool-using turn injects it.
+    const lastResult = toolResults.length > 0 ? toolResults[toolResults.length - 1]! : null
+    if (lastResult && lastResult.type === 'tool_result') {
+      const steerText = input.callbacks.onSteerDrain?.()
+      if (steerText) {
         const existing = typeof lastResult.content === 'string' ? lastResult.content : ''
         toolResults[toolResults.length - 1] = { ...lastResult, content: existing + '\n\n' + steerText }
-     }
-   }
+      }
+    }
 
     // Enforce per-message aggregate budget before adding to conversation.
     const budgetEntries = toolResults

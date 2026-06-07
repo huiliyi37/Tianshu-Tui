@@ -1,4 +1,4 @@
-import { readdirSync, statSync, existsSync } from 'fs'
+import { readdir, stat } from 'node:fs/promises'
 import { join, basename, resolve, relative } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 
@@ -50,24 +50,22 @@ interface TreeNode {
   sizeBytes?: number
 }
 
-function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFiles: number, maxDepth: number): TreeNode[] {
+async function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFiles: number, maxDepth: number): Promise<TreeNode[]> {
   if (depth > maxDepth) return []
   let names: string[]
   try {
-    names = readdirSync(dir)
+    names = await readdir(dir)
   } catch {
     return []
   }
 
-  // Sort: directories first, then files; alphabetically within each group
   const entries: { name: string; isDir: boolean; sizeBytes?: number }[] = []
   for (const name of names) {
-    // Skip hidden files/dirs except allowed ones
     if (name.startsWith('.') && name !== '.env.example' && name !== '.gitignore') continue
     const fullPath = join(dir, name)
-    let s: ReturnType<typeof statSync>
+    let s: Awaited<ReturnType<typeof stat>>
     try {
-      s = statSync(fullPath)
+      s = await stat(fullPath)
     } catch {
       continue
     }
@@ -87,10 +85,8 @@ function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFile
   const nodes: TreeNode[] = []
   for (const entry of entries) {
     if (entry.isDir) {
-      const children = buildTree(join(dir, entry.name), depth + 1, fileCount, maxFiles, maxDepth)
-      // Only include directory if it has contents
+      const children = await buildTree(join(dir, entry.name), depth + 1, fileCount, maxFiles, maxDepth)
       if (children.length > 0) {
-        // Check if directory itself should be annotated (e.g., __tests__)
         const annotation = entry.name === '__tests__' ? 'test' : undefined
         nodes.push({ name: entry.name, isDir: true, children, annotation })
       }
@@ -185,21 +181,18 @@ Good: repo_map({ max_files: 100 }) — smaller tree for large projects`,
       }
     }
 
-    if (!existsSync(root)) {
+    let s: Awaited<ReturnType<typeof stat>>
+    try {
+      s = await stat(root)
+    } catch {
       return { content: `Error: Directory not found: ${root}`, isError: true }
     }
-
-    try {
-      const stat = statSync(root)
-      if (!stat.isDirectory()) {
-        return { content: `Error: Not a directory: ${root}`, isError: true }
-      }
-    } catch {
-      return { content: `Error: Cannot access path: ${root}`, isError: true }
+    if (!s.isDirectory()) {
+      return { content: `Error: Not a directory: ${root}`, isError: true }
     }
 
     const fileCount = { n: 0 }
-    const tree = buildTree(root, 0, fileCount, maxFiles, maxDepth)
+    const tree = await buildTree(root, 0, fileCount, maxFiles, maxDepth)
 
     // Header: show relative path when focused on subdirectory
     const displayRoot = subPath

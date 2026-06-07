@@ -1,6 +1,12 @@
+import { stat } from 'node:fs/promises'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { ArtifactCorruptionError } from '../artifact/store.js'
 import { computeModelReadCap } from './model-read-cap.js'
+
+/** Maximum raw artifact file size to read into memory (2MB).
+ *  Larger files cause memory pressure and stall on repeated read_section
+ *  attempts — the model should use grep or targeted bash commands instead. */
+const MAX_RAW_BYTES = 2 * 1024 * 1024
 
 /**
  * Hard floor on read_section output. Matches the legacy default before
@@ -123,7 +129,7 @@ Good: read_section(artifactId="abc123", section="L100-L200")`,
     const artifact = artifactStore.get(artifactId)
     if (!artifact) {
       return {
-        content: `Error: Artifact ${artifactId} not found. Re-read the source.`,
+        content: `Error: Artifact ${artifactId} not found — it may have been pruned or never created. Use the original tool (bash/read_file/grep) to regenerate the output.`,
         isError: true,
       }
     }
@@ -138,10 +144,20 @@ Good: read_section(artifactId="abc123", section="L100-L200")`,
     }
 
     try {
+      // Guard against reading multi-MB raw files into memory.
+      let _rawSize = 0
+      try { _rawSize = (await stat(artifact.rawPath)).size } catch { /* file may not exist */ }
+      if (_rawSize > MAX_RAW_BYTES) {
+        return {
+          content: `Error: Artifact ${artifactId} raw file is too large (${(_rawSize / 1024 / 1024).toFixed(1)}MB > 2MB limit). Use grep on the original output, or bash with head/tail to inspect the file directly.`,
+          isError: true,
+        }
+      }
+
       const rawContent = await artifactStore.readRaw(artifactId)
       if (rawContent === null) {
         return {
-          content: `Error: Artifact ${artifactId} raw file missing on disk. Re-read the source.`,
+          content: `Error: Artifact ${artifactId} raw file missing on disk (${artifact.rawPath}). It may have been cleaned up. Use the original tool to regenerate the output.`,
           isError: true,
         }
       }

@@ -86,6 +86,50 @@ describe('DelegationCoordinator', () => {
     assert.equal(shouldDelegateObjective('inspect files', { files: ['a.ts', 'b.ts'] }), true)
   })
 
+  it('propagates reviewDepth from delegation request into worker runtime config', async () => {
+    let orderDepth: number | undefined
+    let configDepth: number | undefined
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        orderDepth = order.reviewDepth
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => {
+        configDepth = config.reviewDepth
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    await coordinator.delegate({
+      parentTurnId: 'turn-review-depth',
+      objective: 'Verify structural review depth propagation across worker runtime config',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/agent/coordinator.ts', 'src/agent/deliver-task.ts'] },
+      reviewDepth: 1,
+    })
+
+    assert.equal(orderDepth, 1)
+    assert.equal(configDepth, 1)
+  })
+
   it('routes patcher profile through injected hands runner seam', async () => {
     let handsCalled = false
     let workerCalled = false
@@ -369,6 +413,91 @@ describe('DelegationCoordinator', () => {
     const state = coordinator.getState()
     assert.ok(state.getSummary().queued > 0)
     assert.ok(state.getSummary().passed > 0)
+  })
+
+  it('downgrades adversarial verifier self-reported verified result without run_tests transcript', async () => {
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => ({
+        result: {
+          ...resultFor(config.order.id),
+          summary: 'Self-reported verified without running tests',
+          evidenceStatus: 'verified',
+        },
+        transcript: { text: '', thinking: '', toolUses: ['read_file'], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_adv_no_tests',
+      objective: 'Independently verify the worker evidence gate behavior against the changed coordinator path.',
+      kind: 'verify',
+      profile: 'adversarial_verifier',
+      scope: { files: ['src/agent/coordinator.ts', 'src/agent/worker-evidence.ts'] },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results.length, 1)
+    assert.equal(run.results[0]!.status, 'passed')
+    assert.equal(run.results[0]!.evidenceStatus, 'unverified')
+    assert.ok(run.results[0]!.risks.some(r => r.includes('without running run_tests')))
+    assert.ok(run.packet.includes('without running run_tests'))
+  })
+
+  it('keeps adversarial verifier verified when run_tests appears in transcript', async () => {
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => ({
+        result: {
+          ...resultFor(config.order.id),
+          summary: 'Verified after running tests',
+          evidenceStatus: 'verified',
+        },
+        transcript: { text: '', thinking: '', toolUses: ['read_file', 'run_tests'], toolResults: ['run_tests'], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_adv_tests',
+      objective: 'Independently verify the worker evidence gate behavior by running tests after reading code.',
+      kind: 'verify',
+      profile: 'adversarial_verifier',
+      scope: { files: ['src/agent/coordinator.ts', 'src/agent/worker-evidence.ts'] },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results.length, 1)
+    assert.equal(run.results[0]!.status, 'passed')
+    assert.equal(run.results[0]!.evidenceStatus, 'verified')
+    assert.ok(!run.results[0]!.risks.some(r => r.includes('without running run_tests')))
   })
 
   it('blocks single worker result with changed files and unverified evidence', async () => {

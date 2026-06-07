@@ -30,6 +30,10 @@ export interface WorkerSessionConfig {
   contextWindow: number
   compact: CompactionConfig
   activeClaims?: import('../context/claims.js').ContextClaim[]
+  /** Review-router re-entrancy depth propagated to worker tool calls. */
+  reviewDepth?: number
+  /** Parent abort signal — propagated to worker AgentLoop for immediate abort. */
+  abortSignal?: AbortSignal
 }
 
 export interface WorkerTranscript {
@@ -132,10 +136,20 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     contextWindow: config.contextWindow,
     compact: config.compact,
     sessionId: `worker-${config.order.id}`,
+    reviewDepth: config.reviewDepth,
   }, session, config.cwd)
 
   const timeoutMs = config.order.budget.timeoutMs
   const timer = setTimeout(() => agent.abort(), timeoutMs)
+
+  // Propagate parent abort signal — when parent aborts, worker must stop
+  // immediately instead of waiting for the internal budget timeout.
+  const onParentAbort = config.abortSignal
+    ? () => { agent.abort(); clearTimeout(timer) }
+    : null
+  if (onParentAbort && !config.abortSignal!.aborted) {
+    config.abortSignal!.addEventListener('abort', onParentAbort, { once: true })
+  }
 
   try {
     const transcript = emptyTranscript()
@@ -174,5 +188,8 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     }
   } finally {
     clearTimeout(timer)
+    if (onParentAbort && config.abortSignal) {
+      config.abortSignal.removeEventListener('abort', onParentAbort)
+    }
   }
 }

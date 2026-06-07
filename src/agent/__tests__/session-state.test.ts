@@ -105,13 +105,25 @@ describe('SessionStateManager', () => {
     assert.equal(task.currentStep, 0)
   })
 
-  it('getSnapshot returns readonly (frozen-like) reference', () => {
+  it('getSnapshot returns deep copy — mutations to snapshot do not affect state', () => {
     const mgr = new SessionStateManager('test-sid')
-    const snap = mgr.getSnapshot()
-    // The snapshot is the actual state object — verify it reflects mutations
     mgr.trackFileRead('/x.ts', 'r:1')
+    const snap = mgr.getSnapshot()
+    // Mutating the snapshot should NOT affect internal state
+    const fileEntry = snap.fileIndex['/x.ts']
+    assert.ok(fileEntry)
+    fileEntry.modifiedByMe = true
+    // Internal state should remain unchanged
+    assert.equal(mgr.getSnapshot().fileIndex['/x.ts']?.modifiedByMe, false)
+  })
+
+  it('snapshot reflects mutations made after taking a previous snapshot', () => {
+    const mgr = new SessionStateManager('test-sid')
+    const snap1 = mgr.getSnapshot()
+    mgr.trackFileRead('/x.ts', 'r:1')
+    // Old snapshot should NOT see the new file (it's a copy, not a live reference)
+    assert.equal(snap1.fileIndex['/x.ts'], undefined)
+    // New snapshot should see it
     assert.ok(mgr.getSnapshot().fileIndex['/x.ts'])
-    // Original snapshot is same reference (no copy)
-    assert.ok(snap.fileIndex['/x.ts'])
   })
 })

@@ -35,21 +35,21 @@ index 2e65efe..a2005b8 100644
     rmSync(repoDir, { recursive: true, force: true })
   })
 
-  it('applies valid patch', () => {
-    const result = applyPatch(repoDir, { diff: validDiff })
+  it('applies valid patch', async () => {
+    const result = await applyPatch(repoDir, { diff: validDiff })
     assert.equal(result.ok, true, result.error)
     assert.equal(readFileSync(join(repoDir, 'file.txt'), 'utf-8').trim(), 'patched')
   })
 
-  it('check-only mode does not modify files', () => {
-    const result = applyPatch(repoDir, { diff: validDiff, checkOnly: true })
+  it('check-only mode does not modify files', async () => {
+    const result = await applyPatch(repoDir, { diff: validDiff, checkOnly: true })
     assert.equal(result.ok, true, result.error)
     assert.equal(readFileSync(join(repoDir, 'file.txt'), 'utf-8').trim(), 'original')
   })
 
-  it('returns error for conflicting patch', () => {
+  it('returns error for conflicting patch', async () => {
     writeFileSync(join(repoDir, 'file.txt'), 'already changed\n')
-    const result = applyPatch(repoDir, { diff: validDiff })
+    const result = await applyPatch(repoDir, { diff: validDiff })
     assert.equal(result.ok, false)
     assert.ok(
       /patch does not apply|does not match index|repository lacks the necessary blob|和索引不匹配/i.test(result.error),

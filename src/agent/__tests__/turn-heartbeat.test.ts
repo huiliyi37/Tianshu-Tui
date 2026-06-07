@@ -107,4 +107,92 @@ describe('TurnHeartbeat', () => {
     // Should keep firing despite the throws
     assert.ok(calls >= 2, `expected >=2 calls despite errors, got ${calls}`)
   })
+
+  describe('hard-stall watchdog', () => {
+    it('fires onHardStall once when silence exceeds hardStallMs', async () => {
+      const stalls: Array<{ elapsed: number; activity: string }> = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 60,
+        onHeartbeat: () => {},
+        onHardStall: (elapsed, activity) => stalls.push({ elapsed, activity }),
+      })
+      hb.start()
+      hb.tick('read_file returned')
+      await delay(140)
+      hb.stop()
+      assert.equal(stalls.length, 1, `onHardStall must fire exactly once, got ${stalls.length}`)
+      assert.equal(stalls[0]!.activity, 'read_file returned')
+      assert.ok(stalls[0]!.elapsed >= 60, `elapsed should be >= hardStallMs, got ${stalls[0]!.elapsed}`)
+    })
+
+    it('does not fire onHardStall when a tick resets the clock in time', async () => {
+      const stalls: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 80,
+        onHeartbeat: () => {},
+        onHardStall: (elapsed) => stalls.push(elapsed),
+      })
+      hb.start()
+      // Tick every 30ms — never silent for the full 80ms ceiling.
+      for (let i = 0; i < 5; i++) {
+        await delay(30)
+        hb.tick(`activity ${i}`)
+      }
+      hb.stop()
+      assert.equal(stalls.length, 0, 'watchdog must not fire while ticks keep arriving')
+    })
+
+    it('re-arms the watchdog after a tick (fires again on a second stall)', async () => {
+      const stalls: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 50,
+        onHeartbeat: () => {},
+        onHardStall: (elapsed) => stalls.push(elapsed),
+      })
+      hb.start()
+      await delay(90)        // first stall fires
+      hb.tick('recovered')   // re-arm
+      await delay(90)        // second stall fires
+      hb.stop()
+      assert.ok(stalls.length >= 2, `expected watchdog to re-arm and fire twice, got ${stalls.length}`)
+    })
+
+    it('disables the watchdog when hardStallMs is 0', async () => {
+      const stalls: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 0,
+        onHeartbeat: () => {},
+        onHardStall: (elapsed) => stalls.push(elapsed),
+      })
+      hb.start()
+      await delay(120)
+      hb.stop()
+      assert.equal(stalls.length, 0, 'hardStallMs=0 must disable the watchdog')
+    })
+
+    it('keeps emitting heartbeats after a hard stall fires', async () => {
+      let beats = 0
+      let stalls = 0
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 50,
+        onHeartbeat: () => { beats++ },
+        onHardStall: () => { stalls++ },
+      })
+      hb.start()
+      await delay(140)
+      hb.stop()
+      assert.equal(stalls, 1, 'hard stall fires once')
+      assert.ok(beats >= 3, `heartbeats keep emitting while abort propagates, got ${beats}`)
+    })
+  })
 })

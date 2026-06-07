@@ -268,7 +268,7 @@ async function nativeSearch(
   cwd: string,
   contextLines: number = 0,
 ): Promise<string[]> {
-  const filter = new GitignoreFilter(cwd)
+  const filter = await GitignoreFilter.create(cwd)
   const globRegex = glob ? globToRegex(glob) : null
   const results: string[] = []
   const visited = new Set<string>()

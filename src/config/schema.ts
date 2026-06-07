@@ -68,6 +68,22 @@ export const antiAnchoringSchema = z.object({
   seedMaxTokens: z.number().int().positive().default(512),
 }).default({})
 
+export const intentRetrievalRouterSchema = z.preprocess(
+  value => {
+    if (value === true) return { enabled: true }
+    if (value === false) return { enabled: false }
+    if (value === undefined) return { enabled: true }
+    return value
+  },
+  z.object({
+    enabled: z.boolean().default(true),
+    classifier: z.enum(['heuristic', 'llm']).default('llm'),
+    timeoutMs: z.number().int().positive().default(4_000),
+    maxTokens: z.number().int().positive().default(600),
+    temperature: z.number().min(0).max(2).default(0),
+  }).default({}),
+)
+
 export const agentSchema = z.object({
   approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),
@@ -79,6 +95,8 @@ export const agentSchema = z.object({
   hearthObserveEnabled: z.boolean().default(false),
   /** Explicit opt-in for anti-anchoring harness hooks (prompt-flow intervention). */
   antiAnchoring: antiAnchoringSchema,
+  /** Explicit opt-in for current-turn intent retrieval route guidance. */
+  intentRetrievalRouter: intentRetrievalRouterSchema,
   permissions: permissionsSchema.default({}),
 })
 

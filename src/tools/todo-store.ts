@@ -17,6 +17,34 @@ export class TodoStore {
     return [...this.todos]
   }
 
+  /**
+   * Detect items that were `completed` in the current list but are being
+   * reset to a non-completed status (or dropped entirely) by an incoming write.
+   *
+   * The `todo` tool is full-replace only, so after compaction discards the todo
+   * tool messages the model rebuilds the list from lossy memory and silently
+   * re-sends finished items as `pending` — causing re-execution of done work
+   * ("todo 退回重做"). Surfacing this lets the tool warn the model so it can
+   * self-correct. (root-cause analysis 2026-06-05, Thread 3)
+   *
+   * Returns the human-readable contents of regressed items (empty if none).
+   */
+  detectRegressions(incoming: TodoItem[]): string[] {
+    const completedNow = this.todos.filter(t => t.status === 'completed')
+    if (completedNow.length === 0) return []
+    const incomingById = new Map(incoming.map(t => [t.id, t]))
+    const regressed: string[] = []
+    for (const done of completedNow) {
+      const next = incomingById.get(done.id)
+      if (!next) {
+        regressed.push(`${done.content} (dropped from list)`)
+      } else if (next.status !== 'completed') {
+        regressed.push(`${done.content} (completed → ${next.status})`)
+      }
+    }
+    return regressed
+  }
+
   write(todos: TodoItem[]): void {
     const parsed = z.array(todoItemSchema).safeParse(todos)
     if (!parsed.success) {

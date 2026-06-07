@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
 import type { PhysarumEdgeState } from './physarum-types.js'
 import type { ImmuneMemory } from '../agent/immune-types.js'
@@ -109,16 +110,17 @@ export class MeridianDb {
     if (!this.conn) {
       if (!existsSync(this.stateDir)) mkdirSync(this.stateDir, { recursive: true })
       try {
-        const { createRequire } = require('node:module') as typeof import('node:module')
-        const Database = createRequire(import.meta.url)('better-sqlite3')
+        const require = createRequire(import.meta.url)
+        const Database = require('better-sqlite3')
         if (!Database) throw new Error('better-sqlite3 not installed')
         const dbPath = join(this.stateDir, 'meridian.db')
         this.conn = new Database(dbPath)
         this.conn.pragma('journal_mode = WAL')
         this.conn.pragma('busy_timeout = 3000')
         this.conn.exec(SCHEMA)
-      } catch {
-        console.warn('⚠ better-sqlite3 not available. Code index (MeridianDb) disabled.')
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        console.warn(`⚠ better-sqlite3 not available. Code index (MeridianDb) disabled. Reason: ${reason}`)
         this._available = false
         this.conn = createNullDb()
       }
@@ -134,8 +136,10 @@ export class MeridianDb {
   upsertFile(result: ParseResult): void {
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM symbols WHERE file_path = ?').run(result.filePath)
-      this.db.prepare('DELETE FROM edges WHERE source_id LIKE ?').run(`${result.filePath}:%`)
-      this.db.prepare('INSERT OR REPLACE INTO files (path, content_hash) VALUES (?, ?)').run(result.filePath, result.contentHash)
+      // Use GLOB instead of LIKE — LIKE treats _ as single-char wildcard,
+      // causing mis-deletion of edges for similarly-named files (persistence #2).
+      const escapedPath = result.filePath.replace(/[*?[]/g, '[$&]')
+      this.db.prepare('DELETE FROM edges WHERE source_id GLOB ?').run(`${escapedPath}:*`)
 
       const insertSym = this.db.prepare('INSERT OR REPLACE INTO symbols (id, name, kind, file_path, line, exported, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?)')
       for (const s of result.symbols) {

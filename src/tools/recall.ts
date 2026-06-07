@@ -3,7 +3,7 @@ import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimKind } from '../context/claims.js'
 import type { ToolDefinition } from '../api/types.js'
 import { loadAllProjectMemoryEntries } from '../context/project-memory-loader.js'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { stat, readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 interface RecallInput {
@@ -31,17 +31,21 @@ const DEFINITION: ToolDefinition = {
   },
 }
 
-export function searchKnowledgeFiles(cwd: string, query: string): string[] {
+export async function searchKnowledgeFiles(cwd: string, query: string): Promise<string[]> {
   const dir = join(cwd, '.rivet', 'knowledge')
-  if (!existsSync(dir)) return []
+  try {
+    await stat(dir)
+  } catch {
+    return []
+  }
 
   const results: string[] = []
   const lowerQuery = query.toLowerCase()
 
   try {
-    const files = readdirSync(dir).filter(f => f.endsWith('.md'))
+    const files = (await readdir(dir)).filter(f => f.endsWith('.md'))
     for (const file of files) {
-      const content = readFileSync(join(dir, file), 'utf-8')
+      const content = await readFile(join(dir, file), 'utf-8')
       const entries = content.split(/(?=^### )/m)
       for (const entry of entries) {
         if (entry.toLowerCase().includes(lowerQuery)) {
@@ -99,7 +103,7 @@ export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext &
           parts.push(`Project memory (${memoryHits.length}):\n${memoryFormatted}`)
         }
 
-        const knowledgeHits = searchKnowledgeFiles(knowledgeCwd, input.query)
+        const knowledgeHits = await searchKnowledgeFiles(knowledgeCwd, input.query)
         if (knowledgeHits.length > 0) {
           const knowledgeFormatted = knowledgeHits.slice(0, 3).map(e => e.slice(0, 300)).join('\n---\n')
           parts.push(`\nProject knowledge (${knowledgeHits.length} entries):\n${knowledgeFormatted}`)

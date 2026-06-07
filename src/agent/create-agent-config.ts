@@ -7,6 +7,7 @@ import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
 import type { ProviderConfig, Config } from '../config/schema.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
+import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router.js'
 import type { AuthProvider } from '../auth/types.js'
 import type { PermissionConfig } from './permissions.js'
 import { getProviderProfile } from '../api/provider-profile.js'
@@ -31,6 +32,7 @@ export interface AgentConfigInput {
   songlineEnabled?: boolean
   hearthObserveEnabled?: boolean
   antiAnchoring?: AntiAnchoringConfig
+  intentRetrievalRouter?: IntentRetrievalRouterConfigInput
   auth?: AuthProvider
   habituationThreshold?: number
   /** Optional permission config — allowlists, bash command prefixes, etc. */
@@ -65,6 +67,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     songlineEnabled: params.config.agent.songlineEnabled,
     hearthObserveEnabled: params.config.agent.hearthObserveEnabled,
     antiAnchoring: params.config.agent.antiAnchoring,
+    intentRetrievalRouter: params.config.agent.intentRetrievalRouter,
     auth: params.auth,
     habituationThreshold: params.habituationThreshold,
     permissions: params.config.agent.permissions as PermissionConfig,
@@ -73,7 +76,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'permissions'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'permissions'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -114,6 +117,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     songlineEnabled: input.songlineEnabled,
     hearthObserveEnabled: input.hearthObserveEnabled,
     antiAnchoring: input.antiAnchoring,
+    intentRetrievalRouter: input.intentRetrievalRouter,
     autoReasoning: true,
     reasoningFloor: model.reasoningEffort,
     // GLM turn-level thinking: disable thinking on tool execution turns

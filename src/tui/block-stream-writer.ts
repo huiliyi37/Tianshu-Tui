@@ -42,6 +42,13 @@ export class BlockStreamWriter {
     await this.sending
   }
 
+  /** The text received but not yet emitted as a block — i.e. the live tail.
+   *  Structurally bounded by maxChars/maxBufferSize, so it stays small enough
+   *  to render in the live region without exceeding the viewport (真凶②). */
+  peek(): string {
+    return this.buffer
+  }
+
   private resetIdleTimer(): void {
     this.clearIdleTimer()
     this.idleTimer = setTimeout(() => { this.flush() }, this.config.idleMs)
@@ -91,8 +98,15 @@ export class BlockStreamWriter {
 
     while (this.buffer.length > this.config.maxBufferSize) {
       const pos = this.findBreakPoint(this.buffer, Math.min(this.config.maxChars, this.buffer.length))
-      const block = this.buffer.slice(0, pos)
-      this.buffer = this.buffer.slice(pos)
+      // Structural guarantee that the buffer shrinks every iteration. If a
+      // misconfig (e.g. maxChars <= 0) or a degenerate window ever made
+      // findBreakPoint return 0, `slice(0)` would leave the buffer unchanged
+      // and this while loop would spin forever at 100% CPU — the same
+      // non-advancing-loop class that froze the TUI via parseBlocks. Force at
+      // least one char of progress so termination never depends on config.
+      const cut = pos > 0 ? pos : Math.min(this.config.maxChars > 0 ? this.config.maxChars : 1, this.buffer.length)
+      const block = this.buffer.slice(0, cut)
+      this.buffer = this.buffer.slice(cut)
       this.enqueue(block)
     }
   }

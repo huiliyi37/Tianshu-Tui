@@ -35,6 +35,10 @@ export interface SessionState {
   filesRead: Set<string>
   filesModified: Set<string>
   testResults: Array<{ passed: number; failed: number }>
+  /** Fixed overhead from system prompt, tool schemas, and static blocks
+   *  that are not reflected in per-message token estimates. Set by the
+   *  prompt engine after the first request build. */
+  prefixOverhead: number
   turnCacheHistory: TurnCacheSnapshot[]
   compactedAtTurns: Set<number>
   contextLedger?: ContextLedger
@@ -64,6 +68,7 @@ export class SessionContext {
       turnCount: 0,
       startTime: Date.now(),
       estimatedTokens: 0,
+      prefixOverhead: 0,
       filesRead: new Set(),
       filesModified: new Set(),
       testResults: [],
@@ -203,7 +208,12 @@ export class SessionContext {
   }
 
   getEstimatedTokens(): number {
-    return this.state.estimatedTokens
+    return this.state.estimatedTokens + this.state.prefixOverhead
+  }
+
+  /** Set the fixed token overhead from system prompt, tool schemas, static blocks. */
+  setPrefixOverhead(tokens: number): void {
+    this.state.prefixOverhead = tokens
   }
 
   trackFileRead(path: string): void {

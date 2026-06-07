@@ -97,6 +97,22 @@ describe('StigmergyStore', () => {
     const store1 = new StigmergyStore(storePath)
     await store1.deposit({ path: 'a.ts', signal: 'entry-point', strength: 0.4 })
     await store1.deposit({ path: 'b.ts', signal: 'fragile', strength: 0.8 })
+    // deposit() uses debounced persist — must flush before creating a new instance
+    // that reads from disk, otherwise the new instance sees stale data.
+    await store1.flush()
+
+    const store2 = new StigmergyStore(storePath)
+    const entries = await store2.load()
+    assert.equal(entries.length, 2)
+  })
+
+  it('flushSync persists pending debounced deposits without awaiting (exit path)', async () => {
+    const store1 = new StigmergyStore(storePath)
+    await store1.deposit({ path: 'a.ts', signal: 'entry-point', strength: 0.4 })
+    await store1.deposit({ path: 'b.ts', signal: 'fragile', strength: 0.8 })
+    // Simulate the process-exit path: deposits are still inside the 200ms
+    // debounce window. flushSync must persist them synchronously.
+    store1.flushSync()
 
     const store2 = new StigmergyStore(storePath)
     const entries = await store2.load()
