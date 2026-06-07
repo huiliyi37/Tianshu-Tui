@@ -18,6 +18,7 @@ import type { PlaybookStore } from './playbook-store.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router.js'
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
+import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
 
@@ -83,6 +84,8 @@ export interface AgentConfig {
   /** Optional stream rules — abort and inject reminders when model output matches patterns.
    *  Each rule has a regex `pattern` and an `inject` message appended as a user reminder. */
   streamRules?: StreamRule[]
+  /** V3 Component B: per-domain knowledge persistence for worker lesson precipitation. */
+  domainKnowledgeStore?: DomainKnowledgeStore
 }
 
 export interface AgentCallbacks {

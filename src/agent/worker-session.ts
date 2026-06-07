@@ -15,8 +15,7 @@ import {
 import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
 import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
 import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
-import { precipitateDomainLessons } from './domain-lesson-precipitate.js'
-import { DomainKnowledgeStore } from './domain-knowledge-store.js'
+import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 
 /** Max transient-retry attempts for network/API errors during worker execution.
  *  Independent of order.budget.maxRetries (which covers output parse failures). */
@@ -37,6 +36,8 @@ export interface WorkerSessionConfig {
   reviewDepth?: number
   /** Parent abort signal — propagated to worker AgentLoop for immediate abort. */
   abortSignal?: AbortSignal
+  /** V3 Component B: optional per-domain lessons recalled into worker prompt. */
+  domainKnowledgeStore?: DomainKnowledgeStore
 }
 
 export interface WorkerTranscript {
@@ -124,11 +125,16 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
   if (config.activeClaims && config.activeClaims.length > 0) {
     config.promptEngine.updateActiveClaims(config.activeClaims)
   }
-  // Build knowledge block from active claims for prompt injection
-  const knowledgeBlock = config.activeClaims ? buildWorkerKnowledgeBlock(config.activeClaims) : ''
-  const prompt = knowledgeBlock
-    ? `${knowledgeBlock}\n\n${buildWorkerPrompt(config.order)}`
-    : buildWorkerPrompt(config.order)
+  // Build knowledge blocks for prompt injection. Domain lessons are scoped to
+  // the worker authority and stay in the worker prompt only; they never mutate
+  // the primary session prompt/prefix.
+  const knowledgeBlocks = [
+    config.activeClaims ? buildWorkerKnowledgeBlock(config.activeClaims) : '',
+    config.domainKnowledgeStore && config.order.authority
+      ? buildDomainKnowledgeBlock(config.domainKnowledgeStore, config.order.authority)
+      : '',
+  ].filter(Boolean)
+  const prompt = [...knowledgeBlocks, buildWorkerPrompt(config.order)].join('\n\n')
 
   const session = new SessionContext()
   const agent = new AgentLoop({

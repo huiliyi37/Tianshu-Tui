@@ -26,7 +26,7 @@ import { CoordinatorState } from './coordinator-state.js'
 import { WorkOrderQueue } from './work-queue.js'
 import { CollaborationProtocol, type CollaborationConfig } from './collaboration-protocol.js'
 import type { LockIntent } from './semantic-lock.js'
-import { DomainKnowledgeStore } from './domain-knowledge-store.js'
+import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import { precipitateDomainLessons } from './domain-lesson-precipitate.js'
 
 export interface DelegationRequest {
@@ -43,8 +43,9 @@ export interface DelegationRequest {
   groupId?: string
   /** Star domain authority for cognitive injection (V3 Component A).
    *  When set, the domain's systemPromptSuffix is injected into the worker prompt
-   *  and allowedTools are intersected with the domain's toolWhitelist. */
-  authority?: import('./star-domain.js').StarDomainId
+   *  and allowedTools are intersected with the domain's toolWhitelist.
+   *  Custom domains are loaded at startup, so this must remain an open string. */
+  authority?: string
 }
 
 export interface CoordinatorRun {
@@ -281,6 +282,7 @@ export class DelegationCoordinator {
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
     workerConfig.reviewDepth = order.reviewDepth
+    workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
     // Propagate parent abort signal so worker stops immediately on abort
     // instead of waiting for its internal budget timeout (中间层 #1).
     workerConfig.abortSignal = this.config.abortSignal
@@ -372,12 +374,14 @@ export class DelegationCoordinator {
         contextWindow: workerConfig.contextWindow,
         compact: workerConfig.compact,
         activeClaims,
+        domainKnowledgeStore: this.config.domainKnowledgeStore,
         runAgent: async (prompt, callbacks, workerCwd) => {
           const sessionRun = await this.runWorker({
             ...workerConfig,
             order,
             cwd: workerCwd,
             activeClaims,
+            domainKnowledgeStore: this.config.domainKnowledgeStore,
           })
           callbacks.onTurnComplete(sessionRun.usage, 1, true)
           return JSON.stringify(sessionRun.result)

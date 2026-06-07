@@ -41,6 +41,7 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
         kind: inferWorkOrderKind(st.domain),
         profile: inferWorkerProfile(st.domain),
         scope: st.scope,
+        authority: st.authority,
       }))
 
       // 通过现有 coordinator 执行（复用模型路由、工具过滤、session 隔离）

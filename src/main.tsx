@@ -38,9 +38,11 @@ import { createAuthProvider } from './auth/registry.js'
 import type { AuthProvider } from './auth/types.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
+import { DomainKnowledgeStore } from './agent/domain-knowledge-store.js'
 import { createCoordinatorReviewDeps } from './agent/review-coordinator-deps.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { profileRegistry } from './agent/profile-registry.js'
+import { starDomainRegistry } from './agent/star-domain-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 import { killAllSync } from './tools/process-tracker.js'
@@ -407,15 +409,31 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     _meridianIndexerRef = new MeridianIndexer(cwd)
   }
 
-  // Load user-defined agent profiles from .rivet/agents/
-  const agentsDir = join(cwd, '.rivet', 'agents')
-  const agentLoadResult = profileRegistry.loadFromDirectory(agentsDir)
-  if (agentLoadResult.loaded.length > 0 || agentLoadResult.errors.length > 0) {
-    // Will be surfaced to user via console if needed
-    for (const err of agentLoadResult.errors) {
-      console.warn(`[agents] ${err}`)
+  // Load user-defined agent profiles/domains once per TUI Root. Re-loading on
+  // every render would make custom domain ids look like duplicates.
+  const registriesLoadedRef = useRef(false)
+  if (!registriesLoadedRef.current) {
+    const agentsDir = join(cwd, '.rivet', 'agents')
+    const agentLoadResult = profileRegistry.loadFromDirectory(agentsDir)
+    if (agentLoadResult.loaded.length > 0 || agentLoadResult.errors.length > 0) {
+      // Will be surfaced to user via console if needed
+      for (const err of agentLoadResult.errors) {
+        console.warn(`[agents] ${err}`)
+      }
     }
+
+    // Load user-defined star domains from .rivet/domains/
+    const domainsDir = join(cwd, '.rivet', 'domains')
+    const domainLoadResult = starDomainRegistry.loadFromDirectory(domainsDir)
+    if (domainLoadResult.errors.length > 0) {
+      for (const err of domainLoadResult.errors) {
+        console.warn(`[domains] ${err}`)
+      }
+    }
+    registriesLoadedRef.current = true
   }
+
+  const [domainKnowledgeStore] = useState(() => new DomainKnowledgeStore(join(cwd, '.rivet', 'knowledge')))
 
   // Register recall tool once (depends on claimStore existing)
   const recallRef = useRef(false)
@@ -572,6 +590,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         contextWindow: workerContextWindow,
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
         activeClaims: _claimStoreRef?.listActiveClaims() ?? [],
+        domainKnowledgeStore,
       }
     }
 
@@ -581,6 +600,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       maxWorkers: 3,
       runtimeFactory,
       routing: workerRouting,
+      domainKnowledgeStore,
     })
 
     return new AgentLoop(
@@ -597,11 +617,12 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         taskLedger: _taskLedgerRef ?? undefined,
         ownershipLedger: _ownershipLedgerRef ?? undefined,
         meridianIndexer: _meridianIndexerRef,
+        domainKnowledgeStore,
       },
       session,
       cwd,
     )
-  }, [activeProvider, activeApiKey, activeAuth, currentModel, fileHistory])
+  }, [activeProvider, activeApiKey, activeAuth, currentModel, fileHistory, domainKnowledgeStore])
   agentRef.current = agent
 
   const allProviders: Record<string, { models: Array<{ id: string; alias: string }> }> = {}

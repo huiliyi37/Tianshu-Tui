@@ -16,7 +16,7 @@
  *   - Write does not block return (debounced 200ms + flushSync on exit)
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, openSync, closeSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { randomBytes, createHash } from 'node:crypto'
 import { computeCurrentStrength } from '../context/stigmergy.js'
@@ -68,7 +68,10 @@ const MAX_TEXT_LENGTH = 200
 const MAX_EVIDENCE_LENGTH = 300
 const LOCK_RETRY_MAX_MS = 500
 const LOCK_RETRY_INTERVAL_MS = 20
+const LOCK_STALE_TTL_MS = 30_000
 const DEBOUNCE_MS = 200
+const DOMAIN_ID_RE = /^[a-z][a-z0-9_-]{0,31}$/
+const REDACTED = '[redacted]'
 
 // Grade thresholds
 const GRADE_THRESHOLDS: Array<{ min: number; grade: DomainGrade }> = [
@@ -86,33 +89,114 @@ function computeGrade(reinforcement: number): DomainGrade {
   return 'novice'
 }
 
+function sanitizeDomainId(domainId: string): string | null {
+  const trimmed = domainId.trim()
+  return DOMAIN_ID_RE.test(trimmed) ? trimmed : null
+}
+
+function redactSecrets(text: string): string {
+  return text
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, `$1${REDACTED}`)
+    .replace(/((?:api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,'\"]+/gi, `$1${REDACTED}`)
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, 'sk-xxx')
+}
+
 function lessonId(domainId: string, text: string): string {
   const canonical = text.toLowerCase().replace(/\s+/g, ' ').trim()
   return createHash('sha256').update(`${domainId}:${canonical}`).digest('hex').slice(0, 16)
 }
 
-function acquireLock(lockPath: string): () => void {
+interface LockHandle {
+  acquired: boolean
+  release: () => void
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function shouldBreakStaleLock(lockPath: string, now: number): boolean {
+  try {
+    const raw = readFileSync(lockPath, 'utf-8').trim()
+    const pid = Number.parseInt(raw, 10)
+    if (!isProcessAlive(pid)) return true
+  } catch {
+    // Unreadable/malformed lock files should not permanently wedge writes;
+    // the age check below still protects active freshly-created locks.
+  }
+
+  try {
+    return now - statSync(lockPath).mtimeMs > LOCK_STALE_TTL_MS
+  } catch {
+    return true
+  }
+}
+
+function acquireLock(lockPath: string): LockHandle {
   const start = Date.now()
+  let staleChecked = false
   while (true) {
     try {
       const fd = openSync(lockPath, 'wx')
-      writeFileSync(fd, String(process.pid), 'utf-8')
-      closeSync(fd)
-      return () => { try { unlinkSync(lockPath) } catch { /* already released */ } }
+      try {
+        writeFileSync(fd, String(process.pid), 'utf-8')
+      } finally {
+        closeSync(fd)
+      }
+      return { acquired: true, release: () => { try { unlinkSync(lockPath) } catch { /* already released */ } } }
     } catch {
-      if (Date.now() - start > LOCK_RETRY_MAX_MS) return () => {}
-      const waitUntil = Date.now() + LOCK_RETRY_INTERVAL_MS
+      const now = Date.now()
+      if (!staleChecked && shouldBreakStaleLock(lockPath, now)) {
+        staleChecked = true
+        try { unlinkSync(lockPath) } catch { /* raced with another lock owner */ }
+        continue
+      }
+      if (now - start > LOCK_RETRY_MAX_MS) return { acquired: false, release: () => {} }
+      const waitUntil = now + LOCK_RETRY_INTERVAL_MS
       while (Date.now() < waitUntil) { /* spin */ }
     }
   }
+}
+
+function mergeLessons(existing: DomainLesson[], incoming: DomainLesson[]): DomainLesson[] {
+  const byId = new Map<string, DomainLesson>()
+  for (const lesson of existing) byId.set(lesson.id, lesson)
+  for (const lesson of incoming) {
+    const prev = byId.get(lesson.id)
+    if (!prev) {
+      byId.set(lesson.id, lesson)
+      continue
+    }
+    const reinforcement = Math.max(prev.reinforcement, lesson.reinforcement)
+    byId.set(lesson.id, {
+      ...prev,
+      ...lesson,
+      reinforcement,
+      strength: Math.max(prev.strength, lesson.strength),
+      grade: computeGrade(reinforcement),
+      depositedAt: Math.max(prev.depositedAt, lesson.depositedAt),
+    })
+  }
+  return [...byId.values()]
 }
 
 function atomicWrite(targetPath: string, content: string): void {
   const dir = dirname(targetPath)
   const tmpName = `.domain.${randomBytes(4).toString('hex')}.tmp`
   const tmpPath = join(dir, tmpName)
-  writeFileSync(tmpPath, content, 'utf-8')
-  renameSync(tmpPath, targetPath)
+  try {
+    writeFileSync(tmpPath, content, 'utf-8')
+    renameSync(tmpPath, targetPath)
+  } catch (err) {
+    try { unlinkSync(tmpPath) } catch { /* ignore cleanup failure */ }
+    throw err
+  }
 }
 
 function parseLessons(raw: string): DomainLesson[] {
@@ -138,9 +222,11 @@ export class DomainKnowledgeStore {
 
   /** Deposit a lesson. If dedup key matches existing, reinforce instead. */
   deposit(input: DepositInput): void {
-    const { domainId, kind, text, evidence, halfLifeMs } = input
-    const truncatedText = text.slice(0, MAX_TEXT_LENGTH).trim()
-    const truncatedEvidence = evidence.slice(0, MAX_EVIDENCE_LENGTH).trim()
+    const { kind, text, evidence, halfLifeMs } = input
+    const domainId = sanitizeDomainId(input.domainId)
+    if (!domainId) return
+    const truncatedText = redactSecrets(text).slice(0, MAX_TEXT_LENGTH).trim()
+    const truncatedEvidence = redactSecrets(evidence).slice(0, MAX_EVIDENCE_LENGTH).trim()
     if (!truncatedText) return
 
     const id = lessonId(domainId, truncatedText)
@@ -169,14 +255,19 @@ export class DomainKnowledgeStore {
       })
     }
 
-    this.cache.set(domainId, lessons)
+    const nextLessons = lessons.length > MAX_PER_DOMAIN
+      ? this.compactLessons(lessons).kept
+      : lessons
+    this.cache.set(domainId, nextLessons)
     this.dirty.add(domainId)
     this.scheduleFlush()
   }
 
   /** Recall top-K lessons for a domain, sorted by grade×decay strength. */
   recall(domainId: string, topK = 8): DomainLesson[] {
-    const lessons = this.loadDomain(domainId)
+    const safeDomainId = sanitizeDomainId(domainId)
+    if (!safeDomainId) return []
+    const lessons = this.loadDomain(safeDomainId)
     const now = Date.now()
 
     return lessons
@@ -196,7 +287,18 @@ export class DomainKnowledgeStore {
 
   /** Compact: dedup + cap per-domain + prune decayed. Returns number pruned. */
   compact(domainId: string): number {
-    const lessons = this.loadDomain(domainId)
+    const safeDomainId = sanitizeDomainId(domainId)
+    if (!safeDomainId) return 0
+    const { kept, pruned } = this.compactLessons(this.loadDomain(safeDomainId))
+    if (pruned > 0) {
+      this.cache.set(safeDomainId, kept)
+      this.dirty.add(safeDomainId)
+      this.scheduleFlush()
+    }
+    return pruned
+  }
+
+  private compactLessons(lessons: DomainLesson[]): { kept: DomainLesson[]; pruned: number } {
     const now = Date.now()
 
     // Dedup by id (keep highest reinforcement)
@@ -217,23 +319,21 @@ export class DomainKnowledgeStore {
       })
       .slice(0, MAX_PER_DOMAIN)
 
-    const pruned = lessons.length - kept.length
-    if (pruned > 0) {
-      this.cache.set(domainId, kept)
-      this.dirty.add(domainId)
-      this.scheduleFlush()
-    }
-    return pruned
+    return { kept, pruned: lessons.length - kept.length }
   }
 
   // ── Persistence ──────────────────────────────────────────────
 
   private domainPath(domainId: string): string {
-    return join(this.baseDir, 'domains', `${domainId}.jsonl`)
+    const safeDomainId = sanitizeDomainId(domainId)
+    if (!safeDomainId) throw new Error(`Invalid domain id: ${domainId}`)
+    return join(this.baseDir, 'domains', `${safeDomainId}.jsonl`)
   }
 
   private lockPath(domainId: string): string {
-    return join(this.baseDir, 'domains', `${domainId}.jsonl.lock`)
+    const safeDomainId = sanitizeDomainId(domainId)
+    if (!safeDomainId) throw new Error(`Invalid domain id: ${domainId}`)
+    return join(this.baseDir, 'domains', `${safeDomainId}.jsonl.lock`)
   }
 
   private loadDomain(domainId: string): DomainLesson[] {
@@ -256,25 +356,42 @@ export class DomainKnowledgeStore {
     if (this.flushTimer) clearTimeout(this.flushTimer)
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null
-      this.flushDirty()
+      try {
+        this.flushDirty()
+      } catch {
+        // Keep background flush failures from crashing the process. Entries stay
+        // dirty and flushSync() / the next deposit can retry with a fresh lock.
+      }
     }, DEBOUNCE_MS)
   }
 
   private flushDirty(): void {
+    const flushed = new Set<string>()
     for (const domainId of this.dirty) {
       const lessons = this.cache.get(domainId)
       if (!lessons) continue
       const path = this.domainPath(domainId)
       const lockPath = this.lockPath(domainId)
-      const release = acquireLock(lockPath)
       try {
         mkdirSync(dirname(path), { recursive: true })
-        atomicWrite(path, lessons.map(l => JSON.stringify(l)).join('\n') + '\n')
-      } finally {
-        release()
+        const lock = acquireLock(lockPath)
+        if (!lock.acquired) continue
+        try {
+          const diskLessons = existsSync(path) ? parseLessons(readFileSync(path, 'utf-8')) : []
+          const merged = mergeLessons(diskLessons, lessons)
+          const { kept } = this.compactLessons(merged)
+          atomicWrite(path, kept.map(l => JSON.stringify(l)).join('\n') + '\n')
+          this.cache.set(domainId, kept)
+          flushed.add(domainId)
+        } finally {
+          lock.release()
+        }
+      } catch {
+        // Writer-health gate: background or exit flush failures must not crash
+        // the agent. Keep this domain dirty so a later flush can retry.
       }
     }
-    this.dirty.clear()
+    for (const domainId of flushed) this.dirty.delete(domainId)
   }
 
   /** Force-flush pending writes. Call before process exit. */

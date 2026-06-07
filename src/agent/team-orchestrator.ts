@@ -1,5 +1,6 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
 import type { AggregationPolicy } from './work-order.js'
+import { matchDomain } from './star-domain.js'
 import { parseTeamTaskDrafts, parseTeamTasks, buildUnifiedTeamPlan, hasOverlappingFiles, type TeamTaskDraft, type TeamTask, type UnifiedTeamPlan } from './team-plan.js'
 import { groupTeamTasks, type TeamWave } from './team-grouping.js'
 import { buildPlannerObjective, mergePerspectives, normalizePerspective, parsePerspectiveResult, type TeamPerspectivePlan } from './team-perspectives.js'
@@ -43,6 +44,12 @@ function isFileScopedPatcher(task: TeamTaskDraft): boolean {
 function buildExecutionObjective(task: TeamTaskDraft): string {
   if (task.profile !== 'patcher') return task.objective
   return `你是天梁执行者。只执行本 task，不扩展范围，不重写计划。\n\n${task.objective}`
+}
+
+function taskAuthority(task: TeamTaskDraft): string {
+  if (task.profile === 'patcher') return 'tianliang'
+  if (task.profile === 'reviewer' || task.profile === 'adversarial_verifier') return 'tianquan'
+  return matchDomain(task.objective) ?? 'tianliang'
 }
 
 export function selectDispatchableTeamTasks(tasks: TeamTaskDraft[], maxParallel = 3): { selected: TeamTaskDraft[]; blocked: string[] } {
@@ -94,6 +101,7 @@ export function teamTasksToDelegationRequests(tasks: TeamTaskDraft[], parentTurn
       profile: task.profile,
       scope: { files: task.files },
       dependencies: deps,
+      authority: taskAuthority(task),
     }
   })
 }
@@ -117,6 +125,7 @@ function waveToRequests(wave: TeamWave, taskMap: Map<string, TeamTask>, parentTu
         profile: task.profile,
         scope: { files: task.files },
         dependencies: deps,
+        authority: taskAuthority(task),
       }
       return req
     })
@@ -193,6 +202,7 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
       kind: 'plan',
       profile: 'reviewer',
       scope: {},
+      authority: perspective,
     }))
     const plannerRun = await deps.delegateBatch(plannerRequests, 'all_required', input.abortSignal)
 

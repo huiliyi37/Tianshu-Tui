@@ -97,11 +97,13 @@ describe('V3 Component A — authority injection', () => {
     assert.ok(!order.allowedTools.includes('bash'))
   })
 
-  test('unknown authority: no injection, no whitelist change', () => {
-    const order = readOnlyOrder({ authority: 'nonexistent_domain' })
-    const prompt = buildWorkerPrompt(order)
+  test('unknown authority fails closed: no injection and no allowed tools', () => {
+    const readOrder = readOnlyOrder({ authority: 'nonexistent_domain' })
+    const prompt = buildWorkerPrompt(readOrder)
     assert.doesNotMatch(prompt, /权域指令/)
-    // allowedTools should be default profile tools (not filtered)
-    assert.ok(order.allowedTools.includes('read_file'))
+    assert.deepEqual(readOrder.allowedTools, [])
+
+    const patchOrder = writeOrder({ authority: 'nonexistent_domain' })
+    assert.deepEqual(patchOrder.allowedTools, [])
   })
 })

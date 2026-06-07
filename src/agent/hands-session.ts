@@ -9,6 +9,9 @@ import {
   type WorkerResult,
 } from './work-order.js'
 import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
+import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
+import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
+import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import { materializeScope } from './worktree-scope.js'
 import type { AgentCallbacks } from './loop-types.js'
 import type { Usage } from '../api/types.js'
@@ -19,6 +22,16 @@ function worktreeScopeFiles(order: WorkOrder): string[] {
   return explicitlyReadable
 }
 
+function buildHandsPrompt(config: HandsSessionConfig): string {
+  const knowledgeBlocks = [
+    config.activeClaims ? buildWorkerKnowledgeBlock(config.activeClaims) : '',
+    config.domainKnowledgeStore && config.order.authority
+      ? buildDomainKnowledgeBlock(config.domainKnowledgeStore, config.order.authority)
+      : '',
+  ].filter(Boolean)
+  return [...knowledgeBlocks, buildWorkerPrompt(config.order)].join('\n\n')
+}
+
 export interface HandsSessionConfig {
   order: WorkOrder
   wtCoordinator: WorktreeCoordinator
@@ -27,6 +40,8 @@ export interface HandsSessionConfig {
   contextWindow: number
   compact: CompactionConfig
   activeClaims?: import('../context/claims.js').ContextClaim[]
+  /** V3 Component B: optional per-domain lessons recalled into worker prompt. */
+  domainKnowledgeStore?: DomainKnowledgeStore
   /** Base git ref to diff worker changes against. Defaults to current branch/HEAD of cwd. */
   baseRef?: string
   /**
@@ -70,7 +85,7 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
     let apiError: string | undefined
     let turnUsage: Partial<Usage> = {}
 
-    text = await config.runAgent(buildWorkerPrompt(config.order), {
+    text = await config.runAgent(buildHandsPrompt(config), {
       onTextDelta: (delta) => { text += delta },
       onThinkingDelta: () => {},
       onToolUse: () => {},
