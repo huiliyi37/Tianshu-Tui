@@ -154,11 +154,11 @@
 
 **做什么：** 新增纯函数层，不触碰 AgentLoop。它负责类型定义、默认任务类型表、启发式 fallback、route 校验与 XML 渲染。
 
-- [ ] 定义 `RetrievalSource` / `RetrievalPriority` / `IntentTaskKind` / `RetrievalDirection` / `RetrievalRoute`。
-- [ ] 实现 `buildHeuristicRetrievalRoute(input)`：输入 user message + TaskContract，输出保守 route。
-- [ ] 实现 `normalizeRetrievalRoute(raw)`：限制 source 白名单、priority 白名单、方向数量、字符串长度。
-- [ ] 实现 `renderIntentRetrievalRoute(route)`：输出 `<intent-retrieval-route>`，不包含用户原文全文，只保留必要短摘要。
-- [ ] 测试覆盖 bug/perf/architecture/refactor/usage/review/security 等代表消息。
+- [x] 定义 `RetrievalSource` / `RetrievalPriority` / `IntentTaskKind` / `RetrievalDirection` / `RetrievalRoute`。
+- [x] 实现 `buildHeuristicRetrievalRoute(input)`：输入 user message + TaskContract，输出保守 route。
+- [x] 实现 `normalizeRetrievalRoute(raw)`：限制 source 白名单、priority 白名单、方向数量、字符串长度。
+- [x] 实现 `renderIntentRetrievalRoute(route)`：输出 `<intent-retrieval-route>`，不包含用户原文全文，只保留必要短摘要。
+- [x] 测试覆盖 bug/perf/architecture/refactor/usage/review/security 等代表消息。
 
 **实现细则：**
 
@@ -175,11 +175,11 @@
 
 **做什么：** 新增 orchestrator：根据配置选择 heuristic 或 LLM。LLM 只负责分类和路由，不回答用户任务，不调用工具。
 
-- [ ] 定义 `IntentRetrievalRouterConfig` 与 `DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG`。
-- [ ] 实现 `normalizeIntentRetrievalRouterConfig`，支持 boolean / partial config。
-- [ ] 实现 `buildIntentRouterPrompt`，明确要求：先归类任务真实类型，再列该类型应查源；用户关键词是线索不是边界；只输出 JSON。
-- [ ] 实现 `classifyIntentRetrievalRoute`：LLM 成功则 parse + normalize；失败、超时、abort 则 fallback。
-- [ ] 测试：LLM 返回合法 JSON、非法 JSON、超时/throw、disabled、heuristic 模式。
+- [x] 定义 `IntentRetrievalRouterConfig` 与 `DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG`。
+- [x] 实现 `normalizeIntentRetrievalRouterConfig`，支持 boolean / partial config。
+- [x] 实现 `buildIntentRouterPrompt`，明确要求：先归类任务真实类型，再列该类型应查源；用户关键词是线索不是边界；只输出 JSON。
+- [x] 实现 `classifyIntentRetrievalRoute`：LLM 成功则 parse + normalize；失败、超时、abort 则 fallback。
+- [x] 测试：LLM 返回合法 JSON、非法 JSON、超时/throw、disabled、heuristic 模式。
 
 **建议配置字段：**
 
@@ -219,12 +219,12 @@ export const DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG: IntentRetrievalRouterConfig
 
 **做什么：** 把 route 注入 dynamic appendix，不进入 stable volatile，不改变历史消息 prefix。
 
-- [ ] `VolatileContext` 增加 `intentRetrievalRoute?: string | null`。
-- [ ] `buildStableVolatileBlock` 显式剔除该字段。
-- [ ] `buildDynamicAppendix` 在 `affordanceHint` / `policyGuidance` 前后渲染该块；salience 建议 0.7。
-- [ ] `PromptEngine` 增加 `setIntentRetrievalRoute(route: string | null)`，调用后 invalidate fresh cache。
-- [ ] `PromptEngine.getVolatilePayloadReport` 的 latest context 补该字段，方便 payload diagnostic 与测试覆盖。
-- [ ] 测试：stable block 不含 route；dynamic appendix 含 route；重复 tool-call turn 不重复重建 stable prefix。
+- [x] `VolatileContext` 增加 `intentRetrievalRoute?: string | null`。
+- [x] `buildStableVolatileBlock` 显式剔除该字段。
+- [x] `buildDynamicAppendix` 在 `affordanceHint` / `policyGuidance` 前后渲染该块；salience 建议 0.7。
+- [x] `PromptEngine` 增加 `setIntentRetrievalRoute(route: string | null)`，调用后 invalidate fresh cache。
+- [x] `PromptEngine.getVolatilePayloadReport` 的 latest context 补该字段，方便 payload diagnostic 与测试覆盖。
+- [x] 测试：stable block 不含 route；dynamic appendix 含 route；重复 tool-call turn 不重复重建 stable prefix。
 
 **接入细节：**
 
@@ -247,12 +247,12 @@ export const DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG: IntentRetrievalRouterConfig
 
 **做什么：** 把 router 插到 `initializeRun` 的 task contract 之后、主模型请求之前。默认关闭；开启后只影响 actionable turn。
 
-- [ ] `AgentConfig` 增加 `intentRetrievalRouter?: IntentRetrievalRouterConfigInput`。
-- [ ] 分层配置增加 `agent.intentRetrievalRouter`，默认 `{ enabled: false }`。
-- [ ] `createAgentConfig` 透传配置。
-- [ ] `AgentLoop.initializeRun`：actionable 且 enabled 时调用 router，并 `promptEngine.setIntentRetrievalRoute(rendered)`；非 actionable 或 disabled 时清空。
-- [ ] 使用当前 abort signal + timeout；router 失败只记录 debug，不抛出。
-- [ ] 测试：disabled 不注入；enabled heuristic 注入；router throw 不阻断 run；非 actionable turn 清空 route。
+- [x] `AgentConfig` 增加 `intentRetrievalRouter?: IntentRetrievalRouterConfigInput`。
+- [x] 分层配置增加 `agent.intentRetrievalRouter`，默认 `{ enabled: false }`。
+- [x] `createAgentConfig` 透传配置。
+- [x] `AgentLoop.initializeRun`：actionable 且 enabled 时调用 router，并 `promptEngine.setIntentRetrievalRoute(rendered)`；非 actionable 或 disabled 时清空。
+- [x] 使用当前 abort signal + timeout；router 失败只记录 debug，不抛出。
+- [x] 测试：disabled 不注入；enabled heuristic 注入；router throw 不阻断 run；非 actionable turn 清空 route。
 
 **配置 schema 细节：**
 
@@ -274,14 +274,14 @@ export const DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG: IntentRetrievalRouterConfig
 
 **做什么：** 用具体例子验证「不被第一个关键词锁死」这个真实意图，而不是只测字段存在。
 
-- [ ] 用「重试一下这个失败」断言 route 至少包含 codebase/tests/memory，且不只给 retry 建议。
-- [ ] 用「慢」类性能请求断言包含 git + codebase + memory。
-- [ ] 用「怎么用 X」断言 external/docs 为 must 或 should，git 为 avoid/optional。
-- [ ] 用「审查 P0」断言包含 codebase + tests + git + memory。
-- [ ] LLM 合法 JSON 如果遗漏该任务类型的 baseline `must` 源，normalize 后仍应补回；否则 LLM 分类器本身会重新制造“漏查源”的问题。
-- [ ] 用「慢慢解释这个函数」断言不要误判为 `performance_diagnosis`；`慢/slow` 只有与性能、延迟、卡顿、吞吐等语义同现时才触发性能路由。
-- [ ] 用「token refresh API 怎么用」断言不要误判为 `security_safety`；只有泄露、权限、secret、路径穿越、命令执行等安全语义同现时才触发安全路由。
-- [ ] 用「最近升级后 X 怎么用失败」断言允许 `usage_question + bug_fix` 多标签，并补 codebase/tests/git，而不是被“怎么用”单词锁死。
+- [x] 用「重试一下这个失败」断言 route 至少包含 codebase/tests/memory，且不只给 retry 建议。
+- [x] 用「慢」类性能请求断言包含 git + codebase + memory。
+- [x] 用「怎么用 X」断言 external/docs 为 must 或 should，git 为 avoid/optional。
+- [x] 用「审查 P0」断言包含 codebase + tests + git + memory。
+- [x] LLM 合法 JSON 如果遗漏该任务类型的 baseline `must` 源，normalize 后仍应补回；否则 LLM 分类器本身会重新制造“漏查源”的问题。
+- [x] 用「慢慢解释这个函数」断言不要误判为 `performance_diagnosis`；`慢/slow` 只有与性能、延迟、卡顿、吞吐等语义同现时才触发性能路由。
+- [x] 用「token refresh API 怎么用」断言不要误判为 `security_safety`；只有泄露、权限、secret、路径穿越、命令执行等安全语义同现时才触发安全路由。
+- [x] 用「最近升级后 X 怎么用失败」断言允许 `usage_question + bug_fix` 多标签，并补 codebase/tests/git，而不是被“怎么用”单词锁死。
 
 ---
 
