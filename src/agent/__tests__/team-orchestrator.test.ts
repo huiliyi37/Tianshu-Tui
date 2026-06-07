@@ -96,7 +96,7 @@ describe('team orchestrator skeleton', () => {
     })
 
     assert.equal(summary.dispatched, 2)
-    assert.equal(summary.packet, 'delegated')
+    assert.match(summary.packet, /delegated/)
     assert.deepEqual(captured.map(r => r.scope.files), [
       ['src/agent/team-plan.ts'],
       ['src/agent/team-orchestrator.ts'],
@@ -186,7 +186,7 @@ depends: T1
     }
     // First wave dispatched
     assert.ok(summary.dispatched >= 1)
-    assert.equal(summary.packet, 'wave-done')
+    assert.match(summary.packet, /wave-done/)
   })
 
   it('serializes same-file tasks across waves', async () => {
@@ -245,5 +245,40 @@ depends: T1
     assert.ok(t2)
     assert.equal(t1!.riskTier, 'high')
     assert.deepEqual(t2!.dependsOn, ['T1'])
+  })
+
+  it('dispatches a later wave when fromWave is set', async () => {
+    let captured: DelegationRequest[] = []
+    const md = `
+### T1: First edit
+修改 src/a.ts
+
+### T2: Second edit
+修改 src/a.ts
+`
+    const summary = await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'serialize',
+      planMarkdown: md,
+      fromWave: 1,
+    }, {
+      delegateBatch: async (requests) => { captured = requests; return run('wave2') },
+    })
+
+    assert.ok(summary.waves.length >= 2)
+    assert.ok(captured.some(r => r.parentTurnId.includes('T2')))
+    assert.ok(!captured.some(r => r.parentTurnId.includes('T1')))
+  })
+
+  it('reports completion when fromWave is past the last wave', async () => {
+    const summary = await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'done',
+      fromWave: 9,
+      planMarkdown: '### T1: only\n修改 src/a.ts',
+    }, { delegateBatch: async () => run() })
+
+    assert.equal(summary.dispatched, 0)
+    assert.match(summary.packet, /all .* waves dispatched/)
   })
 })

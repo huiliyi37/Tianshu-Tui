@@ -20,6 +20,9 @@ export interface TeamRunInput {
   maxParallel?: number
   parentTurnId?: string
   abortSignal?: AbortSignal
+  /** Dispatch this wave index (default 0). Main controller increments after
+   *  integrating each wave's diffs to drive multi-wave execution. */
+  fromWave?: number
 }
 
 export interface TeamRunSummary {
@@ -119,6 +122,58 @@ function waveToRequests(wave: TeamWave, taskMap: Map<string, TeamTask>, parentTu
     })
 }
 
+interface WaveDispatchContext {
+  taskMap: Map<string, TeamTask>
+  tasks: TeamTask[]
+  planned: TeamTaskDraft[]
+  input: TeamRunInput
+  deps: TeamOrchestratorDeps
+}
+
+async function dispatchWaveAt(
+  waves: TeamWave[],
+  waveIndex: number,
+  ctx: WaveDispatchContext,
+): Promise<TeamRunSummary> {
+  const fromWave = Math.max(0, waveIndex)
+  const { input, planned, tasks, taskMap, deps } = ctx
+  if (waves.length === 0) {
+    return { mode: input.mode, planned, tasks, waves: [], dispatched: 0, blocked: [], packet: 'team: no dispatchable waves.' }
+  }
+  if (fromWave >= waves.length) {
+    return { mode: input.mode, planned, tasks, waves, dispatched: 0, blocked: [], packet: `team: all ${waves.length} waves dispatched.` }
+  }
+
+  const targetWave = waves[fromWave]!
+  const remainingBlocked = waves.slice(fromWave + 1).map(w =>
+    `${w.taskIds.join(', ')}: waiting for wave ${w.id} to complete`
+  )
+  const requests = waveToRequests(targetWave, taskMap, input.parentTurnId ?? 'team')
+  if (requests.length === 0) {
+    return {
+      mode: input.mode,
+      planned,
+      tasks,
+      waves,
+      dispatched: 0,
+      blocked: remainingBlocked,
+      packet: `team: wave ${targetWave.id} produced no dispatchable requests.`,
+    }
+  }
+
+  const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
+  return {
+    mode: input.mode,
+    planned,
+    tasks,
+    waves,
+    dispatched: requests.length,
+    blocked: remainingBlocked,
+    packet: `[wave ${fromWave + 1}/${waves.length}] ${run.packet}`,
+    run,
+  }
+}
+
 export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestratorDeps): Promise<TeamRunSummary> {
   const maxParallel = Math.max(1, Math.min(input.maxParallel ?? 3, 5))
 
@@ -163,35 +218,13 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
       }
     }
 
-    const firstWave = waves[0]!
-    const remainingBlocked = waves.slice(1).map(w =>
-      `${w.taskIds.join(', ')}: waiting for wave ${w.id} to complete`
-    )
-    const requests = waveToRequests(firstWave, taskMap, input.parentTurnId ?? 'team')
-    if (requests.length === 0) {
-      return {
-        mode: input.mode,
-        planned: [],
-        tasks: mergedTasks,
-        waves,
-        dispatched: 0,
-        blocked: remainingBlocked,
-        packet: 'team max: first wave produced no dispatchable requests.',
-        run: plannerRun,
-      }
-    }
-
-    const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
-    return {
-      mode: input.mode,
-      planned: [],
+    return dispatchWaveAt(waves, input.fromWave ?? 0, {
+      taskMap,
       tasks: mergedTasks,
-      waves,
-      dispatched: requests.length,
-      blocked: remainingBlocked,
-      packet: run.packet,
-      run,
-    }
+      planned: [],
+      input,
+      deps,
+    })
   }
 
   // Group tasks into waves
@@ -229,37 +262,13 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
     }
   }
 
-  // Wave-based dispatch: dispatch first wave
-  const firstWave = waves[0]!
-  const remainingBlocked = waves.slice(1).map(w =>
-    `${w.taskIds.join(', ')}: waiting for wave ${w.id} to complete`
-  )
-
-  const requests = waveToRequests(firstWave, taskMap, input.parentTurnId ?? 'team')
-  if (requests.length === 0) {
-    return {
-      mode: input.mode,
-      planned: drafts,
-      tasks: enrichedTasks,
-      waves,
-      dispatched: 0,
-      blocked: remainingBlocked,
-      packet: 'team skeleton: first wave produced no dispatchable requests.',
-    }
-  }
-
-  const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
-
-  return {
-    mode: input.mode,
-    planned: drafts,
+  return dispatchWaveAt(waves, input.fromWave ?? 0, {
+    taskMap,
     tasks: enrichedTasks,
-    waves,
-    dispatched: requests.length,
-    blocked: remainingBlocked,
-    packet: run.packet,
-    run,
-  }
+    planned: drafts,
+    input,
+    deps,
+  })
 }
 
 /** Re-export buildUnifiedTeamPlan for convenience. */

@@ -40,3 +40,29 @@ test('team_orchestrate blocks a planPath outside the project', async () => {
   assert.equal(result.isError, true)
   assert.match(result.content, /outside project|blocked/i)
 })
+
+test('team_orchestrate passes fromWave through and reports the next wave value', async () => {
+  let captured: DelegationRequest[] = []
+  const tool = createTeamOrchestrateTool({
+    delegateBatch: async (requests) => { captured = requests; return stubRun('wave2') },
+  })
+  const md = [
+    '### T1: edit first',
+    'Modify `src/agent/foo.ts`',
+    '### T2: edit second',
+    'Modify `src/agent/foo.ts`',
+    '### T3: edit third',
+    'Modify `src/agent/foo.ts`',
+  ].join('\n')
+
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'continue', planMarkdown: md, fromWave: 1 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-3',
+  })
+
+  assert.equal(result.isError, false)
+  assert.ok(captured.some(r => r.parentTurnId.includes('T2')))
+  assert.ok(!captured.some(r => r.parentTurnId.includes('T1')))
+  assert.match(result.content, /fromWave: 2/)
+})

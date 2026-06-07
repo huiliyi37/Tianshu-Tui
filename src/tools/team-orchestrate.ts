@@ -25,9 +25,10 @@ const inputSchema = z.object({
   planPath: z.string().optional(),
   planMarkdown: z.string().optional(),
   maxParallel: z.number().int().min(1).max(5).optional(),
+  fromWave: z.number().int().min(0).optional(),
 })
 
-export function formatTeamSummary(summary: TeamRunSummary): string {
+export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string {
   const lines: string[] = [
     `team ${summary.mode}: ${summary.dispatched} dispatched, ${summary.waves.length} waves, ${summary.blocked.length} blocked`,
   ]
@@ -38,6 +39,10 @@ export function formatTeamSummary(summary: TeamRunSummary): string {
   if (summary.blocked.length > 0) {
     lines.push('Blocked:')
     for (const b of summary.blocked) lines.push(`  - ${b}`)
+  }
+  const nextWave = fromWave + 1
+  if (summary.waves.length > nextWave) {
+    lines.push('', `To run the next wave after integrating this wave's diffs: call team_orchestrate again with fromWave: ${nextWave}.`)
   }
   lines.push('', summary.packet)
   return lines.join('\n')
@@ -57,6 +62,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
           planPath: { type: 'string', description: 'Optional path to a Markdown plan inside the project (standard mode).' },
           planMarkdown: { type: 'string', description: 'Optional inline Markdown plan; takes precedence over planPath.' },
           maxParallel: { type: 'number', description: 'Max parallel workers per wave (1-5, default 3).' },
+          fromWave: { type: 'number', description: 'Dispatch this zero-based wave index after integrating prior wave diffs.' },
         },
         required: ['objective'],
       },
@@ -64,7 +70,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
     async execute(params: ToolCallParams): Promise<ToolResult> {
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
-      const { mode, objective, planPath, planMarkdown, maxParallel } = parsed.data
+      const { mode, objective, planPath, planMarkdown, maxParallel, fromWave } = parsed.data
 
       let markdown = planMarkdown
       if (!markdown && planPath) {
@@ -81,7 +87,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
       let summary: TeamRunSummary
       try {
         summary = await runTeamSkeleton(
-          { mode, objective, planMarkdown: markdown, maxParallel, parentTurnId: params.toolUseId, abortSignal: params.abortSignal },
+          { mode, objective, planMarkdown: markdown, maxParallel, fromWave, parentTurnId: params.toolUseId, abortSignal: params.abortSignal },
           {
             delegateBatch: (requests, policy, abortSignal, onProgress) =>
               coordinator.delegateBatch(requests, policy, abortSignal, onProgress),
@@ -93,7 +99,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
       }
 
       return {
-        content: formatTeamSummary(summary),
+        content: formatTeamSummary(summary, fromWave ?? 0),
         uiContent: `team ${mode}: ${summary.dispatched} dispatched / ${summary.blocked.length} blocked`,
         isError: false,
       }
