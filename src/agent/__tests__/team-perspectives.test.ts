@@ -275,6 +275,46 @@ describe('mergePerspectives', () => {
     assert.ok(merged.conflicts.some(c => c.description.includes('Dependency conflict')), 'Should detect dep ordering conflict')
   })
 
+  it('does NOT fabricate a conflict when a 天府 risk has no taskId', () => {
+    // Regression: `''.includes` is always true, so an undefined taskId used to
+    // match the first 天璇 alternative and invent a spurious "conflict on unknown".
+    const tianquan = basePerspective({ tasks: [] })
+    const tianfu = normalizePerspective('tianfu', {
+      risks: [{ severity: 'high', claim: 'global concurrency hazard', mitigation: 'serialize' }],
+    })
+    const tianxuan = normalizePerspective('tianxuan', {
+      alternatives: [{ title: 'Unrelated caching layer', tradeoff: 'memory', recommendation: 'accept' }],
+    })
+
+    const merged = mergePerspectives(tianquan, tianfu, tianxuan)
+
+    assert.equal(
+      merged.conflicts.filter(c => c.description.includes('Risk vs alternative')).length,
+      0,
+      'A taskId-less risk must not correlate to an unrelated alternative',
+    )
+  })
+
+  it('treats identical dependency SETS in different order as no conflict', () => {
+    // Regression: dependsOn was compared via join(','), so [a,b] vs [b,a] —
+    // the same dependency set — was flagged as a false ordering conflict.
+    const tianquan = basePerspective({
+      tasks: [{ ...makeTask('T1'), dependsOn: ['A', 'B'] }],
+    })
+    const tianfu = normalizePerspective('tianfu', {})
+    const tianxuan = normalizePerspective('tianxuan', {
+      tasks: [{ ...makeTask('T1'), dependsOn: ['B', 'A'] }],
+    })
+
+    const merged = mergePerspectives(tianquan, tianfu, tianxuan)
+
+    assert.equal(
+      merged.conflicts.filter(c => c.description.includes('Dependency conflict')).length,
+      0,
+      'Same dependency set in different order is not a conflict',
+    )
+  })
+
   it('works without 天璇 (two-perspective merge)', () => {
     const tianquan = basePerspective()
     const tianfu = normalizePerspective('tianfu', {})

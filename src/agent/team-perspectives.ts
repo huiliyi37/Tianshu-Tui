@@ -155,11 +155,15 @@ export function mergePerspectives(
     const tianquanTaskIds = new Set(tianquan.tasks.map(t => t.id))
     const tianxuanExtraTasks = tianxuan.tasks.filter(t => !tianquanTaskIds.has(t.id))
 
-    // Detect risk conflicts: 天府 and 天璇 disagree on severity
+    // Detect risk conflicts: 天府 and 天璇 disagree on severity.
+    // Only correlate a risk to an alternative when the risk names a concrete
+    // taskId — otherwise `''.includes` would match the first alternative and
+    // fabricate a spurious "conflict on unknown".
     for (const tianfuRisk of tianfu.risks) {
-      const tianxuanAlt = tianxuan.alternatives.find(a =>
-        a.title.toLowerCase().includes(tianfuRisk.taskId?.toLowerCase() ?? '')
-      )
+      const riskTaskId = tianfuRisk.taskId?.toLowerCase()
+      const tianxuanAlt = riskTaskId
+        ? tianxuan.alternatives.find(a => a.title.toLowerCase().includes(riskTaskId))
+        : undefined
       if (tianxuanAlt && tianxuanAlt.recommendation === 'accept') {
         // 天府 says risky, 天璇 says accept → conflict
         conflicts.push({
@@ -171,10 +175,12 @@ export function mergePerspectives(
       }
     }
 
-    // Detect task ordering conflicts: 天璇 proposes different deps than 天权
+    // Detect task ordering conflicts: 天璇 proposes a different dependency SET
+    // than 天权. Compare as sets (order-insensitive) so `[a,b]` vs `[b,a]` —
+    // the same dependencies in a different order — is not a false conflict.
     for (const tianxuanTask of tianxuan.tasks) {
       const tianquanTask = tianquan.tasks.find(t => t.id === tianxuanTask.id)
-      if (tianquanTask && tianxuanTask.dependsOn.join(',') !== tianquanTask.dependsOn.join(',')) {
+      if (tianquanTask && !sameDependencySet(tianxuanTask.dependsOn, tianquanTask.dependsOn)) {
         const hasDepConflict = tianxuanTask.dependsOn.length > 0 || tianquanTask.dependsOn.length > 0
         if (hasDepConflict) {
           conflicts.push({
@@ -278,6 +284,15 @@ function riskSeverityRank(severity: 'low' | 'medium' | 'high'): number {
     case 'medium': return 1
     case 'high': return 2
   }
+}
+
+/** Order-insensitive comparison of two dependency lists. Treats them as sets,
+ *  so `[a,b]` and `[b,a]` are equal (same dependencies, different declaration
+ *  order — not a real ordering conflict). */
+function sameDependencySet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const setB = new Set(b)
+  return a.every(dep => setB.has(dep))
 }
 
 // ── Planner fanout helpers (max mode) ───────────────────────────────────────
