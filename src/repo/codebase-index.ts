@@ -357,12 +357,3 @@ export function isStale(headSha: string | null | undefined, verifiedAtCommit: st
   if (!headSha || !verifiedAtCommit) return false
   return headSha !== verifiedAtCommit
 }
-
-/** Compute 1-based line number from character offset */
-function lineNumberAt(source: string, offset: number): number {
-  let line = 1
-  for (let i = 0; i < offset && i < source.length; i++) {
-    if (source[i] === '\n') line++
-  }
-  return line
-}

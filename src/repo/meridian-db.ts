@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS module_summaries (
 CREATE TABLE IF NOT EXISTS cli_entries (
   flag TEXT NOT NULL,
   handler TEXT NOT NULL,
-  wired INTEGER NOT NULL DEFAULT 1,
+  wired INTEGER NOT NULL DEFAULT 0,
   verified_at_commit TEXT,
   source_file TEXT NOT NULL,
   PRIMARY KEY(flag, source_file)
