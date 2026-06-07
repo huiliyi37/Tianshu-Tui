@@ -133,3 +133,34 @@ flowchart TD
 2. **写语义词汇 + 调色板参考**（第 1、2 层）→ 注入 `plan_submit`。
 3. **图型骨架模板**（第 3 层）。
 4. **`/diagram` 命令**（可选，B 路）。
+
+---
+
+## 附录 · plan_submit 注入草案（词汇已定稿，调色板待实测回填）
+
+> 状态：第 1 层（形状词汇）跨渲染器可移植，**现已定稿**，等兼容性测试一回来即可应用到 `plan-submit.ts:24` 的 Mermaid 段。第 2 层（调色板）留占位符，由 `mermaid-compat-test.md` 实测结果回填——三处都 ✅ 的才进。
+
+拟在 `plan-submit.ts` 描述里，把现有 "Use Mermaid diagrams" 段升级为：
+
+```text
+### 画图：用语义形状，不要随机形状
+
+节点形状编码语义角色（跨 VSCode/GitHub/Obsidian 一致）：
+- LLM / 模型     → {{六边形}}      A{{LLM 分类器}}
+- Agent / 处理器 → [[子程序框]]    B[[意图路由]]
+- 数据存储 / DB  → [(圆柱)]        C[(MeridianDB)]
+- 决策 / 分支    → {菱形}          D{HEAD 变了?}
+- 外部输入 / 用户 → (圆角)          E(用户消息)
+- 普通模块       → [矩形]          F[write_file]
+- 入口 / 终点    → ([体育场形])    G([CLI 入口])
+
+边编码流类型：
+- 同步/读  A --> B
+- 写/强流  A ==> B
+- 异步/事件 A -.-> B
+- 带标签   A --富化--> B
+
+[调色板：待 mermaid-compat-test.md 实测确认后填入三处都支持的 classDef]
+```
+
+回填规则：实测表里"图1 classDef 着色生效"三列全 ✅ → dark 调色板进；若 GitHub ⚠️（已知 GitHub mermaid 对 classDef 支持有限）→ 调色板降级为"可选增强"，形状词汇仍是强制基线（形状不依赖 classDef）。
