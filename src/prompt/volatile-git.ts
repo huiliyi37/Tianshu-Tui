@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { promisify } from 'node:util'
 
 const execFileP = promisify(execFile)
@@ -56,9 +55,6 @@ export function createGitStatusCache(options: GitStatusCacheOptions) {
 
   return {
     get(cwd: string): string | undefined {
-      if (!isFresh(cwd) && !refreshing.has(cwd) && existsSync(cwd)) {
-        void this.refresh(cwd)
-      }
       trimCache(values, options.ttlMs)
       return values.get(cwd)?.value
     },
@@ -84,7 +80,7 @@ export function createGitStatusCache(options: GitStatusCacheOptions) {
     /**
      * Awaitable variant: triggers refresh only if the cache is stale.
      * Call this before building a prompt to eliminate the 30s staleness blind spot
-     * without changing the fire-and-forget get() path used in sync contexts.
+     * while keeping the synchronous get() path side-effect free.
      */
     async refreshIfStale(cwd: string): Promise<void> {
       if (!isFresh(cwd)) {
