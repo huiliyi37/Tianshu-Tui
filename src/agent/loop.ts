@@ -85,6 +85,8 @@ import { ImmuneHook } from './immune-hook.js'
 import { formatImmuneContext } from './immune-context.js'
 import { checkTddGate } from './tdd-gate.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
+import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
+import type { PhysarumShadowStats } from '../repo/physarum-shadow-stats.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
@@ -326,6 +328,7 @@ export class AgentLoop {
       },
       getDoomLoopLevel: () => this.getDoomLoopLevel(),
       telemetryWriter: this.telemetryWriter,
+      getPhysarumShadowStats: () => this.getPhysarumShadowStats(),
       getDomainId: () => this.sessionDomain?.id ?? null,
       getFileObservations: () => this.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
       antiAnchoring: normalizeAntiAnchoringConfig(this.config.antiAnchoring),
@@ -871,6 +874,10 @@ export class AgentLoop {
   getPlanModeState(): PlanModeState { return this.planModeState }
 
   getPrewarmStats(): { hits: number; misses: number; hitRate: number } { return this.prewarm.stats() }
+
+  getPhysarumShadowStats(): PhysarumShadowStats {
+    return getPhysarumShadowStatsFromDb(this.meridianDbForWarmup)
+  }
 
   getCacheDiagnostic(): string | null { return this.lastCacheDiagnostic }
 

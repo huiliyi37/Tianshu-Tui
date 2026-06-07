@@ -144,7 +144,7 @@ describe('buildCockpitSnapshot', () => {
 })
 
 
-it('buildCockpitSnapshot includes cache diagnostics and prewarm stats', () => {
+it('buildCockpitSnapshot includes cache diagnostics, prewarm stats, and shadow next-step hit rates', () => {
   const session = new SessionContext()
   session.recordTurnCache(1, {
     input_tokens: 100,
@@ -156,6 +156,7 @@ it('buildCockpitSnapshot includes cache diagnostics and prewarm stats', () => {
     session,
     agent: makeAgent({
       getPrewarmStats: () => ({ hits: 3, misses: 1, hitRate: 0.75 }),
+      getPhysarumShadowStats: () => ({ semantic: 'next-step', total: 3, hit1: 1, hit3: 2, miss: 1, hitAt1: 1 / 3, hitAt3: 2 / 3 }),
       getCacheDiagnostic: () => 'Cache drift detected',
     } as Partial<AgentLoop>),
   })
@@ -164,5 +165,10 @@ it('buildCockpitSnapshot includes cache diagnostics and prewarm stats', () => {
   assert.equal(snapshot.model.prewarmHits, 3)
   assert.equal(snapshot.model.prewarmMisses, 1)
   assert.equal(snapshot.model.prewarmHitRate, 0.75)
+  assert.equal(snapshot.model.physarumShadow.total, 3)
+  assert.equal(snapshot.model.physarumShadow.semantic, 'next-step')
+  assert.equal(snapshot.model.physarumShadow.hitAt1, 1 / 3)
+  assert.equal(snapshot.model.physarumShadow.hitAt3, 2 / 3)
+  assert.equal(snapshot.model.physarumShadow.miss, 1)
   assert.equal(snapshot.model.cacheDiagnostic, 'Cache drift detected')
 })

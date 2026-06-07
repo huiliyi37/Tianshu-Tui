@@ -1,3 +1,5 @@
+import type { PhysarumShadowStats } from '../../repo/physarum-shadow-stats.js'
+
 export type Panel = 'summary' | 'trace' | 'verify' | 'context' | 'safety' | 'model' | 'mcp'
 
 export const PANELS: Panel[] = ['summary', 'trace', 'verify', 'context', 'safety', 'model', 'mcp']
@@ -96,6 +98,7 @@ export interface CockpitSnapshot {
     prewarmHits: number
     prewarmMisses: number
     prewarmHitRate: number
+    physarumShadow: PhysarumShadowStats
     cacheDiagnostic: string | null
     reasoningEffort: string
   }

@@ -105,6 +105,16 @@ describe('PhysarumEngine', () => {
     assert.equal(observations[0]!.hitRank, null)
   })
 
+  it('returns zero shadow stats when no observations are recorded', () => {
+    const engine = new PhysarumEngine(undefined)
+
+    const stats = engine.getShadowStats()
+
+    assert.equal(stats.total, 0)
+    assert.equal(stats.hitAt1, 0)
+    assert.equal(stats.hitAt3, 0)
+  })
+
   it('filters legacy tool-name physarum edges when loading and saving', () => {
     let stored: any[] = [
       { fileA: 'read_file', fileB: 'src/a.ts', weight: 10, flow: 1, consolidated: true, activationCount: 9, lastActivatedTurn: 3, direction: 0 },

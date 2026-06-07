@@ -11,6 +11,8 @@ import type {
   Criticality, AvalancheStats, PhysarumPredictionObservation,
 } from './physarum-types.js'
 import { DEFAULT_PHYSARUM_CONFIG } from './physarum-types.js'
+import { aggregatePhysarumPredictionObservations } from './physarum-shadow-stats.js'
+import type { PhysarumShadowStats } from './physarum-shadow-stats.js'
 
 const PHYSARUM_INDEXABLE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go'] as const
 const PHYSARUM_IGNORED_SEGMENTS = new Set(['node_modules', 'dist', '.git', '.rivet'])
@@ -114,6 +116,10 @@ export class PhysarumEngine {
 
   getPredictionObservations(): PhysarumPredictionObservation[] {
     return [...this.predictionObservations]
+  }
+
+  getShadowStats(): PhysarumShadowStats {
+    return aggregatePhysarumPredictionObservations(this.predictionObservations)
   }
 
   /** Record flow on an edge (called on file access/co-edit) */

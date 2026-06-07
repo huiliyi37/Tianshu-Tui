@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink'
 import { memo } from 'react'
+import type { PhysarumShadowStats } from '../../repo/physarum-shadow-stats.js'
 import { getTheme } from '../theme.js'
 import { contextBar } from '../format-utils.js'
 
@@ -17,6 +18,7 @@ export interface ModelPanelProps {
   prewarmHits?: number
   prewarmMisses?: number
   prewarmHitRate?: number
+  physarumShadow?: PhysarumShadowStats
   cacheDiagnostic?: string | null
   reasoningEffort?: string
 }
@@ -39,8 +41,8 @@ const EFFORT_COLOR: Record<string, string> = {
 
 export const ModelPanel = memo(function ModelPanel({
   model, cacheHitRate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost, routingReason,
-  perTurnHitRate = null, recentTurnHitRate = null, prewarmHits = 0, prewarmMisses = 0, prewarmHitRate = 0, cacheDiagnostic = null,
-  reasoningEffort = 'medium',
+  perTurnHitRate = null, recentTurnHitRate = null, prewarmHits = 0, prewarmMisses = 0, prewarmHitRate = 0,
+  physarumShadow, cacheDiagnostic = null, reasoningEffort = 'medium',
 }: ModelPanelProps) {
   const theme = getTheme()
 
@@ -90,6 +92,15 @@ export const ModelPanel = memo(function ModelPanel({
           <Text color={theme.muted}> │ Prewarm: </Text>
           <Text>{prewarmHits}/{prewarmHits + prewarmMisses}</Text>
           <Text color={theme.dim}> ({Math.round(prewarmHitRate * 100)}%)</Text>
+        </Text>
+      )}
+      {physarumShadow && (
+        <Text>
+          <Text color={theme.muted}>Shadow next-step: </Text>
+          <Text>hit@1 {Math.round(physarumShadow.hitAt1 * 100)}%</Text>
+          <Text color={theme.muted}> │ hit@3 </Text>
+          <Text>{Math.round(physarumShadow.hitAt3 * 100)}%</Text>
+          <Text color={theme.dim}> ({physarumShadow.total} obs, miss {physarumShadow.miss})</Text>
         </Text>
       )}
       {perTurnHitRate !== null && perTurnHitRate < 0.4 && (

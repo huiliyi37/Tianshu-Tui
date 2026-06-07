@@ -183,6 +183,25 @@ describe('ModelPanel renders', () => {
     })
     assert.ok(el != null)
   })
+
+  it('renders physarum shadow next-step hit rates without prompt injection', () => {
+    const el = innerFn(ModelPanel)({
+      model: 'deepseek-v4',
+      cacheHitRate: 0.85,
+      inputTokens: 120000,
+      outputTokens: 35000,
+      cacheReadTokens: 100000,
+      cacheWriteTokens: 20000,
+      cost: 0.0423,
+      physarumShadow: { semantic: 'next-step', total: 3, hit1: 1, hit3: 2, miss: 1, hitAt1: 1 / 3, hitAt3: 2 / 3 },
+    })
+    const tree = JSON.stringify(el)
+
+    assert.ok(tree.includes('Shadow next-step'))
+    assert.ok(tree.includes('hit@1'))
+    assert.ok(tree.includes('hit@3'))
+    assert.ok(tree.includes('miss'))
+  })
 })
 
 describe('ApprovalRiskCard renders', () => {

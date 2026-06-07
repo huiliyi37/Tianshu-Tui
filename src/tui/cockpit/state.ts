@@ -2,6 +2,7 @@ import type { AgentLoop } from '../../agent/loop.js'
 import type { SessionContext } from '../../agent/context.js'
 import { buildDeliveryGate } from '../../agent/delivery-gate.js'
 import type { McpManager } from '../../mcp/manager.js'
+import { emptyPhysarumShadowStats, type PhysarumShadowStats } from '../../repo/physarum-shadow-stats.js'
 import type { CockpitSnapshot, Panel, PanelStatus } from './types.js'
 
 export interface CockpitSnapshotSources {
@@ -65,10 +66,12 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
   const mcpManager = sources.mcpManager ?? null
   const agentWithCache = agent as AgentLoop & {
     getPrewarmStats?: () => { hits: number; misses: number; hitRate: number }
+    getPhysarumShadowStats?: () => PhysarumShadowStats
     getCacheDiagnostic?: () => string | null
     getRoutingReason?: () => string | null
   }
   const prewarmStats = agentWithCache.getPrewarmStats?.() ?? { hits: 0, misses: 0, hitRate: 0 }
+  const physarumShadowStats = agentWithCache.getPhysarumShadowStats?.() ?? emptyPhysarumShadowStats()
   const cacheDiagnostic = agentWithCache.getCacheDiagnostic?.() ?? null
   const routingReason = agentWithCache.getRoutingReason?.() ?? null
 
@@ -149,6 +152,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       prewarmHits: prewarmStats.hits,
       prewarmMisses: prewarmStats.misses,
       prewarmHitRate: prewarmStats.hitRate,
+      physarumShadow: physarumShadowStats,
       cacheDiagnostic,
       reasoningEffort: agent.getReasoningEffort() || reasoningEffort || 'medium',
     },

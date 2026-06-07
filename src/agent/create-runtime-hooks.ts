@@ -7,6 +7,7 @@ import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
 import { createSignalConsumerRuntimeHook } from './hooks/signal-consumer-hook.js'
 import { createPlaybookReflectHook } from './hooks/playbook-reflect-hook.js'
 import { createTelemetryFlushHook } from './hooks/telemetry-flush-hook.js'
+import { createPhysarumShadowTelemetryHook } from './hooks/physarum-shadow-telemetry-hook.js'
 import { createDreamHook } from './hooks/dream-hook.js'
 import { createCourageHook } from './hooks/courage-hook.js'
 import { createRadioHook, type RadioHookDeps } from './hooks/radio-hook.js'
@@ -30,6 +31,7 @@ import type { TrajectoryEntry } from './trajectory.js'
 import type { DomainVoiceId } from './domain-voice.js'
 import type { ContextClaim } from '../context/claims.js'
 import type { MeridianIndexer } from '../repo/meridian-indexer.js'
+import type { PhysarumShadowStats } from '../repo/physarum-shadow-stats.js'
 
 export interface RuntimeHookDeps {
   stigmergyDeposit: (deposit: any) => Promise<void>
@@ -41,6 +43,8 @@ export interface RuntimeHookDeps {
   setThetaState: (state: any) => void
   getPredictionAccumulator: () => any
   telemetryWriter?: TelemetryWriter
+  /** Runtime-only aggregate of Physarum shadow prediction observations. Never injected into prompts. */
+  getPhysarumShadowStats?: () => PhysarumShadowStats
   /** Publish cross-session event (file changes, type errors, etc.) */
   publishEvent?: (input: { eventType: string; filePath?: string; detail?: string; priority?: number }) => void
   /** Current session ID for event attribution */
@@ -152,6 +156,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getEvidenceState: deps.getEvidenceState,
       getDecisions: deps.dream.getDecisions,
       getTrajectory: deps.dream.getTrajectory,
+    }))
+  }
+
+  if (deps.telemetryWriter && deps.getPhysarumShadowStats) {
+    hooks.push(createPhysarumShadowTelemetryHook({
+      getStats: deps.getPhysarumShadowStats,
+      telemetryWriter: deps.telemetryWriter,
     }))
   }
 
