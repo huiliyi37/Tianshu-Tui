@@ -1,6 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { hasOverlappingFiles, parseTeamTaskDrafts } from '../team-plan.js'
+import {
+  hasOverlappingFiles,
+  parseTeamTaskDrafts,
+  parseTeamTasks,
+  buildUnifiedTeamPlan,
+  type TeamTaskDraft,
+  type TeamTask,
+} from '../team-plan.js'
 
 describe('parseTeamTaskDrafts', () => {
   it('parses loop-split style Step sections', () => {
@@ -63,5 +70,98 @@ describe('parseTeamTaskDrafts', () => {
 
     assert.equal(hasOverlappingFiles(a!, b!), true)
     assert.equal(hasOverlappingFiles(a!, c!), false)
+  })
+})
+
+describe('parseTeamTasks', () => {
+  it('enriches drafts with dependencies and risk tier', () => {
+    const tasks = parseTeamTasks(`
+### T1: Setup auth schema
+修改 src/config/schema.ts
+depends on: none
+
+### T2: Implement login
+修改 src/auth/login.ts
+depends: T1
+`)
+
+    assert.equal(tasks.length, 2)
+    assert.equal(tasks[0]!.id, 'T1')
+    assert.equal(tasks[0]!.riskTier, 'high')
+    assert.deepEqual(tasks[0]!.dependsOn, [])
+    assert.deepEqual(tasks[0]!.touchSet, ['src/config/schema.ts'])
+
+    assert.equal(tasks[1]!.id, 'T2')
+    assert.equal(tasks[1]!.riskTier, 'high') // auth/login triggers high risk
+    assert.deepEqual(tasks[1]!.dependsOn, ['T1'])
+    assert.deepEqual(tasks[1]!.touchSet, ['src/auth/login.ts'])
+  })
+
+  it('extracts dependencies from Chinese and English patterns', () => {
+    const tasks = parseTeamTasks(`
+### T1: Base
+修改 src/base.ts
+
+### T2: Build on T1
+修改 src/next.ts
+依赖 T1
+
+### T3: Build on T1 and T2
+修改 src/final.ts
+depends on: T1, T2
+`)
+
+    assert.deepEqual(tasks[0]!.dependsOn, [])
+    assert.deepEqual(tasks[1]!.dependsOn, ['T1'])
+    assert.deepEqual(tasks[2]!.dependsOn, ['T1', 'T2'])
+  })
+
+  it('classifies medium risk for refactor tasks', () => {
+    const tasks = parseTeamTasks(`
+### T1: Refactor loop
+Refactor src/agent/loop.ts
+`)
+
+    assert.equal(tasks[0]!.riskTier, 'medium')
+  })
+
+  it('returns empty array for no-task documents', () => {
+    assert.deepEqual(parseTeamTasks('Just a plan, no tasks.\n## Introduction'), [])
+  })
+})
+
+describe('buildUnifiedTeamPlan', () => {
+  it('builds a plan with verification gates and risks from tasks', () => {
+    const tasks = parseTeamTasks(`
+### T1: Security fix
+修改 src/auth.ts
+验证：npx tsc --noEmit
+
+### T2: Add tests
+修改 src/__tests__/auth.test.ts
+`)
+    const plan = buildUnifiedTeamPlan('Fix auth', 'standard', tasks, {
+      nonGoals: ['TUI panel'],
+    })
+
+    assert.equal(plan.mission, 'Fix auth')
+    assert.equal(plan.mode, 'standard')
+    assert.equal(plan.tasks.length, 2)
+    assert.equal(plan.nonGoals.length, 1)
+    assert.equal(plan.nonGoals[0], 'TUI panel')
+
+    // T1 is high risk (auth in title/file), T2 also contains auth in path
+    assert.equal(plan.risks.length, 2)
+    assert.equal(plan.risks[0]!.severity, 'high')
+    assert.equal(plan.risks[1]!.severity, 'high')
+
+    // Verification gate from T1
+    assert.equal(plan.verification.length, 1)
+    assert.equal(plan.verification[0]!.taskId, 'T1')
+    assert.ok(plan.verification[0]!.command.includes('npx tsc'))
+
+    // Groups and decisions start empty
+    assert.deepEqual(plan.groups, [])
+    assert.deepEqual(plan.decisions, [])
   })
 })
