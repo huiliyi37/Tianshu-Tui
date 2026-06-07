@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Tool } from './types.js'
 import { TodoStore } from './todo-store.js'
 import type { TodoItem } from './todo-store.js'
+import { detectDependencies, computeMaxDepth, findExecutable, buildDepAnnotation } from './todo-deps.js'
 
 const VALID_STATUSES = ['pending', 'in_progress', 'completed'] as const
 
@@ -86,16 +87,36 @@ Always update the list when completing or starting a task.`,
       store.write(data.todos)
 
       const summary = TodoStore.formatSummary(data.todos)
-      if (regressions.length > 0) {
-        const warn = regressions.map(r => `  - ${r}`).join('\n')
-        return {
-          content: `⚠️ ${regressions.length} previously-completed item(s) were reset or dropped:\n${warn}\n\n`
-            + `If this was unintentional (e.g. rebuilding the list from memory after a long task), `
-            + `re-mark them as completed. Do NOT redo finished work.\n\n${summary}`,
+      let content = summary
+
+      // Scope gate: detect dependencies and narrow focus
+      const deps = detectDependencies(data.todos)
+      const maxDepth = computeMaxDepth(deps)
+      const pendingCount = data.todos.filter(t => t.status === 'pending').length
+
+      // Auto-focus: when pending > 5 or dependency depth > 3, mark the
+      // first executable item as the current focus
+      const SCOPE_PENDING_THRESHOLD = 5
+      const SCOPE_DEPTH_THRESHOLD = 3
+      const needsFocus = pendingCount > SCOPE_PENDING_THRESHOLD || maxDepth > SCOPE_DEPTH_THRESHOLD
+
+      if (needsFocus || deps.some(d => d.dependsOn.length > 0)) {
+        const executable = findExecutable(data.todos, deps)
+        const focusId = executable.length > 0 ? executable[0]!.id : null
+        const annotation = buildDepAnnotation(data.todos, deps, needsFocus ? focusId : null)
+        if (annotation) {
+          content += '\n\n' + annotation
         }
       }
 
-      return { content: summary }
+      if (regressions.length > 0) {
+        const warn = regressions.map(r => `  - ${r}`).join('\n')
+        content = `⚠️ ${regressions.length} previously-completed item(s) were reset or dropped:\n${warn}\n\n`
+            + `If this was unintentional (e.g. rebuilding the list from memory after a long task), `
+            + `re-mark them as completed. Do NOT redo finished work.\n\n${content}`
+      }
+
+      return { content }
     },
 
     requiresApproval: () => false,
