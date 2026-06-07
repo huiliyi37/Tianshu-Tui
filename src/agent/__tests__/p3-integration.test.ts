@@ -1,6 +1,23 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { ToolRegistry } from '../../tools/registry.js'
+import { READ_FILE_TOOL } from '../../tools/read-file.js'
 import { P3Integration } from '../p3-integration.js'
+import { AgentLoop } from '../loop.js'
+import { SessionContext } from '../context.js'
+import { PromptEngine } from '../../prompt/engine.js'
+
+function makeEngine(cwd: string) {
+  return new PromptEngine({
+    model: 'deepseek-v4-pro',
+    maxTokens: 1024,
+    staticCtx: { tools: [] },
+    volatileCtx: { cwd },
+  })
+}
 
 describe('P3Integration', () => {
   it('creates all subsystems', () => {
@@ -62,6 +79,37 @@ describe('P3Integration', () => {
 
     assert.equal(p3.queue.pending(), 0)
     assert.deepEqual(executed, [])
+  })
+
+  it('AgentLoop validates speculative targets before executing file-capable tools', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'p3-spec-safe-'))
+    const outside = mkdtempSync(join(tmpdir(), 'p3-spec-outside-'))
+    try {
+      mkdirSync(join(cwd, 'src'), { recursive: true })
+      writeFileSync(join(cwd, 'src', 'ok.ts'), 'export const ok = 1\n')
+      writeFileSync(join(outside, 'secret.ts'), 'secret\n')
+
+      const registry = new ToolRegistry()
+      registry.register(READ_FILE_TOOL)
+      const loop = new AgentLoop({
+        client: {} as any,
+        promptEngine: makeEngine(cwd),
+        toolRegistry: registry,
+        maxTurns: 1,
+        contextWindow: 1_000_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        fsWatcherEnabled: false,
+      }, new SessionContext(), cwd)
+
+      const unsafe = await (loop.p3 as any).queue.deps.execute('read_file', join(outside, 'secret.ts'))
+      const safe = await (loop.p3 as any).queue.deps.execute('read_file', 'src/ok.ts')
+
+      assert.equal(unsafe, '')
+      assert.ok(safe.includes('export const ok = 1'))
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
   })
 
   it('records and retrieves mistakes', () => {

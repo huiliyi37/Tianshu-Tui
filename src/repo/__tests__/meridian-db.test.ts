@@ -158,4 +158,23 @@ describe('meridian db', () => {
     assert.equal(loaded.length, 1)
     assert.equal(loaded[0]!.fileA, 'p.ts')
   })
+
+  it('saves and loads P3 tool pattern miner state', () => {
+    const snapshot = {
+      version: 1 as const,
+      bigrams: [{
+        fromTool: 'grep',
+        entries: [{ tool: 'read_file', targetPath: 'src/foo.ts' }],
+      }],
+      trigrams: [{
+        context: 'glob|grep',
+        entries: [{ tool: 'read_file', targetPath: 'src/foo.ts' }],
+      }],
+      prev: 'grep',
+    }
+
+    db.saveToolPatternMinerSnapshot(snapshot)
+
+    assert.deepEqual(db.loadToolPatternMinerSnapshot(), snapshot)
+  })
 })

@@ -11,6 +11,7 @@ import { SessionPersist } from './session-persist.js'
 import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
 import { batchPrewarm, buildPrewarmValue, buildPrewarmValueAsync } from './prewarm-file.js'
+import { validatePathSafe } from '../tools/path-validate.js'
 import { type CompactionConfig, staleRoundThresholds } from '../compact/constants.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
@@ -281,9 +282,11 @@ export class AgentLoop {
       execute: async (tool, target) => {
         const SAFE_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_dir'])
         if (!SAFE_TOOLS.has(tool)) return ''
+        const validated = validatePathSafe(this.cwd, target)
+        if (!validated.ok) return ''
         try {
           const params = {
-            input: { file_path: target, path: target },
+            input: { file_path: validated.path, path: validated.path },
             cwd: this.cwd,
             toolUseId: `spec_${Date.now()}`,
             contextWindow: this.config.contextWindow,
@@ -940,6 +943,12 @@ export class AgentLoop {
       const db = this.config.meridianIndexer?.getDb()
       if (db) db.saveMistakeEntries(this.p3.notebook.getAllEntries())
     } catch { /* non-critical */ }
+
+    // Persist P3 tool transition miner for cross-session speculation.
+    try {
+      const db = this.config.meridianIndexer?.getDb()
+      if (db) db.saveToolPatternMinerSnapshot(this.p3.miner.exportSnapshot())
+    } catch { /* non-critical */ }
   }
 
   private async startFsWatcher(): Promise<void> {
@@ -985,6 +994,10 @@ export class AgentLoop {
     }
     try { this.immuneHook.importMemories(db.loadImmuneMemories()) } catch { /* non-critical */ }
     try { this.p3?.notebook.importEntries(db.loadMistakeEntries()) } catch { /* non-critical */ }
+    try {
+      const snapshot = db.loadToolPatternMinerSnapshot()
+      if (snapshot) this.p3.miner.importSnapshot(snapshot)
+    } catch { /* non-critical */ }
   }
 
   /**

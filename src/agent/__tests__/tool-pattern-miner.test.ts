@@ -39,4 +39,18 @@ describe('ToolPatternMiner', () => {
     const predictions = miner.predict('grep')
     assert.equal(predictions[0]!.likelyTarget, 'src/foo.ts')
   })
+
+  it('exports and imports transition state', () => {
+    const miner = new ToolPatternMiner()
+    miner.record('grep', 'read_file', { targetPath: 'src/foo.ts' })
+    miner.record('read_file', 'grep', { targetPath: 'src' })
+    miner.record('grep', 'read_file', { targetPath: 'src/foo.ts' })
+
+    const restored = new ToolPatternMiner()
+    restored.importSnapshot(miner.exportSnapshot())
+
+    const predictions = restored.predict('grep', 0)
+    assert.equal(predictions[0]!.tool, 'read_file')
+    assert.equal(predictions[0]!.likelyTarget, 'src/foo.ts')
+  })
 })

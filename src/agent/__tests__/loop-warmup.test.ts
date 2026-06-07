@@ -41,6 +41,7 @@ describe('AgentLoop memory warmup (S9)', () => {
       loadFromDb: () => { dbReads.push('physarum') },
       loadImmuneMemories: () => { dbReads.push('immune'); return [] },
       loadMistakeEntries: () => { dbReads.push('mistake'); return [] },
+      loadToolPatternMinerSnapshot: () => { dbReads.push('p3'); return null },
     } as any
 
     const session = new SessionContext()
@@ -54,11 +55,12 @@ describe('AgentLoop memory warmup (S9)', () => {
   })
 
   it('warmupMemories() is callable and idempotent', async () => {
-    const callCount = { physarum: 0, immune: 0, mistake: 0 }
+    const callCount = { physarum: 0, immune: 0, mistake: 0, p3: 0 }
     const fakeDb = {
       loadFromDb: () => { callCount.physarum++ },
       loadImmuneMemories: () => { callCount.immune++; return [] },
       loadMistakeEntries: () => { callCount.mistake++; return [] },
+      loadToolPatternMinerSnapshot: () => { callCount.p3++; return null },
     } as any
 
     const session = new SessionContext()

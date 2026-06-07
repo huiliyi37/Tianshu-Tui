@@ -6,6 +6,7 @@ import type { ModuleSummaryEntry, CliEntry } from './meridian-types.js'
 import type { PhysarumEdgeState, PhysarumPredictionObservation } from './physarum-types.js'
 import type { ImmuneMemory } from '../agent/immune-types.js'
 import type { MistakeEntry } from '../agent/mistake-notebook.js'
+import type { ToolPatternMinerSnapshot } from '../agent/tool-pattern-miner.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS files (
@@ -98,6 +99,14 @@ CREATE TABLE IF NOT EXISTS mistake_entries (
   tags_json TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_mistake_error ON mistake_entries(error);
+
+CREATE TABLE IF NOT EXISTS p3_state (
+  kind TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(kind, version)
+);
 
 CREATE TABLE IF NOT EXISTS sensorimotor_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -529,6 +538,30 @@ export class MeridianDb {
       }
     }
     return result
+  }
+
+  // ─── P3 state persistence ───────────────────────────────────────────
+
+  saveToolPatternMinerSnapshot(snapshot: ToolPatternMinerSnapshot): void {
+    if (!this._available) return
+    this.db.prepare(`
+      INSERT INTO p3_state (kind, version, json, updated_at)
+      VALUES ('tool_pattern_miner', ?, ?, datetime('now'))
+      ON CONFLICT(kind, version) DO UPDATE SET
+        json = excluded.json,
+        updated_at = excluded.updated_at
+    `).run(snapshot.version, JSON.stringify(snapshot))
+  }
+
+  loadToolPatternMinerSnapshot(): ToolPatternMinerSnapshot | null {
+    if (!this._available) return null
+    const row = this.db.prepare(`
+      SELECT json FROM p3_state
+      WHERE kind = 'tool_pattern_miner' AND version = 1
+    `).get() as { json: string } | undefined
+    if (!row) return null
+    const parsed = JSON.parse(row.json) as ToolPatternMinerSnapshot
+    return parsed.version === 1 ? parsed : null
   }
 
   /**
