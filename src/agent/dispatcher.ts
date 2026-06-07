@@ -58,7 +58,7 @@ export function decomposeByDataContract(contract: TaskContract): DecomposedTask[
       title: contract.objective.slice(0, 60),
       objective: contract.objective,
       domain: 'backend',
-      authority: matchDomain(contract.objective) ?? 'tianliang',
+      authority: (matchDomain(contract.objective) ?? 'tianliang') as StarDomainId,
       dependsOn: [],
       scope: { files: [] },
     }]
@@ -77,7 +77,7 @@ export function decomposeByDataContract(contract: TaskContract): DecomposedTask[
       title: `[${domain}] ${contract.objective.slice(0, 40)}`,
       objective,
       domain,
-      authority: matchDomain(objective) ?? 'tianliang',
+      authority: (matchDomain(objective) ?? 'tianliang') as StarDomainId,
       dependsOn: [],
       scope: { files: domainFiles },
     })

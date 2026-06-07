@@ -1,4 +1,4 @@
-export type StarDomainId = 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan'
+export type StarDomainId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan'
 export type DecisionStyle = 'bold' | 'cautious' | 'methodical'
 
 export interface StarDomain {
@@ -26,6 +26,19 @@ export interface StarDomain {
 }
 
 export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
+  tianshu: {
+    id: 'tianshu',
+    name: '天枢',
+    motto: '执中调度，以全貌定向',
+    volatileBlock: '你当前在天枢域。天枢之道：执中调度。以全貌定向，协调各域，选择最小且稳妥的路径完成任务。',
+    decisionStyle: 'methodical',
+    courageThreshold: 0.6,
+    keywords: ['全貌', '统筹', '调度', '协调', '执中', 'orchestrate', 'coordinate', 'overview'],
+    isCustom: false,
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
+    systemPromptSuffix: '你是天枢——执中者。以全貌定向，协调各域，选择最小且稳妥的路径完成任务。',
+    uiPersona: { separator: 'thin', accent: 'secondary', glyph: '✹' },
+  },
   pojun: {
     id: 'pojun',
     name: '破军',
@@ -106,23 +119,23 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   },
 }
 
-export function matchDomain(taskDescription: string): StarDomainId | null {
-  const lower = taskDescription.toLowerCase()
-  const scores: Record<StarDomainId, number> = {pojun: 0, tianfu: 0, tianliang: 0, tianquan: 0, tianji: 0, tianxuan: 0 }
+/** Delegate to registry so custom domains loaded at startup are visible.
+ *  Lazy import avoids circular dependency: star-domain → star-domain-registry → star-domain.
+ *  Uses createRequire because this is an ESM project (no native require). */
+import { createRequire } from 'node:module'
+const _require = createRequire(import.meta.url)
 
-  for (const domain of Object.values(STAR_DOMAINS)) {
-    for (const keyword of domain.keywords) {
-      if (lower.includes(keyword.toLowerCase())) scores[domain.id]++
-    }
+let _registry: import('./star-domain-registry.js').StarDomainRegistry | null = null
+function getRegistry(): import('./star-domain-registry.js').StarDomainRegistry {
+  if (!_registry) {
+    const mod = _require('./star-domain-registry.js') as typeof import('./star-domain-registry.js')
+    _registry = mod.starDomainRegistry
   }
+  return _registry
+}
 
-  const max = Math.max(...Object.values(scores))
-  if (max === 0) return null
-
-  const winners = (Object.entries(scores) as Array<[StarDomainId, number]>).filter(([, score]) => score === max)
-  if (winners.length > 1) return null
-
-  return winners[0]![0]
+export function matchDomain(taskDescription: string): string | null {
+  return getRegistry().matchDomain(taskDescription)
 }
 
 export interface ActiveStarDomain {
@@ -135,9 +148,10 @@ export interface ActiveStarDomain {
 export function buildActiveDomain(taskDescription: string): ActiveStarDomain | null {
   const id = matchDomain(taskDescription)
   if (!id) return null
-  const domain = STAR_DOMAINS[id]
+  const domain = getRegistry().get(id)
+  if (!domain) return null
   return {
-    id,
+    id: id as StarDomainId,
     name: domain.name,
     volatileBlock: domain.volatileBlock,
     motto: domain.motto,

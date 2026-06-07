@@ -392,3 +392,35 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
     }
   })
 })
+
+// ─── P1-1 matchDomain unified: custom domain visible at runtime ──
+describe('P1-1 — custom domain visible to runtime matchDomain', () => {
+  const tmpBase = join(tmpdir(), `rivet-p11-test-${Date.now()}`)
+
+  test('custom domain keywords are matched by runtime matchDomain (via registry)', () => {
+    const dir = join(tmpBase, 'test-rt-match')
+    mkdirSync(join(dir, 'machao'), { recursive: true })
+    writeFileSync(join(dir, 'machao', 'card.md'), [
+      '---',
+      'name: 马超',
+      'motto: 长驱直入',
+      "keywords: ['penetration', '渗透', '安全测试']",
+      "toolWhitelist: ['read_file', 'bash', 'grep']",
+      '---',
+      '',
+      '突击手',
+    ].join('\n'))
+
+    try {
+      const reg = new StarDomainRegistry()
+      const { loaded } = reg.loadFromDirectory(dir)
+      assert.ok(loaded.includes('machao'))
+
+      // Registry-level matchDomain sees the custom domain
+      const match = reg.matchDomain('进行网络渗透安全测试')
+      assert.equal(match, 'machao', 'custom domain should be matched by registry.matchDomain')
+    } finally {
+      rmSync(tmpBase, { recursive: true, true: true })
+    }
+  })
+})

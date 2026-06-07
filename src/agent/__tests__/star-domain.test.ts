@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { matchDomain, STAR_DOMAINS, buildActiveDomain } from '../star-domain.js'
+import { starDomainRegistry } from '../star-domain-registry.js'
 
 describe('StarDomain', () => {
   it('exports built-in domains', () => {
@@ -71,10 +72,11 @@ describe('StarDomain', () => {
     }
   })
 
-  it('matchDomain result has toolWhitelist accessible via STAR_DOMAINS', () => {
+  it('matchDomain result has toolWhitelist accessible via registry', () => {
     const id = matchDomain('探索新功能')
     assert.ok(id)
-    const domain = STAR_DOMAINS[id]
+    const domain = starDomainRegistry.get(id)
+    assert.ok(domain)
     assert.ok(domain.toolWhitelist.length > 0)
     assert.ok(domain.systemPromptSuffix.length > 0)
   })
