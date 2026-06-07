@@ -84,6 +84,17 @@ describe('SessionContext → SessionPersist integration', () => {
     const { drain } = wirePersistence(session, persist)
 
     // Fire 50 tool_results back-to-back; serialization queue must keep them in order.
+    // Each result must be anchored to a matching assistant tool_call, otherwise the
+    // load-time orphan repair (loadOai → repairOrphanToolCalls) correctly drops them
+    // as API-unsafe dangling tool messages.
+    session.addAssistantBlocks(
+      Array.from({ length: 50 }, (_, i) => ({
+        type: 'tool_use' as const,
+        id: `call_${i}`,
+        name: 'read_file',
+        input: { idx: i },
+      })),
+    )
     const results = Array.from({ length: 50 }, (_, i) => ({
       type: 'tool_result' as const,
       tool_use_id: `call_${i}`,
@@ -93,9 +104,11 @@ describe('SessionContext → SessionPersist integration', () => {
     await drain()
 
     const onDisk = persist.loadOai()
-    assert.equal(onDisk.length, 50)
+    // index 0 = the assistant message that issued the 50 tool_calls; 1..50 = tool results
+    assert.equal(onDisk.length, 51)
+    assert.equal(onDisk[0]!.role, 'assistant')
     for (let i = 0; i < 50; i++) {
-      const msg = onDisk[i]!
+      const msg = onDisk[i + 1]!
       assert.ok(isToolMessage(msg), `index ${i} should be a tool message`)
       assert.equal(msg.tool_call_id, `call_${i}`, `index ${i} out of order`)
       assert.equal(msg.content, `payload-${i}`)

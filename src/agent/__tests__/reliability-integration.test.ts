@@ -1,5 +1,12 @@
 import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+// Writable cwd: AgentLoop turn-cache telemetry fire-and-forgets a mkdir under
+// cwd; an unwritable TEST_CWD sentinel makes that async write reject after the
+// test ends, leaking an unhandledRejection onto later tests in the same run.
+const TEST_CWD = mkdtempSync(join(tmpdir(), 'rivet-loop-cwd-'))
 import { AgentLoop } from '../loop.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
@@ -18,7 +25,7 @@ function makeEngine(tools: ToolDefinition[]): PromptEngine {
     model: 'deepseek-v4-pro',
     maxTokens: 1024,
     staticCtx: { tools },
-    volatileCtx: { cwd: '/test' },
+    volatileCtx: { cwd: TEST_CWD },
   })
 }
 
@@ -95,7 +102,7 @@ describe('AgentLoop reliability integration', () => {
         memoryLimitBytes: 1_000,
         memoryUsage: () => ({ rss: 750, heapUsed: 750 }),
       },
-    }, session, '/test')
+    }, session, TEST_CWD)
 
     const results: string[] = []
     await agent.run('write out.txt', makeCallbacks(results))

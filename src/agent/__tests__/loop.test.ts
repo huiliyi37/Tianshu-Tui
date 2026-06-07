@@ -16,6 +16,12 @@ import type { StreamClient } from '../../api/stream-client.js'
 import type { ContentBlock, Message } from '../../api/types.js'
 import type { Tool } from '../../tools/types.js'
 
+// Writable cwd for AgentLoop: turn-cache telemetry does a fire-and-forget
+// mkdir under cwd/.rivet/sessions; an unwritable sentinel like TEST_CWD makes
+// that async write reject (ENOENT) after the test ends, leaking an
+// unhandledRejection onto the next test.
+const TEST_CWD = mkdtempSync(join(tmpdir(), 'rivet-loop-cwd-'))
+
 function makeTextBlock(text: string): ContentBlock {
   return { type: 'text', text }
 }
@@ -66,7 +72,7 @@ function makeEngine() {
     model: 'deepseek-v4-pro',
     maxTokens: 1024,
     staticCtx: { tools: [READ_FILE_TOOL.definition] },
-    volatileCtx: { cwd: '/test' },
+    volatileCtx: { cwd: TEST_CWD },
   })
 }
 
@@ -77,7 +83,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
     registry.register(READ_FILE_TOOL)
 
     const client = mockClient([makeTextBlock('Hello! How can I help?')])
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     const texts: string[] = []
     let completeCount = 0
@@ -122,7 +128,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       autoReasoning: true,
       reasoningFloor: 'high',
-    }, session, '/test')
+    }, session, TEST_CWD)
 
     await agent.run('What does this function do?', makeCallbacks())
 
@@ -151,7 +157,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     const toolUses: string[] = []
     const toolResults: string[] = []
@@ -192,7 +198,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: engine, toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: engine, toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     await agent.run('探索一个新的实验性 POC', makeCallbacks())
     await agent.run('修复内存泄漏', makeCallbacks())
@@ -221,7 +227,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     await agent.run('hello', makeCallbacks())
 
@@ -251,7 +257,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     await agent.run('hello', makeCallbacks())
 
@@ -275,7 +281,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     await agent.run('hello', makeCallbacks())
 
@@ -349,7 +355,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 3, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 3, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     await agent.run('loop test', {
       onTextDelta: () => {},
@@ -380,7 +386,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 20, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 20, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     let aborted = false
     const runPromise = agent.run('abort test', {
@@ -418,7 +424,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     const toolInputs: Record<string, unknown>[] = []
 
@@ -459,7 +465,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     const texts: string[] = []
     let intermediateCount = 0
@@ -513,7 +519,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     const texts: string[] = []
 
@@ -552,7 +558,7 @@ describe('AgentLoop — multi-turn tool_use', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
     const texts: string[] = []
 
     await agent.run('continue after prefix', {
@@ -593,7 +599,7 @@ describe('AgentLoop — session lifecycle', () => {
       contextWindow: 1_000_000,
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       runtimeHooks,
-    }, session, '/test')
+    }, session, TEST_CWD)
 
     await agent.run('test prompt', {
       ...makeCallbacks(),
@@ -635,7 +641,7 @@ describe('AgentLoop — session lifecycle', () => {
       contextWindow: 1_000_000,
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       runtimeHooks,
-    }, session, '/test')
+    }, session, TEST_CWD)
 
     await agent.run('test prompt', {
       ...makeCallbacks(),
@@ -660,7 +666,7 @@ describe('AgentLoop — error handling', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 1, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 1, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     let errorMessage = ''
     await agent.run('hello', {
@@ -699,7 +705,7 @@ describe('AgentLoop — error handling', () => {
       }),
     } as unknown as StreamClient
 
-    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, '/test')
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
 
     const errors: string[] = []
 
@@ -836,7 +842,7 @@ describe('AgentLoop — active claims projection', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       sessionId: 'session-123',
       contextClaimStore: claimStore,
-    }, session, '/test')
+    }, session, TEST_CWD)
 
     await agent.run('CRITICAL: always run tests before saying done', {
       onTextDelta: () => {},
@@ -888,7 +894,7 @@ describe('AgentLoop — active claims projection', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       sessionId: 'session-123',
       contextClaimStore: claimStore,
-    }, session, '/test')
+    }, session, TEST_CWD)
 
     const cb = {
       onTextDelta: () => {},
@@ -952,7 +958,7 @@ describe('AgentLoop — antibody generation', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       sessionId: 'session-ab',
       contextClaimStore: claimStore,
-    }, session, '/test')
+    }, session, TEST_CWD)
 
     await agent.run('fix types', {
       onTextDelta: () => {},
@@ -988,7 +994,7 @@ describe('AgentLoop — antibody generation', () => {
       client, promptEngine: makeEngine(), toolRegistry: registry,
       maxTurns: 5, contextWindow: 1_000_000,
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
-    }, session, '/test')
+    }, session, TEST_CWD)
 
     const texts1: string[] = []
     await agent.run('hello', {
@@ -1041,7 +1047,7 @@ describe('AgentLoop — playbook telemetry bounds', () => {
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 120, contextWindow: 1_000_000,
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' }, playbookStore: new PlaybookStore(dir) },
-      session, '/test',
+      session, TEST_CWD,
     )
 
     try {
@@ -1089,7 +1095,7 @@ describe('AgentLoop — output token escalation', () => {
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000,
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
-      session, '/test',
+      session, TEST_CWD,
     )
 
     await agent.run('test prompt', {
@@ -1127,7 +1133,7 @@ describe('AgentLoop — output token escalation', () => {
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 10, contextWindow: 1_000_000,
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
-      session, '/test',
+      session, TEST_CWD,
     )
 
     await agent.run('test prompt', {
@@ -1175,7 +1181,7 @@ describe('AgentLoop — worktree reality detection', () => {
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       },
       session,
-      '/test', // Non-existent path will trigger worktree reality check
+      '/nonexistent-worktree-path', // Non-existent path will trigger worktree reality check
     )
 
     await agent.run('test', {
@@ -1203,7 +1209,7 @@ describe('AgentLoop — task contract 3-way branch', () => {
     const client = mockClient([makeTextBlock('Done.')])
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
-      session, '/test',
+      session, TEST_CWD,
     )
 
     await agent.run('fix src/api/client.ts retry bug', {
@@ -1232,7 +1238,7 @@ describe('AgentLoop — task contract 3-way branch', () => {
     const client = mockClient([makeTextBlock('Hello!')])
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
-      session, '/test',
+      session, TEST_CWD,
     )
 
     await agent.run('你好', {
@@ -1266,7 +1272,7 @@ describe('AgentLoop — task contract 3-way branch', () => {
 
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
-      session, '/test',
+      session, TEST_CWD,
     )
 
     // First run: actionable → establishes contract
@@ -1311,7 +1317,7 @@ describe('AgentLoop — task contract 3-way branch', () => {
     const client = mockClient([makeTextBlock('Done.')])
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
-      session, '/test',
+      session, TEST_CWD,
     )
 
     // Seed a contract in ready_to_deliver state
@@ -1393,7 +1399,7 @@ describe('AgentLoop — convergence recovery', () => {
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       },
       session,
-      '/test',
+      TEST_CWD,
     )
 
     let finalTurn = false
@@ -1439,7 +1445,7 @@ describe('AgentLoop — no-tool forced abort', () => {
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       },
       new SessionContext(),
-      '/test',
+      TEST_CWD,
     )
 
     let turnCompletes = 0

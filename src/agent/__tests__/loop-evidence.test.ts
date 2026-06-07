@@ -1,5 +1,12 @@
 import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+// Writable cwd: AgentLoop turn-cache telemetry fire-and-forgets a mkdir under
+// cwd; an unwritable TEST_CWD sentinel makes that async write reject after the
+// test ends, leaking an unhandledRejection onto later tests in the same run.
+const TEST_CWD = mkdtempSync(join(tmpdir(), 'rivet-loop-cwd-'))
 import { AgentLoop } from '../loop.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
@@ -24,7 +31,7 @@ function makeEngine() {
     model: 'deepseek-v4-pro',
     maxTokens: 1024,
     staticCtx: { tools: [READ_FILE_TOOL.definition] },
-    volatileCtx: { cwd: '/test' },
+    volatileCtx: { cwd: TEST_CWD },
   })
 }
 
@@ -106,7 +113,7 @@ describe('AgentLoop — evidence integration', () => {
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
       session,
-      '/test',
+      TEST_CWD,
     )
 
     const captured = evidenceCapture()
@@ -165,7 +172,7 @@ describe('AgentLoop — evidence integration', () => {
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
       session,
-      '/test',
+      TEST_CWD,
     )
 
     const captured = evidenceCapture()
@@ -210,7 +217,7 @@ describe('AgentLoop — evidence integration', () => {
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
       session,
-      '/test',
+      TEST_CWD,
     )
 
     const captured = evidenceCapture()
@@ -265,7 +272,7 @@ describe('AgentLoop — evidence integration', () => {
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' }, approvalMode: 'auto-safe' },
       session,
-      '/test',
+      TEST_CWD,
     )
 
     let approvalAsked = false
@@ -305,7 +312,7 @@ describe('AgentLoop — evidence integration', () => {
     const agent = new AgentLoop(
       { client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 5, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } },
       session,
-      '/test',
+      TEST_CWD,
     )
 
     assert.equal(agent.getLatestRisk().level, 'none')

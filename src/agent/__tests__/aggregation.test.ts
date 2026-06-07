@@ -215,7 +215,11 @@ describe('aggregateResults', () => {
       },
     ]
     const profiles = new Map([['wo_1', 'patcher'], ['wo_2', 'adversarial_verifier']])
-    const aggregated = aggregateResults(results, 'primary_decides', profiles)
+    // Post-"enforce adversarial verifier evidence": a verifier only counts as
+    // genuinely verified when its transcript proves it ran run_tests. Supply that
+    // transcript so wo_2 stays verified and the gap nudge is correctly suppressed.
+    const transcripts = new Map([['wo_2', transcript(['run_tests'])]])
+    const aggregated = aggregateResults(results, 'primary_decides', profiles, transcripts)
 
     assert.ok(aggregated[0]!.risks.some(r => r.includes('advisory')))
     // No nudge because adversarial_verifier is present

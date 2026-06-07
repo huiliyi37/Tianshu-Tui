@@ -1,5 +1,12 @@
 import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+// Writable cwd: AgentLoop turn-cache telemetry fire-and-forgets a mkdir under
+// cwd; an unwritable TEST_CWD sentinel makes that async write reject after the
+// test ends, leaking an unhandledRejection onto later tests in the same run.
+const TEST_CWD = mkdtempSync(join(tmpdir(), 'rivet-loop-cwd-'))
 import { AgentLoop } from '../loop.js'
 import { SessionContext } from '../context.js'
 import { ToolRegistry } from '../../tools/registry.js'
@@ -12,7 +19,7 @@ function makeEngine() {
     model: 'deepseek-v4-pro',
     maxTokens: 1024,
     staticCtx: { tools: [] },
-    volatileCtx: { cwd: '/test' },
+    volatileCtx: { cwd: TEST_CWD },
     habituationThreshold: 0,
   })
 }
@@ -56,7 +63,7 @@ describe('AgentLoop intent retrieval router wiring', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       fsWatcherEnabled: false,
       intentRetrievalRouter: { enabled: false },
-    }, new SessionContext(), '/test')
+    }, new SessionContext(), TEST_CWD)
 
     await agent.run('fix this failing test', makeCallbacks())
 
@@ -84,7 +91,7 @@ describe('AgentLoop intent retrieval router wiring', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       fsWatcherEnabled: false,
       intentRetrievalRouter: { enabled: true, classifier: 'heuristic' },
-    }, new SessionContext(), '/test')
+    }, new SessionContext(), TEST_CWD)
 
     await agent.run('重试一下这个失败', makeCallbacks())
 
@@ -118,7 +125,7 @@ describe('AgentLoop intent retrieval router wiring', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       fsWatcherEnabled: false,
       intentRetrievalRouter: { enabled: true, classifier: 'llm', timeoutMs: 50 },
-    }, new SessionContext(), '/test')
+    }, new SessionContext(), TEST_CWD)
 
     await agent.run('token 泄露风险', makeCallbacks())
 
@@ -154,7 +161,7 @@ describe('AgentLoop intent retrieval router wiring', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       fsWatcherEnabled: false,
       intentRetrievalRouter: { enabled: true, classifier: 'heuristic' },
-    }, new SessionContext(), '/test')
+    }, new SessionContext(), TEST_CWD)
 
     await agent.run('修复这个失败', makeCallbacks())
     await agent.run('你好', makeCallbacks())

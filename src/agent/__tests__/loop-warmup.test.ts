@@ -1,5 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+// Writable cwd: AgentLoop turn-cache telemetry fire-and-forgets a mkdir under
+// cwd; an unwritable TEST_CWD sentinel makes that async write reject after the
+// test ends, leaking an unhandledRejection onto later tests in the same run.
+const TEST_CWD = mkdtempSync(join(tmpdir(), 'rivet-loop-cwd-'))
 import { AgentLoop } from '../loop.js'
 import { SessionContext } from '../context.js'
 import { ToolRegistry } from '../../tools/registry.js'
@@ -10,7 +17,7 @@ function makeEngine() {
     model: 'deepseek-v4-pro',
     maxTokens: 1024,
     staticCtx: { tools: [] },
-    volatileCtx: { cwd: '/test' },
+    volatileCtx: { cwd: TEST_CWD },
   })
 }
 
@@ -40,7 +47,7 @@ describe('AgentLoop memory warmup (S9)', () => {
     new AgentLoop(
       makeConfig({ meridianIndexer: { getDb: () => fakeDb } }),
       session,
-      '/test',
+      TEST_CWD,
     )
     // After construction, no DB reads should have occurred
     assert.deepEqual(dbReads, [], 'constructor should not trigger DB reads')
@@ -58,7 +65,7 @@ describe('AgentLoop memory warmup (S9)', () => {
     const loop = new AgentLoop(
       makeConfig({ meridianIndexer: { getDb: () => fakeDb } }),
       session,
-      '/test',
+      TEST_CWD,
     )
     await loop.warmupMemories()
     const after = { ...callCount }
