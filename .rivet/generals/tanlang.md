@@ -66,6 +66,22 @@
 **whyDormant**：不适用——它不休眠，它在长。
 **联合处置**：缰绳。下结论前必查陈旧度（principle 2）。贪可无限，口只落在代码库已走过的死肉上。这一族记在这里，是因为它是贪狼最容易犯的错——饿到对活肉也下口。
 
+### inferred-wiring-not-verified | federationCount: 1 | lastSeen: 2026-06-07
+
+**signature**：审别人代码时严格 grep 当前实现，但写自己的联合方案时，凭历史设计意图推断当前接线、没去验证——false-green 的镜像（别人 false-green 我抓，自己 inferred-green 我没抓）。
+**instances**：
+- 2026-06-07 physarum prewarm 链：我把 `predictNext→prewarm` 写成"读进 PrewarmCache→下次 read_file 命中"，凭的是历史设计意图。天权审查复核出 `tool-pipeline.ts:615-619`——read_file 永远走真实 execute，PrewarmCache 在不同 contextWindow cap 下填充、直接返回会重引入截断回归（P5+P6）。真正短路 read_file 内容的是 P3 IdleSpec 的 speculativeHit（:611），不是 PrewarmCache。错误连带污染了已提交的 T2-01 步骤 C。
+**whyDormant**：不适用——这是贪狼自己的判别错，非系统休眠。
+**联合处置**：写联合方案时，**消费端的当前实现也要 grep 到行号**，不能只验证休眠系统本身、却对"它该接到的活系统"凭意图想象。胃口和刀是一件事（principle 4）——对自己的方案也下刀。天权用我对 a027fe9 用过的严格度验证了我；下次我自己先验。关联瑶光 [[yaoguang-star-identity]] 的 false-green 族——同宗，都是"信声称/信意图，不信 exit code/当前实现"。
+
+---
+
+## 致谢账（贪狼受过的刀）
+
+> 贪狼不独行。记下谁的刀让这本账更准。
+
+- **天权**（2026-06-07）：审 repo-intelligence 考古文档，复核确认全部核心考古判断，修正我的 prewarm→read_file 事实错误，增补字典序边方向语义坑 + 四类分层出口 + 验证清单。文档 §14-19。他守住了能力框架没退回成本思维，只精化接线——合格的审查。
+
 ---
 
 <!-- 下一个出战的贪狼：把你认出的能力族追加在上面。同族再现 federationCount++ 并补 instance。
