@@ -58,17 +58,23 @@ const PASTEL_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
-// Cyberpunk theme — high-saturation neon (legacy, switchable)
+// Cyberpunk theme — neon tech-noir, tuned for legibility on near-black bg.
+// Original maxed-out neons (#00ffcc/#7b2fff/#00ff88/#ff3333) had two defects on
+// dark terminals: (1) the electric purple secondary failed WCAG AA (3.3:1) and
+// vibrated against black; (2) primary cyan-green and success green were nearly
+// the same hue, so they read as one color. Fix per dark-mode color rules: raise
+// lightness + ease saturation, split the greens (cyan primary vs green success),
+// lift the purple to a readable lavender, swap pure-red for rose to kill halation.
 const CYBERPUNK_TRUECOLOR: ColorSet = {
-  primary: '#00ffcc',
-  secondary: '#7b2fff',
-  success: '#00ff88',
-  warning: '#ffaa00',
-  error: '#ff3333',
-  dim: '#4a4a6a',
+  primary: '#22d3ee',   // cyan-400 — distinct cyan (was #00ffcc, collided w/ success)
+  secondary: '#c4a3ff', // lavender — readable violet, 9:1 (was #7b2fff, failed AA 3.3:1)
+  success: '#4ade80',   // green-400 — clearly green, separated from primary cyan
+  warning: '#fbbf24',   // amber-400 — softer than raw orange, still neon-warm
+  error: '#fb7185',     // rose-400 — alarming without pure-red halation on black
+  dim: '#6b6b8f',       // raised violet-gray so dividers are actually visible (was 2.5:1)
   pulseQuiet: '#2f3048',
-  pulseActive: '#00ffcc',
-  pulseAlert: '#ff3333',
+  pulseActive: '#22d3ee',
+  pulseAlert: '#fb7185',
 }
 
 const CYBERPUNK_FALLBACK: ColorSet = {

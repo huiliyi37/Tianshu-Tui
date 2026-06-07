@@ -522,12 +522,19 @@ function renderBlock(block: Block, key: number, columns: number): ReactNode {
 
   switch (block.type) {
     case 'header': {
-      const colors = [theme.primary, theme.primary, theme.secondary, theme.secondary, theme.dim, theme.dim]
-      const glyphs = ['■', '⎔', '◈', '◇', '▪', '·']
-      const glyph = glyphs[(block.level ?? 1) - 1] ?? '▪'
+      const level = block.level ?? 1
+      // Terminal hierarchy has no font-size lever — every cell is one size — so
+      // headers separate from body via weight + accent + whitespace only. Body
+      // renders at the terminal's bright default fg, so a header must never be
+      // DIMMER than body (that inverts the hierarchy). H1 pops via accent color;
+      // H2/H3 stay body-bright + bold; deep levels recede slightly but stay bold.
+      const colors = [theme.primary, undefined, undefined, theme.secondary, theme.secondary, theme.secondary]
+      const glyphs = ['▍', '▍', '', '', '', '']
+      const glyph = glyphs[level - 1] ?? ''
+      const color = colors[level - 1]
       return (
-        <Box key={key} marginTop={block.level === 1 ? 1 : 0}>
-          <Text bold color={colors[(block.level ?? 1) - 1]}>{glyph} {block.content}</Text>
+        <Box key={key} marginTop={level <= 2 ? 1 : 0}>
+          <Text bold color={color}>{glyph ? `${glyph} ` : ''}{block.content}</Text>
         </Box>
       )
     }

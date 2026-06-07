@@ -18,8 +18,8 @@ const TurnSummary = memo(function TurnSummary({ content }: { content: string }) 
   const { columns } = useTerminalSize()
   return (
     <Box paddingX={1} marginTop={1} flexDirection="column">
-      <Text color={theme.dim}>{horizontalRule(columns, 'thick')}</Text>
-      <Text bold color={theme.primary}>◆ {content}</Text>
+      <Text color={theme.dim}>{horizontalRule(columns, 'thin')}</Text>
+      <Text color={theme.muted}><Text color={theme.dim}>◇ </Text>{content}</Text>
     </Box>
   )
 })

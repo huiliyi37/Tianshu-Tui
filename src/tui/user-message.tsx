@@ -18,7 +18,7 @@ export const UserMessage = memo(function UserMessage({ content }: UserMessagePro
       <Box flexDirection="row" gap={1} marginTop={1}>
         <Text color={theme.userColor} bold>{gutterGlyph('user')}</Text>
         <Box flexDirection="column" flexGrow={1}>
-          <Text color={theme.userColor} bold dimColor>You</Text>
+          <Text color={theme.userColor} dimColor>You</Text>
           <Text color={theme.userColor}>{content}</Text>
         </Box>
       </Box>

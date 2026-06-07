@@ -40,11 +40,11 @@ export const AssistantMessage = memo(function AssistantMessage({ content }: Assi
   const displayContent = isLong ? lines.slice(-MAX_STATIC_LINES).join('\n') : content
 
   return (
-    <Box flexDirection="column" paddingX={1} marginBottom={1}>
+    <Box flexDirection="column" paddingX={1} marginTop={1} marginBottom={1}>
       <Box flexDirection="row" gap={1}>
         <Text color={theme.assistantColor} bold>{gutterGlyph('assistant')}</Text>
         <Box flexDirection="column" flexGrow={1}>
-          <Text color={theme.assistantColor} bold dimColor>Rivet</Text>
+          <Text color={theme.assistantColor} dimColor>Rivet</Text>
           {omittedLines > 0 && (
             <Text color={theme.muted}>(… {omittedLines} earlier lines omitted)</Text>
           )}

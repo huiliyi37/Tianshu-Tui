@@ -47,8 +47,8 @@ describe('theme switching', () => {
     setTheme('cyberpunk')
     assert.equal(getActiveThemeName(), 'cyberpunk')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#00ffcc')
-    assert.equal(theme.error, '#ff3333')
+    assert.equal(theme.primary, '#22d3ee')
+    assert.equal(theme.error, '#fb7185')
   })
 
   it('switches back to midnight theme', () => {
