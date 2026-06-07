@@ -602,3 +602,194 @@ npm exec -- tsx --test <对应测试文件>
 5. 再决定是否工具化、profile 化、面板化。
 
 不要从 DAG、TaskBoard、自动 merge 开始；那会把风险堆在最难验证的地方。
+
+---
+
+## 8. 天权补充：P0 前置依赖与下一批实施切分
+
+> 来源：天权 2026-06-07 规划评审
+> 原则：先结构化计划，再分组执行，再视角合并，再自动化合并。不提前碰自动 merge / TUI 面板。
+
+### 8.1 P0 四前置依赖
+
+以下四件事必须先于 Phase 3.5 的完整实现，但可以与 Phase 1-3 并行启动。
+
+#### P0-1：TeamPlan 结构化 schema
+
+现在 `team-plan.ts` 只是弱解析 Markdown。下一步需要定义稳定中间格式：
+
+```ts
+interface UnifiedTeamPlan {
+  mission: string
+  mode: 'standard' | 'max'
+  tasks: TeamTask[]
+  groups: TeamGroup[]
+  verification: VerificationGate[]
+  risks: RiskItem[]
+  decisions: PlanDecision[]
+  nonGoals: string[]
+}
+```
+
+核心：让 `/team` 不再依赖"自然语言计划看起来对"，而是把 planner 输出收敛成机器可检查结构。
+
+#### P0-2：DelegationRequest dependency 透传
+
+现状：`WorkOrder` 已有 `dependencies`，`WorkOrderQueue` 也会检查依赖；但 `DelegationRequest` / `delegate_batch` 入口没有透传 dependencies。
+
+补法：
+
+```ts
+interface DelegationRequest {
+  // ...existing fields...
+  dependencies?: string[]
+  groupId?: string
+}
+```
+
+并在 `coordinator.ts` 创建 `createReadOnlyWorkOrder`/`createWriteWorkOrder` 时传进去。
+
+这一步是 DAG 的前置，但不要求马上做复杂 DAG。
+
+#### P0-3：Profile / model 路由前置
+
+`/team max` 规划阶段不用 flash。原则：
+
+- `/team max` 规划阶段：强模型 / 主模型 / 用户配置的 OpenAI 多模型。
+- `/team` 执行阶段：天梁 executor 可以 flash / 便宜模型。
+- 审查阶段：不能 flash-only，至少 adversarial verifier 用强一点或可配置模型。
+
+配置示例：
+
+```yaml
+workers:
+  profileRouting:
+    tianquan_planner:
+      provider: openai
+      model: gpt-4.1
+    tianfu_risk:
+      provider: deepseek
+      model: deepseek-v4-pro
+    tianxuan_scout:
+      provider: openai
+      model: o3
+    tianliang_executor:
+      provider: deepseek
+      model: deepseek-chat-flash
+```
+
+优先级：`profileRouting > capability routing > current recommendModelForTask`。
+
+不破坏现有多模型 OpenAI 支持。
+
+#### P0-4：Team review gate
+
+现在 ReviewRouter 主要挂在 `deliver_task` 的 fix commit gate 上。但 `/team` 不是只有 fix，很多是 feature/refactor。
+
+team 模式需要显式验收阶段：
+
+```
+execute groups
+  → collect diffs
+  → targeted tests + tsc
+  → team review route
+  → deliver_task
+```
+
+不应该只靠 commit message 是否含 `fix:`。
+
+### 8.2 分组策略补充
+
+#### source + test 属于同一逻辑单元
+
+不要把 `src/foo.ts` 和 `src/__tests__/foo.test.ts` 拆给两个 executor。这应该是一个 task。
+
+#### 每组显式并行上限
+
+```ts
+const maxWriteWorkers = 2
+const maxReadWorkers = 3
+```
+
+先稳，后续再放大。即使理论上能跑 5 个 write worker。
+
+### 8.3 下一批实现切分（天权建议）
+
+在 Phase 1-3 骨架完成后，按以下顺序推进：
+
+#### Commit A：TeamPlan schema + parser 强化
+
+文件：
+- `src/agent/team-plan.ts`
+- `src/agent/__tests__/team-plan.test.ts`
+
+交付：
+- `TeamTask`
+- `TeamGroup`
+- `UnifiedTeamPlan`
+- weak markdown → structured plan
+- dependencies 字段先支持但不要求完美解析
+
+#### Commit B：DelegationRequest dependency 透传
+
+文件：
+- `src/agent/coordinator.ts`
+- `src/agent/work-order.ts`
+- `src/tools/delegate-batch.ts`
+- tests
+
+交付：
+- request 可以带 `dependencies`
+- WorkOrderQueue 真正能消费 team 依赖
+- 不改变现有 delegate_batch 默认行为
+
+#### Commit C：team grouping
+
+文件：
+- `src/agent/team-grouping.ts`
+- `src/agent/__tests__/team-grouping.test.ts`
+
+交付：
+- 纯函数 `groupTeamTasks(tasks, options): TeamWave[]`
+- 同文件 write task 默认串行
+- source + test 绑定同一 task
+- maxWriteWorkers / maxReadWorkers 常量
+- 行级并发以后再做
+
+#### Commit D：max planner fanout（视角系统）
+
+文件：
+- `src/agent/team-perspectives.ts`
+- `src/agent/team-merge.ts`
+- `src/agent/__tests__/team-perspectives.test.ts`
+- `src/agent/__tests__/team-merge.test.ts`
+
+交付：
+- `TeamPerspectivePlan` schema
+- 天权主图 + 天府风险门禁 + 天璇反证/备选的 deterministic merge
+- 合并不是平均，是裁决
+
+#### Commit E：team orchestrator 升级
+
+文件：
+- `src/agent/team-orchestrator.ts`
+- `src/agent/__tests__/team-orchestrator.test.ts`
+
+交付：
+- `runTeamSkeleton` 改为先 group waves
+- max 模式只派 planning workers，不派 patcher
+- 非 max 模式直接走 standard execute path
+
+### 8.4 关键约束（天权强调，不妥协）
+
+- 同文件 write task 默认串行。行级并发以后再做。
+- worker 不直接提交。先返回 diff/patchSummary，主控集成和 deliver_task。
+- `/team` 的验收独立于 `fix:` commit gate。feature/refactor 也必须有 review path。
+
+### 8.5 天权建议的下一步
+
+最值得做的是：
+
+> TeamPlan schema + grouping + max planner fanout
+
+不要先做自动 merge，也不要先做 TUI 面板。那两个会把复杂度提前引爆。
