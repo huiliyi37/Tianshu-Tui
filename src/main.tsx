@@ -992,6 +992,61 @@ async function main() {
     process.exit(result.achieved ? 0 : 1)
   }
 
+  // rivet -p "prompt" | rivet --print "prompt" [--json] [--stream-json] — Headless one-shot
+  if (args.includes('-p') || args.includes('--print')) {
+    const { parseCliArgs, runHeadless } = await import('./headless.js')
+    const parsed = parseCliArgs(args)
+    if (!parsed.prompt) {
+      console.error('-p/--print requires a prompt string')
+      process.exit(2)
+    }
+
+    const cfg = loadConfig()
+    const prov = cfg.provider.providers[cfg.provider.default]
+    if (!prov) { console.error('Provider not configured'); process.exit(1) }
+    const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
+    if (!key) { console.error('API key not configured'); process.exit(1) }
+
+    const model = prov.models[0]!
+    const sessionId = randomUUID()
+
+    const result = await runHeadless({
+      prompt: parsed.prompt,
+      json: parsed.json,
+      streamJson: parsed.streamJson,
+      createAgent: () => {
+        const toolRegistry = createDefaultToolRegistry()
+        const agentCfg = createAgentConfig(createMainAgentConfigInput({
+          apiKey: key,
+          model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
+          cwd: process.cwd(),
+          provider: prov,
+          config: cfg,
+          sessionId,
+          toolDefinitions: toolRegistry.getDefinitions(),
+          sessionMemoryBlock: undefined,
+          auth: undefined,
+        }))
+
+        const session = new SessionContext()
+        return new AgentLoop({
+          ...agentCfg,
+          toolRegistry,
+          maxTurns: 15,
+          contextClaimStore: undefined,
+          getSessionMemoryState: () => undefined,
+        }, session, process.cwd())
+      },
+    })
+
+    if (result.stdout) process.stdout.write(result.stdout + '\n')
+    if (result.json) {
+      // stdout already contains the JSON in --json mode, skip duplicate
+      if (!parsed.json) process.stdout.write(JSON.stringify(result.json) + '\n')
+    }
+    process.exit(result.exitCode)
+  }
+
   const config = loadConfig()
 
   // Session Registry: 多实例共存 + 崩溃检测
