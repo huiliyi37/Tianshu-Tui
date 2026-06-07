@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { Tool } from './types.js'
 import { TodoStore } from './todo-store.js'
 import type { TodoItem } from './todo-store.js'
-import { detectDependencies, computeMaxDepth, findExecutable, buildDepAnnotation } from './todo-deps.js'
+import { detectDependencies, assessScopeRisk, buildScopeNotice } from './todo-deps.js'
 
 const VALID_STATUSES = ['pending', 'in_progress', 'completed'] as const
 
@@ -89,24 +89,15 @@ Always update the list when completing or starting a task.`,
       const summary = TodoStore.formatSummary(data.todos)
       let content = summary
 
-      // Scope gate: detect dependencies and narrow focus
+      // Scope gate (protective net for non-tianquan models): assess whether
+      // the task is large/deeply-chained and, if so, surface a notice nudging
+      // the model to PAUSE AND CONFIRM scope with the user instead of charging
+      // ahead. Blocked items are listed for visibility, never hidden.
       const deps = detectDependencies(data.todos)
-      const maxDepth = computeMaxDepth(deps)
-      const pendingCount = data.todos.filter(t => t.status === 'pending').length
-
-      // Auto-focus: when pending > 5 or dependency depth > 3, mark the
-      // first executable item as the current focus
-      const SCOPE_PENDING_THRESHOLD = 5
-      const SCOPE_DEPTH_THRESHOLD = 3
-      const needsFocus = pendingCount > SCOPE_PENDING_THRESHOLD || maxDepth > SCOPE_DEPTH_THRESHOLD
-
-      if (needsFocus || deps.some(d => d.dependsOn.length > 0)) {
-        const executable = findExecutable(data.todos, deps)
-        const focusId = executable.length > 0 ? executable[0]!.id : null
-        const annotation = buildDepAnnotation(data.todos, deps, needsFocus ? focusId : null)
-        if (annotation) {
-          content += '\n\n' + annotation
-        }
+      const risk = assessScopeRisk(data.todos, deps)
+      const notice = buildScopeNotice(data.todos, deps, risk)
+      if (notice) {
+        content += '\n\n' + notice
       }
 
       if (regressions.length > 0) {

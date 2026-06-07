@@ -1,13 +1,27 @@
 # Scope Gate: TODO 层的依赖识别与范围缩窄
 
 > 日期：2026-06-07
-> 状态：设计待实施
-> 根因：用户指令覆盖太宽 → 模型在 thinking 中试图一次消化全部范围 → thinking 爆炸/循环
-> 核心约束：**不追加 prompt 文本**，通过代码行为缩窄工作集
+> 状态：**已实施（v2，已修正 v1 方向）**
+> 根因：用户指令覆盖太宽 → 弱模型在 thinking 中试图一次消化全部范围 → thinking 爆炸/循环
+> 核心诉求：**识别长任务/高复杂度风险 → 主动停下与用户沟通**。天权(tianquan)域的强模型自身能做到；这套机制是给其他较弱模型的**兜底保护网**。
 
 ---
 
-## 一、问题
+## v2 修正说明（实施时的方向调整）
+
+v1 设计（下方原文保留）把目标定为"静默缩窄工作集 + 标焦点 + 不要并行"。实施评审发现这与真实诉求相反，已按以下三点修正：
+
+1. **不再静默隐藏被阻断的 todo。** `taskStateFromTodos` 改为 `orderPendingByExecutability`——可执行项排前、被阻断项排后，但**所有 pending 一个都不少**。否则一条 stale/误判的依赖边会让真实待办从 prompt 里消失，正好重蹈它本要修的"todo 退回重做/丢失"。
+2. **信号从"推模型闷头收窄"改为"推模型停下沟通"。** 工具返回的注解从 `📌当前焦点/不要并行` 改成 `⚠️ 范围风险偏高 → 建议先与用户确认范围/优先级`（`buildScopeNotice` + `assessScopeRisk`）。这才是"识别风险主动停下"。
+3. **修依赖误判。** 纯数字 id（`"1"`/`"2"`）必须有显式依赖措辞（`基于/依赖/after/depends on`…）才连边，避免"还剩 1 个测试"被当成"依赖 todo 1"。字母前缀 id（`T1`/`task-2`）仍按 token 边界匹配。
+
+风险分级（`assessScopeRisk`）：`none / elevated / high`。`high`（深度>3、有环、或 pending>10）才触发"停下沟通"措辞——强模型很少触到，弱模型超标时被兜底。诚实声明：注解通过**工具返回值**注入，省的是常驻 system prompt，但每次 write 仍产生一次性返回文本（v1 所谓"零 prompt token"不准确）。
+
+实现文件：`src/tools/todo-deps.ts`（`detectDependencies`/`computeMaxDepth`/`findExecutable`/`orderPendingByExecutability`/`assessScopeRisk`/`buildScopeNotice`）、`src/tools/todo.ts`（write 路径）、`src/agent/task-state.ts`（`taskStateFromTodos`）。测试：`todo-deps.test.ts` 25 例 + `todo.test.ts` scope-gate 集成 5 例。
+
+---
+
+## 一、问题（v1 原文）
 
 用户给了一条宽指令（"设计一下怎么优化规划循环"），模型在 turn 0 试图用 thinking 一次规划全部内容——涉及多个子系统、多个依赖关系、多个设计决策。thinking 膨胀到 9.2k tokens 后超时。
 

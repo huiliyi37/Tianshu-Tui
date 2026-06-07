@@ -148,3 +148,66 @@ describe('TodoStore', () => {
   })
 })
 
+describe('TODO_TOOL scope gate', () => {
+  beforeEach(() => {
+    setTodos([])
+  })
+
+  const write = (todos: Array<{ id: string; content: string; status: string }>) =>
+    TODO_TOOL.execute({ input: { action: 'write', todos }, toolUseId: 'tu', cwd: '/repo' })
+
+  it('stays quiet for a small flat list', async () => {
+    const r = await write([
+      { id: '1', content: 'fix a', status: 'pending' },
+      { id: '2', content: 'fix b', status: 'pending' },
+    ])
+    assert.ok(!r.content.includes('⚠️'))
+    assert.ok(!r.content.includes('⛔'))
+  })
+
+  it('surfaces a pause-and-confirm notice when scope is high', async () => {
+    const todos = Array.from({ length: 11 }, (_, i) => ({
+      id: `T${i + 1}`, content: `task ${i + 1}`, status: 'pending',
+    }))
+    const r = await write(todos)
+    assert.ok(r.content.includes('⚠️'), 'high-risk notice present')
+    assert.ok(r.content.includes('确认范围'))
+  })
+
+  it('lists blocked items but never errors', async () => {
+    const r = await write([
+      { id: 'T1', content: '基础模块', status: 'pending' },
+      { id: 'T2', content: '基于 T1 的扩展', status: 'pending' },
+    ])
+    assert.equal(r.isError, undefined)
+    assert.ok(r.content.includes('⛔'))
+    assert.ok(r.content.includes('仍保留在列表中'))
+  })
+
+  it('does not false-positive on bare-number quantities', async () => {
+    const r = await write([
+      { id: '1', content: '修复登录 bug', status: 'pending' },
+      { id: '2', content: '还剩 1 个测试要写', status: 'pending' },
+    ])
+    // "还剩 1 个" must not be read as "depends on todo 1" → no blocked marker
+    assert.ok(!r.content.includes('⛔'))
+  })
+
+  it('scope notice composes after a regression warning', async () => {
+    setTodos([{ id: 'T1', content: '已完成项', status: 'completed' }])
+    // re-open T1 (regression) + push the list over the high-risk threshold
+    const todos = [
+      { id: 'T1', content: '已完成项', status: 'pending' },
+      ...Array.from({ length: 11 }, (_, i) => ({
+        id: `N${i + 1}`, content: `task ${i + 1}`, status: 'pending',
+      })),
+    ]
+    const r = await write(todos)
+    const regressionIdx = r.content.indexOf('previously-completed')
+    const noticeIdx = r.content.indexOf('⚠️ 范围风险')
+    assert.ok(regressionIdx >= 0, 'regression warning present')
+    assert.ok(noticeIdx >= 0, 'scope notice present')
+    assert.ok(regressionIdx < noticeIdx, 'regression warning leads, scope notice follows')
+  })
+})
+
