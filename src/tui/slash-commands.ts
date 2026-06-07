@@ -24,6 +24,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
+import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
+import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 
 const HELP_TEXT = `Available commands:
 /help — Show this help
@@ -57,6 +59,8 @@ const HELP_TEXT = `Available commands:
 /team max <task> — Run team-mode max planning through team_orchestrate
 /sensorium — Show 天枢 3D self-awareness state
 /dream — Distill session decisions into project memory
+/index — Rebuild codebase index (modules + CLI entries)
+/diagram [list|<type>] — Generate a mermaid diagram skeleton (architecture|dataflow|sequence|flowchart|comparison|state)
 Ctrl+C — Interrupt current turn (press twice to exit)`
 
 export interface SlashHandlerContext {
@@ -970,6 +974,37 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       return true
     }
 
+    case '/index': {
+      // Rebuild codebase index from MeridianDB
+      const indexer = ctx.agent.getIndexer?.()
+      if (!indexer) {
+        pushStatic(createLogEntry({ type: 'system', content: '⚠ MeridianIndexer not available. Index requires better-sqlite3.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const db = indexer.getDb()
+      const cwd = ctx.agent.cwd ?? process.cwd()
+
+      // Read main.tsx and headless.ts for CLI extraction
+      let mainTsxSource = ''
+      let headlessSource: string | null = null
+      const mainTsxPath = 'src/main.tsx'
+      const headlessPath = 'src/headless.ts'
+      try {
+        mainTsxSource = readFileSync(join(cwd, mainTsxPath), 'utf-8')
+      } catch { /* not found */ }
+      try {
+        headlessSource = readFileSync(join(cwd, headlessPath), 'utf-8')
+      } catch { /* not found */ }
+
+      const result = fullRebuild(db, mainTsxSource, headlessSource, mainTsxPath, headlessPath)
+      const indexBlock = generateCodebaseIndexBlock(db, getHeadSha())
+
+      pushStatic(createLogEntry({ type: 'system', content: `📚 Codebase Index Rebuilt\n\n${result}\n\nIndex will be injected into agent context on next turn.` }))
+      setIsStreaming(false)
+      return true
+    }
+
     case '/dream': {
       // Show dream status — memory distillation runs automatically at session end
       const dir = knowledgeDir()
@@ -993,6 +1028,40 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         `  • conceptual_reframe — 概念重构\n` +
         `  • reusable_design_pattern — 可复用设计模式\n\n` +
         `记忆不注入提示词，通过 recall 工具按需检索。`
+      }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/diagram': {
+      const arg = (parts[1] ?? '').toLowerCase()
+      if (!arg || arg === 'list') {
+        pushStatic(createLogEntry({ type: 'system', content:
+          `${formatDiagramList()}\n\n用法：/diagram <type> — 生成骨架并写入 docs/diagrams/<type>.md\n形状语义已内建（{{六边形}}=LLM·[[子程序]]=Agent·[(圆柱)]=存储·{菱形}=决策·(圆角)=输入）。`
+        }))
+        setIsStreaming(false)
+        return true
+      }
+      if (!isDiagramType(arg)) {
+        pushStatic(createLogEntry({ type: 'system', content:
+          `未知图型 "${arg}"。\n${formatDiagramList()}`
+        }))
+        setIsStreaming(false)
+        return true
+      }
+      const cwd = ctx.agent.cwd
+      const outDir = join(cwd, 'docs', 'diagrams')
+      const outPath = join(outDir, `${arg}.md`)
+      let writeNote: string
+      try {
+        mkdirSync(outDir, { recursive: true })
+        writeFileSync(outPath, buildDiagramDoc(arg), 'utf-8')
+        writeNote = `已写入 docs/diagrams/${arg}.md — 在 VSCode/GitHub/Obsidian 打开查看渲染。`
+      } catch (e) {
+        writeNote = `（写入失败：${e instanceof Error ? e.message : String(e)}；骨架见下方，可手动保存）`
+      }
+      pushStatic(createLogEntry({ type: 'system', content:
+        `📐 ${arg} 骨架已生成\n\n${writeNote}\n\n${renderDiagramBlock(arg)}\n\n替换节点文字即可。终端里显示为源码，渲染在外部查看器。`
       }))
       setIsStreaming(false)
       return true
