@@ -109,6 +109,26 @@ loop.ts mutation listener
 
 22 个测试全部通过（原 15 + 新增 7），覆盖：init 默认值、幂等性、部分合并、tokenUsage 合并、createdAt 保留、undefined 处理、排序列表。
 
+### P1 后续修复（审查发现）
+
+`fix(session): correct updatedAt freeze + reduce metadata IO on hot path`
+
+代码审查发现 P1 初版有一个功能性 bug 和两处 robustness 问题，已修复：
+
+| 问题 | 严重度 | 说明 | 修复 |
+|------|--------|------|------|
+| `updatedAt` 永久冻结 | 🔴 功能性 | `updateMetadata` 的 `...existing` 在 `updatedAt: Date.now()` **之后**展开，把新时间戳又覆盖回旧值，导致 `updatedAt` 自创建后再不变化 | 将 `sessionId`/`createdAt`/`updatedAt` 移到所有 spread **之后**，确保它们最终胜出 |
+| 热路径重复同步读 | 🟡 性能 | mutation listener 每次 append 同步读 `.meta.json` 最多 3 次（N 个工具调用 = N 次 append/轮） | 改为一次 `loadMetadata()` 取快照，所有字段从快照计算 |
+| TTSR 注入计入轮次 | 🟡 一致性 | `<system-reminder>` 包裹的守护提醒是 `role:user` 消息，被误计入 `turnCount`、可能被当 title | 跳过 `isReminder` 消息，与 `history-replay.ts` 的轮次定义对齐 |
+
+**影响**：`updatedAt` 冻结直接破坏了 `listSessionsWithMetadata()` 的「按最后活动时间降序浏览」这一核心卖点（见下方对比表）——原排序只能按创建时间排。
+
+**为什么原测试没抓到**：旧测试只断言 `updatedAt >= createdAt`（冻结时两者相等，通过）；排序测试靠会话 init 先后天然有序通过，从未触发「update 后重排」。新增确定性回归测试 `updateMetadata advances updatedAt past createdAt`（桩 `Date.now`），针对旧代码会失败、针对修复通过。
+
+### 测试覆盖（修复后）
+
+23 个测试全部通过（原 22 + 回归测试 1）。
+
 ---
 
 ## P2: codex exec 等价物 — 待实施
