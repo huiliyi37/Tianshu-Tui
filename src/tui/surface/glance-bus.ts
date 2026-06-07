@@ -1,7 +1,6 @@
 import type { StarDomainId } from '../../agent/star-domain.js'
+import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import type { GlancePulse } from './types.js'
-
-const ALL_DOMAINS: StarDomainId[] = ['pojun', 'tianfu', 'tianliang', 'tianquan', 'tianji', 'tianxuan']
 
 export interface GlanceBus {
   snapshot(): readonly GlancePulse[]
@@ -13,7 +12,7 @@ export interface GlanceBus {
 
 export function createGlanceBus(): GlanceBus {
   const state = new Map<StarDomainId, GlancePulse>(
-    ALL_DOMAINS.map(d => [d, { domain: d, level: 'quiet' }])
+    starDomainRegistry.getDomainIds().map(d => [d as StarDomainId, { domain: d as StarDomainId, level: 'quiet' }])
   )
   const listeners = new Set<() => void>()
 
