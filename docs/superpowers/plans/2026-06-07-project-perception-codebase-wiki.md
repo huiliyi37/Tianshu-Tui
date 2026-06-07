@@ -1,7 +1,7 @@
 # 天枢项目感知层 — 自维护代码知识库
 
 > 灵感：LLM Wiki (nashsu/llm_wiki) — 增量构建、持久化、知识图谱
-> 痛点：Agent 每次进入项目从零开始 grep 探索，不知道已有 `headless.ts`、不知道 `--print` 已实现但未接线
+> 痛点：Agent 每次进入项目从零开始 grep 探索。例如 Agent 在 `main.tsx` 中不确定是否有 `--print` 入口时（其实 `main.tsx:998` 早已完全接线 `-p/--print`，`headless.ts` 提供了 `parseCliArgs()` + `runHeadless()`），那一瞬间是断裂的——需要对比多个文件才能确认接线状态，不是心流。
 > 目标：Agent 第一轮就能从持久化的项目索引中获取全貌，心流不中断
 
 ---
@@ -19,7 +19,7 @@ Agent 收到任务 → repo_map（文件树）→ grep（找符号）→ read_fi
 1. **入口点不可见**：`main.tsx` 中 `--print`、`--goal`、`serve` 等 CLI 入口分散在几千行代码中，Agent 不知道哪些已接线、哪些是死代码
 2. **重复探索**：每个新会话都会重复 `grep headless`、`grep --print`，消耗 token 和时间
 3. **模块职责不透明**：`src/repo/` 下有 12 个文件形成 Meridian 索引系统，但 Agent 需要逐个读才能理解
-4. **接线状态断裂**：`headless.ts` 实现了 `runHeadless()`，`main.tsx` 中有 `--goal` 接线但没有 `--print` 接线——这种"实现但未接线"的信息没有地方存储
+4. **接线状态断裂**：`headless.ts` 实现了 `runHeadless()` 和 `parseCliArgs()`，`main.tsx:998` 已将 `-p/--print` 完整接线（含 `--json`/`--stream-json`）——但 Agent 不 grep 就无法知道这个事实，每次都会走一遍"不确定→探索→确认"的认知路径
 
 **本质**：天枢缺少 LLM Wiki 的核心能力——**增量构建并持久维护一个结构化的项目知识索引**。
 
@@ -110,7 +110,8 @@ flowchart TD
 | src/tools/ | 工具实现 + 注册 (49 tools) | default-registry.ts | active |
 | src/api/ | API 客户端 (OpenAI/Codex/流式) | factory.ts:createProviderClient() | active |
 | src/repo/ | 代码仓库索引 (Meridian) | meridian-indexer.ts | active |
-| src/headless.ts | Headless/CI-CD 模式 | parseCliArgs(), runHeadless() | ⚠️ 部分接线 |
+| src/headless.ts | Headless/CI-CD 模式 | parseCliArgs(), runHeadless() | ✅ 已接线 |
+| src/main.tsx | TUI 入口 + TTY/TUI/headless 路由 | App 组件 + CLI args 解析 | active |
 ...
 
 ## CLI 入口注册表
@@ -118,8 +119,9 @@ flowchart TD
 | Flag | 处理位置 | 状态 |
 |------|---------|------|
 | --goal "text" | main.tsx:893 | ✅ 已接线 |
-| -p / --print "text" | main.tsx:996 | ✅ 已接线 |
-| --json | headless.ts:39 | ✅ 随 -p 生效 |
+| -p / --print "text" | main.tsx:998 | ✅ 已接线 (含 --json / --stream-json) |
+| --json | headless.ts:parseCliArgs | ✅ 随 -p 生效 |
+| --stream-json | headless.ts:parseCliArgs | ✅ 随 -p 生效 |
 | serve | main.tsx:762 | ✅ 已接线 |
 
 ## 最近变更 (10 commits)
@@ -206,5 +208,32 @@ Agent 可以在不 grep 的情况下知道:
 ## 成功标准
 
 1. Agent 在处理新任务时，首轮就能从 volatile context 获知相关模块和入口，不再需要 3+ 轮 grep 探索
-2. "headless.ts 有 runHeadless 但未接线"这类信息被持久化记录
+2. "headless.ts 有 runHeadless() 且已在 main.tsx:998 接线"这类信息被持久化记录，Agent 无需 grep 即可确认
 3. 新增工具/CLI 入口后，一次 `/index` 即可更新索引
+
+---
+
+## 审查校准（2026-06-07 天权域对码验证）
+
+以下事实已通过实际代码对照确认，修正了计划初稿中的描述偏差：
+
+| 事实 | 初稿描述 | 校准结果 | 证据 |
+|------|---------|---------|------|
+| `--print`/`-p` 接线状态 | "已实现但未接线" | **完全接线**：`main.tsx:998` 动态 `import('./headless.js')`，含 `--json`/`--stream-json` | `src/main.tsx:998` |
+| `headless.ts` 状态 | "部分接线" | `parseCliArgs()` + `runHeadless()` 均已实现并被 main.tsx 调用 | `src/headless.ts:38,57` |
+| 工具数量 | "49 tools" | **52 tools**（plan_submit 等近期新增） | `grep -rn "name:" src/tools/ \| wc -l` = 52 |
+| `src/repo/` 文件数 | "12 个文件" | **12 个**（meridian-db, meridian-indexer, meridian-graph, meridian-parser, meridian-impact, meridian-behavior, meridian-types, physarum-engine 等） | `ls src/repo/*.ts \| wc -l` = 12 |
+| MeridianIndexer SHA256 增量 | "已有基础" | `MeridianIndexer` + `MeridianDB` 均存在，SHA256 文件哈希增量解析已实现 | `src/repo/meridian-indexer.ts:18` |
+
+### 补充的关键洞察
+
+1. **问题不是"实现未接线"，而是"接线状态不可知"**。`--print` 从实现到接线全程完成，但 Agent 在 `main.tsx` 几千行代码中无法一眼确认这一点——必须有 grep 探索环节。codebase wiki 的价值不在于修复断裂，而在于**消解认知滞后**。
+
+2. **MeridianIndexer 是天然的解析层**。不需要从零构建文件解析——Meridian 已有 SHA256 哈希、导入图、函数签名提取。Phase 2 的 LLM 摘要生成只需要增量读取 MeridianDB 的变更文件列表。
+
+3. **索引粒度建议**：模块级（`src/agent/`）做职责摘要 → Agent 首轮注入（~2000 token）；文件级（`loop.ts`）做入口函数注册表 → 工具查询。避免按函数/类做索引（token 爆炸且 Agent 有 grep 能力）。
+
+4. **与 `project-instructions` 的分工**：
+   - `project-instructions`：静态设计意图（`src/agent/` = 核心智能体循环）— **why**
+   - `codebase index`：动态接线事实（`main.tsx:998` = `--print` 接线点）— **what/where**
+   - 两者互补不重复：一个解释职责，一个记录状态
