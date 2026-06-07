@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { groupTeamTasks, MAX_WRITE_WORKERS, MAX_READ_WORKERS } from '../team-grouping.js'
+import { groupTeamTasks, validateTaskDependencies, MAX_WRITE_WORKERS, MAX_READ_WORKERS } from '../team-grouping.js'
 import type { TeamTask } from '../team-plan.js'
 
 function task(
@@ -147,5 +147,59 @@ describe('groupTeamTasks', () => {
   it('defaults to MAX_WRITE_WORKERS=2 and MAX_READ_WORKERS=3', () => {
     assert.equal(MAX_WRITE_WORKERS, 2)
     assert.equal(MAX_READ_WORKERS, 3)
+  })
+
+  it('names the cycle in the forced wave reason instead of a generic message', () => {
+    // Regression: A→B→A used to force through as "circular dependency or
+    // unresolvable" with no indication of WHICH tasks formed the loop.
+    const waves = groupTeamTasks([
+      task('T1', ['src/a.ts'], { dependsOn: ['T2'] }),
+      task('T2', ['src/b.ts'], { dependsOn: ['T1'] }),
+    ])
+    const forced = waves.find(w => w.reason.startsWith('forced:'))
+    assert.ok(forced, 'expected a forced wave for the cycle')
+    assert.match(forced!.reason, /cycle/)
+    assert.ok(/T1/.test(forced!.reason) && /T2/.test(forced!.reason))
+    // No task is lost.
+    assert.deepEqual(waves.flatMap(w => w.taskIds).sort(), ['T1', 'T2'])
+  })
+
+  it('surfaces dangling deps in wave reason and raises risk', () => {
+    // Regression: a typo'd dep (T9 does not exist) used to be silently treated
+    // as satisfied, dispatching T1 with no signal.
+    const waves = groupTeamTasks([task('T1', ['src/a.ts'], { dependsOn: ['T9'] })])
+    assert.equal(waves.length, 1)
+    assert.match(waves[0]!.reason, /unknown dep/)
+    assert.ok(waves[0]!.reason.includes('T9'))
+    assert.equal(waves[0]!.risk, 'medium')
+  })
+})
+
+describe('validateTaskDependencies', () => {
+  it('reports dangling deps pointing to non-existent tasks', () => {
+    const diag = validateTaskDependencies([
+      task('T1', ['src/a.ts'], { dependsOn: ['T2', 'T9'] }),
+      task('T2', ['src/b.ts']),
+    ])
+    assert.deepEqual(diag.dangling, [{ taskId: 'T1', missingDep: 'T9' }])
+    assert.deepEqual(diag.cycles, [])
+  })
+
+  it('detects a dependency cycle and returns the loop members', () => {
+    const diag = validateTaskDependencies([
+      task('T1', ['src/a.ts'], { dependsOn: ['T2'] }),
+      task('T2', ['src/b.ts'], { dependsOn: ['T1'] }),
+    ])
+    assert.equal(diag.cycles.length, 1)
+    assert.deepEqual([...diag.cycles[0]!].sort(), ['T1', 'T2'])
+  })
+
+  it('returns clean diagnostics for a valid acyclic graph', () => {
+    const diag = validateTaskDependencies([
+      task('T1', ['src/a.ts']),
+      task('T2', ['src/b.ts'], { dependsOn: ['T1'] }),
+    ])
+    assert.deepEqual(diag.dangling, [])
+    assert.deepEqual(diag.cycles, [])
   })
 })

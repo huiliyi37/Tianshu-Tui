@@ -96,10 +96,18 @@ function stripLineNoise(line: string): string {
 function extractFiles(text: string): string[] {
   const files: string[] = []
   for (const match of text.matchAll(FILE_PATH_RE)) {
-    const candidate = (match[1] ?? match[2] ?? '').trim()
-    if (!candidate) continue
-    if (!/^(src|docs|specs|test|tests|\.rivet)\//.test(candidate)) continue
-    files.push(candidate.replace(/[),.;:]+$/g, ''))
+    const captured = (match[1] ?? match[2] ?? '').trim()
+    if (!captured) continue
+    // Backtick captures (match[1]) can wrap several comma/space-separated
+    // paths, e.g. `src/a.ts, src/b.ts`. Split and validate each segment so a
+    // multi-path backtick never becomes one malformed entry (which would
+    // silently defeat file-overlap serialization downstream).
+    for (const raw of captured.split(/[,，、;；\s]+/)) {
+      const candidate = raw.replace(/[(),.;:]+$/g, '').trim()
+      if (!candidate) continue
+      if (!/^(src|docs|specs|test|tests|\.rivet)\//.test(candidate)) continue
+      files.push(candidate)
+    }
   }
   return unique(files)
 }
@@ -142,9 +150,15 @@ function classifyRiskTier(text: string): TeamTask['riskTier'] {
 }
 
 function extractVerification(lines: string[]): string[] {
+  // Only treat a line as a verification command when it actually looks like
+  // one: a recognized command token (npm/npx/node/tsx/tsc/run_tests/typecheck)
+  // OR a backtick-wrapped code span. Bare prose mentions of 验证/测试 must NOT
+  // be collected — otherwise sentences like "需要测试整个流程" become fake
+  // VerificationGates whose `command` is not a runnable shell command.
+  const COMMAND_RE = /\b(?:npm|npx|node|tsx|tsc|run_tests|typecheck|pnpm|yarn|jest|vitest|make)\b/i
   return unique(lines
     .map(stripLineNoise)
-    .filter(line => /\b(?:npm|npx|node|tsx|tsc)\b|验证|测试|typecheck|run_tests/i.test(line)))
+    .filter(line => COMMAND_RE.test(line) || /`[^`]+`/.test(line)))
 }
 
 function extractDependencies(lines: string[]): string[] {

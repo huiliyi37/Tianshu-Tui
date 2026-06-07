@@ -62,6 +62,69 @@ function topologicalSort(tasks: TeamTask[]): string[] {
   return result
 }
 
+export interface DependencyDiagnostics {
+  /** Deps that point to a task id not present in the set (typos, stale refs). */
+  dangling: Array<{ taskId: string; missingDep: string }>
+  /** Dependency cycles, each as the list of task ids forming the loop. */
+  cycles: string[][]
+}
+
+/**
+ * Validate the dependency graph BEFORE scheduling.
+ *
+ * Surfaces two failure classes that the scheduler would otherwise absorb
+ * silently:
+ *  - dangling deps: `dependsOn` referencing a non-existent task id. The
+ *    scheduler treats an unknown dep as "satisfied" (tolerant by design), but
+ *    that means a typo'd dep silently drops and the task dispatches early.
+ *    This makes it visible.
+ *  - cycles: A→B→A. The scheduler force-breaks them, but generically; this
+ *    names the exact loop so callers/logs can report it.
+ *
+ * Pure function — no side effects. Tolerance policy is unchanged; this only
+ * reports.
+ */
+export function validateTaskDependencies(tasks: TeamTask[]): DependencyDiagnostics {
+  const taskMap = new Map(tasks.map(t => [t.id, t]))
+  const dangling: Array<{ taskId: string; missingDep: string }> = []
+  for (const t of tasks) {
+    for (const dep of t.dependsOn) {
+      if (!taskMap.has(dep)) dangling.push({ taskId: t.id, missingDep: dep })
+    }
+  }
+
+  // Cycle detection via DFS with a recursion stack (white/gray/black coloring).
+  const cycles: string[][] = []
+  const state = new Map<string, 'gray' | 'black'>()
+  const stack: string[] = []
+
+  function dfs(id: string): void {
+    state.set(id, 'gray')
+    stack.push(id)
+    const task = taskMap.get(id)
+    if (task) {
+      for (const dep of task.dependsOn) {
+        if (!taskMap.has(dep)) continue
+        const depState = state.get(dep)
+        if (depState === 'gray') {
+          const start = stack.indexOf(dep)
+          if (start >= 0) cycles.push(stack.slice(start))
+        } else if (depState !== 'black') {
+          dfs(dep)
+        }
+      }
+    }
+    stack.pop()
+    state.set(id, 'black')
+  }
+
+  for (const t of tasks) {
+    if (!state.has(t.id)) dfs(t.id)
+  }
+
+  return { dangling, cycles }
+}
+
 /** Check if a file is a test file for a given source file. */
 function isTestFor(testFile: string, sourceFile: string): boolean {
   // src/agent/foo.ts → src/agent/__tests__/foo.test.ts
@@ -139,6 +202,16 @@ export function groupTeamTasks(tasks: TeamTask[], options?: GroupingOptions): Te
   const bound = bindSourceTestPairs(tasks)
   const taskMap = new Map(bound.map(t => [t.id, t]))
 
+  // Validate dependency graph up front so cycles/dangling refs become visible
+  // in wave reasons instead of being silently absorbed by the scheduler.
+  const diag = validateTaskDependencies(bound)
+  const danglingByTask = new Map<string, string[]>()
+  for (const d of diag.dangling) {
+    const arr = danglingByTask.get(d.taskId) ?? []
+    arr.push(d.missingDep)
+    danglingByTask.set(d.taskId, arr)
+  }
+
   // Topological order
   const topoOrder = topologicalSort(bound)
 
@@ -167,12 +240,17 @@ export function groupTeamTasks(tasks: TeamTask[], options?: GroupingOptions): Te
     }
 
     if (ready.length === 0) {
-      // All remaining are blocked — force one through
+      // All remaining are blocked — force one through. Name the exact cause
+      // instead of a generic message so the high-risk forcing is auditable.
       const forced = remaining[0]!
+      const cycle = diag.cycles.find(c => c.includes(forced))
+      const reason = cycle
+        ? `forced: dependency cycle ${cycle.join('→')}→${cycle[0]}`
+        : 'forced: unresolvable dependency order'
       waves.push({
         id: `W${++waveCounter}`,
         taskIds: [forced],
-        reason: 'forced: circular dependency or unresolvable',
+        reason,
         parallelLimit: 1,
         risk: 'high',
       })
@@ -223,17 +301,26 @@ export function groupTeamTasks(tasks: TeamTask[], options?: GroupingOptions): Te
     // Build wave
     const waveTaskIds = [...waveWriteTasks, ...waveReadTasks]
     if (waveTaskIds.length > 0) {
+      // Tasks whose deps were dropped as dangling may be dispatching earlier
+      // than intended — surface that and treat the wave as at least medium risk.
+      const danglingNotes = waveTaskIds
+        .filter(id => danglingByTask.has(id))
+        .map(id => `${id} has unknown dep(s) ${danglingByTask.get(id)!.join(', ')}`)
+
       const waveRisk = waveTaskIds.some(id => taskMap.get(id)?.riskTier === 'high') ? 'high'
-        : waveTaskIds.some(id => taskMap.get(id)?.riskTier === 'medium') ? 'medium'
+        : (waveTaskIds.some(id => taskMap.get(id)?.riskTier === 'medium') || danglingNotes.length > 0) ? 'medium'
         : 'low'
 
       const writeCount = waveWriteTasks.length
       const readCount = waveReadTasks.length
-      const reason = writeCount > 0 && readCount > 0
+      const baseReason = writeCount > 0 && readCount > 0
         ? `${writeCount} write + ${readCount} read tasks`
         : writeCount > 0
           ? `${writeCount} write tasks`
           : `${readCount} read tasks`
+      const reason = danglingNotes.length > 0
+        ? `${baseReason} (⚠ ${danglingNotes.join('; ')})`
+        : baseReason
 
       waves.push({
         id: `W${++waveCounter}`,

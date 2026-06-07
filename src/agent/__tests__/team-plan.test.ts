@@ -187,3 +187,33 @@ describe('buildUnifiedTeamPlan', () => {
     assert.deepEqual(plan.decisions, [])
   })
 })
+
+describe('extractFiles — malformed input hardening', () => {
+  it('splits backtick-wrapped multi-paths instead of one malformed entry', () => {
+    // Regression: `src/a.ts, src/b.ts` used to be captured whole, producing a
+    // bogus file "src/a.ts, src/b.ts" that defeated file-overlap serialization.
+    const drafts = parseTeamTaskDrafts('## T1: change `src/foo.ts, src/bar.ts` together')
+    assert.deepEqual(drafts[0]!.files, ['src/foo.ts', 'src/bar.ts'])
+  })
+
+  it('keeps bare paths clean and strips trailing punctuation', () => {
+    const drafts = parseTeamTaskDrafts('## T1: edit src/foo.ts, then src/bar.ts.')
+    assert.deepEqual(drafts[0]!.files, ['src/foo.ts', 'src/bar.ts'])
+  })
+})
+
+describe('extractVerification — prose vs command', () => {
+  it('does NOT collect bare prose mentions of 测试/验证', () => {
+    // Regression: 测试/验证 had no word boundary, so narrative sentences became
+    // fake VerificationGates with non-runnable commands.
+    const drafts = parseTeamTaskDrafts('## T1: 实现登录\n需要测试整个流程的鲁棒性')
+    assert.deepEqual(drafts[0]!.verification, [])
+  })
+
+  it('still collects real command lines and backtick code spans', () => {
+    const drafts = parseTeamTaskDrafts('## T1: 实现\n运行 npm test\n跑一下 `tsc --noEmit`')
+    assert.equal(drafts[0]!.verification.length, 2)
+    assert.ok(drafts[0]!.verification.some(v => v.includes('npm test')))
+    assert.ok(drafts[0]!.verification.some(v => v.includes('tsc --noEmit')))
+  })
+})
