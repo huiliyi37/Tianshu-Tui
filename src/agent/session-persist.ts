@@ -324,12 +324,17 @@ export class SessionPersist {
   updateMetadata(patch: Partial<SessionMetadata>): void {
     const existing = this.loadMetadata()
     const merged: SessionMetadata = {
-      sessionId: this.sessionId,
-      createdAt: existing?.createdAt ?? Date.now(),
-      updatedAt: Date.now(),
       compactEvents: existing?.compactEvents ?? [],
       ...existing,
       ...patch,
+      // These must win over ...existing/...patch — place them last:
+      // - sessionId is authoritative from `this`
+      // - createdAt is set once at creation and preserved thereafter
+      // - updatedAt always advances to now (the whole point of the field;
+      //   spreading ...existing after it would freeze it at creation time)
+      sessionId: this.sessionId,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
       // Preserve nested objects by merging, not replacing
       tokenUsage: existing?.tokenUsage || patch.tokenUsage
         ? { prompt: 0, completion: 0, total: 0, ...existing?.tokenUsage, ...patch.tokenUsage }

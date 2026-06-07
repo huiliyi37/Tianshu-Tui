@@ -441,17 +441,24 @@ export class AgentLoop {
             .then(() => {
               // P0-1 trace: verify every message triggers persistence
               debugLog(`[persist] append message role=${msg.role}`)
-              // P1: Update metadata on every append — cheap sync write
+              // P1: Update metadata on every append. Snapshot once instead of
+              // re-reading .meta.json per field — this runs on the hot append
+              // path (N tool calls = N appends per turn).
               try {
+                const snapshot = persist.loadMetadata()
                 const patch: Partial<import('../context/types.js').SessionMetadata> = {}
-                if (msg.role === 'user' && typeof msg.content === 'string' && !persist.loadMetadata()?.title) {
-                  patch.title = msg.content.slice(0, 120)
-                }
-                if (msg.role === 'user') {
-                  patch.turnCount = (persist.loadMetadata()?.turnCount ?? 0) + 1
+                // TTSR injects guardrail reminders as <system-reminder>-wrapped
+                // role:user messages; they are not real user turns (history-replay
+                // also excludes them), so don't title/count them.
+                const isReminder = typeof msg.content === 'string' && msg.content.startsWith('<system-reminder>')
+                if (msg.role === 'user' && !isReminder) {
+                  if (typeof msg.content === 'string' && !snapshot?.title) {
+                    patch.title = msg.content.slice(0, 120)
+                  }
+                  patch.turnCount = (snapshot?.turnCount ?? 0) + 1
                 }
                 if (msg.role === 'assistant' && msg.tool_calls) {
-                  patch.toolCallCount = (persist.loadMetadata()?.toolCallCount ?? 0) + msg.tool_calls.length
+                  patch.toolCallCount = (snapshot?.toolCallCount ?? 0) + msg.tool_calls.length
                 }
                 const usage = this.session.getTotalUsage()
                 patch.tokenUsage = {

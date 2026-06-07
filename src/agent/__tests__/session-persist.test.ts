@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, before, after } from 'node:test'
+import { describe, it, beforeEach, afterEach, before, after, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -137,6 +137,30 @@ describe('SessionPersist — metadata (P1)', () => {
     const meta = persist.loadMetadata()
     assert.equal(meta!.createdAt, originalCreatedAt)
     assert.ok(meta!.updatedAt >= originalCreatedAt)
+  })
+
+  it('updateMetadata advances updatedAt past createdAt (regression: spread order froze it)', () => {
+    // Stub Date.now so the test is deterministic and the advance is observable
+    // without sleeping. Regression guard: a prior bug spread ...existing AFTER
+    // updatedAt, re-overwriting it with the stale value so it never advanced.
+    let clock = 1_000
+    const now = mock.method(Date, 'now', () => clock)
+    try {
+      const persist = new SessionPersist('meta-updatedat')
+      persist.initMetadata()
+      const created = persist.loadMetadata()!
+      assert.equal(created.createdAt, 1_000)
+      assert.equal(created.updatedAt, 1_000)
+
+      clock = 5_000
+      persist.updateMetadata({ turnCount: 1 })
+      const after = persist.loadMetadata()!
+      assert.equal(after.createdAt, 1_000, 'createdAt must be preserved')
+      assert.equal(after.updatedAt, 5_000, 'updatedAt must advance to current time')
+      assert.ok(after.updatedAt > after.createdAt, 'updatedAt must move past createdAt on update')
+    } finally {
+      now.mock.restore()
+    }
   })
 
   it('loadMetadata returns undefined when no metadata file exists', () => {
