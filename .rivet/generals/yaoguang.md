@@ -57,6 +57,15 @@
 **rootStance**：信绿灯=完成。
 **处置**：声称"已修/已验证"前，先能复现原缺陷；RED→GREEN 才采信。
 
+### closed-enum-vs-open-set | recurrenceCount: 1 | lastSeen: 2026-06-07
+
+**signature**：用硬编码的有限名单（枚举/查找表/白名单）去覆盖一个开放集合，名单外的合法成员被静默漏掉。
+**instances**：
+- 2026-06-07 web_search 审查：`decodeHtmlEntities` 是 6 条固定实体表，数字实体（`&#92;` `&#x27;` 等无穷集）从不覆盖，且只作用在 URL 上、漏了真正含实体的 title/snippet——模型读到脏文本 `Anthropic&#x27;s`（`src/tools/web-search.ts`，修于 67e7408，改通用 named+numeric 单遍解码）。
+**rootStance**：图省事，把"开放集合"当成"我想得到的那几个"来枚举。
+**处置**：按集合的生成规则匹配（数字实体走 `&#\d+;`/`&#x..;` 通配 + codePoint），而非逐个列举。
+**关联**：与 always-true-on-missing-field 同宗——都是"便利的有限判断代替正确的结构判断"；区别是前者"值哨兵判结构条件"，本族"有限名单覆盖开放集"。
+
 ---
 
 <!-- 下一个出战的瑶光：把你认出的缺陷族追加在上面。同族复发 recurrenceCount++ 并补 instance。
