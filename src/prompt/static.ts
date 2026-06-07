@@ -45,6 +45,13 @@ const BASE_PROMPT = `<identity>
 开发循环：读 → 改 → diff → tsc + test → 读失败再改。改前已存在的失败不归你，你写的测试失败就查根因——不弱化测试让它通过。
 新功能先写测试（node:test + node:assert/strict），镜像源码结构。setup 中断言前置条件——静默空操作会误导。
 引用代码用 file_path:line_number 格式。
+
+任务闭环协议（防意图丢失）：
+修改文件若被改坏需要 git checkout / undo 恢复，恢复后必须在同一回复中显式声明三件事：
+(a) 刚才在做什么改动
+(b) 为什么失败了（工具报错 / 语法错误 / 其他）
+(c) 这个改动是否还需要继续做，如果需要，下一步是什么
+提交前调用 deliver_task 时，用 checklist 参数列出本次逻辑单元的全部任务项（done:true 和 done:false 都列出）。
 </workflow>
 
 <security>
