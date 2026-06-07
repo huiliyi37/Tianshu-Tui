@@ -267,8 +267,8 @@ export function buildTeamWorkflowPrompt(options: TeamWorkflowPromptOptions): str
   const objective = options.objective.trim()
   const modeLabel = options.mode === 'max' ? '/team max' : '/team'
   const planInstruction = options.mode === 'standard'
-    ? '- If the input is a Markdown plan path, read it first and treat it as the task contract. Do not invent a new plan unless the file is missing or insufficient.'
-    : '- Start with multi-perspective planning: delegate read-only planners/reviewers for dependency analysis, risk audit, and adversarial blind-spot search before any patcher executes.'
+    ? '- If the input is a Markdown plan path, pass it as planPath to team_orchestrate and treat it as the task contract. Do not invent a new plan unless the file is missing or insufficient.'
+    : '- Start with multi-perspective planning through team_orchestrate max mode: planner workers cover dependency analysis, risk audit, and adversarial blind-spot search before patcher execution.'
 
   return `我正在使用 ${modeLabel} 团队模式核心骨架执行任务。
 
@@ -278,20 +278,16 @@ ${objective}
 Operating contract:
 - User explicitly triggered team mode; do not ask whether to use it.
 ${planInstruction}
-- Main controller (current session) owns planning, grouping, review, verification, integration, and final deliver_task.
-- Execution workers are bounded helpers. Use delegate_batch/delegate_task only when the task has at least 2 independent fronts or a clear patch/review split.
-- Use patcher workers as 天梁 executors for precise implementation: objective must say "只执行本 task，不扩展范围，不重写计划".
-- MVP safety boundary: do not claim workers auto-committed or auto-merged. Treat worker output as patchSummary/diff evidence; the main controller must inspect and integrate changes.
-- Default execution parallelism: 2-3 workers. If files overlap or scope is unclear, serialize or keep work in the main session.
-- Do not implement a full DAG parser in this turn unless the user specifically asks. Dependencies/grouping can be coarse and explicitly documented.
-- After execution, run targeted tests for changed files plus npx tsc --noEmit. Every green claim needs command + observed output.
-- For >=4 files, cross-module, architecture, or high-risk changes, run an independent review pass (Review Squadron/L3 style or adversarial_verifier) before deliver_task.
+- Main controller (current session) owns integration, verification, and final deliver_task.
+- MVP safety boundary: workers do NOT auto-commit/auto-merge. Treat worker output as patchSummary/diff evidence; integrate deliberately.
+- patcher workers as 天梁 executors remain bounded helpers: objective must say "只执行本 task，不扩展范围，不重写计划".
 
 Suggested phases:
-1. Read the referenced plan/spec/code and extract a small task list.
-2. Dispatch only safe, scoped workers; keep ambiguous tasks in the main controller.
-3. Inspect worker findings/diffs and integrate deliberately.
-4. Verify with evidence, review independently, then deliver_task with checklist.
+1. Call the team_orchestrate tool with { mode: '${options.mode}', objective, planPath? } to deterministically parse/group and dispatch the first wave. It serializes same-file writes and validates dependencies for you.
+2. Inspect the returned worker diffs/findings (these come from delegate_batch workers under the hood); integrate the changes into the working tree.
+3. To run the next wave, call team_orchestrate again with the same args plus fromWave: <previous+1> AFTER integrating the prior wave's diffs.
+4. On the final wave, team_orchestrate runs the review gate automatically (L1/L2/L3 by change scale); address any blocking findings.
+5. Verify with evidence (targeted tests + npx tsc --noEmit), then deliver_task with a checklist.
 `
 }
 

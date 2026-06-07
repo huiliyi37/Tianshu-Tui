@@ -25,6 +25,7 @@ import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
+import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import { createDeliverTaskTool } from './agent/deliver-task.js'
 import { createTaskLedger } from './agent/task-ledger.js'
 import { createOwnershipLedger } from './agent/ownership-ledger.js'
@@ -188,6 +189,16 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       () => _claimStoreRef ?? undefined,
       () => _sessionIdRef ?? undefined,
     ))
+    reg.register(createTeamOrchestrateTool({
+      delegate: async (request, abortSignal) => {
+        if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+        return _coordinatorRef.delegate(request, abortSignal)
+      },
+      delegateBatch: async (requests, policy, abortSignal, onProgress) => {
+        if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
+        return _coordinatorRef.delegateBatch(requests, policy, abortSignal, onProgress)
+      },
+    }))
     reg.register(ASK_USER_QUESTION_TOOL)
     reg.register(createRepoGraphTool(() => _meridianIndexerRef))
 

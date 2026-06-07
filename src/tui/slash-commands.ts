@@ -52,8 +52,8 @@ const HELP_TEXT = `Available commands:
 /interview <topic> — Deep interview before coding
 /plan <feature> — Create implementation plan
 /plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
-/team <task|plan> — Run team-mode workflow skeleton
-/team max <task> — Run team-mode workflow with planning-first max mode
+/team <task|plan> — Run team-mode workflow through team_orchestrate
+/team max <task> — Run team-mode max planning through team_orchestrate
 /sensorium — Show 天枢 3D self-awareness state
 /dream — Distill session decisions into project memory
 Ctrl+C — Interrupt current turn (press twice to exit)`

@@ -89,6 +89,7 @@ describe('ecosystem workflow helpers', () => {
 
     assert.equal(resolved?.command, '/team')
     assert.ok(resolved?.prompt.includes('团队模式核心骨架'))
+    assert.ok(resolved?.prompt.includes('team_orchestrate'))
     assert.ok(resolved?.prompt.includes('delegate_batch'))
     assert.ok(resolved?.prompt.includes('patcher workers as 天梁 executors'))
     assert.ok(resolved?.prompt.includes('verification'))
