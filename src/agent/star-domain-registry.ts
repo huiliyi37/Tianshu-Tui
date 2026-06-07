@@ -31,17 +31,25 @@ const DOMAIN_ID_RE = /^[a-z][a-z0-9_-]{0,31}$/
 
 export class StarDomainRegistry {
   private domains = new Map<string, StarDomain>()
+  private initialized = false
 
   constructor() {
-    // Register built-in domains
+    // Defer STAR_DOMAINS access to first use to avoid circular ESM init
+  }
+
+  /** Ensure built-in domains are loaded (lazy init breaks circular dep) */
+  private ensureInit(): void {
+    if (this.initialized) return
     for (const domain of Object.values(STAR_DOMAINS)) {
       this.domains.set(domain.id, domain)
     }
+    this.initialized = true
   }
 
   /** Load user domains from .rivet/domains/ directory.
    *  Each subdirectory is a domain card: <id>/card.md */
   loadFromDirectory(dir: string): { loaded: string[]; errors: string[] } {
+    this.ensureInit()
     const loaded: string[] = []
     const errors: string[] = []
     try {
@@ -75,27 +83,32 @@ export class StarDomainRegistry {
 
   /** Get a domain definition by id */
   get(id: string): StarDomain | undefined {
+    this.ensureInit()
     return this.domains.get(id)
   }
 
   /** Get all registered domain ids */
   getDomainIds(): string[] {
+    this.ensureInit()
     return [...this.domains.keys()]
   }
 
   /** Get all registered domains */
   list(): StarDomain[] {
+    this.ensureInit()
     return [...this.domains.values()]
   }
 
   /** Check if a domain id is registered */
   has(id: string): boolean {
+    this.ensureInit()
     return this.domains.has(id)
   }
 
   /** Match a task description to the best domain by keyword scoring.
    *  Returns null if no domain matches (all scores = 0 or tie). */
   matchDomain(taskDescription: string): string | null {
+    this.ensureInit()
     const lower = taskDescription.toLowerCase()
     const scores = new Map<string, number>()
 

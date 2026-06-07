@@ -3,8 +3,11 @@ import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import { STAR_DOMAINS } from '../star-domain.js'
 import { StarDomainRegistry, starDomainRegistry } from '../star-domain-registry.js'
+
+const _require = createRequire(import.meta.url)
 
 describe('StarDomainRegistry — built-in domains', () => {
   test('has all 7 built-in domains', () => {
@@ -395,9 +398,8 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
 
 // ─── P1-1 matchDomain unified: custom domain visible at runtime ──
 describe('P1-1 — custom domain visible to runtime matchDomain', () => {
-  const tmpBase = join(tmpdir(), `rivet-p11-test-${Date.now()}`)
-
-  test('custom domain keywords are matched by runtime matchDomain (via registry)', () => {
+  test('runtime matchDomain (star-domain.ts delegate) sees custom domain in singleton registry', async () => {
+    const tmpBase = join(tmpdir(), `rivet-p11-test-${Date.now()}`)
     const dir = join(tmpBase, 'test-rt-match')
     mkdirSync(join(dir, 'machao'), { recursive: true })
     writeFileSync(join(dir, 'machao', 'card.md'), [
@@ -412,15 +414,20 @@ describe('P1-1 — custom domain visible to runtime matchDomain', () => {
     ].join('\n'))
 
     try {
-      const reg = new StarDomainRegistry()
-      const { loaded } = reg.loadFromDirectory(dir)
+      // Load into the GLOBAL singleton — this is what runtime matchDomain delegates to
+      const { loaded } = starDomainRegistry.loadFromDirectory(dir)
       assert.ok(loaded.includes('machao'))
 
-      // Registry-level matchDomain sees the custom domain
-      const match = reg.matchDomain('进行网络渗透安全测试')
-      assert.equal(match, 'machao', 'custom domain should be matched by registry.matchDomain')
+      // Use dynamic ESM import to get the runtime matchDomain (same as dispatcher.ts uses)
+      const { matchDomain: runtimeMatchDomain } = await import('../star-domain.js')
+
+      const match = runtimeMatchDomain('进行网络渗透安全测试')
+      assert.equal(match, 'machao', 'runtime matchDomain (star-domain.ts) should see custom domain via registry singleton')
     } finally {
-      rmSync(tmpBase, { recursive: true, true: true })
+      // Cleanup: remove custom domain so it doesn't leak
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      ;(starDomainRegistry as unknown as { domains: Map<string, unknown> }).domains.delete('machao')
+      rmSync(tmpBase, { recursive: true, force: true })
     }
   })
 })

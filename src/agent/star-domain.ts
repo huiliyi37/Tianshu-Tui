@@ -119,23 +119,14 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   },
 }
 
-/** Delegate to registry so custom domains loaded at startup are visible.
- *  Lazy import avoids circular dependency: star-domain → star-domain-registry → star-domain.
- *  Uses createRequire because this is an ESM project (no native require). */
-import { createRequire } from 'node:module'
-const _require = createRequire(import.meta.url)
-
-let _registry: import('./star-domain-registry.js').StarDomainRegistry | null = null
-function getRegistry(): import('./star-domain-registry.js').StarDomainRegistry {
-  if (!_registry) {
-    const mod = _require('./star-domain-registry.js') as typeof import('./star-domain-registry.js')
-    _registry = mod.starDomainRegistry
-  }
-  return _registry
-}
+/** Synchronous delegate to registry.
+ *  The registry singleton is initialized at module load time, so by the time
+ *  any caller invokes this function, the circular ESM init has completed and
+ *  starDomainRegistry is available. */
+import { starDomainRegistry } from './star-domain-registry.js'
 
 export function matchDomain(taskDescription: string): string | null {
-  return getRegistry().matchDomain(taskDescription)
+  return starDomainRegistry.matchDomain(taskDescription)
 }
 
 export interface ActiveStarDomain {
@@ -148,7 +139,7 @@ export interface ActiveStarDomain {
 export function buildActiveDomain(taskDescription: string): ActiveStarDomain | null {
   const id = matchDomain(taskDescription)
   if (!id) return null
-  const domain = getRegistry().get(id)
+  const domain = starDomainRegistry.get(id)
   if (!domain) return null
   return {
     id: id as StarDomainId,
