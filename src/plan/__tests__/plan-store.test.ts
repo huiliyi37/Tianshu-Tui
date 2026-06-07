@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { writePlan, readPlan, listPlans, approvePlan, deletePlan, slugify } from '../plan-store.js'
+import { checked, checkedAt } from '../../utils/guard.js'
 
 describe('slugify', () => {
   it('converts spaces and special chars to hyphens', () => {
@@ -55,9 +56,9 @@ describe('plan-store CRUD', () => {
       await writePlan(dir, 'my-plan', '# My Plan\n\nSome content.')
       const plan = await readPlan(dir, 'my-plan')
       assert.ok(plan)
-      assert.equal(plan!.title, 'My Plan')
-      assert.equal(plan!.status, 'submitted')
-      assert.equal(plan!.slug, 'my-plan')
+      assert.equal(checked(plan).title, 'My Plan')
+      assert.equal(checked(plan).status, 'submitted')
+      assert.equal(checked(plan).slug, 'my-plan')
     } finally {
       cleanup()
     }
@@ -72,8 +73,8 @@ describe('plan-store CRUD', () => {
       const plans = await listPlans(dir)
       assert.equal(plans.length, 2)
       // Most recent first
-      assert.equal(plans[0]!.slug, 'plan-a')
-      assert.equal(plans[1]!.slug, 'plan-b')
+      assert.equal(checkedAt(plans, 0).slug, 'plan-a')
+      assert.equal(checkedAt(plans, 1).slug, 'plan-b')
     } finally {
       cleanup()
     }
@@ -85,7 +86,7 @@ describe('plan-store CRUD', () => {
       await writePlan(dir, 'my-plan', '# My Plan\n\nContent.')
       const approved = await approvePlan(dir, 'my-plan')
       assert.ok(approved)
-      assert.equal(approved!.status, 'approved')
+      assert.equal(checked(approved).status, 'approved')
     } finally {
       cleanup()
     }
@@ -128,7 +129,7 @@ describe('plan-store CRUD', () => {
     try {
       await writePlan(dir, 'exec-plan', '> **Status: EXECUTED** — 2026-01-01\n\n# Exec')
       const plan = await readPlan(dir, 'exec-plan')
-      assert.equal(plan!.status, 'executed')
+      assert.equal(checked(plan).status, 'executed')
     } finally {
       cleanup()
     }

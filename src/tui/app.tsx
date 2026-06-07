@@ -283,6 +283,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const chronicleRef = useRef(new Chronicle())
   const [interviewState, setInterviewState] = useState<InterviewState | null>(null)
   const [clarityHistory, setClarityHistory] = useState<number[]>([])
+  /** Forces GlanceBar re-render every second during streaming so token count stays live */
+  const [tokenTicker, setTokenTicker] = useState(0)
 
   // --- SurfaceRouter (unified navigation state machine) ---
   const surfaceRouterRef = useRef(createSurfaceRouter())
@@ -575,6 +577,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       // Sync active star domain (bound on first run during streaming)
       const dn = agent.getSessionDomain()?.name
       setStarDomain(prev => (prev === dn ? prev : dn))
+      // Force GlanceBar re-render for live token count
+      setTokenTicker(t => t + 1)
     }, 1000)
     return () => {
       if (activityIntervalRef.current) {
