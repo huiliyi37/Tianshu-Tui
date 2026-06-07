@@ -11,7 +11,10 @@ const COMMAND_RE = /(?:run|execute|check with)\s+(npm\s+\w+|tsc[^\n]*|npx[^\n]*)
 const CODE_BLOCK_RE = /```[\s\S]*?```/g
 
 export function extractIntents(text: string): Intent[] {
-  const cleaned = text.replace(CODE_BLOCK_RE, '')
+  const cleaned = text
+    .replace(CODE_BLOCK_RE, '')
+    // 过滤掉独立的任务编号（不带斜杠或后缀），防止干扰路径识别
+    .replace(/\b([PpTtSs]\d+|TASK-\d+)\b(?!\/|\.\w+)/g, '[REF]')
   const seen = new Set<string>()
   const intents: Intent[] = []
 

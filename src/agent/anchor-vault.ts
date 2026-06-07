@@ -1,3 +1,5 @@
+import { sanitizeForIntentClassification } from './intent-sanitizer.js'
+
 export interface SealedAnchor {
   phrases: string[]
   original: string
@@ -15,8 +17,9 @@ const STOPWORDS = new Set([
 
 export class AnchorVault {
   seal(userMessage: string): SealedAnchor {
-    const identifiers = userMessage.match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g) ?? []
-    const cjkTerms = userMessage.match(/[一-鿿]{2,6}/g) ?? []
+    const { sanitized } = sanitizeForIntentClassification(userMessage)
+    const identifiers = sanitized.match(/[a-zA-Z_][a-zA-Z0-9_]{2,}/g) ?? []
+    const cjkTerms = sanitized.match(/[一-鿿]{2,6}/g) ?? []
     const all = [...identifiers, ...cjkTerms]
       .filter(t => !STOPWORDS.has(t.toLowerCase()))
     const phrases = [...new Set(all)]

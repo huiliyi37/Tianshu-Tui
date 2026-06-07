@@ -1,3 +1,14 @@
+const HIGH_FREQ_VERBS = new Set([
+  '修复', '实现', '优化', '设计', '重构', '验证', '测试', '修改', '更新', '解决', '查看',
+  'fix', 'solve', 'implement', 'design', 'optimize', 'refactor', 'verify', 'test', 'update',
+  'add', 'remove', 'setup', 'configure', 'check', 'audit', 'review'
+])
+
+function tokenize(text: string): string[] {
+  const matches = text.match(/[\u4e00-\u9fa5]|\b[a-zA-Z_][a-zA-Z0-9_]*\b/g) ?? []
+  return matches.map(m => m.toLowerCase())
+}
+
 export class ProjectionScorer {
   /**
    * Score how much output is a "projection" of anchor phrases.
@@ -6,18 +17,26 @@ export class ProjectionScorer {
    */
   score(output: string, anchorPhrases: string[]): number {
     if (!output || !anchorPhrases.length) return 0
-    const outputLower = output.toLowerCase()
-    const outputLen = outputLower.length || 1
-    let totalOverlap = 0
-    for (const phrase of anchorPhrases) {
-      const p = phrase.toLowerCase()
-      let idx = 0
-      while ((idx = outputLower.indexOf(p, idx)) !== -1) {
-        totalOverlap += p.length
-        idx += p.length
+
+    const filteredPhrases = anchorPhrases
+      .map(p => p.toLowerCase())
+      .filter(p => !HIGH_FREQ_VERBS.has(p))
+
+    if (filteredPhrases.length === 0) return 0
+
+    const outputTokens = tokenize(output)
+    if (outputTokens.length === 0) return 0
+
+    let matchedTokens = 0
+    for (const token of outputTokens) {
+      for (const phrase of filteredPhrases) {
+        if (token === phrase || token.includes(phrase) || phrase.includes(token)) {
+          matchedTokens++
+          break
+        }
       }
     }
-    return Math.min(1, totalOverlap / outputLen)
+    return Math.min(1, matchedTokens / outputTokens.length)
   }
 
   /**

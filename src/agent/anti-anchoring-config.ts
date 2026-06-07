@@ -16,7 +16,7 @@ export interface AntiAnchoringConfig {
 }
 
 export const DEFAULT_ANTI_ANCHORING_CONFIG: AntiAnchoringConfig = {
-  enabled: false,
+  enabled: true,
   blindExploration: true,
   mctsPlanning: true,
   branches: 3,
