@@ -110,7 +110,7 @@ function parseInline(text: string): Segment[] {
 
 function renderSegments(segments: Segment[]): ReactNode[] {
   return segments.map((seg, idx) => (
-    <Text key={idx} bold={seg.bold} italic={seg.italic} underline={seg.underline} dimColor={seg.dimmed} color={seg.color ?? (seg.code ? 'cyan' : undefined)}>
+    <Text key={idx} bold={seg.bold} italic={seg.italic} underline={seg.underline} dimColor={seg.dimmed} color={seg.color ?? (seg.code ? getTheme().secondary : undefined)}>
       {seg.code ? ` ${seg.text} ` : seg.text}
     </Text>
   ))
@@ -387,15 +387,21 @@ function keywordsForLang(lang: string): LangConfig | null {
   return null
 }
 
-// Syntax token colors — muted pastels that layer well on dark backgrounds
+// Syntax token colors — pure monochrome gray ramp. Differentiation by
+// brightness + weight only, no hue, so code blocks stay calm against the
+// refined black/gray UI (keyword also rendered bold via highlightLine).
+//   Tier 1 (brightest, bold): keyword   — control flow, declarations
+//   Tier 2 (bright):          type, func
+//   Tier 3 (medium):          string, number
+//   Tier 4 (dim/dimmest):     punct, comment
 const SYN = {
-  keyword: '#c792ea',  // soft purple — control flow, declarations
-  string: '#c3e88d',   // muted green — string literals
-  number: '#f78c6c',   // warm orange — numeric literals
-  comment: '#546e7a',  // blue-gray — comments
-  type: '#ffcb6b',     // gold — capitalized identifiers (types/classes)
-  punct: '#89ddff',    // ice blue — operators, brackets, punctuation
-  func: '#82aaff',     // periwinkle — function calls (word followed by `(`)
+  keyword: '#d7dce3',  // brightest gray (bold) — control flow, declarations
+  type: '#b0b8c4',     // bright gray — capitalized identifiers (types/classes)
+  func: '#b0b8c4',     // bright gray — function calls (word followed by `(`)
+  string: '#9aa2b1',   // medium gray — string literals
+  number: '#9aa2b1',   // medium gray — numeric literals
+  punct: '#6e7681',    // dim gray — operators, brackets, punctuation
+  comment: '#6e7681',  // dimmest gray — comments
 }
 
 function highlightLine(line: string, keywords: Set<string> | null, caseInsensitive = false): Segment[] {
@@ -431,7 +437,7 @@ function highlightLine(line: string, keywords: Set<string> | null, caseInsensiti
     } else {
       const matchToken = caseInsensitive ? token.toLowerCase() : token
       if (keywords.has(matchToken)) {
-        segments.push({ text: token, color: SYN.keyword })
+        segments.push({ text: token, color: SYN.keyword, bold: true })
       } else if (/^\d[\d._]*$/.test(token)) {
         segments.push({ text: token, color: SYN.number })
       } else if (/^[A-Z][a-zA-Z0-9]*$/.test(token)) {

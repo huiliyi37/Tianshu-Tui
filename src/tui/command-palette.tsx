@@ -79,7 +79,7 @@ export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteP
     <Box flexDirection="column" paddingX={1} paddingY={0}>
       <Box>
         <Text color={theme.primary} bold>&gt; </Text>
-        <Text color={query ? '#e6edf3' : theme.dim}>{query || 'search commands...'}</Text>
+        <Text color={query ? theme.userColor : theme.dim}>{query || 'search commands...'}</Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {filtered.slice(0, 10).map((cmd, i) => {
@@ -87,7 +87,7 @@ export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteP
           return (
             <Box key={cmd.name}>
               <Text color={isSelected ? theme.primary : theme.dim}>{isSelected ? '>' : ' '} </Text>
-              <Text color={isSelected ? '#e6edf3' : theme.secondary} bold={isSelected}>{cmd.name}</Text>
+              <Text color={isSelected ? theme.primary : theme.secondary} bold={isSelected}>{cmd.name}</Text>
               {cmd.hotkey && <Text color={theme.dim}> [{cmd.hotkey}]</Text>}
               <Text color={theme.dim}> {cmd.description}</Text>
             </Box>

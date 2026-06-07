@@ -47,7 +47,7 @@ export function RewindList({ entries, onSelect, onCancel }: RewindListProps) {
           return (
             <Box key={entry.index}>
               <Text color={isSelected ? theme.primary : theme.dim}>{isSelected ? '>' : ' '} </Text>
-              <Text color={isSelected ? '#e6edf3' : theme.secondary} bold={isSelected}>
+              <Text color={isSelected ? theme.primary : theme.secondary} bold={isSelected}>
                 {preview.replace(/\n/g, ' ')}
               </Text>
             </Box>

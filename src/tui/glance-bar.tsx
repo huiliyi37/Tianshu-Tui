@@ -27,32 +27,11 @@ interface GlanceBarProps {
 }
 
 function getDomainColor(domainName: string | undefined, theme: RivetTheme): string {
+  // Polish pass: collapse all domains to the refined silver (theme.secondary)
+  // for a calm, single-tone identity marker on the black/gray UI. Per-domain
+  // distinct qi (seals/accents) is a separate, deferred task — not loud colors.
   if (!domainName) return theme.dim
-  switch (domainName) {
-    case '破军':
-    case 'pojun':
-      return theme.error
-    case '天府':
-    case 'tianfu':
-      return theme.warning
-    case '天梁':
-    case 'tianliang':
-      return theme.success
-    case '天权':
-    case 'tianquan':
-      return theme.secondary
-    case '天机':
-    case 'tianji':
-      return theme.primary
-    case '天璇':
-    case 'tianxuan':
-      return theme.primary
-    case '天枢':
-    case 'tianshu':
-      return theme.primary
-    default:
-      return theme.primary
-  }
+  return theme.secondary
 }
 
 

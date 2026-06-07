@@ -1453,9 +1453,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
             </Text>
             <Box marginTop={1}>
               <Text>
-                <Text backgroundColor={theme.success} color="black" bold>  y  </Text>
+                <Text bold color={theme.primary}>[y]</Text>
                 <Text color={theme.muted}> approve  </Text>
-                <Text backgroundColor={theme.error} color="black" bold>  n  </Text>
+                <Text bold color={theme.dim}>[n]</Text>
                 <Text color={theme.muted}> deny</Text>
               </Text>
             </Box>
