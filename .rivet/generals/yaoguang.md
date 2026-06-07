@@ -30,15 +30,16 @@
 > 格式：### [family-slug] | recurrenceCount: N | lastSeen: DATE
 > 下含 signature / instances / rootStance / 处置。
 
-### always-true-on-missing-field | recurrenceCount: 2 | lastSeen: 2026-06-07
+### always-true-on-missing-field | recurrenceCount: 4 | lastSeen: 2026-06-07
 
 **signature**：某字段缺失时，比较/匹配逻辑退化为恒真，吞掉本该跳过的分支。
 **instances**：
 - 2026-06-07 团队审查 round-1 ④：verification 关键词无词边界，散文"测试整个流程"被当成命令（`team-plan.ts:extractVerification`）。
 - 2026-06-07 团队审查 round-2 #1：天府风险无 taskId 时落到 `''.includes(taskId ?? '')` 空串永真，凭空造出幽灵冲突（`team-perspectives.ts`，修于 commit f364a02）。
 - 2026-06-07 胶囊系统：`parseCapsuleTag` 正则要求 `sealed="…"` 紧跟 `>`，多一个属性即整块静默丢弃——瑶光自封胶囊时亲历，差点让自己的胶囊不加载。
-**rootStance**：容错偏好 / 便利写法，遇缺字段咽下歧义而非大声失败。
-**处置**：补正确语义（缺字段时跳过而非恒真匹配；解析改逐属性提取容忍额外属性）。**不**加更多兜底。
+- 2026-06-07 优化审查 Issue 1：`checkedAt` 用 `val === undefined` 同时判越界与"元素本身是 undefined"，对 (T|undefined)[] 合法位置抛撒谎的越界错（`src/utils/guard.ts`，修于 commit 2ae5203，铺向 813 处前拦下）。
+**rootStance**：容错偏好 / 便利写法，用值哨兵检测结构条件，遇缺字段/边界咽下歧义而非大声失败。
+**处置**：补正确语义（缺字段时跳过而非恒真匹配；解析逐属性提取；越界用索引比较而非值哨兵）。**不**加更多兜底。
 
 ### stringify-eats-structure | recurrenceCount: 1 | lastSeen: 2026-06-07
 
