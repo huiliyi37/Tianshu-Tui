@@ -1,7 +1,8 @@
 import { readdir, lstat, realpath, stat } from 'node:fs/promises'
-import { join, relative } from 'path'
+import { join } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePathSafe } from './path-validate.js'
+import { relativePosix } from '../path-format.js'
 import { GitignoreFilter } from './gitignore.js'
 
 const EXCLUDE_DIRS = new Set([
@@ -93,7 +94,7 @@ async function walkDir(
       if (EXCLUDE_DIRS.has(name)) continue
       await walkDir(fullPath, results, root, filter, visited)
     } else if (s.isFile()) {
-      const rel = relative(root, fullPath)
+      const rel = relativePosix(root, fullPath)
       if (!filter || filter.test(rel)) {
         results.push(rel)
       }
@@ -160,7 +161,7 @@ Bad: glob(pattern="node_modules/**") (excluded by default)`,
     const matches = files
       .filter(f => !gitignore.isIgnored(params.cwd, join(searchRoot, f)))
       .sort()
-      .map((f) => relative(params.cwd, join(searchRoot, f)))
+      .map((f) => relativePosix(params.cwd, join(searchRoot, f)))
 
     return {
       content: matches.length > 0 ? matches.join('\n') : 'No files found matching pattern',

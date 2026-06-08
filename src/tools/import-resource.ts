@@ -1,9 +1,10 @@
 import { stat, lstat, symlink, mkdir, cp, readFile, rm, readdir, writeFile } from 'node:fs/promises'
-import { basename, join, resolve, relative, extname } from 'path'
+import { basename, join, resolve, extname } from 'path'
 import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
 import { expandHome } from '../platform.js'
+import { relativePosix } from '../path-format.js'
 
 const IMPORT_DIR = '.rivet/external'
 const PREVIEW_BYTES = 4000
@@ -72,7 +73,7 @@ async function buildResult(
   cwd: string,
   stats: { type: 'file' | 'directory'; size?: number; files?: number },
 ): Promise<{ content: string; uiContent: string }> {
-  const relPath = relative(cwd, localPath)
+  const relPath = relativePosix(cwd, localPath)
   let header = `Imported: ${source}\nLocal: ${relPath}\nType: ${stats.type}`
   if (stats.size !== undefined) header += `\nSize: ${(stats.size / 1024).toFixed(1)} KB`
   if (stats.files !== undefined) header += `\nFiles: ~${stats.files}`

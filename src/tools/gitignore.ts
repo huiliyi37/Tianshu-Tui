@@ -1,6 +1,7 @@
 import { existsSync } from 'fs'
 import { readFile } from 'node:fs/promises'
-import { resolve, join, relative } from 'path'
+import { resolve, join } from 'path'
+import { relativePosix } from '../path-format.js'
 
 const DEFAULT_IGNORE = [
   'node_modules', '.git', '.svn', '.hg',
@@ -40,7 +41,7 @@ export class GitignoreFilter {
 
   isIgnored(cwd: string, filePath: string): boolean {
     const absPath = resolve(cwd, filePath)
-    const relPath = relative(cwd, absPath)
+    const relPath = relativePosix(cwd, absPath)
 
     for (const pattern of this.patterns) {
       if (this.matchPattern(pattern, relPath)) return true

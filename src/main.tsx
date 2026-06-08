@@ -5,7 +5,7 @@ if (proxyUrl) {
   setGlobalDispatcher(new EnvHttpProxyAgent())
 }
 
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync, writeFileSync, readSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
@@ -766,7 +766,15 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
 function readPipedStdin(): string | undefined {
   if (process.stdin.isTTY) return undefined
   try {
-    return readFileSync('/dev/stdin', 'utf-8').trim()
+    const chunks: Buffer[] = []
+    const buffer = Buffer.alloc(8192)
+    while (true) {
+      const bytesRead = readSync(0, buffer, 0, buffer.length, null)
+      if (bytesRead === 0) break
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)))
+    }
+    const input = Buffer.concat(chunks).toString('utf-8').trim()
+    return input.length > 0 ? input : undefined
   } catch {
     return undefined
   }

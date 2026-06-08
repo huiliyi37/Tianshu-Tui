@@ -1,9 +1,10 @@
 import { spawn } from 'child_process'
 import { createReadStream } from 'fs'
 import { lstat, readdir, realpath } from 'fs/promises'
-import { join, relative } from 'path'
+import { join } from 'path'
 import { createInterface } from 'readline'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import { relativePosix } from '../path-format.js'
 import { truncateContent } from './truncation.js'
 import { GitignoreFilter } from './gitignore.js'
 import { validatePathSafe } from './path-validate.js'
@@ -295,7 +296,7 @@ async function nativeSearch(
       if (s.isDirectory()) {
         await walk(fullPath)
       } else if (s.isFile()) {
-        const relPath = relative(cwd, fullPath)
+        const relPath = relativePosix(cwd, fullPath)
         if (filter.isIgnored(cwd, fullPath)) continue
         if (globRegex && !globRegex.test(entry.name)) continue
 
@@ -310,7 +311,7 @@ async function nativeSearch(
 
   const s = await lstat(absPath).catch(() => null)
   if (s?.isFile()) {
-    const relPath = relative(cwd, absPath)
+    const relPath = relativePosix(cwd, absPath)
     const matched = await searchFile(absPath, regex, maxResults, contextLines)
     for (const line of matched) {
       results.push(`${relPath}:${line}`)
