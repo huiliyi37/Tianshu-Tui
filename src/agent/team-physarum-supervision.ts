@@ -304,10 +304,36 @@ function buildExplicitDependencyEdges(
 export interface BuildOptions {
   timestamp?: number
   apply?: boolean
-  /** Per-task actual changed files for explicit_dependency edges. */
+  /** Per-task actual changed files for explicit_dependency edges. Overrides telemetry-derived facts. */
   taskFiles?: TaskFileMap
-  /** Task-level dependsOn: key = task id, values = task ids this task depends on. */
+  /** Task-level dependsOn: key = task id, values = task ids this task depends on. Overrides telemetry-derived facts. */
   taskDependsOn?: Map<string, string[]>
+}
+
+function deriveTaskFilesFromEpisode(episode: TeamEpisode): TaskFileMap {
+  const taskFiles: TaskFileMap = new Map()
+  for (const fragment of episode.fragments) {
+    const observedByTask = fragment.telemetry.changedFiles.observedChangedFilesByTask ?? []
+    const reportedByTask = fragment.telemetry.changedFiles.reportedChangedFilesByTask ?? []
+    const reported = new Map(reportedByTask.map(entry => [entry.taskId, entry.files]))
+    const taskIds = new Set([...observedByTask.map(entry => entry.taskId), ...reportedByTask.map(entry => entry.taskId)])
+    for (const taskId of taskIds) {
+      const observed = observedByTask.find(entry => entry.taskId === taskId)?.files ?? []
+      const files = observed.length > 0 ? observed : (reported.get(taskId) ?? [])
+      if (files.length > 0) taskFiles.set(taskId, uniqueSorted(files))
+    }
+  }
+  return taskFiles
+}
+
+function deriveTaskDependsOnFromEpisode(episode: TeamEpisode): Map<string, string[]> {
+  const taskDependsOn = new Map<string, string[]>()
+  for (const fragment of episode.fragments) {
+    for (const entry of fragment.telemetry.planned.taskDependencies ?? []) {
+      if (entry.dependsOn.length > 0) taskDependsOn.set(entry.taskId, uniqueSorted(entry.dependsOn))
+    }
+  }
+  return taskDependsOn
 }
 
 /**
@@ -332,9 +358,11 @@ export function buildTeamPhysarumSupervision(
     allEdges = crossWave.edges
     allSkipped = allSkipped.concat(crossWave.skipped)
 
-    // explicit_dependency edges (only when task-level info is available)
-    if (options.taskFiles && options.taskDependsOn && options.taskDependsOn.size > 0) {
-      const depEdges = buildExplicitDependencyEdges(episode, options.taskFiles, options.taskDependsOn)
+    // explicit_dependency edges: prefer caller-supplied facts, otherwise derive from TeamWaveTelemetry.
+    const taskFiles = options.taskFiles ?? deriveTaskFilesFromEpisode(episode)
+    const taskDependsOn = options.taskDependsOn ?? deriveTaskDependsOnFromEpisode(episode)
+    if (taskFiles.size > 0 && taskDependsOn.size > 0) {
+      const depEdges = buildExplicitDependencyEdges(episode, taskFiles, taskDependsOn)
       allEdges = allEdges.concat(depEdges.edges)
       allSkipped = allSkipped.concat(depEdges.skipped)
     }

@@ -21,6 +21,8 @@ export interface TeamWaveTelemetry {
     profiles: string[]
     authorities: string[]
     files: string[]
+    /** Per-task dependency facts from the parsed team plan. Append-only telemetry; consumers may ignore. */
+    taskDependencies?: Array<{ taskId: string; dependsOn: string[] }>
   }
   outcome: {
     dispatched: number
@@ -31,6 +33,10 @@ export interface TeamWaveTelemetry {
   changedFiles: {
     reportedChangedFiles?: string[]
     observedChangedFiles?: string[]
+    /** Worker-reported changed files by team task id, derived from per-worker results. */
+    reportedChangedFilesByTask?: Array<{ taskId: string; files: string[] }>
+    /** Diff-artifact observed changed files by team task id, derived from per-worker diff artifacts. */
+    observedChangedFilesByTask?: Array<{ taskId: string; files: string[] }>
     changedFilesSource: ChangedFilesSource
   }
   workerModels?: Array<{ workOrderId: string; model: string }>
@@ -83,12 +89,58 @@ export function extractReportedChangedFiles(run: CoordinatorRun): string[] {
   return uniqueSorted(run.results.flatMap(result => result.changedFiles))
 }
 
+function taskIdFromWorkOrderId(workOrderId: string): string | null {
+  if (workOrderId.startsWith('team:')) return workOrderId.slice('team:'.length)
+  if (workOrderId.startsWith('task:')) return workOrderId.slice('task:'.length)
+  return null
+}
+
+function extractObservedChangedFilesFromResult(result: CoordinatorRun['results'][number]): string[] {
+  const files = new Set<string>()
+  for (const artifact of result.artifacts) {
+    if (artifact.kind !== 'diff') continue
+    for (const match of artifact.content.matchAll(/^\+\+\+ b\/(.+)$/gm)) {
+      if (match[1]) files.add(match[1])
+    }
+  }
+  return [...files].sort()
+}
+
+function buildChangedFilesByTask(
+  run: CoordinatorRun,
+  taskIds: string[],
+): {
+  reportedChangedFilesByTask: Array<{ taskId: string; files: string[] }>
+  observedChangedFilesByTask: Array<{ taskId: string; files: string[] }>
+} {
+  const taskSet = new Set(taskIds)
+  const reported = new Map<string, string[]>()
+  const observed = new Map<string, string[]>()
+
+  for (const result of run.results) {
+    const taskId = taskIdFromWorkOrderId(result.workOrderId)
+    if (!taskId || !taskSet.has(taskId)) continue
+
+    const reportedFiles = uniqueSorted(result.changedFiles)
+    if (reportedFiles.length > 0) reported.set(taskId, reportedFiles)
+
+    const observedFiles = extractObservedChangedFilesFromResult(result)
+    if (observedFiles.length > 0) observed.set(taskId, observedFiles)
+  }
+
+  return {
+    reportedChangedFilesByTask: [...reported.entries()].map(([taskId, files]) => ({ taskId, files })).sort((a, b) => a.taskId.localeCompare(b.taskId)),
+    observedChangedFilesByTask: [...observed.entries()].map(([taskId, files]) => ({ taskId, files })).sort((a, b) => a.taskId.localeCompare(b.taskId)),
+  }
+}
+
 export function buildTeamWaveTelemetry(input: BuildTeamWaveTelemetryInput): TeamWaveTelemetry {
   const tasks = input.wave.taskIds
     .map(id => input.taskMap.get(id))
     .filter((task): task is TeamTask => Boolean(task))
   const reportedChangedFiles = extractReportedChangedFiles(input.run)
   const observedChangedFiles = extractObservedChangedFilesFromArtifacts(input.run)
+  const { reportedChangedFilesByTask, observedChangedFilesByTask } = buildChangedFilesByTask(input.run, input.wave.taskIds)
   const changedFilesSource: ChangedFilesSource = observedChangedFiles.length > 0
     ? 'diff_artifact'
     : reportedChangedFiles.length > 0
@@ -116,6 +168,9 @@ export function buildTeamWaveTelemetry(input: BuildTeamWaveTelemetryInput): Team
       profiles: uniqueSorted(tasks.map(task => task.profile)),
       authorities: uniqueSorted(tasks.map(task => taskAuthority(task))),
       files: uniqueSorted(tasks.flatMap(task => task.touchSet.length > 0 ? task.touchSet : task.files)),
+      taskDependencies: tasks
+        .filter(task => task.dependsOn.length > 0)
+        .map(task => ({ taskId: task.id, dependsOn: uniqueSorted(task.dependsOn) })),
     },
     outcome: {
       dispatched: input.dispatched ?? input.run.results.length,
@@ -129,6 +184,8 @@ export function buildTeamWaveTelemetry(input: BuildTeamWaveTelemetryInput): Team
     changedFiles: {
       ...(reportedChangedFiles.length > 0 ? { reportedChangedFiles } : {}),
       ...(observedChangedFiles.length > 0 ? { observedChangedFiles } : {}),
+      ...(reportedChangedFilesByTask.length > 0 ? { reportedChangedFilesByTask } : {}),
+      ...(observedChangedFilesByTask.length > 0 ? { observedChangedFilesByTask } : {}),
       changedFilesSource,
     },
     ...(input.run.workerModels && input.run.workerModels.length > 0

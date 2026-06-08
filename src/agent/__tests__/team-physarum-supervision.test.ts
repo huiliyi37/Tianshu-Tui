@@ -132,6 +132,62 @@ describe('buildTeamPhysarumSupervision', () => {
 
   // ── explicit_dependency ──
 
+  it('derives explicit_dependency edges from TeamWaveTelemetry task facts', () => {
+    const wave0 = fakeWaveTelemetry({
+      fromWave: 0,
+      waveId: 'w0',
+      waveCount: 2,
+      planned: {
+        taskIds: ['T1'],
+        files: ['src/a.ts'],
+        profiles: ['scout'],
+        authorities: [],
+        risk: 'low',
+      },
+      outcome: {
+        dispatched: 1,
+        statuses: [{ workOrderId: 'team:T1', status: 'completed', evidenceStatus: 'passed' }],
+        verificationPassed: true,
+      },
+      changedFiles: {
+        observedChangedFiles: ['src/a.ts'],
+        observedChangedFilesByTask: [{ taskId: 'T1', files: ['src/a.ts'] }],
+        changedFilesSource: 'diff_artifact',
+      },
+    })
+    const wave1 = fakeWaveTelemetry({
+      fromWave: 1,
+      waveId: 'w1',
+      waveCount: 2,
+      planned: {
+        taskIds: ['T2'],
+        files: ['src/b.ts'],
+        profiles: ['patcher'],
+        authorities: [],
+        risk: 'low',
+        taskDependencies: [{ taskId: 'T2', dependsOn: ['T1'] }],
+      },
+      outcome: {
+        dispatched: 1,
+        statuses: [{ workOrderId: 'team:T2', status: 'completed', evidenceStatus: 'passed' }],
+        verificationPassed: true,
+      },
+      changedFiles: {
+        observedChangedFiles: ['src/b.ts'],
+        observedChangedFilesByTask: [{ taskId: 'T2', files: ['src/b.ts'] }],
+        changedFilesSource: 'diff_artifact',
+      },
+    })
+    const episode = buildTeamEpisode([wave0, wave1])
+
+    const event = buildTeamPhysarumSupervision(episode)
+    const depEdges = event.edges.filter(e => e.relation === 'explicit_dependency')
+
+    assert.ok(depEdges.length > 0, 'should produce explicit_dependency edges from telemetry facts')
+    assert.deepEqual(depEdges[0]!.sourceTaskIds, ['T1'])
+    assert.deepEqual(depEdges[0]!.targetTaskIds, ['T2'])
+  })
+
   it('generates explicit_dependency edges from task dependsOn', () => {
     const wave0 = fakeWaveTelemetry({
       fromWave: 0,

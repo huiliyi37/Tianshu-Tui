@@ -177,6 +177,57 @@ describe('team wave telemetry', () => {
     }])
   })
 
+  it('records per-task dependencies and per-task changed files for supervision consumers', () => {
+    const task1 = teamTask('T1', ['src/a.ts'])
+    const task2: TeamTask = { ...teamTask('T2', ['src/b.ts']), dependsOn: ['T1'] }
+    const event = buildTeamWaveTelemetry({
+      sessionId: 's1',
+      objective: 'objective',
+      mode: 'standard',
+      fromWave: 1,
+      wave: wave('W2', ['T1', 'T2']),
+      waves: [wave('W1', ['T1']), wave('W2', ['T2'])],
+      taskMap: new Map([[task1.id, task1], [task2.id, task2]]),
+      run: run({
+        results: [
+          {
+            workOrderId: 'team:T1',
+            status: 'passed',
+            summary: 'done T1',
+            findings: [],
+            artifacts: [{ kind: 'diff', title: 'Patch', content: 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@\n' }],
+            changedFiles: ['src/a-reported.ts'],
+            risks: [],
+            nextActions: [],
+            evidenceStatus: 'verified',
+          },
+          {
+            workOrderId: 'team:T2',
+            status: 'passed',
+            summary: 'done T2',
+            findings: [],
+            artifacts: [{ kind: 'diff', title: 'Patch', content: 'diff --git a/src/b.ts b/src/b.ts\n--- a/src/b.ts\n+++ b/src/b.ts\n@@\n' }],
+            changedFiles: ['src/b-reported.ts'],
+            risks: [],
+            nextActions: [],
+            evidenceStatus: 'verified',
+          },
+        ],
+      }),
+      timestamp: 10,
+    })
+
+    assert.deepEqual(event.planned.taskDependencies, [{ taskId: 'T2', dependsOn: ['T1'] }])
+    assert.deepEqual(event.changedFiles.reportedChangedFilesByTask, [
+      { taskId: 'T1', files: ['src/a-reported.ts'] },
+      { taskId: 'T2', files: ['src/b-reported.ts'] },
+    ])
+    assert.deepEqual(event.changedFiles.observedChangedFilesByTask, [
+      { taskId: 'T1', files: ['src/a.ts'] },
+      { taskId: 'T2', files: ['src/b.ts'] },
+    ])
+  })
+
   it('persist is no-op safe when store is missing or throws', () => {
     const task = teamTask('T1', [])
     const event = buildTeamWaveTelemetry({
