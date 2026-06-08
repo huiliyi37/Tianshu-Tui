@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTeamOrchestrateTool } from '../team-orchestrate.js'
 import type { CoordinatorRun, DelegationRequest } from '../../agent/coordinator.js'
+import { decodeTeamPanelModel } from '../../tui/team-panel-model.js'
 
 function stubRun(packet = 'stub'): CoordinatorRun {
   return { status: 'completed', results: [], packet }
@@ -26,6 +27,10 @@ test('team_orchestrate dispatches a standard plan first wave', async () => {
   assert.equal(result.isError, false)
   assert.equal(captured.length, 2)
   assert.match(result.content, /2 dispatched/)
+  const panel = decodeTeamPanelModel(result.uiContent ?? '')
+  assert.ok(panel)
+  assert.equal(panel.dispatched, 2)
+  assert.equal(panel.tasks.length, 2)
 })
 
 test('team_orchestrate forwards telemetry sink, reward closure sink, and session id', async () => {
@@ -55,6 +60,36 @@ test('team_orchestrate forwards telemetry sink, reward closure sink, and session
   assert.equal((rewardClosures[0] as any).sessionId, 'session-tool')
   assert.equal((telemetry[0] as any).mode, 'standard')
   assert.equal((telemetry[0] as any).fromWave, 0)
+})
+
+test('team_orchestrate streams worker progress through onOutput', async () => {
+  const progress: string[] = []
+  const tool = createTeamOrchestrateTool({
+    delegateBatch: async (_requests, _policy, _abortSignal, onProgress) => {
+      onProgress?.(1, 2)
+      onProgress?.(2, 2)
+      return stubRun('progress')
+    },
+  })
+  const md = [
+    '### T1: edit foo',
+    'Modify `src/agent/foo.ts`',
+    '### T2: edit bar',
+    'Modify `src/agent/bar.ts`',
+  ].join('\n')
+
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'execute with progress', planMarkdown: md },
+    cwd: process.cwd(),
+    toolUseId: 'tu-progress',
+    onOutput: chunk => { progress.push(chunk) },
+  })
+
+  assert.equal(result.isError, false)
+  assert.deepEqual(progress, [
+    '✦ team progress: 1/2 workers done\n',
+    '✦ team progress: 2/2 workers done\n',
+  ])
 })
 
 test('team_orchestrate blocks a planPath outside the project', async () => {

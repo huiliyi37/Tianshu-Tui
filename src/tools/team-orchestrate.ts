@@ -6,6 +6,7 @@ import { isCrossModule, isFixContext, type ChangeSet } from '../agent/review-dis
 import { routeReviewWorkflow } from '../agent/review-router.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
 import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
+import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
@@ -103,7 +104,11 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
           { mode, objective, planMarkdown: markdown, maxParallel, fromWave, parentTurnId: params.toolUseId, abortSignal: params.abortSignal },
           {
             delegateBatch: (requests, policy, abortSignal, onProgress) =>
-              coordinator.delegateBatch(requests, policy, abortSignal, onProgress),
+              coordinator.delegateBatch(requests, policy, abortSignal, (completed, total) => {
+                onProgress?.(completed, total)
+                const done = Math.max(0, Math.min(completed, total))
+                params.onOutput?.(`✦ team progress: ${done}/${total} workers done\n`)
+              }),
             recordTeamWaveTelemetry: event => {
               telemetryEvent = event
               coordinator.recordTeamWaveTelemetry?.(event)
@@ -162,9 +167,10 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
         }
       }
 
+      const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict)
       return {
         content: formatTeamSummary(summary, effectiveFromWave) + reviewNote,
-        uiContent: `team ${mode}: ${summary.dispatched} dispatched / ${summary.blocked.length} blocked`,
+        uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
       }
     },

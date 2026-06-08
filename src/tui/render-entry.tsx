@@ -10,6 +10,8 @@ import { ThinkingMessage } from './thinking-message.js'
 import { SystemMessage } from './system-message.js'
 import { StreamOutput } from './stream.js'
 import { QuestionCard } from './question-card.js'
+import { decodeTeamPanelModel } from './team-panel-model.js'
+import { TeamPanel } from './team-panel.js'
 
 const TurnSummary = memo(function TurnSummary({ content }: { content: string }) {
   const theme = getTheme()
@@ -32,6 +34,10 @@ const RENDER_MAP: Record<string, EntryRenderer> = {
   tool: (e, verbose) => {
     if (e.toolName === 'ask_user_question') {
       return <QuestionCard key={e.id} question={e.content} />
+    }
+    if (e.toolName === 'team_orchestrate') {
+      const model = decodeTeamPanelModel(e.content)
+      if (model) return <TeamPanel key={e.id} model={model} />
     }
     return <ToolCard key={e.id} name={e.toolName ?? ''} result={e.content} isError={e.isError} verbose={verbose} rawPath={e.rawPath} depth={e.depth} />
   },

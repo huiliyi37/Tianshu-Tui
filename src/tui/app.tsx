@@ -49,6 +49,8 @@ import { createGlanceBus } from './surface/glance-bus.js'
 import { glanceOnToolStart, glanceOnToolResult } from './surface/tool-domain.js'
 import { GlanceBar } from './glance-bar.js'
 import { TaskListBar } from './task-list-bar.js'
+import { decodeTeamPanelModel } from './team-panel-model.js'
+import { TeamPanel } from './team-panel.js'
 import { appendStreamWindow } from './stream-window.js'
 import { capLiveTail } from './live-tail-cap.js'
 import { createRingBuffer, type RingBuffer } from './ring-buffer.js'
@@ -1408,11 +1410,14 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           </Box>
         )}
         {/* liveTools elapsedMs relies on the 1s activity tick (activityIntervalRef) for re-render — see app.tsx:398 */}
-        {liveTools.map(log => (
-          log.toolName === 'ask_user_question'
-            ? <QuestionCard key={log.id} question={log.content} />
-            : <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} />
-        ))}
+        {liveTools.map(log => {
+          if (log.toolName === 'ask_user_question') return <QuestionCard key={log.id} question={log.content} />
+          if (log.toolName === 'team_orchestrate') {
+            const model = decodeTeamPanelModel(log.content)
+            if (model) return <TeamPanel key={log.id} model={model} />
+          }
+          return <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} />
+        })}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && (!!streamingThinking || isThinkingActive)} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
         {(streamingText || isStreaming) && (
           <StreamOutput text={displayStreamingText} isStreaming={isStreaming} />
