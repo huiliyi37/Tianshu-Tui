@@ -33,6 +33,16 @@ export interface TeamPhysarumSupervisionStore {
   saveBanditState(kind: string, json: string): void
 }
 
+/**
+ * Per-task file mapping for explicit_dependency edge construction.
+ *
+ * Key = task id (matching TeamWaveTelemetry.planned.taskIds).
+ * Values = actual changed files for that specific task.
+ *
+ * When not provided, only cross_wave edges are built.
+ */
+export type TaskFileMap = Map<string, string[]>
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function shortHash(input: string): string {
@@ -55,6 +65,7 @@ function actualFilesForFragment(fragment: TeamEpisodeFragment): { files: string[
 
 interface SafetyResult {
   safeToApply: boolean
+  shadowOnly: boolean
   skipped: Array<{ reason: string; detail: string }>
 }
 
@@ -63,7 +74,7 @@ function checkSafety(episode: TeamEpisode): SafetyResult {
 
   if (!episode.complete) {
     skipped.push({ reason: 'episode_incomplete', detail: `episode ${episode.episodeKey} is not complete` })
-    return { safeToApply: false, skipped }
+    return { safeToApply: false, shadowOnly: true, skipped }
   }
 
   const failedOrBlocked = episode.outcome.statuses.filter(
@@ -74,7 +85,7 @@ function checkSafety(episode: TeamEpisode): SafetyResult {
       reason: 'failed_or_blocked_status',
       detail: `${failedOrBlocked.length} status(es) are failed/blocked/failed-evidence`,
     })
-    return { safeToApply: false, skipped }
+    return { safeToApply: false, shadowOnly: true, skipped }
   }
 
   const scopeHealth = buildTeamEpisodeScopeHealth(episode)
@@ -83,29 +94,40 @@ function checkSafety(episode: TeamEpisode): SafetyResult {
       reason: 'high_scope_leak',
       detail: `scope severity ${scopeHealth.severity}, leaked ${scopeHealth.leakedFiles.length} files`,
     })
-    return { safeToApply: false, skipped }
+    return { safeToApply: false, shadowOnly: true, skipped }
   }
 
   // Actual files must be non-empty for at least one fragment
   const hasActualFiles = episode.fragments.some(f => actualFilesForFragment(f).files.length > 0)
   if (!hasActualFiles) {
     skipped.push({ reason: 'no_actual_files', detail: 'no fragment has observed or reported changed files' })
-    return { safeToApply: false, skipped }
+    return { safeToApply: false, shadowOnly: true, skipped }
   }
 
-  return { safeToApply: true, skipped }
+  // Spec §4.1: reported-only fallback with non-healthy/low scope → shadow-only
+  const anyReportedOnly = episode.fragments.some(f => actualFilesForFragment(f).isReportedFallback)
+  if (anyReportedOnly && scopeHealth.severity !== 'healthy' && scopeHealth.severity !== 'low') {
+    skipped.push({
+      reason: 'reported_fallback_non_healthy',
+      detail: `scope severity ${scopeHealth.severity} with reported-only changed files — shadow-only per §4.1`,
+    })
+    return { safeToApply: false, shadowOnly: true, skipped }
+  }
+
+  return { safeToApply: true, shadowOnly: false, skipped }
 }
 
 // ── Edge construction ────────────────────────────────────────────────────────
 
-function buildCrossWaveEdges(episode: TeamEpisode, scopeSeverity: TeamScopeHealthSeverity): {
+interface EdgeBuildResult {
   edges: TeamPhysarumSupervisionEdge[]
   skipped: Array<{ reason: string; detail: string }>
-} {
+}
+
+function buildCrossWaveEdges(episode: TeamEpisode): EdgeBuildResult {
   const edges: TeamPhysarumSupervisionEdge[] = []
   const skipped: Array<{ reason: string; detail: string }> = []
 
-  // Sort fragments by fromWave for ordering
   const ordered = [...episode.fragments].sort((a, b) =>
     a.telemetry.fromWave - b.telemetry.fromWave
   )
@@ -114,7 +136,6 @@ function buildCrossWaveEdges(episode: TeamEpisode, scopeSeverity: TeamScopeHealt
     const prev = ordered[i]!
     const next = ordered[i + 1]!
 
-    // Only cross-wave if fromWave differs
     if (prev.telemetry.fromWave === next.telemetry.fromWave) {
       skipped.push({
         reason: 'parallel_wave_no_order',
@@ -126,6 +147,20 @@ function buildCrossWaveEdges(episode: TeamEpisode, scopeSeverity: TeamScopeHealt
     const prevFiles = actualFilesForFragment(prev)
     const nextFiles = actualFilesForFragment(next)
 
+    // Record reported-fallback reason for telemetry (§4.1)
+    if (prevFiles.isReportedFallback) {
+      skipped.push({
+        reason: 'reported_files_fallback',
+        detail: `wave ${prev.telemetry.fromWave}: using worker-reported files (no observed diff)`,
+      })
+    }
+    if (nextFiles.isReportedFallback) {
+      skipped.push({
+        reason: 'reported_files_fallback',
+        detail: `wave ${next.telemetry.fromWave}: using worker-reported files (no observed diff)`,
+      })
+    }
+
     if (prevFiles.files.length === 0 || nextFiles.files.length === 0) {
       skipped.push({
         reason: 'empty_actual_files',
@@ -134,7 +169,6 @@ function buildCrossWaveEdges(episode: TeamEpisode, scopeSeverity: TeamScopeHealt
       continue
     }
 
-    // Only produce edges for indexable files
     const fromFiles = prevFiles.files.filter(isIndexablePhysarumFile)
     const toFiles = nextFiles.files.filter(isIndexablePhysarumFile)
     if (fromFiles.length === 0 || toFiles.length === 0) {
@@ -164,7 +198,117 @@ function buildCrossWaveEdges(episode: TeamEpisode, scopeSeverity: TeamScopeHealt
   return { edges, skipped }
 }
 
+/**
+ * Build explicit_dependency edges from task-level dependsOn relationships.
+ *
+ * When a task in a later wave depends on a task in an earlier wave,
+ * we connect their actual changed files with direction.
+ *
+ * Requires task→files mapping and task-level dependsOn info.
+ */
+function buildExplicitDependencyEdges(
+  episode: TeamEpisode,
+  taskFiles: TaskFileMap,
+  taskDependsOn: Map<string, string[]>,
+): EdgeBuildResult {
+  const edges: TeamPhysarumSupervisionEdge[] = []
+  const skipped: Array<{ reason: string; detail: string }> = []
+
+  // Build task→wave lookup
+  const taskWave = new Map<string, number>()
+  for (const fragment of episode.fragments) {
+    for (const taskId of fragment.telemetry.planned.taskIds) {
+      taskWave.set(taskId, fragment.telemetry.fromWave)
+    }
+  }
+
+  // Build completed task set
+  const completedTasks = new Set<string>()
+  for (const fragment of episode.fragments) {
+    for (const status of fragment.telemetry.outcome.statuses) {
+      if (status.status === 'completed' && status.evidenceStatus === 'passed') {
+        const taskId = status.workOrderId.startsWith('task:')
+          ? status.workOrderId.slice(5)
+          : status.workOrderId
+        completedTasks.add(taskId)
+      }
+    }
+    if (fragment.telemetry.outcome.verificationPassed) {
+      for (const taskId of fragment.telemetry.planned.taskIds) {
+        completedTasks.add(taskId)
+      }
+    }
+  }
+
+  for (const [taskId, deps] of taskDependsOn) {
+    const taskWaveId = taskWave.get(taskId)
+    const taskActualFiles = uniqueSorted(taskFiles.get(taskId) ?? [])
+    // NB: wave index 0 is falsy — use === undefined, not !taskWaveId
+    if (taskWaveId === undefined || taskActualFiles.length === 0) continue
+
+    for (const depId of deps) {
+      const depWaveId = taskWave.get(depId)
+      const depActualFiles = uniqueSorted(taskFiles.get(depId) ?? [])
+      if (depWaveId === undefined || depActualFiles.length === 0) continue
+
+      // Both tasks must be completed
+      if (!completedTasks.has(taskId) || !completedTasks.has(depId)) {
+        skipped.push({
+          reason: 'dependency_task_not_completed',
+          detail: `${depId}→${taskId}: one or both tasks not completed`,
+        })
+        continue
+      }
+
+      // Only cross-wave dependencies: dep must be in an earlier wave
+      if (depWaveId >= taskWaveId) {
+        skipped.push({
+          reason: 'dependency_not_cross_wave',
+          detail: `${depId}→${taskId}: dependency is within same or later wave`,
+        })
+        continue
+      }
+
+      const fromFiles = depActualFiles.filter(isIndexablePhysarumFile)
+      const toFiles = taskActualFiles.filter(isIndexablePhysarumFile)
+      if (fromFiles.length === 0 || toFiles.length === 0) {
+        skipped.push({
+          reason: 'dependency_no_indexable_files',
+          detail: `${depId}→${taskId}: all files filtered by isIndexablePhysarumFile`,
+        })
+        continue
+      }
+
+      for (const fromFile of fromFiles) {
+        for (const toFile of toFiles) {
+          edges.push({
+            fromFile,
+            toFile,
+            relation: 'explicit_dependency',
+            fromWaveId: String(depWaveId),
+            toWaveId: String(taskWaveId),
+            sourceTaskIds: [depId],
+            targetTaskIds: [taskId],
+            dtTurns: Math.max(1, taskWaveId - depWaveId),
+          })
+        }
+      }
+    }
+  }
+
+  return { edges, skipped }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
+
+export interface BuildOptions {
+  timestamp?: number
+  apply?: boolean
+  /** Per-task actual changed files for explicit_dependency edges. */
+  taskFiles?: TaskFileMap
+  /** Task-level dependsOn: key = task id, values = task ids this task depends on. */
+  taskDependsOn?: Map<string, string[]>
+}
 
 /**
  * Build physarum supervision edges from a completed TeamEpisode.
@@ -175,7 +319,7 @@ function buildCrossWaveEdges(episode: TeamEpisode, scopeSeverity: TeamScopeHealt
  */
 export function buildTeamPhysarumSupervision(
   episode: TeamEpisode,
-  options: { timestamp?: number; apply?: boolean } = {},
+  options: BuildOptions = {},
 ): TeamPhysarumSupervisionEvent {
   const scopeHealth = buildTeamEpisodeScopeHealth(episode)
   const safety = checkSafety(episode)
@@ -184,9 +328,16 @@ export function buildTeamPhysarumSupervision(
   let allSkipped = [...safety.skipped]
 
   if (safety.safeToApply) {
-    const crossWave = buildCrossWaveEdges(episode, scopeHealth.severity)
+    const crossWave = buildCrossWaveEdges(episode)
     allEdges = crossWave.edges
     allSkipped = allSkipped.concat(crossWave.skipped)
+
+    // explicit_dependency edges (only when task-level info is available)
+    if (options.taskFiles && options.taskDependsOn && options.taskDependsOn.size > 0) {
+      const depEdges = buildExplicitDependencyEdges(episode, options.taskFiles, options.taskDependsOn)
+      allEdges = allEdges.concat(depEdges.edges)
+      allSkipped = allSkipped.concat(depEdges.skipped)
+    }
   }
 
   return {
@@ -206,15 +357,15 @@ export function buildTeamPhysarumSupervision(
 /**
  * Apply supervision edges into the physarum engine.
  *
- * Call order: recordFlow before recordSequentialEdit (per spec).
- * Only safeToApply events should be passed here.
+ * Guards: event must be marked applied AND safeToApply AND have edges.
+ * Call order: recordFlow before recordSequentialEdit (per spec §2.3).
  */
 export function applyTeamPhysarumSupervision(
   engine: { recordFlow(fileA: string, fileB: string, turn: number): void; recordSequentialEdit(first: string, second: string, dtTurns: number): void },
   event: TeamPhysarumSupervisionEvent,
   startTurn = 1,
 ): void {
-  if (!event.safeToApply || event.edges.length === 0) return
+  if (!event.applied || !event.safeToApply || event.edges.length === 0) return
 
   for (const edge of event.edges) {
     // recordFlow first, then recordSequentialEdit (spec §2.3)
