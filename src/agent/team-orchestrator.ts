@@ -105,6 +105,7 @@ export function teamTasksToDelegationRequests(tasks: TeamTaskDraft[], parentTurn
       scope: { files: task.files },
       dependencies: deps,
       authority: taskAuthority(task),
+      riskTier: 'riskTier' in task ? (task as TeamTask).riskTier : undefined,
     }
   })
 }
@@ -129,6 +130,7 @@ function waveToRequests(wave: TeamWave, taskMap: Map<string, TeamTask>, parentTu
         scope: { files: task.files },
         dependencies: deps,
         authority: taskAuthority(task),
+        riskTier: 'riskTier' in task ? (task as TeamTask).riskTier : undefined,
       }
       return req
     })

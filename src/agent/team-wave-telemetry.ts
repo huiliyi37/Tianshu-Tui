@@ -34,6 +34,7 @@ export interface TeamWaveTelemetry {
     changedFilesSource: ChangedFilesSource
   }
   workerModels?: Array<{ workOrderId: string; model: string }>
+  workerModelTierShadows?: Array<{ workOrderId: string; recommendedTier: string; actualTier: string; matched: boolean; reason: string }>
 }
 
 export interface TeamWaveTelemetryStore {
@@ -132,6 +133,17 @@ export function buildTeamWaveTelemetry(input: BuildTeamWaveTelemetryInput): Team
     },
     ...(input.run.workerModels && input.run.workerModels.length > 0
       ? { workerModels: input.run.workerModels.map(model => ({ ...model })) }
+      : {}),
+    ...(input.run.modelTierShadows && input.run.modelTierShadows.length > 0
+      ? {
+          workerModelTierShadows: input.run.modelTierShadows.map(event => ({
+            workOrderId: event.workOrderId,
+            recommendedTier: event.recommendedTier,
+            actualTier: event.actualTier,
+            matched: event.matched,
+            reason: event.reason,
+          })),
+        }
       : {}),
   }
 }

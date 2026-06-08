@@ -129,6 +129,19 @@ describe('team wave telemetry', () => {
       taskMap: new Map([[task.id, task]]),
       run: run({
         workerModels: [{ workOrderId: 'team:T1', model: 'pro' }],
+        modelTierShadows: [{
+          schemaVersion: 1,
+          sessionId: 's1',
+          workOrderId: 'team:T1',
+          profile: 'patcher',
+          kind: 'patch_proposal',
+          recommendedTier: 'cheap',
+          actualModel: 'pro',
+          actualTier: 'strong',
+          matched: false,
+          reason: 'low-risk patcher observed as cheap',
+          timestamp: 9,
+        }],
         results: [{
           workOrderId: 'team:T1',
           status: 'passed',
@@ -155,6 +168,13 @@ describe('team wave telemetry', () => {
     assert.deepEqual(event.outcome.statuses, [{ workOrderId: 'team:T1', status: 'passed', evidenceStatus: 'verified' }])
     assert.equal(event.outcome.verificationPassed, true)
     assert.deepEqual(event.workerModels, [{ workOrderId: 'team:T1', model: 'pro' }])
+    assert.deepEqual(event.workerModelTierShadows, [{
+      workOrderId: 'team:T1',
+      recommendedTier: 'cheap',
+      actualTier: 'strong',
+      matched: false,
+      reason: 'low-risk patcher observed as cheap',
+    }])
   })
 
   it('persist is no-op safe when store is missing or throws', () => {

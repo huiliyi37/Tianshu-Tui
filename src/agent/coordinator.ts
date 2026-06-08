@@ -28,6 +28,8 @@ import { CollaborationProtocol, type CollaborationConfig } from './collaboration
 import type { LockIntent } from './semantic-lock.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import { precipitateDomainLessons } from './domain-lesson-precipitate.js'
+import { inferModelTierFromCard, recommendModelTier, type ModelRiskTier } from './model-tier-policy.js'
+import { buildModelTierShadowEvent, persistModelTierShadow, type ModelTierShadowEvent } from './model-tier-shadow.js'
 
 export interface DelegationRequest {
   parentTurnId: string
@@ -46,6 +48,8 @@ export interface DelegationRequest {
    *  and allowedTools are intersected with the domain's toolWhitelist.
    *  Custom domains are loaded at startup, so this must remain an open string. */
   authority?: string
+  /** Team planner risk tier for shadow-only model tier recommendation. */
+  riskTier?: ModelRiskTier
 }
 
 export interface CoordinatorRun {
@@ -54,6 +58,8 @@ export interface CoordinatorRun {
   selectedModel?: string
   /** Batch-only metadata: selected worker model per work order. Telemetry only; never affects dispatch. */
   workerModels?: Array<{ workOrderId: string; model: string }>
+  /** Append-only tier recommendation telemetry; shadow-only and never affects dispatch. */
+  modelTierShadows?: ModelTierShadowEvent[]
   results: WorkerResult[]
   packet: string
   aggregationPolicy?: AggregationPolicy
@@ -97,6 +103,8 @@ export interface DelegationCoordinatorConfig {
   /** V3 Component B: domain knowledge store for precipitate/recall lifecycle.
    *  When provided, coordinator auto-precipitates lessons from worker results. */
   domainKnowledgeStore?: DomainKnowledgeStore
+  /** Optional append-only store for P3 model tier shadow telemetry. */
+  modelTierShadowStore?: import('./model-tier-shadow.js').ModelTierShadowStore | null
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -159,6 +167,28 @@ export class DelegationCoordinator {
     return recommendModelForTask(task, this.config.modelCards)
   }
 
+  private buildTierShadow(order: WorkOrder, selected: ModelCapabilityCard): ModelTierShadowEvent {
+    const recommendation = recommendModelTier({
+      authority: order.authority,
+      profile: order.profile,
+      kind: order.kind,
+      riskTier: order.riskTier,
+      objective: order.objective,
+      consecutiveFailures: this.state.getSummary().failed,
+    })
+    return buildModelTierShadowEvent({
+      sessionId: this.config.sessionId ?? 'unknown',
+      workOrderId: order.id,
+      authority: order.authority,
+      profile: order.profile,
+      kind: order.kind,
+      recommendedTier: recommendation.tier,
+      actualModel: selected.model,
+      actualTier: inferModelTierFromCard(selected),
+      reason: recommendation.reason,
+    })
+  }
+
   async delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun> {
     // Per-call abort signal override — allows the tool pipeline to propagate
     // its timeout signal to the coordinator without mutating config.
@@ -191,6 +221,7 @@ export class DelegationCoordinator {
             reviewDepth: request.reviewDepth,
             dependencies: request.dependencies,
             authority: request.authority,
+            riskTier: request.riskTier,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -202,6 +233,7 @@ export class DelegationCoordinator {
             reviewDepth: request.reviewDepth,
             dependencies: request.dependencies,
             authority: request.authority,
+            riskTier: request.riskTier,
           })
 
       return await this.delegateOrder(order)
@@ -252,6 +284,8 @@ export class DelegationCoordinator {
     }
 
     const selected = this.selectModelForTask(task)
+    const tierShadow = this.buildTierShadow(order, selected)
+    persistModelTierShadow(this.config.modelTierShadowStore, tierShadow)
     // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
@@ -420,6 +454,7 @@ export class DelegationCoordinator {
         status: 'completed',
         order,
         selectedModel: selected.model,
+        modelTierShadows: [tierShadow],
         results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
         packet: buildPrimaryWorkerPacket([run.result]),
       }
@@ -442,6 +477,7 @@ export class DelegationCoordinator {
       status: 'completed',
       order,
       selectedModel: selected.model,
+      modelTierShadows: [tierShadow],
       results,
       packet: buildPrimaryWorkerPacket(results),
     }
@@ -482,6 +518,7 @@ export class DelegationCoordinator {
             reviewDepth: r.reviewDepth,
             dependencies: r.dependencies,
             authority: r.authority,
+            riskTier: r.riskTier,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -493,6 +530,7 @@ export class DelegationCoordinator {
             reviewDepth: r.reviewDepth,
             dependencies: r.dependencies,
             authority: r.authority,
+            riskTier: r.riskTier,
           })
       if (queue.enqueue(order)) {
         orders.push(order)
@@ -501,7 +539,8 @@ export class DelegationCoordinator {
 
     // Process queue with concurrency control
     const allResults: WorkerResult[] = []
-    const workerModels: Array<{ workOrderId: string; model: string }> = []
+    const workerModels: NonNullable<CoordinatorRun['workerModels']> = []
+    const modelTierShadows: ModelTierShadowEvent[] = []
     const inflight: Promise<void>[] = []
     let completedCount = 0
 
@@ -512,6 +551,7 @@ export class DelegationCoordinator {
       try {
         const run = await this.delegateOrder(order)
         allResults.push(...run.results)
+        if (run.modelTierShadows) modelTierShadows.push(...run.modelTierShadows)
         if (run.selectedModel) {
           workerModels.push({ workOrderId: order.id, model: run.selectedModel })
         }
@@ -540,6 +580,7 @@ export class DelegationCoordinator {
       packet: buildPrimaryWorkerPacket(aggregated),
       aggregationPolicy: policy,
       ...(workerModels.length > 0 ? { workerModels } : {}),
+      ...(modelTierShadows.length > 0 ? { modelTierShadows } : {}),
     }
     // NOTE: If delegateBatch is ever changed from serial (processNext recursion)
     // to true concurrent execution, the finally-based signal restoration below

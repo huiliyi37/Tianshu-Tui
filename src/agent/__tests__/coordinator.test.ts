@@ -375,6 +375,51 @@ describe('DelegationCoordinator', () => {
     ])
   })
 
+  it('records model tier shadow without changing selected worker model', async () => {
+    const saved: Array<{ kind: string; json: string }> = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+      modelTierShadowStore: { saveBanditState: (kind, json) => { saved.push({ kind, json }) } },
+      sessionId: 's-tier',
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn-tier',
+      objective: 'Review coordinator false-green risk with strong authority floor.',
+      kind: 'review',
+      profile: 'reviewer',
+      scope: { files: ['src/agent/coordinator.ts', 'src/agent/aggregation.ts'] },
+      authority: 'tianquan',
+    })
+
+    assert.equal(run.selectedModel, 'large-cache')
+    assert.equal(saved.length, 1)
+    const event = JSON.parse(saved[0]!.json)
+    assert.equal(event.recommendedTier, 'strong')
+    assert.equal(event.actualModel, 'large-cache')
+    assert.equal(event.actualTier, 'strong')
+    assert.equal(event.matched, true)
+    assert.equal(run.modelTierShadows?.[0]?.recommendedTier, 'strong')
+  })
+
   it('keeps failed batch workers visible in aggregated results', async () => {
     let calls = 0
     const coordinator = new DelegationCoordinator({

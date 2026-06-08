@@ -99,6 +99,8 @@ export const workOrderSchema = z.object({
   reviewDepth: z.number().int().min(0).optional(),
   /** Star domain authority for cognitive injection (V3 Component A). */
   authority: z.string().optional(),
+  /** Team planner risk tier for shadow-only model tier recommendation. */
+  riskTier: z.enum(['low', 'medium', 'high']).optional(),
 })
 
 export type WorkOrder = z.infer<typeof workOrderSchema>
@@ -192,6 +194,8 @@ export interface CreateReadOnlyWorkOrderInput {
   reviewDepth?: number
   /** Star domain authority for cognitive injection (V3 Component A). */
   authority?: string
+  /** Team planner risk tier for shadow-only model tier recommendation. */
+  riskTier?: 'low' | 'medium' | 'high'
 }
 
 function toolsForAuthority(tools: string[], authority?: string): string[] {
@@ -250,6 +254,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     domain: input.domain,
     reviewDepth: input.reviewDepth,
     authority: input.authority,
+    riskTier: input.riskTier,
   })
 }
 
@@ -290,6 +295,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     domain: input.domain,
     reviewDepth: input.reviewDepth,
     authority: input.authority,
+    riskTier: input.riskTier,
   })
 }
 
