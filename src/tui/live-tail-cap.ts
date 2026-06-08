@@ -6,11 +6,12 @@ function rowsFor(line: string, width: number): number {
   return Math.max(1, Math.ceil(stringWidth(line) / width))
 }
 
-function takeTailByDisplayRows(line: string, width: number, rows: number): string {
-  if (rows <= 0) return ''
-  if (width <= 0) return line
+const OMITTED_PREFIX = '… '
+const OMITTED_PREFIX_NARROW = '…'
 
-  const maxDisplayWidth = rows * width
+function takeTailByDisplayWidth(line: string, maxDisplayWidth: number): string {
+  if (maxDisplayWidth <= 0) return ''
+
   const chars = Array.from(line)
   let displayWidth = 0
   let start = chars.length
@@ -23,6 +24,20 @@ function takeTailByDisplayRows(line: string, width: number, rows: number): strin
   }
 
   return chars.slice(start).join('')
+}
+
+function takeTailByDisplayRows(line: string, width: number, rows: number): string {
+  if (rows <= 0) return ''
+  if (width <= 0) return line
+  return takeTailByDisplayWidth(line, rows * width)
+}
+
+function markOmittedHead(line: string, width: number): string {
+  if (width <= 0) return `${OMITTED_PREFIX}${line}`
+
+  const prefix = width > stringWidth(OMITTED_PREFIX) ? OMITTED_PREFIX : OMITTED_PREFIX_NARROW
+  const available = Math.max(0, rowsFor(line, width) * width - stringWidth(prefix))
+  return `${prefix}${takeTailByDisplayWidth(line, available)}`
 }
 
 /**
@@ -40,7 +55,9 @@ export function capLiveTail(text: string, width: number, maxRows: number): strin
   if (maxRows <= 0) return ''
   const lines = text.split('\n')
   let rows = 0
+  let omitted = false
   const kept: string[] = []
+
   for (let i = lines.length - 1; i >= 0; i--) {
     const cost = rowsFor(lines[i]!, width)
     if (rows + cost > maxRows) {
@@ -49,10 +66,16 @@ export function capLiveTail(text: string, width: number, maxRows: number): strin
       if (remaining > 0) {
         kept.unshift(takeTailByDisplayRows(lines[i]!, width, remaining))
       }
+      omitted = true
       break
     }
     rows += cost
     kept.unshift(lines[i]!)
   }
+
+  if (omitted && kept.length > 0) {
+    kept[0] = markOmittedHead(kept[0]!, width)
+  }
+
   return kept.join('\n')
 }
