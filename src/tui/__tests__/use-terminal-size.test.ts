@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { getTerminalSizeSnapshot, createThrottledResizeHandler } from '../use-terminal-size.js'
+import {
+  getTerminalSizeSnapshot,
+  createThrottledResizeHandler,
+  isResizeSettling,
+  __subscribeTerminalSize,
+} from '../use-terminal-size.js'
 
 describe('useTerminalSize', () => {
   it('returns the same snapshot object when terminal size is unchanged', () => {
@@ -45,5 +50,40 @@ describe('createThrottledResizeHandler (S14)', () => {
     await new Promise(r => setTimeout(r, 50))
     h.cancel()
     assert.equal(calls, 1, 'exactly one commit after the drag settles')
+  })
+})
+
+// resize-ghost (real fix): the S14 debounce only governs resize-driven commits.
+// Streaming timers (1s activity tick, 600ms moon animation) re-render the whole
+// tree mid-drag, taking Ink's NORMAL erase path at an intermediate width → the
+// full-width GlanceBar rule wraps and under-erases = stacked decreasing-width
+// footer ghosts. The cure is a shared "settling" flag those timers can poll to
+// skip their commit until the drag's trailing edge lands.
+describe('isResizeSettling (resize-ghost timer gate)', () => {
+  it('is false at rest', () => {
+    assert.equal(isResizeSettling(), false, 'no resize in flight → not settling')
+  })
+
+  it('is true between the first drag event and the trailing commit, then clears', async () => {
+    // Subscribe so the coordinator attaches its resize listener.
+    const unsubscribe = __subscribeTerminalSize(() => {}, 24)
+    try {
+      assert.equal(isResizeSettling(), false, 'starts at rest')
+
+      // First drag tick: emit a resize on the same channel the coordinator listens to.
+      process.stdout.emit('resize')
+      assert.equal(isResizeSettling(), true, 'a drag in progress must mark settling=true')
+
+      // Keep dragging — still settling, no commit yet.
+      process.stdout.emit('resize')
+      await new Promise(r => setTimeout(r, 10))
+      assert.equal(isResizeSettling(), true, 'still settling mid-drag')
+
+      // Let the trailing edge land.
+      await new Promise(r => setTimeout(r, 40))
+      assert.equal(isResizeSettling(), false, 'settling clears once the drag settles')
+    } finally {
+      unsubscribe()
+    }
   })
 })

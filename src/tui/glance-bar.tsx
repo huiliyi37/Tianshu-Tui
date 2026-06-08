@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react'
 import type { StarPhase } from '../agent/star-event.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS } from '../agent/star-event.js'
 import { getTheme, type RivetTheme } from './theme.js'
-import { useTerminalSize } from './use-terminal-size.js'
+import { useTerminalSize, isResizeSettling } from './use-terminal-size.js'
 import type { GlancePulse } from './surface/types.js'
 import { horizontalRule, type SeparatorStyle } from './separator.js'
 import { STAR_DOMAINS } from '../agent/star-domain.js'
@@ -72,7 +72,12 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
 
   useEffect(() => {
     if (!isStreaming) return
-    const interval = setInterval(() => setMoonIdx(i => (i + 1) % MOON_PHASES.length), 600)
+    const interval = setInterval(() => {
+      // Don't animate mid-resize: a commit now under-erases at an intermediate
+      // width and stacks ghost copies of this bar (see use-terminal-size.ts).
+      if (isResizeSettling()) return
+      setMoonIdx(i => (i + 1) % MOON_PHASES.length)
+    }, 600)
     return () => clearInterval(interval)
   }, [isStreaming])
   const { columns } = useTerminalSize()

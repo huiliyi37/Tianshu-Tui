@@ -25,7 +25,7 @@ import { phaseStatusLabel } from './phase-status.js'
 import { FluencyTracker } from './fluency-hook.js'
 import { getTheme } from './theme.js'
 import { viewportLines } from './viewport.js'
-import { useTerminalSize } from './use-terminal-size.js'
+import { useTerminalSize, isResizeSettling } from './use-terminal-size.js'
 import { AgentLoop } from '../agent/loop.js'
 import { formatIntentPreview, type IntentPreview, type IntentPreviewAction } from '../agent/intent-preview.js'
 import { SessionContext } from '../agent/context.js'
@@ -594,6 +594,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       return
     }
     activityIntervalRef.current = setInterval(() => {
+      // Skip mid-drag: a re-render now takes Ink's NORMAL erase path at an
+      // intermediate width → stacked GlanceBar ghosts. The trailing resize
+      // commit refreshes at the final width (see use-terminal-size.ts).
+      if (isResizeSettling()) return
       const now = Date.now()
       projectActivity(now)
       // Sync active star domain (bound on first run during streaming)
@@ -614,6 +618,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   useEffect(() => {
     if (!isStreaming) { setFluencyStale(null); return }
     const id = setInterval(() => {
+      if (isResizeSettling()) return
       const policy = fluencyRef.current.getPolicy()
       setFluencyStale(policy.staleMessage ? { message: policy.staleMessage, level: policy.staleLevel ?? 'info' } : null)
     }, 2000)
