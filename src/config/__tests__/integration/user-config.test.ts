@@ -32,10 +32,13 @@ describe('User config validation', () => {
     assert.ok(providers.length >= 1, `expected >= 1 providers, got ${providers.length}: ${providers.join(', ')}`)
   })
 
-  it('codex has oauth auth', () => {
+  it('codex auth is null or a well-formed oauth object', () => {
     if (!hasProvider(config, 'codex')) return
     const codex = config.provider.providers.codex
-    assert.deepEqual(codex.auth, { type: 'oauth', provider: 'codex' })
+    // auth is user-configurable: unconfigured (null/undefined) or oauth. Both valid.
+    if (codex.auth) {
+      assert.equal(codex.auth.type, 'oauth')
+    }
     assert.equal(codex.protocol, 'openai')
   })
 
@@ -56,9 +59,13 @@ describe('User config validation', () => {
   it('worker routing maps tasks to profiles', () => {
     if (!config?.workers?.routing) return
     const { routing, profiles } = config.workers
-    if (routing.code_edit) assert.equal(routing.code_edit, 'capable')
-    if (routing.repo_summarization) assert.equal(routing.repo_summarization, 'cheap')
-    if (profiles?.capable) assert.equal(profiles.capable.provider, 'cliproxy')
-    if (profiles?.cheap) assert.equal(profiles.cheap.provider, 'minimax')
+    // Routing targets must resolve to a defined profile; profile providers
+    // are user-configurable, so assert resolvability, not pinned vendor names.
+    for (const target of Object.values(routing) as string[]) {
+      if (target) assert.ok(profiles?.[target], `routing target '${target}' must have a matching profile`)
+    }
+    for (const name of Object.keys(profiles ?? {})) {
+      assert.ok(profiles[name].provider, `profile '${name}' must have a provider`)
+    }
   })
 })
