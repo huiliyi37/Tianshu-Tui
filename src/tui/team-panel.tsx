@@ -45,7 +45,8 @@ export function renderTeamPanelLines(model: TeamPanelModel, width = 80): string[
       const task = tasks.get(id)
       if (!task) continue
       const star = starFor(task.authority)
-      const head = `  ${star.glyph} ${star.name} ${task.id}`
+      const identity = task.identity ?? { name: star.name, glyph: star.glyph }
+      const head = `  ${identity.glyph} ${identity.name} ${task.id}`
       const status = `${statusGlyph(task.status)} ${task.status}`
       lines.push(`│ ${truncate(`${head.padEnd(16)} ${truncate(task.title, 34).padEnd(34)} ${status}`, inner).padEnd(inner)} │`)
       if (task.dependsOn.length > 0) {

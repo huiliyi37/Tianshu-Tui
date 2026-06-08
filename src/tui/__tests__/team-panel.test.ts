@@ -34,8 +34,8 @@ function summary(): TeamRunSummary {
         title: '审查门',
         objective: '审查门',
         files: [],
-        profile: 'reviewer',
-        kind: 'review',
+        profile: 'adversarial_verifier',
+        kind: 'verify',
         verification: [],
         dependsOn: ['T1'],
         riskTier: 'high',
@@ -43,8 +43,8 @@ function summary(): TeamRunSummary {
       },
       {
         id: 'T3',
-        title: '后续波次',
-        objective: '后续波次',
+        title: '贪狼勘探',
+        objective: '贪狼勘探 capability prospecting',
         files: [],
         profile: 'code_scout',
         kind: 'code_search',
@@ -78,6 +78,8 @@ describe('TeamPanel model', () => {
     assert.equal(model.tasks.length, 3)
     assert.equal(model.tasks[0]?.authority, 'tianliang')
     assert.equal(model.tasks[1]?.authority, 'tianquan')
+    assert.deepEqual(model.tasks[1]?.identity, { name: '瑶光', glyph: '↻' })
+    assert.deepEqual(model.tasks[2]?.identity, { name: '贪狼', glyph: '⊕' })
     assert.equal(model.tasks[0]?.status, 'done')
     assert.equal(model.tasks[1]?.status, 'running')
     assert.equal(model.tasks[2]?.status, 'waiting')
@@ -99,7 +101,8 @@ describe('renderTeamPanelLines', () => {
     assert.match(text, /团队协作/)
     assert.match(text, /W1/)
     assert.match(text, /✧ 天梁 T1/)
-    assert.match(text, /✶ 天权 T2/)
+    assert.match(text, /↻ 瑶光 T2/)
+    assert.match(text, /⊕ 贪狼 T3/)
     assert.match(text, /depends ─ T1/)
     assert.match(text, /high ⚠/)
     assert.match(text, /gate: verified/)

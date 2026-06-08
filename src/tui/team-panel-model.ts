@@ -18,6 +18,11 @@ export interface TeamPanelTask {
   riskTier: 'low' | 'medium' | 'high'
   files: string[]
   status: TeamPanelStatus
+  /** Named partner-star identity when a worker explicitly carries one. */
+  identity?: {
+    name: string
+    glyph: string
+  }
   summary?: string
 }
 
@@ -47,6 +52,17 @@ function authorityForTask(task: Pick<TeamTask, 'profile' | 'objective'>): string
     if (domain.keywords.some(keyword => lower.includes(keyword.toLowerCase()))) return id
   }
   return 'tianliang'
+}
+
+function partnerIdentityForTask(task: Pick<TeamTask, 'profile' | 'title' | 'objective'>): TeamPanelTask['identity'] | undefined {
+  const text = `${task.title}\n${task.objective}`.toLowerCase()
+  if (task.profile === 'adversarial_verifier' || /瑶光|yaoguang|↻|复现|verification/.test(text)) {
+    return { name: '瑶光', glyph: '↻' }
+  }
+  if (/贪狼|tanlang|⊕|勘探|prospect|prospecting/.test(text)) {
+    return { name: '贪狼', glyph: '⊕' }
+  }
+  return undefined
 }
 
 function matchesResult(taskId: string, result: WorkerResult): boolean {
@@ -88,6 +104,7 @@ export function buildTeamPanelModel(summary: TeamRunSummary, currentWave = 0, re
       riskTier: task.riskTier,
       files: [...task.files],
       status: taskStatus(task.id, current, summary.run?.results),
+      identity: partnerIdentityForTask(task),
       summary: taskSummary(task.id, summary.run?.results),
     })),
     reviewVerdict,
