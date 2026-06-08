@@ -14,7 +14,6 @@ import {
   isBanditGateOpen,
   type RewardInput,
   type EffortShadowRecord,
-  type AgreementEntry,
 } from './p3-reward.js'
 
 export type { EffortShadowRecord, RewardInput }
@@ -61,8 +60,6 @@ export class P3Integration {
   readonly jit: AgentJIT
   private lastTool: string | null = null
   private _effortShadowRecords = new Map<string, EffortShadowRecord>()
-  /** Track A1: Sliding window of agreement entries for consistency gate */
-  private _agreementWindow: AgreementEntry[] = []
 
   constructor(config: P3Config = {}) {
     this.miner = new ToolPatternMiner()
@@ -240,15 +237,6 @@ export class P3Integration {
       timestamp: Date.now(),
     }
     this._effortShadowRecords.set(record.pendingRewardId, record)
-    // Track A1: record agreement entry (瑶光 ① fix: compare arm→effort vs ruleBaseline)
-    this._agreementWindow.push({
-      ruleBaseline: record.ruleBaseline,
-      recommendedArm: rec.armId,
-    })
-    // Trim to agreement window size + buffer
-    if (this._agreementWindow.length > 100) {
-      this._agreementWindow = this._agreementWindow.slice(-60)
-    }
     return record
   }
 
@@ -277,9 +265,9 @@ export class P3Integration {
 
   // ─── Track A1: Consistency Gate ───────────────────────────────────────
 
-  /** Check if the bandit has enough data and agreement to influence real decisions. */
+  /** Check if the bandit has enough training and reward evidence to influence real decisions. */
   isEffortGateOpen(): boolean {
-    return isBanditGateOpen(this.effortBandit.getStats().reduce((sum, s) => sum + s.pulls, 0), this._agreementWindow)
+    return isBanditGateOpen(this.effortBandit.getStats())
   }
 
   // ─── Agent JIT (P3-H, T2-02 gated) ────────────────────────────────────

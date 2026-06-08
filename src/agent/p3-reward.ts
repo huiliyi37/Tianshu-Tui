@@ -1,9 +1,9 @@
 /**
- * P3 T2-02: Reward function + consistency tracking for LinUCB effort bandit.
+ * P3 T2-02: Reward function + reward-based consistency gate for LinUCB effort bandit.
  *
  * Composite reward signal from task outcomes (Range [-1, 1]).
- * Also tracks the agreement rate between bandit recommendations and rule baseline
- * for the consistency-promotion gate (A1).
+ * The consistency gate is reward-based: it checks whether the bandit's
+ * deviation from "no change" (delta:0) is backed by measured reward.
  */
 
 export interface RewardInput {
@@ -32,37 +32,47 @@ export interface EffortShadowRecord {
   timestamp: number
 }
 
-/**
- * Agreement window entry: records the bandit recommendation and rule baseline.
- * "Agreement" means the effort level the bandit's arm would produce is the same
- * as or adjacent to (±1 in EFFORT_ORDER) the rule baseline.
- */
-export interface AgreementEntry {
-  /** The effort the rule-based heuristic selected (e.g., 'medium') */
-  ruleBaseline: string
-  /** Bandit arm: 'delta:-1' | 'delta:0' | 'delta:+1' */
-  recommendedArm: string
+/** Gate thresholds (conservative starting point, adjustable with evidence) */
+export const MIN_PULLS_FOR_GATE = 30
+export const MIN_ARM_PULLS = 5
+export const REWARD_MARGIN = 0.05
+
+export interface ArmStat {
+  id: string
+  pulls: number
+  avgReward: number
 }
 
-/** Default gate thresholds (瑶光's conservative starting point, not contract) */
-export const MIN_PULLS_FOR_GATE = 30
-export const AGREEMENT_WINDOW = 20
-export const AGREEMENT_RATE_THRESHOLD = 0.8
-
-export const EFFORT_ORDER_GATE = ['off', 'low', 'medium', 'high', 'max'] as const
-
 /**
- * Resolve the effort level a bandit arm would produce from a given baseline.
- * Returns the baseline unchanged if the arm is unknown or out of bounds.
+ * Reward-based consistency gate.
+ *
+ * All conditions must pass:
+ * 1. totalPulls ≥ MIN_PULLS_FOR_GATE (30) — sufficient training data
+ * 2. The best deviating arm (delta:+1 or delta:-1) by avgReward has
+ *    pulls ≥ MIN_ARM_PULLS (5) — not a single-sample fluke
+ * 3. That arm's avgReward ≥ delta:0's avgReward + REWARD_MARGIN (0.05) —
+ *    deviation's measured benefit genuinely exceeds "do nothing"
+ *
+ * accept=+0.75 / reject=-0.25 → avgReward ∈ [-0.25, +0.75]
  */
-export function resolveArmToEffort(ruleBaseline: string, armId: string): string {
-  const idx = EFFORT_ORDER_GATE.indexOf(ruleBaseline as typeof EFFORT_ORDER_GATE[number])
-  if (idx === -1) return ruleBaseline
-  let delta = 0
-  if (armId === 'delta:+1') delta = 1
-  else if (armId === 'delta:-1') delta = -1
-  const newIdx = Math.max(0, Math.min(EFFORT_ORDER_GATE.length - 1, idx + delta))
-  return EFFORT_ORDER_GATE[newIdx]!
+export function isBanditGateOpen(armStats: ArmStat[]): boolean {
+  const totalPulls = armStats.reduce((sum, s) => sum + s.pulls, 0)
+  if (totalPulls < MIN_PULLS_FOR_GATE) return false
+
+  const noop = armStats.find(s => s.id === 'delta:0')
+  if (!noop || noop.pulls === 0) return false
+
+  // Best deviating arm by avgReward
+  const deviating = armStats
+    .filter(s => s.id === 'delta:-1' || s.id === 'delta:+1')
+    .reduce<ArmStat | null>((best, s) => {
+      if (!best) return s
+      return s.avgReward > best.avgReward ? s : best
+    }, null)
+
+  if (!deviating || deviating.pulls < MIN_ARM_PULLS) return false
+
+  return deviating.avgReward >= noop.avgReward + REWARD_MARGIN
 }
 
 /**
@@ -120,44 +130,6 @@ export function buildEffortContext(params: {
     params.isRepeat ? 1 : 0,
     clamp(params.timeOfDay, 0, 1),
   ]
-}
-
-// ─── Consistency Gate (Track A1) ──────────────────────────────────────
-
-/**
- * Check whether the bandit is eligible to influence real decisions.
- *
- * Conditions (all must pass):
- * 1. totalPulls >= MIN_PULLS_FOR_GATE (30)
- * 2. In the last AGREEMENT_WINDOW (20) shadow records,
- *    the fraction where the bandit-recommended effort level is the same
- *    as or adjacent to (±1 in EFFORT_ORDER) the rule baseline
- *    is >= AGREEMENT_RATE_THRESHOLD (0.8).
- *
- * "Adjacent" means the bandit nudging ±1 from the rule's selected effort
- * — the bandit is learning in a conservative neighborhood, not thrashing.
- * This prevents the self-defeating paradox where the gate only opens when
- * the bandit recommends delta:0 most of the time (瑶光 ① fix).
- */
-export function isBanditGateOpen(
-  totalPulls: number,
-  agreementWindow: AgreementEntry[],
-): boolean {
-  if (totalPulls < MIN_PULLS_FOR_GATE) return false
-  const window = agreementWindow.slice(-AGREEMENT_WINDOW)
-  if (window.length < AGREEMENT_WINDOW) return false
-
-  let agreementCount = 0
-  for (const entry of window) {
-    const banditEffort = resolveArmToEffort(entry.ruleBaseline, entry.recommendedArm)
-    const ruleIdx = EFFORT_ORDER_GATE.indexOf(entry.ruleBaseline as typeof EFFORT_ORDER_GATE[number])
-    const banditIdx = EFFORT_ORDER_GATE.indexOf(banditEffort as typeof EFFORT_ORDER_GATE[number])
-    // Same or adjacent (within ±1)
-    if (ruleIdx !== -1 && banditIdx !== -1 && Math.abs(ruleIdx - banditIdx) <= 1) {
-      agreementCount++
-    }
-  }
-  return agreementCount / window.length >= AGREEMENT_RATE_THRESHOLD
 }
 
 function clamp(value: number, min: number, max: number): number {
