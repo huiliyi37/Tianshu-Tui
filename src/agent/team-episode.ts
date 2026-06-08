@@ -4,6 +4,7 @@ import { deriveTeamWaveRewardInput } from './team-reward.js'
 import type { TeamWaveTelemetry, ChangedFilesSource } from './team-wave-telemetry.js'
 import { teamWaveTelemetryKind } from './team-wave-telemetry.js'
 import { normalizeUnitPenalty } from './routing-reward.js'
+import { buildTeamEpisodeScopeHealth } from './team-scope-health.js'
 
 export interface TeamEpisodeFragment {
   sourceKey: string
@@ -119,21 +120,6 @@ function aggregateChangedFilesSource(sources: Array<ChangedFilesSource>): Change
   return 'mixed'
 }
 
-function changedFilesForEpisode(episode: TeamEpisode): string[] {
-  const observed = episode.changedFiles.observedChangedFiles ?? []
-  if (observed.length > 0) return observed
-  return episode.changedFiles.reportedChangedFiles ?? []
-}
-
-function normalizeEpisodeScopeLeak(episode: TeamEpisode): number {
-  const changedFiles = changedFilesForEpisode(episode)
-  if (changedFiles.length === 0) return 0
-  const plannedFiles = new Set(episode.planned.files)
-  if (plannedFiles.size === 0) return 1
-  const leaked = changedFiles.filter(file => !plannedFiles.has(file)).length
-  return normalizeUnitPenalty(leaked / changedFiles.length)
-}
-
 export function buildTeamEpisode(fragments: TeamWaveTelemetry[], options: { timestamp?: number } = {}): TeamEpisode {
   if (fragments.length === 0) throw new Error('buildTeamEpisode requires at least one fragment')
 
@@ -216,7 +202,7 @@ export function deriveTeamEpisodeRewardInput(episode: TeamEpisode): TeamWaveRewa
     reviewPass: review,
     normalizedConflict: normalizeUnitPenalty(blockedOrEscalated / denom),
     normalizedRework: normalizeUnitPenalty(failedOrFailedEvidence / denom),
-    normalizedScopeLeak: normalizeEpisodeScopeLeak(episode),
+    normalizedScopeLeak: buildTeamEpisodeScopeHealth(episode).scopeLeakRate,
     normalizedCostOverBudget: 0,
     normalizedLatencySurprisal: 0,
     falseGreen: waveInputs.some(input => input.falseGreen),

@@ -1,5 +1,6 @@
 import type { TeamWaveTelemetry } from './team-wave-telemetry.js'
 import { normalizeUnitPenalty } from './routing-reward.js'
+import { buildTeamWaveScopeHealth } from './team-scope-health.js'
 
 export interface TeamWaveRewardInput {
   verificationPass?: boolean
@@ -49,19 +50,8 @@ function denominator(event: TeamWaveTelemetry): number {
   return Math.max(event.outcome.dispatched, event.outcome.statuses.length, 1)
 }
 
-function changedFilesForScope(event: TeamWaveTelemetry): string[] {
-  const observed = event.changedFiles.observedChangedFiles ?? []
-  if (observed.length > 0) return observed
-  return event.changedFiles.reportedChangedFiles ?? []
-}
-
 function normalizeScopeLeak(event: TeamWaveTelemetry): number {
-  const changedFiles = changedFilesForScope(event)
-  if (changedFiles.length === 0) return 0
-  const plannedFiles = new Set(event.planned.files)
-  if (plannedFiles.size === 0) return 1
-  const leaked = changedFiles.filter(file => !plannedFiles.has(file)).length
-  return normalizeUnitPenalty(leaked / changedFiles.length)
+  return buildTeamWaveScopeHealth(event).scopeLeakRate
 }
 
 function hasFalseGreen(event: TeamWaveTelemetry, reviewPass: boolean | undefined): boolean {
