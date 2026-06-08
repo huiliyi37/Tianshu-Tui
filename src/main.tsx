@@ -40,6 +40,7 @@ import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import { DomainKnowledgeStore } from './agent/domain-knowledge-store.js'
 import { persistTeamWaveTelemetry, type TeamWaveTelemetry } from './agent/team-wave-telemetry.js'
+import { recordTeamWaveRewardClosure } from './agent/reward-loop.js'
 import { createCoordinatorReviewDeps } from './agent/review-coordinator-deps.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { profileRegistry } from './agent/profile-registry.js'
@@ -204,6 +205,9 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       },
       recordTeamWaveTelemetry: (event: TeamWaveTelemetry) => {
         persistTeamWaveTelemetry(_meridianIndexerRef?.getDb(), event)
+      },
+      recordTeamWaveRewardClosure: (event: TeamWaveTelemetry) => {
+        recordTeamWaveRewardClosure(_meridianIndexerRef?.getDb(), event)
       },
       getSessionId: () => _sessionIdRef ?? undefined,
     }))

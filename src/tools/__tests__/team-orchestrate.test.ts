@@ -28,11 +28,13 @@ test('team_orchestrate dispatches a standard plan first wave', async () => {
   assert.match(result.content, /2 dispatched/)
 })
 
-test('team_orchestrate forwards telemetry sink and session id to the orchestrator', async () => {
+test('team_orchestrate forwards telemetry sink, reward closure sink, and session id', async () => {
   const telemetry: unknown[] = []
+  const rewardClosures: unknown[] = []
   const tool = createTeamOrchestrateTool({
     delegateBatch: async () => stubRun('telemetry-dispatched'),
     recordTeamWaveTelemetry: event => { telemetry.push(event) },
+    recordTeamWaveRewardClosure: event => { rewardClosures.push(event) },
     getSessionId: () => 'session-tool',
   })
   const md = [
@@ -48,7 +50,9 @@ test('team_orchestrate forwards telemetry sink and session id to the orchestrato
 
   assert.equal(result.isError, false)
   assert.equal(telemetry.length, 1)
+  assert.equal(rewardClosures.length, 1)
   assert.equal((telemetry[0] as any).sessionId, 'session-tool')
+  assert.equal((rewardClosures[0] as any).sessionId, 'session-tool')
   assert.equal((telemetry[0] as any).mode, 'standard')
   assert.equal((telemetry[0] as any).fromWave, 0)
 })
@@ -94,6 +98,7 @@ test('team_orchestrate passes fromWave through and reports the next wave value',
 
 test('team_orchestrate runs the review gate on a cross-module final wave', async () => {
   let squadronInvoked = false
+  const rewardClosures: unknown[] = []
   const tool = createTeamOrchestrateTool({
     delegate: async () => ({
       status: 'completed',
@@ -110,6 +115,7 @@ test('team_orchestrate runs the review gate on a cross-module final wave', async
         evidenceStatus: 'verified',
       }],
     }),
+    recordTeamWaveRewardClosure: event => { rewardClosures.push(event) },
     delegateBatch: async (requests) => {
       if (requests.every(r => r.kind === 'review')) {
         squadronInvoked = true
@@ -142,4 +148,6 @@ test('team_orchestrate runs the review gate on a cross-module final wave', async
   assert.equal(result.isError, false)
   assert.match(result.content, /Review gate/)
   assert.equal(squadronInvoked, true)
+  assert.equal(rewardClosures.length, 1)
+  assert.equal((rewardClosures[0] as any).outcome.reviewVerdict, 'verified')
 })

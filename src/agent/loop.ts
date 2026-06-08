@@ -70,6 +70,7 @@ import { selectPolicy, renderPolicyGuidance } from './policy-selection.js'
 import { computeEFE } from './prediction-error.js'
 import { computeAffordanceScores } from './affordance.js'
 import { buildModelRoutingShadowEvent, inferLegacyRoutingRecommendation, persistModelRoutingShadow } from './model-routing-shadow.js'
+import { recordRoutingRewardClosure } from './reward-loop.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
@@ -559,6 +560,7 @@ export class AgentLoop {
         sensorium: currentSensorium,
       })
       persistModelRoutingShadow(store, event)
+      recordRoutingRewardClosure(store, event)
     } catch {
       // Shadow telemetry must never affect the turn.
     }

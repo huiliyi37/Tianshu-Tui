@@ -22,6 +22,7 @@ export interface TeamOrchestrateCoordinator {
   ): Promise<CoordinatorRun>
   delegate?(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
   recordTeamWaveTelemetry?(event: TeamWaveTelemetry): void
+  recordTeamWaveRewardClosure?(event: TeamWaveTelemetry): void
   getSessionId?: () => string | undefined
 }
 
@@ -96,13 +97,17 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
       }
 
       let summary: TeamRunSummary
+      let telemetryEvent: TeamWaveTelemetry | undefined
       try {
         summary = await runTeamSkeleton(
           { mode, objective, planMarkdown: markdown, maxParallel, fromWave, parentTurnId: params.toolUseId, abortSignal: params.abortSignal },
           {
             delegateBatch: (requests, policy, abortSignal, onProgress) =>
               coordinator.delegateBatch(requests, policy, abortSignal, onProgress),
-            recordTeamWaveTelemetry: coordinator.recordTeamWaveTelemetry,
+            recordTeamWaveTelemetry: event => {
+              telemetryEvent = event
+              coordinator.recordTeamWaveTelemetry?.(event)
+            },
             sessionId: coordinator.getSessionId?.(),
           },
         )
@@ -112,6 +117,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
       }
 
       let reviewNote = ''
+      let reviewVerdict: string | undefined
       const effectiveFromWave = fromWave ?? 0
       const isLastWave = summary.waves.length > 0 && effectiveFromWave >= summary.waves.length - 1
       const changedFiles = summary.run
@@ -134,10 +140,25 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
             { reviewDepth: params.reviewDepth ?? 0, abortSignal: params.abortSignal, parentTurnId: `${params.toolUseId}:review` },
           )
           const outcome = await routeReviewWorkflow(change, reviewDeps, { maxRounds: 3 })
+          reviewVerdict = outcome.verdict
           reviewNote = `\n\nReview gate [${outcome.tier}]: ${outcome.verdict}${outcome.evidence ? ` — ${outcome.evidence}` : ''}`
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           return { content: `team_orchestrate review gate failed: ${msg}`, isError: true }
+        }
+      }
+
+      if (telemetryEvent) {
+        try {
+          coordinator.recordTeamWaveRewardClosure?.({
+            ...telemetryEvent,
+            outcome: {
+              ...telemetryEvent.outcome,
+              ...(reviewVerdict ? { reviewVerdict } : {}),
+            },
+          })
+        } catch {
+          // Reward closure must never affect team dispatch or review reporting.
         }
       }
 
