@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { TeamWaveRewardInput } from './team-reward.js'
 import { deriveTeamWaveRewardInput } from './team-reward.js'
 import type { TeamWaveTelemetry, ChangedFilesSource } from './team-wave-telemetry.js'
@@ -49,6 +50,15 @@ export interface TeamEpisodeStore {
 
 export function teamEpisodeKey(input: Pick<TeamEpisode, 'objectiveHash' | 'sessionId' | 'mode' | 'waveCount'>): string {
   return `team_episode:${input.objectiveHash}:${input.sessionId}:${input.mode}:${input.waveCount}`
+}
+
+function shortHash(input: string): string {
+  return createHash('sha256').update(input).digest('hex').slice(0, 8)
+}
+
+export function teamEpisodePersistKind(episode: TeamEpisode): string {
+  const sourceSeed = episode.fragments.map(fragment => fragment.sourceKey).join('|')
+  return `${episode.episodeKey}:${episode.timestamp}:${shortHash(sourceSeed)}`
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -216,7 +226,7 @@ export function deriveTeamEpisodeRewardInput(episode: TeamEpisode): TeamWaveRewa
 export function persistTeamEpisode(store: TeamEpisodeStore | undefined | null, episode: TeamEpisode): void {
   if (!store) return
   try {
-    store.saveBanditState(episode.episodeKey, JSON.stringify(episode))
+    store.saveBanditState(teamEpisodePersistKind(episode), JSON.stringify(episode))
   } catch {
     // Episode telemetry must never affect team dispatch or reward closure.
   }

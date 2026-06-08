@@ -6,6 +6,7 @@ import {
   deriveTeamEpisodeRewardInput,
   persistTeamEpisode,
   teamEpisodeKey,
+  teamEpisodePersistKind,
 } from '../team-episode.js'
 import { buildTeamWaveRewardRecord, deriveTeamWaveRewardInput } from '../team-reward.js'
 
@@ -124,15 +125,25 @@ describe('team episode aggregation', () => {
     assert.equal(reward.normalizedScopeLeak, 0)
   })
 
-  it('persists append-only episode records and remains no-op safe', () => {
-    const episode = buildTeamEpisode([fragment()])
+  it('persists append-only episode records while retaining stable logical episodeKey', () => {
+    const first = buildTeamEpisode([fragment({ timestamp: 10 })], { timestamp: 20 })
+    const second = buildTeamEpisode([fragment({ timestamp: 11 })], { timestamp: 21 })
     const calls: Array<{ kind: string; json: string }> = []
 
-    persistTeamEpisode({ saveBanditState: (kind, json) => { calls.push({ kind, json }) } }, episode)
+    persistTeamEpisode({ saveBanditState: (kind, json) => { calls.push({ kind, json }) } }, first)
+    persistTeamEpisode({ saveBanditState: (kind, json) => { calls.push({ kind, json }) } }, second)
 
-    assert.equal(calls.length, 1)
-    assert.equal(calls[0]!.kind, 'team_episode:obj:s1:standard:1')
-    assert.equal(JSON.parse(calls[0]!.json).complete, true)
+    assert.equal(calls.length, 2)
+    assert.notEqual(calls[0]!.kind, calls[1]!.kind)
+    assert.equal(JSON.parse(calls[0]!.json).episodeKey, 'team_episode:obj:s1:standard:1')
+    assert.equal(JSON.parse(calls[1]!.json).episodeKey, 'team_episode:obj:s1:standard:1')
+    assert.equal(calls[0]!.kind, teamEpisodePersistKind(first))
+    assert.equal(calls[1]!.kind, teamEpisodePersistKind(second))
+  })
+
+  it('persist is no-op safe when store is missing or throws', () => {
+    const episode = buildTeamEpisode([fragment()])
+
     assert.doesNotThrow(() => persistTeamEpisode(undefined, episode))
     assert.doesNotThrow(() => persistTeamEpisode({ saveBanditState: () => { throw new Error('db unavailable') } }, episode))
   })
