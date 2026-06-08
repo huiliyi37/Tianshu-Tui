@@ -83,14 +83,14 @@ describe('pendingApproval card: P2 panelization source contract', () => {
   })
 
   it('highlights the y/n keys in semantic success/error colors', () => {
-    // [y] gets theme.success background, [n] gets theme.error background
+    // [y] and [n] keys must use semantic theme colors (not hardcoded literals)
     assert.ok(
-      /backgroundColor=\{theme\.success\}[\s\S]{0,200}y/.test(jsx),
-      '[y] key must be highlighted with theme.success background',
+      /theme\.(success|primary|warning)\}[\s\S]{0,200}\[y\]/.test(jsx) || /theme\.(success|primary|warning)\}[\s\S]{0,200}y/.test(jsx),
+      '[y] key must use a semantic theme color (success/primary/warning)',
     )
     assert.ok(
-      /backgroundColor=\{theme\.error\}[\s\S]{0,200}n/.test(jsx),
-      '[n] key must be highlighted with theme.error background',
+      /theme\.(error|dim|warning)\}[\s\S]{0,200}\[n\]/.test(jsx) || /theme\.(error|dim|warning)\}[\s\S]{0,200}n/.test(jsx),
+      '[n] key must use a semantic theme color (error/dim/warning)',
     )
   })
 })

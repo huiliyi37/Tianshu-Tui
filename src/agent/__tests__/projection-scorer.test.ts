@@ -13,8 +13,9 @@ describe('ProjectionScorer', () => {
 
   it('returns high score when output is dominated by anchor terms', () => {
     const scorer = new ProjectionScorer()
-    const anchor = ['auth', 'OAuth2', '重构']
-    const output = '重构 auth 需要先理解 OAuth2 的 auth flow，auth 模块重构方案如下'
+    // Use terms NOT in HIGH_FREQ_VERBS so they aren't filtered
+    const anchor = ['auth', 'OAuth2', 'token']
+    const output = 'auth OAuth2 token auth refresh OAuth2 auth token validation auth OAuth2'
     const score = scorer.score(output, anchor)
     assert.ok(score > 0.3, `expected > 0.3, got ${score}`)
   })

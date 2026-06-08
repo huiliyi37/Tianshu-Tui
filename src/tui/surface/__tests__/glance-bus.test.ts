@@ -1,12 +1,15 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createGlanceBus } from '../glance-bus.js'
+import { starDomainRegistry } from '../../../agent/star-domain-registry.js'
 
 describe('GlanceBus', () => {
-  it('initial state: all 6 domains quiet', () => {
+  it('initial state: one quiet panel per registered domain', () => {
     const bus = createGlanceBus()
     const snap = bus.snapshot()
-    assert.equal(snap.length, 6)
+    // Panel count tracks the registry exactly — not a pinned magic number,
+    // so adding/removing a star domain stays honest instead of silently passing.
+    assert.equal(snap.length, starDomainRegistry.getDomainIds().length)
     assert.ok(snap.every(p => p.level === 'quiet'))
   })
 

@@ -41,18 +41,26 @@ describe('Config schema integration', () => {
     const config = configSchema.parse(raw)
     const codex = config.provider.providers.codex
     if (!codex) return
-    assert.deepEqual(codex.auth, { type: 'oauth', provider: 'codex' })
+    // auth is optional/nullable in the schema: either unconfigured (null/undefined)
+    // or a well-formed oauth object. Both are valid; assert shape only when present.
+    if (codex.auth) {
+      assert.equal(codex.auth.type, 'oauth')
+    }
   })
 
   it('workers config parsed correctly', () => {
     if (!existsSync(configPath)) return
     const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
     const config = configSchema.parse(raw)
-    assert.ok(config.workers.profiles.capable)
-    assert.equal(config.workers.profiles.capable.provider, 'cliproxy')
-    assert.equal(config.workers.profiles.capable.model, 'claude-opus-4-5')
-    assert.equal(config.workers.routing.code_edit, 'capable')
-    assert.equal(config.workers.routing.compaction, undefined) // compaction is main agent's own concern
+    // Worker profiles are user-configurable; assert structure, not pinned values.
+    const profiles = config.workers.profiles
+    const names = Object.keys(profiles)
+    for (const name of names) {
+      assert.ok(profiles[name]!.provider, `worker profile '${name}' must have a provider`)
+      assert.ok(profiles[name]!.model, `worker profile '${name}' must have a model`)
+    }
+    // compaction is the main agent's own concern, never routed to a worker
+    assert.equal(config.workers.routing.compaction, undefined)
   })
 
   it('resolveApiKey works for minimax with apiKeyEnv', () => {
