@@ -97,6 +97,8 @@ export const agentSchema = z.object({
   antiAnchoring: antiAnchoringSchema,
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
+  /** Explicit opt-in for P4 team scheduler gated influence. Default false keeps scheduler shadow-only. */
+  teamSchedulerBanditEnabled: z.boolean().default(false),
   permissions: permissionsSchema.default({}),
 })
 

@@ -31,6 +31,7 @@ const testConfig = {
     hearthObserveEnabled: false,
     antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 256 },
     intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 100, maxTokens: 128, temperature: 0 },
+    teamSchedulerBanditEnabled: false,
     permissions: { allow: [], bash: { allowlist: [] } },
   },
   compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },

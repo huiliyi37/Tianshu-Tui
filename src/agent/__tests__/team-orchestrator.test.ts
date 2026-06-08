@@ -304,8 +304,9 @@ depends: T1
     assert.ok(!captured.some(r => r.parentTurnId.includes('T1')))
   })
 
-  it('records telemetry for dispatched wave fragments without changing dispatch result', async () => {
+  it('records telemetry and scheduler shadow for dispatched wave fragments without changing dispatch result', async () => {
     const events: unknown[] = []
+    const schedulerEvents: unknown[] = []
     const summary = await runTeamSkeleton({
       mode: 'standard',
       objective: 'telemetry wave',
@@ -320,14 +321,53 @@ depends: T1
     }, {
       sessionId: 'session-1',
       recordTeamWaveTelemetry: event => { events.push(event) },
+      recordTeamSchedulerShadow: event => { schedulerEvents.push(event) },
       delegateBatch: async () => run('wave2'),
     })
 
     assert.equal(summary.dispatched, 1)
     assert.equal(events.length, 1)
+    assert.equal(schedulerEvents.length, 1)
     assert.equal((events[0] as any).sessionId, 'session-1')
     assert.equal((events[0] as any).fromWave, 1)
     assert.equal((events[0] as any).waveId, 'W2')
+    assert.equal((schedulerEvents[0] as any).applied, false)
+  })
+
+  it('allows scheduler influence only to reduce dispatch within a safe wave', async () => {
+    let captured: DelegationRequest[] = []
+    const summary = await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'scheduler reduce',
+      teamSchedulerBanditEnabled: true,
+      planMarkdown: `
+### T1: one
+修改 src/a.ts
+
+### T2: two
+修改 src/b.ts
+
+### T3: three
+修改 src/c.ts
+`,
+    }, {
+      teamSchedulerState: {
+        totalSamples: 35,
+        arms: {
+          'parallelism:1': { samples: 6, totalReward: 4.8, averageReward: 0.8 },
+          'parallelism:2': { samples: 6, totalReward: 2.4, averageReward: 0.4 },
+          'parallelism:3': { samples: 6, totalReward: 2.4, averageReward: 0.4 },
+          'parallelism:4': { samples: 6, totalReward: 2.4, averageReward: 0.4 },
+          'parallelism:5': { samples: 11, totalReward: 4.4, averageReward: 0.4 },
+        },
+      },
+      delegateBatch: async (requests) => { captured = requests; return run('reduced') },
+    })
+
+    assert.equal(summary.waves[0]!.taskIds.length, 2, 'grouping hard cap remains unchanged')
+    assert.equal(summary.dispatched, 1)
+    assert.equal(captured.length, 1)
+    assert.ok(summary.blocked.some(item => item.includes('deferred by scheduler')))
   })
 
   it('reports completion when fromWave is past the last wave', async () => {

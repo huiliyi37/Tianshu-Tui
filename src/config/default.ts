@@ -107,6 +107,7 @@ export const DEFAULT_CONFIG: Config = {
       maxTokens: 600,
       temperature: 0,
     },
+    teamSchedulerBanditEnabled: false,
     permissions: {
       allow: [],
       bash: { allowlist: [] },

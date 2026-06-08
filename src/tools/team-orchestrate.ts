@@ -5,6 +5,8 @@ import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js
 import { isCrossModule, isFixContext, type ChangeSet } from '../agent/review-discipline.js'
 import { routeReviewWorkflow } from '../agent/review-router.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
+import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from '../agent/team-scheduler-bandit.js'
+import type { TeamSchedulerShadowEvent } from '../agent/team-scheduler-shadow.js'
 import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
@@ -24,6 +26,11 @@ export interface TeamOrchestrateCoordinator {
   delegate?(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
   recordTeamWaveTelemetry?(event: TeamWaveTelemetry): void
   recordTeamWaveRewardClosure?(event: TeamWaveTelemetry): void
+  recordTeamSchedulerShadow?(event: TeamSchedulerShadowEvent): void
+  recordTeamSchedulerReward?(event: TeamWaveTelemetry): void
+  getTeamSchedulerState?: () => TeamSchedulerBanditState | undefined
+  getTeamSchedulerRewardStore?: () => { loadBanditStatesByPrefix?(prefix: string, limit?: number): Array<{ kind: string; json: string }> } | undefined
+  isTeamSchedulerBanditEnabled?: () => boolean
   getSessionId?: () => string | undefined
 }
 
@@ -101,7 +108,16 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
       let telemetryEvent: TeamWaveTelemetry | undefined
       try {
         summary = await runTeamSkeleton(
-          { mode, objective, planMarkdown: markdown, maxParallel, fromWave, parentTurnId: params.toolUseId, abortSignal: params.abortSignal },
+          {
+            mode,
+            objective,
+            planMarkdown: markdown,
+            maxParallel,
+            fromWave,
+            parentTurnId: params.toolUseId,
+            abortSignal: params.abortSignal,
+            teamSchedulerBanditEnabled: coordinator.isTeamSchedulerBanditEnabled?.() === true,
+          },
           {
             delegateBatch: (requests, policy, abortSignal, onProgress) =>
               coordinator.delegateBatch(requests, policy, abortSignal, (completed, total) => {
@@ -113,6 +129,8 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
               telemetryEvent = event
               coordinator.recordTeamWaveTelemetry?.(event)
             },
+            recordTeamSchedulerShadow: event => coordinator.recordTeamSchedulerShadow?.(event),
+            teamSchedulerState: coordinator.getTeamSchedulerState?.() ?? buildHistoricalTeamSchedulerState(coordinator.getTeamSchedulerRewardStore?.()),
             sessionId: coordinator.getSessionId?.(),
           },
         )
@@ -154,16 +172,22 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
       }
 
       if (telemetryEvent) {
+        const closedTelemetry = {
+          ...telemetryEvent,
+          outcome: {
+            ...telemetryEvent.outcome,
+            ...(reviewVerdict ? { reviewVerdict } : {}),
+          },
+        }
         try {
-          coordinator.recordTeamWaveRewardClosure?.({
-            ...telemetryEvent,
-            outcome: {
-              ...telemetryEvent.outcome,
-              ...(reviewVerdict ? { reviewVerdict } : {}),
-            },
-          })
+          coordinator.recordTeamWaveRewardClosure?.(closedTelemetry)
         } catch {
           // Reward closure must never affect team dispatch or review reporting.
+        }
+        try {
+          coordinator.recordTeamSchedulerReward?.(closedTelemetry)
+        } catch {
+          // Scheduler reward must never affect team dispatch or review reporting.
         }
       }
 

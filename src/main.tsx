@@ -40,6 +40,9 @@ import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import { DomainKnowledgeStore } from './agent/domain-knowledge-store.js'
 import { persistTeamWaveTelemetry, type TeamWaveTelemetry } from './agent/team-wave-telemetry.js'
+import { buildTeamSchedulerRewardEvent, persistTeamSchedulerReward, persistTeamSchedulerShadow, type TeamSchedulerShadowEvent } from './agent/team-scheduler-shadow.js'
+import { computeTeamWaveReward, deriveTeamWaveRewardInput } from './agent/team-reward.js'
+import { teamSchedulerArmForParallelism } from './agent/team-scheduler-bandit.js'
 import { recordTeamWaveRewardClosure } from './agent/reward-loop.js'
 import { createCoordinatorReviewDeps } from './agent/review-coordinator-deps.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
@@ -225,6 +228,27 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       recordTeamWaveRewardClosure: (event: TeamWaveTelemetry) => {
         recordTeamWaveRewardClosure(_meridianIndexerRef?.getDb(), event)
       },
+      recordTeamSchedulerShadow: (event: TeamSchedulerShadowEvent) => {
+        persistTeamSchedulerShadow(_meridianIndexerRef?.getDb(), event)
+      },
+      recordTeamSchedulerReward: (event: TeamWaveTelemetry) => {
+        const rewardInput = deriveTeamWaveRewardInput(event)
+        persistTeamSchedulerReward(_meridianIndexerRef?.getDb(), buildTeamSchedulerRewardEvent({
+          sessionId: event.sessionId,
+          objective: event.objectiveHash,
+          waveId: event.waveId,
+          arm: teamSchedulerArmForParallelism(event.outcome.dispatched),
+          rewardInput: {
+            teamWaveReward: computeTeamWaveReward(rewardInput),
+            conflictRate: Number(rewardInput.normalizedConflict),
+            scopeLeakRate: Number(rewardInput.normalizedScopeLeak),
+            falseGreen: rewardInput.falseGreen,
+          },
+          timestamp: event.timestamp,
+        }))
+      },
+      getTeamSchedulerRewardStore: () => _meridianIndexerRef?.getDb(),
+      isTeamSchedulerBanditEnabled: () => config.agent.teamSchedulerBanditEnabled === true,
       getSessionId: () => _sessionIdRef ?? undefined,
     }))
     reg.register(createRecallCapsuleTool(() => cwd))
