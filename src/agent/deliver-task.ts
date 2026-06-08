@@ -31,7 +31,7 @@ import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
 import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet } from './review-discipline.js'
-import { routeReviewWorkflow, type ReviewRouterDeps } from './review-router.js'
+import { routeReviewWorkflow, type ReviewRouterDeps, type ReviewOutcome } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 
@@ -412,7 +412,21 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
           if (route && ctx.reviewDeps) {
-            const outcome = await route(change, ctx.reviewDeps)
+            // REVIEW_TIMEOUT: cap review workflow at 90s to prevent tool timeout (120s default).
+            // If review times out, reject with a clear message rather than crashing.
+            const REVIEW_TIMEOUT_MS = 90_000
+            let outcome: ReviewOutcome
+            try {
+              const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Review workflow timed out')), REVIEW_TIMEOUT_MS),
+              )
+              outcome = await Promise.race([route(change, ctx.reviewDeps), timeoutPromise])
+            } catch (err) {
+              const reason = err instanceof Error ? err.message : String(err)
+              lines.push('', `⚠️  Review workflow ${reason.includes('timed out') ? 'timed out' : 'failed'}: ${reason}`)
+              lines.push('   → Use force=true to skip review for this delivery.')
+              return { content: lines.join('\n'), isError: true }
+            }
             if (outcome.verdict === 'rejected' || outcome.escalated) {
               lines.push('', `❌ ReviewRouter RED (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this delivery'}`)
               if (typeof outcome.rounds === 'number') lines.push(`   Rounds: ${outcome.rounds}`)

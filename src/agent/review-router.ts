@@ -98,7 +98,7 @@ export async function routeReviewWorkflow(
     }
   }
 
-  const maxRounds = Math.max(1, options.maxRounds ?? 3)
+  const maxRounds = Math.max(1, options.maxRounds ?? 1)
   let last: VerifierResult = { verdict: 'rejected', evidence: '' }
 
   for (let round = 1; round <= maxRounds; round++) {
