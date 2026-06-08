@@ -364,10 +364,17 @@ export class AgentLoop {
       meridianIndexer: this.config.meridianIndexer,
       physarumFileAccess: {
         getPhysarum: () => this.immuneHook.getPhysarum(),
-        onPredictions: batch => this.p3.enqueuePhysarumFilePredictions({
-          afterToolName: batch.afterToolName,
-          predictions: batch.predictions,
-        }),
+        onPredictions: batch => {
+          this.p3.enqueuePhysarumFilePredictions({
+            afterToolName: batch.afterToolName,
+            predictions: batch.predictions,
+          })
+          void batchPrewarm(
+            this.cwd,
+            batch.predictions.map(prediction => prediction.file),
+            this.prewarm,
+          ).catch(() => {})
+        },
       },
     }))
     this.perception = new TurnPerceptionController({
