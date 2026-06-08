@@ -414,6 +414,12 @@ rivet config set-url deepseek https://api.deepseek.com/v1
 rivet config set-model deepseek deepseek-v4-pro 1000000 163000 v4-pro
 rivet config set-key-env deepseek DEEPSEEK_API_KEY
 
+# Approval mode: skip all interactive approval prompts for trusted developer workspaces
+rivet config set-approval dangerously-skip-permissions
+
+# Restore recommended smart-safe approval mode
+rivet config set-approval auto-safe
+
 # Show full config
 rivet config show
 ```
@@ -435,10 +441,27 @@ Place `~/.rivet/config.json` (optional, uses built-in provider presets if missin
       }
     }
   },
-  "agent": { "maxTurns": 50, "approval": "suggest" },
+  "agent": { "maxTurns": 50, "approval": "auto-safe" },
   "compact": { "enabled": true, "autoThreshold": 800000 }
 }
 ```
+
+Approval modes:
+
+| Value | Behavior |
+|---|---|
+| `auto-safe` | Recommended default: low-risk actions can proceed automatically; high-risk actions still ask. |
+| `manual` | Ask whenever a tool declares approval is required. |
+| `auto-accept` | Auto-accept normal approval prompts for compatibility. |
+| `dangerously-skip-permissions` | Skip all interactive approval prompts, including high-risk commands and bash writes. Use only in trusted workspaces. |
+
+For one session only, start with:
+
+```bash
+rivet --dangerously-skip-permissions
+```
+
+See `docs/dangerously-skip-permissions.md` for the full safety boundary.
 
 ### MCP Server Configuration
 
