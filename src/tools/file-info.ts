@@ -1,7 +1,8 @@
 import { stat, lstat, readdir } from 'node:fs/promises'
-import { extname, basename, relative, resolve, join } from 'path'
+import { extname, basename, resolve, join } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePathSafe } from './path-validate.js'
+import { relativePosix } from '../path-format.js'
 
 export const FILE_INFO_TOOL: Tool = {
   definition: {
@@ -35,7 +36,7 @@ export const FILE_INFO_TOOL: Tool = {
       const resolved = resolve(inputPath)
       try {
         await stat(resolved)
-        const rel = relative(params.cwd, resolved)
+        const rel = relativePosix(params.cwd, resolved)
         return {
           content: `Path: ${rel}\nNote: outside project directory — use import_resource to bring it in.`,
           uiContent: `${rel} (outside project)`,
@@ -52,12 +53,12 @@ export const FILE_INFO_TOOL: Tool = {
       ls = await lstat(absPath)
     } catch {
       return {
-        content: `Path: ${relative(params.cwd, absPath)}\nExists: false`,
-        uiContent: `${relative(params.cwd, absPath)} — does not exist`,
+        content: `Path: ${relativePosix(params.cwd, absPath)}\nExists: false`,
+        uiContent: `${relativePosix(params.cwd, absPath)} — does not exist`,
       }
     }
 
-    const relPath = relative(params.cwd, absPath)
+    const relPath = relativePosix(params.cwd, absPath)
     const ext = extname(absPath)
     const name = basename(absPath)
 

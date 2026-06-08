@@ -1,6 +1,7 @@
 import { readFile, stat, readdir } from 'node:fs/promises'
-import { join, relative } from 'path'
+import { join } from 'path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import { relativePosix } from '../path-format.js'
 
 interface PackageJson {
   scripts?: Record<string, string>
@@ -110,7 +111,7 @@ async function findEntryFiles(cwd: string): Promise<string[]> {
       for (const ext of ENTRY_EXTENSIONS) {
         const fullPath = join(base, name + ext)
         if (await fileExists(fullPath)) {
-          entries.push(relative(cwd, fullPath))
+          entries.push(relativePosix(cwd, fullPath))
         }
       }
     }
@@ -145,7 +146,7 @@ async function findTestFiles(cwd: string): Promise<string[]> {
       } else if (s.isFile()) {
         if (files.length >= MAX_TEST_FILES) return
         if (name.includes('.test.') || name.includes('.spec.') || name === '__tests__') {
-          files.push(relative(cwd, fullPath))
+          files.push(relativePosix(cwd, fullPath))
         }
       }
     }

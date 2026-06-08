@@ -1,5 +1,6 @@
 import { readdir, stat } from 'node:fs/promises'
-import { join, basename, resolve, relative } from 'path'
+import { join, basename, resolve } from 'path'
+import { relativePosix } from '../path-format.js'
 import type { Tool, ToolCallParams } from './types.js'
 
 const EXCLUDE_DIRS = new Set([
@@ -196,7 +197,7 @@ Good: repo_map({ max_files: 100 }) — smaller tree for large projects`,
 
     // Header: show relative path when focused on subdirectory
     const displayRoot = subPath
-      ? `${basename(params.cwd)}/${relative(params.cwd, root)}/`
+      ? `${basename(params.cwd)}/${relativePosix(params.cwd, root)}/`
       : `${basename(root)}/`
 
     const header = displayRoot
