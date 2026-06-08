@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { capLiveTail } from '../live-tail-cap.js'
+import { capLiveTail, displayRowsForText } from '../live-tail-cap.js'
 
 describe('capLiveTail', () => {
   it('returns text unchanged when within cap', () => {
@@ -40,6 +40,10 @@ describe('capLiveTail', () => {
 
   it('handles very narrow terminals while preserving the omission marker', () => {
     assert.equal(capLiveTail('abcd\nef', 1, 1), '…')
+  })
+
+  it('exports display row counting for sibling live chrome budgeting', () => {
+    assert.equal(displayRowsForText(`${'你'.repeat(80)}\nshort`, 80), 3)
   })
 
   it('maxRows <= 0 returns empty', () => {

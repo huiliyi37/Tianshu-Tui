@@ -6,6 +6,10 @@ function rowsFor(line: string, width: number): number {
   return Math.max(1, Math.ceil(stringWidth(line) / width))
 }
 
+export function displayRowsForText(text: string, width: number): number {
+  return text.split('\n').reduce((total, line) => total + rowsFor(line, width), 0)
+}
+
 const OMITTED_PREFIX = '… '
 const OMITTED_PREFIX_NARROW = '…'
 

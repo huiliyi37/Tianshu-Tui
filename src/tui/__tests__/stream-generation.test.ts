@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { isCurrentGeneration, shouldUseStaticHistory } from '../app.js'
+import { estimateLiveChromeRows, isCurrentGeneration, shouldUseStaticHistory } from '../app.js'
 
 describe('isCurrentGeneration — stream generation guard', () => {
   it('allows flip when the run is still the current generation', () => {
@@ -32,5 +32,43 @@ describe('shouldUseStaticHistory', () => {
 
   it('restores Static after streaming even without ANSI cursor diff rendering', () => {
     assert.equal(shouldUseStaticHistory(false, false), true)
+  })
+})
+
+describe('estimateLiveChromeRows', () => {
+  it('counts full-width thinking text by display rows', () => {
+    const rows = estimateLiveChromeRows({
+      columns: 80,
+      groundRows: 7,
+      streamingThinking: '你'.repeat(80),
+      liveTools: [],
+    })
+
+    assert.equal(rows.thinkRows, 5) // 2 wrapped display rows + thinking chrome
+    assert.equal(rows.totalRows, 12)
+  })
+
+  it('counts wrapped tool output by display rows before applying the tool cap', () => {
+    const rows = estimateLiveChromeRows({
+      columns: 80,
+      groundRows: 7,
+      streamingThinking: '',
+      liveTools: [{ content: '🧪'.repeat(120) }],
+    })
+
+    assert.equal(rows.toolRows, 5) // 3 wrapped display rows + tool chrome
+    assert.equal(rows.totalRows, 12)
+  })
+
+  it('caps each live tool reservation to 12 rows', () => {
+    const rows = estimateLiveChromeRows({
+      columns: 80,
+      groundRows: 7,
+      streamingThinking: '',
+      liveTools: [{ content: Array.from({ length: 40 }, (_, i) => `line${i}`).join('\n') }],
+    })
+
+    assert.equal(rows.toolRows, 12)
+    assert.equal(rows.totalRows, 19)
   })
 })

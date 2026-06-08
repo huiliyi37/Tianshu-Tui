@@ -52,7 +52,7 @@ import { TaskListBar } from './task-list-bar.js'
 import { decodeTeamPanelModel } from './team-panel-model.js'
 import { TeamPanel } from './team-panel.js'
 import { appendStreamWindow } from './stream-window.js'
-import { capLiveTail } from './live-tail-cap.js'
+import { capLiveTail, displayRowsForText } from './live-tail-cap.js'
 import { createRingBuffer, type RingBuffer } from './ring-buffer.js'
 import { createCommittedLog } from './committed-log.js'
 import { RenderBatcher } from './render-batch.js'
@@ -192,6 +192,26 @@ export function isCurrentGeneration(runGen: number, currentGen: number): boolean
 
 export function shouldUseStaticHistory(isStreaming: boolean, supportsAnsiEscapes: boolean): boolean {
   return !isStreaming || supportsAnsiEscapes
+}
+
+export function estimateLiveChromeRows(input: {
+  columns: number
+  groundRows: number
+  streamingThinking: string
+  liveTools: Array<Pick<LogEntry, 'content'>>
+}): { thinkRows: number; toolRows: number; totalRows: number } {
+  const thinkRows = input.streamingThinking
+    ? Math.min(10, displayRowsForText(input.streamingThinking, input.columns)) + 3
+    : 0
+  const toolRows = input.liveTools.reduce((sum, tool) => {
+    const contentRows = tool.content ? displayRowsForText(tool.content, input.columns) : 1
+    return sum + Math.min(12, contentRows + 2)
+  }, 0)
+  return {
+    thinkRows,
+    toolRows,
+    totalRows: input.groundRows + thinkRows + toolRows,
+  }
 }
 
 // --- Main App ---
@@ -1363,9 +1383,13 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   // measured live here at render time — and trim the streaming tail to what's left.
   const liveCols = process.stdout.columns ?? 80
   const liveGroundRows = 7 // GlanceBar(rule+line) + InputBar(bordered, +2) + margin
-  const liveThinkRows = streamingThinking ? Math.min(10, streamingThinking.split('\n').length) + 3 : 0
-  const liveToolRows = liveTools.reduce((s, t) => s + Math.min(12, (t.content ? t.content.split('\n').length : 1) + 2), 0)
-  const liveCapRows = Math.max(2, termRows - liveGroundRows - liveThinkRows - liveToolRows - 2)
+  const liveChromeRows = estimateLiveChromeRows({
+    columns: liveCols,
+    groundRows: liveGroundRows,
+    streamingThinking,
+    liveTools,
+  })
+  const liveCapRows = Math.max(2, termRows - liveChromeRows.totalRows - 2)
   const displayStreamingText = streamingText ? capLiveTail(streamingText, liveCols, liveCapRows) : streamingText
 
   return (
