@@ -3,10 +3,12 @@ import type { ModelRoutingShadowEvent } from './model-routing-shadow.js'
 import { routingShadowKind } from './model-routing-shadow.js'
 import type { TeamWaveTelemetry } from './team-wave-telemetry.js'
 import { teamWaveTelemetryKind } from './team-wave-telemetry.js'
+import type { TeamEpisode } from './team-episode.js'
+import { deriveTeamEpisodeRewardInput, teamEpisodeKey } from './team-episode.js'
 import { buildRoutingRewardRecord, type RoutingRewardInput } from './routing-reward.js'
 import { buildTeamWaveRewardRecord, deriveTeamWaveRewardInput } from './team-reward.js'
 
-export type RewardSourceKind = 'routing_shadow' | 'team_wave'
+export type RewardSourceKind = 'routing_shadow' | 'team_wave' | 'team_episode'
 
 export interface RewardClosureRecord {
   schemaVersion: 1
@@ -141,6 +143,34 @@ export function buildRewardClosureRecordFromTeamWave(
   })
 }
 
+export function buildRewardClosureRecordFromTeamEpisode(
+  episode: TeamEpisode,
+  options?: BuildRewardClosureOptions,
+): RewardClosureRecord | null {
+  const rewardInput = deriveTeamEpisodeRewardInput(episode)
+  if (!rewardInput) return null
+  const rewardRecord = buildTeamWaveRewardRecord(rewardInput)
+  return buildRewardClosureRecord({
+    sourceKind: 'team_episode',
+    sourceKey: teamEpisodeKey(episode),
+    objectiveHash: episode.objectiveHash,
+    sessionId: episode.sessionId,
+    reward: rewardRecord.reward,
+    components: {
+      ...rewardRecord.components,
+      mode: episode.mode,
+      waveCount: episode.waveCount,
+      observedWaveCount: episode.observedWaveIndexes.length,
+      dispatched: episode.outcome.dispatched,
+      ...(episode.outcome.reviewVerdict ? { reviewVerdict: episode.outcome.reviewVerdict } : {}),
+      changedFilesSource: episode.changedFiles.changedFilesSource,
+      fragmentCount: episode.fragments.length,
+      maxRisk: episode.planned.maxRisk,
+    },
+    timestamp: options?.timestamp,
+  })
+}
+
 export function persistRewardClosure(
   store: RewardClosureStore | undefined | null,
   record: RewardClosureRecord,
@@ -169,6 +199,17 @@ export function recordTeamWaveRewardClosure(
   options?: BuildRewardClosureOptions,
 ): RewardClosureRecord {
   const record = buildRewardClosureRecordFromTeamWave(event, options)
+  persistRewardClosure(store, record)
+  return record
+}
+
+export function recordTeamEpisodeRewardClosure(
+  store: RewardClosureStore | undefined | null,
+  episode: TeamEpisode,
+  options?: BuildRewardClosureOptions,
+): RewardClosureRecord | null {
+  const record = buildRewardClosureRecordFromTeamEpisode(episode, options)
+  if (!record) return null
   persistRewardClosure(store, record)
   return record
 }

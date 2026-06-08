@@ -2,11 +2,14 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ModelRoutingShadowEvent } from '../model-routing-shadow.js'
 import type { TeamWaveTelemetry } from '../team-wave-telemetry.js'
+import { buildTeamEpisode } from '../team-episode.js'
 import {
   buildRewardClosureRecordFromRoutingShadow,
+  buildRewardClosureRecordFromTeamEpisode,
   buildRewardClosureRecordFromTeamWave,
   persistRewardClosure,
   recordRoutingRewardClosure,
+  recordTeamEpisodeRewardClosure,
   recordTeamWaveRewardClosure,
   rewardClosureKind,
 } from '../reward-loop.js'
@@ -104,6 +107,23 @@ describe('reward loop closure', () => {
     }
   })
 
+  it('builds team episode reward closures only for complete episodes', () => {
+    const episode = buildTeamEpisode([teamEvent], { timestamp: 250 })
+    const record = buildRewardClosureRecordFromTeamEpisode(episode, { timestamp: 450 })
+
+    assert.ok(record)
+    assert.equal(record.sourceKind, 'team_episode')
+    assert.equal(record.sourceKey, 'team_episode:obj:s1:standard:1')
+    assert.equal(record.sessionId, 's1')
+    assert.equal(record.objectiveHash, 'obj')
+    assert.equal(record.components.fragmentCount, 1)
+    assert.equal(record.components.maxRisk, 'low')
+    assert.equal(record.reward, 0.6)
+
+    const incomplete = buildTeamEpisode([{ ...teamEvent, fromWave: 1, waveId: 'W2', waveCount: 2 }])
+    assert.equal(buildRewardClosureRecordFromTeamEpisode(incomplete), null)
+  })
+
   it('persists reward closures through saveBanditState and remains no-op safe', () => {
     const calls: Array<{ kind: string; json: string }> = []
     const record = buildRewardClosureRecordFromTeamWave(teamEvent, { timestamp: 500 })
@@ -122,5 +142,6 @@ describe('reward loop closure', () => {
 
     assert.doesNotThrow(() => recordRoutingRewardClosure(throwingStore, routingEvent, { timestamp: 600 }))
     assert.doesNotThrow(() => recordTeamWaveRewardClosure(throwingStore, teamEvent, { timestamp: 601 }))
+    assert.doesNotThrow(() => recordTeamEpisodeRewardClosure(throwingStore, buildTeamEpisode([teamEvent]), { timestamp: 602 }))
   })
 })
