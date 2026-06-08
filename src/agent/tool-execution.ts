@@ -30,6 +30,7 @@ import {
   shouldTippingPointReset,
   resetAccumulator,
   adjustReasoningEffort,
+  getErrorRate,
 } from './prediction-error.js'
 import type { ReasoningEffort } from './auto-reasoning.js'
 import { createRuntimeHookContext } from './runtime-hooks.js'
@@ -112,6 +113,30 @@ export interface ToolExecBatchResult {
 
 export class ToolExecutionController {
   constructor(private deps: ToolExecutionDeps) {}
+
+  /**
+   * T2-02 P0: Shadow telemetry for effort bandit at intervention adjustment point.
+   * Records what the bandit would recommend without changing behavior.
+   */
+  private shadowEffortAdjustment(oldEffort: string, newEffort: string): void {
+    try {
+      if (!this.deps.p3) return
+      // Build lightweight context from available deps
+      const predAcc = this.deps.getPredictionAccumulator()
+      const errorRate = getErrorRate(predAcc)
+      const ctx = [
+        Math.min(1, errorRate * 2),                  // taskComplexity proxy
+        errorRate,                                     // errorRate
+        Math.min(1, this.deps.getSessionTurnCount() / 50), // turnDepth
+        0,                                             // fileCount (not accessible at this level)
+        0,                                             // isRepeat (not accessible)
+        new Date().getHours() / 24,                    // timeOfDay
+      ]
+      this.deps.p3.shadowRecommendEffort(ctx, newEffort)
+    } catch {
+      // Shadow telemetry must never affect behavior
+    }
+  }
 
   async executeBatch(input: ToolExecBatchInput): Promise<ToolExecBatchResult> {
     const toolResults: ContentBlock[] = []
@@ -386,6 +411,8 @@ export class ToolExecutionController {
    }
     if (this.deps.getAutoReasoning() && this.deps.getReasoningEffort()) {
       const newEffort = adjustReasoningEffort(this.deps.getReasoningEffort()!, level)
+      // T2-02 P0: shadow telemetry — record bandit recommendation without changing behavior
+      this.shadowEffortAdjustment(this.deps.getReasoningEffort()!, newEffort)
       this.deps.setClientReasoningEffort(newEffort)
    }
 

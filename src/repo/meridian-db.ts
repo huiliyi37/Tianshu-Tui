@@ -564,6 +564,38 @@ export class MeridianDb {
     return parsed.version === 1 ? parsed : null
   }
 
+  // ─── T2-02: Bandit state persistence ──────────────────────────────────
+
+  saveBanditState(kind: string, json: string): void {
+    if (!this._available) return
+    try {
+      this.db.prepare(`
+        INSERT INTO p3_state (kind, version, json, updated_at)
+        VALUES (?, 1, ?, datetime('now'))
+        ON CONFLICT(kind, version) DO UPDATE SET
+          json = excluded.json,
+          updated_at = excluded.updated_at
+      `).run(kind, json)
+    } catch {
+      // Bandit persistence is non-critical
+    }
+  }
+
+  loadBanditState(kind: string): string | null {
+    if (!this._available) return null
+    try {
+      const row = this.db.prepare(`
+        SELECT json FROM p3_state
+        WHERE kind = ? AND version = 1
+      `).get(kind) as { json: string } | undefined
+      return row?.json ?? null
+    } catch {
+      return null
+    }
+  }
+
+  // ─── Sensorimotor ─────────────────────────────────────────────────────
+
   /**
    * Record a sensorimotor experience: (context, tool, outcome).
    * Gracefully degrades when DB is unavailable.

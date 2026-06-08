@@ -34,6 +34,19 @@ const target = typeof input?.path === 'string'
       self.p3.invalidateJIT(target)
     }
 
+    // T2-02 P2: Record successful tool sequences to PlanCache on task delivery
+    if (!isError && name === 'deliver_task') {
+      try {
+        const steps = self.p3.extractPlanSteps(self.recentToolHistory)
+        if (steps.length >= 2) {
+          const taskDesc = self.recentToolHistory
+            .map(e => `${e.tool}:${e.target}`)
+            .join(' → ')
+          self.p3.recordPlan(taskDesc, steps)
+        }
+      } catch { /* PlanCache recording is non-critical */ }
+    }
+
     // P3-D Atropos: assess trajectory health → auto-escalate Flash→Pro on repeated failures (sync)
     let trajectoryHealth: HealthSignal = 'healthy'
     if (self.config.onModelSwitch && self.config.getCurrentModel) {

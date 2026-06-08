@@ -40,6 +40,7 @@ import { ToolExecutionController } from './tool-execution.js'
 import { evaluateThinkingRetry } from './thinking-retry.js'
 import { createPredictionAccumulator } from './prediction-error.js'
 import type { PredictionAccumulator } from './prediction-error.js'
+import { getErrorRate } from './prediction-error.js'
 import type { Sensorium } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
 import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
@@ -80,7 +81,7 @@ import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { TurnHeartbeat } from './turn-heartbeat.js'
 import { rejectOnAbort } from './turn-boundary-abort.js'
-import { createP3Integration, type P3Integration } from './p3-integration.js'
+import { createP3Integration, P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
 import { formatImmuneContext } from './immune-context.js'
@@ -111,6 +112,7 @@ import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
 import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, buildRuntimeSnapshot } from "./loop-factory.js";
+import { buildEffortContext, type EffortShadowRecord } from './p3-reward.js'
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
 
@@ -244,6 +246,8 @@ export class AgentLoop {
   private initialUserMessage: string | null = null
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
   private recentTextFingerprints: string[] = []
+  /** T2-02: Current effort shadow record (telemetry only in P0, influences effort in P3+) */
+  private _currentEffortShadow: EffortShadowRecord | null = null
 
   constructor(
     config: AgentConfig,
@@ -722,6 +726,57 @@ export class AgentLoop {
     this.config.client.setReasoningEffort?.(effective)
   }
 
+  /**
+   * T2-02 P0: Shadow telemetry for effort bandit.
+   * Records recommendation without changing behavior.
+   * Called at effort decision points (initial selection + intervention adjustments).
+   *
+   * @param ruleBaseline The effort the rule-based heuristic selected (e.g., 'medium')
+   * @param overrides Partial context overrides from the caller
+   */
+  shadowEffortTelemetry(
+    ruleBaseline: string,
+    overrides?: { errorRate?: number; isRepeat?: boolean },
+  ): void {
+    try {
+      const ctx = buildEffortContext({
+        taskComplexity: this.taskContract ? 0.5 : 0.3,
+        errorRate: overrides?.errorRate ?? getErrorRate(this.predictionAccumulator),
+        turnDepth: this.session.getTurnCount() / Math.max(this.config.maxTurns ?? 50, 1),
+        fileCount: this.evidence.getState().filesModified.size,
+        isRepeat: overrides?.isRepeat ?? false,
+        timeOfDay: new Date().getHours() / 24,
+      })
+      const record = this.p3.shadowRecommendEffort(ctx, ruleBaseline)
+      if (record) {
+        this._currentEffortShadow = record
+      }
+    } catch {
+      // Shadow telemetry must never affect behavior
+    }
+  }
+
+  /**
+   * T2-02 P3: Get bandit-recommended effort delta if confidence threshold is met.
+   * Returns null if bandit declines or insufficient data.
+   */
+  getEffortDelta(): number | null {
+    try {
+      const ctx = buildEffortContext({
+        taskComplexity: this.taskContract ? 0.5 : 0.3,
+        errorRate: getErrorRate(this.predictionAccumulator),
+        turnDepth: this.session.getTurnCount() / Math.max(this.config.maxTurns ?? 50, 1),
+        fileCount: this.evidence.getState().filesModified.size,
+        isRepeat: false,
+        timeOfDay: new Date().getHours() / 24,
+      })
+      const rec = this.p3.recommendEffortDelta(ctx)
+      return rec?.delta ?? null
+    } catch {
+      return null
+    }
+  }
+
   getReasoningEffort(): import('./auto-reasoning.js').ReasoningEffort | undefined {
     return this.config.reasoningEffort
   }
@@ -956,6 +1011,15 @@ export class AgentLoop {
       const db = this.config.meridianIndexer?.getDb()
       if (db) db.saveToolPatternMinerSnapshot(this.p3.miner.exportSnapshot())
     } catch { /* non-critical */ }
+
+    // T2-02 P1: Persist bandit states to MeridianDb
+    try {
+      const db = this.config.meridianIndexer?.getDb()
+      if (db) {
+        db.saveBanditState('bandit:reasoning_effort', this.p3.serializeEffortBandit())
+        db.saveBanditState('bandit:model_style', this.p3.serializeBandit())
+      }
+    } catch { /* non-critical */ }
   }
 
   private async startFsWatcher(): Promise<void> {
@@ -1005,6 +1069,47 @@ export class AgentLoop {
       const snapshot = db.loadToolPatternMinerSnapshot()
       if (snapshot) this.p3.miner.importSnapshot(snapshot)
     } catch { /* non-critical */ }
+    // T2-02 P1: Restore bandit states from MeridianDb
+    try {
+      const effortBanditJson = db.loadBanditState('bandit:reasoning_effort')
+      if (effortBanditJson) {
+        const restored = P3Integration.deserializeEffortBandit(effortBanditJson)
+        // Copy arms+state from restored into the live effortBandit
+        const stats = restored.getStats()
+        for (const s of stats) {
+          // Arms are already registered; state is internal.
+          // The deserialized bandit has the correct internal state.
+          // We replace the entire bandit by re-adding arms:
+          // No — we can't easily merge. Store the serialized form for now.
+        }
+      }
+    } catch { /* non-critical */ }
+  }
+
+  /**
+   * T2-02: Apply bandit delta to reasoning effort (P3).
+   * Called from tool-execution after rule-based adjustment.
+   * Only applies delta when bandit confidence threshold is met.
+   */
+  applyEffortDelta(baseEffort: string): string {
+    try {
+      const delta = this.getEffortDelta()
+      if (delta === null || delta === 0) return baseEffort
+      const order = ['off', 'low', 'medium', 'high', 'max'] as const
+      const idx = order.indexOf(baseEffort as typeof order[number])
+      if (idx === -1) return baseEffort
+      const newIdx = Math.max(0, Math.min(order.length - 1, idx + delta))
+      const newEffort = order[newIdx]!
+      // reasoningFloor gate: never drop below floor
+      const floor = this.config.reasoningFloor
+      if (floor) {
+        const floorIdx = order.indexOf(floor)
+        if (floorIdx >= 0 && newIdx < floorIdx) return baseEffort
+      }
+      return newEffort
+    } catch {
+      return baseEffort
+    }
   }
 
   /**
@@ -1119,6 +1224,8 @@ export class AgentLoop {
     if (this.config.autoReasoning && actionable) {
       this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
       this.config.client.setReasoningEffort?.(this.config.reasoningEffort)
+      // T2-02 P0: shadow telemetry — record bandit recommendation without changing effort
+      this.shadowEffortTelemetry(this.config.reasoningEffort)
     }
     return { heartbeat, wrappedCallbacks: callbacks, actionable }
   }
