@@ -308,6 +308,20 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
       }
 
       if (commit) {
+        // Atomic commit reminder — injected at the exact moment before commit,
+        // not in system prompt. Keeps prompt noise low while catching "accidental
+        // batch commit" at the most dangerous moment.
+        lines.push(
+          '',
+          '<atomic-commit-reminder>',
+          '提交前只确认本次一个逻辑单元：',
+          '1. 是否只包含当前任务文件？',
+          '2. 是否混入外部/他人改动？',
+          '3. 测试与 typecheck 是否对应本逻辑单元？',
+          '4. commit message 是否描述一个原子变更？',
+          '</atomic-commit-reminder>',
+        )
+
         const forceGate = params.input.force === true
         if (report.state === 'RED') {
           // Stale failure candidates: failures that likely pre-date this change.

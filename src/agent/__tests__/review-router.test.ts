@@ -53,7 +53,7 @@ describe('routeReviewWorkflow', () => {
       ...okDeps,
       spawnVerifier: async () => verdicts.shift() ?? { verdict: 'verified', evidence: 'ran: fallback' },
       spawnPatcher: async () => { patcherCalls++; return { patched: true } },
-    })
+    }, { maxRounds: 2 })
 
     assert.equal(outcome.verdict, 'verified')
     assert.equal(outcome.rounds, 2)

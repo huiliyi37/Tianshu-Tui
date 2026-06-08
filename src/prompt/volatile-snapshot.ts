@@ -5,6 +5,7 @@ import { summarizeGitStatus } from './git-status-summary.js'
 import { loadProjectMemory } from '../context/project-memory-loader.js'
 import { renderResidentCapsuleBlock } from '../agent/seed-capsule-store.js'
 import { generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
+import { detectCwdRelation } from './self-recognition.js'
 import type { VolatileContext } from './volatile.js'
 
 export interface SnapshotInput {
@@ -63,6 +64,7 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
 
   return Object.freeze({
     cwd: input.cwd,
+    cwdRelation: detectCwdRelation(input.cwd),
     rivetMd,
     gitStatus,
     workingSet,
