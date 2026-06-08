@@ -113,6 +113,7 @@ import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
 import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, buildRuntimeSnapshot } from "./loop-factory.js";
 import { buildEffortContext, type EffortShadowRecord } from './p3-reward.js'
+import { resolveEffortDelta } from './effort-delta.js'
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
 
@@ -1069,44 +1070,33 @@ export class AgentLoop {
       const snapshot = db.loadToolPatternMinerSnapshot()
       if (snapshot) this.p3.miner.importSnapshot(snapshot)
     } catch { /* non-critical */ }
-    // T2-02 P1: Restore bandit states from MeridianDb
+    // T2-02 P1: Restore bandit states from MeridianDb (cross-session learning).
+    // effortBandit / bandit are readonly on P3Integration, so we restore them
+    // in place via importState rather than reassigning the references.
     try {
       const effortBanditJson = db.loadBanditState('bandit:reasoning_effort')
-      if (effortBanditJson) {
-        const restored = P3Integration.deserializeEffortBandit(effortBanditJson)
-        // Copy arms+state from restored into the live effortBandit
-        const stats = restored.getStats()
-        for (const s of stats) {
-          // Arms are already registered; state is internal.
-          // The deserialized bandit has the correct internal state.
-          // We replace the entire bandit by re-adding arms:
-          // No — we can't easily merge. Store the serialized form for now.
-        }
-      }
+      if (effortBanditJson) this.p3.importEffortBanditState(effortBanditJson)
+      const modelBanditJson = db.loadBanditState('bandit:model_style')
+      if (modelBanditJson) this.p3.importBanditState(modelBanditJson)
     } catch { /* non-critical */ }
   }
 
   /**
-   * T2-02: Apply bandit delta to reasoning effort (P3).
-   * Called from tool-execution after rule-based adjustment.
-   * Only applies delta when bandit confidence threshold is met.
+   * T2-02 P3: Apply bandit delta to a base reasoning effort.
+   *
+   * Implements the clamp + reasoningFloor safety gate (delegated to the pure
+   * `resolveEffortDelta`) that will guard P3-driven effort adjustment.
+   *
+   * NOT WIRED INTO ANY LIVE PATH. This method is implemented and tested but
+   * has no caller in tool-execution or the agent loop. Activation is deferred
+   * until the T2-02 "consistency promotion gate" lands; until then real effort
+   * selection is unchanged. Do not call this from a live decision path without
+   * that gate.
    */
   applyEffortDelta(baseEffort: string): string {
     try {
       const delta = this.getEffortDelta()
-      if (delta === null || delta === 0) return baseEffort
-      const order = ['off', 'low', 'medium', 'high', 'max'] as const
-      const idx = order.indexOf(baseEffort as typeof order[number])
-      if (idx === -1) return baseEffort
-      const newIdx = Math.max(0, Math.min(order.length - 1, idx + delta))
-      const newEffort = order[newIdx]!
-      // reasoningFloor gate: never drop below floor
-      const floor = this.config.reasoningFloor
-      if (floor) {
-        const floorIdx = order.indexOf(floor)
-        if (floorIdx >= 0 && newIdx < floorIdx) return baseEffort
-      }
-      return newEffort
+      return resolveEffortDelta(baseEffort, delta, this.config.reasoningFloor)
     } catch {
       return baseEffort
     }

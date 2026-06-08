@@ -156,6 +156,27 @@ export class LinUCBBandit {
     return bandit
   }
 
+  /**
+   * In-place restore of arms + totalPulls from a serialized snapshot.
+   *
+   * Unlike `deserialize` (which builds a NEW instance), this overwrites the
+   * live instance's state so a long-lived bandit reference can pick up
+   * cross-session history. This is a REPLACE, not a merge: a freshly
+   * constructed bandit has no learning worth preserving, so dropping its
+   * cold-start arms in favor of the persisted ones is intentional.
+   *
+   * Throws on malformed JSON / shape; callers persisting non-critical state
+   * should wrap in try/catch.
+   */
+  importState(json: string): void {
+    const data = JSON.parse(json)
+    this.arms = new Map<string, BanditArm>()
+    for (const [id, arm] of data.arms) {
+      this.arms.set(id, arm)
+    }
+    this.totalPulls = data.totalPulls ?? 0
+  }
+
   private ucbScore(arm: BanditArm, x: number[]): number {
     // theta = A^{-1} * b (simplified: use diagonal approximation for speed)
     // Full matrix inverse is O(d^3), diagonal approx is O(d)

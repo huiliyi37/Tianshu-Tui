@@ -307,12 +307,29 @@ export class P3Integration {
     return LinUCBBandit.deserialize(json, { dimension: 6, alpha: 1.2 })
   }
 
+  /**
+   * In-place restore of the effort bandit from a persisted snapshot.
+   * `effortBandit` is readonly, so callers cannot reassign it; this delegates
+   * to the live instance's importState so cross-session learning survives.
+   */
+  importEffortBanditState(json: string): void {
+    this.effortBandit.importState(json)
+  }
+
   serializeBandit(): string {
     return this.bandit.serialize()
   }
 
   static deserializeBandit(json: string): LinUCBBandit {
     return LinUCBBandit.deserialize(json, { dimension: 6 })
+  }
+
+  /**
+   * In-place restore of the model_style bandit from a persisted snapshot.
+   * Symmetric with the save side (loop.ts persists both banditstates).
+   */
+  importBanditState(json: string): void {
+    this.bandit.importState(json)
   }
 
   getStats() {
