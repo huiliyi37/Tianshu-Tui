@@ -69,6 +69,7 @@ import { getThetaPhase } from './star-event.js'
 import { selectPolicy, renderPolicyGuidance } from './policy-selection.js'
 import { computeEFE } from './prediction-error.js'
 import { computeAffordanceScores } from './affordance.js'
+import { buildModelRoutingShadowEvent, inferLegacyRoutingRecommendation, persistModelRoutingShadow } from './model-routing-shadow.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
@@ -532,6 +533,35 @@ export class AgentLoop {
 
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
       recordToolHistory(this, name, input, isError, result);
+  }
+
+  private recordModelRoutingShadow(currentSensorium: Sensorium): void {
+    if (this.config.modelRoutingShadowEnabled === false) return
+    const store = this.config.meridianIndexer?.getDb()
+    if (!store) return
+
+    try {
+      const recentCalls = this.trajectory.getEntries().slice(-10).map(entry => ({
+        name: entry.tool,
+        isError: entry.status === 'failed' || entry.status === 'retried-failed',
+      }))
+      const legacyRouting = inferLegacyRoutingRecommendation(
+        recentCalls,
+        this.config.modelRoutingShadowModelCards ?? this.config.modelCards,
+      )
+      const event = buildModelRoutingShadowEvent({
+        sessionId: this.config.sessionId ?? 'unknown',
+        turn: this.session.getTurnCount(),
+        objective: this.initialUserMessage ?? '',
+        currentModel: this.config.getCurrentModel?.() ?? this.config.promptEngine.getModel(),
+        selectedBy: this.config.getCurrentModel ? 'human' : 'config',
+        legacyRouting,
+        sensorium: currentSensorium,
+      })
+      persistModelRoutingShadow(store, event)
+    } catch {
+      // Shadow telemetry must never affect the turn.
+    }
   }
 
   private bindSessionDomain(taskDescription: string): void {
@@ -1572,6 +1602,7 @@ export class AgentLoop {
     const affordances = computeAffordanceScores(affordanceState, this.sessionAffordanceAdaptations)
     const policies = selectPolicy(efe, affordances, { topK: 5 })
     this.config.promptEngine.setPolicyGuidance(renderPolicyGuidance(policies, efe) || null)
+    this.recordModelRoutingShadow(currentSensorium)
 
     // ── Adaptive Affordance: periodically recalibrate base affordances from sensorimotor history ──
     if (this.session.getTurnCount() % 10 === 0) {

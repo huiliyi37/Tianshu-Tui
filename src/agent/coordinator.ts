@@ -52,6 +52,8 @@ export interface CoordinatorRun {
   status: 'completed' | 'skipped'
   order?: WorkOrder
   selectedModel?: string
+  /** Batch-only metadata: selected worker model per work order. Telemetry only; never affects dispatch. */
+  workerModels?: Array<{ workOrderId: string; model: string }>
   results: WorkerResult[]
   packet: string
   aggregationPolicy?: AggregationPolicy
@@ -225,34 +227,6 @@ export class DelegationCoordinator {
     const isWrite = role === 'hands'
     this.state.recordEvent({ type: 'queued', workOrderId: order.id, timestamp: Date.now() })
 
-    // Acquire semantic lock via CollaborationProtocol if configured
-    if (this.collaboration && this.config.sessionId && order.scope.files?.length) {
-      const intent: LockIntent = {
-        operation: isWrite ? 'edit' : 'refactor',
-        files: order.scope.files,
-        description: order.objective,
-      }
-      const lockResult = this.collaboration.acquireLock(this.config.sessionId, intent)
-      if (!lockResult.acquired) {
-        return {
-          status: 'completed',
-          order,
-          results: [{
-            workOrderId: order.id,
-            status: 'blocked',
-            summary: `Semantic lock conflict: ${lockResult.conflictingFiles.join(', ')} held by another session`,
-            findings: [],
-            artifacts: [{ kind: 'risk', title: 'Lock conflict', content: `Files locked by another session: ${lockResult.conflictingFiles.join(', ')}` }],
-            changedFiles: [],
-            risks: [`semantic lock conflict: ${lockResult.conflictingFiles.join(', ')}`],
-            nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
-            evidenceStatus: 'blocked',
-          }],
-          packet: buildPrimaryWorkerPacket([]),
-        }
-      }
-    }
-
     const task = mapWorkOrderKindToCapabilityTask(order.kind)
 
     // Scope budget check for exploration workers (code_search, doc_research, plan)
@@ -322,80 +296,120 @@ export class DelegationCoordinator {
       })
     }
 
-    if (role === 'hands') {
-      // Check file claims before dispatching write worker
-      if (this.config.sessionRegistry && this.config.sessionId && order.scope.files?.length) {
-        const registry = this.config.sessionRegistry
-        const sid = this.config.sessionId
-        const conflictedFiles: string[] = []
-        for (const f of order.scope.files) {
-          if (!registry.acquireClaim(sid, f, 'exclusive')) {
-            conflictedFiles.push(f)
-          }
-        }
-        if (conflictedFiles.length > 0) {
-          // Release any claims we did acquire
-          for (const f of order.scope.files) {
-            if (!conflictedFiles.includes(f)) registry.releaseClaim(sid, f)
-          }
-          return {
-            status: 'completed',
-            order,
-            results: [{
-              workOrderId: order.id,
-              status: 'blocked',
-              summary: `File claim conflict: ${conflictedFiles.join(', ')} held by another session`,
-              findings: [],
-              artifacts: [{ kind: 'risk', title: 'Claim conflict', content: `Files claimed by another session: ${conflictedFiles.join(', ')}` }],
-              changedFiles: [],
-              risks: [`file claim conflict: ${conflictedFiles.join(', ')}`],
-              nextActions: ['Wait for other session to release claims, or use read-only profile'],
-              evidenceStatus: 'blocked',
-            }],
-            packet: buildPrimaryWorkerPacket([]),
-          }
+    let semanticLockAcquired = false
+    // Acquire semantic lock via CollaborationProtocol only after all pre-dispatch
+    // validation has passed. Otherwise early blocked returns (e.g. scope budget)
+    // would need cleanup too and could leak fail-closed locks.
+    if (this.collaboration && this.config.sessionId && order.scope.files?.length) {
+      const intent: LockIntent = {
+        operation: isWrite ? 'edit' : 'refactor',
+        files: order.scope.files,
+        description: order.objective,
+      }
+      const lockResult = this.collaboration.acquireLock(this.config.sessionId, intent)
+      if (!lockResult.acquired) {
+        return {
+          status: 'completed',
+          order,
+          results: [{
+            workOrderId: order.id,
+            status: 'blocked',
+            summary: `Semantic lock conflict: ${lockResult.conflictingFiles.join(', ')} held by another session`,
+            findings: [],
+            artifacts: [{ kind: 'risk', title: 'Lock conflict', content: `Files locked by another session: ${lockResult.conflictingFiles.join(', ')}` }],
+            changedFiles: [],
+            risks: [`semantic lock conflict: ${lockResult.conflictingFiles.join(', ')}`],
+            nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
+            evidenceStatus: 'blocked',
+          }],
+          packet: buildPrimaryWorkerPacket([]),
         }
       }
-
-      const activeClaims = this.config.activeClaims?.() ?? workerConfig.activeClaims ?? []
-      const cwd = this.config.cwd ?? workerConfig.cwd
-      // Write workers (patcher/verifier) execute in an isolated git worktree.
-      // Worktree lifecycle is managed by runHands → runHandsSession: create
-      // before agent runs, collect diff after, cleanup on exit.
-      // NOTE: The host agent framework (Claude Code etc.) may still sandbox
-      // subagent write operations (edit_file/write_file/bash) even when Rivet
-      // correctly provisions write tools and worktree isolation. This is a
-      // host-layer constraint, not a Rivet work-order or worktree bug.
-      const handsRun = await wrapAbort(this.runHands({
-        order,
-        wtCoordinator: new WorktreeCoordinator(cwd),
-        cwd,
-        maxTurns: workerConfig.maxTurns,
-        contextWindow: workerConfig.contextWindow,
-        compact: workerConfig.compact,
-        activeClaims,
-        domainKnowledgeStore: this.config.domainKnowledgeStore,
-        runAgent: async (prompt, callbacks, workerCwd) => {
-          const sessionRun = await this.runWorker({
-            ...workerConfig,
-            order,
-            cwd: workerCwd,
-            activeClaims,
-            domainKnowledgeStore: this.config.domainKnowledgeStore,
-          })
-          callbacks.onTurnComplete(sessionRun.usage, 1, true)
-          return JSON.stringify(sessionRun.result)
-        },
-      }))
-      run = { result: handsRun.result }
-    } else {
-      const workerRun = await wrapAbort(this.runWorker(workerConfig))
-      run = { result: workerRun.result, transcript: workerRun.transcript }
+      semanticLockAcquired = true
     }
 
-    // Release semantic lock after worker completes
-    if (this.collaboration && this.config.sessionId) {
-      this.collaboration.releaseLocks(this.config.sessionId)
+    try {
+      if (role === 'hands') {
+        const acquiredClaimFiles: string[] = []
+        try {
+          // Check file claims before dispatching write worker
+          if (this.config.sessionRegistry && this.config.sessionId && order.scope.files?.length) {
+            const registry = this.config.sessionRegistry
+            const sid = this.config.sessionId
+            const conflictedFiles: string[] = []
+            for (const f of order.scope.files) {
+              if (registry.acquireClaim(sid, f, 'exclusive')) {
+                acquiredClaimFiles.push(f)
+              } else {
+                conflictedFiles.push(f)
+              }
+            }
+            if (conflictedFiles.length > 0) {
+              return {
+                status: 'completed',
+                order,
+                results: [{
+                  workOrderId: order.id,
+                  status: 'blocked',
+                  summary: `File claim conflict: ${conflictedFiles.join(', ')} held by another session`,
+                  findings: [],
+                  artifacts: [{ kind: 'risk', title: 'Claim conflict', content: `Files claimed by another session: ${conflictedFiles.join(', ')}` }],
+                  changedFiles: [],
+                  risks: [`file claim conflict: ${conflictedFiles.join(', ')}`],
+                  nextActions: ['Wait for other session to release claims, or use read-only profile'],
+                  evidenceStatus: 'blocked',
+                }],
+                packet: buildPrimaryWorkerPacket([]),
+              }
+            }
+          }
+
+          const activeClaims = this.config.activeClaims?.() ?? workerConfig.activeClaims ?? []
+          const cwd = this.config.cwd ?? workerConfig.cwd
+          // Write workers (patcher/verifier) execute in an isolated git worktree.
+          // Worktree lifecycle is managed by runHands → runHandsSession: create
+          // before agent runs, collect diff after, cleanup on exit.
+          // NOTE: The host agent framework (Claude Code etc.) may still sandbox
+          // subagent write operations (edit_file/write_file/bash) even when Rivet
+          // correctly provisions write tools and worktree isolation. This is a
+          // host-layer constraint, not a Rivet work-order or worktree bug.
+          const handsRun = await wrapAbort(this.runHands({
+            order,
+            wtCoordinator: new WorktreeCoordinator(cwd),
+            cwd,
+            maxTurns: workerConfig.maxTurns,
+            contextWindow: workerConfig.contextWindow,
+            compact: workerConfig.compact,
+            activeClaims,
+            domainKnowledgeStore: this.config.domainKnowledgeStore,
+            runAgent: async (prompt, callbacks, workerCwd) => {
+              const sessionRun = await this.runWorker({
+                ...workerConfig,
+                order,
+                cwd: workerCwd,
+                activeClaims,
+                domainKnowledgeStore: this.config.domainKnowledgeStore,
+              })
+              callbacks.onTurnComplete(sessionRun.usage, 1, true)
+              return JSON.stringify(sessionRun.result)
+            },
+          }))
+          run = { result: handsRun.result }
+        } finally {
+          if (this.config.sessionRegistry && this.config.sessionId) {
+            for (const file of acquiredClaimFiles) {
+              this.config.sessionRegistry.releaseClaim(this.config.sessionId, file)
+            }
+          }
+        }
+      } else {
+        const workerRun = await wrapAbort(this.runWorker(workerConfig))
+        run = { result: workerRun.result, transcript: workerRun.transcript }
+      }
+    } finally {
+      if (semanticLockAcquired && this.collaboration && this.config.sessionId) {
+        this.collaboration.releaseLocks(this.config.sessionId)
+      }
     }
 
     this.state.recordEvent({ type: run.result.status === 'passed' ? 'passed' : run.result.status === 'blocked' ? 'blocked' : 'failed', workOrderId: order.id, timestamp: Date.now() })
@@ -487,6 +501,7 @@ export class DelegationCoordinator {
 
     // Process queue with concurrency control
     const allResults: WorkerResult[] = []
+    const workerModels: Array<{ workOrderId: string; model: string }> = []
     const inflight: Promise<void>[] = []
     let completedCount = 0
 
@@ -497,6 +512,9 @@ export class DelegationCoordinator {
       try {
         const run = await this.delegateOrder(order)
         allResults.push(...run.results)
+        if (run.selectedModel) {
+          workerModels.push({ workOrderId: order.id, model: run.selectedModel })
+        }
         queue.markCompleted(order)
       } catch (error) {
         allResults.push(workerFailureResult(order, error))
@@ -521,6 +539,7 @@ export class DelegationCoordinator {
       results: aggregated,
       packet: buildPrimaryWorkerPacket(aggregated),
       aggregationPolicy: policy,
+      ...(workerModels.length > 0 ? { workerModels } : {}),
     }
     // NOTE: If delegateBatch is ever changed from serial (processNext recursion)
     // to true concurrent execution, the finally-based signal restoration below

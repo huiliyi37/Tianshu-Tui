@@ -5,6 +5,7 @@ import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js
 import { isCrossModule, isFixContext, type ChangeSet } from '../agent/review-discipline.js'
 import { routeReviewWorkflow } from '../agent/review-router.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
+import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
@@ -20,6 +21,8 @@ export interface TeamOrchestrateCoordinator {
     onProgress?: (completed: number, total: number) => void,
   ): Promise<CoordinatorRun>
   delegate?(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
+  recordTeamWaveTelemetry?(event: TeamWaveTelemetry): void
+  getSessionId?: () => string | undefined
 }
 
 function requireDelegate(coordinator: TeamOrchestrateCoordinator): Required<Pick<TeamOrchestrateCoordinator, 'delegate'>>['delegate'] {
@@ -99,6 +102,8 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
           {
             delegateBatch: (requests, policy, abortSignal, onProgress) =>
               coordinator.delegateBatch(requests, policy, abortSignal, onProgress),
+            recordTeamWaveTelemetry: coordinator.recordTeamWaveTelemetry,
+            sessionId: coordinator.getSessionId?.(),
           },
         )
       } catch (err) {

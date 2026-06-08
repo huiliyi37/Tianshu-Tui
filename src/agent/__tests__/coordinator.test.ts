@@ -328,6 +328,53 @@ describe('DelegationCoordinator', () => {
     assert.ok(run.results.every(r => r.status === 'passed'))
   })
 
+  it('returns selected model metadata for each runnable batch work order', async () => {
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+    })
+
+    const run = await coordinator.delegateBatch([
+      {
+        parentTurnId: 'turn_meta:team:T1',
+        objective: 'Search for routing seams in main module.',
+        kind: 'code_search',
+        profile: 'code_scout',
+        scope: { files: ['src/main.tsx'] },
+      },
+      {
+        parentTurnId: 'turn_meta:team:T2',
+        objective: 'Review coordinator risk patterns across delegation and aggregation boundaries.',
+        kind: 'review',
+        profile: 'reviewer',
+        scope: { files: ['src/agent/coordinator.ts', 'src/agent/aggregation.ts'] },
+      },
+    ])
+
+    assert.equal(run.status, 'completed')
+    assert.deepEqual(run.workerModels?.sort((a, b) => a.workOrderId.localeCompare(b.workOrderId)), [
+      { workOrderId: 'team:T1', model: 'large-cache' },
+      { workOrderId: 'team:T2', model: 'large-cache' },
+    ])
+  })
+
   it('keeps failed batch workers visible in aggregated results', async () => {
     let calls = 0
     const coordinator = new DelegationCoordinator({
@@ -808,12 +855,134 @@ describe('DelegationCoordinator', () => {
     assert.ok(workerCalled)
   })
 
-  it('blocks exploration worker when scope exceeds maxFiles budget', async () => {
+  it('releases CollaborationProtocol locks when worker execution throws', async () => {
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      sessionId: 's-main',
+      collaboration: {},
+      runHands: async () => { throw new Error('worker crashed after lock') },
+    })
+
+    await assert.rejects(() => coordinator.delegate({
+      parentTurnId: 'turn_lock_throw',
+      objective: 'Patch the locked file and intentionally exercise lock cleanup on worker failure.',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      scope: { files: ['src/semantic-lock-cleanup.ts'] },
+    }), /worker crashed after lock/)
+
+    const cp = (coordinator as unknown as { collaboration: CollaborationProtocol }).collaboration
+    assert.equal(cp.getSessionLocks('s-main').length, 0)
+    assert.equal(cp.acquireLock('other-session', { operation: 'edit', files: ['src/semantic-lock-cleanup.ts'], description: 'after failure' }).acquired, true)
+  })
+
+  it('releases sessionRegistry file claims after write worker completes', async () => {
+    const claims = new Map<string, string>()
+    const sessionRegistry = {
+      acquireClaim: (sessionId: string, filePath: string) => {
+        const owner = claims.get(filePath)
+        if (owner && owner !== sessionId) return false
+        claims.set(filePath, sessionId)
+        return true
+      },
+      releaseClaim: (sessionId: string, filePath: string) => {
+        if (claims.get(filePath) === sessionId) claims.delete(filePath)
+      },
+    }
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      sessionRegistry: sessionRegistry as never,
+      sessionId: 's-main',
+      runHands: async config => ({ result: resultFor(config.order.id), usage: {} }),
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_claim_success',
+      objective: 'Patch the claimed file and then release the worker claim after completion.',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      scope: { files: ['src/claim-cleanup.ts'] },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.equal(sessionRegistry.acquireClaim('other-session', 'src/claim-cleanup.ts'), true)
+  })
+
+  it('releases sessionRegistry file claims when write worker throws', async () => {
+    const claims = new Map<string, string>()
+    const sessionRegistry = {
+      acquireClaim: (sessionId: string, filePath: string) => {
+        const owner = claims.get(filePath)
+        if (owner && owner !== sessionId) return false
+        claims.set(filePath, sessionId)
+        return true
+      },
+      releaseClaim: (sessionId: string, filePath: string) => {
+        if (claims.get(filePath) === sessionId) claims.delete(filePath)
+      },
+    }
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      sessionRegistry: sessionRegistry as never,
+      sessionId: 's-main',
+      runHands: async () => { throw new Error('worker crashed after claim') },
+    })
+
+    await assert.rejects(() => coordinator.delegate({
+      parentTurnId: 'turn_claim_throw',
+      objective: 'Patch the claimed file and intentionally exercise file claim cleanup on worker failure.',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      scope: { files: ['src/claim-failure-cleanup.ts'] },
+    }), /worker crashed after claim/)
+
+    assert.equal(sessionRegistry.acquireClaim('other-session', 'src/claim-failure-cleanup.ts'), true)
+  })
+
+  it('blocks exploration worker when scope exceeds maxFiles budget without acquiring semantic locks', async () => {
+    let runtimeCalled = false
     const coordinator = new DelegationCoordinator({
       baseToolRegistry: makeRegistry(),
       modelCards: cards,
       maxWorkers: 2,
       runtimeFactory: (order, card, workerRegistry) => {
+        runtimeCalled = true
         return {
           order,
           client: {} as StreamClient,
@@ -825,6 +994,8 @@ describe('DelegationCoordinator', () => {
           compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
         }
       },
+      sessionId: 's-main',
+      collaboration: {},
       runWorker: async config => ({
         result: resultFor(config.order.id),
         transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
@@ -841,8 +1012,11 @@ describe('DelegationCoordinator', () => {
       scope: { files: Array.from({ length: 25 }, (_, i) => `src/module${i}.ts`), maxFiles: 10 },
     })
 
+    const cp = (coordinator as unknown as { collaboration: CollaborationProtocol }).collaboration
     assert.equal(run.results[0]!.status, 'blocked')
     assert.ok(run.results[0]!.summary.includes('maxFiles'))
+    assert.equal(runtimeCalled, false)
+    assert.equal(cp.getSessionLocks('s-main').length, 0)
   })
 
   it('allows exploration worker when scope is within budget', async () => {

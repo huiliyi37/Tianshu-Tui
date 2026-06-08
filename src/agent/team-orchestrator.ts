@@ -3,6 +3,7 @@ import type { AggregationPolicy } from './work-order.js'
 import { matchDomain } from './star-domain.js'
 import { parseTeamTaskDrafts, parseTeamTasks, buildUnifiedTeamPlan, hasOverlappingFiles, type TeamTaskDraft, type TeamTask, type UnifiedTeamPlan } from './team-plan.js'
 import { groupTeamTasks, type TeamWave } from './team-grouping.js'
+import { buildTeamWaveTelemetry, type TeamWaveTelemetry } from './team-wave-telemetry.js'
 import { buildPlannerObjective, mergePerspectives, normalizePerspective, parsePerspectiveResult, type TeamPerspectivePlan } from './team-perspectives.js'
 
 export interface TeamOrchestratorDeps {
@@ -12,6 +13,8 @@ export interface TeamOrchestratorDeps {
     abortSignal?: AbortSignal,
     onProgress?: (completed: number, total: number) => void,
   ): Promise<CoordinatorRun>
+  recordTeamWaveTelemetry?: (event: TeamWaveTelemetry) => void
+  sessionId?: string
 }
 
 export interface TeamRunInput {
@@ -171,6 +174,21 @@ async function dispatchWaveAt(
   }
 
   const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
+  try {
+    deps.recordTeamWaveTelemetry?.(buildTeamWaveTelemetry({
+      sessionId: deps.sessionId ?? 'unknown',
+      objective: input.objective,
+      mode: input.mode,
+      fromWave,
+      wave: targetWave,
+      waves,
+      taskMap,
+      run,
+      dispatched: requests.length,
+    }))
+  } catch {
+    // Telemetry must never affect dispatch.
+  }
   return {
     mode: input.mode,
     planned,
@@ -259,6 +277,28 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
 
     const requests = teamTasksToDelegationRequests(selected, input.parentTurnId ?? 'team')
     const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
+    try {
+      deps.recordTeamWaveTelemetry?.(buildTeamWaveTelemetry({
+        sessionId: deps.sessionId ?? 'unknown',
+        objective: input.objective,
+        mode: input.mode,
+        fromWave: input.fromWave ?? 0,
+        wave: { id: `legacy-W${(input.fromWave ?? 0) + 1}`, taskIds: selected.map(task => task.id), reason: 'legacy unstructured plan dispatch', parallelLimit: maxParallel, risk: 'medium' },
+        waves: [{ id: `legacy-W${(input.fromWave ?? 0) + 1}`, taskIds: selected.map(task => task.id), reason: 'legacy unstructured plan dispatch', parallelLimit: maxParallel, risk: 'medium' }],
+        taskMap: new Map(selected.map(task => [task.id, {
+          ...task,
+          dependsOn: [],
+          riskTier: 'medium' as const,
+          touchSet: [...task.files],
+          groupId: undefined,
+          routeHint: undefined,
+        }])),
+        run,
+        dispatched: requests.length,
+      }))
+    } catch {
+      // Telemetry must never affect dispatch.
+    }
 
     return {
       mode: input.mode,

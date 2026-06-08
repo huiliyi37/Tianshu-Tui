@@ -28,6 +28,31 @@ test('team_orchestrate dispatches a standard plan first wave', async () => {
   assert.match(result.content, /2 dispatched/)
 })
 
+test('team_orchestrate forwards telemetry sink and session id to the orchestrator', async () => {
+  const telemetry: unknown[] = []
+  const tool = createTeamOrchestrateTool({
+    delegateBatch: async () => stubRun('telemetry-dispatched'),
+    recordTeamWaveTelemetry: event => { telemetry.push(event) },
+    getSessionId: () => 'session-tool',
+  })
+  const md = [
+    '### T1: edit foo',
+    'Modify `src/agent/foo.ts`',
+  ].join('\n')
+
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'execute with telemetry', planMarkdown: md },
+    cwd: process.cwd(),
+    toolUseId: 'tu-telemetry',
+  })
+
+  assert.equal(result.isError, false)
+  assert.equal(telemetry.length, 1)
+  assert.equal((telemetry[0] as any).sessionId, 'session-tool')
+  assert.equal((telemetry[0] as any).mode, 'standard')
+  assert.equal((telemetry[0] as any).fromWave, 0)
+})
+
 test('team_orchestrate blocks a planPath outside the project', async () => {
   const tool = createTeamOrchestrateTool({
     delegateBatch: async () => stubRun(),

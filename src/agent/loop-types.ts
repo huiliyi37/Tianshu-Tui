@@ -44,6 +44,10 @@ export interface AgentConfig {
   runtimeHooks?: RuntimeHookPipeline
   fileHistory?: import('./file-history.js').FileHistory
   modelCards?: ModelCapabilityCard[]
+  /** Shadow-only model routing telemetry cards. Does not enable model switching. */
+  modelRoutingShadowModelCards?: ModelCapabilityCard[]
+  /** Record routing recommendations as append-only telemetry without changing model selection. Default: enabled when a MeridianDb is available. */
+  modelRoutingShadowEnabled?: boolean
   onModelSwitch?: (newModel: string) => void
   getCurrentModel?: () => string
   autoReasoning?: boolean

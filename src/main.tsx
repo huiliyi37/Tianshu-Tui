@@ -39,6 +39,7 @@ import type { AuthProvider } from './auth/types.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
 import { DomainKnowledgeStore } from './agent/domain-knowledge-store.js'
+import { persistTeamWaveTelemetry, type TeamWaveTelemetry } from './agent/team-wave-telemetry.js'
 import { createCoordinatorReviewDeps } from './agent/review-coordinator-deps.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { profileRegistry } from './agent/profile-registry.js'
@@ -201,6 +202,10 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         if (!_coordinatorRef) throw new Error('DelegationCoordinator not initialized')
         return _coordinatorRef.delegateBatch(requests, policy, abortSignal, onProgress)
       },
+      recordTeamWaveTelemetry: (event: TeamWaveTelemetry) => {
+        persistTeamWaveTelemetry(_meridianIndexerRef?.getDb(), event)
+      },
+      getSessionId: () => _sessionIdRef ?? undefined,
     }))
     reg.register(createRecallCapsuleTool(() => cwd))
     reg.register(ASK_USER_QUESTION_TOOL)
@@ -617,6 +622,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         taskLedger: _taskLedgerRef ?? undefined,
         ownershipLedger: _ownershipLedgerRef ?? undefined,
         meridianIndexer: _meridianIndexerRef,
+        modelRoutingShadowModelCards: modelCards,
         domainKnowledgeStore,
       },
       session,

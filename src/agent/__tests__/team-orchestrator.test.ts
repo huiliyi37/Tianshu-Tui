@@ -304,6 +304,32 @@ depends: T1
     assert.ok(!captured.some(r => r.parentTurnId.includes('T1')))
   })
 
+  it('records telemetry for dispatched wave fragments without changing dispatch result', async () => {
+    const events: unknown[] = []
+    const summary = await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'telemetry wave',
+      planMarkdown: `
+### T1: First edit
+修改 src/a.ts
+
+### T2: Second edit
+修改 src/a.ts
+`,
+      fromWave: 1,
+    }, {
+      sessionId: 'session-1',
+      recordTeamWaveTelemetry: event => { events.push(event) },
+      delegateBatch: async () => run('wave2'),
+    })
+
+    assert.equal(summary.dispatched, 1)
+    assert.equal(events.length, 1)
+    assert.equal((events[0] as any).sessionId, 'session-1')
+    assert.equal((events[0] as any).fromWave, 1)
+    assert.equal((events[0] as any).waveId, 'W2')
+  })
+
   it('reports completion when fromWave is past the last wave', async () => {
     const summary = await runTeamSkeleton({
       mode: 'standard',
