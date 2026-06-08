@@ -137,7 +137,7 @@ describe('LinUCBBandit.importState (cross-session restore)', () => {
     // proves importEffortBanditState mutates the existing instance.
     const liveP3 = new P3Integration()
     const liveRef = liveP3.effortBandit
-    liveP3.importEffortBanditState(snapshot)
+    liveP3.effortBandit.importState(snapshot)
     assert.equal(liveP3.effortBandit, liveRef, 'same readonly instance, mutated in place')
 
     const restored = liveP3.getStats().effortBandit.find(s => s.id === 'delta:+1')!
@@ -159,7 +159,7 @@ describe('LinUCBBandit.importState (cross-session restore)', () => {
     const snapshot = sourceP3.serializeBandit()
 
     const liveP3 = new P3Integration()
-    liveP3.importBanditState(snapshot)
+    liveP3.bandit.importState(snapshot)
     const restored = liveP3.getStats().bandit.find(s => s.id === 'pro')!
     assert.equal(restored.pulls, 2, 'model_style cross-session pulls survive')
   })

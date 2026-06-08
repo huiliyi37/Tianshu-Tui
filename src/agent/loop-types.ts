@@ -49,6 +49,11 @@ export interface AgentConfig {
   autoReasoning?: boolean
   reasoningEffort?: import('./auto-reasoning.js').ReasoningEffort
   reasoningFloor?: import('./auto-reasoning.js').ReasoningEffort
+  /** T2-02 Track A2: Enable bandit-controlled effort delta. Default false.
+   *  When false, bandit runs in shadow mode only (telemetry, no behavior change).
+   *  When true, bandit recommendations may adjust reasoning effort after the
+   *  consistency-promotion gate passes. */
+  effortBanditEnabled?: boolean
   /** Turn-level thinking: disable thinking on tool execution turns (GLM turn-level thinking).
    *  Reduces reasoning_content accumulation and prevents context window stalls. */
   turnLevelThinking?: boolean

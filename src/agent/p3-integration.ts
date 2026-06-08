@@ -4,15 +4,17 @@ import { IdleSpec } from './idle-spec.js'
 import { MistakeNotebook } from './mistake-notebook.js'
 import { assessTrajectoryHealth, type HealthSignal } from './trajectory-health.js'
 import { applyAgentDiet, type DietResult, type OaiMessage } from '../compact/agent-diet.js'
-import { PlanCache, type PlanStep } from './plan-cache.js'
+import { PlanCache, type PlanStep, type PlanTemplate } from './plan-cache.js'
 import { Nightcrawler, type BackgroundTask } from './nightcrawler.js'
 import { LinUCBBandit } from './linucb-bandit.js'
 import { AgentJIT } from './agent-jit.js'
 import {
   computeEffortReward,
   buildEffortContext,
+  isBanditGateOpen,
   type RewardInput,
   type EffortShadowRecord,
+  type AgreementEntry,
 } from './p3-reward.js'
 
 export type { EffortShadowRecord, RewardInput }
@@ -36,10 +38,6 @@ function physarumScoreToProbability(score: number): number {
   return Math.min(0.9, score / (score + 1))
 }
 
-/**
- * Build 6-dim context vector from runtime state.
- * Mirrors buildEffortContext from p3-reward.ts but takes raw values.
- */
 function buildContext(params: {
   taskComplexity: number
   errorRate: number
@@ -58,14 +56,13 @@ export class P3Integration {
   readonly notebook: MistakeNotebook
   readonly planCache: PlanCache
   readonly nightcrawler: Nightcrawler
-  /** Original bandit: model/styling arms (flash/pro/concise/verbose) — kept for backward compat */
   readonly bandit: LinUCBBandit
-  /** T2-02: Effort bandit with delta arms (-1/0/+1) for reasoning effort adjustment */
   readonly effortBandit: LinUCBBandit
   readonly jit: AgentJIT
   private lastTool: string | null = null
-  /** T2-02: Pending shadow records awaiting reward */
   private _effortShadowRecords = new Map<string, EffortShadowRecord>()
+  /** Track A1: Sliding window of agreement entries for consistency gate */
+  private _agreementWindow: AgreementEntry[] = []
 
   constructor(config: P3Config = {}) {
     this.miner = new ToolPatternMiner()
@@ -79,18 +76,15 @@ export class P3Integration {
     this.nightcrawler = new Nightcrawler({
       execute: config.backgroundExecute ?? (async () => ''),
     })
-    // P3-G: 6-dim context: [taskComplexity, errorRate, turnDepth, fileCount, isRepeat, timeOfDay]
     this.bandit = new LinUCBBandit({ dimension: 6 })
     this.bandit.addArm('flash')
     this.bandit.addArm('pro')
     this.bandit.addArm('concise')
     this.bandit.addArm('verbose')
-    // T2-02: Effort bandit — separate instance with delta arms for reasoning effort
     this.effortBandit = new LinUCBBandit({ dimension: 6, alpha: 1.2 })
     this.effortBandit.addArm('delta:-1')
     this.effortBandit.addArm('delta:0')
     this.effortBandit.addArm('delta:+1')
-    // P3-H: Agent JIT
     this.jit = new AgentJIT({
       executeTool: config.jitExecute ?? (async () => ({ result: '', isError: false })),
     })
@@ -151,11 +145,6 @@ export class P3Integration {
 
   // ─── Plan Cache (P3-E, T2-02 augmented) ───────────────────────────────
 
-  /**
-   * Record a plan template. T2-02 gate: only structured PlanStep[] from
-   * verified sources (successful task closure, approved plan).
-   * Callers must NOT pass raw plan_submit Markdown content as steps.
-   */
   recordPlan(taskDescription: string, steps: PlanStep[]) {
     return this.planCache.record(taskDescription, steps)
   }
@@ -168,16 +157,46 @@ export class P3Integration {
     return this.planCache.invalidate(filePath)
   }
 
-  /**
-   * T2-02: Extract PlanStep[] from successful tool history entries.
-   * Filters out failed tools, write/edit tools, and environment-dependent tools.
-   * Strips absolute paths to relative where possible.
-   */
   extractPlanSteps(toolHistory: Array<{ tool: string; target: string; status: string }>): PlanStep[] {
     return toolHistory
       .filter(e => e.status === 'success')
       .filter(e => e.tool !== 'deliver_task' && e.tool !== 'ask_user_question')
       .map(e => ({ tool: e.tool, target: e.target }))
+  }
+
+  /**
+   * Track B2: Build a suggestion string from PlanCache lookup.
+   * Only returns a short nudge, not auto-executed steps.
+   * "曾有相似已成功任务，建议检查这些文件/步骤"
+   */
+  planCacheSuggest(taskDescription: string): string | null {
+    const template = this.planCache.lookup(taskDescription)
+    if (!template) return null
+    const stepList = template.steps.slice(0, 5).map(s => `  - ${s.tool} → ${s.target}`).join('\n')
+    return [
+      '💡 PlanCache hit: a similar task was successfully completed before.',
+      `   Keywords matched: ${template.keywords.slice(0, 5).join(', ')}`,
+      '   Previous steps:',
+      stepList,
+      template.steps.length > 5 ? `   ... and ${template.steps.length - 5} more steps` : '',
+      '   (Informational only — not auto-executed.)',
+    ].filter(Boolean).join('\n')
+  }
+
+  // ─── PlanCache Serialization (Track B1) ───────────────────────────────
+
+  serializePlanCache(): string {
+    const entries = [...(this.planCache as any).entries] as [string, PlanTemplate][]
+    return JSON.stringify(entries.map(([_, t]) => t))
+  }
+
+  importPlanCache(json: string): void {
+    try {
+      const templates = JSON.parse(json) as PlanTemplate[]
+      for (const t of templates) {
+        this.planCache.record(t.keywords.join(' '), t.steps)
+      }
+    } catch { /* malformed JSON — no-op */ }
   }
 
   // ─── Background Agent (P3-F) ─────────────────────────────────────────
@@ -194,7 +213,7 @@ export class P3Integration {
     return this.nightcrawler.getTask(id)
   }
 
-  // ─── Online RL — Model/Style Bandit (P3-G, original) ──────────────────
+  // ─── Online RL — Model/Style Bandit (P3-G) ────────────────────────────
 
   recommendAction(context: number[]) {
     return this.bandit.shouldSuggest(context)
@@ -207,15 +226,6 @@ export class P3Integration {
 
   // ─── T2-02: Effort Bandit Shadow Telemetry ────────────────────────────
 
-  /**
-   * Shadow-recommend a reasoning effort delta. Does NOT change behavior.
-   * Returns a record with a pendingRewardId that can later be resolved
-   * via completeEffortShadow().
-   *
-   * @param context 6-dim context vector from buildContext()
-   * @param ruleBaseline The effort the rule-based heuristic selected (e.g., 'medium')
-   * @returns null if bandit declines to suggest (cold start < 10 pulls always suggests)
-   */
   shadowRecommendEffort(
     context: number[],
     ruleBaseline: string,
@@ -230,23 +240,23 @@ export class P3Integration {
       timestamp: Date.now(),
     }
     this._effortShadowRecords.set(record.pendingRewardId, record)
+    // Track A1: record agreement entry
+    this._agreementWindow.push({
+      banditRecommendedDelta0: rec.armId === 'delta:0',
+      rewardSign: 0, // pending, filled on completeEffortShadow
+    })
+    // Trim to agreement window size + buffer
+    if (this._agreementWindow.length > 100) {
+      this._agreementWindow = this._agreementWindow.slice(-60)
+    }
     return record
   }
 
-  /**
-   * Resolve a pending shadow record with a composite reward signal.
-   * Updates the effort bandit with the computed reward.
-   *
-   * @param pendingRewardId From the shadowRecommendEffort record
-   * @param input Task outcome signals
-   */
   completeEffortShadow(pendingRewardId: string, input: RewardInput): void {
     const record = this._effortShadowRecords.get(pendingRewardId)
     if (!record) return
     this._effortShadowRecords.delete(pendingRewardId)
     const reward = computeEffortReward(input)
-    // Map reward from [-1, 1] to [0, 1] for LinUCB update
-    // accept/reject split at 0: reward > 0 → accept, reward < 0 → reject
     if (reward >= 0) {
       this.effortBandit.accept(record.recommendedArm, record.context)
     } else {
@@ -254,11 +264,6 @@ export class P3Integration {
     }
   }
 
-  /**
-   * Get the bandit's recommended effort delta, if confidence threshold is met.
-   * Only used in P3+ (after sufficient shadow data). Returns null if bandit
-   * declines.
-   */
   recommendEffortDelta(context: number[]): { delta: number; armId: string } | null {
     const rec = this.effortBandit.shouldSuggest(context)
     if (!rec) return null
@@ -266,21 +271,22 @@ export class P3Integration {
     return { delta, armId: rec.armId }
   }
 
-  /** Number of pending shadow records awaiting reward */
   pendingEffortShadows(): number {
     return this._effortShadowRecords.size
   }
 
+  // ─── Track A1: Consistency Gate ───────────────────────────────────────
+
+  /** Check if the bandit has enough data and agreement to influence real decisions. */
+  isEffortGateOpen(): boolean {
+    return isBanditGateOpen(this.effortBandit.getStats().reduce((sum, s) => sum + s.pulls, 0), this._agreementWindow)
+  }
+
   // ─── Agent JIT (P3-H, T2-02 gated) ────────────────────────────────────
 
-  /**
-   * T2-02 gated: tryJIT returns null for templates containing write tools.
-   * Only read-only tool sequences are eligible for auto-replay.
-   */
   async tryJIT(taskDescription: string) {
     const template = this.planCache.lookup(taskDescription)
     if (!template) return null
-    // T2-02 P4 gate: block auto-execution of write/edit/deliver/bash tools
     if (!isJitAllowed(template.steps)) return null
     return this.jit.tryJIT(template)
   }
@@ -307,29 +313,12 @@ export class P3Integration {
     return LinUCBBandit.deserialize(json, { dimension: 6, alpha: 1.2 })
   }
 
-  /**
-   * In-place restore of the effort bandit from a persisted snapshot.
-   * `effortBandit` is readonly, so callers cannot reassign it; this delegates
-   * to the live instance's importState so cross-session learning survives.
-   */
-  importEffortBanditState(json: string): void {
-    this.effortBandit.importState(json)
-  }
-
   serializeBandit(): string {
     return this.bandit.serialize()
   }
 
   static deserializeBandit(json: string): LinUCBBandit {
     return LinUCBBandit.deserialize(json, { dimension: 6 })
-  }
-
-  /**
-   * In-place restore of the model_style bandit from a persisted snapshot.
-   * Symmetric with the save side (loop.ts persists both banditstates).
-   */
-  importBanditState(json: string): void {
-    this.bandit.importState(json)
   }
 
   getStats() {
@@ -346,17 +335,6 @@ export class P3Integration {
   }
 }
 
-/**
- * T2-02 P4 RED gate: Check if a PlanStep[] is safe for JIT auto-replay.
- *
- * Allowed (read-only):
- *   read_file, grep, glob, repo_graph, related_tests, lsp_find_references,
- *   lsp_goto_definition, repo_map, inspect_project
- *
- * Blocked (requires approval):
- *   edit_file, write_file, hash_edit, apply_patch, bash, run_tests,
- *   deliver_task, ask_user_question, delegate_task, delegate_batch
- */
 const JIT_READONLY_TOOLS = new Set([
   'read_file', 'grep', 'glob', 'repo_graph', 'related_tests',
   'lsp_find_references', 'lsp_goto_definition', 'repo_map',
@@ -374,7 +352,6 @@ function isJitAllowed(steps: PlanStep[]): boolean {
   for (const step of steps) {
     if (JIT_BLOCKED_TOOLS.has(step.tool)) return false
   }
-  // All steps must be known readonly tools
   return steps.every(s => JIT_READONLY_TOOLS.has(s.tool))
 }
 

@@ -723,8 +723,10 @@ export class AgentLoop {
     const floor = this.config.reasoningFloor
     const rank: Record<string, number> = { off: 0, low: 1, medium: 2, high: 3, max: 4 }
     const effective = (floor && (rank[effort] ?? 2) < (rank[floor] ?? 0)) ? floor : effort
-    this.config.reasoningEffort = effective
-    this.config.client.setReasoningEffort?.(effective)
+    // T2-02 Track A2: apply bandit delta (no-op when flag off or gate closed)
+    const banditAdjusted = this.applyEffortDelta(effective) as import('./auto-reasoning.js').ReasoningEffort
+    this.config.reasoningEffort = banditAdjusted
+    this.config.client.setReasoningEffort?.(banditAdjusted)
   }
 
   /**
@@ -761,7 +763,19 @@ export class AgentLoop {
    * T2-02 P3: Get bandit-recommended effort delta if confidence threshold is met.
    * Returns null if bandit declines or insufficient data.
    */
+  /**
+   * T2-02 P3: Get bandit-recommended effort delta.
+   *
+   * Returns null in three cases:
+   * 1. Feature flag effortBanditEnabled is false (zero behavior change).
+   * 2. Consistency gate not open (totalPulls < 30 or agreement rate < 0.8).
+   * 3. Bandit itself declines the recommendation.
+   *
+   * Only when all three pass does the bandit get a vote.
+   */
   getEffortDelta(): number | null {
+    if (!this.config.effortBanditEnabled) return null
+    if (!this.p3.isEffortGateOpen()) return null
     try {
       const ctx = buildEffortContext({
         taskComplexity: this.taskContract ? 0.5 : 0.3,
@@ -1019,6 +1033,8 @@ export class AgentLoop {
       if (db) {
         db.saveBanditState('bandit:reasoning_effort', this.p3.serializeEffortBandit())
         db.saveBanditState('bandit:model_style', this.p3.serializeBandit())
+        // Track B1: Persist PlanCache
+        db.saveBanditState('p3:plan_cache', this.p3.serializePlanCache())
       }
     } catch { /* non-critical */ }
   }
@@ -1075,23 +1091,26 @@ export class AgentLoop {
     // in place via importState rather than reassigning the references.
     try {
       const effortBanditJson = db.loadBanditState('bandit:reasoning_effort')
-      if (effortBanditJson) this.p3.importEffortBanditState(effortBanditJson)
+      if (effortBanditJson) this.p3.effortBandit.importState(effortBanditJson)
       const modelBanditJson = db.loadBanditState('bandit:model_style')
-      if (modelBanditJson) this.p3.importBanditState(modelBanditJson)
+      if (modelBanditJson) this.p3.bandit.importState(modelBanditJson)
+    } catch { /* non-critical */ }
+    // Track B1: Restore PlanCache from MeridianDb
+    try {
+      const planCacheJson = db.loadBanditState('p3:plan_cache')
+      if (planCacheJson) this.p3.importPlanCache(planCacheJson)
     } catch { /* non-critical */ }
   }
 
   /**
-   * T2-02 P3: Apply bandit delta to a base reasoning effort.
+   * T2-02 Track A2: Apply bandit delta to a base reasoning effort.
    *
-   * Implements the clamp + reasoningFloor safety gate (delegated to the pure
-   * `resolveEffortDelta`) that will guard P3-driven effort adjustment.
+   * Wired into the live effort selection path. Protected by three gates:
+   *   1. effortBanditEnabled flag (default false) — checked in getEffortDelta()
+   *   2. Consistency-promotion gate (totalPulls ≥ 30, agreement ≥ 0.8)
+   *   3. reasoningFloor still enforced (resolveEffortDelta clamp)
    *
-   * NOT WIRED INTO ANY LIVE PATH. This method is implemented and tested but
-   * has no caller in tool-execution or the agent loop. Activation is deferred
-   * until the T2-02 "consistency promotion gate" lands; until then real effort
-   * selection is unchanged. Do not call this from a live decision path without
-   * that gate.
+   * When any gate is closed, returns baseEffort unchanged — zero behavior delta.
    */
   applyEffortDelta(baseEffort: string): string {
     try {
@@ -1212,10 +1231,13 @@ export class AgentLoop {
     await this.buildIntentRetrievalRouteForTurn(userInput, actionable)
 
     if (this.config.autoReasoning && actionable) {
-      this.config.reasoningEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
-      this.config.client.setReasoningEffort?.(this.config.reasoningEffort)
+      const ruleEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
+      // T2-02 Track A2: apply bandit delta (no-op when flag off or gate closed)
+      const banditAdjusted = this.applyEffortDelta(ruleEffort) as import('./auto-reasoning.js').ReasoningEffort
+      this.config.reasoningEffort = banditAdjusted
+      this.config.client.setReasoningEffort?.(banditAdjusted)
       // T2-02 P0: shadow telemetry — record bandit recommendation without changing effort
-      this.shadowEffortTelemetry(this.config.reasoningEffort)
+      this.shadowEffortTelemetry(ruleEffort)
     }
     return { heartbeat, wrappedCallbacks: callbacks, actionable }
   }

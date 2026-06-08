@@ -88,7 +88,7 @@ return new ToolExecutionController({
       requestThetaCheck: reason => { self.requestThetaCheck(reason) },
       getAutoReasoning: () => self.config.autoReasoning ?? false,
       getReasoningEffort: () => self.config.reasoningEffort,
-      setClientReasoningEffort: effort => { self.config.reasoningEffort = effort; self.config.client.setReasoningEffort?.(effort) },
+      setClientReasoningEffort: effort => { self.setReasoningEffort(effort) },
       getSensorium: () => self.sensorium,
       getReliabilityDecision: () => self.latestReliabilityDecision,
       getTurnBudget: () => self.turnBudget,
