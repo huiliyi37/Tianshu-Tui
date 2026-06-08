@@ -9,7 +9,7 @@
 
 ## 0. 一句话
 
-**先建双影子层（ModelRoutingShadow + TeamEpisodeRecorder），落 MeridianDb，一行行为不改。** 这一步是后面所有路由自学、成本计算、team 学习器接活的唯一可归因地基。
+**先建双影子层（ModelRoutingShadow + TeamWaveTelemetry），落 MeridianDb，一行行为不改。** 这一步是后面所有路由自学、成本计算、team 学习器接活的唯一可归因地基。P0 不承诺完整跨 wave episode；P1 再把 wave fragment stitch 成 TeamEpisode。
 
 ---
 
@@ -67,14 +67,14 @@ interface TeamSchedulerShadow {
 ## 2. 天枢的联合架构
 
 ```
-                        ┌── MeridianDb (p3_state / team_episodes / routing_shadow) ──┐
-                        │                                                            │
-  team run ─────────────┼──→ TeamEpisodeRecorder ───→ team_episodes 表               │
-  (orchestrator)        │     (不改派发, 只录结果)                                    │
-                        │                                                            │
-  turn loop ────────────┼──→ ModelRoutingShadowRecorder ──→ routing_shadow 表         │
-  (initializeRun/       │     (记 EFE 推荐 vs 旧路由器 vs 实际, 不切换)               │
-   setReasoningEffort)  │                                                            │
+                        ┌── MeridianDb (p3_state KV: team_wave:* / routing_shadow:*) ────┐
+                        │                                                                │
+  team run ─────────────┼──→ TeamWaveTelemetry ─────→ team_wave:* KV                     │
+  (runTeamSkeleton)     │     (不改派发, 只录单次 fromWave；P1 再 stitch episode)          │
+                        │                                                                │
+  turn loop ────────────┼──→ ModelRoutingShadowRecorder ──→ routing_shadow:* KV          │
+  (initializeRun/       │     (记 EFE 推荐 vs 旧路由器 dry-run vs 实际, 不注入 switch)    │
+   runPostSession)      │                                                                │
                         │                                                            │
   P1 reward loop ───────┼── 两条影子线汇合 → computeEffortReward / computeModelReward  │
                         │     → 回写 MeridianDb → 供 P2+ 学习器消费                    │
@@ -93,7 +93,7 @@ interface TeamSchedulerShadow {
 **核心约束（第一性）**：
 1. **三类数据严格分流**：计划意图 → advisory/planner context；执行事实 → reward/physarum 监督边唯一合法来源；可复用动作 → JIT 只读模板。
 2. **审查/verifier 永不为省钱降级**：`false_green_penalty` 压住 `cost_over_budget`，天权配强模型是不进 bandit 的硬规则。
-3. **所有学习产物落 MeridianDb**：复用已有 `p3_state` 表 + 新建 `team_episodes` / `routing_shadow` 表。DB 不可用 no-op。
+3. **所有学习产物落 MeridianDb**：P0 复用已有 `p3_state` KV（`team_wave:*` / `routing_shadow:*`），不新增 DDL。DB 不可用 no-op。
 4. **每个影响行为的组件走已验证的闸**：flag 默认关 → shadow → reward 闭环 → 样本+置信达阈值才 gated 影响。瑶光在 effort bandit 上趟通的这条路是模板。
 
 ---
@@ -148,79 +148,58 @@ export class ModelRoutingShadowRecorder {
 - `routing_shadow:*` 出现在 MeridianDb `p3_state` 表
 - tsc + tests 全绿
 
-### 3.2 TeamEpisodeRecorder
+### 3.2 TeamWaveTelemetryRecorder（P0 名称；P1 stitch 为 TeamEpisode）
 
-**文件**：新建 `src/agent/team-episode-recorder.ts`
+**文件**：新建 `src/agent/team-wave-telemetry.ts`
 
 ```ts
-export interface TeamEpisode {
+export interface TeamWaveTelemetry {
+  schemaVersion: 1
+  sessionId: string
   objectiveHash: string
   mode: 'standard' | 'max'
-  startedAt: number
-  completedAt?: number
-  waves: Array<{
-    waveId: string
+  fromWave: number
+  waveId: string
+  waveCount: number
+  timestamp: number
+  planned: {
     taskIds: string[]
     risk: 'low' | 'medium' | 'high'
     profiles: string[]
     authorities: string[]
-    files: string[]       // planned scope
-    actualFiles?: string[] // actual changed (from worktree diff)
-    modelUsed?: string[]
-    reviewVerdict?: string
+    files: string[]
+  }
+  outcome: {
+    dispatched: number
+    statuses: Array<{ workOrderId: string; status: string; evidenceStatus: string }>
     verificationPassed?: boolean
-    conflictCount?: number
-    scopeLeakFiles?: string[]
-  }>
-  finalOutcome?: 'passed' | 'failed' | 'partial'
-  reward?: number
+    reviewVerdict?: string
+  }
+  changedFiles: {
+    reportedChangedFiles?: string[]
+    observedChangedFiles?: string[]
+    changedFilesSource: 'worker_result' | 'diff_artifact' | 'unknown'
+  }
+  workerModels?: Array<{ workOrderId: string; model: string }>
 }
 
-export class TeamEpisodeRecorder {
-  private current: TeamEpisode | null = null
-
-  startEpisode(objectiveHash: string, mode: 'standard' | 'max'): void {
-    this.current = {
-      objectiveHash,
-      mode,
-      startedAt: Date.now(),
-      waves: [],
-    }
-  }
-
-  recordWave(wave: TeamEpisode['waves'][number]): void {
-    if (!this.current) return
-    this.current.waves.push(wave)
-  }
-
-  closeEpisode(outcome: 'passed' | 'failed' | 'partial'): TeamEpisode | null {
-    if (!this.current) return null
-    this.current.completedAt = Date.now()
-    this.current.finalOutcome = outcome
-    const episode = this.current
-    this.current = null
-    return episode
-  }
-
-  persist(db: import('../repo/meridian-db.js').MeridianDb | undefined, episode: TeamEpisode): void {
-    if (!db) return
-    try {
-      db.saveBanditState(`team_episode:${episode.objectiveHash}:${episode.startedAt}`,
-        JSON.stringify(episode))
-    } catch { /* no-op */ }
-  }
+export function teamWaveTelemetryKind(event: Pick<TeamWaveTelemetry, 'objectiveHash' | 'sessionId' | 'fromWave' | 'timestamp'>): string {
+  return `team_wave:${event.objectiveHash}:${event.sessionId}:${event.fromWave}:${event.timestamp}`
 }
 ```
 
+P0 只记录单次 `team_orchestrate` / `fromWave` 的 wave fragment。字段不使用 `actualFiles`：worker 自报只能进入 `reportedChangedFiles`；只有从 diff artifact 解析出的文件才进入 `observedChangedFiles`，并用 `changedFilesSource` 标明来源。
+
 **接线点**：
-- `team-orchestrator.ts` — 在 `run()` 开始时调 `startEpisode`，每波完成后调 `recordWave`，全部完成后调 `closeEpisode` + `persist`
-- `WorkerSession` / coordinator — 补充 `actualFiles`（从 worktree diff 取，不是 worker 自报）
+- `team-orchestrator.ts` — 每次 `runTeamSkeleton()` dispatch 一个 `fromWave` 后记录一条 wave telemetry。
+- `coordinator.ts` — 在 `delegateBatch()` 返回可选 `workerModels` metadata，供 telemetry 记录 per-worker selected model。
+- `team-wave-telemetry.ts` — 从 `WorkerResult.changedFiles` 取 `reportedChangedFiles`，从 diff artifact 解析 `observedChangedFiles`。
 
 **验收**：
 - team 派发行为不变
 - worker 选择不变
-- `team_episode:*` 出现在 MeridianDb `p3_state` 表
-- 至少跑一次 team 后能 grep 到 episode 记录
+- `team_wave:*` 出现在 MeridianDb `p3_state` 表
+- 至少跑一次 team 后能看到 wave telemetry 记录
 
 ### 3.3 MeridianDb 落库
 
@@ -228,8 +207,8 @@ export class TeamEpisodeRecorder {
 
 | kind | 内容 |
 |---|---|
-| `routing_shadow:{turn}` | ModelRoutingShadowEvent JSON |
-| `team_episode:{hash}:{ts}` | TeamEpisode JSON |
+| `routing_shadow:{sessionId}:{turn}:{timestamp}` | ModelRoutingShadowEvent JSON |
+| `team_wave:{objectiveHash}:{sessionId}:{fromWave}:{timestamp}` | TeamWaveTelemetry JSON |
 
 **DDL 不新增**。等 P1 reward loop 有稳定 schema 后再考虑建专表。
 
@@ -243,7 +222,7 @@ npm exec -- tsx --test src/agent/__tests__/effort-*.test.ts  # effort bandit 测
 
 # 新代码有测试
 npm exec -- tsx --test src/agent/__tests__/model-routing-shadow.test.ts
-npm exec -- tsx --test src/agent/__tests__/team-episode-recorder.test.ts
+npm exec -- tsx --test src/agent/__tests__/team-wave-telemetry.test.ts
 ```
 
 ---
@@ -310,7 +289,7 @@ npm exec -- tsx --test src/agent/__tests__/team-episode-recorder.test.ts
 
 - 三条阈值（如有）用了什么、是否调过、依据
 - routing shadow 对照窗口跑了多少 turn，EFE vs 旧路由器 vs 实际的偏差分布
-- team episode 记录了多少次 run，scope leak 检出率
+- team wave telemetry 记录了多少次 run/fromWave，reported/observed changed files 来源分布
 - 任何新发现的设计分叉：**报告，不自行合理化**（a372cbc 教训）
 
 ---
