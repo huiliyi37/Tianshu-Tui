@@ -45,6 +45,10 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal — changes every turn. */
   policyGuidance?: string | null
+  /** PlanCache suggestion for the current user turn.
+   *  Cache-safe: rendered ONLY into the dynamic appendix.
+   *  Advisory-only: never auto-executes cached tool sequences. */
+  planCacheAdvisory?: string | null
   /** Intent retrieval route for the current user turn.
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal and historical user-message injection. */
@@ -153,6 +157,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     cerebellarHint: undefined,
     affordanceHint: undefined,
     policyGuidance: undefined,
+    planCacheAdvisory: undefined,
     intentRetrievalRoute: undefined,
     // gitStatus moved to dynamic appendix — changes every turn, breaks prefix cache
     gitStatus: undefined,
@@ -302,6 +307,12 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(ctx.policyGuidance)
   }
 
+  // PlanCache advisory: current-turn, informational-only hint.
+  // Keep near policy guidance so it informs planning without becoming stable prompt.
+  if (ctx.planCacheAdvisory) {
+    parts.push(ctx.planCacheAdvisory)
+  }
+
   // Repair hint: ephemeral — keep at very end
   if (ctx.repairHint) {
     parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
@@ -356,6 +367,7 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
   if (blockContent.startsWith('<affordance-hint>')) return 0.7
   if (blockContent.startsWith('<policy-guidance>')) return 0.7
+  if (blockContent.startsWith('<plan-cache-advisory>')) return 0.7
   if (blockContent.startsWith('<intent-retrieval-route')) return 0.7
   if (blockContent.startsWith('<task-progress')) return 0.7
   if (blockContent.startsWith('<decisions>')) return 0.7

@@ -39,7 +39,7 @@ import { TurnCompletionController } from './turn-completion.js'
 import { ToolExecutionController } from './tool-execution.js'
 import { evaluateThinkingRetry } from './thinking-retry.js'
 import { createPredictionAccumulator } from './prediction-error.js'
-import type { PredictionAccumulator } from './prediction-error.js'
+import type { PredictionAccumulator, EFEComponents } from './prediction-error.js'
 import { getErrorRate } from './prediction-error.js'
 import type { Sensorium } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
@@ -70,7 +70,9 @@ import { selectPolicy, renderPolicyGuidance } from './policy-selection.js'
 import { computeEFE } from './prediction-error.js'
 import { computeAffordanceScores } from './affordance.js'
 import { buildModelRoutingShadowEvent, inferLegacyRoutingRecommendation, persistModelRoutingShadow } from './model-routing-shadow.js'
+import { buildModelPolicyCandidates, selectModelPolicy } from './model-policy-selection.js'
 import { recordRoutingRewardClosure } from './reward-loop.js'
+import { renderPlanCacheAdvisory } from './plan-cache-advisory.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
@@ -536,7 +538,7 @@ export class AgentLoop {
       recordToolHistory(this, name, input, isError, result);
   }
 
-  private recordModelRoutingShadow(currentSensorium: Sensorium): void {
+  private recordModelRoutingShadow(currentSensorium: Sensorium, efe: EFEComponents): void {
     if (this.config.modelRoutingShadowEnabled === false) return
     const store = this.config.meridianIndexer?.getDb()
     if (!store) return
@@ -546,10 +548,14 @@ export class AgentLoop {
         name: entry.tool,
         isError: entry.status === 'failed' || entry.status === 'retried-failed',
       }))
-      const legacyRouting = inferLegacyRoutingRecommendation(
-        recentCalls,
-        this.config.modelRoutingShadowModelCards ?? this.config.modelCards,
-      )
+      const modelCards = this.config.modelRoutingShadowModelCards ?? this.config.modelCards
+      const legacyRouting = inferLegacyRoutingRecommendation(recentCalls, modelCards)
+      const efeRecommendation = selectModelPolicy({
+        candidates: buildModelPolicyCandidates(modelCards),
+        efe,
+        sensorium: currentSensorium,
+        topK: 1,
+      })[0]
       const event = buildModelRoutingShadowEvent({
         sessionId: this.config.sessionId ?? 'unknown',
         turn: this.session.getTurnCount(),
@@ -557,6 +563,7 @@ export class AgentLoop {
         currentModel: this.config.getCurrentModel?.() ?? this.config.promptEngine.getModel(),
         selectedBy: this.config.getCurrentModel ? 'human' : 'config',
         legacyRouting,
+        ...(efeRecommendation ? { efeRecommendedModel: efeRecommendation.model } : {}),
         sensorium: currentSensorium,
       })
       persistModelRoutingShadow(store, event)
@@ -1261,6 +1268,9 @@ export class AgentLoop {
     // else: non-actionable follow-up to active task → inherit existing contract
 
     await this.buildIntentRetrievalRouteForTurn(userInput, actionable)
+    this.config.promptEngine.setPlanCacheAdvisory(
+      actionable ? renderPlanCacheAdvisory(this.p3.planCacheSuggest(userInput)) : null,
+    )
 
     if (this.config.autoReasoning && actionable) {
       const ruleEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
@@ -1604,7 +1614,7 @@ export class AgentLoop {
     const affordances = computeAffordanceScores(affordanceState, this.sessionAffordanceAdaptations)
     const policies = selectPolicy(efe, affordances, { topK: 5 })
     this.config.promptEngine.setPolicyGuidance(renderPolicyGuidance(policies, efe) || null)
-    this.recordModelRoutingShadow(currentSensorium)
+    this.recordModelRoutingShadow(currentSensorium, efe)
 
     // ── Adaptive Affordance: periodically recalibrate base affordances from sensorimotor history ──
     if (this.session.getTurnCount() % 10 === 0) {
