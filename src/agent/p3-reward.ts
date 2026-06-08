@@ -33,26 +33,37 @@ export interface EffortShadowRecord {
 }
 
 /**
- * Agreement window entry: records whether the bandit agreed with the rule.
- * "Agreement" means the bandit's delta arm would not change the rule's effort.
- * A delta:0 arm always agrees. For delta:+1 and delta:-1, we track whether
- * the arm would have made the right call (retrospectively, via reward sign).
- *
- * For the consistency-promotion gate, we need a simpler metric: how often
- * does the bandit agree with the rule baseline? This is tracked via the
- * `banditRecommendedDelta0` flag — true if the bandit recommended delta:0.
+ * Agreement window entry: records the bandit recommendation and rule baseline.
+ * "Agreement" means the effort level the bandit's arm would produce is the same
+ * as or adjacent to (±1 in EFFORT_ORDER) the rule baseline.
  */
 export interface AgreementEntry {
-  /** Whether the bandit recommended delta:0 (i.e., agreed with rule baseline) */
-  banditRecommendedDelta0: boolean
-  /** Reward sign after resolution (+ = positive, - = negative, 0 = neutral/pending) */
-  rewardSign: number
+  /** The effort the rule-based heuristic selected (e.g., 'medium') */
+  ruleBaseline: string
+  /** Bandit arm: 'delta:-1' | 'delta:0' | 'delta:+1' */
+  recommendedArm: string
 }
 
 /** Default gate thresholds (瑶光's conservative starting point, not contract) */
 export const MIN_PULLS_FOR_GATE = 30
 export const AGREEMENT_WINDOW = 20
 export const AGREEMENT_RATE_THRESHOLD = 0.8
+
+export const EFFORT_ORDER_GATE = ['off', 'low', 'medium', 'high', 'max'] as const
+
+/**
+ * Resolve the effort level a bandit arm would produce from a given baseline.
+ * Returns the baseline unchanged if the arm is unknown or out of bounds.
+ */
+export function resolveArmToEffort(ruleBaseline: string, armId: string): string {
+  const idx = EFFORT_ORDER_GATE.indexOf(ruleBaseline as typeof EFFORT_ORDER_GATE[number])
+  if (idx === -1) return ruleBaseline
+  let delta = 0
+  if (armId === 'delta:+1') delta = 1
+  else if (armId === 'delta:-1') delta = -1
+  const newIdx = Math.max(0, Math.min(EFFORT_ORDER_GATE.length - 1, idx + delta))
+  return EFFORT_ORDER_GATE[newIdx]!
+}
 
 /**
  * Compute composite reward from task outcome signals.
@@ -119,8 +130,14 @@ export function buildEffortContext(params: {
  * Conditions (all must pass):
  * 1. totalPulls >= MIN_PULLS_FOR_GATE (30)
  * 2. In the last AGREEMENT_WINDOW (20) shadow records,
- *    the fraction where bandit agreed with rule (recommended delta:0)
- *    is >= AGREEMENT_RATE_THRESHOLD (0.8)
+ *    the fraction where the bandit-recommended effort level is the same
+ *    as or adjacent to (±1 in EFFORT_ORDER) the rule baseline
+ *    is >= AGREEMENT_RATE_THRESHOLD (0.8).
+ *
+ * "Adjacent" means the bandit nudging ±1 from the rule's selected effort
+ * — the bandit is learning in a conservative neighborhood, not thrashing.
+ * This prevents the self-defeating paradox where the gate only opens when
+ * the bandit recommends delta:0 most of the time (瑶光 ① fix).
  */
 export function isBanditGateOpen(
   totalPulls: number,
@@ -129,7 +146,17 @@ export function isBanditGateOpen(
   if (totalPulls < MIN_PULLS_FOR_GATE) return false
   const window = agreementWindow.slice(-AGREEMENT_WINDOW)
   if (window.length < AGREEMENT_WINDOW) return false
-  const agreementCount = window.filter(e => e.banditRecommendedDelta0).length
+
+  let agreementCount = 0
+  for (const entry of window) {
+    const banditEffort = resolveArmToEffort(entry.ruleBaseline, entry.recommendedArm)
+    const ruleIdx = EFFORT_ORDER_GATE.indexOf(entry.ruleBaseline as typeof EFFORT_ORDER_GATE[number])
+    const banditIdx = EFFORT_ORDER_GATE.indexOf(banditEffort as typeof EFFORT_ORDER_GATE[number])
+    // Same or adjacent (within ±1)
+    if (ruleIdx !== -1 && banditIdx !== -1 && Math.abs(ruleIdx - banditIdx) <= 1) {
+      agreementCount++
+    }
+  }
   return agreementCount / window.length >= AGREEMENT_RATE_THRESHOLD
 }
 

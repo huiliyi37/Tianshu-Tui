@@ -240,10 +240,10 @@ export class P3Integration {
       timestamp: Date.now(),
     }
     this._effortShadowRecords.set(record.pendingRewardId, record)
-    // Track A1: record agreement entry
+    // Track A1: record agreement entry (瑶光 ① fix: compare arm→effort vs ruleBaseline)
     this._agreementWindow.push({
-      banditRecommendedDelta0: rec.armId === 'delta:0',
-      rewardSign: 0, // pending, filled on completeEffortShadow
+      ruleBaseline: record.ruleBaseline,
+      recommendedArm: rec.armId,
     })
     // Trim to agreement window size + buffer
     if (this._agreementWindow.length > 100) {
