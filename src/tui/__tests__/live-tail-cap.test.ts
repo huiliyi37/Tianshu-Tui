@@ -24,6 +24,18 @@ describe('capLiveTail', () => {
     assert.ok(out.length < text.length, 'must have trimmed the wide line by display rows')
   })
 
+  it('counts CJK full-width characters by display width, not UTF-16 length', () => {
+    const text = `${'你'.repeat(80)}\nshort`
+    const out = capLiveTail(text, 80, 2)
+    assert.equal(out, `${'你'.repeat(40)}\nshort`)
+  })
+
+  it('trims partial wide-character lines without splitting surrogate pairs', () => {
+    const text = `${'🧪'.repeat(80)}\nshort`
+    const out = capLiveTail(text, 80, 2)
+    assert.equal(out, `${'🧪'.repeat(40)}\nshort`)
+  })
+
   it('maxRows <= 0 returns empty', () => {
     assert.equal(capLiveTail('anything', 80, 0), '')
   })

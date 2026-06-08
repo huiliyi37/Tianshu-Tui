@@ -12,12 +12,11 @@ interface StreamOutputProps {
 /**
  * StreamOutput — live streaming content during model generation.
  *
- * NOTE (2026-06-05): live-zone height is NOT bounded here. The correct fix for
- * runaway scroll is layout (root height={termRows} + dynamic zone flexGrow
- * justifyContent="flex-end" + <Static> as an absolute direct child), NOT a
- * per-row tail window — see memory `dynamic-budget-was-a-layout-workaround`
- * and docs/known-issues/HANDOFF-2026-06-05-steer-and-render-fixes.md (真凶②).
- * When the turn ends the full content moves to <Static> and this unmounts.
+ * NOTE (2026-06-08): live-zone height is bounded by app.tsx at render time via
+ * capLiveTail(), after current thinking/tool/footer chrome rows are known. This
+ * component deliberately stays presentation-only; it must not add another tail
+ * window or full-screen layout wrapper. When the turn ends the full content moves
+ * to <Static> and this unmounts.
  */
 export const StreamOutput = memo(function StreamOutput({ text, isStreaming }: StreamOutputProps) {
   const theme = getTheme()
