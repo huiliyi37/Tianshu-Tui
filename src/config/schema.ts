@@ -85,7 +85,7 @@ export const intentRetrievalRouterSchema = z.preprocess(
 )
 
 export const agentSchema = z.object({
-  approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual']).default('auto-safe'),
+  approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
   autoReasoning: z.boolean().default(false),

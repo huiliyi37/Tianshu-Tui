@@ -75,8 +75,8 @@ describe('createAgentConfig', () => {
   })
 
   it('passes approvalMode through', () => {
-    const cfg = createAgentConfig({ ...baseInput, approvalMode: 'auto-accept' })
-    assert.equal(cfg.approvalMode, 'auto-accept')
+    const cfg = createAgentConfig({ ...baseInput, approvalMode: 'dangerously-skip-permissions' })
+    assert.equal(cfg.approvalMode, 'dangerously-skip-permissions')
   })
 
   it('defaults autoReasoning to true', () => {

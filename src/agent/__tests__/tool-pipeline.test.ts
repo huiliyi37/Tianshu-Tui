@@ -567,6 +567,34 @@ describe('executeToolUse', () => {
     assert.equal((result.toolResult as any).is_error, false)
   })
 
+  it('dangerously-skip-permissions bypasses high-risk and bash-write approval prompts', async () => {
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'dangerously-skip-permissions',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'reset', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+        },
+      } as any,
+      getSensorium: () => ({ momentum: 0.2, pressure: 0.9, confidence: 0.1, complexity: 0.9, freshness: 0.1, stability: 0.1 }),
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+
+    const result = await executeToolUse(
+      { id: 'tu-danger-skip', name: 'bash', input: { command: 'git reset --hard HEAD~1' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.equal(approvalCalls, 0)
+    assert.equal(executed, true)
+    assert.equal((result.toolResult as any).is_error, false)
+  })
+
   it('P1.3: strips trailing whitespace from tool result content', async () => {
     const deps = makeDeps()
     // Override tool registry to return content with trailing whitespace.

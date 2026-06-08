@@ -82,8 +82,24 @@ function captureGitBaseline(cwd: string): BaselineSnapshot {
   }
 }
 
-function loadConfig(cwd?: string): Config {
-  return loadLayeredConfig({ cwd })
+function approvalOverlayFromArgs(args: string[]): Record<string, unknown> | undefined {
+  if (args.includes('--dangerously-skip-permissions') || args.includes('--dangerously-skip-approvals')) {
+    return { agent: { approval: 'dangerously-skip-permissions' } }
+  }
+  const modeIndex = args.indexOf('--approval-mode')
+  if (modeIndex >= 0) {
+    const mode = args[modeIndex + 1]
+    if (!mode) {
+      console.error('--approval-mode requires a value')
+      process.exit(2)
+    }
+    return { agent: { approval: mode } }
+  }
+  return undefined
+}
+
+function loadConfig(cwd?: string, args = process.argv.slice(2)): Config {
+  return loadLayeredConfig({ cwd, sessionOverlay: approvalOverlayFromArgs(args) })
 }
 
 let _cachedSessionId: string | null = null
@@ -610,6 +626,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       runtimeFactory,
       routing: workerRouting,
       domainKnowledgeStore,
+      modelTierShadowStore: _meridianIndexerRef?.getDb(),
     })
 
     return new AgentLoop(
@@ -742,6 +759,7 @@ async function main() {
 
   Usage:
     rivet              Start interactive session
+    rivet --dangerously-skip-permissions  Start with all approval prompts skipped
     rivet config              Configure providers interactively
     rivet --help              Show this help
     rivet --version    Show version
@@ -775,6 +793,7 @@ async function main() {
 
   Configuration:
     Config file: ~/.rivet/config.json
+    Approval:    rivet config set-approval auto-safe|manual|auto-accept|dangerously-skip-permissions
     Sessions:    ~/.rivet/sessions/
 
   Environment:

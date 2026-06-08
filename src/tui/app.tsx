@@ -100,7 +100,7 @@ interface AppProps {
   initialInput?: string
   mcpManagerRef: RefObject<McpManager | null>
   claimStoreRef: RefObject<import('../context/claim-store.js').ContextClaimStore | null>
-  approvalMode?: 'auto-accept' | 'auto-safe' | 'suggest' | 'manual'
+  approvalMode?: 'auto-accept' | 'auto-safe' | 'suggest' | 'manual' | 'dangerously-skip-permissions'
 }
 
 const THINKING_FLUSH_MS = 1000
@@ -1273,7 +1273,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       onApprovalRequired: async (id, name, input) => {
         fluencyRef.current.recordApproval()
         // Auto-approve in auto-accept mode — no user confirmation needed
-        if (approvalMode === 'auto-accept') {
+        if (approvalMode === 'auto-accept' || approvalMode === 'dangerously-skip-permissions') {
           return true
         }
         const target = String(input?.path ?? input?.command ?? name)
@@ -1285,7 +1285,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
       onIntentPreview: async (intent) => {
         pushStatic(createLogEntry({ type: 'system', content: formatIntentPreview(intent) }))
         // Auto-continue in auto-accept mode — no user confirmation needed
-        if (approvalMode === 'auto-accept') {
+        if (approvalMode === 'auto-accept' || approvalMode === 'dangerously-skip-permissions') {
           return 'continue'
         }
         return new Promise<IntentPreviewAction>((resolve) => {

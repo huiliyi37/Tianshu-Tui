@@ -20,7 +20,7 @@ import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 
-export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual'
+export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
 
 export interface AgentConfig {
   client: StreamClient

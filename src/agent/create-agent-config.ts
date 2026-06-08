@@ -28,7 +28,7 @@ export interface AgentConfigInput {
   toolDefinitions: ToolDefinition[]
   provider: ProviderConfig
   sessionMemoryBlock?: string
-  approvalMode?: 'auto-accept' | 'auto-safe' | 'manual'
+  approvalMode?: 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
   songlineEnabled?: boolean
   hearthObserveEnabled?: boolean
   antiAnchoring?: AntiAnchoringConfig
@@ -63,7 +63,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     toolDefinitions: params.toolDefinitions,
     provider: params.provider,
     sessionMemoryBlock: params.sessionMemoryBlock,
-    approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual',
+    approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions',
     songlineEnabled: params.config.agent.songlineEnabled,
     hearthObserveEnabled: params.config.agent.hearthObserveEnabled,
     antiAnchoring: params.config.agent.antiAnchoring,

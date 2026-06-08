@@ -31,6 +31,12 @@ describe('config permissions schema', () => {
     assert.deepEqual(parsed.agent.permissions.allow, [])
   })
 
+  it('parses dangerously-skip-permissions approval mode', () => {
+    const agent = agentSchema.parse({ approval: 'dangerously-skip-permissions' })
+
+    assert.equal(agent.approval, 'dangerously-skip-permissions')
+  })
+
   it('includes Codex OAuth provider in DEFAULT_CONFIG', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 

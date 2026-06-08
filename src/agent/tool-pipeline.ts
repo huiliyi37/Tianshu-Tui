@@ -514,6 +514,7 @@ export async function executeToolUse(
     latestRisk = risk
     const isHighRisk = risk.level === 'high'
     const approvalMode = deps.config.approvalMode ?? 'manual'
+    const skipAllApproval = approvalMode === 'dangerously-skip-permissions'
 
     // Sensorium-driven auto-approve: high confidence + low risk → bypass approval
     const canAutoApprove = sensorium
@@ -531,19 +532,21 @@ export async function executeToolUse(
     // approval. warn is the live window (blocked is short-circuited earlier).
     const protectionMode = deps.getDoomLoopLevel() !== 'none' && isDestructiveGitAction(tu.name, tu.input)
 
-    const shouldAsk = protectionMode
-      ? true
-      : bashWriteRequiresApproval
-      ? true
-      : allowlisted
-        ? false
-        : canAutoApprove
-          ? false
-          : approvalMode === 'manual'
-            ? needsApproval
-            : approvalMode === 'auto-safe'
-              ? isHighRisk
-              : false
+    const shouldAsk = skipAllApproval
+      ? false
+      : protectionMode
+        ? true
+        : bashWriteRequiresApproval
+          ? true
+          : allowlisted
+            ? false
+            : canAutoApprove
+              ? false
+              : approvalMode === 'manual'
+                ? needsApproval
+                : approvalMode === 'auto-safe'
+                  ? isHighRisk
+                  : false
 
     if (shouldAsk) {
       const approvalResult = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)

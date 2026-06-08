@@ -13,7 +13,7 @@ describe('loadConfig — 3-layer resolution', () => {
     assert.ok(config.provider)
     assert.ok(config.agent)
     // approval may be overridden by user's global config, just check it's valid
-    assert.ok(['auto-accept', 'auto-safe', 'suggest', 'manual'].includes(config.agent.approval))
+    assert.ok(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions'].includes(config.agent.approval))
   })
 
   it('applies project config over defaults', () => {
@@ -80,7 +80,7 @@ describe('loadConfig — 3-layer resolution', () => {
 
     const config = loadConfig({ cwd: projectDir })
     // Falls back to global/user config (not default 'auto-safe' if user has custom config)
-    assert.ok(['auto-accept', 'auto-safe', 'suggest', 'manual'].includes(config.agent.approval))
+    assert.ok(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions'].includes(config.agent.approval))
 
     rmSync(projectDir, { recursive: true, force: true })
   })

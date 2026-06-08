@@ -70,6 +70,22 @@ describe('runConfigCLI provider commands', () => {
     assert.equal(provider.models[0]?.alias, 'custom')
   })
 
+  it('set-approval updates global approval mode', async () => {
+    const { stdout, io } = makeIo()
+    await runConfigCLI(['set-approval', 'dangerously-skip-permissions'], io)
+
+    assert.equal(loadConfig().agent.approval, 'dangerously-skip-permissions')
+    assert.match(stdout.join('\n'), /Approval mode set to dangerously-skip-permissions/)
+  })
+
+  it('rejects invalid approval modes', async () => {
+    const { stderr, exits, io } = makeIo()
+    await runConfigCLI(['set-approval', 'unsafe'], io)
+
+    assert.deepEqual(exits, [1])
+    assert.match(stderr.join('\n'), /Invalid approval mode/)
+  })
+
   it('rejects invalid numeric model parameters', async () => {
     const { stderr, exits, io } = makeIo()
     await runConfigCLI(['set-model', 'deepseek', 'bad-model', 'not-a-number', '32000'], io)

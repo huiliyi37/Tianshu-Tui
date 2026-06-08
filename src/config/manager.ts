@@ -6,6 +6,9 @@ import { configSchema, type Config, type ProviderConfig, type ModelConfig } from
 import { DEFAULT_CONFIG } from './default.js'
 import { cloneProviderPreset, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 
+const APPROVAL_MODES = ['auto-safe', 'manual', 'auto-accept', 'dangerously-skip-permissions'] as const
+type ApprovalModeConfig = typeof APPROVAL_MODES[number]
+
 const DEFAULT_CONFIG_PATH = join(homedir(), '.rivet', 'config.json')
 
 export function getUserConfigPath(): string {
@@ -143,6 +146,16 @@ export function setDefaultProvider(name: string): void {
   }
   cfg.provider.default = name
   saveConfig(cfg)
+}
+
+export function setApprovalMode(mode: string): ApprovalModeConfig {
+  if (!(APPROVAL_MODES as readonly string[]).includes(mode)) {
+    throw new Error(`Invalid approval mode "${mode}". Available: ${APPROVAL_MODES.join(', ')}`)
+  }
+  const cfg = loadConfig()
+  cfg.agent.approval = mode as ApprovalModeConfig
+  saveConfig(cfg)
+  return mode as ApprovalModeConfig
 }
 
 // --- API key management ---
@@ -329,6 +342,7 @@ Commands:
   set-key <p> <key>            Set API key for provider
   set-key-env <p> <v>          Set API key from env variable
   set-default <p>              Set default provider
+  set-approval <mode>          Set approval mode (auto-safe/manual/auto-accept/dangerously-skip-permissions)
   add-model <p> <id>           Add model to provider
   remove-model <p> <id>        Remove model from provider
   mcp                          MCP server management
@@ -337,6 +351,7 @@ Examples:
   rivet config providers
   rivet config setup deepseek --key-env DEEPSEEK_API_KEY --default
   rivet config setup codex --default
+  rivet config set-approval dangerously-skip-permissions
   rivet config set-url mimo https://token-plan-sgp.xiaomimimo.com/v1
   rivet config set-model minimax MiniMax-M2.8 300000 64000 m28
   rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp`)
@@ -473,6 +488,18 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
         }
         setDefaultProvider(providerName)
         cliOut(io, `Default provider set to ${providerName}`)
+        break
+      }
+
+      case 'set-approval': {
+        const mode = args[1]
+        if (!mode) {
+          cliErr(io, `Usage: rivet config set-approval <${APPROVAL_MODES.join('|')}>`)
+          cliExit(io, 1)
+          return
+        }
+        const saved = setApprovalMode(mode)
+        cliOut(io, `Approval mode set to ${saved}`)
         break
       }
 
