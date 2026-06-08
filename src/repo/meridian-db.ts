@@ -594,6 +594,21 @@ export class MeridianDb {
     }
   }
 
+  loadBanditStatesByPrefix(prefix: string, limit = 100): Array<{ kind: string; json: string; updatedAt: string }> {
+    if (!this._available) return []
+    try {
+      const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)))
+      return this.db.prepare(`
+        SELECT kind, json, updated_at as updatedAt FROM p3_state
+        WHERE substr(kind, 1, length(?)) = ?
+        ORDER BY updated_at DESC
+        LIMIT ${safeLimit}
+      `).all(prefix, prefix) as Array<{ kind: string; json: string; updatedAt: string }>
+    } catch {
+      return []
+    }
+  }
+
   // ─── Sensorimotor ─────────────────────────────────────────────────────
 
   /**

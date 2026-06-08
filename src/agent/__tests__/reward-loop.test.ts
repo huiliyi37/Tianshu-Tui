@@ -75,6 +75,7 @@ describe('reward loop closure', () => {
     assert.equal(record.sessionId, 's1')
     assert.equal(record.objectiveHash, 'obj')
     assert.equal(record.components.workerModelCount, 1)
+    assert.equal(record.components.workerModel, 'pro')
     assert.equal(record.components.reviewVerdict, 'pass')
     assert.equal(record.reward, 0.6)
   })

@@ -133,6 +133,7 @@ export function buildRewardClosureRecordFromTeamWave(
       ...(event.outcome.reviewVerdict ? { reviewVerdict: event.outcome.reviewVerdict } : {}),
       changedFilesSource: event.changedFiles.changedFilesSource,
       workerModelCount: event.workerModels?.length ?? 0,
+      ...(event.workerModels?.length === 1 ? { workerModel: event.workerModels[0]!.model } : {}),
     },
     timestamp: options?.timestamp,
   })

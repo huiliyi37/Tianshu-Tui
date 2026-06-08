@@ -71,6 +71,7 @@ import { computeEFE } from './prediction-error.js'
 import { computeAffordanceScores } from './affordance.js'
 import { buildModelRoutingShadowEvent, inferLegacyRoutingRecommendation, persistModelRoutingShadow } from './model-routing-shadow.js'
 import { buildModelPolicyCandidates, selectModelPolicy } from './model-policy-selection.js'
+import { buildHistoricalModelRewards } from './model-reward-summary.js'
 import { recordRoutingRewardClosure } from './reward-loop.js'
 import { renderPlanCacheAdvisory } from './plan-cache-advisory.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
@@ -550,8 +551,9 @@ export class AgentLoop {
       }))
       const modelCards = this.config.modelRoutingShadowModelCards ?? this.config.modelCards
       const legacyRouting = inferLegacyRoutingRecommendation(recentCalls, modelCards)
+      const historicalRewards = buildHistoricalModelRewards(store)
       const efeRecommendation = selectModelPolicy({
-        candidates: buildModelPolicyCandidates(modelCards),
+        candidates: buildModelPolicyCandidates(modelCards, { historicalRewards }),
         efe,
         sensorium: currentSensorium,
         topK: 1,
