@@ -1,5 +1,5 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
-import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, type ChangeSet } from './review-discipline.js'
+import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatWeighingReviewStance, type ChangeSet } from './review-discipline.js'
 import type { PatcherResult, ReviewFinding, ReviewRouterDeps, SquadronResult, VerifierResult } from './review-router.js'
 import type { AggregationPolicy, WorkerProfile, WorkerResult, WorkOrderKind } from './work-order.js'
 
@@ -51,6 +51,13 @@ function pathBoundaryReviewBlock(): string {
   return [
     'Path boundary / attention-gate review stance (T7/MeridianIndexer lesson; always apply for path, classifier, discovery, indexer, watcher, git-status, ownership-adjacent changes):',
     formatPathBoundaryReviewStance(),
+  ].join('\n')
+}
+
+function weighingReviewBlock(): string {
+  return [
+    'Weighing review stance (天权 称量者 lesson; apply to refactors, extractions, encapsulation/scope changes — verify truth AND weigh cost):',
+    formatWeighingReviewStance(),
   ].join('\n')
 }
 
@@ -164,6 +171,7 @@ function verifierObjective(change: ChangeSet): string {
     objectiveReviewStanceBlock(),
     dataflowVerifierBlock(),
     pathBoundaryReviewBlock(),
+    weighingReviewBlock(),
     `Files: ${files(change).join(', ') || '(none)'}`,
     'Run targeted existing tests when possible and return command + observed output evidence.',
     'Do not stop at green tests: try at least one counterexample or boundary/error-path probe relevant to the changed files.',

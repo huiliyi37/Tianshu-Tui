@@ -47,6 +47,21 @@ export function formatPathBoundaryReviewStance(): string {
   return PATH_BOUNDARY_REVIEW_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
 }
 
+/**
+ * 天权（称量者）审查之道里不与对抗验证重复的那一维：审查不只验真伪、找反例，
+ * 还要"称量"——权衡这个改动在当前上下文里偏轻还是偏重、退化了什么换来了什么。
+ * 对抗验证回答"对不对"，称量回答"值不值、是否伤了全局"。仅保留此独有维度，
+ * 同伴归零/沉默是失职等已由 REVIEW_DISCIPLINES / OBJECTIVE_REVIEW_STANCE 覆盖。
+ */
+export const WEIGHING_REVIEW_STANCE: readonly string[] = [
+  '审查不止于找错，更要称量：这个改动在当前上下文里偏轻还是偏重？封装/抽象/边界退化了多少，换来了什么？秤的两端都要放上东西，只报缺陷不报代价是半截称量。',
+  '记账全局影响：局部优化是否以牺牲整体稳定/封装性为代价（如批量移除 private、复制常量、跨模块耦合）。真实退化即使"测试仍绿"也要记录并指明偿还阶段，不可静默通过。',
+]
+
+export function formatWeighingReviewStance(): string {
+  return WEIGHING_REVIEW_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
+}
+
 const FIX_PATTERNS = [
   /\bfix(?:\(|:|\b)/i,
   /\bbugfix\b/i,
