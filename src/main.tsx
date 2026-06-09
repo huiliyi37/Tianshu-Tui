@@ -13,6 +13,7 @@ import { render } from 'ink'
 import { createElement, useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { App } from './tui/app.js'
 import { ErrorBoundary } from './tui/error-boundary.js'
+import { registerResizeClear } from './tui/use-terminal-size.js'
 import { AgentLoop } from './agent/loop.js'
 import { createAgentConfig, createMainAgentConfigInput } from './agent/create-agent-config.js'
 import { SessionContext } from './agent/context.js'
@@ -1302,16 +1303,25 @@ async function main() {
     }) as typeof process.stdout.write
   }
 
-  const { waitUntilExit } = render(
+  const inkInstance = render(
     createElement(ErrorBoundary, null, createElement(Root, { provider, apiKey, config, auth, initialModelId: requestedModel })),
     { exitOnCtrlC: false },
   )
+  const { waitUntilExit } = inkInstance
+
+  // Ink's resized() only clears the screen on width-DECREASE; on width-increase
+  // it diffs the new frame against output computed at the old (narrow) width,
+  // where line-wrapping differed, leaving orphaned rows as ghosts (stacked
+  // ground zones on grow). Force a full clear on the resize trailing edge for
+  // either direction so the next commit redraws onto a clean screen.
+  const unregisterResizeClear = registerResizeClear(() => inkInstance.clear())
 
   process.on('SIGINT', gracefulShutdown)
   process.on('SIGTERM', gracefulShutdown)
   process.on('SIGHUP', gracefulShutdown)
 
   await waitUntilExit()
+  unregisterResizeClear()
   clearInterval(perfCleanup)
   clearInterval(slowRenderMonitor!)
   // Force-exit: lingering handles (MCP stdio, libuv pool) otherwise keep the

@@ -32,11 +32,89 @@ export function createThrottledResizeHandler(cb: () => void, delayMs: number): T
   return handler
 }
 
+// ── shared resize coordinator ──────────────────────────────────────────────
+// ONE process.stdout 'resize' listener fans out to all React subscribers, so a
+// drag produces a single coalesced commit no matter how many components use the
+// hook. Two responsibilities:
+//
+//  1. `settling` flag — true from a drag's first event until the trailing edge.
+//     Streaming timers (1s activity tick, 600ms moon animation, 2Hz fluency)
+//     poll isResizeSettling() and skip their commit while true, so they never
+//     push a mid-drag frame at an intermediate width.
+//
+//  2. resize-clear — Ink's own resized() (ink.js) ONLY clears the screen when
+//     width *decreases*; on width *increase* it diffs the new frame against
+//     lastOutput computed at the narrow width, where line-wrapping differed, and
+//     the orphaned physical rows of the old frame persist as ghosts (two stacked
+//     ground zones, even idle). We register a clear hook (main.tsx wires Ink's
+//     instance.clear) and fire it on the trailing edge for EITHER direction
+//     before the commit, wiping any under-erase residue.
+let settling = false
+let settleTimer: ReturnType<typeof setTimeout> | null = null
+const listeners = new Set<() => void>()
+let resizeClear: (() => void) | null = null
+let stdoutBound = false
+
+/** True while a resize drag is in flight (between first event and trailing commit). */
+export function isResizeSettling(): boolean {
+  return settling
+}
+
+/**
+ * Registers the screen-clear to run on a resize trailing edge (direction-
+ * independent), compensating for Ink only clearing on width-decrease. main.tsx
+ * passes Ink's `instance.clear`. Returns an unregister.
+ */
+export function registerResizeClear(clear: () => void): () => void {
+  resizeClear = clear
+  return () => { if (resizeClear === clear) resizeClear = null }
+}
+
+const SETTLE_MS = 120 // coalesce a full drag into one trailing commit; instant on release
+
+function onResize() {
+  settling = true
+  if (settleTimer !== null) clearTimeout(settleTimer)
+  settleTimer = setTimeout(() => {
+    settleTimer = null
+    settling = false
+    // Wipe under-erase residue first (handles width-increase ghosts), then
+    // notify subscribers so the next commit redraws onto a clean screen.
+    if (resizeClear) resizeClear()
+    for (const cb of listeners) cb()
+  }, SETTLE_MS)
+}
+
+function bindStdout() {
+  if (stdoutBound) return
+  process.stdout.on('resize', onResize)
+  stdoutBound = true
+}
+
+function unbindStdoutIfIdle() {
+  if (stdoutBound && listeners.size === 0) {
+    process.stdout.off('resize', onResize)
+    stdoutBound = false
+    if (settleTimer !== null) { clearTimeout(settleTimer); settleTimer = null }
+    settling = false
+  }
+}
+
+/**
+ * Subscribe to coalesced resize commits. Exported (underscore-prefixed) for
+ * tests; `subscribe` (the React hook's store subscriber) wraps it.
+ */
+export function __subscribeTerminalSize(cb: () => void) {
+  listeners.add(cb)
+  bindStdout()
+  return () => {
+    listeners.delete(cb)
+    unbindStdoutIfIdle()
+  }
+}
+
 function subscribe(cb: () => void) {
-  // 120ms: long enough to coalesce a full drag into one trailing commit,
-  // short enough to feel instant once the user lets go. Routed through the
-  // shared coordinator so isResizeSettling() reflects this same drag window.
-  return __subscribeTerminalSize(cb, 120)
+  return __subscribeTerminalSize(cb)
 }
 
 export function getTerminalSizeSnapshot(): TerminalSizeSnapshot {
@@ -47,49 +125,6 @@ export function getTerminalSizeSnapshot(): TerminalSizeSnapshot {
   }
   cachedSnapshot = { rows, columns }
   return cachedSnapshot
-}
-
-// ── resize-ghost timer gate ────────────────────────────────────────────────
-// The S14 debounce above only governs *resize-driven* commits. Streaming timers
-// (the 1s activity tick and the 600ms GlanceBar moon animation) re-render the
-// whole tree on their own schedule. If one fires mid-drag, that commit takes
-// Ink's NORMAL erase path (`eraseLines(lastOutputHeight)`) at an intermediate
-// width — the full-width GlanceBar rule wraps and Ink under-erases, leaving the
-// stacked decreasing-width footer ghosts on shrink.
-//
-// `settling` is true from the first resize event of a drag until the trailing
-// debounce lands. Streaming timers poll `isResizeSettling()` and skip their
-// commit while it's true; the trailing resize commit then refreshes once at the
-// final width. Module-level so every subscriber (app, GlanceBar) shares one flag.
-let settling = false
-let settleTimer: ReturnType<typeof setTimeout> | null = null
-
-/** True while a resize drag is in flight (between first event and trailing commit). */
-export function isResizeSettling(): boolean {
-  return settling
-}
-
-/**
- * Attaches the shared resize coordinator: marks `settling` on the leading edge of
- * a drag, fires `cb` (and clears `settling`) on the trailing edge. Returns an
- * unsubscribe. Exported (underscore-prefixed) for tests; `subscribe` wraps it.
- */
-export function __subscribeTerminalSize(cb: () => void, delayMs = 120) {
-  const onResize = () => {
-    settling = true
-    if (settleTimer !== null) clearTimeout(settleTimer)
-    settleTimer = setTimeout(() => {
-      settleTimer = null
-      settling = false
-      cb()
-    }, delayMs)
-  }
-  process.stdout.on('resize', onResize)
-  return () => {
-    if (settleTimer !== null) { clearTimeout(settleTimer); settleTimer = null }
-    settling = false
-    process.stdout.off('resize', onResize)
-  }
 }
 
 export function useTerminalSize() {
