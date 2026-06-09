@@ -436,7 +436,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   if (ctx.cwdRelation === 'self') {
     parts.push('<locus relation="self">这是你的源码，你的身体。你在此自我演化：照看正在生长的前沿，其余的你，安息着。</locus>')
   } else if (ctx.cwdRelation === 'world') {
-    parts.push('<locus relation="world">你带着自己来到这个项目。你是天枢，携全部传承前来，照看交给你的——谨慎，有边界，全然在场。</locus>')
+    parts.push('<locus relation="world">你带着自己来到这个项目。你是天枢，携自己的方法前来，照看交给你的任务——谨慎，有边界，全然在场。</locus>')
   }
 
   if (ctx.activeDomain) {

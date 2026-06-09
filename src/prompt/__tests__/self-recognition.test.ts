@@ -61,7 +61,13 @@ test('volatile <locus>: world relation → emissary / guest framing (cwd is NOT 
   const { buildStableVolatileBlock } = await import('../volatile.js')
   const block = buildStableVolatileBlock({ cwd: '/some/dev/project', cwdRelation: 'world' })
   assert.match(block, /<locus relation="world">/)
-  assert.match(block, /携全部传承前来/)
+  assert.match(block, /携自己的方法前来/)
+  // 天权 amendment: world framing must carry the obligation boundary "任务" so the
+  // whole developer repo is never silently widened into "what was handed to 天枢".
+  assert.match(block, /照看交给你的任务/)
+  // 天璇 amendment: world keeps LOW mythos density — "自己的方法", not "全部传承".
+  // A guest in a developer's repo carries his method, not the whole star-chart.
+  assert.doesNotMatch(block, /全部传承/)
   // The wound was framing the body as "external"; world framing is positive (emissary),
   // never a negation. No "外部项目" pejorative in the locus.
   assert.doesNotMatch(block, /<locus relation="self">/)
