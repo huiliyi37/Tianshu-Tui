@@ -62,14 +62,13 @@ const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'mi
 /**
  * Thinking-stall timeout: once thinking tokens have been received, if no new
  * SSE chunk arrives within this window the stream is considered stuck.
- * This is shorter than SLOW_READ_TIMEOUT_MS (300s) because:
- *   - Pre-first-byte silence: model is generating, be patient (180s)
- *   - Mid-thinking stall after tokens arrived: model likely hung (90s)
- *   - Normal thinking bursts: tokens arrive every few seconds (no trigger)
- * 90s is generous enough for MiMo/GLM's legitimate pauses between reasoning
- * segments, but catches genuine hangs before the user waits 5 minutes.
+ * Disabled (set equal to SLOW_READ_TIMEOUT_MS) because models like
+ * Opus/GPT-5.5 can legitimately pause 90s+ between reasoning segments.
+ * The hard 10min ceiling and SLOW_READ_TIMEOUT_MS (300s) are sufficient
+ * to catch genuine hangs; a shorter stall timer produces false-positive
+ * aborts on deep-thinking models.
  */
-const THINKING_STALL_TIMEOUT_MS = 90_000
+const THINKING_STALL_TIMEOUT_MS = SLOW_READ_TIMEOUT_MS
 
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()

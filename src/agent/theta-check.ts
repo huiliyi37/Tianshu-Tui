@@ -24,7 +24,7 @@ function parseTypeScriptErrorFiles(output: string): string[] {
  * This is intentionally best-effort: missing tsc, missing tsconfig, and timeouts
  * return an empty error set so the agent loop never blocks on rhythmic checks.
  */
-export function runThetaCheck(cwd: string, timeoutMs = 3000): Promise<ThetaCheckResult> {
+export function runThetaCheck(cwd: string, timeoutMs = 15_000): Promise<ThetaCheckResult> {
   const start = Date.now()
 
   return new Promise(resolve => {
