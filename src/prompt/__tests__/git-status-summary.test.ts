@@ -65,6 +65,48 @@ describe('summarizeGitStatus', () => {
     assert.match(result, /20 staged/)
     assert.match(result, /15 modified/)
   })
+
+  it('parses and summarizes long short-status input without losing paths', () => {
+    const status = [
+      'Current branch: main',
+      'Status:',
+      ' M src/prompt/volatile.ts',
+      '?? docs/teamtask/T7-落地实施方案·注意力闸分阶段执行.md',
+      ...Array.from({ length: 40 }, (_, i) => `?? src/context/generated-content-${i}.ts`),
+    ].join('\n')
+    assert.ok(status.length > 1200, `fixture should exceed threshold, got ${status.length}`)
+
+    const result = summarizeGitStatus(status)
+
+    assert.match(result, /\[main\]/)
+    assert.match(result, /modified: src\/prompt\/volatile\.ts/)
+    assert.match(result, /untracked: .*docs\/teamtask\/T7-/)
+    assert.doesNotMatch(result, /\[unknown\]/)
+  })
+
+  it('folds attention noise in long short-status input while keeping content visible', () => {
+    const status = [
+      'Current branch: main',
+      'Status:',
+      ' M src/prompt/volatile.ts',
+      '?? docs/teamtask/T7-落地实施方案·注意力闸分阶段执行.md',
+      '?? layout.log',
+      '?? .codex/hooks.json',
+      '?? node_modules/pkg/index.js',
+      ...Array.from({ length: 40 }, (_, i) => `?? .rivet/tasks/events/task_${i}.jsonl`),
+    ].join('\n')
+    assert.ok(status.length > 1200, `fixture should exceed threshold, got ${status.length}`)
+
+    const result = summarizeGitStatus(status)
+
+    assert.match(result, /modified: src\/prompt\/volatile\.ts/)
+    assert.match(result, /untracked: docs\/teamtask\/T7-/)
+    assert.match(result, /41 runtime fragments folded/)
+    assert.match(result, /1 foreign tool footprint folded/)
+    assert.doesNotMatch(result, /layout\.log/)
+    assert.doesNotMatch(result, /\.codex\/hooks\.json/)
+    assert.doesNotMatch(result, /node_modules/)
+  })
 })
 
 describe('parseGitStatus', () => {
