@@ -26,6 +26,7 @@ function makeContext(opts: {
   commitOwnedFiles?: (cwd: string, files: string[], message: string) => { ok: boolean; output: string }
   routeReviewWorkflow?: (change: ChangeSet, deps: ReviewRouterDeps, options?: ReviewRouterOptions) => Promise<ReviewOutcome>
   reviewDeps?: ReviewRouterDeps
+  disableReviewDeps?: boolean
   reviewDepth?: number
   sessionRegistry?: SessionRegistry
   sessionId?: string
@@ -54,8 +55,10 @@ function makeContext(opts: {
     getCurrentDirtyFiles: () => opts.dirtyFiles,
     getProjectMemoryContent: () => opts.projectMemory,
     commitOwnedFiles: opts.commitOwnedFiles,
-    routeReviewWorkflow: opts.routeReviewWorkflow,
-    reviewDeps: opts.reviewDeps,
+    routeReviewWorkflow: opts.disableReviewDeps
+      ? opts.routeReviewWorkflow
+      : (opts.routeReviewWorkflow ?? (async () => ({ tier: 'L2', verdict: 'verified', evidence: 'test review shim', rounds: 1 }))),
+    reviewDeps: opts.disableReviewDeps ? undefined : (opts.reviewDeps ?? {} as ReviewRouterDeps),
     reviewDepth: opts.reviewDepth,
   }))
 
@@ -68,6 +71,14 @@ function makeContext(opts: {
   }
 
   return { tool, params, ledger, ownership, gate }
+}
+
+function toolDescription(): string {
+  const { tool } = makeContext({
+    taskId: 'schema',
+    ownedFiles: [],
+  })
+  return tool.definition.description
 }
 
 describe('deliver-task — semantic task delivery tool', () => {
@@ -214,6 +225,15 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /commit abc123/)
   })
 
+  it('describes complex spec checklist audit in the tool schema', () => {
+    const description = toolDescription()
+
+    assert.match(description, /Complex spec delivery checklist/)
+    assert.match(description, /fact-flow graph verified/)
+    assert.match(description, /condition matrix verified/)
+    assert.match(description, /counterexample tests verified/)
+  })
+
   it('routes fix commits through ReviewRouter before scoped commit', async () => {
     const calls: Array<{ files: string[]; message: string }> = []
     let routedChange: ChangeSet | undefined
@@ -284,6 +304,50 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(result.isError ?? false, false)
     assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: false })
     assert.match(result.content, /ReviewRouter verified \(L2\)/)
+    assert.match(result.content, /Scoped commit created/)
+  })
+
+  it('blocks commit when review workflow should run but review deps are not wired', async () => {
+    let committed = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      commitOwnedFiles: () => {
+        committed = true
+        return { ok: true, output: 'commit abc123' }
+      },
+      disableReviewDeps: true,
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
+
+    assert.equal(result.isError, true)
+    assert.equal(committed, false)
+    assert.match(result.content, /ReviewRouter RED \(unwired\)/)
+    assert.match(result.content, /review dependencies are unavailable/)
+  })
+
+  it('allows force=true to skip an unwired review workflow explicitly', async () => {
+    let committed = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      commitOwnedFiles: () => {
+        committed = true
+        return { ok: true, output: 'commit abc123' }
+      },
+      disableReviewDeps: true,
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, force: true, message: 'feat: scoped delivery' } })
+
+    assert.equal(result.isError ?? false, false)
+    assert.equal(committed, true)
+    assert.match(result.content, /ReviewRouter skipped \(force=true\)/)
     assert.match(result.content, /Scoped commit created/)
   })
 
@@ -900,6 +964,73 @@ Do not declare a streamed response duplicate in the middle of the stream.
       }
     })
 
+    it('blocks commit when other session holds a claim on an owned file', async () => {
+      const { SessionRegistry: SR } = await import('../session-registry.js')
+      const tmpDir = mkdtempSync(join(tmpdir(), 'p2-claims-commit-block-'))
+      const registry = await SR.create(tmpDir)
+      registry.register('other-session', '/fake/project')
+      registry.acquireClaim('other-session', 'src/owned.ts', 'exclusive')
+      let committed = false
+
+      try {
+        const ctx = makeContext({
+          taskId: 't1',
+          ownedFiles: ['src/owned.ts'],
+          dirtyFiles: ['src/owned.ts'],
+          verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+          sessionRegistry: registry,
+          sessionId: 'my-session',
+          commitOwnedFiles: () => {
+            committed = true
+            return { ok: true, output: 'commit should-not-happen' }
+          },
+        })
+
+        const result = await ctx.tool.execute({ ...ctx.params, input: { commit: true, message: 'feat: claim conflict' } })
+
+        assert.equal(result.isError, true)
+        assert.equal(committed, false)
+        assert.match(result.content, /Cannot commit: cross-session claim conflicts are present/)
+      } finally {
+        registry.close()
+        try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    })
+
+    it('allows force=true to override a cross-session claim conflict explicitly', async () => {
+      const { SessionRegistry: SR } = await import('../session-registry.js')
+      const tmpDir = mkdtempSync(join(tmpdir(), 'p2-claims-commit-force-'))
+      const registry = await SR.create(tmpDir)
+      registry.register('other-session', '/fake/project')
+      registry.acquireClaim('other-session', 'src/owned.ts', 'shared_read')
+      let committed = false
+
+      try {
+        const ctx = makeContext({
+          taskId: 't1',
+          ownedFiles: ['src/owned.ts'],
+          dirtyFiles: ['src/owned.ts'],
+          verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+          sessionRegistry: registry,
+          sessionId: 'my-session',
+          commitOwnedFiles: () => {
+            committed = true
+            return { ok: true, output: 'commit abc123' }
+          },
+        })
+
+        const result = await ctx.tool.execute({ ...ctx.params, input: { commit: true, force: true, message: 'feat: claim conflict override' } })
+
+        assert.equal(result.isError ?? false, false)
+        assert.equal(committed, true)
+        assert.match(result.content, /Cross-session claim conflicts overridden with force=true/)
+        assert.match(result.content, /Scoped commit created/)
+      } finally {
+        registry.close()
+        try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    })
+
     it('does NOT report conflict when own session holds the claim', async () => {
       const { SessionRegistry: SR } = await import('../session-registry.js')
       const tmpDir = mkdtempSync(join(tmpdir(), 'p2-claims-self-'))
@@ -1268,6 +1399,34 @@ Do not declare a streamed response duplicate in the middle of the stream.
       assert.match(result.content, /Adopted 1 external file/)
       assert.match(result.content, /Scoped commit created/)
       assert.deepEqual(calls, [{ files: ['src/crashed-work.ts'], message: 'fix: adopt orphaned work' }])
+    })
+
+    it('blocks adopted files when the refreshed delivery gate is RED', async () => {
+      let committed = false
+      const ctx = makeContext({
+        taskId: 't1',
+        ownedFiles: [],
+        externalFiles: ['src/crashed-work.ts'],
+        dirtyFiles: ['src/crashed-work.ts'],
+        commitOwnedFiles: () => {
+          committed = true
+          return { ok: true, output: 'commit should-not-happen' }
+        },
+      })
+
+      const result = await ctx.tool.execute({
+        ...ctx.params,
+        input: {
+          commit: true,
+          message: 'fix: adopt unverified orphaned work',
+          adopt: ['src/crashed-work.ts'],
+        },
+      })
+
+      assert.equal(result.isError, true)
+      assert.equal(committed, false)
+      assert.match(result.content, /delivery gate is RED after adoption/)
+      assert.match(result.content, /Run verification before delivery/)
     })
 
     it('rejects adopt for file not in external list', async () => {

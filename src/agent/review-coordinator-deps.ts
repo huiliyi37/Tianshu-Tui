@@ -37,6 +37,16 @@ function objectiveReviewStanceBlock(): string {
   ].join('\n')
 }
 
+function dataflowVerifierBlock(): string {
+  return [
+    'Dataflow verifier stance for complex specs (P4-c lesson):',
+    '1. Do not treat spec clauses as a flat checklist; reconstruct the fact-flow graph from spec fields/constraints to producers, intermediate structures, consumers/write targets, and assertions.',
+    '2. Check condition matrices for combined gates such as source × severity × apply; nested constraints must not be flattened into independent ifs.',
+    '3. Demand counterexample coverage: which existing or new test would fail if the implementation only handled the happy path, forgot a call contract, declared a type without consuming it, or used truthy/falsy sentinels such as !waveId.',
+    '4. A green test suite is not enough unless it can make the wrong/first-pass implementation red on the relevant spec path.',
+  ].join('\n')
+}
+
 function childReviewDepth(options: CoordinatorReviewDepsOptions): number {
   return (options.reviewDepth ?? 0) + 1
 }
@@ -145,9 +155,11 @@ function verifierObjective(change: ChangeSet): string {
   return [
     'Independently adversarially verify this change before delivery.',
     objectiveReviewStanceBlock(),
+    dataflowVerifierBlock(),
     `Files: ${files(change).join(', ') || '(none)'}`,
     'Run targeted existing tests when possible and return command + observed output evidence.',
     'Do not stop at green tests: try at least one counterexample or boundary/error-path probe relevant to the changed files.',
+    'For spec/integration changes, explicitly report fact-flow closure, condition-matrix coverage, and the counterexample that would fail a checklist-only implementation.',
     'Return JSON WorkerResult with evidenceStatus="verified" only when the verification actually ran, passed, and no counterexample was found.',
   ].join('\n')
 }
@@ -179,7 +191,9 @@ function squadronRequests(change: ChangeSet, options: CoordinatorReviewDepsOptio
     objective: [
       `${inspector.name} Inspector: ${inspector.objective}`,
       objectiveReviewStanceBlock(),
+      dataflowVerifierBlock(),
       `Files: ${files(change).join(', ') || '(none)'}`,
+      'For spec/integration changes, review the fact-flow graph, condition matrix, and counterexample tests before accepting checklist-style coverage.',
       'Report each finding with severity CRITICAL/HIGH/MEDIUM/LOW, claim, evidence, and minimal fix suggestion.',
     ].join('\n'),
   }))

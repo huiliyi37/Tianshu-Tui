@@ -52,10 +52,14 @@ flowchart TD
 Include these sections:
 1. **Problem description** — what's broken or missing, with concrete examples
 2. **Root cause analysis** — why it happens (Mermaid flowchart recommended)
-3. **Proposed changes** — each file with diff/pseudocode, file paths, line references
-4. **Competitive/design comparison** — how alternatives solve this (table format)
-5. **Verification plan** — test cases + manual verification steps
-6. **Risk & mitigation** — what could go wrong
+3. **Spec/dataflow closure** — for complex specs, include:
+   - fact-flow map: spec field/constraint → producer → intermediate structure → consumer/write target → assertion
+   - condition matrix: cross-product branches such as source × severity × apply, with expected behavior per cell
+   - counterexample test table: which test fails if an implementer only does the checklist/happy path, forgets a call contract, declares a type without consuming it, or uses truthy/falsy sentinels
+4. **Proposed changes** — each file with diff/pseudocode, file paths, line references
+5. **Competitive/design comparison** — how alternatives solve this (table format)
+6. **Verification plan** — test cases + manual verification steps; include RED→GREEN or counterexample coverage for every high-risk spec clause
+7. **Risk & mitigation** — what could go wrong
 
 Reference files with full paths: \`src/agent/loop.ts:123\`
 

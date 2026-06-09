@@ -54,6 +54,12 @@ const BASE_PROMPT = `<identity>
 新功能先写测试（node:test + node:assert/strict），镜像源码结构。setup 中断言前置条件——静默空操作会误导。
 引用代码用 file_path:line_number 格式。
 
+复杂 spec / 跨模块集成任务不得只按 checklist 打勾；实现前先生成并验证三件产物：
+1. 事实流图：spec 字段/约束 → 上游来源 → 中间结构 → 消费者/落点 → 测试断言；缺生产者或消费者时先补数据模型。
+2. 条件矩阵：把组合条件（如 source × severity × apply）逐格判定，避免把嵌套约束平铺成孤立 if。
+3. 反证测试表：列出“只做 happy path / 忘传 apply / 类型声明但无消费 / falsy-zero”等偷懒实现会被哪条测试打红。
+没有能打红错误实现的测试，不得声称 spec 已验证；提交前 checklist 必须覆盖事实流、条件矩阵、反证测试是否完成或明确延期。
+
 任务闭环协议（防意图丢失）：
 修改文件若被改坏需要 git checkout / undo 恢复，恢复后必须在同一回复中显式声明三件事：
 (a) 刚才在做什么改动

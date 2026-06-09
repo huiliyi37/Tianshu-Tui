@@ -125,7 +125,13 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
 - message: commit message (required if commit=true)
 - files: optional array of owned file paths to commit (subset). When omitted, commits all owned files. Use this to commit logical units separately.
 - adopt: array of external or co-owned file paths to claim ownership of before committing. Use when taking over work from a crashed/frozen session. Requires commit=true. The adopted files are force-added to the owned set and included in the commit scope.
-- force: set to true to override the cohesion gate when committing many files across multiple areas. Use sparingly.`,
+- force: set to true to override the cohesion gate when committing many files across multiple areas. Use sparingly.
+
+### Complex spec delivery checklist
+When the task implements a complex spec or cross-module integration, include these entries in the checklist parameter before commit:
+- fact-flow graph verified: every spec field/constraint has producer → intermediate structure → consumer/write target → assertion
+- condition matrix verified: combined gates (source × severity × apply, etc.) are covered per cell
+- counterexample tests verified: at least one test would fail for checklist-only/happy-path implementations, missing call contracts, type-without-consumer, or truthy/falsy sentinel mistakes.`,
       input_schema: {
         type: 'object',
         properties: {
@@ -144,6 +150,19 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           force: {
             type: 'boolean',
             description: 'Override cohesion gate. Only use when the commit truly is one logical unit despite spanning multiple areas.',
+          },
+          checklist: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                item: { type: 'string' },
+                done: { type: 'boolean' },
+                files: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['item', 'done'],
+            },
+            description: 'Task completion audit entries. For complex specs include fact-flow graph verified, condition matrix verified, and counterexample tests verified/deferred.',
           },
         },
       },
@@ -253,17 +272,17 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
       }
 
       // P2 cross-session signal: detect claim conflicts with other sessions
+      const claimConflicts: Array<{ file: string; holder: string; claimType: string }> = []
       if (ctx.sessionRegistry && ctx.sessionId && report.ownedFiles.length > 0) {
-        const conflicts: Array<{ file: string; holder: string; claimType: string }> = []
         for (const f of report.ownedFiles) {
           const claim = ctx.sessionRegistry.checkClaim(f)
           if (claim && claim.sessionId !== ctx.sessionId) {
-            conflicts.push({ file: f, holder: claim.sessionId, claimType: claim.claimType })
+            claimConflicts.push({ file: f, holder: claim.sessionId, claimType: claim.claimType })
           }
         }
-        if (conflicts.length > 0) {
+        if (claimConflicts.length > 0) {
           lines.push('', '⚠️  Cross-session claim conflicts:')
-          for (const c of conflicts) {
+          for (const c of claimConflicts) {
             const claimKind = c.claimType === 'exclusive' ? 'exclusive lock' : 'shared read'
             lines.push(`  ${c.file} — ${claimKind} held by session ${c.holder}`)
           }
@@ -364,7 +383,6 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           lines.push('', '❌ Commit requires a "message" parameter.')
           return { content: lines.join('\n'), isError: true }
         }
-
         // Adopt external files into owned set (cross-session takeover)
         const adoptFiles = params.input.adopt as string[] | undefined
         if (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length > 0) {
@@ -395,6 +413,21 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           // model-generated tool calls) may pass an explicit empty array to mean "no adoption".
         }
 
+        const postAdoptionReport = adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length > 0
+          ? ctx.gate.getReport([], currentDirtyFiles)
+          : report
+        if (postAdoptionReport.state === 'RED') {
+          lines.push('', '❌ Cannot commit: delivery gate is RED after adoption.')
+          if (postAdoptionReport.blockingReason) {
+            lines.push(`  Reason: ${postAdoptionReport.blockingReason}`)
+          }
+          if (postAdoptionReport.currentBlockingFailure) {
+            lines.push(`  Detail: ${postAdoptionReport.currentBlockingFailure}`)
+          }
+          lines.push('  → Run verification for the adopted files, then re-run deliver_task.')
+          return { content: lines.join('\n'), isError: true }
+        }
+
         // Resolve files to commit: subset from `files` param, or all owned
         // Note: after adoption, use refreshed owned set from ledger (not stale report)
         const requestedFiles = params.input.files as string[] | undefined
@@ -414,6 +447,17 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           return { content: lines.join('\n'), isError: true }
         }
 
+        const commitConflictFiles = new Set(filesToCommit)
+        const blockingClaimConflicts = claimConflicts.filter(conflict => commitConflictFiles.has(conflict.file))
+        if (blockingClaimConflicts.length > 0 && !forceGate) {
+          lines.push('', '❌ Cannot commit: cross-session claim conflicts are present.')
+          lines.push('   → Resolve the other session claim or use force=true only after independently verifying the override is safe.')
+          return { content: lines.join('\n'), isError: true }
+        }
+        if (blockingClaimConflicts.length > 0 && forceGate) {
+          lines.push('', '⚠️ Cross-session claim conflicts overridden with force=true. Verify the other session has finished or approved the takeover.')
+        }
+
         // Review discipline gate: deliverable commits pass through the review route when wired.
         // L1 stays advisory, while L2/L3 require independent evidence before commit.
         // The reviewDepth guard prevents verifier/patcher child contexts from recursively reviewing themselves.
@@ -425,7 +469,14 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         }
         if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
-          if (route && ctx.reviewDeps) {
+          if (!route || !ctx.reviewDeps) {
+            if (!forceGate) {
+              lines.push('', '❌ ReviewRouter RED (unwired): review dependencies are unavailable.')
+              lines.push('   → Wire reviewDeps/routeReviewWorkflow, or use force=true only when an equivalent independent review has already been captured.')
+              return { content: lines.join('\n'), isError: true }
+            }
+            lines.push('', '⚠️ ReviewRouter skipped (force=true): review dependencies are unavailable. Verify equivalent independent review evidence exists.')
+          } else {
             // REVIEW_TIMEOUT: cap review workflow at 90s to prevent tool timeout (120s default).
             // If review times out, reject with a clear message rather than crashing.
             const REVIEW_TIMEOUT_MS = 90_000

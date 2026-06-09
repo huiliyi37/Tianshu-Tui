@@ -81,6 +81,16 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('策略 X 无效，切换到 Y'))
   })
 
+  it('upgrades complex spec workflow from checklist to dataflow verification', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+
+    assert.ok(prompt.includes('复杂 spec / 跨模块集成任务不得只按 checklist 打勾'))
+    assert.ok(prompt.includes('事实流图'))
+    assert.ok(prompt.includes('条件矩阵'))
+    assert.ok(prompt.includes('反证测试表'))
+    assert.ok(prompt.includes('没有能打红错误实现的测试，不得声称 spec 已验证'))
+  })
+
   it('includes only a short manifest entry for sensitive knowledge domains', () => {
     const prompt = buildSystemPrompt({ tools: [] })
 
