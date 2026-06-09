@@ -51,14 +51,29 @@ function makeContext(
 }
 
 describe('createThetaRuntimeHook', () => {
-  it('advances theta state and phase after every tool event', async () => {
+  it('ignores non-file-writing tools (no theta advancement)', async () => {
+    let state = createThetaState(7)
+    const requests: string[] = []
+    const hook = createThetaRuntimeHook({
+      getThetaState: () => state,
+      setThetaState: next => { state = next },
+    })
+
+    await hook.run(makeContext(makeSensorium(), requests), { name: 'read_file', success: true })
+
+    // read_file is not a file-writing tool — no theta state change, no request
+    assert.deepEqual(requests, [])
+    assert.equal(state.toolCallCount, 0, 'state should not advance for read_file')
+  })
+
+  it('advances theta state after file-writing tools', async () => {
     let state = createThetaState(7)
     const hook = createThetaRuntimeHook({
       getThetaState: () => state,
       setThetaState: next => { state = next },
     })
 
-    await hook.run(makeContext(), { name: 'read_file', success: true })
+    await hook.run(makeContext(), { name: 'edit_file', success: true })
 
     assert.equal(state.toolCallCount, 1)
     assert.equal(state.lastThetaAt, 0)
@@ -73,7 +88,7 @@ describe('createThetaRuntimeHook', () => {
       setThetaState: next => { state = next },
     })
 
-    await hook.run(makeContext(null, requests), { name: 'read_file', success: true })
+    await hook.run(makeContext(null, requests), { name: 'edit_file', success: true })
 
     assert.deepEqual(requests, [])
     assert.equal(state.toolCallCount, 1)
@@ -87,7 +102,7 @@ describe('createThetaRuntimeHook', () => {
       setThetaState: next => { state = next },
     })
 
-    await hook.run(makeContext(makeSensorium({ complexity: 0.2 }), requests), { name: 'read_file', success: true })
+    await hook.run(makeContext(makeSensorium({ complexity: 0.2 }), requests), { name: 'write_file', success: true })
 
     assert.deepEqual(requests, [])
     assert.equal(state.toolCallCount, 1)
@@ -103,7 +118,7 @@ describe('createThetaRuntimeHook', () => {
       setThetaState: next => { state = next },
     })
 
-    await hook.run(makeContext(makeSensorium(), requests), { name: 'read_file', success: true })
+    await hook.run(makeContext(makeSensorium(), requests), { name: 'hash_edit', success: true })
 
     assert.deepEqual(requests, [])
     assert.equal(state.toolCallCount, 1)

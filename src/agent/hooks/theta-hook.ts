@@ -7,11 +7,26 @@ export interface ThetaRuntimeHookDeps {
   setThetaState: (state: ThetaState) => void
 }
 
+/** Tools that modify source files — only these should trigger theta checks. */
+const FILE_WRITING_TOOLS = new Set([
+  'write_file',
+  'edit_file',
+  'hash_edit',
+  'apply_patch',
+])
+
 export function createThetaRuntimeHook(deps: ThetaRuntimeHookDeps): PostToolRuntimeHook {
   return {
     phase: 'postTool',
     name: 'theta-runtime',
-    run(ctx) {
+    run(ctx, tool) {
+      // Only trigger theta checks when a file-writing tool was used.
+      // Periodic (turn-based) tsc scans are removed — the agent already
+      // runs tsc explicitly before commits, and background scanning
+      // wastes CPU (especially with multiple parallel sessions).
+      const toolName = tool.name
+      if (!toolName || !FILE_WRITING_TOOLS.has(toolName)) return
+
       const sensorium = ctx.snapshot.sensorium
       const vigor = ctx.snapshot.vigor
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runThetaCheck } from '../theta-check.js'
+import { runThetaCheck, clearThetaCache } from '../theta-check.js'
 
 const tempDirs: string[] = []
 
@@ -18,6 +18,7 @@ function makeProject(): string {
 }
 
 afterEach(() => {
+  clearThetaCache()
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()!
     try { rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ }

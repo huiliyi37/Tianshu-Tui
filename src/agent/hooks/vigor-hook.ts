@@ -46,14 +46,10 @@ export function createVigorAfterPerceptionHook(): AfterPerceptionRuntimeHook {
       const adjusted = modulateStrategyByVigor(strategy, vigor, sensorium)
       ctx.effects.setStrategy(adjusted)
 
-      if (shouldTriggerElmRelease(vigor)) {
-        // Suppress elm-micro-release if recent theta checks timed out —
-        // spawning more checks won't help if tsc is unresponsive.
-        const theta = ctx.snapshot.thetaTelemetry
-        if (!theta || !theta.lastTimedOut) {
-          ctx.effects.requestThetaCheck('elm-micro-release')
-        }
-      }
+      // elm-micro-release theta check removed: periodic tsc scans are
+      // wasteful (especially with parallel sessions).  Theta checks now
+      // only fire after file-writing tools (theta-hook.ts), not on every
+      // vigor-driven ELM release.
     },
   }
 }

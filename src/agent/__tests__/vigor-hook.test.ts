@@ -146,7 +146,7 @@ describe('createVigorAfterPerceptionHook', () => {
     assert.equal(called, false)
   })
 
-  it('requests an ELM theta pulse after sustained high vigor', async () => {
+  it('no longer requests ELM theta pulse (removed: theta only fires after file writes)', async () => {
     const requests: string[] = []
     const hook = createVigorAfterPerceptionHook()
     const ctx = makeContext({
@@ -156,6 +156,6 @@ describe('createVigorAfterPerceptionHook', () => {
 
     await hook.run(ctx)
 
-    assert.deepEqual(requests, ['elm-micro-release'])
+    assert.deepEqual(requests, [])
   })
 })

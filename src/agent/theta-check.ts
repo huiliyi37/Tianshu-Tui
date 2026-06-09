@@ -18,13 +18,56 @@ function parseTypeScriptErrorFiles(output: string): string[] {
   return [...files]
 }
 
+// ── Cross-session result cache ─────────────────────────────────────
+// Multiple agent sessions (main + workers) share the same repo and
+// would otherwise each spawn a full `tsc --noEmit` (~6s).  This cache
+// deduplicates: the first caller spawns the process; subsequent callers
+// within `CACHE_TTL_MS` receive the same result without spawning.
+const CACHE_TTL_MS = 15_000
+
+let cachedResult: ThetaCheckResult | null = null
+let cachedAt = 0
+let inFlight: Promise<ThetaCheckResult> | null = null
+
 /**
  * Run a lightweight theta-gamma consistency check with an isolated tsc process.
  *
  * This is intentionally best-effort: missing tsc, missing tsconfig, and timeouts
  * return an empty error set so the agent loop never blocks on rhythmic checks.
+ *
+ * Cross-session dedup: if a tsc is already running (or completed within 15s),
+ * the cached/in-flight result is returned instead of spawning another process.
  */
+/** Clear the result cache (for testing). */
+export function clearThetaCache(): void {
+  cachedResult = null
+  cachedAt = 0
+  inFlight = null
+}
+
 export function runThetaCheck(cwd: string, timeoutMs = 15_000): Promise<ThetaCheckResult> {
+  // Return cached result if still fresh
+  if (cachedResult && (Date.now() - cachedAt) < CACHE_TTL_MS) {
+    return Promise.resolve(cachedResult)
+  }
+
+  // Deduplicate in-flight checks
+  if (inFlight) return inFlight
+
+  inFlight = runThetaCheckInner(cwd, timeoutMs).then(result => {
+    cachedResult = result
+    cachedAt = Date.now()
+    inFlight = null
+    return result
+  }).catch(err => {
+    inFlight = null
+    throw err
+  })
+
+  return inFlight
+}
+
+function runThetaCheckInner(cwd: string, timeoutMs: number): Promise<ThetaCheckResult> {
   const start = Date.now()
 
   return new Promise(resolve => {
