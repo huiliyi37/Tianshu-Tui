@@ -31,6 +31,22 @@ export function formatObjectiveReviewStance(): string {
   return OBJECTIVE_REVIEW_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
 }
 
+/**
+ * T7 attention-gate / MeridianIndexer review lesson:
+ * path and classifier fixes are only verified when caller-produced shapes,
+ * normalization boundaries, and downstream consumers are all covered.
+ */
+export const PATH_BOUNDARY_REVIEW_STANCE: readonly string[] = [
+  '任何路径/分类/过滤/索引改动都必须先确认真实调用方传入的路径形态：repo-relative、absolute inside cwd、absolute outside cwd、../ traversal、平台分隔符。不要只测私有 helper 的理想输入。',
+  '分类器 verdict 不是闭环：必须追踪 producer → normalizer → classifier → consumer/write target/DB key → assertion。类型声明或 guard 存在，不等于消费端真的用了。',
+  '显式目标与默认发现要分开审：默认 broad discovery 可降噪，用户/工具显式点名路径必须可达；沉默层不等于不存在、不等于 ownership/delivery 消失。',
+  '安全边界按 fail-closed/fail-toward-content 区分：项目外路径不得读/索引/入库；陌生项目内内容默认当 L3 content，不用 truthy/falsy 或字符串前缀哨兵偷判。',
+]
+
+export function formatPathBoundaryReviewStance(): string {
+  return PATH_BOUNDARY_REVIEW_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
+}
+
 const FIX_PATTERNS = [
   /\bfix(?:\(|:|\b)/i,
   /\bbugfix\b/i,

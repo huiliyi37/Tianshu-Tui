@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { OBJECTIVE_REVIEW_STANCE, REVIEW_DISCIPLINES, classifyChangeScale, formatObjectiveReviewStance, isCrossModule, isFixContext, shouldRouteReviewWorkflow } from '../review-discipline.js'
+import { OBJECTIVE_REVIEW_STANCE, PATH_BOUNDARY_REVIEW_STANCE, REVIEW_DISCIPLINES, classifyChangeScale, formatObjectiveReviewStance, formatPathBoundaryReviewStance, isCrossModule, isFixContext, shouldRouteReviewWorkflow } from '../review-discipline.js'
 
 describe('review disciplines', () => {
   it('contains all four review disciplines', () => {
@@ -19,6 +19,15 @@ describe('review disciplines', () => {
     assert.match(text, /亲自观察的证据/)
     assert.match(text, /主动构造反例/)
     assert.match(text, /定义.*真实边界/)
+  })
+
+  it('captures path-boundary review stance so T7/MeridianIndexer regressions do not depend on memory recall', () => {
+    assert.equal(PATH_BOUNDARY_REVIEW_STANCE.length, 4)
+    const text = formatPathBoundaryReviewStance()
+    assert.match(text, /repo-relative.*absolute inside cwd.*absolute outside cwd.*\.\.\/ traversal/)
+    assert.match(text, /producer.*normalizer.*classifier.*consumer.*DB key.*assertion/)
+    assert.match(text, /显式目标.*默认发现/)
+    assert.match(text, /fail-closed.*fail-toward-content/)
   })
 
   it('detects fix contexts from English and Chinese signals', () => {
