@@ -99,6 +99,10 @@ export const agentSchema = z.object({
   intentRetrievalRouter: intentRetrievalRouterSchema,
   /** Explicit opt-in for P4 team scheduler gated influence. Default false keeps scheduler shadow-only. */
   teamSchedulerBanditEnabled: z.boolean().default(false),
+  /** Explicit opt-in for P4-d worker model-tier gated influence. Default false keeps tier bandit shadow-only. */
+  modelTierBanditEnabled: z.boolean().default(false),
+  /** Reserved opt-in for future ModelRouting/ModelG direct switching. Default false; currently shadow-only. */
+  modelRoutingGatedEnabled: z.boolean().default(false),
   permissions: permissionsSchema.default({}),
 })
 

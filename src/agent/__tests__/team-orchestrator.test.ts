@@ -304,9 +304,10 @@ depends: T1
     assert.ok(!captured.some(r => r.parentTurnId.includes('T1')))
   })
 
-  it('records telemetry and scheduler shadow for dispatched wave fragments without changing dispatch result', async () => {
+  it('records telemetry, scheduler shadow, and gated influence audit without changing dispatch result', async () => {
     const events: unknown[] = []
     const schedulerEvents: unknown[] = []
+    const auditEvents: unknown[] = []
     const summary = await runTeamSkeleton({
       mode: 'standard',
       objective: 'telemetry wave',
@@ -322,6 +323,7 @@ depends: T1
       sessionId: 'session-1',
       recordTeamWaveTelemetry: event => { events.push(event) },
       recordTeamSchedulerShadow: event => { schedulerEvents.push(event) },
+      recordGatedInfluenceAudit: event => { auditEvents.push(event) },
       delegateBatch: async () => run('wave2'),
     })
 
@@ -332,6 +334,10 @@ depends: T1
     assert.equal((events[0] as any).fromWave, 1)
     assert.equal((events[0] as any).waveId, 'W2')
     assert.equal((schedulerEvents[0] as any).applied, false)
+    assert.equal(auditEvents.length, 1)
+    assert.equal((auditEvents[0] as any).source, 'team_scheduler_bandit')
+    assert.equal((auditEvents[0] as any).applied, false)
+    assert.ok(Array.isArray((auditEvents[0] as any).vetoSignals))
   })
 
   it('allows scheduler influence only to reduce dispatch within a safe wave', async () => {

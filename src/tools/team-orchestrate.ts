@@ -7,6 +7,7 @@ import { routeReviewWorkflow } from '../agent/review-router.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from '../agent/team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from '../agent/team-scheduler-shadow.js'
+import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from '../agent/gated-influence-audit.js'
 import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
@@ -28,8 +29,10 @@ export interface TeamOrchestrateCoordinator {
   recordTeamWaveRewardClosure?(event: TeamWaveTelemetry): void
   recordTeamSchedulerShadow?(event: TeamSchedulerShadowEvent): void
   recordTeamSchedulerReward?(event: TeamWaveTelemetry): void
+  recordGatedInfluenceAudit?(event: GatedInfluenceAuditEvent): void
   getTeamSchedulerState?: () => TeamSchedulerBanditState | undefined
-  getTeamSchedulerRewardStore?: () => { loadBanditStatesByPrefix?(prefix: string, limit?: number): Array<{ kind: string; json: string }> } | undefined
+  getTeamSchedulerRewardStore?: () => { saveBanditState?(kind: string, json: string): void; loadBanditStatesByPrefix?(prefix: string, limit?: number): Array<{ kind: string; json: string }> } | undefined
+
   isTeamSchedulerBanditEnabled?: () => boolean
   getSessionId?: () => string | undefined
 }
@@ -130,6 +133,14 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
               coordinator.recordTeamWaveTelemetry?.(event)
             },
             recordTeamSchedulerShadow: event => coordinator.recordTeamSchedulerShadow?.(event),
+            recordGatedInfluenceAudit: event => {
+              if (coordinator.recordGatedInfluenceAudit) {
+                coordinator.recordGatedInfluenceAudit(event)
+                return
+              }
+              const store = coordinator.getTeamSchedulerRewardStore?.()
+              if (store?.saveBanditState) persistGatedInfluenceAudit({ saveBanditState: store.saveBanditState.bind(store) }, event)
+            },
             teamSchedulerState: coordinator.getTeamSchedulerState?.() ?? buildHistoricalTeamSchedulerState(coordinator.getTeamSchedulerRewardStore?.()),
             sessionId: coordinator.getSessionId?.(),
           },

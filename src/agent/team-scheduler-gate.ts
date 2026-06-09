@@ -22,10 +22,39 @@ export interface TeamSchedulerGateDecision {
   gateOpen: boolean
   applied: boolean
   reason: string
+  evidenceWindow: Record<string, number | boolean | string>
+  vetoSignals: string[]
 }
 
 function safeNumber(value: number): number {
   return Number.isFinite(value) ? value : 0
+}
+
+function makeDecision(
+  input: TeamSchedulerGateInput,
+  gateOpen: boolean,
+  applied: boolean,
+  reason: string,
+  evidenceWindow: Record<string, number | boolean | string>,
+  vetoSignals: string[] = [],
+): TeamSchedulerGateDecision {
+  return {
+    gateOpen,
+    applied,
+    reason,
+    evidenceWindow: {
+      source: 'team_scheduler_bandit',
+      totalSamples: input.state.totalSamples,
+      minTotalSamples: MIN_TOTAL_SAMPLES,
+      candidateArm: input.candidateArm,
+      candidateSamples: input.state.arms[input.candidateArm]?.samples ?? 0,
+      minArmSamples: MIN_ARM_SAMPLES,
+      ruleParallelism: Math.max(1, Math.min(5, Math.trunc(input.ruleParallelism))),
+      featureFlagEnabled: input.featureFlagEnabled === true,
+      ...evidenceWindow,
+    },
+    vetoSignals,
+  }
 }
 
 export function evaluateTeamSchedulerGate(input: TeamSchedulerGateInput): TeamSchedulerGateDecision {
@@ -34,28 +63,28 @@ export function evaluateTeamSchedulerGate(input: TeamSchedulerGateInput): TeamSc
   const ruleParallelism = Math.max(1, Math.min(5, Math.trunc(input.ruleParallelism)))
 
   if (input.state.totalSamples < MIN_TOTAL_SAMPLES) {
-    return { gateOpen: false, applied: false, reason: `shadow: total samples ${input.state.totalSamples}/${MIN_TOTAL_SAMPLES}` }
+    return makeDecision(input, false, false, `shadow: total samples ${input.state.totalSamples}/${MIN_TOTAL_SAMPLES}`, {}, ['insufficient_samples'])
   }
   if (!candidate || candidate.samples < MIN_ARM_SAMPLES) {
-    return { gateOpen: false, applied: false, reason: `shadow: arm samples ${candidate?.samples ?? 0}/${MIN_ARM_SAMPLES}` }
+    return makeDecision(input, false, false, `shadow: arm samples ${candidate?.samples ?? 0}/${MIN_ARM_SAMPLES}`, {}, ['insufficient_arm_samples'])
   }
   const margin = safeNumber(candidate.averageReward) - safeNumber(input.ruleBaselineReward)
   if (margin < REWARD_MARGIN) {
-    return { gateOpen: false, applied: false, reason: `shadow: reward margin ${margin.toFixed(3)} < ${REWARD_MARGIN}` }
+    return makeDecision(input, false, false, `shadow: reward margin ${margin.toFixed(3)} < ${REWARD_MARGIN}`, { rewardMargin: margin, minRewardMargin: REWARD_MARGIN }, ['reward_margin'])
   }
   if (safeNumber(input.recentFalseGreenRate) > MAX_FALSE_GREEN_RATE) {
-    return { gateOpen: false, applied: false, reason: 'shadow: false-green observed' }
+    return makeDecision(input, false, false, 'shadow: false-green observed', { recentFalseGreenRate: safeNumber(input.recentFalseGreenRate) }, ['false_green'])
   }
   if (safeNumber(input.ruleAgreementRate) < MIN_RULE_AGREEMENT) {
-    return { gateOpen: false, applied: false, reason: `shadow: rule agreement ${input.ruleAgreementRate.toFixed(2)} < ${MIN_RULE_AGREEMENT}` }
+    return makeDecision(input, false, false, `shadow: rule agreement ${input.ruleAgreementRate.toFixed(2)} < ${MIN_RULE_AGREEMENT}`, { ruleAgreementRate: safeNumber(input.ruleAgreementRate), minRuleAgreement: MIN_RULE_AGREEMENT }, ['rule_agreement'])
   }
   if (!input.hardGateSafe || candidateParallelism > ruleParallelism) {
-    return { gateOpen: false, applied: false, reason: 'shadow: hard gate blocks candidate' }
+    return makeDecision(input, false, false, 'shadow: hard gate blocks candidate', { candidateParallelism, hardGateSafe: input.hardGateSafe }, ['hard_safety_floor', ...(candidateParallelism > ruleParallelism ? ['down_only'] : [])])
   }
 
   const gateOpen = true
-  if (!input.featureFlagEnabled) return { gateOpen, applied: false, reason: 'shadow: feature flag disabled' }
-  return { gateOpen, applied: true, reason: `applied: ${input.candidateArm} within rule parallelism ${ruleParallelism}` }
+  if (!input.featureFlagEnabled) return makeDecision(input, gateOpen, false, 'shadow: feature flag disabled', { rewardMargin: margin, candidateParallelism }, ['explicit_flag_closed'])
+  return makeDecision(input, gateOpen, true, `applied: ${input.candidateArm} within rule parallelism ${ruleParallelism}`, { rewardMargin: margin, candidateParallelism })
 }
 
 export function applyTeamSchedulerInfluence(ruleParallelism: number, candidateArm: TeamSchedulerArm, gate: TeamSchedulerGateDecision): number {

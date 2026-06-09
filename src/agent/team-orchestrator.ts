@@ -7,6 +7,7 @@ import { buildTeamWaveTelemetry, type TeamWaveTelemetry } from './team-wave-tele
 import { createTeamSchedulerBandit, parallelismForTeamSchedulerArm, recommendTeamSchedulerArm, summarizeTeamSchedulerBandit, teamSchedulerArmForParallelism, type TeamSchedulerBanditState, type TeamSchedulerContext } from './team-scheduler-bandit.js'
 import { applyTeamSchedulerInfluence, evaluateTeamSchedulerGate } from './team-scheduler-gate.js'
 import { buildTeamSchedulerShadowEvent, type TeamSchedulerShadowEvent } from './team-scheduler-shadow.js'
+import { buildGatedInfluenceAuditEvent, type GatedInfluenceAuditEvent } from './gated-influence-audit.js'
 import { buildPlannerObjective, mergePerspectives, normalizePerspective, parsePerspectiveResult, type TeamPerspectivePlan } from './team-perspectives.js'
 
 export interface TeamOrchestratorDeps {
@@ -18,6 +19,7 @@ export interface TeamOrchestratorDeps {
   ): Promise<CoordinatorRun>
   recordTeamWaveTelemetry?: (event: TeamWaveTelemetry) => void
   recordTeamSchedulerShadow?: (event: TeamSchedulerShadowEvent) => void
+  recordGatedInfluenceAudit?: (event: GatedInfluenceAuditEvent) => void
   teamSchedulerState?: TeamSchedulerBanditState
   sessionId?: string
 }
@@ -207,6 +209,24 @@ function applySchedulerToWave(wave: TeamWave, waves: TeamWave[], ctx: WaveDispat
     }))
   } catch {
     // Scheduler shadow must never affect dispatch.
+  }
+  try {
+    ctx.deps.recordGatedInfluenceAudit?.(buildGatedInfluenceAuditEvent({
+      source: 'team_scheduler_bandit',
+      sessionId: ctx.deps.sessionId ?? 'unknown',
+      targetId: wave.id,
+      gateOpen: decision.gateOpen,
+      applied: decision.applied,
+      reason: decision.reason,
+      evidenceWindow: {
+        ...decision.evidenceWindow,
+        candidateAverageReward: candidateAvg,
+        baselineAverageReward: baselineAvg,
+      },
+      vetoSignals: decision.vetoSignals,
+    }))
+  } catch {
+    // Audit telemetry must never affect dispatch.
   }
 
   if (parallelLimit >= wave.taskIds.length) return { wave: { ...wave, parallelLimit: ruleParallelism }, blocked: [] }

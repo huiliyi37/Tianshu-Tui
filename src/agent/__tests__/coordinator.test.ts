@@ -445,7 +445,11 @@ describe('DelegationCoordinator', () => {
     })
 
     assert.equal(run.selectedModel, 'large-cache')
-    assert.equal(saved.length, 2)
+    assert.equal(saved.length, 3)
+    assert.ok(saved.some(row => row.kind.startsWith('gated_influence_audit:model_tier_bandit:')))
+    const audit = JSON.parse(saved.find(row => row.kind.startsWith('gated_influence_audit:model_tier_bandit:'))!.json)
+    assert.equal(audit.applied, false)
+    assert.equal(audit.source, 'model_tier_bandit')
     const event = JSON.parse(saved.find(row => row.kind.startsWith('model_tier_shadow:'))!.json)
     assert.equal(event.recommendedTier, 'strong')
     assert.equal(event.actualModel, 'large-cache')
@@ -510,6 +514,9 @@ describe('DelegationCoordinator', () => {
     assert.equal(run.modelTierGatedDecisions?.[0]?.candidateTier, 'cheap')
     assert.equal(run.modelTierGatedDecisions?.[0]?.selectedTier, 'cheap')
     assert.ok(saved.some(row => row.kind.startsWith('model_tier_gated_decision:')))
+    const audit = JSON.parse(saved.find(row => row.kind.startsWith('gated_influence_audit:model_tier_bandit:'))!.json)
+    assert.equal(audit.applied, true)
+    assert.equal(audit.evidenceWindow.selectedTier, 'cheap')
   })
 
   it('does not consume historical tier evidence when the feature flag is disabled', async () => {

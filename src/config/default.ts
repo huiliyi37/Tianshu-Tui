@@ -108,6 +108,8 @@ export const DEFAULT_CONFIG: Config = {
       temperature: 0,
     },
     teamSchedulerBanditEnabled: false,
+    modelTierBanditEnabled: false,
+    modelRoutingGatedEnabled: false,
     permissions: {
       allow: [],
       bash: { allowlist: [] },

@@ -29,6 +29,8 @@ describe('model tier gate', () => {
     assert.equal(decision.applied, false)
     assert.equal(decision.effectiveTier, 'balanced')
     assert.match(decision.reason, /total samples/)
+    assert.equal(decision.evidenceWindow.source, 'model_tier_bandit')
+    assert.deepEqual(decision.vetoSignals, ['insufficient_samples'])
   })
 
   it('opens with sufficient evidence but remains shadow-only when flag is disabled', () => {
@@ -41,6 +43,8 @@ describe('model tier gate', () => {
     assert.equal(decision.gateOpen, true)
     assert.equal(decision.applied, false)
     assert.equal(decision.effectiveTier, 'balanced')
+    assert.equal(decision.evidenceWindow.featureFlagEnabled, false)
+    assert.deepEqual(decision.vetoSignals, ['explicit_flag_closed'])
   })
 
   it('applies cheap as a valid candidate when flag and evidence allow it', () => {
@@ -80,6 +84,7 @@ describe('model tier gate', () => {
     })
     assert.equal(falseGreen.applied, false)
     assert.match(falseGreen.reason, /false-green/)
+    assert.deepEqual(falseGreen.vetoSignals, ['false_green'])
 
     const scope = evaluateModelTierGate({
       state: state(),
@@ -91,5 +96,6 @@ describe('model tier gate', () => {
     })
     assert.equal(scope.applied, false)
     assert.match(scope.reason, /scope-health veto high/)
+    assert.deepEqual(scope.vetoSignals, ['scope_health'])
   })
 })

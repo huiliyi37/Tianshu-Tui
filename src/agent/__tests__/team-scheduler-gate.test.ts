@@ -31,6 +31,8 @@ describe('team scheduler gate', () => {
     assert.equal(decision.gateOpen, false)
     assert.equal(decision.applied, false)
     assert.match(decision.reason, /total samples/)
+    assert.equal(decision.evidenceWindow.source, 'team_scheduler_bandit')
+    assert.deepEqual(decision.vetoSignals, ['insufficient_samples'])
   })
 
   it('opens on sufficient reward evidence but only shadows when feature flag is disabled', () => {
@@ -45,6 +47,8 @@ describe('team scheduler gate', () => {
     })
     assert.equal(decision.gateOpen, true)
     assert.equal(decision.applied, false)
+    assert.equal(decision.evidenceWindow.featureFlagEnabled, false)
+    assert.deepEqual(decision.vetoSignals, ['explicit_flag_closed'])
     assert.equal(applyTeamSchedulerInfluence(3, 'parallelism:2', decision), 3)
   })
 

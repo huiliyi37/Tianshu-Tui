@@ -39,6 +39,11 @@ import {
   type ModelTierGatedDecisionEvent,
   type ModelTierShadowEvent,
 } from './model-tier-shadow.js'
+import {
+  buildGatedInfluenceAuditEvent,
+  persistGatedInfluenceAudit,
+  type GatedInfluenceAuditEvent,
+} from './gated-influence-audit.js'
 
 export interface DelegationRequest {
   parentTurnId: string
@@ -71,6 +76,8 @@ export interface CoordinatorRun {
   modelTierShadows?: ModelTierShadowEvent[]
   /** Append-only gated tier decisions; applied only behind explicit feature flag and hard gates. */
   modelTierGatedDecisions?: ModelTierGatedDecisionEvent[]
+  /** Unified append-only Shadow→Gated audit events; never used as a decision source. */
+  gatedInfluenceAudits?: GatedInfluenceAuditEvent[]
   results: WorkerResult[]
   packet: string
   aggregationPolicy?: AggregationPolicy
@@ -118,6 +125,8 @@ export interface DelegationCoordinatorConfig {
   modelTierShadowStore?: import('./model-tier-shadow.js').ModelTierShadowStore | null
   /** P4-d gated worker tier influence flag. Defaults to shadow-only. */
   modelTierBanditEnabled?: boolean
+  /** Append-only unified gated influence audit store. Defaults to modelTierShadowStore when omitted. */
+  gatedInfluenceAuditStore?: import('./gated-influence-audit.js').GatedInfluenceAuditStore | null
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -337,8 +346,24 @@ export class DelegationCoordinator {
       selectedModel: selected.model,
       selectedTier,
     })
+    const gatedInfluenceAudit = buildGatedInfluenceAuditEvent({
+      source: 'model_tier_bandit',
+      sessionId: this.config.sessionId ?? 'unknown',
+      targetId: order.id,
+      gateOpen: tierInfluence.gate.gateOpen,
+      applied: tierInfluence.gate.applied,
+      reason: tierInfluence.gate.reason,
+      evidenceWindow: {
+        ...tierInfluence.gate.evidenceWindow,
+        candidateConfidence: tierInfluence.candidate.confidence,
+        candidateScore: tierInfluence.candidate.score,
+        selectedTier,
+      },
+      vetoSignals: tierInfluence.gate.vetoSignals,
+    })
     persistModelTierShadow(this.config.modelTierShadowStore, tierShadow)
     persistModelTierGatedDecision(this.config.modelTierShadowStore, tierGatedDecision)
+    persistGatedInfluenceAudit(this.config.gatedInfluenceAuditStore ?? this.config.modelTierShadowStore, gatedInfluenceAudit)
     // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
@@ -509,6 +534,7 @@ export class DelegationCoordinator {
         selectedModel: selected.model,
         modelTierShadows: [tierShadow],
         modelTierGatedDecisions: [tierGatedDecision],
+        gatedInfluenceAudits: [gatedInfluenceAudit],
         results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
         packet: buildPrimaryWorkerPacket([run.result]),
       }
@@ -533,6 +559,7 @@ export class DelegationCoordinator {
       selectedModel: selected.model,
       modelTierShadows: [tierShadow],
       modelTierGatedDecisions: [tierGatedDecision],
+      gatedInfluenceAudits: [gatedInfluenceAudit],
       results,
       packet: buildPrimaryWorkerPacket(results),
     }
@@ -597,6 +624,7 @@ export class DelegationCoordinator {
     const workerModels: NonNullable<CoordinatorRun['workerModels']> = []
     const modelTierShadows: ModelTierShadowEvent[] = []
     const modelTierGatedDecisions: ModelTierGatedDecisionEvent[] = []
+    const gatedInfluenceAudits: GatedInfluenceAuditEvent[] = []
     const inflight: Promise<void>[] = []
     let completedCount = 0
 
@@ -609,6 +637,7 @@ export class DelegationCoordinator {
         allResults.push(...run.results)
         if (run.modelTierShadows) modelTierShadows.push(...run.modelTierShadows)
         if (run.modelTierGatedDecisions) modelTierGatedDecisions.push(...run.modelTierGatedDecisions)
+        if (run.gatedInfluenceAudits) gatedInfluenceAudits.push(...run.gatedInfluenceAudits)
         if (run.selectedModel) {
           workerModels.push({ workOrderId: order.id, model: run.selectedModel })
         }
@@ -639,6 +668,7 @@ export class DelegationCoordinator {
       ...(workerModels.length > 0 ? { workerModels } : {}),
       ...(modelTierShadows.length > 0 ? { modelTierShadows } : {}),
       ...(modelTierGatedDecisions.length > 0 ? { modelTierGatedDecisions } : {}),
+      ...(gatedInfluenceAudits.length > 0 ? { gatedInfluenceAudits } : {}),
     }
     // NOTE: If delegateBatch is ever changed from serial (processNext recursion)
     // to true concurrent execution, the finally-based signal restoration below

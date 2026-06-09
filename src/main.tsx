@@ -41,6 +41,7 @@ import { DelegationCoordinator } from './agent/coordinator.js'
 import { DomainKnowledgeStore } from './agent/domain-knowledge-store.js'
 import { persistTeamWaveTelemetry, type TeamWaveTelemetry } from './agent/team-wave-telemetry.js'
 import { buildTeamSchedulerRewardEvent, persistTeamSchedulerReward, persistTeamSchedulerShadow, type TeamSchedulerShadowEvent } from './agent/team-scheduler-shadow.js'
+import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from './agent/gated-influence-audit.js'
 import { computeTeamWaveReward, deriveTeamWaveRewardInput } from './agent/team-reward.js'
 import { teamSchedulerArmForParallelism } from './agent/team-scheduler-bandit.js'
 import { recordTeamWaveRewardClosure } from './agent/reward-loop.js'
@@ -230,6 +231,9 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       },
       recordTeamSchedulerShadow: (event: TeamSchedulerShadowEvent) => {
         persistTeamSchedulerShadow(_meridianIndexerRef?.getDb(), event)
+      },
+      recordGatedInfluenceAudit: (event: GatedInfluenceAuditEvent) => {
+        persistGatedInfluenceAudit(_meridianIndexerRef?.getDb(), event)
       },
       recordTeamSchedulerReward: (event: TeamWaveTelemetry) => {
         const rewardInput = deriveTeamWaveRewardInput(event)
@@ -651,6 +655,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       routing: workerRouting,
       domainKnowledgeStore,
       modelTierShadowStore: _meridianIndexerRef?.getDb(),
+      modelTierBanditEnabled: config.agent.modelTierBanditEnabled === true,
+      gatedInfluenceAuditStore: _meridianIndexerRef?.getDb(),
     })
 
     return new AgentLoop(
