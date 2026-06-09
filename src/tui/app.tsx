@@ -26,7 +26,7 @@ import { phaseStatusLabel } from './phase-status.js'
 import { FluencyTracker } from './fluency-hook.js'
 import { getTheme } from './theme.js'
 import { viewportLines } from './viewport.js'
-import { useTerminalSize, isResizeSettling } from './use-terminal-size.js'
+import { useTerminalSize, useResizeSettling, isResizeSettling } from './use-terminal-size.js'
 import { AgentLoop } from '../agent/loop.js'
 import { formatIntentPreview, type IntentPreview, type IntentPreviewAction } from '../agent/intent-preview.js'
 import { SessionContext } from '../agent/context.js'
@@ -221,6 +221,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const { stdout } = useStdout()
   const supportsAnsiEscapes = (stdout as NodeJS.WriteStream & { supportsAnsiEscapes?: boolean }).supportsAnsiEscapes ?? process.stdout.isTTY
   const { rows: termRows } = useTerminalSize()
+  // While a resize drag is in flight, collapse the LIVE region to near-nothing so
+  // Ink's synchronous resized() re-render (ink.js) can never reflow a tall frame
+  // to >= terminal height and trip the fullscreen re-emit that scrolls copies into
+  // scrollback. The trailing edge clears + commits the full region once. (真凶②)
+  const resizeSettling = useResizeSettling()
   /**
    * Stream-commit strategy gate (真凶②).
    * - DeepSeek (and other providers that separate reasoning_content / content
@@ -1471,7 +1476,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           </Box>
         )}
         {/* liveTools elapsedMs relies on the 1s activity tick (activityIntervalRef) for re-render — see app.tsx:398 */}
-        {liveTools.map(log => {
+        {/* Resize guard: while a drag is settling, collapse this whole live cluster
+            (tools + thinking + streaming tail + heartbeat) so Ink's synchronous
+            resized() re-render has nothing tall to reflow past terminal height →
+            no fullscreen re-emit, no stacked/duplicated lines. The trailing-edge
+            commit restores it on a clean screen. (真凶② — [[resize-ghost-streaming-timer-bypass]]) */}
+        {!resizeSettling && liveTools.map(log => {
           if (log.toolName === 'ask_user_question') return <QuestionCard key={log.id} question={log.content} />
           if (log.toolName === 'team_orchestrate') {
             const model = decodeTeamPanelModel(log.content)
@@ -1479,11 +1489,11 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           }
           return <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} />
         })}
-        <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && (!!streamingThinking || isThinkingActive)} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
-        {(streamingText || waitingIndicator === 'stream') && (
+        {!resizeSettling && <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && (!!streamingThinking || isThinkingActive)} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />}
+        {!resizeSettling && (streamingText || waitingIndicator === 'stream') && (
           <StreamOutput text={displayStreamingText} isStreaming={isStreaming} />
         )}
-        {waitingIndicator === 'heartbeat' && (
+        {!resizeSettling && waitingIndicator === 'heartbeat' && (
           <Box paddingX={2}>
             <Text>◌ {heartbeatStatus}</Text>
           </Box>

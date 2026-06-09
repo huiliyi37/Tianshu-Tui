@@ -6,6 +6,7 @@ import {
   isResizeSettling,
   registerResizeClear,
   __subscribeTerminalSize,
+  __subscribeSettling,
 } from '../use-terminal-size.js'
 
 describe('useTerminalSize', () => {
@@ -103,6 +104,31 @@ describe('isResizeSettling (resize-ghost timer gate)', () => {
       // Let the trailing edge land (SETTLE_MS=120).
       await new Promise(r => setTimeout(r, 160))
       assert.equal(isResizeSettling(), false, 'settling clears once the drag settles')
+    } finally {
+      unsubscribe()
+    }
+  })
+})
+
+// The reactive settling flag must drive React re-renders (via useSyncExternalStore)
+// so the live region can COLLAPSE for the whole drag — otherwise Ink's synchronous
+// resized() reflows a tall frame past terminal height → fullscreen re-emit →
+// stacked/duplicated lines in scrollback. See [[resize-ghost-streaming-timer-bypass]].
+describe('reactive settling notifications (drive live-region collapse)', () => {
+  it('notifies settling subscribers on rise (drag start) and fall (settle)', async () => {
+    const transitions: boolean[] = []
+    const unsubscribe = __subscribeSettling(() => transitions.push(isResizeSettling()))
+    try {
+      process.stdout.emit('resize')
+      assert.deepEqual(transitions, [true], 'drag start flips settling true → one notify')
+
+      // Mid-drag events must NOT re-notify settling subscribers (already true) —
+      // avoids needless re-renders; only edge transitions matter.
+      process.stdout.emit('resize')
+      assert.deepEqual(transitions, [true], 'mid-drag stays true → no extra settling notify')
+
+      await new Promise(r => setTimeout(r, 160))
+      assert.deepEqual(transitions, [true, false], 'trailing edge flips false → second notify')
     } finally {
       unsubscribe()
     }
