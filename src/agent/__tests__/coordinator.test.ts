@@ -65,6 +65,40 @@ const cards: ModelCapabilityCard[] = [
   },
 ]
 
+function modelTierRows(tier: 'cheap' | 'balanced' | 'strong', model: string, reward: number, count = 35) {
+  return {
+    shadows: Array.from({ length: count }, (_, i) => ({
+      kind: `model_tier_shadow:s-tier:team:T${i}:${i}`,
+      json: JSON.stringify({
+        schemaVersion: 1,
+        sessionId: 's-tier',
+        workOrderId: `team:T${i}`,
+        profile: 'code_scout',
+        kind: 'code_search',
+        recommendedTier: tier,
+        actualModel: model,
+        actualTier: tier,
+        matched: true,
+        reason: 'history',
+        timestamp: i,
+      }),
+    })),
+    rewards: Array.from({ length: count }, (_, i) => ({
+      kind: `reward_closure:team_wave:s-tier:${i}:x`,
+      json: JSON.stringify({
+        schemaVersion: 1,
+        id: `r:${i}`,
+        sourceKind: 'team_wave',
+        sourceKey: `team_wave:${i}`,
+        sessionId: 's-tier',
+        reward,
+        components: { workerModel: model },
+        timestamp: 100 + i,
+      }),
+    })),
+  }
+}
+
 function resultFor(id: string): WorkerResult {
   return {
     workOrderId: id,
@@ -411,13 +445,169 @@ describe('DelegationCoordinator', () => {
     })
 
     assert.equal(run.selectedModel, 'large-cache')
-    assert.equal(saved.length, 1)
-    const event = JSON.parse(saved[0]!.json)
+    assert.equal(saved.length, 2)
+    const event = JSON.parse(saved.find(row => row.kind.startsWith('model_tier_shadow:'))!.json)
     assert.equal(event.recommendedTier, 'strong')
     assert.equal(event.actualModel, 'large-cache')
     assert.equal(event.actualTier, 'strong')
     assert.equal(event.matched, true)
     assert.equal(run.modelTierShadows?.[0]?.recommendedTier, 'strong')
+    assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
+    assert.equal(run.modelTierGatedDecisions?.[0]?.selectedModel, 'large-cache')
+  })
+
+  it('applies gated tier influence only when the feature flag is enabled', async () => {
+    const history = modelTierRows('cheap', 'cheap-flash', 0.9)
+    const selectedModels: string[] = []
+    const saved: Array<{ kind: string; json: string }> = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: [
+        ...cards,
+        { model: 'cheap-flash', toolUseReliability: 0.45, jsonStability: 0.45, editSuccessRate: 0.45, testRepairRate: 0.45, contextWindow: 128_000, cacheEconomics: 'weak', recommendedTasks: [] },
+      ],
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        selectedModels.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+      modelTierShadowStore: {
+        saveBanditState: (kind, json) => { saved.push({ kind, json }) },
+        loadBanditStatesByPrefix: prefix => prefix === 'model_tier_shadow:' ? history.shadows : prefix === 'reward_closure:team_wave:' ? history.rewards : [],
+      },
+      modelTierBanditEnabled: true,
+      sessionId: 's-tier',
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn-tier-apply',
+      objective: 'Assess low risk documentation changes and exercise gated cheap tier selection.',
+      kind: 'review',
+      profile: 'reviewer',
+      riskTier: 'low',
+      scope: { files: ['docs/a.md', 'docs/b.md', 'docs/c.md'] },
+      authority: 'tianliang',
+    })
+
+    assert.equal(run.selectedModel, 'cheap-flash')
+    assert.deepEqual(selectedModels, ['cheap-flash'])
+    assert.equal(run.modelTierGatedDecisions?.[0]?.applied, true)
+    assert.equal(run.modelTierGatedDecisions?.[0]?.candidateTier, 'cheap')
+    assert.equal(run.modelTierGatedDecisions?.[0]?.selectedTier, 'cheap')
+    assert.ok(saved.some(row => row.kind.startsWith('model_tier_gated_decision:')))
+  })
+
+  it('does not consume historical tier evidence when the feature flag is disabled', async () => {
+    const history = modelTierRows('cheap', 'cheap-flash', 0.9)
+    const selectedModels: string[] = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: [
+        ...cards,
+        { model: 'cheap-flash', toolUseReliability: 0.45, jsonStability: 0.45, editSuccessRate: 0.45, testRepairRate: 0.45, contextWindow: 128_000, cacheEconomics: 'weak', recommendedTasks: [] },
+      ],
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        selectedModels.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], errors: [], toolResults: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+      modelTierShadowStore: {
+        saveBanditState: () => {},
+        loadBanditStatesByPrefix: prefix => prefix === 'model_tier_shadow:' ? history.shadows : prefix === 'reward_closure:team_wave:' ? history.rewards : [],
+      },
+      sessionId: 's-tier',
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn-tier-shadow-only',
+      objective: 'Assess low risk documentation while model tier bandit remains shadow-only.',
+      kind: 'review',
+      profile: 'reviewer',
+      riskTier: 'low',
+      scope: { files: ['docs/a.md', 'docs/b.md', 'docs/c.md'] },
+      authority: 'tianliang',
+    })
+
+    assert.equal(run.selectedModel, 'large-cache')
+    assert.deepEqual(selectedModels, ['large-cache'])
+    assert.equal(run.modelTierGatedDecisions?.[0]?.gateOpen, true)
+    assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
+  })
+
+  it('hardFloor prevents verifier downgrade despite strong cheap reward history', async () => {
+    const history = modelTierRows('cheap', 'cheap-flash', 0.9)
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: [
+        ...cards,
+        { model: 'cheap-flash', toolUseReliability: 0.45, jsonStability: 0.45, editSuccessRate: 0.45, testRepairRate: 0.45, contextWindow: 128_000, cacheEconomics: 'weak', recommendedTasks: [] },
+      ],
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+      modelTierShadowStore: {
+        saveBanditState: () => {},
+        loadBanditStatesByPrefix: prefix => prefix === 'model_tier_shadow:' ? history.shadows : prefix === 'reward_closure:team_wave:' ? history.rewards : [],
+      },
+      modelTierBanditEnabled: true,
+      sessionId: 's-tier',
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn-tier-hardfloor',
+      objective: 'Adversarially verify a failing test path where strong tier hard floor must hold.',
+      kind: 'verify',
+      profile: 'adversarial_verifier',
+      scope: { files: ['src/agent/coordinator.ts', 'src/agent/__tests__/coordinator.test.ts'] },
+    })
+
+    assert.equal(run.selectedModel, 'large-cache')
+    assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
+    assert.match(run.modelTierGatedDecisions?.[0]?.reason ?? '', /hardFloor strong blocks cheap/)
   })
 
   it('keeps failed batch workers visible in aggregated results', async () => {

@@ -28,8 +28,17 @@ import { CollaborationProtocol, type CollaborationConfig } from './collaboration
 import type { LockIntent } from './semantic-lock.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import { precipitateDomainLessons } from './domain-lesson-precipitate.js'
-import { inferModelTierFromCard, recommendModelTier, type ModelRiskTier } from './model-tier-policy.js'
-import { buildModelTierShadowEvent, persistModelTierShadow, type ModelTierShadowEvent } from './model-tier-shadow.js'
+import { inferModelTierFromCard, recommendModelTier, type ModelRiskTier, type ModelTier, type ModelTierRecommendation } from './model-tier-policy.js'
+import { buildHistoricalModelTierState, recommendModelTierArm, type ModelTierBanditRecommendation } from './model-tier-bandit.js'
+import { evaluateModelTierGate, type ModelTierGateDecision } from './model-tier-gate.js'
+import {
+  buildModelTierGatedDecisionEvent,
+  buildModelTierShadowEvent,
+  persistModelTierGatedDecision,
+  persistModelTierShadow,
+  type ModelTierGatedDecisionEvent,
+  type ModelTierShadowEvent,
+} from './model-tier-shadow.js'
 
 export interface DelegationRequest {
   parentTurnId: string
@@ -60,6 +69,8 @@ export interface CoordinatorRun {
   workerModels?: Array<{ workOrderId: string; model: string }>
   /** Append-only tier recommendation telemetry; shadow-only and never affects dispatch. */
   modelTierShadows?: ModelTierShadowEvent[]
+  /** Append-only gated tier decisions; applied only behind explicit feature flag and hard gates. */
+  modelTierGatedDecisions?: ModelTierGatedDecisionEvent[]
   results: WorkerResult[]
   packet: string
   aggregationPolicy?: AggregationPolicy
@@ -103,8 +114,10 @@ export interface DelegationCoordinatorConfig {
   /** V3 Component B: domain knowledge store for precipitate/recall lifecycle.
    *  When provided, coordinator auto-precipitates lessons from worker results. */
   domainKnowledgeStore?: DomainKnowledgeStore
-  /** Optional append-only store for P3 model tier shadow telemetry. */
+  /** Optional append-only store for P3/P4-d model tier shadow telemetry and reward history. */
   modelTierShadowStore?: import('./model-tier-shadow.js').ModelTierShadowStore | null
+  /** P4-d gated worker tier influence flag. Defaults to shadow-only. */
+  modelTierBanditEnabled?: boolean
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -144,7 +157,12 @@ export class DelegationCoordinator {
     return this.state
   }
 
-  private selectModelForTask(task: CapabilityTask): ModelCapabilityCard {
+  private selectModelForTask(task: CapabilityTask, preferredTier?: ModelTier): ModelCapabilityCard {
+    const eligibleCards = preferredTier
+      ? this.config.modelCards.filter(card => inferModelTierFromCard(card) === preferredTier)
+      : this.config.modelCards
+    const cards = eligibleCards.length > 0 ? eligibleCards : this.config.modelCards
+
     if (this.config.routing) {
       const routeName = this.config.routing.routing[task]
       if (routeName && this.config.routing.profiles[routeName]) {
@@ -158,17 +176,17 @@ export class DelegationCoordinator {
           const routeModelExists = !provider || provider.models.some(m => m.id === routeProfile.model || m.alias === routeProfile.model)
           const routeHasCredentials = !provider || provider.auth?.type === 'oauth' || Boolean(provider.apiKey || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]))
           if (routeModelExists && routeHasCredentials) {
-            const routed = this.config.modelCards.find(c => c.model === routeProfile.model)
+            const routed = cards.find(c => c.model === routeProfile.model)
             if (routed) return routed
           }
         }
       }
     }
-    return recommendModelForTask(task, this.config.modelCards)
+    return recommendModelForTask(task, cards)
   }
 
-  private buildTierShadow(order: WorkOrder, selected: ModelCapabilityCard): ModelTierShadowEvent {
-    const recommendation = recommendModelTier({
+  private buildTierRecommendation(order: WorkOrder): ModelTierRecommendation {
+    return recommendModelTier({
       authority: order.authority,
       profile: order.profile,
       kind: order.kind,
@@ -176,6 +194,9 @@ export class DelegationCoordinator {
       objective: order.objective,
       consecutiveFailures: this.state.getSummary().failed,
     })
+  }
+
+  private buildTierShadow(order: WorkOrder, selected: ModelCapabilityCard, recommendation: ModelTierRecommendation): ModelTierShadowEvent {
     return buildModelTierShadowEvent({
       sessionId: this.config.sessionId ?? 'unknown',
       workOrderId: order.id,
@@ -187,6 +208,20 @@ export class DelegationCoordinator {
       actualTier: inferModelTierFromCard(selected),
       reason: recommendation.reason,
     })
+  }
+
+  private evaluateTierInfluence(recommendation: ModelTierRecommendation): { candidate: ModelTierBanditRecommendation; gate: ModelTierGateDecision } {
+    const state = buildHistoricalModelTierState(this.config.modelTierShadowStore)
+    const candidate = recommendModelTierArm(state)
+    const gate = evaluateModelTierGate({
+      state,
+      candidateArm: candidate.arm,
+      ruleRecommendation: recommendation,
+      recentFalseGreenRate: state.recentFalseGreenRate,
+      scopeHealthSeverity: state.worstScopeHealthSeverity,
+      featureFlagEnabled: this.config.modelTierBanditEnabled === true,
+    })
+    return { candidate, gate }
   }
 
   async delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun> {
@@ -283,9 +318,27 @@ export class DelegationCoordinator {
       }
     }
 
-    const selected = this.selectModelForTask(task)
-    const tierShadow = this.buildTierShadow(order, selected)
+    const tierRecommendation = this.buildTierRecommendation(order)
+    const tierInfluence = this.evaluateTierInfluence(tierRecommendation)
+    const selected = this.selectModelForTask(task, tierInfluence.gate.applied ? tierInfluence.gate.effectiveTier : undefined)
+    const selectedTier = inferModelTierFromCard(selected)
+    const tierShadow = this.buildTierShadow(order, selected, tierRecommendation)
+    const tierGatedDecision = buildModelTierGatedDecisionEvent({
+      sessionId: this.config.sessionId ?? 'unknown',
+      workOrderId: order.id,
+      authority: order.authority,
+      profile: order.profile,
+      kind: order.kind,
+      ruleTier: tierRecommendation.tier,
+      candidateTier: tierInfluence.candidate.tier,
+      applied: tierInfluence.gate.applied,
+      gateOpen: tierInfluence.gate.gateOpen,
+      reason: `${tierInfluence.gate.reason}; ${tierInfluence.candidate.reason}`,
+      selectedModel: selected.model,
+      selectedTier,
+    })
     persistModelTierShadow(this.config.modelTierShadowStore, tierShadow)
+    persistModelTierGatedDecision(this.config.modelTierShadowStore, tierGatedDecision)
     // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
@@ -455,6 +508,7 @@ export class DelegationCoordinator {
         order,
         selectedModel: selected.model,
         modelTierShadows: [tierShadow],
+        modelTierGatedDecisions: [tierGatedDecision],
         results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
         packet: buildPrimaryWorkerPacket([run.result]),
       }
@@ -478,6 +532,7 @@ export class DelegationCoordinator {
       order,
       selectedModel: selected.model,
       modelTierShadows: [tierShadow],
+      modelTierGatedDecisions: [tierGatedDecision],
       results,
       packet: buildPrimaryWorkerPacket(results),
     }
@@ -541,6 +596,7 @@ export class DelegationCoordinator {
     const allResults: WorkerResult[] = []
     const workerModels: NonNullable<CoordinatorRun['workerModels']> = []
     const modelTierShadows: ModelTierShadowEvent[] = []
+    const modelTierGatedDecisions: ModelTierGatedDecisionEvent[] = []
     const inflight: Promise<void>[] = []
     let completedCount = 0
 
@@ -552,6 +608,7 @@ export class DelegationCoordinator {
         const run = await this.delegateOrder(order)
         allResults.push(...run.results)
         if (run.modelTierShadows) modelTierShadows.push(...run.modelTierShadows)
+        if (run.modelTierGatedDecisions) modelTierGatedDecisions.push(...run.modelTierGatedDecisions)
         if (run.selectedModel) {
           workerModels.push({ workOrderId: order.id, model: run.selectedModel })
         }
@@ -581,6 +638,7 @@ export class DelegationCoordinator {
       aggregationPolicy: policy,
       ...(workerModels.length > 0 ? { workerModels } : {}),
       ...(modelTierShadows.length > 0 ? { modelTierShadows } : {}),
+      ...(modelTierGatedDecisions.length > 0 ? { modelTierGatedDecisions } : {}),
     }
     // NOTE: If delegateBatch is ever changed from serial (processNext recursion)
     // to true concurrent execution, the finally-based signal restoration below
