@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createFsWatcher } from '../fs-watcher.js'
+import { createFsWatcher, shouldRecordFsEvent } from '../fs-watcher.js'
 
 describe('FsWatcher — 原则③ 参考系锚定', () => {
   let watchers: Array<{ stop: () => void }> = []
@@ -11,6 +11,20 @@ describe('FsWatcher — 原则③ 参考系锚定', () => {
   afterEach(() => {
     for (const w of watchers) w.stop()
     watchers = []
+  })
+
+  it('filters only classifiable silent paths and fails unknown toward signal', () => {
+    assert.equal(shouldRecordFsEvent('layout.log'), false)
+    assert.equal(shouldRecordFsEvent('node_modules/pkg/index.js'), false)
+    assert.equal(shouldRecordFsEvent('.codex/hooks.json'), false)
+    assert.equal(shouldRecordFsEvent('src/context/fs-watcher.ts'), true)
+    assert.equal(shouldRecordFsEvent('docs/teamtask/T7-天枢注意力闸·运行碎片识别层.md'), true)
+    assert.equal(shouldRecordFsEvent(undefined), true)
+  })
+
+  it('treats watched subdirectory filenames as repository-relative paths', () => {
+    assert.equal(shouldRecordFsEvent('docs/teamtask.zip'), false)
+    assert.equal(shouldRecordFsEvent('docs/teamtask/T7-落地实施方案·注意力闸分阶段执行.md'), true)
   })
 
   it('starts and reports zero event rate initially', async () => {

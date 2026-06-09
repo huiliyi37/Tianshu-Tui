@@ -1,6 +1,7 @@
 import { watch, type FSWatcher } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { classifyPath } from './attention-filter.js'
 
 export interface FsWatcherConfig {
   /** Directory to watch (project root). Only top-level entries are watched. */
@@ -18,6 +19,11 @@ export interface FsWatcherState {
   eventCount: number
   /** Whether watcher is active */
   active: boolean
+}
+
+export function shouldRecordFsEvent(relPath?: string): boolean {
+  if (!relPath) return true
+  return !classifyPath(relPath).silent
 }
 
 /**
@@ -43,7 +49,9 @@ export function createFsWatcher(config: FsWatcherConfig) {
   let events: number[] = []
   let lastEventTime = 0
 
-  function recordEvent(): void {
+  function recordEvent(relPath?: string): void {
+    if (!shouldRecordFsEvent(relPath)) return
+
     const now = Date.now()
     if (now - lastEventTime < debounceMs) return
     lastEventTime = now
@@ -71,16 +79,16 @@ export function createFsWatcher(config: FsWatcherConfig) {
     if (fsWatcher) return
     try {
       // Only watch top-level entries — recursive: false
-      fsWatcher = watch(config.cwd, { recursive: false }, () => {
-        recordEvent()
+      fsWatcher = watch(config.cwd, { recursive: false }, (_eventType, filename) => {
+        recordEvent(typeof filename === 'string' ? filename : undefined)
       })
       // Also watch immediate subdirectories (src/, docs/, etc.) for deeper coverage
       try {
         const entries = await readdir(config.cwd, { withFileTypes: true })
         for (const entry of entries) {
           if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
-            const sub = watch(join(config.cwd, entry.name), { recursive: false }, () => {
-              recordEvent()
+            const sub = watch(join(config.cwd, entry.name), { recursive: false }, (_eventType, filename) => {
+              recordEvent(typeof filename === 'string' ? join(entry.name, filename) : undefined)
             })
             subWatchers.push(sub)
           }
