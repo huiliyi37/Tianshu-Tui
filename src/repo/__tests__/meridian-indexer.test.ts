@@ -69,7 +69,7 @@ describe('MeridianIndexer attention indexing scope', () => {
     }
   })
 
-  it('toRepoRelative normalizes absolute to repo-relative, passes through relative', () => {
+  it('toRepoRelative normalizes absolute to repo-relative, blocks traversal and outside paths', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-rel-'))
     const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-rel-state-'))
     const indexer = new MeridianIndexer(cwd, stateDir)
@@ -78,6 +78,8 @@ describe('MeridianIndexer attention indexing scope', () => {
       assert.equal(callToRepoRelative(indexer, resolve(cwd, '.codex/hooks.ts')), '.codex/hooks.ts')
       // relative passes through unchanged
       assert.equal(callToRepoRelative(indexer, 'src/app.ts'), 'src/app.ts')
+      // relative traversal outside cwd returns null — fail-closed
+      assert.equal(callToRepoRelative(indexer, '../outside.ts'), null)
       // absolute outside cwd returns null — fail-closed
       const outside = resolve('/tmp/outside/file.ts')
       assert.equal(callToRepoRelative(indexer, outside), null)
@@ -103,6 +105,17 @@ describe('MeridianIndexer attention indexing scope', () => {
         false,
         'absolute path to another project must not be indexable',
       )
+      // relative traversal also blocked
+      assert.equal(
+        isIndexable(indexer, '../outside.ts'),
+        false,
+        'relative traversal outside project must not be indexable',
+      )
+      assert.equal(
+        isIndexable(indexer, '../../etc/passwd.ts'),
+        false,
+        'deep traversal must not be indexable',
+      )
     } finally {
       indexer.close()
       rmSync(cwd, { recursive: true, force: true })
@@ -118,9 +131,18 @@ describe('MeridianIndexer attention indexing scope', () => {
     writeFileSync(outsideFile, 'export const secret = 42\n')
     const indexer = new MeridianIndexer(cwd, stateDir)
     try {
+      // absolute outside-project path
       await indexer.indexFile(outsideFile)
-      const stats = indexer.getStats()
-      assert.equal(stats.files, 0, 'outside-project file must not enter the DB')
+      let stats = indexer.getStats()
+      assert.equal(stats.files, 0, 'absolute outside-project file must not enter the DB')
+
+      // relative traversal: create a real file one dir up
+      const parentDir = join(cwd, '..', 'meridian-parent-sibling.ts')
+      writeFileSync(parentDir, 'export const sibling = 1\n')
+      await indexer.indexFile('../meridian-parent-sibling.ts')
+      stats = indexer.getStats()
+      assert.equal(stats.files, 0, 'relative traversal outside project must not enter the DB')
+      rmSync(parentDir, { force: true })
     } finally {
       indexer.close()
       rmSync(cwd, { recursive: true, force: true })

@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs'
-import { resolve, dirname, isAbsolute } from 'node:path'
+import { resolve, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { MeridianDb } from './meridian-db.js'
 import { MeridianBehavior } from './meridian-behavior.js'
@@ -137,16 +137,15 @@ export class MeridianIndexer {
   }
 
   /** Normalize to repo-relative path for classification & DB keys.
-   *  Returns null for absolute paths outside the repo — fail-closed so
-   *  the indexer never reads, parses, or stores files outside the project. */
+   *  Returns null for any path that resolves outside the repo root —
+   *  covers both absolute paths and relative `../` traversal.
+   *  Fail-closed: the indexer must never read/parse/store files
+   *  outside the project boundary. */
   private toRepoRelative(filePath: string): string | null {
-    if (isAbsolute(filePath)) {
-      const absCwd = resolve(this.cwd)
-      const absFile = resolve(filePath)
-      if (absFile.startsWith(absCwd + '/')) return absFile.slice(absCwd.length + 1)
-      return null
-    }
-    return filePath
+    const absCwd = resolve(this.cwd)
+    const absFile = resolve(this.cwd, filePath)
+    if (!absFile.startsWith(absCwd + '/')) return null
+    return absFile.slice(absCwd.length + 1)
   }
 
   private isIndexable(filePath: string): boolean {
