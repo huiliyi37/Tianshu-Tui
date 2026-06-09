@@ -20,7 +20,16 @@ function normalizeOpenTarget(path: string, platform: NodeJS.Platform): string {
 export function buildOpenPathCommand(path: string, platform: NodeJS.Platform = process.platform): OpenPathCommand {
   const target = normalizeOpenTarget(path, platform)
   if (platform === 'win32') {
-    return { cmd: 'cmd.exe', args: ['/c', 'start', '""', target] }
+    // 不用 `cmd.exe /c start`：cmd 对参数做二次解析，路径中的 & | % ^ 等元字符
+    // 会被重新解释（注入面）。改用 PowerShell Start-Process -LiteralPath，并把
+    // 路径包成单引号字面串（单引号内 & | % ^ $ 全不解释，'' 转义内嵌单引号），
+    // -LiteralPath 又禁用通配符。既能正常打开含 & 的合法路径（如 R&D 文件夹），
+    // 又消除元字符注入。
+    const literal = `'${target.replace(/'/g, "''")}'`
+    return {
+      cmd: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-Command', `Start-Process -LiteralPath ${literal}`],
+    }
   }
   if (platform === 'darwin') {
     return { cmd: 'open', args: [target] }
