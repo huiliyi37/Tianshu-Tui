@@ -2,6 +2,7 @@ import { readFile, stat, readdir } from 'node:fs/promises'
 import { join } from 'path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { relativePosix } from '../path-format.js'
+import { classifyPath } from '../context/attention-filter.js'
 
 interface PackageJson {
   scripts?: Record<string, string>
@@ -12,6 +13,11 @@ interface PackageJson {
 const EXCLUDE_DIRS = new Set([
   'node_modules', '.git', 'dist', '.next', 'build', 'target', '__pycache__',
 ])
+
+function shouldSkipBroadDiscoveryDir(cwd: string, fullPath: string, name: string): boolean {
+  if (EXCLUDE_DIRS.has(name)) return true
+  return classifyPath(relativePosix(cwd, fullPath)).silent
+}
 
 const FRAMEWORK_HINTS: Array<{ deps: string[]; name: string }> = [
   { deps: ['next'], name: 'Next.js' },
@@ -141,7 +147,7 @@ async function findTestFiles(cwd: string): Promise<string[]> {
         continue
       }
       if (s.isDirectory()) {
-        if (EXCLUDE_DIRS.has(name)) continue
+        if (shouldSkipBroadDiscoveryDir(cwd, fullPath, name)) continue
         await walk(fullPath)
       } else if (s.isFile()) {
         if (files.length >= MAX_TEST_FILES) return

@@ -20,6 +20,8 @@ describe('INSPECT_PROJECT_TOOL', () => {
     testDir = mkdtempSync(join(tmpdir(), 'inspect-project-test-'))
     mkdirSync(join(testDir, 'src'), { recursive: true })
     mkdirSync(join(testDir, 'src', '__tests__'), { recursive: true })
+    mkdirSync(join(testDir, '.rivet', 'tasks', '__tests__'), { recursive: true })
+    mkdirSync(join(testDir, '.codex', '__tests__'), { recursive: true })
 
     writeFileSync(join(testDir, 'package.json'), JSON.stringify({
       name: 'test-project',
@@ -35,6 +37,8 @@ describe('INSPECT_PROJECT_TOOL', () => {
     writeFileSync(join(testDir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'es2022' } }))
     writeFileSync(join(testDir, 'src', 'main.ts'), '')
     writeFileSync(join(testDir, 'src', '__tests__', 'main.test.ts'), '')
+    writeFileSync(join(testDir, '.rivet', 'tasks', '__tests__', 'runtime.test.ts'), '')
+    writeFileSync(join(testDir, '.codex', '__tests__', 'foreign.test.ts'), '')
     writeFileSync(join(testDir, 'package-lock.json'), '')
   })
 
@@ -70,9 +74,11 @@ describe('INSPECT_PROJECT_TOOL', () => {
     assert.ok(result.content.includes('src/main.ts'))
   })
 
-  it('finds test files', async () => {
+  it('finds test files from content paths and skips runtime/foreign attention noise during broad discovery', async () => {
     const result = await INSPECT_PROJECT_TOOL.execute(makeParams(testDir))
     assert.ok(result.content.includes('main.test.ts'))
+    assert.ok(!result.content.includes('runtime.test.ts'))
+    assert.ok(!result.content.includes('foreign.test.ts'))
   })
 
   it('finds config files', async () => {
