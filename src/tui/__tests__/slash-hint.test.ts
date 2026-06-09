@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { slashHintMaxVisible, SLASH_HINT_MAX_VISIBLE } from '../slash-hint.js'
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -45,15 +46,17 @@ describe('SlashHint: P2 panelization source contract', () => {
     )
   })
 
-  it('clamps visible items to a max-height constant (panel does not grow unbounded)', () => {
+  it('clamps visible items to a max-height bound (panel does not grow unbounded)', () => {
     assert.ok(
       /export const SLASH_HINT_MAX_VISIBLE\s*=/.test(source),
       'must export a SLASH_HINT_MAX_VISIBLE constant for the clamp',
     )
-    // The clamp must actually be applied via .slice(0, SLASH_HINT_MAX_VISIBLE)
+    // The clamp is applied via .slice(0, maxVisible), where maxVisible is the
+    // terminal-height-aware bound (slashHintMaxVisible) capped by the constant.
     assert.ok(
-      source.includes('.slice(0, SLASH_HINT_MAX_VISIBLE)'),
-      'must .slice(0, SLASH_HINT_MAX_VISIBLE) to clamp the visible list',
+      source.includes('.slice(0, maxVisible)') &&
+        /maxVisible\s*=\s*slashHintMaxVisible\(/.test(source),
+      'must .slice(0, maxVisible) with maxVisible from slashHintMaxVisible(rows)',
     )
   })
 
@@ -82,5 +85,44 @@ describe('SlashHint: P2 panelization source contract', () => {
         !selectedBlock![0]!.includes('color="green"'),
       'selected row must not be hard-coded green',
     )
+  })
+})
+
+// Root cause five: an unbounded palette + ground zone can exceed the viewport,
+// tripping Ink's fullscreen re-emit which freezes a palette snapshot into
+// scrollback (a "Command Palette" box stuck at the top, see
+// [[resize-ghost-streaming-timer-bypass]]). slashHintMaxVisible keeps the
+// palette+ground STRICTLY under terminal height on any size.
+describe('slashHintMaxVisible (palette must fit under the viewport)', () => {
+  it('caps at SLASH_HINT_MAX_VISIBLE on a tall terminal', () => {
+    assert.equal(slashHintMaxVisible(50), SLASH_HINT_MAX_VISIBLE)
+    assert.equal(slashHintMaxVisible(40), SLASH_HINT_MAX_VISIBLE)
+  })
+
+  it('shrinks the list on a short terminal so palette+ground stays under rows', () => {
+    // budget = rows - GROUND(7) - PALETTE_NON_LIST(6) - 1
+    assert.equal(slashHintMaxVisible(20), 6) // 20-14=6 → min(6,6)
+    assert.equal(slashHintMaxVisible(18), 4) // 18-14=4
+    assert.equal(slashHintMaxVisible(16), 2) // 16-14=2
+  })
+
+  it('never returns less than 1 (always shows the selected command) on a tiny terminal', () => {
+    assert.equal(slashHintMaxVisible(14), 1)
+    assert.equal(slashHintMaxVisible(10), 1)
+    assert.equal(slashHintMaxVisible(1), 1)
+    assert.equal(slashHintMaxVisible(0), 1)
+  })
+
+  it('the chosen count + ground rows never reaches the terminal height', () => {
+    for (let rows = 8; rows <= 60; rows++) {
+      const visible = slashHintMaxVisible(rows)
+      // palette live height ≈ visible + non-list chrome; + ground must stay < rows
+      // (except the degenerate floor of 1 on terminals too small to fit anything,
+      //  where overflow is unavoidable and the floor is the least-bad choice).
+      if (rows >= 15) {
+        const liveHeight = visible + 6 /*PALETTE_NON_LIST_ROWS*/ + 7 /*GROUND_ROWS*/
+        assert.ok(liveHeight < rows, `rows=${rows}: liveHeight ${liveHeight} must be < ${rows}`)
+      }
+    }
   })
 })
