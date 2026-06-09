@@ -14,6 +14,8 @@ describe('REPO_MAP_TOOL', () => {
     mkdirSync(join(testDir, 'src', 'tools', '__tests__'), { recursive: true })
     mkdirSync(join(testDir, 'src', 'tui'), { recursive: true })
     mkdirSync(join(testDir, 'node_modules', 'pkg'), { recursive: true })
+    mkdirSync(join(testDir, '.codex'), { recursive: true })
+    mkdirSync(join(testDir, '.test-tmp'), { recursive: true })
     writeFileSync(join(testDir, 'src', 'main.tsx'), '')
     writeFileSync(join(testDir, 'src', 'agent', 'loop.ts'), '')
     writeFileSync(join(testDir, 'src', 'tools', 'bash.ts'), '')
@@ -22,6 +24,9 @@ describe('REPO_MAP_TOOL', () => {
     writeFileSync(join(testDir, 'package.json'), '{}')
     writeFileSync(join(testDir, 'tsconfig.json'), '{}')
     writeFileSync(join(testDir, 'README.md'), '# test')
+    writeFileSync(join(testDir, 'layout.log'), '')
+    writeFileSync(join(testDir, '.codex', 'hooks.json'), '{}')
+    writeFileSync(join(testDir, '.test-tmp', 'debug.json'), '{}')
     writeFileSync(join(testDir, 'node_modules', 'pkg', 'index.ts'), '')
   })
 
@@ -44,10 +49,20 @@ describe('REPO_MAP_TOOL', () => {
     assert.match(result.content, /\d+ files in tree, \d+ directories/)
   })
 
-  it('excludes node_modules', async () => {
+  it('excludes build/runtime/foreign attention noise from default root map', async () => {
     const result = await REPO_MAP_TOOL.execute(makeParams())
     assert.ok(!result.content.includes('node_modules'))
     assert.ok(!result.content.includes('pkg'))
+    assert.ok(!result.content.includes('layout.log'))
+    assert.ok(!result.content.includes('.codex'))
+    assert.ok(!result.content.includes('.test-tmp'))
+  })
+
+  it('allows explicit focus on a silent foreign directory', async () => {
+    const result = await REPO_MAP_TOOL.execute(makeParams({ path: '.codex' }))
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('.codex/'))
+    assert.ok(result.content.includes('hooks.json'))
   })
 
   it('annotates entry/test/config/doc files', async () => {

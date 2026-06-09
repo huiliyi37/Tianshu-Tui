@@ -1,6 +1,7 @@
 import { readdir, stat } from 'node:fs/promises'
 import { join, basename, resolve } from 'path'
 import { relativePosix } from '../path-format.js'
+import { classifyPath } from '../context/attention-filter.js'
 import type { Tool, ToolCallParams } from './types.js'
 
 const EXCLUDE_DIRS = new Set([
@@ -51,7 +52,7 @@ interface TreeNode {
   sizeBytes?: number
 }
 
-async function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFiles: number, maxDepth: number): Promise<TreeNode[]> {
+async function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFiles: number, maxDepth: number, projectRoot: string, includeSilent: boolean): Promise<TreeNode[]> {
   if (depth > maxDepth) return []
   let names: string[]
   try {
@@ -62,8 +63,11 @@ async function buildTree(dir: string, depth: number, fileCount: { n: number }, m
 
   const entries: { name: string; isDir: boolean; sizeBytes?: number }[] = []
   for (const name of names) {
-    if (name.startsWith('.') && name !== '.env.example' && name !== '.gitignore') continue
     const fullPath = join(dir, name)
+    const relPath = relativePosix(projectRoot, fullPath)
+    const verdict = classifyPath(relPath)
+    if (!includeSilent && (name.startsWith('.') && name !== '.env.example' && name !== '.gitignore')) continue
+    if (!includeSilent && verdict.silent) continue
     let s: Awaited<ReturnType<typeof stat>>
     try {
       s = await stat(fullPath)
@@ -72,6 +76,7 @@ async function buildTree(dir: string, depth: number, fileCount: { n: number }, m
     }
     if (s.isDirectory()) {
       if (EXCLUDE_DIRS.has(name)) continue
+      if (!includeSilent && verdict.tier === 'L0_build') continue
       entries.push({ name, isDir: true })
     } else if (s.isFile()) {
       entries.push({ name, isDir: false, sizeBytes: s.size })
@@ -86,7 +91,7 @@ async function buildTree(dir: string, depth: number, fileCount: { n: number }, m
   const nodes: TreeNode[] = []
   for (const entry of entries) {
     if (entry.isDir) {
-      const children = await buildTree(join(dir, entry.name), depth + 1, fileCount, maxFiles, maxDepth)
+      const children = await buildTree(join(dir, entry.name), depth + 1, fileCount, maxFiles, maxDepth, projectRoot, includeSilent)
       if (children.length > 0) {
         const annotation = entry.name === '__tests__' ? 'test' : undefined
         nodes.push({ name: entry.name, isDir: true, children, annotation })
@@ -192,8 +197,9 @@ Good: repo_map({ max_files: 100 }) — smaller tree for large projects`,
       return { content: `Error: Not a directory: ${root}`, isError: true }
     }
 
+    const includeSilent = Boolean(subPath && classifyPath(relativePosix(params.cwd, root)).silent)
     const fileCount = { n: 0 }
-    const tree = await buildTree(root, 0, fileCount, maxFiles, maxDepth)
+    const tree = await buildTree(root, 0, fileCount, maxFiles, maxDepth, params.cwd, includeSilent)
 
     // Header: show relative path when focused on subdirectory
     const displayRoot = subPath
