@@ -6,20 +6,79 @@ import { track } from './process-tracker.js'
 import { gracefulKill, forceKill } from '../platform.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
 
-interface TestCommand {
+interface RunnableTestCommand {
+  type: 'run'
   command: string
   args: string[]
   display: string
   runner: string
   scope: 'full' | 'targeted'
+  recommendedCommand?: string
 }
 
-async function detectTestCommand(cwd: string): Promise<{ base: string; runner: string }> {
-  const pkgPath = join(cwd, 'package.json')
+interface BlockedTestCommand {
+  type: 'blocked'
+  display: string
+  runner: string
+  scope: 'full' | 'targeted'
+  message: string
+  recommendedCommand?: string
+}
+
+type TestCommand = RunnableTestCommand | BlockedTestCommand
+
+async function pathExists(path: string): Promise<boolean> {
   try {
-    await stat(pkgPath)
+    await stat(path)
+    return true
   } catch {
-    return { base: 'npm test', runner: 'npm' }
+    return false
+  }
+}
+
+async function hasPythonProjectMarker(cwd: string): Promise<boolean> {
+  const markers = ['pyproject.toml', 'pytest.ini', 'tox.ini', 'setup.cfg']
+  const markerChecks = await Promise.all(markers.map(marker => pathExists(join(cwd, marker))))
+  if (markerChecks.some(Boolean)) return true
+
+  const testsPath = join(cwd, 'tests')
+  try {
+    const s = await stat(testsPath)
+    return s.isDirectory()
+  } catch {
+    return false
+  }
+}
+
+async function pythonHasTests(cwd: string): Promise<boolean> {
+  try {
+    const s = await stat(join(cwd, 'tests'))
+    if (!s.isDirectory()) return false
+  } catch {
+    return false
+  }
+  try {
+    for await (const _ of glob('tests/test_*.py', { cwd })) return true
+    for await (const _ of glob('tests/**/*_test.py', { cwd })) return true
+    for await (const _ of glob('tests/**/test_*.py', { cwd })) return true
+  } catch {
+    return true
+  }
+  return false
+}
+
+async function detectTestCommand(cwd: string): Promise<{ base: string; runner: string; recommendedCommand?: string; hasTests?: boolean }> {
+  const pkgPath = join(cwd, 'package.json')
+  if (!(await pathExists(pkgPath))) {
+    if (await hasPythonProjectMarker(cwd)) {
+      return {
+        base: 'pytest',
+        runner: 'pytest',
+        recommendedCommand: 'pytest',
+        hasTests: await pythonHasTests(cwd),
+      }
+    }
+    return { base: '', runner: 'unknown' }
   }
 
   const pkg = JSON.parse(await readFile(pkgPath, 'utf-8')) as { scripts?: { test?: string } }
@@ -27,7 +86,7 @@ async function detectTestCommand(cwd: string): Promise<{ base: string; runner: s
 
   if (testScript.includes('vitest')) return { base: 'npx vitest run', runner: 'vitest' }
   if (testScript.includes('jest')) return { base: 'npx jest', runner: 'jest' }
-  if (testScript.includes('tsx --test') || testScript.includes('node:test')) {
+  if (testScript.includes('tsx --test') || testScript.includes('node:test') || testScript.includes('run-node-tests')) {
     return { base: testScript, runner: 'node-test' }
   }
 
@@ -59,43 +118,102 @@ async function resolveFilterToTestFile(cwd: string, filter: string): Promise<str
 }
 
 async function buildTestCommand(cwd: string, filter?: string): Promise<TestCommand> {
-  const { base, runner } = await detectTestCommand(cwd)
+  const { base, runner, recommendedCommand, hasTests } = await detectTestCommand(cwd)
+  const scope = filter ? 'targeted' as const : 'full' as const
+
+  if (runner === 'unknown') {
+    return {
+      type: 'blocked',
+      display: '(auto-detect tests)',
+      runner,
+      scope,
+      message: [
+        'Unable to infer test command automatically.',
+        'No package.json or supported test runner markers were found.',
+        'Use bash to run the project-specific verification command (for example a Python script, pytest invocation, or output check).',
+      ].join('\n'),
+    }
+  }
+
+  if (runner === 'pytest') {
+    if (!filter && hasTests === false) {
+      return {
+        type: 'blocked',
+        display: '(auto-detect tests)',
+        runner,
+        scope: 'full',
+        message: [
+          'Unable to infer test command automatically for this Python project because no tests were found under tests/.',
+          'Pytest is the recommended runner when Python tests exist.',
+          'If this is a non-test output/plot task, use bash to run the concrete Python script or inspect generated output instead.',
+        ].join('\n'),
+        recommendedCommand: recommendedCommand ?? 'pytest',
+      }
+    }
+    const safeFilter = filter?.replace(/[`$\\;"'|]/g, '')
+    const args = safeFilter ? [safeFilter] : []
+    const display = safeFilter ? `pytest ${safeFilter}` : 'pytest'
+    return { type: 'run', command: 'pytest', args, display, runner, scope, recommendedCommand: recommendedCommand ?? 'pytest' }
+  }
+
   if (!filter) {
-    return { command: 'npm', args: ['test'], display: 'npm test', runner, scope: 'full' }
+    return { type: 'run', command: 'npm', args: ['test'], display: 'npm test', runner, scope: 'full' }
   }
 
   const safeFilter = filter.replace(/[`$\\;"'|]/g, '')
   if (runner === 'node-test' && isTestFileFilter(safeFilter)) {
-    if (base.includes('tsx')) {
+    if (base.includes('tsx') || base.includes('run-node-tests')) {
       // Do not spawn `npx tsx ...`: npm 11 can parse that form as an npm
       // command and fail with `Missing script: "tsx"` / `Unknown command: "tsx"`.
       // buildExecutionEnv prepends local node_modules/.bin, so invoking `tsx`
       // directly is both faster and deterministic.
-      return { command: 'tsx', args: ['--test', safeFilter], display: `tsx --test ${safeFilter}`, runner, scope: 'targeted' }
+      return { type: 'run', command: 'tsx', args: ['--test', safeFilter], display: `tsx --test ${safeFilter}`, runner, scope: 'targeted' }
     }
-    return { command: 'node', args: ['--test', safeFilter], display: `node --test ${safeFilter}`, runner, scope: 'targeted' }
+    return { type: 'run', command: 'node', args: ['--test', safeFilter], display: `node --test ${safeFilter}`, runner, scope: 'targeted' }
   }
 
   // Resolve non-file-path filter to actual test file via find
   if (runner === 'node-test' && safeFilter.length > 0) {
     const resolved = await resolveFilterToTestFile(cwd, safeFilter)
-    if (resolved && base.includes('tsx')) {
-      return { command: 'tsx', args: ['--test', resolved], display: `tsx --test ${resolved}`, runner, scope: 'targeted' }
+    if (resolved && (base.includes('tsx') || base.includes('run-node-tests'))) {
+      return { type: 'run', command: 'tsx', args: ['--test', resolved], display: `tsx --test ${resolved}`, runner, scope: 'targeted' }
     }
     if (resolved) {
-      return { command: 'node', args: ['--test', resolved], display: `node --test ${resolved}`, runner, scope: 'targeted' }
+      return { type: 'run', command: 'node', args: ['--test', resolved], display: `node --test ${resolved}`, runner, scope: 'targeted' }
+    }
+    return {
+      type: 'blocked',
+      display: '(auto-detect tests)',
+      runner,
+      scope: 'targeted',
+      message: [
+        'Unable to resolve the run_tests filter to a Node test file.',
+        'Use a concrete .test/.spec file path, or use bash to run the exact project-specific test command.',
+      ].join('\n'),
+      recommendedCommand: 'npm test',
     }
   }
 
   if (runner === 'vitest') {
-    return { command: 'npx', args: ['vitest', 'run', safeFilter], display: `npx vitest run ${safeFilter}`, runner, scope: 'targeted' }
+    return { type: 'run', command: 'npx', args: ['vitest', 'run', safeFilter], display: `npx vitest run ${safeFilter}`, runner, scope: 'targeted' }
   }
 
   if (runner === 'jest') {
-    return { command: 'npx', args: ['jest', '--testPathPattern', safeFilter], display: `npx jest --testPathPattern ${safeFilter}`, runner, scope: 'targeted' }
+    return { type: 'run', command: 'npx', args: ['jest', '--testPathPattern', safeFilter], display: `npx jest --testPathPattern ${safeFilter}`, runner, scope: 'targeted' }
   }
 
-  return { command: 'npm', args: ['test', '--', safeFilter], display: `npm test -- ${safeFilter}`, runner, scope: 'targeted' }
+  return {
+    type: 'blocked',
+    display: '(auto-detect tests)',
+    runner,
+    scope: 'targeted',
+    message: [
+      'Unable to infer a safe targeted test command for this project.',
+      'The configured npm test runner is not recognized as node:test, vitest, or jest, so run_tests(filter=...) will not synthesize npm test arguments.',
+      'Use bash to run the exact targeted verification command, or run run_tests() without a filter for the full npm test script.',
+    ].join('\n'),
+    recommendedCommand: 'npm test',
+  }
 }
 
 interface ParsedResult {
@@ -170,6 +288,17 @@ export function parseOutput(raw: string, runner: string): ParsedResult {
     if (durMatch) result.duration = durMatch[1] ?? ''
   }
 
+  if (runner === 'pytest') {
+    const summaryMatch = clean.match(/={2,}\s*(.*?)\s+in\s+([\d.]+s)\s*={2,}/) ?? clean.match(/([^\n]*\b(?:passed|failed|skipped)\b[^\n]*)\s+in\s+([\d.]+s)/)
+    if (summaryMatch) {
+      const s = summaryMatch[1] ?? ''
+      result.failed = asNum(s.match(/(\d+)\s+failed/)?.[1])
+      result.passed = asNum(s.match(/(\d+)\s+passed/)?.[1])
+      result.skipped = asNum(s.match(/(\d+)\s+skipped/)?.[1])
+      result.duration = summaryMatch[2] ?? ''
+    }
+  }
+
   const failLines: Array<{ name: string; error: string }> = []
   const nodeTestFails = clean.matchAll(/✖\s+(.+?)(?:\s+\([\d.]+m?s\))?\n((?:  .*\n)*)/g)
   for (const m of nodeTestFails) {
@@ -213,6 +342,31 @@ const MAX_OUTPUT = 8000
 const HEAD_CHARS = 4000
 const TAIL_CHARS = 3000
 
+function buildBlockedVerification(command: TestCommand, startTime: number): VerificationMetadata {
+  return {
+    command: command.display,
+    status: 'blocked',
+    scope: command.scope,
+    exitCode: -1,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    durationMs: Date.now() - startTime,
+    failureKind: 'tool_invocation_failure',
+    ...(command.recommendedCommand ? { recommendedCommand: command.recommendedCommand } : {}),
+  }
+}
+
+function extractTargetFilesFromCommand(testCommand: RunnableTestCommand, filter?: string): string[] {
+  const testFilePattern = /([^\s"']+\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)|[^\s"']+\.py)/g
+  const allMatches = [
+    ...testCommand.args.join(' ').matchAll(testFilePattern),
+    ...testCommand.display.matchAll(testFilePattern),
+    ...(filter?.matchAll(testFilePattern) ?? []),
+  ]
+  return [...new Set(allMatches.map(m => m[1]!))]
+}
+
 function truncateOutput(output: string): string {
   if (output.length <= MAX_OUTPUT) return output
   const head = output.slice(0, HEAD_CHARS)
@@ -239,12 +393,14 @@ export const RUN_TESTS_TOOL: Tool = {
 ### Usage
 - Use run_tests to verify changes after editing code
 - Use filter to run a specific test file or test name
-- Automatically detects package manager and test command from package.json
+- Automatically detects Node.js test scripts and Python pytest projects
+- When no safe runner can be inferred, returns a blocked verification with guidance to use bash
 - Reports: exit code, failed tests, error details, duration
 
 ### Examples
 Good: run_tests() — run all tests
 Good: run_tests(filter="loop.test.ts") — run specific test file
+Good: run_tests(filter="tests/test_example.py") — run a Python pytest file
 Good: run_tests(timeout=300000) — longer timeout for slow suites`,
     input_schema: {
       type: 'object',
@@ -260,6 +416,18 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
     const testCommand = await buildTestCommand(params.cwd, filter)
+
+    if (testCommand.type === 'blocked') {
+      const rawPath = await persistRawOutput(params.toolUseId, testCommand.message)
+      const meta = { command: testCommand.display, exitCode: -1, durationMs: Date.now() - startTime }
+      return {
+        content: testCommand.message,
+        uiContent: buildUiOutput(testCommand.message, meta),
+        rawPath,
+        isError: true,
+        verification: buildBlockedVerification(testCommand, startTime),
+      }
+    }
 
     return new Promise((resolve) => {
       const child = track(spawn(testCommand.command, testCommand.args, {
@@ -298,16 +466,7 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         }
       })
 
-      const blockedVerification: VerificationMetadata = {
-        command: testCommand.display,
-        status: 'blocked',
-        scope: testCommand.scope,
-        exitCode: -1,
-        passed: 0,
-        failed: 0,
-        skipped: 0,
-        durationMs: Date.now() - startTime,
-      }
+      const blockedVerification = (): VerificationMetadata => buildBlockedVerification(testCommand, startTime)
 
       const timer = setTimeout(async () => {
         gracefulKill(child)
@@ -316,11 +475,11 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         const meta = { command: testCommand.display, exitCode: -1, durationMs: Date.now() - startTime }
         const rawPath = await persistRawOutput(params.toolUseId, raw)
         resolve({
-          content: 'Tests timed out',
+          content: `Tests timed out after ${timeout}ms`,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
           isError: true,
-          verification: { ...blockedVerification, durationMs: Date.now() - startTime },
+          verification: blockedVerification(),
         })
       }, timeout)
 
@@ -337,15 +496,18 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         const rawPath = await persistRawOutput(params.toolUseId, raw)
         const meta = { command: testCommand.display, exitCode, durationMs }
 
+        const invocationFailed = exitCode !== 0 && parsed.passed === 0 && parsed.failed === 0 && parsed.skipped === 0
         const verification: VerificationMetadata = {
           command: testCommand.display,
-          status: exitCode === 0 ? 'passed' : 'failed',
+          status: exitCode === 0 ? 'passed' : invocationFailed ? 'blocked' : 'failed',
           scope: testCommand.scope,
           exitCode,
           passed: parsed.passed,
           failed: parsed.failed,
           skipped: parsed.skipped,
           durationMs,
+          ...(invocationFailed ? { failureKind: 'tool_invocation_failure' as const } : {}),
+          ...(testCommand.recommendedCommand ? { recommendedCommand: testCommand.recommendedCommand } : {}),
         }
 
         // Populate targetFiles for verification supersession key matching.
@@ -353,11 +515,7 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         // later runs with different filter strings targeting the same file
         // can be matched via meta.targetFiles instead of command string.
         if (testCommand.scope === 'targeted' && filter) {
-          const args = testCommand.args.join(' ')
-          const display = testCommand.display
-          const testFilePattern = /([^\s"']+\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs))/g
-          const allMatches = [...args.matchAll(testFilePattern), ...display.matchAll(testFilePattern)]
-          const files = [...new Set(allMatches.map(m => m[1]!))]
+          const files = extractTargetFilesFromCommand(testCommand, filter)
           if (files.length > 0) {
             verification.targetFiles = files
           }
@@ -384,10 +542,21 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
           uiContent: err.message,
           rawPath,
           isError: true,
-          verification: { ...blockedVerification, durationMs: Date.now() - startTime },
+          verification: blockedVerification(),
         })
       })
     })
+  },
+
+  timeoutMs(params?: ToolCallParams): number {
+    const requested = params?.input.timeout
+    const testTimeout = typeof requested === 'number' && Number.isFinite(requested) && requested > 0
+      ? requested
+      : 120_000
+    // Keep the outer tool-pipeline timeout slightly above run_tests' own
+    // timer so timeout results can return structured VerificationMetadata
+    // instead of being converted into an untracked pipeline exception.
+    return testTimeout + 5_000
   },
 
   requiresApproval(): boolean {

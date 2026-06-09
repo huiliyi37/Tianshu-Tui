@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { chmodSync, mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { RUN_TESTS_TOOL, parseOutput } from '../run-tests.js'
@@ -21,6 +21,32 @@ function setupProject(testScript: string, testFile: string): string {
     scripts: { test: testScript },
   }))
   writeFileSync(join(dir, 'src', 'example.test.ts'), testFile)
+  return dir
+}
+
+function setupPythonProject(options: { withTests?: boolean; withFakePytest?: boolean } = {}): string {
+  const dir = mkdtempSync(join(tmpdir(), 'run-tests-python-'))
+  writeFileSync(join(dir, 'pyproject.toml'), '[tool.pytest.ini_options]\n')
+  if (options.withTests) {
+    mkdirSync(join(dir, 'tests'), { recursive: true })
+    writeFileSync(join(dir, 'tests', 'test_example.py'), 'def test_ok():\n    assert 1 + 1 == 2\n')
+  }
+  if (options.withFakePytest) {
+    const binDir = join(dir, 'node_modules', '.bin')
+    mkdirSync(binDir, { recursive: true })
+    const pytestPath = join(binDir, 'pytest')
+    writeFileSync(pytestPath, '#!/usr/bin/env node\nconsole.log("1 passed in 0.01s")\n')
+    chmodSync(pytestPath, 0o755)
+  }
+  return dir
+}
+
+function setupHangingProject(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'run-tests-hanging-'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({
+    name: 'hanging-project',
+    scripts: { test: 'node -e "setInterval(() => {}, 1000)"' },
+  }))
   return dir
 }
 
@@ -103,8 +129,133 @@ describe('mixed', () => {
     assert.equal(result.verification!.command, 'tsx --test src/example.test.ts')
   })
 
+  it('treats scripts/run-node-tests.ts projects as node-test for targeted filters', async () => {
+    const dir = setupProject('tsx scripts/run-node-tests.ts', `import { it } from 'node:test'
+import assert from 'node:assert/strict'
+it('works', () => assert.equal(2 + 2, 4))`)
+    try {
+      const result = await RUN_TESTS_TOOL.execute(makeParams({ filter: 'src/example.test.ts' }, dir))
+
+      assert.equal(result.isError, false)
+      assert.equal(result.verification!.command, 'tsx --test src/example.test.ts')
+      assert.equal(result.verification!.scope, 'targeted')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not default to npm test when package.json is absent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'run-tests-empty-'))
+    try {
+      const result = await RUN_TESTS_TOOL.execute(makeParams({}, dir))
+
+      assert.equal(result.isError, true)
+      assert.equal(result.verification!.status, 'blocked')
+      assert.equal(result.verification!.failureKind, 'tool_invocation_failure')
+      assert.equal(result.verification!.command, '(auto-detect tests)')
+      assert.match(result.content, /Unable to infer test command/i)
+      assert.match(result.content, /Use bash/i)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('detects Python projects and recommends pytest without tests directory', async () => {
+    const dir = setupPythonProject()
+    try {
+      const result = await RUN_TESTS_TOOL.execute(makeParams({}, dir))
+
+      assert.equal(result.isError, true)
+      assert.equal(result.verification!.status, 'blocked')
+      assert.equal(result.verification!.recommendedCommand, 'pytest')
+      assert.equal(result.verification!.command, '(auto-detect tests)')
+      assert.match(result.content, /Unable to infer test command/i)
+      assert.match(result.content, /pytest/i)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('runs pytest for Python projects with tests directory', async () => {
+    const dir = setupPythonProject({ withTests: true, withFakePytest: true })
+    try {
+      const result = await RUN_TESTS_TOOL.execute(makeParams({}, dir))
+
+      assert.equal(result.isError, false)
+      assert.equal(result.verification!.command, 'pytest')
+      assert.equal(result.verification!.status, 'passed')
+      assert.equal(result.verification!.scope, 'full')
+      assert.equal(result.verification!.passed, 1)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('uses pytest filter directly for Python targeted runs', async () => {
+    const dir = setupPythonProject({ withTests: true, withFakePytest: true })
+    try {
+      const result = await RUN_TESTS_TOOL.execute(makeParams({ filter: 'tests/test_example.py' }, dir))
+
+      assert.equal(result.isError, false)
+      assert.equal(result.verification!.command, 'pytest tests/test_example.py')
+      assert.equal(result.verification!.scope, 'targeted')
+      assert.equal(result.verification!.targetFiles?.[0], 'tests/test_example.py')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('unknown npm runner with filter does not synthesize npm test arguments', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'run-tests-unknown-filter-'))
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({
+        name: 'unknown-runner',
+        scripts: { test: 'custom-test-runner' },
+      }))
+      const result = await RUN_TESTS_TOOL.execute(makeParams({ filter: 'foo' }, dir))
+
+      assert.equal(result.isError, true)
+      assert.equal(result.verification!.status, 'blocked')
+      assert.equal(result.verification!.command, '(auto-detect tests)')
+      assert.equal(result.verification!.recommendedCommand, 'npm test')
+      assert.doesNotMatch(result.content, /npm test -- foo/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('node-test runner with unresolved filter does not fall back to npm test arguments', async () => {
+    const result = await RUN_TESTS_TOOL.execute(makeParams({ filter: 'missing-test-name' }, passingDir))
+
+    assert.equal(result.isError, true)
+    assert.equal(result.verification!.status, 'blocked')
+    assert.equal(result.verification!.command, '(auto-detect tests)')
+    assert.equal(result.verification!.recommendedCommand, 'npm test')
+    assert.doesNotMatch(result.content, /npm test -- missing-test-name/)
+  })
+
+  it('classifies run_tests timeout as tool invocation failure', async () => {
+    const dir = setupHangingProject()
+    try {
+      const result = await RUN_TESTS_TOOL.execute(makeParams({ timeout: 50 }, dir))
+
+      assert.equal(result.isError, true)
+      assert.equal(result.verification!.status, 'blocked')
+      assert.equal(result.verification!.failureKind, 'tool_invocation_failure')
+      assert.equal(result.verification!.command, 'npm test')
+      assert.match(result.content, /timed out/i)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('requiresApproval returns false', () => {
     assert.equal(RUN_TESTS_TOOL.requiresApproval(makeParams({}, '/tmp')), false)
+  })
+
+  it('sets outer tool timeout above requested test timeout', () => {
+    assert.equal(RUN_TESTS_TOOL.timeoutMs?.(makeParams({ timeout: 50 }, passingDir)), 5050)
+    assert.equal(RUN_TESTS_TOOL.timeoutMs?.(makeParams({}, passingDir)), 125000)
   })
 
   it('isConcurrencySafe returns false', () => {
