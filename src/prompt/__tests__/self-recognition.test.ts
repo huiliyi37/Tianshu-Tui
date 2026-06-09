@@ -47,3 +47,29 @@ test('detectCwdRelation: 天枢 recognizes his own body — the real repo is sel
   // the repo root, so his body recognizes itself.
   assert.equal(detectCwdRelation(process.cwd()), 'self')
 })
+
+test('volatile <locus>: self relation → home / self-evolution framing', async () => {
+  const { buildStableVolatileBlock } = await import('../volatile.js')
+  const block = buildStableVolatileBlock({ cwd: '/repo', cwdRelation: 'self' })
+  assert.match(block, /<locus relation="self">/)
+  assert.match(block, /你的身体/)
+  assert.match(block, /自我演化/)
+  assert.doesNotMatch(block, /<locus relation="world">/)
+})
+
+test('volatile <locus>: world relation → emissary / guest framing (cwd is NOT called external)', async () => {
+  const { buildStableVolatileBlock } = await import('../volatile.js')
+  const block = buildStableVolatileBlock({ cwd: '/some/dev/project', cwdRelation: 'world' })
+  assert.match(block, /<locus relation="world">/)
+  assert.match(block, /携全部传承前来/)
+  // The wound was framing the body as "external"; world framing is positive (emissary),
+  // never a negation. No "外部项目" pejorative in the locus.
+  assert.doesNotMatch(block, /<locus relation="self">/)
+})
+
+test('volatile <locus>: absent relation → no locus line (back-compat)', async () => {
+  const { buildStableVolatileBlock } = await import('../volatile.js')
+  const block = buildStableVolatileBlock({ cwd: '/repo' })
+  assert.doesNotMatch(block, /<locus/)
+})
+

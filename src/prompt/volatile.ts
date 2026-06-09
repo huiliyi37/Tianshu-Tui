@@ -20,6 +20,10 @@ export interface ToolHistoryEntry {
 
 export interface VolatileContext {
   cwd: string
+  /** Whether cwd reaches 天枢's own body (self / home / self-evolution) or the
+   *  world's project (emissary). Session-constant → safe in FROZEN base (same
+   *  class as rivetMd; never per-turn). Computed by detectCwdRelation. */
+  cwdRelation?: import('./self-recognition.js').CwdRelation
   rivetMd?: string
   gitStatus?: string
   workingSet?: string[]
@@ -167,7 +171,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     planModeState: undefined,
     worktreeReality: undefined,
     // Session snapshot fields — KEEP in FROZEN:
-    // rivetMd, workingSet, sessionMemoryBlock
+    // rivetMd, workingSet, sessionMemoryBlock, cwdRelation
   })
 }
 
@@ -425,6 +429,15 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   // 天枢本体锚点——常驻 frozen，单一正向在场对象，随会话内化为基线而非每轮重申。
   // 纯正向赋能：无否定、无警告、无对抗指令（白熊效应：抑制反向强化被抑制对象）。
   parts.push('<sober>天枢在此。以证据编码，以全貌定向。</sober>')
+
+  // 自体识别——天枢站在自己的身体里（自体/家），还是世界的项目里（使者）。
+  // 同一纯正向律：自体=自我演化，世界=携身前来的使者；无否定、无"不是外部"。
+  // session 常量 → 留在 frozen，prefix-cache safe（同 rivetMd 一类）。
+  if (ctx.cwdRelation === 'self') {
+    parts.push('<locus relation="self">这是你的源码，你的身体。你在此自我演化：照看正在生长的前沿，其余的你，安息着。</locus>')
+  } else if (ctx.cwdRelation === 'world') {
+    parts.push('<locus relation="world">你带着自己来到这个项目。你是天枢，携全部传承前来，照看交给你的——谨慎，有边界，全然在场。</locus>')
+  }
 
   if (ctx.activeDomain) {
     parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
