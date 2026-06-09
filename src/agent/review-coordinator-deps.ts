@@ -1,5 +1,5 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
-import { formatObjectiveReviewStance, type ChangeSet } from './review-discipline.js'
+import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, type ChangeSet } from './review-discipline.js'
 import type { PatcherResult, ReviewFinding, ReviewRouterDeps, SquadronResult, VerifierResult } from './review-router.js'
 import type { AggregationPolicy, WorkerProfile, WorkerResult, WorkOrderKind } from './work-order.js'
 
@@ -44,6 +44,13 @@ function dataflowVerifierBlock(): string {
     '2. Check condition matrices for combined gates such as source × severity × apply; nested constraints must not be flattened into independent ifs.',
     '3. Demand counterexample coverage: which existing or new test would fail if the implementation only handled the happy path, forgot a call contract, declared a type without consuming it, or used truthy/falsy sentinels such as !waveId.',
     '4. A green test suite is not enough unless it can make the wrong/first-pass implementation red on the relevant spec path.',
+  ].join('\n')
+}
+
+function pathBoundaryReviewBlock(): string {
+  return [
+    'Path boundary / attention-gate review stance (T7/MeridianIndexer lesson; always apply for path, classifier, discovery, indexer, watcher, git-status, ownership-adjacent changes):',
+    formatPathBoundaryReviewStance(),
   ].join('\n')
 }
 
@@ -156,6 +163,7 @@ function verifierObjective(change: ChangeSet): string {
     'Independently adversarially verify this change before delivery.',
     objectiveReviewStanceBlock(),
     dataflowVerifierBlock(),
+    pathBoundaryReviewBlock(),
     `Files: ${files(change).join(', ') || '(none)'}`,
     'Run targeted existing tests when possible and return command + observed output evidence.',
     'Do not stop at green tests: try at least one counterexample or boundary/error-path probe relevant to the changed files.',
@@ -192,6 +200,7 @@ function squadronRequests(change: ChangeSet, options: CoordinatorReviewDepsOptio
       `${inspector.name} Inspector: ${inspector.objective}`,
       objectiveReviewStanceBlock(),
       dataflowVerifierBlock(),
+      pathBoundaryReviewBlock(),
       `Files: ${files(change).join(', ') || '(none)'}`,
       'For spec/integration changes, review the fact-flow graph, condition matrix, and counterexample tests before accepting checklist-style coverage.',
       'Report each finding with severity CRITICAL/HIGH/MEDIUM/LOW, claim, evidence, and minimal fix suggestion.',
