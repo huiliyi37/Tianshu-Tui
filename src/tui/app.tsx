@@ -8,6 +8,7 @@ import { ChronicleView } from './chronicle-view.js'
 import { Chronicle } from '../agent/chronicle.js'
 import { InputBar } from './input.js'
 import { StreamOutput } from './stream.js'
+import { pickWaitingIndicator } from './waiting-indicator.js'
 import { ThinkingCollapser } from './thinking.js'
 import { ToolCard } from './tool-card.js'
 import { QuestionCard } from './question-card.js'
@@ -1397,6 +1398,17 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const liveCapRows = Math.max(2, termRows - liveChromeRows.totalRows - 2)
   const displayStreamingText = streamingText ? capLiveTail(streamingText, liveCols, liveCapRows) : streamingText
 
+  // Exactly one waiting indicator may render. Two used to overlap during
+  // first-token wait (StreamOutput's "Waiting for model…" + the heartbeat box);
+  // the oscillating height made Ink under-erase and stack ghost rows.
+  const waitingIndicator = pickWaitingIndicator({
+    isStreaming,
+    hasText: !!streamingText,
+    hasHeartbeat: !!heartbeatStatus,
+    hasTools: liveTools.length > 0,
+    hasThinking: !!streamingThinking,
+  })
+
   return (
     // Natural-flow layout: live Box has NO height constraint. Content flows top-down,
     // input sits right after the latest content. No spacer = no gap between content
@@ -1448,10 +1460,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           return <ToolCard key={log.id} name={log.toolName ?? ''} result={log.content} isStreaming verbose={verbose} elapsedMs={Date.now() - (toolStartMap.current.get(log.id) ?? Date.now())} />
         })}
         <ThinkingCollapser thinking={streamingThinking} isStreaming={isStreaming && (!!streamingThinking || isThinkingActive)} focused={!!streamingThinking && !streamingText} completedDurationMs={completedThinkingDurationMs} />
-        {(streamingText || isStreaming) && (
+        {(streamingText || waitingIndicator === 'stream') && (
           <StreamOutput text={displayStreamingText} isStreaming={isStreaming} />
         )}
-        {heartbeatStatus && !streamingText && liveTools.length === 0 && !streamingThinking && (
+        {waitingIndicator === 'heartbeat' && (
           <Box paddingX={2}>
             <Text>◌ {heartbeatStatus}</Text>
           </Box>
