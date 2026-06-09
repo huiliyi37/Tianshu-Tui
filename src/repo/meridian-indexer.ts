@@ -10,6 +10,7 @@ import type { RepoMapResult } from './meridian-types.js'
 import type { RepoMapOptions } from './meridian-graph.js'
 import type { ImpactResult } from './meridian-impact.js'
 import type { StigmergyStore } from '../context/stigmergy.js'
+import { classifyPath } from '../context/attention-filter.js'
 
 const TS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx']
 const ALL_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go']
@@ -131,6 +132,7 @@ export class MeridianIndexer {
 
   private isIndexable(filePath: string): boolean {
     if (IGNORE_PATTERNS.some(p => filePath.includes(p))) return false
+    if (classifyPath(filePath).silent) return false
     return ALL_EXTENSIONS.some(ext => filePath.endsWith(ext))
   }
 
