@@ -1287,17 +1287,36 @@ async function main() {
 
   // Gated diagnostic — no-op unless RIVET_DEBUG_FULLSCREEN=1 AND stderr is
   // redirected to a file/pipe (never writes to an interactive terminal, which
-  // would itself corrupt Ink frames). Detects when Ink enters fullscreen mode
-  // (it writes \x1B[2J\x1B[H and redraws from the top because the live output
-  // reached terminal height) so any remaining live-region overflow is provable:
-  //   RIVET_DEBUG_FULLSCREEN=1 node dist/main.js 2>layout.log
+  // would itself corrupt Ink frames). Detects every mechanism that can deposit
+  // a stale live frame (ground zone / palette / history) into scrollback:
+  //   (1) [fullscreen-clear] — Ink wrote \x1B[2J\x1B[H (live output reached
+  //       terminal height → fullscreen re-emit of fullStaticOutput).
+  //   (2) [resize-clear] — our registerResizeClear → inkInstance.clear() fired.
+  //   (3) [tall-frame] — a single write contained >= rows newlines (a live frame
+  //       at/over terminal height — the precondition for fullscreen on next render).
+  // Capture with:  RIVET_DEBUG_FULLSCREEN=1 node dist/main.js 2>layout.log
   if (process.env.RIVET_DEBUG_FULLSCREEN === '1' && !process.stderr.isTTY) {
     const origWrite = process.stdout.write.bind(process.stdout)
     let clears = 0
+    let tallFrames = 0
     process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
-      if (typeof chunk === 'string' && chunk.includes('\x1B[2J')) {
-        clears++
-        process.stderr.write(`[fullscreen-clear] #${clears} rows=${process.stdout.rows} cols=${process.stdout.columns} — Ink cleared screen (live output >= terminal height)\n`)
+      if (typeof chunk === 'string') {
+        const rows = process.stdout.rows ?? 0
+        if (chunk.includes('\x1B[2J')) {
+          clears++
+          process.stderr.write(`[fullscreen-clear] #${clears} rows=${rows} cols=${process.stdout.columns} — Ink cleared screen (live output >= terminal height)\n`)
+        }
+        // A frame whose newline count approaches the viewport is the precondition
+        // for the next render tripping fullscreen. Log it so overflow is provable
+        // even when the clear itself hasn't fired yet.
+        if (rows > 0) {
+          let nl = 0
+          for (let i = 0; i < chunk.length; i++) if (chunk.charCodeAt(i) === 10) nl++
+          if (nl >= rows - 1) {
+            tallFrames++
+            process.stderr.write(`[tall-frame] #${tallFrames} lines=${nl} rows=${rows} cols=${process.stdout.columns} — live frame near/over viewport height\n`)
+          }
+        }
       }
       return (origWrite as (...a: unknown[]) => boolean)(chunk, ...rest)
     }) as typeof process.stdout.write
@@ -1314,7 +1333,15 @@ async function main() {
   // where line-wrapping differed, leaving orphaned rows as ghosts (stacked
   // ground zones on grow). Force a full clear on the resize trailing edge for
   // either direction so the next commit redraws onto a clean screen.
-  const unregisterResizeClear = registerResizeClear(() => inkInstance.clear())
+  const debugFs = process.env.RIVET_DEBUG_FULLSCREEN === '1' && !process.stderr.isTTY
+  let resizeClears = 0
+  const unregisterResizeClear = registerResizeClear(() => {
+    if (debugFs) {
+      resizeClears++
+      process.stderr.write(`[resize-clear] #${resizeClears} rows=${process.stdout.rows} cols=${process.stdout.columns} — registerResizeClear fired inkInstance.clear()\n`)
+    }
+    inkInstance.clear()
+  })
 
   process.on('SIGINT', gracefulShutdown)
   process.on('SIGTERM', gracefulShutdown)
