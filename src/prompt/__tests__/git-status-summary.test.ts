@@ -28,9 +28,33 @@ function makeLongStatus(files: { modified?: number; untracked?: number; staged?:
 }
 
 describe('summarizeGitStatus', () => {
-  it('returns original status when under threshold', () => {
+  it('returns original status when under threshold and no attention noise is present', () => {
     const short = 'On branch main\nChanges: 1 file'
     assert.equal(summarizeGitStatus(short), short)
+  })
+
+  it('folds attention noise even when short-status input is under threshold', () => {
+    const status = [
+      'Current branch: main',
+      'Status:',
+      ' M src/prompt/volatile.ts',
+      '?? .codex/hooks.json',
+      '?? layout.log',
+      '?? docs/teamtask.zip',
+      '?? node_modules/pkg/index.js',
+    ].join('\n')
+    assert.ok(status.length <= 1200, `fixture should stay under threshold, got ${status.length}`)
+
+    const result = summarizeGitStatus(status)
+
+    assert.match(result, /\[main\]/)
+    assert.match(result, /modified: src\/prompt\/volatile\.ts/)
+    assert.match(result, /2 runtime fragments folded/)
+    assert.match(result, /1 foreign tool footprint folded/)
+    assert.match(result, /1 build outputs omitted/)
+    assert.doesNotMatch(result, /\.codex\/hooks\.json/)
+    assert.doesNotMatch(result, /layout\.log/)
+    assert.doesNotMatch(result, /docs\/teamtask\.zip/)
   })
 
   it('returns empty string for empty input', () => {
@@ -131,5 +155,30 @@ describe('parseGitStatus', () => {
     const result = parseGitStatus(status)
     assert.deepEqual(result.staged, ['src/new.ts'])
     assert.deepEqual(result.modified, ['src/old.ts'])
+  })
+
+  it('parses extensionless untracked paths in long status', () => {
+    const status = [
+      'On branch main',
+      'Untracked files:',
+      '  README',
+      '  Makefile',
+      '  LICENSE',
+      '  src/new.ts',
+    ].join('\n')
+    const result = parseGitStatus(status)
+    assert.deepEqual(result.untracked, ['README', 'Makefile', 'LICENSE', 'src/new.ts'])
+  })
+
+  it('does not treat unindented advisory text as untracked files', () => {
+    const status = [
+      'On branch main',
+      'Untracked files:',
+      '  README',
+      '',
+      'nothing added to commit but untracked files present (use "git add" to track)',
+    ].join('\n')
+    const result = parseGitStatus(status)
+    assert.deepEqual(result.untracked, ['README'])
   })
 })

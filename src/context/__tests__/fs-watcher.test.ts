@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createFsEventRecorder, createFsWatcher, shouldRecordFsEvent } from '../fs-watcher.js'
@@ -108,24 +108,18 @@ describe('FsWatcher — 原则③ 参考系锚定', () => {
     assert.ok(typeof state.eventRate === 'number')
   })
 
-  it('eventRate is normalized: 0 events = 0, many events → approaches 1', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'fs-watcher-test-'))
-    const watcher = createFsWatcher({ cwd: dir, debounceMs: 0 }) // no debounce for test
-    watchers.push(watcher)
-    await watcher.start()
+  it('recorder normalizes eventRate: 0 events = 0, many content events → approaches 1', () => {
+    let t = 30_000
+    const recorder = createFsEventRecorder({ debounceMs: 0, now: () => t++ })
 
-    // Write enough files to trigger event rate
+    assert.equal(recorder.getEventRate(), 0)
+    assert.equal(recorder.getEventCount(), 0)
+
     for (let i = 0; i < 35; i++) {
-      writeFileSync(join(dir, `test-${i}.txt`), 'x')
+      recorder.recordEvent(`src/test-${i}.txt`)
     }
 
-    // Wait a bit for fs events to propagate
-    await new Promise(r => setTimeout(r, 200))
-
-    const state = watcher.getState()
-    // Should have some events detected (may not be exactly 35 due to OS batching)
-    // But eventRate should be > 0 if any events were detected
-    assert.ok(state.eventRate >= 0, 'eventRate should be non-negative')
-    assert.ok(state.eventCount >= 0, 'eventCount should be non-negative')
+    assert.equal(recorder.getEventCount(), 35)
+    assert.equal(recorder.getEventRate(), 1)
   })
 })

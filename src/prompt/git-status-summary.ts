@@ -120,9 +120,13 @@ function parseLongGitStatus(lines: string[]): GitStatusSummary {
       continue
     }
 
-    const untrackedMatch = line.match(/^\s+(.+\.\w+)$/)
-    if (untrackedMatch && section === 'untracked') {
-      pushPath(summary, 'untracked', untrackedMatch[1]!.trim())
+    if (section === 'untracked') {
+      const untrackedLine = line.match(/^\s+(.+)$/)
+      if (!untrackedLine) continue
+      const filePath = untrackedLine[1]!.trim()
+      if (filePath && !filePath.endsWith(':') && !filePath.startsWith('(use ')) {
+        pushPath(summary, 'untracked', filePath)
+      }
     }
   }
 
@@ -163,12 +167,15 @@ function renderSummary(summary: GitStatusSummary): string {
 }
 
 export function summarizeGitStatus(status: string): string {
-  if (!status || status.length <= SUMMARY_THRESHOLD) return status
+  if (!status) return status
 
   const lines = status.split('\n')
   const commitIdx = lines.findIndex(l => l.startsWith('Recent commits:'))
   const statusPart = commitIdx >= 0 ? lines.slice(0, commitIdx).join('\n').trim() : status
   const commitsPart = commitIdx >= 0 ? lines.slice(commitIdx).join('\n').trim() : ''
+
+  const shouldSummarize = status.length > SUMMARY_THRESHOLD || isShortStatus(statusPart.split('\n'))
+  if (!shouldSummarize) return status
 
   const summary = renderSummary(parseGitStatus(statusPart))
   return commitsPart ? `${summary}\n${commitsPart}` : summary
