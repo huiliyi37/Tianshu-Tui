@@ -4,6 +4,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { validatePathSafe } from './path-validate.js'
 import { relativePosix } from '../path-format.js'
 import { GitignoreFilter } from './gitignore.js'
+import { classifyPath } from '../context/attention-filter.js'
 
 const EXCLUDE_DIRS = new Set([
   'node_modules', '.git', 'dist', '.next', 'build', 'target', '__pycache__',
@@ -12,6 +13,15 @@ const MAX_RESULTS = 500
 
 function escapeRegex(str: string): string {
   return str.replace(/[.+^$()|[\]\\{}]/g, '\\$&')
+}
+
+function globPatternExplicitlyTargetsSilentLayer(pattern: string, requestedRoot: string): boolean {
+  if (classifyPath(pattern).silent) return true
+  const normalized = `${requestedRoot}/${pattern}`.replaceAll('\\', '/').replace(/\/+/g, '/')
+  const literalPrefix = normalized.split(/[*?{]/, 1)[0] ?? ''
+  const trimmed = literalPrefix.replace(/^\.\//, '').replace(/\/$/, '')
+  if (!trimmed) return false
+  return classifyPath(trimmed).silent
 }
 
 function globToRegex(pattern: string): RegExp {
@@ -59,6 +69,7 @@ async function walkDir(
   results: string[],
   root: string,
   filter: RegExp | undefined,
+  includeSilentMatches: boolean,
   visited = new Set<string>(),
 ): Promise<void> {
   if (results.length >= MAX_RESULTS) return
@@ -90,12 +101,14 @@ async function walkDir(
     }
 
     if (s.isSymbolicLink()) continue
+    const rel = relativePosix(root, fullPath)
+    const verdict = classifyPath(rel)
     if (s.isDirectory()) {
       if (EXCLUDE_DIRS.has(name)) continue
-      await walkDir(fullPath, results, root, filter, visited)
+      if (verdict.tier === 'L0_build') continue
+      await walkDir(fullPath, results, root, filter, includeSilentMatches, visited)
     } else if (s.isFile()) {
-      const rel = relativePosix(root, fullPath)
-      if (!filter || filter.test(rel)) {
+      if ((!verdict.silent || includeSilentMatches) && (!filter || filter.test(rel))) {
         results.push(rel)
       }
     }
@@ -155,8 +168,9 @@ Bad: glob(pattern="node_modules/**") (excluded by default)`,
 
     const regex = globToRegex(pattern)
     const gitignore = await GitignoreFilter.create(params.cwd)
+    const includeSilentMatches = globPatternExplicitlyTargetsSilentLayer(pattern, requestedRoot)
     const files: string[] = []
-    await walkDir(searchRoot, files, searchRoot, regex)
+    await walkDir(searchRoot, files, searchRoot, regex, includeSilentMatches)
 
     const matches = files
       .filter(f => !gitignore.isIgnored(params.cwd, join(searchRoot, f)))

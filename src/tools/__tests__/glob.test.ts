@@ -13,12 +13,17 @@ describe('GLOB_TOOL', () => {
     mkdirSync(join(testDir, 'src', 'components'), { recursive: true })
     mkdirSync(join(testDir, 'src', 'utils'), { recursive: true })
     mkdirSync(join(testDir, 'node_modules', 'pkg'), { recursive: true })
+    mkdirSync(join(testDir, '.codex'), { recursive: true })
+    mkdirSync(join(testDir, '.test-tmp'), { recursive: true })
     writeFileSync(join(testDir, 'src', 'app.ts'), '')
     writeFileSync(join(testDir, 'src', 'components', 'Button.tsx'), '')
     writeFileSync(join(testDir, 'src', 'components', 'Modal.tsx'), '')
     writeFileSync(join(testDir, 'src', 'utils', 'helpers.ts'), '')
     writeFileSync(join(testDir, 'src', 'style.css'), '')
     writeFileSync(join(testDir, 'README.md'), '')
+    writeFileSync(join(testDir, 'layout.log'), '')
+    writeFileSync(join(testDir, '.codex', 'hooks.json'), '')
+    writeFileSync(join(testDir, '.test-tmp', 'debug.json'), '')
     writeFileSync(join(testDir, 'node_modules', 'pkg', 'index.ts'), '')
   })
 
@@ -47,10 +52,24 @@ describe('GLOB_TOOL', () => {
     assert.ok(result.content.includes('src/utils/helpers.ts'))
   })
 
-  it('excludes node_modules', async () => {
-    const result = await GLOB_TOOL.execute(makeParams({ pattern: '**/*.ts' }))
+  it('excludes build/runtime/foreign attention noise from broad discovery', async () => {
+    const result = await GLOB_TOOL.execute(makeParams({ pattern: '**/*' }))
     assert.ok(!result.content.includes('node_modules'))
+    assert.ok(!result.content.includes('layout.log'))
+    assert.ok(!result.content.includes('.codex'))
+    assert.ok(!result.content.includes('.test-tmp'))
     assert.ok(result.content.includes('src/app.ts'))
+  })
+
+  it('keeps explicitly targeted silent-layer glob results visible while preserving project gitignore semantics', async () => {
+    const logResult = await GLOB_TOOL.execute(makeParams({ pattern: '*.log' }))
+    assert.ok(logResult.content.includes('layout.log'))
+
+    const foreignResult = await GLOB_TOOL.execute(makeParams({ pattern: '.codex/**' }))
+    assert.ok(foreignResult.content.includes('.codex/hooks.json'))
+
+    const ignoredResult = await GLOB_TOOL.execute(makeParams({ pattern: 'node_modules/**' }))
+    assert.ok(!ignoredResult.content.includes('node_modules/pkg/index.ts'))
   })
 
   it('limits to 500 results', async () => {
