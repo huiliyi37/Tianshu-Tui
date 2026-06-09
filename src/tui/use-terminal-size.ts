@@ -70,16 +70,25 @@ export function registerResizeClear(clear: () => void): () => void {
   return () => { if (resizeClear === clear) resizeClear = null }
 }
 
-const SETTLE_MS = 120 // coalesce a full drag into one trailing commit; instant on release
+const SETTLE_MS = 120 // trailing edge: coalesce the end of a drag into one clear+commit
 
 function onResize() {
   settling = true
+  // IMMEDIATE notify on every resize event — NOT debounced. The live-region
+  // height cap (capLiveTail in app.tsx) recomputes only when React re-renders;
+  // if we defer the re-render to the trailing edge, Ink's own resized() re-lays
+  // out the existing (old-size-capped) elements at the new smaller height first,
+  // overflowing the viewport and tripping Ink's fullscreen re-emit (whole history
+  // dumped to scrollback = duplicated conversation). getTerminalSizeSnapshot()
+  // caches by rows/cols, so useSyncExternalStore bails out when size is unchanged
+  // — notifying per-event is cheap and only re-renders on a real size change.
+  for (const cb of listeners) cb()
+  // Trailing edge: after the drag settles, clear under-erase residue (Ink only
+  // clears on width-decrease) and commit once more onto a clean screen.
   if (settleTimer !== null) clearTimeout(settleTimer)
   settleTimer = setTimeout(() => {
     settleTimer = null
     settling = false
-    // Wipe under-erase residue first (handles width-increase ghosts), then
-    // notify subscribers so the next commit redraws onto a clean screen.
     if (resizeClear) resizeClear()
     for (const cb of listeners) cb()
   }, SETTLE_MS)

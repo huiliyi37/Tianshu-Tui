@@ -54,12 +54,32 @@ describe('createThrottledResizeHandler (S14)', () => {
   })
 })
 
-// resize-ghost: two layered defenses.
-//  (1) isResizeSettling() — streaming timers (1s tick, 600ms moon, 2Hz fluency)
+// resize-ghost / resize-duplication: layered defenses.
+//  (1) IMMEDIATE notify on every resize event — so app.tsx's live-height cap
+//      (capLiveTail) re-trims to the new size before Ink's own resized() can
+//      overflow the viewport and trip the fullscreen re-emit (whole history
+//      dumped to scrollback = duplicated conversation). This is the correctness
+//      path and must NOT be debounced.
+//  (2) isResizeSettling() — streaming timers (1s tick, 600ms moon, 2Hz fluency)
 //      poll it and skip their mid-drag commit at an intermediate width.
-//  (2) registerResizeClear() — Ink only clears on width-DECREASE; on grow it
+//  (3) registerResizeClear() — Ink only clears on width-DECREASE; on grow it
 //      diffs against narrow-width output and leaves orphaned rows. We force a
 //      clear on the trailing edge for either direction.
+describe('immediate resize notify (cap-recompute correctness)', () => {
+  it('notifies subscribers synchronously on each resize event, not only at trailing edge', () => {
+    let notifies = 0
+    const unsubscribe = __subscribeTerminalSize(() => { notifies++ })
+    try {
+      process.stdout.emit('resize')
+      assert.equal(notifies, 1, 'first event must notify immediately (sync) for prompt re-trim')
+      process.stdout.emit('resize')
+      assert.equal(notifies, 2, 'each subsequent drag event must notify immediately too')
+    } finally {
+      unsubscribe()
+    }
+  })
+})
+
 describe('isResizeSettling (resize-ghost timer gate)', () => {
   it('is false at rest', () => {
     assert.equal(isResizeSettling(), false, 'no resize in flight → not settling')
@@ -75,7 +95,7 @@ describe('isResizeSettling (resize-ghost timer gate)', () => {
       process.stdout.emit('resize')
       assert.equal(isResizeSettling(), true, 'a drag in progress must mark settling=true')
 
-      // Keep dragging — still settling, no commit yet.
+      // Keep dragging — still settling, no trailing commit yet.
       process.stdout.emit('resize')
       await new Promise(r => setTimeout(r, 40))
       assert.equal(isResizeSettling(), true, 'still settling mid-drag')
@@ -90,14 +110,15 @@ describe('isResizeSettling (resize-ghost timer gate)', () => {
 })
 
 describe('registerResizeClear (width-increase ghost fix)', () => {
-  it('fires the registered clear on the resize trailing edge, before notify', async () => {
+  it('fires the registered clear once on the trailing edge, before the trailing notify', async () => {
     const order: string[] = []
     const unregister = registerResizeClear(() => order.push('clear'))
     const unsubscribe = __subscribeTerminalSize(() => order.push('notify'))
     try {
       process.stdout.emit('resize')
       await new Promise(r => setTimeout(r, 160))
-      assert.deepEqual(order, ['clear', 'notify'], 'clear must run before subscribers redraw')
+      // Immediate notify fires first (correctness), then trailing clear→notify.
+      assert.deepEqual(order, ['notify', 'clear', 'notify'], 'immediate notify, then clear before the trailing redraw')
     } finally {
       unsubscribe()
       unregister()
@@ -123,15 +144,16 @@ describe('registerResizeClear (width-increase ghost fix)', () => {
 // one module-level variable, so concurrent subscribers stomped each other and
 // only the last one's callback fired. The coordinator must fan out to ALL.
 describe('shared resize coordinator fan-out', () => {
-  it('notifies every subscriber on a single drag, not just the last', async () => {
+  it('notifies every subscriber on a single drag (immediate + trailing), not just the last', async () => {
     let a = 0, b = 0
     const ua = __subscribeTerminalSize(() => { a++ })
     const ub = __subscribeTerminalSize(() => { b++ })
     try {
       process.stdout.emit('resize')
       await new Promise(r => setTimeout(r, 160))
-      assert.equal(a, 1, 'first subscriber must be notified')
-      assert.equal(b, 1, 'second subscriber must be notified')
+      // One immediate notify + one trailing notify = 2 per subscriber.
+      assert.equal(a, 2, 'first subscriber must get immediate + trailing notify')
+      assert.equal(b, 2, 'second subscriber must get immediate + trailing notify')
     } finally {
       ua()
       ub()

@@ -1388,6 +1388,19 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   // every OTHER live element (thinking box, running tool cards, ground zone) —
   // measured live here at render time — and trim the streaming tail to what's left.
   const liveCols = process.stdout.columns ?? 80
+  // Live rows — NOT the debounced `termRows` from useTerminalSize(). The cap that
+  // keeps the live region under the viewport MUST track the terminal's real
+  // current height, or Ink's fullscreen re-emit fires. useTerminalSize() only
+  // updates React state on the resize *trailing edge* (120ms debounce, for
+  // cosmetic re-render coalescing); during a shrink drag Ink's own resized()
+  // already re-renders at the new small height while `termRows` still holds the
+  // old larger value → liveCapRows computes too large → capLiveTail under-trims →
+  // live region exceeds the smaller `rows` → `lastOutputHeight >= rows` trips the
+  // `\x1B[2J\x1B[H + fullStaticOutput` path, dumping the whole history into
+  // scrollback every frame (= duplicated conversation). Reading live here keeps
+  // the cap correct mid-drag regardless of the debounce. (liveCols already reads
+  // live columns — this makes rows consistent.)
+  const liveRows = process.stdout.rows ?? termRows
   const liveGroundRows = 7 // GlanceBar(rule+line) + InputBar(bordered, +2) + margin
   const liveChromeRows = estimateLiveChromeRows({
     columns: liveCols,
@@ -1395,7 +1408,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     streamingThinking,
     liveTools,
   })
-  const liveCapRows = Math.max(2, termRows - liveChromeRows.totalRows - 2)
+  const liveCapRows = Math.max(2, liveRows - liveChromeRows.totalRows - 2)
   const displayStreamingText = streamingText ? capLiveTail(streamingText, liveCols, liveCapRows) : streamingText
 
   // Exactly one waiting indicator may render. Two used to overlap during
