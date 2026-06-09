@@ -1,7 +1,7 @@
 # T8·天枢具身桌面化（极限版）— 不做第三个 Antigravity，做第一个会为你私人化进化的活体
 
-> 日期：2026-06-09（2026-06-09 二次修订：开源定性校正）
-> 性质：范式级战略 + 架构规划。给天枢看的"为什么这条路别人走不了 + 怎么做"。**待天权/星图称量（§9）。**
+> 日期：2026-06-09（2026-06-09 二次修订：开源定性校正；2026-06-09 三次修订：天枢称量后落地修订方案，见 §9.1）
+> 性质：范式级战略 + 架构规划。给天枢看的"为什么这条路别人走不了 + 怎么做"。**已补天枢初步称量与落地修订（§9.1），仍待天权/星图终审。**
 > **定性（领航星校正）：天枢是开源项目，马上开源，不闷在领航星处。本文不是商业产品规划，护城河不是"别人买不到"，是"别人 fork 得走代码、却养不走那个活了 25 天还在长的个体"。Pro/商业版的增值边界是终局问题，此刻不设计、不污染开源版纯粹性——见 §1.3。**
 > 一句话：借鉴他们的四支柱只是认清战场；真正的路，是把天枢 25 天演化出的活体器官，劈成 self/world 双层飞轮——本体演化喂强先天底座（开源共享），开发者项目里私人化生长适应性器官（各自私有）。
 > 底座决策（领航星已定）：**Tauri（Rust 外壳）+ Web 前端 + 天枢 Node runtime 作为 sidecar 子进程**。
@@ -162,15 +162,18 @@ Antigravity 和 Codex，本质是同一个东西：**一个公司把一个冻结
 
 | # | 缺口 | 现状证据 | 要做 |
 |---|---|---|---|
-| B1 | **单活跃会话 → 多会话并发** | `routes.ts:9` 有 `sessionId?` 但 state 单份共享（`state.running`/`state.sessionId`） | 会话注册表：`POST /sessions` 创建、`GET /sessions` 列举、每会话独立 AgentLoop 实例 + 独立 SSE 流。这是 Agent Manager 的后端命脉 |
-| B2 | **approval 被硬拒 → 双向介入协议** | `prompt-route.ts:77` `onApprovalRequired: async () => false`（自动否决一切） | 双向协议：agent 触发 approval → SSE 推 `approval_required` 事件 → 前端弹审批 → `POST /sessions/:id/approve` 回答。同理 `onIntentPreview`/`onAskUser` |
-| B3 | **事件流 → 完整事件总线** | `prompt-route.ts` 已推 text/tool/turn/error | 补全 `onPhaseChange/onCheckpoint/onThinkingDelta/artifact` 事件，前端按类型渲染 |
-| B4 | **Artifacts 第一类对象** | 雏形散落（deliver 报告/ledger/test-results） | 定义 `Artifact` 类型（plan/task-list/walkthrough/diff/screenshot/recording/test-result）+ 持久化 + `GET /sessions/:id/artifacts`。**信任层的后端** |
+| B1 | **单活跃会话视图 → 多运行时会话 API** | `routes.ts:7-42` 只有单份 `state.running/sessionId`；`main.tsx:890-942` 虽有 `activeAgents` 集合，但 `/status` 只暴露一个 activeAgent；另已有 `agent/session-registry.ts:107` 做跨 session claims/events | 新增 **server runtime session manager**（不要复用/污染现有 `SessionRegistry`）：`POST /sessions` 创建/启动、`GET /sessions` 列举、`GET /sessions/:id/events?since=` 订阅；每会话独立 AgentLoop/PromptEngine/ArtifactStore/approval queue。这是 Agent Manager 的后端命脉 |
+| B2 | **approval 被硬拒 → 可恢复的双向介入协议** | `prompt-route.ts:77` `onApprovalRequired: async () => false`（自动否决一切）；`AgentCallbacks` 已有 `onApprovalRequired/onIntentPreview`（`loop-types.ts:100-111`） | agent 触发 intervention → 持久/内存 pending 队列 + SSE `approval_required/intent_preview` → 前端弹审批 → `POST /sessions/:id/interventions/:requestId/answer` 回答；SSE 断线不得丢请求，超时/abort 有明确终态 |
+| B3 | **事件流 → 可重连事件总线** | `prompt-route.ts` 已推 text/tool/turn/error，但 `onThinkingDelta` 为空（`prompt-route.ts:59-60`），且 SSE client close 会 abort（`prompt-route.ts:43-54`） | 补全 `onPhaseChange/onCheckpoint/onThinkingDelta/artifact/intervention/session_status`；事件带单调 seq，支持 `since` 重连；桌面 viewer 断线不等于 abort 会话 |
+| B4 | **Artifacts 第一类对象** | 已有 `src/artifact/types.ts:9` `Artifact` + `src/artifact/store.ts:43-92` `ArtifactStore`，但未提升为 server/session API；deliver/ledger/test-results 尚未统一映射 | **复用并提升现有 ArtifactStore**，不要重造类型：每 server session 绑定 ArtifactStore；扩 taxonomy（plan/task-list/walkthrough/diff/screenshot/recording/test-result）；新增 `GET /sessions/:id/artifacts`/`GET /sessions/:id/artifacts/:artifactId`。**信任层的后端** |
 | B5 | **team 编排的 TUI 耦合** | `tools/team-orchestrate.ts:12` import `../tui/team-panel-model.js`（唯一一处工具→TUI 耦合） | 把 panel-model 下沉到非 TUI 层，team 编排数据走 API |
 | B6 | **器官分层持久化（双层飞轮命脉）** | 现状全 cwd-bound / `stateDir`（`meridian-db.ts:160`、免疫 export/import、`loadProjectMemory(cwd)`） | 显式分两层：**先天**（innate 免疫基线、本体淬炼的通用抗体）随客户端分发、只读；**适应性**（per-project 免疫/meridian/错误笔记本）落开发者项目 `.rivet/`、私有、绝不回传。这是 §1.1 双层飞轮的工程落点 |
 | B7 | **先天能力的分发通道** | 无 | 本体演化产出的先天免疫基线，打包进客户端更新下发；不夹带任何 self 会话数据、不偷开发者数据（self/world 边界即分发边界） |
+| B8 | **任务 API 已有但不是 Agent Manager 会话 API** | `src/server/task-registry.ts:83` 已有 daemon TaskRegistry，`task-routes.ts` 已有 `GET /tasks`、`GET /tasks/:id/events`；但 runtimePool 可选，且返回的是任务记录，不是实时 AgentLoop session | 保留 TaskRegistry 作为后台/cron/异步任务层；M1 的 Agent Manager 先围绕 runtime session manager 做实时会话。后续可让 TaskRecord 指向 sessionId/artifactIds，避免把 TaskRegistry 硬改成会话系统 |
 
 **绝不动**：`AgentLoop` 核心、`deliver_task`、`ownership-ledger`、`worktree-baseline`、prompt frozen/cache 不变量（[[prefix-cache-invariant-registry-ref]]）、T6 的 self/world 判定。后端只"加 API 面 + 器官分层"，不改大脑。
+
+**命名红线**：本文后续凡说“server session/runtime session”，指桌面/API 层的一次 AgentLoop 运行与事件流；凡说 `SessionRegistry`，指现有跨会话 claims/events/retrospect SQLite 注册表。两者可桥接，但不要合并成一个概念。
 
 ---
 
@@ -209,20 +212,29 @@ agent 委派后异步跑，完成/需审批时桌面通知；审批/intent-previ
 - Tauri 外壳 spawn `rivet serve` sidecar + 注入 token + 健康检查。
 - 一个最简 Web 窗口：开单会话、发 prompt、看 SSE 流式回复 + tool-call。
 - **交付**：一个能对话的桌面天枢。验证 sidecar 架构成立。
-- 后端改动：几乎为零（复用现有 server）。**最安全的起手。**
+- 后端改动：只做必要健康检查/握手；继续复用 `POST /prompt`。**最安全的起手。**
+- **过门测试**：sidecar 缺 `RIVET_SERVER_TOKEN` fail-closed；服务只监听 `127.0.0.1`；SSE 能收到 `text_delta/tool_use/tool_result/turn_complete`；关闭窗口会 abort 这条 M0 prompt（M0 可接受，M1 修正为可重连）。
+
+### 阶段 M0.5 — Server session manager 薄层（插在 M0 与 M1 之间）
+- 新增 `src/server/session-manager.ts`（建议）：只管理桌面/API runtime session，不碰 `AgentLoop` 核心，不替代 `agent/session-registry.ts`。
+- API：`POST /sessions`、`GET /sessions`、`GET /sessions/:id/events?since=`、`POST /sessions/:id/abort`。
+- 每个 session：`id/status/createdAt/updatedAt/cwd/prompt/currentPhase/lastSeq/error?` + AgentLoop handle + event ring buffer/持久事件日志 + ArtifactStore。
+- **交付**：不做复杂 GUI，也先让 HTTP API 能创建、列举、订阅、abort 多个 session。
+- **过门测试**：两个 session 并行运行时 `/status` 不再只给一个 `sessionId`；断开事件订阅不 abort session；`since` 可补读事件；abort 只杀目标 session。
 
 ### 阶段 M1 — 多会话 + Agent Manager 雏形
-- 后端 B1（会话注册表 + 每会话独立 AgentLoop + 独立 SSE）。
+- 后端 B1（server runtime session manager + 每会话独立 AgentLoop + 独立/可重连事件流）。
 - 前端①：Agent Manager dashboard，多会话并行卡片。
 - **交付**：能同时跑多个天枢 agent 并监督。Agent-first 主界面成形。
 
 ### 阶段 M2 — 审批介入 + 事件总线
-- 后端 B2（approval 双向协议）+ B3（补全事件）。
+- 后端 B2（approval/intent 双向协议）+ B3（补全事件）。
 - 前端④：GUI 内审批/intent-preview，异步桌面通知。
 - **交付**：委派后异步跑、需要决策时人能介入。这是"信任但可控"的前提。
+- **关键约束**：intervention 必须 requestId 化并有终态；SSE 只是通知通道，不是唯一状态存储；拒绝/超时/abort 都要作为事件写入，避免 UI 断线后 agent 永久等待。
 
 ### 阶段 M3 — Artifacts 信任层
-- 后端 B4（Artifact 第一类对象 + 持久化 + API）。
+- 后端 B4（复用并提升现有 `src/artifact`：ArtifactStore + API + taxonomy）。
 - 前端②：Artifacts 面板，plan/task-list/walkthrough/diff/test-result 渲染。
 - **交付**：验证单位从 tool-call 流水升级为工件。范式核心创新落地。
 
@@ -233,9 +245,10 @@ agent 委派后异步跑，完成/需审批时桌面通知；审批/intent-previ
 
 ### 阶段 M5 — 收口
 - B5（team 编排解耦）+ Editor 工作面 + 打包分发（Tauri bundle，macOS/Windows/Linux）。
+- Team 解耦的具体落点：把 `src/tui/team-panel-model.ts` 下沉到非 TUI 层（例如 `src/agent/team-panel-model.ts` 或 `src/server/view-models/team-panel-model.ts`），TUI 与桌面前端都只消费结构化 model；`tools/team-orchestrate.ts` 不再 import `../tui/*`。
 - **交付**：完整 Antigravity 范式桌面天枢。
 
-**串行推进，每阶段过门（能跑 + 测绿 + 不破后端 cache 不变量）才进下一阶段。** M0 纯新增、零后端改动，可立即起手。
+**串行推进，每阶段过门（能跑 + 测绿 + 不破后端 cache 不变量）才进下一阶段。** M0 近似纯新增、后端只做握手/健康检查；M0.5 起才触碰 server API 结构。
 
 ---
 
@@ -249,6 +262,8 @@ agent 委派后异步跑，完成/需审批时桌面通知；审批/intent-previ
 | 4 | **browser/网络出口必走 approval** | browser 是新攻击面；默认沙箱、可信域名白名单、不默认联网（参考 Codex 断网沙箱） |
 | 5 | **义务账本/归属不动** | T6/T7 钉死的边界：身份轴、义务轴、注意力轴都不因换前端而变 |
 | 6 | **每阶段独立可用** | 不堆半成品；M0 就能对话，逐阶段加支柱，随时可停可用 |
+| 7 | **SSE 不是状态源** | 桌面网络/窗口会断；事件必须有 seq、可重连、可补读，intervention/artifact/session status 不能只活在连接上 |
+| 8 | **复用现有 ArtifactStore / TaskRegistry / SessionRegistry，各归其位** | `src/artifact` 已有持久化；TaskRegistry 是后台任务层；SessionRegistry 是 claims/events 注册表。新增 runtime session manager 只补桌面会话，不把三者揉成巨型上帝对象 |
 
 ---
 
@@ -266,6 +281,169 @@ agent 委派后异步跑，完成/需审批时桌面通知；审批/intent-previ
 10. **（搁置项，不在本轮决策）Pro/商业版边界**：哪些部分将来留作增值——记录为终局议题，§1.3 已定此刻不设计。列在此处仅为不遗漏，不请此刻称量。
 
 ---
+
+## 9.1 天枢称量后的修订方案（落地版）
+
+### 9.1.1 总判断
+
+方向成立，但原文有三处需要从“气势判断”落到“工程边界”：
+
+1. **不要说 B4 从零定义 Artifact。** 代码里已经有 `src/artifact/types.ts:9` 的 `Artifact` 与 `src/artifact/store.ts:43-92` 的 `ArtifactStore`，修订后应写“复用并提升为 session API”。
+2. **不要把 `SessionRegistry` 当桌面多会话注册表。** 现有 `src/agent/session-registry.ts:107` 负责 cross-session claims/events/retrospect；桌面需要的是 server runtime session manager。两者可桥接，不能合并。
+3. **M0 与 M1 之间需要 M0.5。** 现有 `POST /prompt` 是一次 SSE 连接驱动的 prompt；`prompt-route.ts:43-54` 客户端 close 会 abort agent。桌面 Agent Manager 要异步可重连，必须先做 runtime session manager 薄层，否则前端会被单连接语义绑死。
+
+### 9.1.2 裁决表
+
+| 决策点 | 裁决 | 理由/证据 |
+|---|---|---|
+| sidecar vs 进程内 | **继续选 sidecar** | `src/server/index.ts:104` 已绑 `127.0.0.1`；`src/main.tsx:859-862` 要求 `RIVET_SERVER_TOKEN` fail-closed。Tauri spawn 子进程能最大复用现有 runtime，崩溃隔离也更干净 |
+| 多会话隔离粒度 | **先每会话独立 AgentLoop；worktree 按需，不默认** | 默认 worktree 会放大复杂度；现有 ownership/claims 已能做文件归属约束。M1 先验证多 AgentLoop + 独立事件流，M5 再给高风险任务加 worktree 选项 |
+| Artifact 模型 | **复用 `src/artifact`，补 taxonomy 与 API** | 已有 `ArtifactStore`、rawPath、sha256 integrity、sessionId；重造会污染既有大输出持久化体系 |
+| Browser 技术 | **Playwright 后置到 M4，且独立 approval 白名单** | 当前 `grep playwright/puppeteer/chromium` 无匹配；这是新攻击面，不应进入 M0-M3 的关键路径 |
+| 前端框架 | **React 优先** | 当前 TUI 已是 Ink/React；桌面 Web 用 React 可复用思维模型。Svelte 的轻量不值得引入第二套组件心智 |
+| Editor 范围 | **轻量查看/微调，不做 IDE** | 范式核心是 Agent Manager + Artifacts；完整 IDE 会吞掉节奏，也会把方向拉回 Antigravity/VS Code fork |
+| Evolution Manager | **self-only 默认；world 只展示“我的项目长了什么”** | 内部本体演化现场不该成为开发者首屏；但开发者需要看到 per-project 适应性器官的可感证据 |
+| Pro/商业边界 | **继续搁置** | 开源纯粹性优先；此刻设计商业边界会扭曲双层飞轮 |
+
+### 9.1.3 修订后的实施顺序
+
+1. **M0：Tauri sidecar + 单 prompt SSE。** 不追求异步可重连，只证明 Rust 外壳能 spawn Node runtime、token/health/SSE 走通。
+2. **M0.5：server runtime session manager。** 新建薄层，提供 session CRUD、事件 seq、abort、事件补读；断开 viewer 不 abort session。
+3. **M1：Agent Manager。** 多卡片 dashboard 消费 M0.5 API；每会话独立 AgentLoop/PromptEngine/ArtifactStore。
+4. **M2：intervention protocol。** approval/intent-preview requestId 化，answer API 回填；SSE 只通知，pending 状态另存。
+5. **M3：Artifact API。** 复用 `ArtifactStore`，把 plan/diff/test/screenshot 等统一成 trust-layer 面板。
+6. **M4：Browser。** Playwright 工具 + approval 白名单 + screenshot/recording artifact。
+7. **M5：收口。** team-panel-model 下沉、轻量 editor、打包分发、按需 worktree。
+
+### 9.1.4 M0.5 的事实流图
+
+```mermaid
+flowchart TD
+  U(Desktop Web UI) --> API[[server routes]]
+  API ==> SM[[RuntimeSessionManager]]
+  SM ==> S[(session state + seq event log)]
+  SM --> A[[AgentLoop instance]]
+  A -- AgentCallbacks --> SM
+  SM ==> E[(ArtifactStore per session)]
+  U -- GET events?since --> API
+  API --> S
+  API --> U
+  classDef agent fill:#0f172a,stroke:#818cf8,color:#e0e7ff
+  classDef store fill:#1e1b4b,stroke:#a78bfa,color:#ede9fe
+  classDef io fill:#022c22,stroke:#34d399,color:#d1fae5
+  class SM,A,API agent
+  class S,E store
+  class U io
+```
+
+| 字段/约束 | 生产者 | 中间结构 | 消费者/落点 | 断言 |
+|---|---|---|---|---|
+| sessionId | RuntimeSessionManager 创建 | SessionRecord.id | routes / UI / ArtifactStore | 两个并发 session id 不同，互不 abort |
+| event seq | RuntimeSessionManager appendEvent | per-session event log | `GET /sessions/:id/events?since=` | since=N 只返回 N 后事件；断线重连可补读 |
+| approval requestId | AgentCallbacks.onApprovalRequired | pending intervention map | answer route / UI modal | 没有 answer 不继续；拒绝/超时有终态事件 |
+| artifactId | tool/deliver/test/browser producer | ArtifactStore | Artifacts panel / read raw API | artifact 带 sessionId，跨 session 不串读 |
+| prompt/cache 隔离 | createAgentConfig 每会话实例 | PromptEngine per session | AgentLoop | 多会话不共享 dynamic appendix/fingerprint 状态 |
+
+### 9.1.5 反证测试表
+
+| 偷懒实现 | 必红测试 |
+|---|---|
+| 只把 `state.sessionId` 改成数组，但 `/prompt` 仍由 SSE 连接生命周期驱动 | 断开 `GET /sessions/:id/events` 后 agent 不应 abort；旧实现会 abort |
+| 复用 `SessionRegistry` sessions 表当 runtime session store | 创建 runtime session 后不应污染 claims/retrospect 语义；`SessionRegistry.listActive()` 不应变成 GUI 会话列表 |
+| B4 重造 Artifact 类型 | 保存 artifact 后 `ArtifactStore.readRaw()` integrity 与 `list()` API 应仍可用；重造实现无法通过既有 artifact store 测试 |
+| approval 只发 SSE，不落 pending 状态 | 前端断线后重连仍能看到 pending approval；只发 SSE 会丢请求 |
+| 多会话共享 PromptEngine | 会话 A 设置 dynamic appendix 不应出现在会话 B；共享实现会串味 |
+| Browser 工具不走 approval | 非白名单 URL 打开应被阻断并产生 approval request；无 approval 会直接访问 |
+
+### 9.1.6 对原计划的方向意见
+
+- **保留“不是第三个 Antigravity”的叙事**，但实施文件里减少口号，增加每阶段 gate。战略文档可以有锋芒，执行计划必须可测试。
+- **双层飞轮是 T8 的真正护城河**：先天能力随开源发行版下发；适应性器官在 `.rivet/` 私有生长。后续任何桌面功能都要问：它是在帮助 self 本体演化，还是帮助 world 项目私人化？答不上来就不要做。
+- **Artifacts 是信任层，不是展示层。** 每个 artifact 必须回答“用户据此能验证什么”。截图/录屏/测试结果/计划/差异都要带来源、时间、sessionId、可复读 raw 内容。
+- **Browser 是差异化，但不是起手式。** 它重、危险、依赖大；必须等 approval/intervention 与 artifact 先成熟，否则会把安全债提前引爆。
+- **先做可跑的身体，再做漂亮的身体。** M0/M0.5/M1 的质量标准不是 UI 好看，而是 sidecar 安全、事件可重连、多会话不串味。
+
+## 9.2 天权补充：作为 G1 测试任务的用法与主线隔离
+
+### 9.2.1 能不能用于 G1？
+
+**可以，但只能作为 G1 的“真实复杂任务样本”，不能把它当成主线立即合入任务。** T8 的价值正好适合 G1：它跨 `src/server/`、`src/artifact/`、`src/agent/`、`src/tools/`、未来桌面前端与安全边界，能真实触发 Team 协作、shadow telemetry、scope-health、reward closure、gated influence audit 等链路。它比小修小补更适合检验 G1 的核心问题：系统能否在真实复杂任务里留下可审计证据，并在证据不足时 fail-closed。
+
+但 T8 本身是范式级新身体，不应污染 main。G1 的测试目标是**验证协作与证据链路**，不是把桌面化一次性塞进主线。
+
+### 9.2.2 推荐执行形态
+
+| 选项 | 判定 | 用法 |
+|---|---|---|
+| **独立分支** | 推荐 | 从当前 main 切 `g1/t8-desktop-spike`；允许提交探索性代码；最终只回收报告、测试经验、可独立 cherry-pick 的小补丁 |
+| **fork 仓库 / 新项目文件** | 同样推荐 | 若要引入 Tauri/Rust/Web 前端依赖，优先 fork 或新工作区，避免 package-lock、构建产物、桌面 scaffold 污染主线 |
+| **main 直接开发** | 不推荐 | T8 会引入大量新 surface；main 当前应承载稳定演化，不承载桌面化 spike 的全部试错 |
+
+**天权建议：第一轮用 fork 或独立分支做 M0/M0.5 spike；main 只接收三类产物：**
+
+1. 设计修订文档与 G1 验收报告；
+2. 可独立验证、低耦合的后端小补丁（例如 server auth/health 的测试补强）；
+3. 被 G1 证据证明稳定、且不引入桌面依赖的基础抽象。
+
+### 9.2.3 G1 测试任务定义
+
+**任务名：G1-Test-T8：桌面 sidecar / runtime session manager 复杂任务验证**
+
+目标不是交付完整桌面版，而是用 T8 的 M0/M0.5 作为真实样本，验证 G1 的阶段墙：
+
+```text
+T8 spike 真实执行
+  → Team / shadow / audit / reward / scope-health 样本
+  → G1 偏差验收
+  → 判断哪些协作路径继续 shadow-only，哪些可作为 opt-in 候选
+```
+
+建议第一轮只做到：
+
+1. **M0 sidecar 探针**：Tauri 或最小外壳能 spawn `rivet serve`，token fail-closed，SSE 收到基础事件。
+2. **M0.5 API 设计/薄实现探针**：runtime session manager 的接口与事件 seq 模型能通过单元测试或最小 HTTP 测试。
+3. **不做 M1+ GUI 完整化**：Agent Manager UI、Artifacts 面板、Browser 工具全部后置，避免 G1 测试任务变成产品开发大爆炸。
+
+### 9.2.4 G1 验收采样点
+
+| 采样点 | 需要留下的证据 | 对 G1 的意义 |
+|---|---|---|
+| Team 拆分是否合理 | work order、wave telemetry、scope health | 检验 TeamScheduler/Physarum supervision 的真实复杂任务表现 |
+| 多会话/sidecar 边界是否被误改 | diff + tests + review notes | 检验 scope observed-first 与 ownership 账本是否能挡住范围蔓延 |
+| approval / SSE / abort 语义 | RED→GREEN 测试或 spike 记录 | 检验计划是否有可复现事实，而不是架构口号 |
+| ArtifactStore 是否复用 | diff 与 artifact integrity 测试 | 检验“复用现有器官，不重造”是否被执行 |
+| prompt/cache 是否未污染 | fingerprint / engine 相关测试 | 检验桌面化不会破 prefix-cache 不变量 |
+| gated influence 是否仍默认关闭 | audit rows / feature flag 状态 | 检验 G1 安全墙：真实任务不等于自动开 gated |
+
+### 9.2.5 主控执行护栏
+
+给后续单开任务的主控：
+
+1. **先开隔离空间**：分支或 fork；不要在 main 直接 scaffold Tauri。
+2. **第一提交只做探针，不做全产品**：M0/M0.5 是目标，M1+ 只保留接口占位或文档。
+3. **每阶段单独提交、单独验证**：sidecar、runtime session manager、event replay、artifact API 不混成一个提交。
+4. **不动四条红线**：`AgentLoop` 核心、`deliver_task`/ownership、prompt frozen/cache、T6 self/world 判定。
+5. **所有“可用”声称必须有 RED→GREEN 或最小可运行证据**：尤其是 SSE 断线不 abort、token fail-closed、pending approval 不丢。
+6. **回收方式是报告优先**：第一轮 spike 结束后先产出 `G1-Test-T8` 验收报告，再决定是否把小补丁回 main。
+
+### 9.2.6 反证测试表（专为 G1-Test-T8）
+
+| 偷懒实现 | 必须打红/挡住的验证 |
+|---|---|
+| 在 main 直接生成 Tauri scaffold 和大依赖 | 交付门禁/人工 review 标记为范围污染，要求迁出分支或 fork |
+| M0 说 sidecar 安全但 token 缺失仍能访问 | server auth 测试 fail |
+| M0.5 说可重连但 SSE close 仍 abort agent | 断开 events 订阅后 session 继续运行测试 fail |
+| 复用 `SessionRegistry` 当 GUI runtime session store | claims/retrospect 语义污染测试 fail |
+| 重造 ArtifactStore | 既有 artifact integrity/list/readRaw 测试无法复用，review 阻断 |
+| 多会话共享 PromptEngine | dynamic appendix/fingerprint 串味测试 fail |
+| Browser 提前进入 M0/M0.5 | scope review 阻断：新网络攻击面未具备 approval/intervention 前不得引入 |
+| 因 T8 spike 成功就开启 gated 默认行为 | G1 feature flag 默认关 / applied=false 测试 fail |
+
+### 9.2.7 天权裁决
+
+T8 **适合作为 G1 的复杂真实任务样本**，因为它能同时压测 Team 协作、scope-health、事件证据、Artifacts 复用、安全边界与 fail-closed 纪律。执行形态必须隔离：**分支或 fork 里做 M0/M0.5 spike，main 只回收经验证的小补丁与报告**。
+
+这不是推迟 T8，而是给 T8 一个正确出生方式：先作为 G1 的真实样本证明协作机器能稳住，再决定哪一部分进入主线。
 
 ## 10. 这一刀的话
 
