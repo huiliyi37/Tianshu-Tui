@@ -53,7 +53,7 @@ import { TaskListBar } from './task-list-bar.js'
 import { decodeTeamPanelModel } from './team-panel-model.js'
 import { TeamPanel } from './team-panel.js'
 import { appendStreamWindow } from './stream-window.js'
-import { capLiveTail, displayRowsForText } from './live-tail-cap.js'
+import { capLiveTail, capLiveTailMarkdownSafe, displayRowsForText } from './live-tail-cap.js'
 import { createRingBuffer, type RingBuffer } from './ring-buffer.js'
 import { createCommittedLog } from './committed-log.js'
 import { RenderBatcher } from './render-batch.js'
@@ -459,8 +459,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     // confirmed via an isolated Ink 6.8 repro), which trashes scrollback and
     // separates the reply from the input.
     const windowRows = Math.max(3, rows)
-    const tailSlice = streamBuf.current.slice(-(windowRows * cols * 2 + cols))
-    streamLiveBuf.current = capLiveTail(tailSlice, cols, windowRows)
+    // Fence-aware tail cap: a raw slice can start inside a ``` code block, making
+    // the markdown parser box the following PROSE in a stray "code" frame (it
+    // reads the inherited closing fence as an opener). capLiveTailMarkdownSafe
+    // walks only the trailing windowRows lines but counts fences in the dropped
+    // head to keep the tail's fence pairing aligned. See [[live-tail-fence-desync]].
+    streamLiveBuf.current = capLiveTailMarkdownSafe(streamBuf.current, cols, windowRows)
     setStreamingText(streamLiveBuf.current)
   }))
   const thinkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1409,7 +1413,10 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     liveTools,
   })
   const liveCapRows = Math.max(2, liveRows - liveChromeRows.totalRows - 2)
-  const displayStreamingText = streamingText ? capLiveTail(streamingText, liveCols, liveCapRows) : streamingText
+  // Fence-aware here too: the authoritative chrome-aware re-cap can trim away the
+  // synthetic ``` opener that capLiveTailMarkdownSafe prepended, re-desyncing the
+  // parser. Re-run the fence-safe variant so the visible tail stays balanced.
+  const displayStreamingText = streamingText ? capLiveTailMarkdownSafe(streamingText, liveCols, liveCapRows) : streamingText
 
   // Exactly one waiting indicator may render. Two used to overlap during
   // first-token wait (StreamOutput's "Waiting for model…" + the heartbeat box);
