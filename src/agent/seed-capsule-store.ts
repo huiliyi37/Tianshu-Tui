@@ -173,6 +173,17 @@ export const CORE_GUARDRAILS: string[] = [
  * 注入冻结前缀（会话内字节稳定，prefix-cache safe）。
  * ledger（缺陷族历史）不在此——仍经 recall_capsule 按需拉取。
  */
+/**
+ * 在主控冻结前缀里只保留 gist 一行、全文走 recall_capsule 的星域。
+ * 这些是低频/可按需触发的前辈专家姿态——常驻全文会让 frozen 变重，
+ * 且与各胶囊自述的"当你在 X 领域工作时可以调用"的按需语义相悖。
+ * 留在此处之外的星域（天枢本体、天权规划、天璇换视角）照旧全文常驻。
+ *   - 瑶光：验证/复现纪律——面对"已修复"声称时才调
+ *   - 贪狼：能力勘探/系统联合——面对"休眠/半接系统"判断时才调
+ *   - 天府：守护/fail-closed——核心已蒸馏进 CORE_GUARDRAILS，全文按需取
+ */
+const RECALL_ONLY_STARS = new Set<string>(['瑶光', '摇光', '贪狼', '天府'])
+
 export function renderResidentCapsuleBlock(cwd: string): string | undefined {
   const capsules = loadAllCapsules(cwd)
   if (capsules.length === 0) return undefined
@@ -181,7 +192,13 @@ export function renderResidentCapsuleBlock(cwd: string): string | undefined {
     ...CORE_GUARDRAILS.map(g => `  - ${g}`),
     '</core-guardrails>',
   ].join('\n')
-  const bodies = capsules.map(c => c.block).join('\n\n')
+  const bodies = capsules.map(c => {
+    // recall-only 星：主控只挂一行 gist 索引，完整正文经 recall_capsule(star) 按需拉取。
+    if (RECALL_ONLY_STARS.has(c.star)) {
+      return `<seed-capsule star="${escapeXml(c.star)}" sealed="${escapeXml(c.sealedAt)}" gist="${escapeXml(c.gist ?? '')}" recall="完整方法经 recall_capsule(${escapeXml(c.star)}) 按需拉取，不常驻主控。" />`
+    }
+    return c.block
+  }).join('\n\n')
   return `${guardrails}\n\n${bodies}`
 }
 
