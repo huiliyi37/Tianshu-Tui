@@ -1,6 +1,8 @@
 import { APPLY_PATCH_TOOL } from './apply-patch.js'
 import { IMPORT_RESOURCE_TOOL } from './import-resource.js'
 import { FILE_INFO_TOOL } from './file-info.js'
+import { CREATE_DOCUMENT_TOOL } from './create-document.js'
+import { CREATE_SPREADSHEET_TOOL } from './create-spreadsheet.js'
 import { EXPORT_FILE_TOOL } from './export-file.js'
 import { OPEN_PATH_TOOL } from './open-path.js'
 import { BASH_TOOL } from './bash.js'
@@ -18,12 +20,10 @@ import { READ_SECTION_TOOL } from './read-section.js'
 import { RELATED_TESTS_TOOL } from './related-tests.js'
 import { REPO_MAP_TOOL } from './repo-map.js'
 import { RUN_TESTS_TOOL } from './run-tests.js'
-import { SANDBOX_EXEC_TOOL } from './sandbox-exec-tool.js'
 import { TODO_TOOL } from './todo.js'
 import { ToolRegistry } from './registry.js'
 import type { Tool } from './types.js'
 import { WEB_FETCH_TOOL } from './web-fetch.js'
-import { WEB_SEARCH_TOOL } from './web-search.js'
 import { WRITE_FILE_TOOL } from './write-file.js'
 
 export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry {
@@ -34,6 +34,8 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(WRITE_FILE_TOOL)
   registry.register(EXPORT_FILE_TOOL)
   registry.register(OPEN_PATH_TOOL)
+  registry.register(CREATE_DOCUMENT_TOOL)
+  registry.register(CREATE_SPREADSHEET_TOOL)
   registry.register(PLAN_CLOSE_TOOL)
   registry.register(PLAN_SUBMIT_TOOL)
   registry.register(BASH_TOOL)
@@ -49,10 +51,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(INSPECT_PROJECT_TOOL)
   registry.register(REPO_MAP_TOOL)
   registry.register(RELATED_TESTS_TOOL)
-  registry.register(WEB_SEARCH_TOOL)
   registry.register(READ_SECTION_TOOL)
-  registry.register(SANDBOX_EXEC_TOOL)
-  registry.register(IMPORT_RESOURCE_TOOL)
   registry.register(FILE_INFO_TOOL)
   for (const tool of extraTools) registry.register(tool)
   return registry
