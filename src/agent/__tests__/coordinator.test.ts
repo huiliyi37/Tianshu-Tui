@@ -564,6 +564,67 @@ describe('DelegationCoordinator', () => {
     assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
   })
 
+  it('scope-health history vetoes gated tier influence even with sufficient reward evidence', async () => {
+    const history = modelTierRows('cheap', 'cheap-flash', 0.9)
+    const selectedModels: string[] = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: [
+        ...cards,
+        { model: 'cheap-flash', toolUseReliability: 0.45, jsonStability: 0.45, editSuccessRate: 0.45, testRepairRate: 0.45, contextWindow: 128_000, cacheEconomics: 'weak', recommendedTasks: [] },
+      ],
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        selectedModels.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+      modelTierShadowStore: {
+        saveBanditState: () => {},
+        loadBanditStatesByPrefix: prefix => {
+          if (prefix === 'model_tier_shadow:') return history.shadows
+          if (prefix === 'reward_closure:team_wave:') return history.rewards
+          if (prefix === 'team_scope_health:') return [{
+            kind: 'team_scope_health:obj:s-tier:team_wave:1:x',
+            json: JSON.stringify({ schemaVersion: 1, severity: 'high' }),
+          }]
+          return []
+        },
+      },
+      modelTierBanditEnabled: true,
+      sessionId: 's-tier',
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn-tier-scope-veto',
+      objective: 'Assess low risk documentation with historical high scope leak veto.',
+      kind: 'review',
+      profile: 'reviewer',
+      riskTier: 'low',
+      scope: { files: ['docs/a.md', 'docs/b.md', 'docs/c.md'] },
+      authority: 'tianliang',
+    })
+
+    assert.equal(run.selectedModel, 'large-cache')
+    assert.deepEqual(selectedModels, ['large-cache'])
+    assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
+    assert.match(run.modelTierGatedDecisions?.[0]?.reason ?? '', /scope-health veto high/)
+  })
+
   it('hardFloor prevents verifier downgrade despite strong cheap reward history', async () => {
     const history = modelTierRows('cheap', 'cheap-flash', 0.9)
     const coordinator = new DelegationCoordinator({

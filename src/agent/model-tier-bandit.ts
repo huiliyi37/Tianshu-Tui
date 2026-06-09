@@ -38,6 +38,10 @@ interface ParsedTierShadow {
   actualTier: ModelTier
 }
 
+interface ParsedScopeHealth {
+  severity: TeamScopeHealthSeverity
+}
+
 const MODEL_TIERS: ModelTier[] = ['cheap', 'balanced', 'strong']
 const MODEL_TIER_ARMS: ModelTierArm[] = ['tier:cheap', 'tier:balanced', 'tier:strong']
 const REWARD_CLOSURE_PREFIXES = [
@@ -137,6 +141,21 @@ function parseRewardClosure(json: string): RewardClosureRecord | null {
   }
 }
 
+function parseScopeHealth(json: string): ParsedScopeHealth | null {
+  try {
+    const parsed = JSON.parse(json) as { schemaVersion?: unknown; severity?: unknown }
+    if (parsed.schemaVersion !== 1) return null
+    const severity = parseScopeSeverity(parsed.severity)
+    return severity ? { severity } : null
+  } catch {
+    return null
+  }
+}
+
+function severityFromNormalizedScopeLeak(value: unknown): TeamScopeHealthSeverity | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? 'medium' : undefined
+}
+
 function rewardTier(record: RewardClosureRecord, modelTierByModel: Map<string, ModelTier>): ModelTier | null {
   const directTier = stringComponent(record.components, 'workerTier') ?? stringComponent(record.components, 'selectedTier')
   if (isModelTier(directTier)) return directTier
@@ -169,6 +188,12 @@ export function buildHistoricalModelTierState(
     modelTierByModel.set(parsed.actualModel, parsed.actualTier)
   }
 
+  for (const row of store.loadBanditStatesByPrefix('team_scope_health:', limit)) {
+    const parsed = parseScopeHealth(row.json)
+    if (!parsed) continue
+    updateWorstScopeHealth(state, parsed.severity)
+  }
+
   for (const prefix of REWARD_CLOSURE_PREFIXES) {
     for (const row of store.loadBanditStatesByPrefix(prefix, limit)) {
       const record = parseRewardClosure(row.json)
@@ -178,6 +203,7 @@ export function buildHistoricalModelTierState(
         continue
       }
       updateWorstScopeHealth(state, parseScopeSeverity(record.components.scopeSeverity))
+      updateWorstScopeHealth(state, severityFromNormalizedScopeLeak(record.components.normalizedScopeLeak))
       const tier = rewardTier(record, modelTierByModel)
       if (!tier) continue
       addReward(state, tier, record.reward)

@@ -81,7 +81,26 @@ describe('model tier bandit', () => {
     }))
 
     assert.equal(state.totalSamples, 0)
+    assert.equal(state.recentFalseGreenRate, 1)
     assert.equal(recommendModelTierArm(state).confidence, 0)
+  })
+
+  it('derives scope-health veto state from real persisted scope health and reward closures', () => {
+    const fromScopeHealth = buildHistoricalModelTierState(store({
+      'model_tier_shadow:': [{ kind: 'model_tier_shadow:s1:team:T1:1', json: shadow('cheap-flash', 'cheap') }],
+      'team_scope_health:': [{
+        kind: 'team_scope_health:obj:s1:team_wave:1:x',
+        json: JSON.stringify({ schemaVersion: 1, severity: 'high' }),
+      }],
+      'reward_closure:team_wave:': [{ kind: 'reward_closure:team_wave:s1:1:a', json: reward('cheap-flash', 1) }],
+    }))
+    assert.equal(fromScopeHealth.worstScopeHealthSeverity, 'high')
+
+    const fromRewardClosure = buildHistoricalModelTierState(store({
+      'model_tier_shadow:': [{ kind: 'model_tier_shadow:s1:team:T1:1', json: shadow('cheap-flash', 'cheap') }],
+      'reward_closure:team_wave:': [{ kind: 'reward_closure:team_wave:s1:1:a', json: reward('cheap-flash', 1, { normalizedScopeLeak: 1 }) }],
+    }))
+    assert.equal(fromRewardClosure.worstScopeHealthSeverity, 'medium')
   })
 
   it('returns deterministic empty-state recommendation without inventing evidence', () => {
