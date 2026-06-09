@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { resolve, dirname, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
 import { MeridianDb } from './meridian-db.js'
 import { MeridianBehavior } from './meridian-behavior.js'
@@ -38,53 +38,55 @@ export class MeridianIndexer {
   }
 
   async indexFile(filePath: string): Promise<void> {
-    if (this.indexing.has(filePath)) return
-    if (!this.isIndexable(filePath)) return
+    const rel = this.toRepoRelative(filePath)
+    if (this.indexing.has(rel)) return
+    if (!this.isIndexable(rel)) return
 
-    const absPath = resolve(this.cwd, filePath)
+    const absPath = resolve(this.cwd, rel)
     if (!existsSync(absPath)) return
 
     const source = readFileSync(absPath, 'utf-8')
     const hash = createHash('sha256').update(source).digest('hex').slice(0, 16)
 
-    if (!this.db.needsParse(filePath, hash)) {
-      this.db.recordAccess(filePath)
+    if (!this.db.needsParse(rel, hash)) {
+      this.db.recordAccess(rel)
       return
     }
 
     await this.ensureInit()
-    this.indexing.add(filePath)
+    this.indexing.add(rel)
 
     try {
-      const result = await parseFile(filePath, source)
+      const result = await parseFile(rel, source)
       this.db.upsertFile(result)
-      this.db.recordAccess(filePath)
+      this.db.recordAccess(rel)
 
       // Build tested_by edges if this is a test file
-      if (this.isTestFile(filePath)) {
-        this.buildTestEdges(filePath)
+      if (this.isTestFile(rel)) {
+        this.buildTestEdges(rel)
       }
 
       // 1-hop expand: parse direct imports
       for (const imp of result.imports) {
-        const resolved = this.resolveImport(filePath, imp)
+        const resolved = this.resolveImport(rel, imp)
         if (resolved && !this.indexing.has(resolved)) {
           await this.indexFile(resolved)
         }
       }
     } finally {
-      this.indexing.delete(filePath)
+      this.indexing.delete(rel)
     }
   }
 
   async invalidateFile(filePath: string): Promise<void> {
-    if (!this.isIndexable(filePath)) return
-    const absPath = resolve(this.cwd, filePath)
+    const rel = this.toRepoRelative(filePath)
+    if (!this.isIndexable(rel)) return
+    const absPath = resolve(this.cwd, rel)
     if (!existsSync(absPath)) return
 
     await this.ensureInit()
     const source = readFileSync(absPath, 'utf-8')
-    const result = await parseFile(filePath, source)
+    const result = await parseFile(rel, source)
     this.db.upsertFile(result)
   }
 
@@ -99,7 +101,8 @@ export class MeridianIndexer {
   }
 
   recordEdit(filePath: string, turn: number): void {
-    this.behavior.recordEdit(filePath, turn)
+    const rel = this.toRepoRelative(filePath)
+    this.behavior.recordEdit(rel, turn)
   }
 
   flushTurn(): void {
@@ -130,10 +133,24 @@ export class MeridianIndexer {
     this.db.close()
   }
 
+  /** Normalize to repo-relative path for classification & DB keys.
+   *  Absolute paths are accepted (read_file tool sends absolute file_path)
+   *  but silently converted so classifyPath — which expects repo-relative —
+   *  works correctly. */
+  private toRepoRelative(filePath: string): string {
+    if (isAbsolute(filePath)) {
+      const absCwd = resolve(this.cwd)
+      const absFile = resolve(filePath)
+      if (absFile.startsWith(absCwd + '/')) return absFile.slice(absCwd.length + 1)
+    }
+    return filePath
+  }
+
   private isIndexable(filePath: string): boolean {
-    if (IGNORE_PATTERNS.some(p => filePath.includes(p))) return false
-    if (classifyPath(filePath).silent) return false
-    return ALL_EXTENSIONS.some(ext => filePath.endsWith(ext))
+    const rel = this.toRepoRelative(filePath)
+    if (IGNORE_PATTERNS.some(p => rel.includes(p))) return false
+    if (classifyPath(rel).silent) return false
+    return ALL_EXTENSIONS.some(ext => rel.endsWith(ext))
   }
 
   private isTestFile(filePath: string): boolean {
