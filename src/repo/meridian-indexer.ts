@@ -39,6 +39,7 @@ export class MeridianIndexer {
 
   async indexFile(filePath: string): Promise<void> {
     const rel = this.toRepoRelative(filePath)
+    if (rel === null) return
     if (this.indexing.has(rel)) return
     if (!this.isIndexable(rel)) return
 
@@ -80,6 +81,7 @@ export class MeridianIndexer {
 
   async invalidateFile(filePath: string): Promise<void> {
     const rel = this.toRepoRelative(filePath)
+    if (rel === null) return
     if (!this.isIndexable(rel)) return
     const absPath = resolve(this.cwd, rel)
     if (!existsSync(absPath)) return
@@ -102,6 +104,7 @@ export class MeridianIndexer {
 
   recordEdit(filePath: string, turn: number): void {
     const rel = this.toRepoRelative(filePath)
+    if (rel === null) return
     this.behavior.recordEdit(rel, turn)
   }
 
@@ -134,20 +137,21 @@ export class MeridianIndexer {
   }
 
   /** Normalize to repo-relative path for classification & DB keys.
-   *  Absolute paths are accepted (read_file tool sends absolute file_path)
-   *  but silently converted so classifyPath — which expects repo-relative —
-   *  works correctly. */
-  private toRepoRelative(filePath: string): string {
+   *  Returns null for absolute paths outside the repo — fail-closed so
+   *  the indexer never reads, parses, or stores files outside the project. */
+  private toRepoRelative(filePath: string): string | null {
     if (isAbsolute(filePath)) {
       const absCwd = resolve(this.cwd)
       const absFile = resolve(filePath)
       if (absFile.startsWith(absCwd + '/')) return absFile.slice(absCwd.length + 1)
+      return null
     }
     return filePath
   }
 
   private isIndexable(filePath: string): boolean {
     const rel = this.toRepoRelative(filePath)
+    if (rel === null) return false
     if (IGNORE_PATTERNS.some(p => rel.includes(p))) return false
     if (classifyPath(rel).silent) return false
     return ALL_EXTENSIONS.some(ext => rel.endsWith(ext))

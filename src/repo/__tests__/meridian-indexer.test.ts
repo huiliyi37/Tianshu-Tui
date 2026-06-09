@@ -9,8 +9,8 @@ function isIndexable(indexer: MeridianIndexer, filePath: string): boolean {
   return (indexer as unknown as { isIndexable(filePath: string): boolean }).isIndexable(filePath)
 }
 
-function callToRepoRelative(indexer: MeridianIndexer, filePath: string): string {
-  return (indexer as unknown as { toRepoRelative(filePath: string): string }).toRepoRelative(filePath)
+function callToRepoRelative(indexer: MeridianIndexer, filePath: string): string | null {
+  return (indexer as unknown as { toRepoRelative(filePath: string): string | null }).toRepoRelative(filePath)
 }
 
 describe('MeridianIndexer attention indexing scope', () => {
@@ -78,13 +78,54 @@ describe('MeridianIndexer attention indexing scope', () => {
       assert.equal(callToRepoRelative(indexer, resolve(cwd, '.codex/hooks.ts')), '.codex/hooks.ts')
       // relative passes through unchanged
       assert.equal(callToRepoRelative(indexer, 'src/app.ts'), 'src/app.ts')
-      // absolute outside cwd passes through as-is (unusual but safe)
+      // absolute outside cwd returns null — fail-closed
       const outside = resolve('/tmp/outside/file.ts')
-      assert.equal(callToRepoRelative(indexer, outside), outside)
+      assert.equal(callToRepoRelative(indexer, outside), null)
     } finally {
       indexer.close()
       rmSync(cwd, { recursive: true, force: true })
       rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects absolute paths outside the project — fail-closed', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-outside-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-outside-state-'))
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      assert.equal(
+        isIndexable(indexer, '/tmp/outside/file.ts'),
+        false,
+        'absolute path outside project must not be indexable',
+      )
+      assert.equal(
+        isIndexable(indexer, '/Users/stranger/project/src/app.ts'),
+        false,
+        'absolute path to another project must not be indexable',
+      )
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('indexFile rejects outside-project paths even when file exists on disk', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-outside-idx-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-outside-idx-state-'))
+    const outsideDir = mkdtempSync(join(tmpdir(), 'meridian-outside-'))
+    const outsideFile = join(outsideDir, 'secret.ts')
+    writeFileSync(outsideFile, 'export const secret = 42\n')
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      await indexer.indexFile(outsideFile)
+      const stats = indexer.getStats()
+      assert.equal(stats.files, 0, 'outside-project file must not enter the DB')
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+      rmSync(outsideDir, { recursive: true, force: true })
     }
   })
 
