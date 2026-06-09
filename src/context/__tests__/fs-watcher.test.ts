@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createFsWatcher, shouldRecordFsEvent } from '../fs-watcher.js'
+import { createFsEventRecorder, createFsWatcher, shouldRecordFsEvent } from '../fs-watcher.js'
 
 describe('FsWatcher — 原则③ 参考系锚定', () => {
   let watchers: Array<{ stop: () => void }> = []
@@ -25,6 +25,35 @@ describe('FsWatcher — 原则③ 参考系锚定', () => {
   it('treats watched subdirectory filenames as repository-relative paths', () => {
     assert.equal(shouldRecordFsEvent('docs/teamtask.zip'), false)
     assert.equal(shouldRecordFsEvent('docs/teamtask/T7-落地实施方案·注意力闸分阶段执行.md'), true)
+  })
+
+  it('does not count classifiable L1/L2/L0 events but counts content and unknown events', () => {
+    let t = 10_000
+    const recorder = createFsEventRecorder({ debounceMs: 0, now: () => t++ })
+
+    for (let i = 0; i < 10; i++) recorder.recordEvent('layout.log')
+    recorder.recordEvent('.codex/hooks.json')
+    recorder.recordEvent('node_modules/pkg/index.js')
+    assert.equal(recorder.getEventCount(), 0)
+    assert.equal(recorder.getEventRate(), 0)
+
+    recorder.recordEvent('src/context/fs-watcher.ts')
+    assert.equal(recorder.getEventCount(), 1)
+
+    recorder.recordEvent(undefined)
+    assert.equal(recorder.getEventCount(), 2)
+  })
+
+  it('does not count watched subdirectory runtime artifacts when recorder sees repo-relative paths', () => {
+    let t = 20_000
+    const recorder = createFsEventRecorder({ debounceMs: 0, now: () => t++ })
+
+    recorder.recordEvent('docs/output.log')
+    recorder.recordEvent('docs/teamtask.zip')
+    assert.equal(recorder.getEventCount(), 0)
+
+    recorder.recordEvent('docs/teamtask/T7-落地实施方案·注意力闸分阶段执行.md')
+    assert.equal(recorder.getEventCount(), 1)
   })
 
   it('starts and reports zero event rate initially', async () => {

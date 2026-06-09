@@ -26,6 +26,50 @@ export function shouldRecordFsEvent(relPath?: string): boolean {
   return !classifyPath(relPath).silent
 }
 
+export interface FsEventRecorderOptions {
+  windowMs?: number
+  debounceMs?: number
+  now?: () => number
+}
+
+export function createFsEventRecorder(options: FsEventRecorderOptions = {}) {
+  const windowMs = options.windowMs ?? 60_000
+  const debounceMs = options.debounceMs ?? 2_000
+  const now = options.now ?? (() => Date.now())
+
+  let events: number[] = []
+  let lastEventTime = 0
+
+  function recordEvent(relPath?: string): void {
+    if (!shouldRecordFsEvent(relPath)) return
+
+    const timestamp = now()
+    if (timestamp - lastEventTime < debounceMs) return
+    lastEventTime = timestamp
+    events.push(timestamp)
+  }
+
+  function pruneOld(timestamp: number): void {
+    events = events.filter(t => timestamp - t <= windowMs)
+  }
+
+  function getEventCount(): number {
+    pruneOld(now())
+    return events.length
+  }
+
+  function getEventRate(): number {
+    return Math.min(1, getEventCount() / 30)
+  }
+
+  function reset(): void {
+    events = []
+    lastEventTime = 0
+  }
+
+  return { recordEvent, getEventCount, getEventRate, reset }
+}
+
 /**
  * 原则 ③ 参考系锚定 — 外部 Zeitgeber
  *
@@ -41,35 +85,18 @@ export function shouldRecordFsEvent(relPath?: string): boolean {
  *   watcher.stop()
  */
 export function createFsWatcher(config: FsWatcherConfig) {
-  const windowMs = config.windowMs ?? 60_000
-  const debounceMs = config.debounceMs ?? 2_000
+  const recorder = createFsEventRecorder({
+    windowMs: config.windowMs,
+    debounceMs: config.debounceMs,
+  })
 
   let fsWatcher: FSWatcher | undefined
   let subWatchers: FSWatcher[] = []
-  let events: number[] = []
-  let lastEventTime = 0
-
-  function recordEvent(relPath?: string): void {
-    if (!shouldRecordFsEvent(relPath)) return
-
-    const now = Date.now()
-    if (now - lastEventTime < debounceMs) return
-    lastEventTime = now
-    events.push(now)
-  }
-
-  function pruneOld(now: number): void {
-    events = events.filter(t => now - t <= windowMs)
-  }
 
   function getState(): FsWatcherState {
-    const now = Date.now()
-    pruneOld(now)
-    const eventCount = events.length
-    // Normalize: 0 events = 0, ≥30 events/min = 1.0 (high volatility)
-    const eventRate = Math.min(1, eventCount / 30)
+    const eventCount = recorder.getEventCount()
     return {
-      eventRate,
+      eventRate: Math.min(1, eventCount / 30),
       eventCount,
       active: fsWatcher !== undefined,
     }
@@ -80,7 +107,7 @@ export function createFsWatcher(config: FsWatcherConfig) {
     try {
       // Only watch top-level entries — recursive: false
       fsWatcher = watch(config.cwd, { recursive: false }, (_eventType, filename) => {
-        recordEvent(typeof filename === 'string' ? filename : undefined)
+        recorder.recordEvent(typeof filename === 'string' ? filename : undefined)
       })
       // Also watch immediate subdirectories (src/, docs/, etc.) for deeper coverage
       try {
@@ -88,7 +115,7 @@ export function createFsWatcher(config: FsWatcherConfig) {
         for (const entry of entries) {
           if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
             const sub = watch(join(config.cwd, entry.name), { recursive: false }, (_eventType, filename) => {
-              recordEvent(typeof filename === 'string' ? join(entry.name, filename) : undefined)
+              recorder.recordEvent(typeof filename === 'string' ? join(entry.name, filename) : undefined)
             })
             subWatchers.push(sub)
           }
@@ -107,7 +134,7 @@ export function createFsWatcher(config: FsWatcherConfig) {
     fsWatcher = undefined
     for (const sub of subWatchers) sub.close()
     subWatchers = []
-    events = []
+    recorder.reset()
   }
 
   return { start, stop, getState }
