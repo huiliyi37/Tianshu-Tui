@@ -1013,6 +1013,15 @@ npm run build                  # tsup build
 npm run dev                    # Watch mode
 ```
 
+## Open-Source Baseline
+
+The public open-source version of this project lives at github.com/huiliyi37/Tianshu (`/Users/banxia/app/Tianshu`).
+
+- **Baseline snapshot**: rivet `21dace8` → Tianshu `44a26b5` (2026-06-09)
+- **Content**: `src/` + build config + 4 user-facing docs + completions; no internal design docs, session logs, star capsules, or task planning
+- **License**: Apache-2.0
+- **Iteration model**: Tianshu evolves independently from its baseline snapshot. Changes to the public repo are applied as new commits on top of the snapshot, not by re-exporting from rivet.
+
 ## Design Documents
 
 - `docs/superpowers/specs/2026-05-16-rivet-subagent-orchestration-design.md` — Subagent orchestration: Cache-first Bounded Coordinator design
