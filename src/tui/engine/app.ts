@@ -121,6 +121,8 @@ export class TuiApp {
   private slashHandler?: (input: string) => boolean | Promise<boolean>
   /** SteerBuffer reference for live region display */
   steerBuffer: { hasPending: () => boolean; getPending: () => readonly string[] } | null = null
+  /** Ctrl+C double-press window start timestamp (ms), 0 = inactive */
+  private ctrlCPendingSince = 0
 
   constructor(options: {
     stdout: WriteStream
@@ -206,14 +208,24 @@ export class TuiApp {
         if (this.state.isStreaming || this.state.isThinking) {
           // Streaming: abort current agent run
           this.handleAbort()
-        } else {
-          // Idle: exit application via graceful shutdown
+        } else if (this.ctrlCPendingSince > 0) {
+          // Second Ctrl+C within window → exit
+          this.ctrlCPendingSince = 0
           this.dispose()
           if (this.onExitCallback) {
             this.onExitCallback()
           } else {
             process.exit(0)
           }
+        } else if (this.inputLine.value.trim()) {
+          // Idle with input: clear input line, don't exit
+          this.inputLine.setValue('')
+          this.renderLive()
+        } else {
+          // Idle with empty input: first Ctrl+C → show hint, start 2s window
+          this.ctrlCPendingSince = Date.now()
+          this.renderLive()
+          setTimeout(() => { this.ctrlCPendingSince = 0 }, 2000)
         }
         return
       }
@@ -610,17 +622,21 @@ export class TuiApp {
     }, this.theme)
     lines.push({ text: glanceBar })
 
-    // 5. Input line
-    const inputText = this.inputLine.value || 'Type your message...'
-    const cursorPos = this.inputLine.cursor
-    const displayInput = inputText
-      ? `▸ ${inputText.slice(0, cursorPos)}█${inputText.slice(cursorPos)}`
-      : `▸ ${inputText}`
-
-    if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-      lines.push({ text: `-- NORMAL -- ${displayInput}` })
+    // 5. Input line / Ctrl+C hint
+    if (this.ctrlCPendingSince > 0) {
+      lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
-      lines.push({ text: displayInput })
+      const inputText = this.inputLine.value || 'Type your message...'
+      const cursorPos = this.inputLine.cursor
+      const displayInput = inputText
+        ? `▸ ${inputText.slice(0, cursorPos)}█${inputText.slice(cursorPos)}`
+        : `▸ ${inputText}`
+
+      if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
+        lines.push({ text: `-- NORMAL -- ${displayInput}` })
+      } else {
+        lines.push({ text: displayInput })
+      }
     }
 
     this.live.render(lines)
