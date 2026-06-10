@@ -1,0 +1,209 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { InputLine } from '../engine/input-line.js'
+
+describe('InputLine', () => {
+  describe('basic editing', () => {
+    it('inserts characters', () => {
+      const input = new InputLine()
+      input.handleKey('unknown', 'h', false, false)
+      input.handleKey('unknown', 'i', false, false)
+      assert.equal(input.value, 'hi')
+      assert.equal(input.cursor, 2)
+    })
+
+    it('handles backspace', () => {
+      const input = new InputLine({ value: 'hello' })
+      const result = input.handleKey('backspace', '', false, false)
+      assert.equal(input.value, 'hell')
+      assert.equal(result?.type, 'change')
+    })
+
+    it('handles delete forward', () => {
+      const input = new InputLine({ value: 'hello' })
+      input.handleKey('left', '', false, false) // cursor at 4, on 'o'
+      input.handleKey('delete', '', false, false) // delete char AT cursor
+      assert.equal(input.value, 'hell')
+    })
+
+    it('ignores backspace at start', () => {
+      const input = new InputLine()
+      assert.equal(input.handleKey('backspace', '', false, false), null)
+    })
+
+    it('ignores delete at end', () => {
+      const input = new InputLine({ value: 'a' })
+      assert.equal(input.handleKey('delete', '', false, false), null)
+    })
+
+    it('inserts at cursor position', () => {
+      const input = new InputLine({ value: 'ac' })
+      input.handleKey('left', '', false, false)
+      input.handleKey('unknown', 'b', false, false)
+      assert.equal(input.value, 'abc')
+    })
+  })
+
+  describe('cursor movement', () => {
+    it('moves left and right', () => {
+      const input = new InputLine({ value: 'ab' })
+      assert.equal(input.cursor, 2)
+      input.handleKey('left', '', false, false)
+      assert.equal(input.cursor, 1)
+      input.handleKey('right', '', false, false)
+      assert.equal(input.cursor, 2)
+    })
+
+    it('home moves to start', () => {
+      const input = new InputLine({ value: 'hello' })
+      input.handleKey('home', '', false, false)
+      assert.equal(input.cursor, 0)
+    })
+
+    it('end moves to end', () => {
+      const input = new InputLine({ value: 'hello' })
+      input.handleKey('home', '', false, false)
+      input.handleKey('end', '', false, false)
+      assert.equal(input.cursor, 5)
+    })
+  })
+
+  describe('Ctrl key combos', () => {
+    it('Ctrl+A moves to home', () => {
+      const input = new InputLine({ value: 'hello' })
+      input.handleKey('ctrl_a', '', true, false)
+      assert.equal(input.cursor, 0)
+    })
+
+    it('Ctrl+E moves to end', () => {
+      const input = new InputLine({ value: 'hello' })
+      input.handleKey('ctrl_a', '', true, false)
+      input.handleKey('ctrl_e', '', true, false)
+      assert.equal(input.cursor, 5)
+    })
+
+    it('Ctrl+U deletes to start', () => {
+      const input = new InputLine({ value: 'hello world' })
+      input.handleKey('left', '', false, false)
+      input.handleKey('ctrl_u', '', true, false)
+      assert.equal(input.value, 'd')
+    })
+
+    it('Ctrl+K deletes to end', () => {
+      const input = new InputLine({ value: 'hello world' })
+      input.handleKey('left', '', false, false) // cursor before 'd' (pos 10)
+      input.handleKey('ctrl_k', '', true, false)
+      assert.equal(input.value, 'hello worl')
+    })
+
+    it('Ctrl+W deletes word backward', () => {
+      const input = new InputLine({ value: 'hello world' })
+      input.handleKey('ctrl_w', '', true, false)
+      assert.equal(input.value, 'hello ')
+    })
+  })
+
+  describe('submit', () => {
+    it('calls onSubmit and returns submit event', () => {
+      let submitted = ''
+      const input = new InputLine({
+        value: 'query',
+        onSubmit: (v) => { submitted = v },
+      })
+      const result = input.handleKey('return', '', false, false)
+      assert.equal(result?.type, 'submit')
+      assert.equal(submitted, 'query')
+    })
+  })
+
+  describe('history', () => {
+    it('navigates history with up/down', () => {
+      const input = new InputLine({ history: ['cmd3', 'cmd2', 'cmd1'] })
+      input.handleKey('up', '', false, false)
+      assert.equal(input.value, 'cmd3')
+      input.handleKey('up', '', false, false)
+      assert.equal(input.value, 'cmd2')
+      input.handleKey('down', '', false, false)
+      assert.equal(input.value, 'cmd3')
+    })
+
+    it('returns null when no more history', () => {
+      assert.equal(new InputLine().handleKey('up', '', false, false), null)
+    })
+  })
+
+  describe('vim mode', () => {
+    it('switches to normal mode on Escape', () => {
+      const input = new InputLine({ vimEnabled: true })
+      assert.equal(input.vimMode, 'insert')
+      input.handleKey('escape', '', false, false)
+      assert.equal(input.vimMode, 'normal')
+    })
+
+    it('switches to insert mode with i', () => {
+      const input = new InputLine({ vimEnabled: true })
+      input.handleKey('escape', '', false, false)
+      input.handleKey('unknown', 'i', false, false)
+      assert.equal(input.vimMode, 'insert')
+    })
+
+    it('a moves cursor forward then enters insert', () => {
+      const input = new InputLine({ vimEnabled: true, value: 'hello' })
+      input.handleKey('escape', '', false, false)
+      input.handleKey('left', '', false, false) // cursor from 5 → 4
+      input.handleKey('unknown', 'a', false, false)
+      assert.equal(input.vimMode, 'insert')
+      assert.equal(input.cursor, 5) // 4+1=5
+    })
+
+    it('w + D in normal mode', () => {
+      const input = new InputLine({ vimEnabled: true, value: 'hello world' })
+      input.handleKey('escape', '', false, false)
+      input.handleKey('home', '', false, false)
+      // 'w' moves to next word start (position 6, 'w' of 'world')
+      input.handleKey('unknown', 'w', false, false)
+      input.handleKey('unknown', 'D', false, false)
+      assert.equal(input.value, 'hello ')
+    })
+  })
+
+  describe('word navigation', () => {
+    it('Option+Left moves to previous word start', () => {
+      const input = new InputLine({ value: 'hello world' })
+      input.handleKey('left', '', false, true) // meta+left
+      assert.equal(input.cursor, 6)
+    })
+
+    it('Option+Right moves to next word end', () => {
+      const input = new InputLine({ value: 'hello world' })
+      input.handleKey('home', '', false, false)
+      input.handleKey('right', '', false, true) // meta+right
+      assert.equal(input.cursor, 5)
+    })
+
+    it('Option+Backspace deletes word backward', () => {
+      const input = new InputLine({ value: 'hello world' })
+      input.handleKey('backspace', '', false, true) // meta+backspace
+      assert.equal(input.value, 'hello ')
+    })
+  })
+
+  describe('maxLength', () => {
+    it('caps input at maxLength', () => {
+      const input = new InputLine({ maxLength: 5 })
+      for (const ch of 'hello world') {
+        input.handleKey('unknown', ch, false, false)
+      }
+      assert.equal(input.value, 'hello')
+    })
+  })
+
+  describe('setValue', () => {
+    it('updates value and cursor from external source', () => {
+      const input = new InputLine()
+      input.setValue('new text', 3)
+      assert.equal(input.value, 'new text')
+      assert.equal(input.cursor, 3)
+    })
+  })
+})
