@@ -69,6 +69,8 @@ export interface TuiState {
 // ── Agent callbacks interface (aligned to loop-types.ts AgentCallbacks) ──
 
 import type { Usage } from '../../api/types.js'
+import type { IntentPreview, IntentPreviewAction } from '../../agent/intent-preview.js'
+import type { ApprovalResult } from '../../agent/approval-edit.js'
 
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
@@ -78,10 +80,10 @@ export interface AgentCallbacks {
   onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean) => void
   onError: (error: Error) => void
   onAbort: () => void
-  onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<boolean>
+  onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string }) => void
-  onIntentPreview?: (intent: unknown) => Promise<unknown>
+  onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
   onSteerDrain?: () => string | null
 }
 

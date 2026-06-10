@@ -50,10 +50,10 @@ export function wrapCallbacksWithTuiApp(
       original.onAbort?.()
     },
     onApprovalRequired: async (id, name, input) => {
-      const approved = await app.callbacks.onApprovalRequired(id, name, input)
-      return original.onApprovalRequired
-        ? original.onApprovalRequired(id, name, input)
-        : approved
+      if (original.onApprovalRequired) {
+        return original.onApprovalRequired(id, name, input)
+      }
+      return app.callbacks.onApprovalRequired(id, name, input)
     },
     onCheckpoint: (hash) => {
       app.callbacks.onCheckpoint?.(hash)
@@ -64,10 +64,10 @@ export function wrapCallbacksWithTuiApp(
       original.onPhaseChange?.(phase, detail)
     },
     onIntentPreview: async (intent) => {
-      const action = await (app.callbacks.onIntentPreview?.(intent as unknown) ?? 'continue')
-      return original.onIntentPreview
-        ? original.onIntentPreview(intent)
-        : action as unknown
+      if (original.onIntentPreview) {
+        return original.onIntentPreview(intent)
+      }
+      return app.callbacks.onIntentPreview?.(intent) ?? 'continue'
     },
     onSteerDrain: () => {
       const drained = app.callbacks.onSteerDrain?.() ?? null
