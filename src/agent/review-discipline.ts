@@ -109,8 +109,8 @@ function touchesSecurityBoundary(files: readonly string[]): boolean {
 /**
  * Classify a change set into the review workflow scale:
  * - L3: cross-module, large (≥5 files), or touches security boundary → Review Squadron
- * - L2: normal code changes (default) → single adversarial verifier
- * - L1: trivial docs/data files or test-only files → nudge only
+ * - L2: dependency/config files → single adversarial verifier (opt-in by file nature)
+ * - L1: everything else → nudge only (DEFAULT — no child workers spawned)
  *
  * isFix from the commit message is NOT used as a gating signal —
  * structural properties of the change determine review depth, not message prefix.
@@ -123,7 +123,10 @@ export function classifyChangeScale(change: ChangeSet): ReviewScale {
   )) {
     return 'L1'
   }
-  return 'L2'
+  // DEFAULT: L1 — nudge only. L2/L3 require explicit structural signals
+  // (cross-module, large batch, security boundary, dep/config files).
+  // This prevents review workflow child workers from stalling deliver_task.
+  return 'L1'
 }
 
 /** Route any non-empty delivery through ReviewRouter; L1 remains a non-blocking nudge. */

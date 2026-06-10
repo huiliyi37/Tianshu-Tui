@@ -4,7 +4,7 @@ import { routeReviewWorkflow } from '../review-router.js'
 import type { ChangeSet } from '../review-discipline.js'
 import type { ReviewRouterDeps, VerifierResult } from '../review-router.js'
 
-const fixChange: ChangeSet = { files: ['src/server/task-registry.ts'], crossModule: false, isFix: true }
+const fixChange: ChangeSet = { files: ['package.json'], crossModule: false, isFix: true }
 
 const okDeps: ReviewRouterDeps = {
   spawnVerifier: async () => ({ verdict: 'verified', evidence: 'ran: npx tsx --test src/server/__tests__/task-registry.test.ts → 43/43' }),

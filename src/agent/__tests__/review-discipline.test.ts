@@ -44,9 +44,9 @@ describe('review disciplines', () => {
     assert.equal(classifyChangeScale({ files: ['src/agent/approval-risk.ts'], crossModule: false, isFix: true }), 'L3')
   })
 
-  it('routes fix or code changes to L2', () => {
-    assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: false, isFix: true }), 'L2')
-    assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: false, isFix: false }), 'L2')
+  it('routes single-file non-cross-module code changes to L1 (nudge only, default safe)', () => {
+    assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: false, isFix: true }), 'L1')
+    assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: false, isFix: false }), 'L1')
   })
 
   it('routes trivial documentation or test-only files to L1 (isFix does NOT force L2)', () => {
