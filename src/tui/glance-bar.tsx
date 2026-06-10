@@ -2,12 +2,21 @@ import { Box, Text } from 'ink'
 import React, { useState, useEffect } from 'react'
 import type { StarPhase } from '../agent/star-event.js'
 import { PHASE_GLYPHS, PHASE_SHORT_LABELS } from '../agent/star-event.js'
+import type { ReasoningEffort } from '../agent/auto-reasoning.js'
 import { getTheme, type RivetTheme } from './theme.js'
 import { useTerminalSize, isResizeSettling } from './use-terminal-size.js'
 import type { GlancePulse } from './surface/types.js'
 import { horizontalRule, type SeparatorStyle } from './separator.js'
 import { STAR_DOMAINS } from '../agent/star-domain.js'
 import { formatToolElapsed } from './tool-elapsed.js'
+
+const EFFORT_GLYPH: Record<ReasoningEffort, string> = {
+  off: '○',
+  low: '◔',
+  medium: '◑',
+  high: '◕',
+  max: '●',
+}
 
 interface GlanceBarProps {
   pulses: readonly GlancePulse[]
@@ -27,6 +36,8 @@ interface GlanceBarProps {
   maxTokens: number
   /** Live elapsed time of the current/last turn (ms) — flows on the far right */
   elapsedMs?: number
+  /** Current reasoning effort level */
+  reasoningEffort?: ReasoningEffort
 }
 
 function findDomain(domainName: string | undefined) {
@@ -66,7 +77,7 @@ export function getDomainSeparatorStyle(domainName: string | undefined): Separat
 }
 const MOON_PHASES = ['◐', '◑', '◒', '◓'] as const
 
-export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens, elapsedMs }: GlanceBarProps) {
+export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens, elapsedMs, reasoningEffort }: GlanceBarProps) {
   const theme = getTheme()
   const [moonIdx, setMoonIdx] = useState(0)
 
@@ -142,6 +153,8 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
         {/* Zone 3 · metrics — model (bold), cache, cost, tokens */}
         <Text bold color={theme.primary}>「{modelLabel}」</Text>
         <Text color={theme.dim}> </Text>
+        {reasoningEffort && <Text color={reasoningEffort === 'high' || reasoningEffort === 'max' ? theme.warning : theme.muted}>{EFFORT_GLYPH[reasoningEffort]}{reasoningEffort}</Text>}
+        {reasoningEffort && <Text color={theme.dim}> · </Text>}
         <Text color={cacheColor}>⚡{cachePct}%</Text>
         <Text color={theme.dim}> · </Text>
         <Text color={theme.muted}>${cost.toFixed(2)}</Text>

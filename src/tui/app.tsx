@@ -918,6 +918,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           elapsedMs: Date.now() - streamStartRef.current,
           tokenHistory: pushTokenHistory(tuPct),
           recentToolSummary: recentToolLabels.current,
+          reasoningEffort: agent.getReasoningEffort(),
         }))
       },
       onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => {
@@ -1180,7 +1181,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           foldedCountRef.current = 0
         }
         const tcPct = Math.min(session.getEstimatedTokens() / maxTokens, 1)
-        setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current, tokenHistory: pushTokenHistory(tcPct), taskList: agent.getTaskList() }))
+        setSummaryState(prev => ({ ...prev, phase: 'idle', elapsedMs: Date.now() - streamStartRef.current, tokenHistory: pushTokenHistory(tcPct), taskList: agent.getTaskList(), reasoningEffort: agent.getReasoningEffort() }))
 
         const usage = session.getTotalUsage()
         const normalInput = Math.max(0, usage.input_tokens - usage.cache_read_input_tokens)
@@ -1581,6 +1582,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           estimatedTokens={session.getEstimatedTokens()}
           maxTokens={maxTokens}
           elapsedMs={summaryState.elapsedMs}
+          reasoningEffort={summaryState.reasoningEffort}
         />
         <InputBar onSubmit={(text: string) => {
           // Evaluate routing INSIDE the event handler, not at render time.

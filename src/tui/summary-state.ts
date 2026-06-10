@@ -1,6 +1,7 @@
 import type { Phase, LastAction } from './phase-tracker.js'
 import { PHASE_SHORT_LABELS, type StarPhase } from '../agent/star-event.js'
 import type { TaskListItem } from '../agent/session-state.js'
+import type { ReasoningEffort } from '../agent/auto-reasoning.js'
 
 export interface SummaryState {
   task: string
@@ -26,6 +27,8 @@ export interface SummaryState {
   recentToolSummary?: string[]
   /** 持久化的任务列表（从 Assistant 回复中提取），用于底部固定面板显示 */
   taskList?: readonly TaskListItem[]
+  /** Current reasoning effort level shown in status bar */
+  reasoningEffort?: ReasoningEffort
 }
 
 export function phaseFromSummary(state: SummaryState): StarPhase {
