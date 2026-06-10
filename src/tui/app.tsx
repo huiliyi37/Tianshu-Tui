@@ -820,6 +820,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
     }
 
     pushStatic(createLogEntry({ type: 'user_message', content: originalUserInput }))
+    // Sync-flush the microtask-batched Static update so the user message is
+    // committed BEFORE agent.run() sets isStreaming=true. Without this, Ink
+    // can process the live-region resize (streaming → idle → streaming) while
+    // Static rows are still catching up, miscalculating eraseLines and leaving
+    // a stranded GlanceBar ghost in scrollback (stacked-footer on error→retry).
+    flushStaticBatch()
 
     await agent.run(promptInput, {
       onTextDelta: (text) => {
@@ -1243,6 +1249,12 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
         flushStreamingState()
+        // Sync-flush microtask-batched Static entries from flushStreamingState
+        // BEFORE setIsStreaming(false) so the streaming archive is committed in
+        // the same render as the streaming→idle transition — prevents a split
+        // render where Static rows change across frames and Ink miscalculates
+        // eraseLines, stranding a ghost footer (stacked GlanceBar on error).
+        flushStaticBatch()
         foldedCountRef.current = 0
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
@@ -1280,6 +1292,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         if (thinkTimer.current) { clearTimeout(thinkTimer.current); thinkTimer.current = null }
         if (toolTimer.current) { clearTimeout(toolTimer.current); toolTimer.current = null }
         flushStreamingState()
+        // Sync-flush microtask-batched Static entries before setIsStreaming(false)
+        // (same rationale as onError — prevents split render and ghost footer).
+        flushStaticBatch()
         foldedCountRef.current = 0
         fluencyRef.current.onTurnComplete()
         setFluencyStale(null)
