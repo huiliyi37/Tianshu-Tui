@@ -81,6 +81,9 @@ export class LiveEngine {
 
     let out = ''
 
+    // Save cursor position BEFORE moving, so we can restore after rewrite
+    out += ANSI.SAVE_CURSOR
+
     if (startRow !== undefined) {
       // 精确模式：跳到起始行
       out += cursorTo(startRow, 1)

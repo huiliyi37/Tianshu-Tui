@@ -105,6 +105,7 @@ export interface BootstrapContext {
   meridianIndexer: MeridianIndexer
   cwd: string
   shutdown: () => void
+  heartbeatInterval: ReturnType<typeof setInterval>
 }
 
 // ── HTTP Proxy ─────────────────────────────────────────────────
@@ -644,6 +645,7 @@ export function createShutdownHandler(ctx: BootstrapContext): () => void {
     } catch (err) {
       try { process.stderr.write(`[shutdown] callback error: ${(err as Error)?.message}\n`) } catch { /* noop */ }
     } finally {
+      if (ctx.heartbeatInterval) clearInterval(ctx.heartbeatInterval)
       try { ctx.refs.mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
       void ctx.refs.mcpManager?.shutdown?.()
       if (process.stdin.isTTY && process.stdin.setRawMode) {
@@ -797,6 +799,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     claimStore, fileHistory, toolRegistry, agent, refs,
     domainKnowledgeStore, meridianIndexer, cwd,
     shutdown: () => {}, // placeholder, replaced below
+    heartbeatInterval,
   })
 
   const ctx: BootstrapContext = {
@@ -804,6 +807,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     claimStore, fileHistory, toolRegistry, agent, refs,
     domainKnowledgeStore, meridianIndexer, cwd,
     shutdown,
+    heartbeatInterval,
   }
 
   return ctx

@@ -275,7 +275,7 @@ export class TuiApp {
       }
       // ── Normal input processing ─────────────────────────────
       const event = this.inputLine.handleKey(key.name, key.char, key.ctrl, key.meta)
-      if (event?.type === 'change') {
+      if (event?.type === 'change' || event?.type === 'submit') {
         this.renderLive()
       }
     })

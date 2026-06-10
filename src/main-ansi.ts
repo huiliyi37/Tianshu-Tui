@@ -38,6 +38,7 @@ let app: TuiApp | null = null
 let ctx: BootstrapContext | null = null
 let steerBuffer: SteerBuffer | null = null
 let isStreaming = false
+let heartbeatInterval: ReturnType<typeof setInterval> | null = null
 
 let isShuttingDown = false
 
@@ -57,6 +58,11 @@ function shutdown(code: number = 0) {
     }
     try { ctx.refs.mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
     void ctx.refs.mcpManager?.shutdown?.()
+  }
+
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval)
+    heartbeatInterval = null
   }
 
   if (process.stdin.isTTY && process.stdin.setRawMode) {
@@ -95,6 +101,9 @@ async function main() {
 
   process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
   process.stderr.write(`[T9] Session: ${ctx.sessionId.slice(0, 8)}...\n`)
+
+  // Store heartbeat for shutdown cleanup
+  heartbeatInterval = ctx.heartbeatInterval
 
   // ── Build TuiApp ─────────────────────────────────────────────
   const currentModel = ctx.provider.models[0]
