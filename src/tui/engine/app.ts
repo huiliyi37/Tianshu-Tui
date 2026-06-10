@@ -117,6 +117,8 @@ export class TuiApp {
   private onSubmitCallback?: (text: string) => void
   private onAbortCallback?: () => void
   private onExitCallback?: () => void
+  /** External slash command handler. If set, handleSlashCommand delegates here. */
+  private slashHandler?: (input: string) => boolean | Promise<boolean>
 
   constructor(options: {
     stdout: WriteStream
@@ -219,8 +221,13 @@ export class TuiApp {
       const inputVal = this.inputLine.value
       if (inputVal.startsWith('/')) {
         if (key.name === 'return') {
-          this.handleSlashCommand(inputVal)
+          const handled = this.handleSlashCommand(inputVal)
           this.inputLine.setValue('')
+          // If slash was not handled (pass-through like /team, /review),
+          // submit to agent via onSubmitCallback
+          if (!handled) {
+            this.onSubmitCallback?.(inputVal)
+          }
           return
         }
       }
@@ -322,6 +329,34 @@ export class TuiApp {
   dispose(): void {
     this.input.dispose()
     this.resize.dispose()
+  }
+
+  /** 将静态文本提交到 scrollback（slash command 输出等） */
+  commitStatic(text: string): void {
+    this.commit.write({ text, trailingNewline: true })
+  }
+
+  /** 手动设置 streaming 状态 */
+  setStreamingState(v: boolean): void {
+    this.state.isStreaming = v
+    if (!v) {
+      this.state.phase = 'idle'
+      this.live.clear()
+    }
+    this.renderLive()
+  }
+
+  /** 获取模型信息（供 slash commands 使用） */
+  getModelInfo(): { modelName: string; turnNumber: number } {
+    return {
+      modelName: this.state.modelName,
+      turnNumber: this.state.turnNumber,
+    }
+  }
+
+  /** 设置外部 slash command 处理器（如 SlashRouter） */
+  setSlashHandler(handler: (input: string) => boolean | Promise<boolean>): void {
+    this.slashHandler = handler
   }
 
   // ── Agent Event Handlers ─────────────────────────────────────
@@ -551,21 +586,35 @@ export class TuiApp {
     return true
   }
 
-  /** 处理斜杠命令 */
-  private handleSlashCommand(input: string): void {
+  /** 处理斜杠命令，返回 true 表示已处理，false 表示应透传 agent */
+  private handleSlashCommand(input: string): boolean {
+    // Delegate to external handler (SlashRouter) if configured
+    if (this.slashHandler) {
+      const result = this.slashHandler(input)
+      if (result instanceof Promise) {
+        result.catch((err) => {
+          this.commit.write({ text: `Error: ${(err as Error).message}`, trailingNewline: true })
+        })
+        // Async handler — assume handled
+        return true
+      }
+      return result
+    }
+
+    // Fallback: basic built-in commands
     const trimmed = input.trim()
     switch (trimmed) {
       case '/clear':
         process.stdout.write('\x1B[2J\x1B[H')
         this.live.reset()
         this.renderLive()
-        break
+        return true
       case '/starmap':
         this.activateOverlay('starmap')
-        break
+        return true
       case '/chronicle':
         this.activateOverlay('chronicle')
-        break
+        return true
       case '/exit':
       case '/quit':
         this.dispose()
@@ -576,9 +625,9 @@ export class TuiApp {
         } else {
           process.exit(0)
         }
-        break
+        return true
       default:
-        break
+        return false
     }
   }
 

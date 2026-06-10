@@ -14,6 +14,7 @@ import { bootstrapInteractiveSession, createShutdownHandler } from './bootstrap.
 import type { BootstrapContext } from './bootstrap.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
+import { SlashRouter } from './tui/engine/slash-router.js'
 import { SteerBuffer } from './tui/steer-buffer.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { formatUserMessage } from './tui/format/user-message.js'
@@ -106,6 +107,10 @@ async function main() {
 
   // Register overlays with real data (when available)
   app.registerOverlays()
+
+  // ── SlashRouter ──────────────────────────────────────────────
+  const slashRouter = new SlashRouter(app, ctx)
+  app.setSlashHandler(async (input) => slashRouter.route(input))
 
   // ── SteerBuffer ──────────────────────────────────────────────
   steerBuffer = new SteerBuffer()
