@@ -119,6 +119,8 @@ export class TuiApp {
   private onExitCallback?: () => void
   /** External slash command handler. If set, handleSlashCommand delegates here. */
   private slashHandler?: (input: string) => boolean | Promise<boolean>
+  /** SteerBuffer reference for live region display */
+  steerBuffer: { hasPending: () => boolean; getPending: () => readonly string[] } | null = null
 
   constructor(options: {
     stdout: WriteStream
@@ -146,7 +148,20 @@ export class TuiApp {
     this.resize = new ResizeHandler({ stdout: options.stdout })
     this.inputLine = new InputLine({
       history: options.history,
-      onSubmit: (text) => this.onSubmitCallback?.(text),
+      onSubmit: (text) => {
+        // Commit user message to scrollback
+        if (text.trim()) {
+          const formatted = formatUserMessage({
+            content: text.trim(),
+            width: this.columns,
+          }, this.theme)
+          for (const line of formatted) {
+            this.commit.writeRaw(line + '\n')
+          }
+          this.state.committedCount++
+        }
+        this.onSubmitCallback?.(text)
+      },
     })
 
     // Write batcher: coalesce render calls
@@ -512,6 +527,8 @@ export class TuiApp {
   }
 
   private handleAbort(): void {
+    // Clear steer buffer on abort to prevent stale guidance
+    this.steerBuffer?.getPending()
     this.state.isStreaming = false
     this.state.isThinking = false
     this.state.phase = 'idle'
@@ -553,6 +570,22 @@ export class TuiApp {
       const showLines = allLines.slice(-6) // last 6 lines
       for (const line of showLines) {
         lines.push({ text: line })
+      }
+    }
+
+    // 2b. Steer buffer indicator (during streaming)
+    if (this.steerBuffer?.hasPending()) {
+      const pending = this.steerBuffer.getPending()
+      lines.push({ text: `⏳ ${pending.length} guidance message(s) queued` })
+    }
+
+    // 2c. Tool accumulator (live tool output during streaming)
+    if (this.toolAccumulator.size > 0) {
+      for (const [id, text] of this.toolAccumulator) {
+        const lastLines = text.split('\n').slice(-3)
+        for (const line of lastLines) {
+          lines.push({ text: `  ${line.slice(0, this.columns - 4)}` })
+        }
       }
     }
 

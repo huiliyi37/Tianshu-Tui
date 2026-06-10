@@ -114,6 +114,7 @@ async function main() {
 
   // ── SteerBuffer ──────────────────────────────────────────────
   steerBuffer = new SteerBuffer()
+  app.steerBuffer = steerBuffer
 
   // ── Wire agent → TuiApp ──────────────────────────────────────
   app.onSubmit((text) => {
