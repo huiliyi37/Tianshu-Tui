@@ -116,6 +116,7 @@ export class TuiApp {
   // External hooks
   private onSubmitCallback?: (text: string) => void
   private onAbortCallback?: () => void
+  private onExitCallback?: () => void
 
   constructor(options: {
     stdout: WriteStream
@@ -184,8 +185,29 @@ export class TuiApp {
     // Wire input: character input → inputLine → live region update
     this.input.onAnyKey((key) => {
       // ── Global shortcuts (before input line processing) ──────
-      if (key.name === 'ctrl_c' || (key.name === 'escape' && !this.inputLine.vimEnabled)) {
-        this.handleAbort()
+      if (key.name === 'ctrl_c') {
+        if (this.state.isStreaming || this.state.isThinking) {
+          // Streaming: abort current agent run
+          this.handleAbort()
+        } else {
+          // Idle: exit application via graceful shutdown
+          this.dispose()
+          if (this.onExitCallback) {
+            this.onExitCallback()
+          } else {
+            process.exit(0)
+          }
+        }
+        return
+      }
+      if (key.name === 'escape' && !this.inputLine.vimEnabled) {
+        if (this.state.isStreaming || this.state.isThinking) {
+          this.handleAbort()
+        } else {
+          // Idle: clear input line
+          this.inputLine.setValue('')
+          this.renderLive()
+        }
         return
       }
       if (key.name === 'ctrl_l') {
@@ -221,7 +243,26 @@ export class TuiApp {
       onAbort: () => this.handleAbort(),
       onApprovalRequired: async (_id, _name, _input) => this.handleApprovalRequired(),
       onCheckpoint: (hash) => this.handleCheckpoint(hash),
-      onPhaseChange: (phase, detail) => { this.state.phase = phase as ActivityPhase; this.renderLive() },
+      onPhaseChange: (phase, _detail) => {
+        // Only map recognized phases to ActivityPhase; ignore unknown strings
+        const knownPhases: Record<string, ActivityPhase> = {
+          idle: 'idle',
+          thinking: 'thinking',
+          streaming: 'streaming',
+          waiting: 'waiting',
+          analyzing: 'analyzing',
+          working: 'streaming',
+          preparing: 'thinking',
+          blocked: 'waiting',
+        }
+        const mapped = knownPhases[phase]
+        if (mapped) {
+          this.state.phase = mapped
+          this.renderLive()
+        }
+        // Unknown phases (heartbeat, convergence-warning, etc.) are ignored
+        // for the status bar display
+      },
       onIntentPreview: async (_intent) => 'continue',
       onSteerDrain: () => null, // SteerBuffer integration in Phase B
     }
@@ -237,6 +278,11 @@ export class TuiApp {
   /** 设置中止回调 */
   onAbort(callback: () => void): void {
     this.onAbortCallback = callback
+  }
+
+  /** 设置退出回调（/exit、/quit 时触发，由外部执行 graceful shutdown） */
+  onExit(callback: () => void): void {
+    this.onExitCallback = callback
   }
 
   /** 设置输入文本（外部更新，如 slash command） */
@@ -523,7 +569,13 @@ export class TuiApp {
       case '/exit':
       case '/quit':
         this.dispose()
-        process.exit(0)
+        // Delegate to graceful shutdown (session persist, agent abort, MCP teardown)
+        // instead of process.exit(0) which skips all cleanup.
+        if (this.onExitCallback) {
+          this.onExitCallback()
+        } else {
+          process.exit(0)
+        }
         break
       default:
         break
