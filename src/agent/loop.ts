@@ -986,6 +986,7 @@ export class AgentLoop {
   }
 
   requestThetaCheck(reason: string): void {
+      if (this.config.thetaCheckDisabled) return
       requestThetaCheck(this, reason);
   }
 
@@ -1865,13 +1866,17 @@ export class AgentLoop {
         const request = turnRequest.request!
 
         // Turn-level thinking (GLM): disable thinking on tool execution turns
-        // to reduce reasoning_content accumulation. Enable on planning/analysis turns.
-        // This prevents the "200k window stall" where preserved thinking bloats context.
+        // to reduce reasoning_content accumulation. Plan Mode also disables
+        // provider-side thinking: plan_submit already requires a large polished
+        // document, and hidden reasoning streams can consume the whole timeout
+        // before the model emits the tool call. Normal analysis turns keep the
+        // previous behavior.
         if (this.config.turnLevelThinking && this.config.client.setThinking) {
           const messages = this.session.getMessages()
           const lastMsg = messages[messages.length - 1]
           const isToolExecTurn = lastMsg?.role === 'tool'
-          this.config.client.setThinking(isToolExecTurn ? 'disabled' : 'enabled')
+          const isPlanModeTurn = this.planModeState === 'planning'
+          this.config.client.setThinking(isToolExecTurn || isPlanModeTurn ? 'disabled' : 'enabled')
         }
 
         let turnTextAccum = ''

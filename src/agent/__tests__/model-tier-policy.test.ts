@@ -23,13 +23,13 @@ describe('model tier policy', () => {
     }).tier, 'strong')
   })
 
-  it('forces verifier work to strong independent of authority', () => {
+  it('routes verifier work to cheap (flash) for fast review throughput', () => {
     assert.equal(recommendModelTier({
       authority: 'tianliang',
       profile: 'verifier',
       kind: 'verify',
       objective: 'run tests and diagnose failures',
-    }).tier, 'strong')
+    }).tier, 'cheap')
   })
 
   it('allows low-risk tianliang patcher to be cheap but not high-risk patcher', () => {

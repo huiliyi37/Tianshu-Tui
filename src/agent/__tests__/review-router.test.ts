@@ -13,7 +13,7 @@ const okDeps: ReviewRouterDeps = {
 }
 
 describe('routeReviewWorkflow', () => {
-  it('routes L1 micro-change to nudge only and spawns no agents', async () => {
+  it('routes L1 README to nudge only and spawns no agents', async () => {
     let verifierCalls = 0
     let patcherCalls = 0
     let squadronCalls = 0
@@ -31,6 +31,36 @@ describe('routeReviewWorkflow', () => {
     assert.equal(verifierCalls, 0)
     assert.equal(patcherCalls, 0)
     assert.equal(squadronCalls, 0)
+  })
+
+  it('routes L1 test-only fix to nudge (isFix does NOT force L2)', async () => {
+    let verifierCalls = 0
+    const outcome = await routeReviewWorkflow(
+      { files: ['src/agent/__tests__/theta-check.test.ts'], crossModule: false, isFix: true },
+      {
+        ...okDeps,
+        spawnVerifier: async () => { verifierCalls++; return { verdict: 'verified', evidence: 'ran: ok' } },
+      },
+    )
+
+    assert.equal(outcome.tier, 'L1')
+    assert.equal(outcome.verdict, 'nudge')
+    assert.equal(verifierCalls, 0, 'test-only fix should not spawn verifier')
+  })
+
+  it('routes security boundary file to L3 squadron', async () => {
+    let squadronCalls = 0
+    const outcome = await routeReviewWorkflow(
+      { files: ['src/agent/approval-risk.ts'], crossModule: false, isFix: true },
+      {
+        ...okDeps,
+        spawnSquadron: async () => { squadronCalls++; return { findings: [] } },
+      },
+    )
+
+    assert.equal(outcome.tier, 'L3')
+    assert.equal(outcome.verdict, 'verified')
+    assert.equal(squadronCalls, 1, 'security boundary file should trigger squadron')
   })
 
   it('routes L2 fix through verifier and passes only with evidence', async () => {
@@ -80,7 +110,7 @@ describe('routeReviewWorkflow', () => {
   it('routes L3 through squadron before verifier workflow', async () => {
     let squadronCalls = 0
     const outcome = await routeReviewWorkflow(
-      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts'], crossModule: false, isFix: false },
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false },
       {
         ...okDeps,
         spawnSquadron: async () => { squadronCalls++; return { findings: [] } },
@@ -95,11 +125,11 @@ describe('routeReviewWorkflow', () => {
   it('rejects L3 when squadron reports high-severity findings before verifier can pass it', async () => {
     let verifierCalls = 0
     const outcome = await routeReviewWorkflow(
-      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts'], crossModule: false, isFix: false },
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false },
       {
         ...okDeps,
         spawnVerifier: async () => { verifierCalls++; return { verdict: 'verified', evidence: 'ran: should not matter' } },
-        spawnSquadron: async () => ({ findings: [{ severity: 'HIGH', claim: 'race' }] }),
+        spawnSquadron: async () => ({ findings: [{ severity: 'HIGH', claim: 'race' }], infraFailures: [] }),
       },
     )
 
@@ -108,6 +138,45 @@ describe('routeReviewWorkflow', () => {
     assert.equal(outcome.escalated, true)
     assert.match(outcome.evidence ?? '', /squadron/i)
     assert.equal(verifierCalls, 0)
+  })
+
+  it('L3 squadron with infra-only failures returns verified (no L2 fallthrough)', async () => {
+    let verifierCalls = 0
+    const outcome = await routeReviewWorkflow(
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false },
+      {
+        ...okDeps,
+        spawnVerifier: async () => { verifierCalls++; return { verdict: 'verified', evidence: 'ran: npx tsc --noEmit → ok' } },
+        spawnSquadron: async () => ({
+          findings: [],
+          infraFailures: [{ kind: 'json', claim: 'Worker result did not contain a JSON object' }],
+        }),
+      },
+    )
+
+    assert.equal(outcome.tier, 'L3')
+    assert.equal(outcome.verdict, 'verified')
+    assert.equal(verifierCalls, 0, 'L3 squadron pass skips L2 verifier')
+    assert.equal(outcome.infraFailures?.length, 1)
+    assert.match(outcome.evidence ?? '', /squadron/i)
+  })
+
+  it('L3 squadron with infra-only failures still passes (no L2 fallthrough)', async () => {
+    const outcome = await routeReviewWorkflow(
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false },
+      {
+        ...okDeps,
+        spawnVerifier: async () => ({ verdict: 'verified', evidence: '   ' }),
+        spawnSquadron: async () => ({
+          findings: [],
+          infraFailures: [{ kind: 'timeout', claim: 'review worker timed out' }],
+        }),
+      },
+    )
+
+    assert.equal(outcome.tier, 'L3')
+    assert.equal(outcome.verdict, 'verified', 'L3 squadron pass: no blocking findings → verified')
+    assert.equal(outcome.infraFailures?.length, 1)
   })
 
   it('escalates immediately when patcher reports it did not patch a verifier rejection', async () => {

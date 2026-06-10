@@ -150,5 +150,26 @@ describe('createCoordinatorReviewDeps', () => {
     assert.match(capturedRequests[0]?.objective ?? '', /fail-closed.*fail-toward-content/)
     assert.equal(result.findings[0]?.severity, 'HIGH')
     assert.match(result.findings[0]?.claim ?? '', /race/)
+    assert.deepEqual(result.infraFailures, [])
+  })
+
+  it('keeps squadron worker contract failures separate from real findings', async () => {
+    const coordinator: ReviewCoordinator = {
+      delegate: async () => run([]),
+      delegateBatch: async () => run([worker({
+        status: 'failed',
+        summary: 'Worker failed: Worker result did not contain a JSON object',
+        findings: [],
+        risks: ['all_required: work order wo-test was blocked (unparseable or connectivity issue)'],
+        evidenceStatus: 'blocked',
+      })]),
+    }
+
+    const deps = createCoordinatorReviewDeps(coordinator)
+    const result = await deps.spawnSquadron({ files: ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'], crossModule: false, isFix: false })
+
+    assert.deepEqual(result.findings, [])
+    assert.equal(result.infraFailures?.[0]?.kind, 'json')
+    assert.match(result.infraFailures?.[0]?.claim ?? '', /JSON object/)
   })
 })

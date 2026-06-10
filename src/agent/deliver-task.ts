@@ -478,14 +478,31 @@ When the task implements a complex spec or cross-module integration, include the
             lines.push('', '⚠️ ReviewRouter skipped (force=true): review dependencies are unavailable. Verify equivalent independent review evidence exists.')
           } else {
             // REVIEW_TIMEOUT: cap review workflow at 90s to prevent tool timeout (120s default).
-            // If review times out, reject with a clear message rather than crashing.
+            // If review times out, reject with a clear message and ABORT child workers.
+            // Previously the timeout only rejected the Promise.race but left zombie
+            // worker sessions consuming API quota — causing 245s stalls.
             const REVIEW_TIMEOUT_MS = 90_000
+            const reviewAbort = new AbortController()
+            // Link to tool-level abort signal so tool cancellation also stops workers
+            if (params.abortSignal) {
+              if (params.abortSignal.aborted) {
+                lines.push('', '⚠️  Review workflow aborted: tool was cancelled.')
+                return { content: lines.join('\n'), isError: true }
+              }
+              params.abortSignal.addEventListener('abort', () => reviewAbort.abort(), { once: true })
+            }
             let outcome: ReviewOutcome
             try {
               const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Review workflow timed out')), REVIEW_TIMEOUT_MS),
+                setTimeout(() => {
+                  reviewAbort.abort()
+                  reject(new Error('Review workflow timed out'))
+                }, REVIEW_TIMEOUT_MS),
               )
-              outcome = await Promise.race([route(change, ctx.reviewDeps), timeoutPromise])
+              outcome = await Promise.race([
+                route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal }),
+                timeoutPromise,
+              ])
             } catch (err) {
               const reason = err instanceof Error ? err.message : String(err)
               lines.push('', `⚠️  Review workflow ${reason.includes('timed out') ? 'timed out' : 'failed'}: ${reason}`)
@@ -499,7 +516,12 @@ When the task implements a complex spec or cross-module integration, include the
               return { content: lines.join('\n'), isError: true }
             }
             if (outcome.verdict === 'verified') {
-              lines.push('', `✅ ReviewRouter verified (${outcome.tier}): ${outcome.evidence ?? 'verified'}`)
+              if (outcome.infraFailures && outcome.infraFailures.length > 0) {
+                lines.push('', `⚠️ ReviewRouter YELLOW (${outcome.tier}): review infrastructure caveat(s), delivery verified by available evidence.`)
+                lines.push(`   ${outcome.evidence ?? 'verified with review infra caveats'}`)
+              } else {
+                lines.push('', `✅ ReviewRouter verified (${outcome.tier}): ${outcome.evidence ?? 'verified'}`)
+              }
             } else if (outcome.verdict === 'nudge') {
               lines.push('', `⚠️ ReviewRouter nudge (${outcome.tier}): apply review disciplines before committing.`)
             }

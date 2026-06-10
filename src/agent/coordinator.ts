@@ -3,6 +3,7 @@ import { recommendModelForTask } from '../model/capability.js'
 import type { ProviderConfig } from '../config/schema.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import { ProviderHealthTracker } from './provider-health.js'
+import { debugLog } from '../utils/debug.js'
 import {
   createReadOnlyWorkOrder,
   createWriteWorkOrder,
@@ -186,12 +187,22 @@ export class DelegationCoordinator {
           const routeHasCredentials = !provider || provider.auth?.type === 'oauth' || Boolean(provider.apiKey || (provider.apiKeyEnv && process.env[provider.apiKeyEnv]))
           if (routeModelExists && routeHasCredentials) {
             const routed = cards.find(c => c.model === routeProfile.model)
-            if (routed) return routed
+            if (routed) {
+              debugLog(`[worker-model] routing: task=${task} → ${routeName} → ${routeProfile.provider}/${routeProfile.model} ✓`)
+              return routed
+            }
+            debugLog(`[worker-model] routing: task=${task} → ${routeName} → ${routeProfile.model} NOT in cards=[${cards.map(c => c.model).join(',')}]`)
+          } else {
+            debugLog(`[worker-model] routing: task=${task} → ${routeName} skipped (modelExists=${routeModelExists} creds=${routeHasCredentials})`)
           }
+        } else {
+          debugLog(`[worker-model] routing: task=${task} → ${routeName} skipped (provider ${routeProfile.provider} is cold)`)
         }
       }
     }
-    return recommendModelForTask(task, cards)
+    const fallback = recommendModelForTask(task, cards)
+    debugLog(`[worker-model] fallback: task=${task} → ${fallback.model} (routing=${this.config.routing ? 'configured' : 'none'})`)
+    return fallback
   }
 
   private buildTierRecommendation(order: WorkOrder): ModelTierRecommendation {

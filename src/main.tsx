@@ -68,6 +68,7 @@ import { cleanupOrphanedTmpFiles } from './fs-atomic.js'
 import { cleanupOldArtifactSessions } from './artifact/store.js'
 import { createLspManager } from './lsp/manager.js'
 import { createGotoDefinitionTool, createFindReferencesTool } from './lsp/tools.js'
+import { debugLog } from './utils/debug.js'
 
 function captureGitBaseline(cwd: string): BaselineSnapshot {
   try {
@@ -621,6 +622,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       const workerMaxTokens = isWrite
         ? Math.min(8192, workerModelSpec?.maxTokens ?? workerContextWindow)
         : Math.min(4096, workerModelSpec?.maxTokens ?? workerContextWindow)
+
+      debugLog(`[worker-model] runtimeFactory: kind=${_order.kind} profile=${_order.profile} model=${workerModel} provider=${workerProvider.name} contextWindow=${workerContextWindow}`)
 
       return {
         order: _order,

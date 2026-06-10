@@ -82,6 +82,8 @@ export interface AgentConfig {
   hearthObserveEnabled?: boolean
   /** Explicit opt-in for anti-anchoring harness hooks. Disabled by default. */
   antiAnchoring?: AntiAnchoringConfig
+  /** Disable theta (tsc --noEmit) checks. Workers use this to skip redundant typechecking. Default: false (enabled). */
+  thetaCheckDisabled?: boolean
   /** Optional current-turn intent retrieval route guidance. Disabled by default. */
   intentRetrievalRouter?: IntentRetrievalRouterConfigInput
   /** Optional OwnershipLedger for real-time file ownership — updated on every file_write. */

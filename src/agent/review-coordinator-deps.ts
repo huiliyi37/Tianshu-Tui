@@ -1,6 +1,6 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
 import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatWeighingReviewStance, type ChangeSet } from './review-discipline.js'
-import type { PatcherResult, ReviewFinding, ReviewRouterDeps, SquadronResult, VerifierResult } from './review-router.js'
+import type { PatcherResult, ReviewFinding, ReviewInfraFailure, ReviewRouterDeps, SquadronResult, VerifierResult } from './review-router.js'
 import type { AggregationPolicy, WorkerProfile, WorkerResult, WorkOrderKind } from './work-order.js'
 
 type WorkerFinding = WorkerResult['findings'][number]
@@ -134,20 +134,35 @@ function mapWorkerFinding(result: WorkerResult, finding: WorkerFinding): ReviewF
 }
 
 function mapSquadronFindings(run: CoordinatorRun): ReviewFinding[] {
-  if (run.status === 'skipped') {
-    return [{ severity: 'HIGH', claim: 'Review Squadron skipped before producing findings' }]
-  }
-
   const findings: ReviewFinding[] = []
   for (const result of run.results) {
+    if (result.status !== 'passed') continue
     for (const finding of result.findings) {
       findings.push(mapWorkerFinding(result, finding))
     }
-    if (result.status !== 'passed') {
-      findings.push({ severity: 'HIGH', claim: result.summary })
-    }
   }
   return findings
+}
+
+function classifyInfraFailure(result: WorkerResult): ReviewInfraFailure['kind'] {
+  const text = `${result.summary}\n${result.risks.join('\n')}\n${result.artifacts.map(a => a.content).join('\n')}`
+  if (/did not contain a JSON object|schema-valid JSON|parse/i.test(text)) return 'json'
+  if (/timeout|timed out/i.test(text)) return 'timeout'
+  if (/skipped/i.test(text)) return 'skip'
+  return 'worker'
+}
+
+function mapSquadronInfraFailures(run: CoordinatorRun): ReviewInfraFailure[] {
+  if (run.status === 'skipped') {
+    return [{ kind: 'skip', claim: 'Review Squadron skipped before producing findings' }]
+  }
+
+  const failures: ReviewInfraFailure[] = []
+  for (const result of run.results) {
+    if (result.status === 'passed') continue
+    failures.push({ kind: classifyInfraFailure(result), claim: result.summary })
+  }
+  return failures
 }
 
 function verifierResult(run: CoordinatorRun): VerifierResult {
@@ -248,7 +263,7 @@ export function createCoordinatorReviewDeps(
       const run = coordinator.delegateBatch
         ? await coordinator.delegateBatch(requests, 'all_required', options.abortSignal)
         : await runSquadronSerially(coordinator, requests, options.abortSignal)
-      return { findings: mapSquadronFindings(run) }
+      return { findings: mapSquadronFindings(run), infraFailures: mapSquadronInfraFailures(run) }
     },
   }
 }

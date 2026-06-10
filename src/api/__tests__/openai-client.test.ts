@@ -421,4 +421,39 @@ describe('DeepSeek-specific features', () => {
     assert.equal(thoughts.join(''), 'Step 1: analyzeStep 2: conclude')
     assert.equal(stopReason, 'end_turn')
   })
+
+  it('8: thinking plus tool call is actionable and not text-only', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+
+    const texts: string[] = []
+    const thoughts: string[] = []
+    const blocks: any[] = []
+    let stopReason: string | undefined
+
+    const callbacks = {
+      onTextDelta: (t: string) => texts.push(t),
+      onThinkingDelta: (t: string) => thoughts.push(t),
+      onContentBlock: (block: any) => blocks.push(block),
+      onStopReason: (reason: string) => { stopReason = reason },
+    }
+
+    client.processDelta(
+      { choices: [{ delta: { reasoning_content: 'Need to submit the plan.' }, finish_reason: null }] },
+      callbacks,
+    )
+    client.processDelta(
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_plan', type: 'function', function: { name: 'plan_submit', arguments: '{"title":"Stepwise Document Writing","plan":"Do it."}' } }] }, finish_reason: 'tool_calls' }] },
+      callbacks,
+    )
+    client.processDelta(
+      { usage: { prompt_tokens: 100, completion_tokens: 20 } },
+      callbacks,
+    )
+
+    assert.deepEqual(texts, [])
+    assert.deepEqual(thoughts, ['Need to submit the plan.'])
+    assert.equal(blocks.length, 1)
+    assert.equal(blocks[0].name, 'plan_submit')
+    assert.equal(stopReason, 'tool_use')
+  })
 })

@@ -38,9 +38,10 @@ describe('review disciplines', () => {
     assert.equal(isFixContext('docs: update handoff'), false)
   })
 
-  it('routes large or cross-module changes to L3', () => {
-    assert.equal(classifyChangeScale({ files: ['a.ts', 'b.ts', 'c.ts', 'd.ts'], crossModule: false, isFix: false }), 'L3')
+  it('routes large (≥5 files), cross-module, or security-boundary changes to L3', () => {
+    assert.equal(classifyChangeScale({ files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false }), 'L3')
     assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: true, isFix: false }), 'L3')
+    assert.equal(classifyChangeScale({ files: ['src/agent/approval-risk.ts'], crossModule: false, isFix: true }), 'L3')
   })
 
   it('routes fix or code changes to L2', () => {
@@ -48,9 +49,11 @@ describe('review disciplines', () => {
     assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: false, isFix: false }), 'L2')
   })
 
-  it('routes trivial non-fix documentation changes to L1', () => {
+  it('routes trivial documentation or test-only files to L1 (isFix does NOT force L2)', () => {
     assert.equal(classifyChangeScale({ files: ['README.md'], crossModule: false, isFix: false }), 'L1')
     assert.equal(classifyChangeScale({ files: ['docs/notes.txt', 'docs/example.json'], crossModule: false, isFix: false }), 'L1')
+    assert.equal(classifyChangeScale({ files: ['README.md'], crossModule: false, isFix: true }), 'L1')
+    assert.equal(classifyChangeScale({ files: ['src/agent/__tests__/loop.test.ts'], crossModule: false, isFix: true }), 'L1')
   })
 
   it('routes any non-empty delivery through review workflow while leaving L1 advisory', () => {

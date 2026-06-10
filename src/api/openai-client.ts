@@ -370,9 +370,11 @@ export class OpenAIClient implements StreamClient {
         : isReasoning ? REASONING_READ_TIMEOUT_MS : READ_TIMEOUT_MS
       // Thinking-stall detection: once thinking tokens have arrived but no text
       // content yet, use a shorter timeout to catch stalled thinking streams.
-      // Without this, a mimo/glm model that sends one thinking chunk then hangs
-      // would silently block for 300s (SLOW_READ_TIMEOUT_MS) before timeout.
-      const thinkingStallMs = (receivedThinking && !textReceived)
+      // If the provider has already sent a complete content block (for example
+      // a tool_use) but no text delta, do not treat the stream as thinking-only:
+      // some APIs finalize tool calls without any text content.
+      const hasActionableBlock = this.toolCallBuffer.size > 0 || this._textAccum.length > 0
+      const thinkingStallMs = (receivedThinking && !textReceived && !hasActionableBlock)
         ? THINKING_STALL_TIMEOUT_MS
         : null
       const timeout = receivedFirstChunk

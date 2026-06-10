@@ -14,7 +14,7 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('<rules>'))
     assert.ok(prompt.includes('</rules>'))
-    assert.ok(prompt.includes('verify-first'))
+    assert.ok(prompt.includes('evidence-scope'))
   })
 
   it('wraps tool usage in <tool-usage> tags', () => {
@@ -65,7 +65,7 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     // Key phrases from the current prompt contract must survive
     assert.ok(prompt.includes('有理有据'))
-    assert.ok(prompt.includes('verify-first'))
+    assert.ok(prompt.includes('代码修改 / 架构决策 / bug 修复：严格先读'))
     assert.ok(prompt.includes('read_file'))
     assert.ok(prompt.includes('edit_file'))
     assert.ok(prompt.includes('write_file'))

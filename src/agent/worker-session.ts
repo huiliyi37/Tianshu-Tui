@@ -146,6 +146,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     compact: config.compact,
     sessionId: `worker-${config.order.id}`,
     reviewDepth: config.reviewDepth,
+    thetaCheckDisabled: true,
   }, session, config.cwd)
 
   const timeoutMs = config.order.budget.timeoutMs

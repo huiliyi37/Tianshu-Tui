@@ -18,6 +18,7 @@ import {
 } from './fingerprint.js'
 import { FieldHabituationTracker } from './field-habituation.js'
 import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
+import { debugLog } from '../utils/debug.js'
 
 export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
 
@@ -182,6 +183,17 @@ export class PromptEngine {
           this.lastMessageCount = oaiMessages.length
           this.lastMessageHash = msgHash
           if (userContent !== this.cachedFreshForUser || isDuplicate) {
+            // New user message boundary — apply any pending frozen base update.
+            // rebuildFrozenBase() defers the volatileBlock swap to this point
+            // so that tool-call turns within the same user message keep using
+            // the old stable volatileBlock → exact-prefix cache preserved.
+            if (this.frozenBase !== this.volatileBlock) {
+              this.volatileBlock = this.frozenBase
+              // Old frozen entries embed old volatileBlock, which byte-matches
+              // previous API calls — clearing them would force fallback with
+              // newVolatileBlock and cause full prefix cache break. Keep them:
+              // historical messages hit cache; only new user message misses.
+            }
             this.cachedFreshForUser = userContent
             this.userMessagesSinceGitRefresh++
             const refreshGit = this.gitDirty || this.userMessagesSinceGitRefresh >= 3
@@ -434,10 +446,17 @@ export class PromptEngine {
   private rebuildFrozenBase(): void {
     const ctx = { ...this.config.volatileCtx, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock }
     this.frozenBase = buildStableVolatileBlock(ctx)
-    this.volatileBlock = this.frozenBase
-    // P1: frozen snapshots store volatileBlock format — clear stale entries
-    // when frozen base is rebuilt so historical messages use consistent format.
-    this.frozenUserMerged.clear()
+    // P1: Do NOT update volatileBlock or clear frozenUserMerged here.
+    // Changing volatileBlock mid-tool-loop mutates the merged user message
+    // content from byte 0 and breaks DeepSeek exact-prefix cache entirely
+    // (hit rate drops from 99%+ to ~16%). The frozenBase→volatileBlock swap
+    // is deferred to the next user-message boundary in buildOaiRequest(),
+    // which naturally triggers a full fresh rebuild — cache break at that
+    // point is unavoidable and acceptable.
+    //
+    // frozenUserMerged entries embed old volatileBlock format. They stay
+    // valid as long as volatileBlock hasn't changed. When volatileBlock
+    // eventually swaps, frozenUserMerged is cleared at that boundary.
   }
 
   setActionableTurn(actionable: boolean): void {
@@ -560,6 +579,14 @@ export class PromptEngine {
   }
 
   private invalidateFreshCache(): void {
+    // P1 diagnostic: log caller when fresh cache is cleared mid-tool-loop.
+    // cachedFreshForUser should only be emptied at user-message boundaries.
+    // If cleared between tool-call turns, the appendix changes → prefix
+    // cache breaks → hit rate drops from 99%+ to ~16%.
+    if (this.cachedFreshForUser !== '') {
+      const err = new Error('invalidateFreshCache')
+      debugLog(`[fresh-cache] CLEARED cachedFreshForUser="${this.cachedFreshForUser.slice(0, 80)}..." by: ${err.stack?.split('\n').slice(2, 5).join(' → ') ?? 'unknown'}`)
+    }
     this.cachedFreshForUser = ''
     this.cachedAppendix = ''
   }

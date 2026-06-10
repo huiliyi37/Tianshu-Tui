@@ -83,19 +83,44 @@ export interface ChangeSet {
   isFix: boolean
 }
 
-const TRIVIAL_FILE_PATTERN = /(?:^|\/)(?:README|CHANGELOG)(?:\.[^/]*)?$|\.(?:md|mdx|txt|json)$/i
+const TRIVIAL_FILE_PATTERN = /(?:^|\/)README|CHANGELOG(?:\.[^/]*)?$|\.(?:md|mdx|txt|json)$/i
 const DEPENDENCY_OR_COMPILER_CONFIG_PATTERN = /(?:^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock|tsconfig(?:\.[^/]*)?\.json|[^/]+\.lock)$/i
+const TEST_ONLY_PATTERN = /(?:^|\/)__tests__\//i
+
+/** Files touching these paths cross into security/safety boundaries → forced L3. */
+const SECURITY_BOUNDARY_PATTERNS = [
+  'approval-risk',
+  'path-validate',
+  'sandbox-exec',
+  'permissions',
+  'sycophancy-trap',
+  'immune-hook',
+  'sensitive-preflight',
+]
+
+function isTestOnlyFile(file: string): boolean {
+  return TEST_ONLY_PATTERN.test(file)
+}
+
+function touchesSecurityBoundary(files: readonly string[]): boolean {
+  return files.some(f => SECURITY_BOUNDARY_PATTERNS.some(p => f.includes(p)))
+}
 
 /**
  * Classify a change set into the review workflow scale:
- * - L3: new/cross-module/large changes → Review Squadron
- * - L2: fix, code, dependency, or compiler config changes → single adversarial verifier
- * - L1: tiny non-fix docs/trivial data changes → nudge only
+ * - L3: cross-module, large (≥5 files), or touches security boundary → Review Squadron
+ * - L2: normal code changes (default) → single adversarial verifier
+ * - L1: trivial docs/data files or test-only files → nudge only
+ *
+ * isFix from the commit message is NOT used as a gating signal —
+ * structural properties of the change determine review depth, not message prefix.
  */
 export function classifyChangeScale(change: ChangeSet): ReviewScale {
-  if (change.crossModule || change.files.length >= 4) return 'L3'
+  if (change.crossModule || change.files.length >= 5 || touchesSecurityBoundary(change.files)) return 'L3'
   if (change.files.some(file => DEPENDENCY_OR_COMPILER_CONFIG_PATTERN.test(file))) return 'L2'
-  if (!change.isFix && change.files.length > 0 && change.files.every(file => TRIVIAL_FILE_PATTERN.test(file))) {
+  if (change.files.length > 0 && change.files.every(file =>
+    TRIVIAL_FILE_PATTERN.test(file) || isTestOnlyFile(file)
+  )) {
     return 'L1'
   }
   return 'L2'

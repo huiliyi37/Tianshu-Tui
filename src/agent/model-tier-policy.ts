@@ -48,7 +48,7 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
   }
 
   if (input.kind === 'verify' || input.profile === 'verifier' || input.profile === 'adversarial_verifier') {
-    return { tier: 'strong', hardFloor: 'strong', reason: 'verification work requires strong model tier' }
+    return { tier: 'cheap', reason: 'verification work uses flash model for fast review throughput' }
   }
 
   if (authority === 'tianfu' || authority === '天府') {
