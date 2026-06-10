@@ -410,38 +410,48 @@ export class TuiApp {
 
   // ── Overlay Registration ─────────────────────────────────────
 
-  /** 注册 overlay 渲染器（初始化时调用一次） */
-  registerOverlays(): void {
+  /**
+   * 注册 overlay 渲染器。
+   *
+   * @param overlayData 可选：每个 overlay 的数据提供函数。
+   *                    不传入则使用空占位数据。
+   */
+  registerOverlays(overlayData?: {
+    pagerContent?: () => PagerData
+    starmapEntries?: () => StarmapData
+    paletteCommands?: () => PaletteData
+    chronicleEntries?: () => ChronicleData
+  }): void {
     // Pager
     this.overlay.register('pager', {
-      render: (_w, _h) => renderPager(
-        { content: 'Pager placeholder', page: 0 },
-        this.columns, this.rows, this.theme,
-      ),
+      render: (_w, _h) => {
+        const data = overlayData?.pagerContent?.() ?? { content: '(no content)', page: 0 }
+        return renderPager(data, this.columns, this.rows, this.theme)
+      },
     })
 
     // Starmap
     this.overlay.register('starmap', {
-      render: (_w, _h) => renderStarmap(
-        { entries: [] },
-        this.columns, this.rows, this.theme,
-      ),
+      render: (_w, _h) => {
+        const data = overlayData?.starmapEntries?.() ?? { entries: [] }
+        return renderStarmap(data, this.columns, this.rows, this.theme)
+      },
     })
 
     // Command palette
     this.overlay.register('command-palette', {
-      render: (_w, _h) => renderCommandPalette(
-        { commands: [], selectedIndex: 0 },
-        this.columns, this.rows, this.theme,
-      ),
+      render: (_w, _h) => {
+        const data = overlayData?.paletteCommands?.() ?? { commands: [], selectedIndex: 0 }
+        return renderCommandPalette(data, this.columns, this.rows, this.theme)
+      },
     })
 
     // Chronicle
     this.overlay.register('chronicle', {
-      render: (_w, _h) => renderChronicle(
-        { entries: [] },
-        this.columns, this.rows, this.theme,
-      ),
+      render: (_w, _h) => {
+        const data = overlayData?.chronicleEntries?.() ?? { entries: [] }
+        return renderChronicle(data, this.columns, this.rows, this.theme)
+      },
     })
   }
 }
