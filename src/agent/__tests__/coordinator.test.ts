@@ -670,6 +670,7 @@ describe('DelegationCoordinator', () => {
       objective: 'Adversarially verify a failing test path where strong tier hard floor must hold.',
       kind: 'verify',
       profile: 'adversarial_verifier',
+      authority: 'tianquan',
       scope: { files: ['src/agent/coordinator.ts', 'src/agent/__tests__/coordinator.test.ts'] },
     })
 

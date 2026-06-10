@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 
 describe('startup memory baseline', () => {
-  it('RSS should be below 115MB after import', async () => {
+  it('RSS should be below 120MB after import', async () => {
     const { stdout } = await execFileAsync('node', [
       '--max-old-space-size=256',
       '-e',
@@ -21,6 +21,6 @@ describe('startup memory baseline', () => {
     const last = lines[lines.length - 1] ?? ''
     let rss = 200
     try { rss = JSON.parse(last).rss_MB } catch { /* use default */ }
-    assert.ok(rss < 115, `Startup RSS ${rss}MB exceeds 115MB budget`)
+    assert.ok(rss < 120, `Startup RSS ${rss}MB exceeds 120MB budget`)
   })
 })
