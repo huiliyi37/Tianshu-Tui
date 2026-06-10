@@ -231,6 +231,10 @@ export class TuiApp {
           return
         }
       }
+      // ── Approval mode handling ──────────────────────────────
+      if (this.input.getMode() === 'approval') {
+        if (this.handleApprovalKey(key.char)) return
+      }
       // ── Normal input processing ─────────────────────────────
       const event = this.inputLine.handleKey(key.name, key.char, key.ctrl, key.meta)
       if (event?.type === 'change') {
@@ -248,7 +252,7 @@ export class TuiApp {
       onTurnComplete: (usage, turnNumber, isFinal) => { void this.handleTurnComplete(usage, turnNumber, isFinal ?? true) },
       onError: (error) => this.handleError(error),
       onAbort: () => this.handleAbort(),
-      onApprovalRequired: async (_id, _name, _input) => this.handleApprovalRequired(),
+      onApprovalRequired: async (id, name, input) => this.handleApprovalRequired(id, name, input),
       onCheckpoint: (hash) => this.handleCheckpoint(hash),
       onPhaseChange: (phase, _detail) => {
         // Only map recognized phases to ActivityPhase; ignore unknown strings
@@ -273,6 +277,22 @@ export class TuiApp {
       onIntentPreview: async (_intent) => 'continue',
       onSteerDrain: () => null, // SteerBuffer integration in Phase B
     }
+
+    // ── Approval key bindings ─────────────────────────────────
+    this.input.onKey('approval:y', () => this.resolveApproval({ approved: true }))
+    this.input.onKey('approval:n', () => this.resolveApproval(false))
+    this.input.onKey('approval:escape', () => this.resolveApproval(false))
+    this.input.onKey('approval:return', () => this.resolveApproval({ approved: true }))
+  }
+
+  // ── Approval resolution ─────────────────────────────────────
+
+  private resolveApproval(result: ApprovalResult | boolean): void {
+    if (!this.approvalPending) return
+    this.approvalPending.resolve(result)
+    this.approvalPending = null
+    this.input.setMode('input')
+    this.renderLive()
   }
 
   // ── Public API ───────────────────────────────────────────────
@@ -358,6 +378,16 @@ export class TuiApp {
   setSlashHandler(handler: (input: string) => boolean | Promise<boolean>): void {
     this.slashHandler = handler
   }
+
+  // ── Approval state ──────────────────────────────────────────
+
+  /** Pending approval request — when set, InputHandler switches to approval mode */
+  private approvalPending: {
+    id: string
+    name: string
+    input: Record<string, unknown>
+    resolve: (result: ApprovalResult | boolean) => void
+  } | null = null
 
   // ── Agent Event Handlers ─────────────────────────────────────
 
@@ -496,6 +526,7 @@ export class TuiApp {
    *
    * Live region 结构：
    * ┌─ streaming/thinking 内容 ─┐
+   * │ Approval prompt (when pending) │
    * │ GlanceBar                  │
    * │ InputLine                  │
    * └────────────────────────────┘
@@ -525,7 +556,17 @@ export class TuiApp {
       }
     }
 
-    // 3. GlanceBar
+    // 3. Approval prompt (when pending)
+    if (this.approvalPending) {
+      const p = this.approvalPending
+      const inputSummary = JSON.stringify(p.input).slice(0, 80)
+      lines.push({ text: ` ╭─ Approval Required ──────────────────────────────` })
+      lines.push({ text: ` │ Tool: ${p.name}` })
+      lines.push({ text: ` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}` })
+      lines.push({ text: ` ╰─ [y] approve  [n] deny  [e] edit ──────────────` })
+    }
+
+    // 4. GlanceBar
     const glanceBar = formatGlanceBar({
       width: this.columns,
       domainGlyph: this.state.domainGlyph,
@@ -536,7 +577,7 @@ export class TuiApp {
     }, this.theme)
     lines.push({ text: glanceBar })
 
-    // 4. Input line
+    // 5. Input line
     const inputText = this.inputLine.value || 'Type your message...'
     const cursorPos = this.inputLine.cursor
     const displayInput = inputText
@@ -580,10 +621,51 @@ export class TuiApp {
     this.state.thinkStartMs = 0
   }
 
-  /** 审批处理器（当前为 auto-approve 模式） */
-  private async handleApprovalRequired(): Promise<boolean> {
-    // Auto-approve for now. Interactive approval UI in future iteration.
-    return true
+  /** 审批处理器 — 交互式 y/n/e */
+  private handleApprovalRequired(id: string, name: string, input: Record<string, unknown>): Promise<ApprovalResult | boolean> {
+    return new Promise((resolve) => {
+      this.approvalPending = { id, name, input, resolve }
+      this.input.setMode('approval')
+      this.state.phase = 'waiting'
+      this.renderLive()
+    })
+  }
+
+  /** 处理审批模式按键。返回 true 表示已处理。 */
+  private handleApprovalKey(char: string): boolean {
+    if (!this.approvalPending) return false
+
+    const key = char.toLowerCase()
+    if (key === 'y') {
+      const resolve = this.approvalPending.resolve
+      this.approvalPending = null
+      this.input.setMode('input')
+      this.state.phase = 'idle'
+      this.renderLive()
+      resolve(true)
+      return true
+    }
+    if (key === 'n') {
+      const resolve = this.approvalPending.resolve
+      this.approvalPending = null
+      this.input.setMode('input')
+      this.state.phase = 'idle'
+      this.renderLive()
+      resolve(false)
+      return true
+    }
+    if (key === 'e') {
+      // Edit mode: approve with edited input (for now, approve as-is;
+      // full edit flow requires external editor integration)
+      const resolve = this.approvalPending.resolve
+      this.approvalPending = null
+      this.input.setMode('input')
+      this.state.phase = 'idle'
+      this.renderLive()
+      resolve(true)
+      return true
+    }
+    return false
   }
 
   /** 处理斜杠命令，返回 true 表示已处理，false 表示应透传 agent */
