@@ -181,9 +181,29 @@ export class TuiApp {
 
     // Wire input: character input → inputLine → live region update
     this.input.onAnyKey((key) => {
+      // ── Global shortcuts (before input line processing) ──────
+      if (key.name === 'ctrl_c' || (key.name === 'escape' && !this.inputLine.vimEnabled)) {
+        this.handleAbort()
+        return
+      }
+      if (key.name === 'ctrl_l') {
+        process.stdout.write('\x1B[2J\x1B[H')
+        this.renderLive()
+        return
+      }
+      // ── Slash command handling ──────────────────────────────
+      const inputVal = this.inputLine.value
+      if (inputVal.startsWith('/')) {
+        if (key.name === 'return') {
+          this.handleSlashCommand(inputVal)
+          this.inputLine.setValue('')
+          return
+        }
+      }
+      // ── Normal input processing ─────────────────────────────
       const event = this.inputLine.handleKey(key.name, key.char, key.ctrl, key.meta)
       if (event?.type === 'change') {
-        this.renderLive() // update input bar in live region
+        this.renderLive()
       }
     })
 
@@ -481,6 +501,31 @@ export class TuiApp {
   private async handleApprovalRequired(): Promise<boolean> {
     // Auto-approve for now. Interactive approval UI in future iteration.
     return true
+  }
+
+  /** 处理斜杠命令 */
+  private handleSlashCommand(input: string): void {
+    const trimmed = input.trim()
+    switch (trimmed) {
+      case '/clear':
+        process.stdout.write('\x1B[2J\x1B[H')
+        this.live.reset()
+        this.renderLive()
+        break
+      case '/starmap':
+        this.activateOverlay('starmap')
+        break
+      case '/chronicle':
+        this.activateOverlay('chronicle')
+        break
+      case '/exit':
+      case '/quit':
+        this.dispose()
+        process.exit(0)
+        break
+      default:
+        break
+    }
   }
 
   // ── Overlay Registration ─────────────────────────────────────
