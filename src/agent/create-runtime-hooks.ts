@@ -16,6 +16,7 @@ import { createMeridianHook, type MeridianHookDeps } from './hooks/meridian-hook
 import { createPhysarumFileAccessHook, type PhysarumFileAccessHookDeps } from './hooks/physarum-file-access-hook.js'
 import { createSonglineRuntimeHook } from './hooks/songline-hook.js'
 import { createHearthObserveHook } from './hooks/hearth-observe-hook.js'
+import { createDedupGuardHook, type DedupGuardHookDeps } from './hooks/dedup-guard-hook.js'
 import { createBlindExplorationHook } from './hooks/blind-exploration-hook.js'
 import { createMCTSPlanningHook } from './hooks/mcts-planning-hook.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
@@ -83,6 +84,16 @@ export interface RuntimeHookDeps {
   callAntiAnchoringSeedModel?: (prompt: string) => Promise<string>
   /** Observe MCTS planning result for diagnostics/tests. */
   onAntiAnchoringMCTSResult?: Parameters<typeof createMCTSPlanningHook>[0]['onResult']
+
+  // ── DEDUP guard (postTurn: detect repeated summaries) ──
+  /** Get the current turn's streamed assistant text. */
+  getStreamedText?: () => string
+  /** Get the previous turn's streamed assistant text. */
+  getPrevStreamedText?: () => string | null
+  /** Store the current turn's streamed text for next turn comparison. */
+  setPrevStreamedText?: (text: string) => void
+  /** Overlap ratio threshold (0-1). Default: 0.6 */
+  dedupGuardThreshold?: number
 
   // ── HEARTH observe (pure diagnostic, no intervention) ──
   /** Explicit opt-in for HEARTH anchor invariant observation. Default: false. */
@@ -197,6 +208,15 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       setPrevGraphHash: deps.setPrevAnchorGraphHash,
       getPrevCycleOpen: deps.getPrevCycleOpen ?? (() => null),
       getPrevSessionCycleClose: deps.getPrevSessionCycleClose ?? (() => null),
+    }))
+  }
+
+  if (deps.getStreamedText && deps.getPrevStreamedText && deps.setPrevStreamedText) {
+    hooks.push(createDedupGuardHook({
+      getStreamedText: deps.getStreamedText,
+      getPrevStreamedText: deps.getPrevStreamedText,
+      setPrevStreamedText: deps.setPrevStreamedText,
+      threshold: deps.dedupGuardThreshold,
     }))
   }
 

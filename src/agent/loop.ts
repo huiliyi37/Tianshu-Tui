@@ -186,6 +186,8 @@ export class AgentLoop {
   private sessionAffordanceAdaptations: Record<string, import('./affordance.js').BaseAffordance> = {}
   /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
   private prevAnchorGraphHash: string | null = null
+  /** Previous turn's streamed assistant text for dedup-guard P5. */
+  private prevStreamedText: string | null = null
   private pressureMonitor: PressureMonitor
   private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   private sycophancyWasActive = false
@@ -357,6 +359,10 @@ export class AgentLoop {
       getAnchorGraph: () => this.buildAnchorGraph(),
       getPrevAnchorGraphHash: () => this.prevAnchorGraphHash,
       setPrevAnchorGraphHash: (hash: string) => { this.prevAnchorGraphHash = hash },
+      // ── DEDUP guard (postTurn: repeated summary detection) ──
+      getStreamedText: () => this.streamedText,
+      getPrevStreamedText: () => this.prevStreamedText,
+      setPrevStreamedText: (text: string) => { this.prevStreamedText = text },
       getPrevCycleOpen: this.config.sessionRegistry && this.config.sessionId
         ? () => this.config.sessionRegistry!.getLastCycleClose()
         : undefined,
