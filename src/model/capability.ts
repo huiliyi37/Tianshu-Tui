@@ -28,5 +28,9 @@ function score(task: CapabilityTask, card: ModelCapabilityCard): number {
 
 export function recommendModelForTask(task: CapabilityTask, cards: ModelCapabilityCard[]): ModelCapabilityCard {
   if (cards.length === 0) throw new Error('No model capability cards configured')
-  return [...cards].sort((a, b) => score(task, b) - score(task, a))[0]!
+  return [...cards].sort((a, b) => {
+    const scoreA = score(task, a) + (a.recommendedTasks.includes(task) ? 0.5 : 0)
+    const scoreB = score(task, b) + (b.recommendedTasks.includes(task) ? 0.5 : 0)
+    return scoreB - scoreA
+  })[0]!
 }
