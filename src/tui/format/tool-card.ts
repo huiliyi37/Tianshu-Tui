@@ -83,7 +83,6 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   lines.push(color(parts.join(' '), borderColor, { bold: true }))
 
   // ── Body ────────────────────────────────────────────────────
-  const pipe = depth > 0 ? color('│', theme.dim) : '│'
 
   for (const line of displayLines) {
     lines.push(`${color('│', theme.dim)} ${color(line, borderColor)}`)

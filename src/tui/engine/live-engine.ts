@@ -95,9 +95,7 @@ export class LiveEngine {
         const line = bounded[i]!
         // 检查是否与缓存相同（相同则跳过擦除+重写，减少闪烁）
         if (i < this.lineCache.length && this.lineCache[i] === line.text) {
-          out += cursorUp(0) || '\n' // 只换行
-          // 实际上需要下移一行。用 cursorDown 模拟。
-          out += '\x1B[1B'
+          out += '\x1B[1B' // 跳过：直接下移一行，不擦除不重写
         } else {
           out += ANSI.ERASE_LINE + line.text
           if (i < newRows - 1) out += '\n'

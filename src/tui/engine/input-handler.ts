@@ -204,7 +204,18 @@ export class InputHandler {
   private parseInput(data: string): KeyPress | null {
     if (data.length === 0) return null
 
-    // 转义序列处理
+    // 完整 ESC 序列一次到达（如 \x1B[A）——直接解析，不走两阶段状态机
+    if (data.startsWith('\x1B') && data.length > 1) {
+      const name = this.resolveEscapeSequence(data)
+      if (name) {
+        const meta = data.includes(';3') || data.includes(';4')
+        const shift = data.includes(';2')
+        return { raw: data, char: '', name, ctrl: false, meta, shift }
+      }
+      return { raw: data, char: '', name: 'unknown', ctrl: false, meta: false, shift: false }
+    }
+
+    // 单独的 ESC 字节 — 进入 escaped 状态，等待后续字节
     if (data === '\x1B') {
       this.escaped = true
       this.escapeSeq = '\x1B'
@@ -213,14 +224,14 @@ export class InputHandler {
 
     if (this.escaped) {
       this.escapeSeq += data
-      // 检查是否完整的 ANSI escape sequence
-      const name = this.resolveEscapeSequence(this.escapeSeq)
+      const fullSeq = this.escapeSeq
+      const name = this.resolveEscapeSequence(fullSeq)
       if (name) {
         this.escaped = false
         this.escapeSeq = ''
-        // 解析修饰键（shift/alt 在序列中以 ;2 等表示）
-        const meta = this.escapeSeq.includes(';3') || this.escapeSeq.includes(';4')
-        return { raw: this.escapeSeq, char: '', name, ctrl: false, meta, shift: false }
+        const meta = fullSeq.includes(';3') || fullSeq.includes(';4')
+        const shift = fullSeq.includes(';2')
+        return { raw: fullSeq, char: '', name, ctrl: false, meta, shift }
       }
       // 如果序列还没结束（如 `\x1B[1` 等待 `;5D`），保持 escaped 状态
       if (this.escapeSeq.length > 10) {
