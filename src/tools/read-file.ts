@@ -2,7 +2,7 @@ import { existsSync } from 'fs'
 import { stat, readFile } from 'node:fs/promises'
 import { extname } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
-import { truncateContent } from './truncation.js'
+import { truncateContent, buildPartialView } from './truncation.js'
 import { validatePath } from './path-validate.js'
 import { GitignoreFilter } from './gitignore.js'
 import { persistRawOutput } from './output-store.js'
@@ -112,6 +112,26 @@ export function __setFileReadMtimeForTests(canonicalPath: string, mtimeMs: numbe
     modelBytes: 0,
     recordedAt: Date.now(),
   })
+}
+
+/**
+ * Register a file as "seen" via grep (or other non-read_file tool).
+ * This allows hash_edit's position-only mode to succeed after grep
+ * without requiring a full read_file call.
+ *
+ * Only registers if the file has NOT been read before (avoids overwriting
+ * a more detailed entry from read_file).
+ */
+export function registerGrepFileAccess(canonicalPath: string, mtimeMs: number): void {
+  if (fileReadHistory.has(canonicalPath)) return
+  fileReadHistory.set(canonicalPath, {
+    mtimeMs,
+    totalLines: 0,
+    rawBytes: 0,
+    modelBytes: 0,
+    recordedAt: Date.now(),
+  })
+  trimFileReadHistory()
 }
 
 async function sliceFromArtifact(
@@ -240,6 +260,18 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
   const policy = decideReadPolicy({ filePath, sizeBytes: fileSize, hasExplicitRange })
 
   if (fileSize > MAX_TOOL_INPUT_BYTES && !hasExplicitRange) {
+    if (policy.action === 'partial') {
+      // Large source file: read and return PARTIAL view instead of hard error
+      const content = await readFile(filePath, 'utf-8')
+      const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
+      const partialContent = buildPartialView(content, filePath, cap.maxChars)
+      return {
+        canonicalPath: filePath,
+        rawContent: content,
+        modelContent: partialContent,
+        uiContent: buildFileUiOutput(content, 80),
+      }
+    }
     const sizeKB = (fileSize / 1024).toFixed(0)
     const estLines = Math.ceil(fileSize / 80)
     throw new Error(
@@ -262,6 +294,17 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
       canonicalPath: filePath,
       rawContent: content,
       modelContent: truncateContent(preview, cap.maxChars, cap.headChars, cap.tailChars),
+      uiContent: buildFileUiOutput(content, 80),
+    }
+  }
+
+  // PARTIAL view for source files that fit in memory but exceed the model cap
+  if (policy.action === 'partial' && !hasExplicitRange) {
+    const partialContent = buildPartialView(content, filePath, cap.maxChars)
+    return {
+      canonicalPath: filePath,
+      rawContent: content,
+      modelContent: partialContent,
       uiContent: buildFileUiOutput(content, 80),
     }
   }
@@ -289,10 +332,16 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
     content = lines.slice(startIdx, endIdx).join('\n')
   }
 
+  // full-with-hint: append editing guidance for medium-sized files
+  const modelContent = truncateContent(content, cap.maxChars, cap.headChars, cap.tailChars)
+  const hint = policy.action === 'full-with-hint'
+    ? `\n\n── Note: this file is ${content.split('\n').length} lines. For editing, consider: grep to locate target → hash_edit with anchors. ──`
+    : ''
+
   return {
     canonicalPath: filePath,
     rawContent: content,
-    modelContent: truncateContent(content, cap.maxChars, cap.headChars, cap.tailChars),
+    modelContent: modelContent + hint,
     uiContent: buildFileUiOutput(content, 50),
   }
 }
@@ -308,6 +357,14 @@ export const READ_FILE_TOOL: Tool = {
 - Use offset and limit ONLY when you specifically need a known sub-range (e.g. a function at line 800-900); never as a workaround for "the file might be too long"
 - This tool reads text files only (UTF-8). Binary files (images, PDFs, executables) will be rejected
 - Do NOT re-read a file that you already read in the current session unless you have edited it since — your earlier tool_result is still in context
+
+### Large file strategy
+- Files > ~2000 lines (80KB+): returned as PARTIAL view (first page only with navigation hints)
+  → use grep to locate, then read_file(offset=..., limit=...) for specific ranges
+- For editing large files: use grep to find the target line → hash_edit with anchors (no full read needed)
+  → grep → get line number + hash from hash_edit anchors → hash_edit(anchors=["L580:a1b2c3d4"], new_string="...")
+- NEVER re-read a file just because the first read was partial — use offset/limit instead
+- Medium files (500-2000 lines): returned in full with editing hints
 
 ### Examples
 Good: read_file(file_path="/abs/path/src/app.ts")  → returns the whole file

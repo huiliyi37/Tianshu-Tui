@@ -56,14 +56,25 @@ describe('readFilePayload', () => {
     assert.ok(payload.modelContent.includes('hello'))
   })
 
-  it('rejects files >100KB without offset/limit', async () => {
+  it('returns PARTIAL view for source files >100KB without offset/limit', async () => {
     mkdirSync(join(dir, 'src'), { recursive: true })
-    const big = 'x'.repeat(101 * 1024)
+    const big = Array.from({ length: 3000 }, (_, i) => `line-${i}-${'x'.repeat(40)}`).join('\n')
     writeFileSync(join(dir, 'src/big.ts'), big, 'utf-8')
-    await assert.rejects(
-      async () => readFilePayload(dir, { filePath: 'src/big.ts' }),
-      /File too large/,
-    )
+    const payload = await readFilePayload(dir, { filePath: 'src/big.ts' })
+    assert.ok(payload.modelContent.includes('PARTIAL view'), 'should contain PARTIAL view header')
+    assert.ok(payload.modelContent.includes('line-0-'), 'should contain first line')
+    assert.ok(payload.modelContent.includes('To read more:'), 'should contain navigation hint')
+  })
+
+  it('returns PARTIAL view for medium-large source files under 100KB', async () => {
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    // ~90KB — over SOURCE_LARGE_BYTES (80KB) but under MAX_TOOL_INPUT_BYTES (100KB)
+    const lines = Array.from({ length: 1500 }, (_, i) => `const val_${i} = ${i}; // ${'x'.repeat(50)}`)
+    const content = lines.join('\n')
+    writeFileSync(join(dir, 'src/medium-large.ts'), content, 'utf-8')
+    const payload = await readFilePayload(dir, { filePath: 'src/medium-large.ts' })
+    assert.ok(payload.modelContent.includes('PARTIAL view'), 'should use PARTIAL view for large source')
+    assert.ok(payload.modelContent.includes('const val_0'), 'should contain first line')
   })
 
   it('allows files >100KB when offset/limit specified', async () => {

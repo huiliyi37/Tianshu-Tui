@@ -37,6 +37,8 @@ interface ReadEntry {
   index: number
   offset?: number
   limit?: number
+  /** True when the tool result was truncated (PARTIAL view, head+tail, or memory-trimmed). */
+  wasTruncated: boolean
 }
 
 /** Parse an optional integer from tool call args (handles both number and string). */
@@ -82,7 +84,7 @@ export function applyAgentDiet(messages: OaiMessage[], options: DietOptions = {}
       const ep = extractPath(msg, messages)
       if (ep) {
         const reads = fileReads.get(ep.path) ?? []
-        reads.push({ index: i, offset: ep.offset, limit: ep.limit })
+        reads.push({ index: i, offset: ep.offset, limit: ep.limit, wasTruncated: isResultTruncated(msg.content) })
         fileReads.set(ep.path, reads)
       }
 
@@ -127,11 +129,21 @@ export function applyAgentDiet(messages: OaiMessage[], options: DietOptions = {}
     const ep = extractPath(msg, messages)
     if (ep) {
       const reads = fileReads.get(ep.path) ?? []
-      // Check if any later read of the same file has a range that contains
-      // the current read's range. Full reads (no offset/limit) contain all
-      // ranges; partial reads only contain overlapping/subsumed ranges.
+      const currentEntry = reads.find(r => r.index === idx)
+
+      // A later read supersedes this one ONLY if range-contains AND the
+      // later read was not itself truncated. If the later read was truncated
+      // too, it didn't actually capture more content.
       const laterReads = reads.filter(r => r.index > idx)
-      if (laterReads.some(r => rangeContains(r, ep))) {
+      const isSuperseded = laterReads.some(r => rangeContains(r, ep) && !r.wasTruncated)
+
+      // Don't mark a supplementary read (offset/limit to fill gaps from a
+      // truncated full read) as redundant of the earlier truncated read.
+      const isSupplementary = currentEntry && !currentEntry.wasTruncated &&
+        (currentEntry.offset !== undefined && currentEntry.offset > 1) &&
+        reads.some(r => r.index < idx && r.wasTruncated && rangeContains(r, currentEntry))
+
+      if (isSuperseded && !isSupplementary) {
         categories.redundant++
         freedChars += msg.content.length
         return { ...msg, content: `[diet:redundant] re-read later` }
@@ -178,4 +190,12 @@ function extractPath(msg: OaiMessage, allMessages: OaiMessage[]): ExtractedPath 
 function isFailedResult(msg: OaiMessage): boolean {
   return msg.content.startsWith('Error:') || msg.content.startsWith('error:') ||
     msg.content.includes('ENOENT') || msg.content.includes('Permission denied')
+}
+
+/** Detect whether a tool result was truncated (PARTIAL view, head+tail, or memory-trimmed). */
+function isResultTruncated(content: string): boolean {
+  return content.includes('PARTIAL view of ') ||
+    content.includes('(truncated, use offset/limit') ||
+    content.includes('<memory-trimmed>') ||
+    content.includes('... (truncated)')
 }

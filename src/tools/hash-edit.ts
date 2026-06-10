@@ -104,7 +104,14 @@ edit_file). Use when you just read the file — never chain position-only calls.
 
 ### Hash computation
 The hash is SHA256(line_content_without_trailing_cr)[0:8].
-Use read_file first to see current content, then construct anchors from the lines you want to target.`,
+Use read_file first to see current content, then construct anchors from the lines you want to target.
+
+### grep → hash_edit direct path (large file editing)
+For large files, you can skip read_file entirely:
+1. grep(pattern="targetCode", path="/abs/path/file.ts") → grep results include hash_edit anchor hints
+2. Copy the anchor from the hints (e.g. L580:a1b2c3d4)
+3. hash_edit(file_path="/abs/path/file.ts", anchors=["L580:a1b2c3d4"], new_string="replacement")
+This avoids the read→truncate→re-read loop for large files.`,
     input_schema: {
       type: 'object',
       properties: {
