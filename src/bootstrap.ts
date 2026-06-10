@@ -85,6 +85,7 @@ export interface RuntimeRefs {
   ownershipLedger: import('./agent/ownership-ledger.js').OwnershipLedger | null
   meridianIndexer: MeridianIndexer | null
   mcpManager: any | null
+  lspManager: ReturnType<typeof createLspManager> | null
 }
 
 /** bootstrapInteractiveSession 的聚合返回值 */
@@ -110,7 +111,11 @@ export interface BootstrapContext {
 
 // ── HTTP Proxy ─────────────────────────────────────────────────
 
+let _proxySetup = false
+
 export function setupHttpProxy(): void {
+  if (_proxySetup) return
+  _proxySetup = true
   const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
   if (proxyUrl) {
     setGlobalDispatcher(new EnvHttpProxyAgent())
@@ -646,13 +651,14 @@ export function createShutdownHandler(ctx: BootstrapContext): () => void {
       try { process.stderr.write(`[shutdown] callback error: ${(err as Error)?.message}\n`) } catch { /* noop */ }
     } finally {
       if (ctx.heartbeatInterval) clearInterval(ctx.heartbeatInterval)
+      try { ctx.refs.lspManager?.dispose() } catch { /* best-effort */ }
       try { ctx.refs.mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
       void ctx.refs.mcpManager?.shutdown?.()
       if (process.stdin.isTTY && process.stdin.setRawMode) {
         process.stdin.setRawMode(false)
       }
       killAllSync()
-      process.exit(0)
+      // Note: does NOT call process.exit — callers should do so after additional cleanup
     }
   }
 }
@@ -758,6 +764,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     ownershipLedger: null,
     meridianIndexer,
     mcpManager: null,
+    lspManager: null,
   }
 
   // 10. Tool registry
@@ -781,16 +788,23 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     domainKnowledgeStore, modelId: opts.modelId,
   })
 
-  // 13. MCP + LSP (fire and forget, non-blocking)
+  // 13. MCP + LSP initialization
+  // asyncExtras (default true): fire-and-forget, non-blocking for faster startup
+  // asyncExtras=false: synchronous await, completes before bootstrap returns
   if (opts.asyncExtras !== false) {
     initializeMcp(config, toolRegistry, refs).then(() => {
       agent.updateTools()
     }).catch(() => {})
     initializeLsp(cwd, toolRegistry).then((lspManager) => {
-      // LSP manager is stored in refs for shutdown
-      ;(refs as any)._lspManager = lspManager
+      refs.lspManager = lspManager
       agent.updateTools()
     }).catch(() => {})
+  } else {
+    await initializeMcp(config, toolRegistry, refs)
+    agent.updateTools()
+    const lsp = await initializeLsp(cwd, toolRegistry)
+    refs.lspManager = lsp
+    agent.updateTools()
   }
 
   // 14. Shutdown handler

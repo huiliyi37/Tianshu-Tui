@@ -47,16 +47,9 @@ function shutdown(code: number = 0) {
 
   app?.dispose()
 
+  // Delegate core cleanup to bootstrap shutdown handler
   if (ctx) {
-    try {
-      ctx.persist.compactOai(ctx.session.getMessages())
-      ctx.agent.flushStigmergySync()
-      ctx.agent.abort()
-    } catch (err) {
-      try { process.stderr.write(`[T9 shutdown] ${(err as Error)?.message}\n`) } catch { /* noop */ }
-    }
-    try { ctx.refs.mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
-    void ctx.refs.mcpManager?.shutdown?.()
+    try { ctx.shutdown() } catch { /* already handled */ }
   }
 
   if (heartbeatInterval) {
