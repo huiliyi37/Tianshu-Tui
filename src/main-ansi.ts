@@ -19,6 +19,10 @@ import { SteerBuffer } from './tui/steer-buffer.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { formatUserMessage } from './tui/format/user-message.js'
 import { getTheme } from './tui/theme.js'
+import { starDomainRegistry } from './agent/star-domain-registry.js'
+import { readdirSync, readFileSync, existsSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -105,8 +109,41 @@ async function main() {
     history: [],
   })
 
-  // Register overlays with real data (when available)
-  app.registerOverlays()
+  // Register overlays with real data
+  app.registerOverlays({
+    starmapEntries: () => {
+      const domains = starDomainRegistry.list()
+      return {
+        entries: domains.map(d => ({
+          name: d.name,
+          glyph: '✦',
+          description: d.motto ?? '',
+          active: false,
+        })),
+      }
+    },
+    chronicleEntries: () => {
+      const sessionsDir = join(homedir(), '.rivet', 'sessions')
+      if (!existsSync(sessionsDir)) return { entries: [] }
+      try {
+        const files = readdirSync(sessionsDir)
+          .filter(f => f.endsWith('.jsonl') && !f.startsWith('worker-') && !f.endsWith('.claims.jsonl'))
+          .slice(0, 20)
+        const entries = files.map((f, i) => {
+          const id = f.replace('.jsonl', '')
+          return {
+            index: i + 1,
+            time: '',
+            summary: `Session ${id.slice(0, 8)}`,
+            current: id === ctx!.sessionId,
+          }
+        })
+        return { entries }
+      } catch {
+        return { entries: [] }
+      }
+    },
+  })
 
   // ── SlashRouter ──────────────────────────────────────────────
   const slashRouter = new SlashRouter(app, ctx)
