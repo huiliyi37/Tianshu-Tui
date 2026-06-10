@@ -3,6 +3,9 @@ import { IMPORT_RESOURCE_TOOL } from './import-resource.js'
 import { FILE_INFO_TOOL } from './file-info.js'
 import { CREATE_DOCUMENT_TOOL } from './create-document.js'
 import { CREATE_SPREADSHEET_TOOL } from './create-spreadsheet.js'
+import { CREATE_IMAGE_TOOL } from './create-image.js'
+import { CREATE_PRESENTATION_TOOL } from './create-presentation.js'
+import { CREATE_PDF_TOOL } from './create-pdf.js'
 import { EXPORT_FILE_TOOL } from './export-file.js'
 import { OPEN_PATH_TOOL } from './open-path.js'
 import { BASH_TOOL } from './bash.js'
@@ -36,6 +39,9 @@ export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry
   registry.register(OPEN_PATH_TOOL)
   registry.register(CREATE_DOCUMENT_TOOL)
   registry.register(CREATE_SPREADSHEET_TOOL)
+  registry.register(CREATE_IMAGE_TOOL)
+  registry.register(CREATE_PRESENTATION_TOOL)
+  registry.register(CREATE_PDF_TOOL)
   registry.register(PLAN_CLOSE_TOOL)
   registry.register(PLAN_SUBMIT_TOOL)
   registry.register(BASH_TOOL)
