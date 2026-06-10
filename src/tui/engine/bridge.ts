@@ -1,15 +1,12 @@
 /**
  * T9 Bridge — 将 TuiApp 接入现有 AgentLoop。
  *
- * 这是阶段 6 的参考实现。它将 TuiApp 的 AgentCallbacks 接口
- * 桥接到 AgentLoop.run() 的 callback 参数。
+ * 将 TuiApp 的 AgentCallbacks 接口桥接到 AgentLoop.run() 的 callback 参数。
+ * 所有回调先经过 TuiApp 处理（渲染），再转发给原始回调（如果有）。
  *
- * 使用方式（在 main.tsx 或 main-ansi.ts 中）：
- *
- *   const app = new TuiApp({ stdout, stdin, cols, rows, modelName });
- *   app.registerOverlays();
- *   const bridge = createT9Bridge(app, agent);
- *   await bridge.run(prompt);
+ * 使用方式：
+ *   const t9Callbacks = wrapCallbacksWithTuiApp(app);
+ *   await agent.run(prompt, { ...t9Callbacks, ...extraCallbacks });
  */
 
 import { TuiApp, type AgentCallbacks } from './app.js'
@@ -17,8 +14,7 @@ import { TuiApp, type AgentCallbacks } from './app.js'
 /**
  * 将 TuiApp 回调绑定到 AgentLoop.run() 的参数。
  *
- * 返回一个代理回调对象：它在 AgentLoop 的每个事件上调用 TuiApp
- * 对应的处理器，然后转发给原始回调（如果有）。
+ * 返回的对象满足 loop-types.ts 的 AgentCallbacks 接口。
  */
 export function wrapCallbacksWithTuiApp(
   app: TuiApp,
@@ -37,13 +33,9 @@ export function wrapCallbacksWithTuiApp(
       app.callbacks.onToolUse(id, name, input)
       original.onToolUse?.(id, name, input)
     },
-    onToolResult: (id, name, content, isError, rawPath) => {
-      app.callbacks.onToolResult(id, name, content, isError, rawPath)
-      original.onToolResult?.(id, name, content, isError, rawPath)
-    },
-    onCheckpoint: (hash) => {
-      app.callbacks.onCheckpoint(hash)
-      original.onCheckpoint?.(hash)
+    onToolResult: (id, name, result, isError, rawPath, uiContent) => {
+      app.callbacks.onToolResult(id, name, result, isError, rawPath, uiContent)
+      original.onToolResult?.(id, name, result, isError, rawPath, uiContent)
     },
     onTurnComplete: (usage, turnNumber, isFinal) => {
       app.callbacks.onTurnComplete(usage, turnNumber, isFinal)
@@ -56,6 +48,31 @@ export function wrapCallbacksWithTuiApp(
     onAbort: () => {
       app.callbacks.onAbort()
       original.onAbort?.()
+    },
+    onApprovalRequired: async (id, name, input) => {
+      const approved = await app.callbacks.onApprovalRequired(id, name, input)
+      return original.onApprovalRequired
+        ? original.onApprovalRequired(id, name, input)
+        : approved
+    },
+    onCheckpoint: (hash) => {
+      app.callbacks.onCheckpoint?.(hash)
+      original.onCheckpoint?.(hash)
+    },
+    onPhaseChange: (phase, detail) => {
+      app.callbacks.onPhaseChange?.(phase, detail)
+      original.onPhaseChange?.(phase, detail)
+    },
+    onIntentPreview: async (intent) => {
+      const action = await (app.callbacks.onIntentPreview?.(intent as unknown) ?? 'continue')
+      return original.onIntentPreview
+        ? original.onIntentPreview(intent)
+        : action as unknown
+    },
+    onSteerDrain: () => {
+      const drained = app.callbacks.onSteerDrain?.() ?? null
+      const originalDrained = original.onSteerDrain?.() ?? null
+      return drained ?? originalDrained
     },
   }
 }

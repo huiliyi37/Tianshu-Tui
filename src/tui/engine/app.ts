@@ -64,15 +64,23 @@ export interface TuiState {
 
 // ── Agent callbacks interface ──────────────────────────────────
 
+// ── Agent callbacks interface (aligned to loop-types.ts AgentCallbacks) ──
+
+import type { Usage } from '../../api/types.js'
+
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
   onToolUse: (id: string, name: string, input: Record<string, unknown>) => void
-  onToolResult: (id: string, name: string, content: string, isError?: boolean, rawPath?: string) => void
-  onCheckpoint: (hash: string) => void
-  onTurnComplete: (usage: unknown, turnNumber: number, isFinal?: boolean) => void
+  onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => void
+  onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean) => void
   onError: (error: Error) => void
   onAbort: () => void
+  onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<boolean>
+  onCheckpoint?: (hash: string) => void
+  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string }) => void
+  onIntentPreview?: (intent: unknown) => Promise<unknown>
+  onSteerDrain?: () => string | null
 }
 
 // ── TuiApp ─────────────────────────────────────────────────────
@@ -91,8 +99,10 @@ export class TuiApp {
   private theme: RivetTheme
   private columns: number
   private rows: number
+  /** Streaming tool result accumulator: id → accumulated text */
+  private toolAccumulator = new Map<string, string>()
 
-  // Agent callbacks (wired in Phase 6)
+  // Agent callbacks (aligned to loop-types.ts AgentCallbacks)
   readonly callbacks: AgentCallbacks
 
   // External hooks
@@ -158,16 +168,21 @@ export class TuiApp {
       }
     })
 
-    // Build AgentCallbacks (these will be passed to AgentLoop in Phase 6)
+    // Build AgentCallbacks (aligned to loop-types.ts AgentCallbacks)
     this.callbacks = {
       onTextDelta: (text) => this.handleTextDelta(text),
       onThinkingDelta: (thinking) => this.handleThinkingDelta(thinking),
       onToolUse: (id, name, input) => this.handleToolUse(id, name, input),
-      onToolResult: (id, name, content, isError, rawPath) => this.handleToolResult(id, name, content, isError, rawPath),
-      onCheckpoint: (hash) => this.handleCheckpoint(hash),
-      onTurnComplete: (usage, turnNumber, isFinal) => this.handleTurnComplete(turnNumber, isFinal ?? true),
+      onToolResult: (id, name, result, isError, rawPath, uiContent) =>
+        this.handleToolResult(id, name, result, isError, rawPath, uiContent),
+      onTurnComplete: (usage, turnNumber, isFinal) => this.handleTurnComplete(usage, turnNumber, isFinal ?? true),
       onError: (error) => this.handleError(error),
       onAbort: () => this.handleAbort(),
+      onApprovalRequired: async (_id, _name, _input) => this.handleApprovalRequired(),
+      onCheckpoint: (hash) => this.handleCheckpoint(hash),
+      onPhaseChange: (phase, detail) => { this.state.phase = phase as ActivityPhase; this.renderLive() },
+      onIntentPreview: async (_intent) => 'continue',
+      onSteerDrain: () => null, // SteerBuffer integration in Phase B
     }
   }
 
@@ -252,21 +267,33 @@ export class TuiApp {
     this.renderLive()
   }
 
-  private handleToolResult(id: string, name: string, content: string, isError?: boolean, rawPath?: string): void {
-    // Commit tool card to scrollback
+  private handleToolResult(id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string): void {
+    const displayContent = uiContent ?? result
+
+    // Streaming chunk mode: isError === undefined means intermediate update
+    if (isError === undefined) {
+      // Accumulate for live tool card display — show last lines in live region
+      const toolAcc = this.toolAccumulator.get(id) ?? ''
+      this.toolAccumulator.set(id, toolAcc + result)
+      this.renderLive()
+      return
+    }
+
+    // Terminal result: commit to scrollback
+    const toolAcc = this.toolAccumulator.get(id)
+    this.toolAccumulator.delete(id)
+    const finalContent = toolAcc ? toolAcc + displayContent : displayContent
+
     const formatted = formatToolCard({
       toolName: name,
-      content,
+      content: finalContent,
       isError,
       rawPath,
       elapsedMs: Date.now() - this.state.turnStartMs,
     }, this.theme)
 
-    // Write each line to commit engine (scrollback)
-    const lines = formatted.join('\n')
-    this.commit.write({ text: lines })
+    this.commit.write({ text: formatted.join('\n') })
     this.state.committedCount++
-
     this.renderLive()
   }
 
@@ -278,7 +305,7 @@ export class TuiApp {
     this.state.committedCount++
   }
 
-  private handleTurnComplete(turnNumber: number, isFinal: boolean): void {
+  private handleTurnComplete(usage: Partial<Usage>, turnNumber: number, isFinal: boolean): void {
     this.state.turnNumber = turnNumber
 
     if (isFinal) {
@@ -300,6 +327,23 @@ export class TuiApp {
       this.state.phase = 'idle'
       this.state.thinkStartMs = 0
       this.live.clear()
+    } else {
+      // Intermediate turn: archive current text to scrollback, keep writer alive
+      if (this.state.streamText) {
+        const formatted = formatAssistantMessage({
+          content: this.state.streamText,
+          width: this.columns,
+        }, this.theme)
+        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+      }
+      if (this.state.thinkingText) {
+        this.commitThinkingToScrollback()
+      }
+      this.state.streamText = ''
+      this.state.thinkingText = ''
+      this.state.isThinking = false
+      this.state.thinkStartMs = 0
+      this.state.phase = 'waiting'
     }
     this.renderLive()
   }
@@ -394,8 +438,8 @@ export class TuiApp {
     }
   }
 
-  /** 将 thinking 文本 commit 到 scrollback */
-  private commitThinking(): void {
+  /** 将 thinking 文本 commit 到 scrollback（保留内部状态） */
+  private commitThinkingToScrollback(): void {
     const formatted = formatThinking({
       text: this.state.thinkingText,
       elapsedMs: Date.now() - this.state.thinkStartMs,
@@ -403,9 +447,20 @@ export class TuiApp {
       expanded: true,
     }, this.theme)
     this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+  }
+
+  /** 将 thinking 文本 commit 到 scrollback 并清空状态 */
+  private commitThinking(): void {
+    this.commitThinkingToScrollback()
     this.state.thinkingText = ''
     this.state.isThinking = false
     this.state.thinkStartMs = 0
+  }
+
+  /** 审批处理器（当前为 auto-approve 模式） */
+  private async handleApprovalRequired(): Promise<boolean> {
+    // Auto-approve for now. Interactive approval UI in future iteration.
+    return true
   }
 
   // ── Overlay Registration ─────────────────────────────────────
