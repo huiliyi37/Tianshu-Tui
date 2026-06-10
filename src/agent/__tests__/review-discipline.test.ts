@@ -49,6 +49,13 @@ describe('review disciplines', () => {
     assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: false, isFix: false }), 'L1')
   })
 
+  it('overrides to L2 or L3 when forceLevel is set (manual review trigger)', () => {
+    assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: false, isFix: false, forceLevel: 'L2' }), 'L2')
+    assert.equal(classifyChangeScale({ files: ['src/a.ts'], crossModule: false, isFix: false, forceLevel: 'L3' }), 'L3')
+    // forceLevel takes precedence over structural classification
+    assert.equal(classifyChangeScale({ files: ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts', 'src/e.ts'], crossModule: false, isFix: false, forceLevel: 'L2' }), 'L2')
+  })
+
   it('routes trivial documentation or test-only files to L1 (isFix does NOT force L2)', () => {
     assert.equal(classifyChangeScale({ files: ['README.md'], crossModule: false, isFix: false }), 'L1')
     assert.equal(classifyChangeScale({ files: ['docs/notes.txt', 'docs/example.json'], crossModule: false, isFix: false }), 'L1')

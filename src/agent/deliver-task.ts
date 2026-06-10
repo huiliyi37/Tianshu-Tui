@@ -30,7 +30,7 @@ import { summarizeOwnershipHealth } from './ownership-health.js'
 import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
-import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet } from './review-discipline.js'
+import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet, type ReviewScale } from './review-discipline.js'
 import { routeReviewWorkflow, type ReviewRouterDeps, type ReviewOutcome } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
@@ -163,6 +163,11 @@ When the task implements a complex spec or cross-module integration, include the
               required: ['item', 'done'],
             },
             description: 'Task completion audit entries. For complex specs include fact-flow graph verified, condition matrix verified, and counterexample tests verified/deferred.',
+          },
+          review_level: {
+            type: 'string',
+            enum: ['L2', 'L3'],
+            description: 'Explicitly set review workflow depth. L2 = single adversarial verifier. L3 = Review Squadron (4 inspectors). When omitted, review level is auto-classified from change structure (default: L1 nudge-only). Use this to manually trigger deeper review for high-risk or critical-path changes.',
           },
         },
       },
@@ -466,6 +471,7 @@ When the task implements a complex spec or cross-module integration, include the
           files: filesToCommit,
           crossModule: isCrossModule(filesToCommit),
           isFix: isFixContext(message),
+          forceLevel: (params.input.review_level as ReviewScale | undefined),
         }
         if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)

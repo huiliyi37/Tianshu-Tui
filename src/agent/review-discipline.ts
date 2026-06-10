@@ -81,6 +81,8 @@ export interface ChangeSet {
   files: readonly string[]
   crossModule: boolean
   isFix: boolean
+  /** Explicitly override the auto-classified review scale. L2 = single verifier, L3 = squadron. */
+  forceLevel?: ReviewScale
 }
 
 const TRIVIAL_FILE_PATTERN = /(?:^|\/)README|CHANGELOG(?:\.[^/]*)?$|\.(?:md|mdx|txt|json)$/i
@@ -116,6 +118,7 @@ function touchesSecurityBoundary(files: readonly string[]): boolean {
  * structural properties of the change determine review depth, not message prefix.
  */
 export function classifyChangeScale(change: ChangeSet): ReviewScale {
+  if (change.forceLevel) return change.forceLevel
   if (change.crossModule || change.files.length >= 5 || touchesSecurityBoundary(change.files)) return 'L3'
   if (change.files.some(file => DEPENDENCY_OR_COMPILER_CONFIG_PATTERN.test(file))) return 'L2'
   if (change.files.length > 0 && change.files.every(file =>

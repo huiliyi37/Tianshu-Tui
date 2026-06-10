@@ -58,6 +58,8 @@ const HELP_TEXT = `Available commands:
 /plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
 /team <task|plan> — Run team-mode workflow through team_orchestrate
 /team max <task> — Run team-mode max planning through team_orchestrate
+/review — Manually trigger L2 review (single adversarial verifier) on current changes via deliver_task
+/review max — Manually trigger L3 review (Review Squadron, 4 inspectors) on current changes via deliver_task
 /sensorium — Show 天枢 3D self-awareness state
 /dream — Distill session decisions into project memory
 /index — Rebuild codebase index (modules + CLI entries)
@@ -183,6 +185,13 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   if (workflow) return workflow.prompt
   const custom = resolveCustomCommand(cwd, input)
   if (custom) return custom
+  // /review and /review max: map to explicit deliver_task instruction for the agent
+  const reviewMatch = input.match(/^\/review(\s+max)?$/i)
+  if (reviewMatch) {
+    const level = reviewMatch[1] ? 'L3' : 'L2'
+    const levelLabel = level === 'L3' ? 'L3 Review Squadron (4 inspectors)' : 'L2 adversarial verifier'
+    return `Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="${level}". This triggers ${levelLabel}.`
+  }
   // Unrecognized slash command — return null to signal "blocked"
   return null
 }
@@ -256,6 +265,12 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         setIsStreaming(false)
         return true
       }
+      return false
+    }
+
+    case '/review': {
+      // /review and /review max pass through to the agent as deliver_task instructions.
+      // resolveAppPromptInput maps them to explicit deliver_task(review_level=...) calls.
       return false
     }
 
