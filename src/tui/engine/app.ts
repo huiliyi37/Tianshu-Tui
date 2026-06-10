@@ -18,6 +18,8 @@ import { OverlayEngine } from './overlay-engine.js'
 import { InputHandler, type KeyPress } from './input-handler.js'
 import { ResizeHandler } from './resize-handler.js'
 import { InputLine } from './input-line.js'
+import { WriteBatcher } from './write-batcher.js'
+import { BlockStreamWriter } from '../block-stream-writer.js'
 import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatAssistantMessage } from '../format/assistant-message.js'
@@ -101,6 +103,10 @@ export class TuiApp {
   private rows: number
   /** Streaming tool result accumulator: id → accumulated text */
   private toolAccumulator = new Map<string, string>()
+  /** Block stream writer: chunks streaming text into display-sized blocks */
+  private blockWriter: BlockStreamWriter
+  /** Write batcher: coalesces render calls into a single LiveEngine.render() */
+  private writeBatcher: WriteBatcher
 
   // Agent callbacks (aligned to loop-types.ts AgentCallbacks)
   readonly callbacks: AgentCallbacks
@@ -137,6 +143,19 @@ export class TuiApp {
       history: options.history,
       onSubmit: (text) => this.onSubmitCallback?.(text),
     })
+
+    // Write batcher: coalesce render calls
+    this.writeBatcher = new WriteBatcher(() => this.renderLive())
+
+    // Block stream writer: buffers streaming text into display blocks
+    this.blockWriter = new BlockStreamWriter(
+      { minChars: 60, maxChars: 200, idleMs: 180 },
+      (block: string) => {
+        // Append block to stream buffer and schedule render
+        this.state.streamText += block
+        this.writeBatcher.schedule()
+      },
+    )
 
     // Initialize state
     this.state = {
@@ -175,7 +194,7 @@ export class TuiApp {
       onToolUse: (id, name, input) => this.handleToolUse(id, name, input),
       onToolResult: (id, name, result, isError, rawPath, uiContent) =>
         this.handleToolResult(id, name, result, isError, rawPath, uiContent),
-      onTurnComplete: (usage, turnNumber, isFinal) => this.handleTurnComplete(usage, turnNumber, isFinal ?? true),
+      onTurnComplete: (usage, turnNumber, isFinal) => { void this.handleTurnComplete(usage, turnNumber, isFinal ?? true) },
       onError: (error) => this.handleError(error),
       onAbort: () => this.handleAbort(),
       onApprovalRequired: async (_id, _name, _input) => this.handleApprovalRequired(),
@@ -242,10 +261,8 @@ export class TuiApp {
   private handleTextDelta(text: string): void {
     this.state.isStreaming = true
     this.state.phase = 'streaming'
-    this.state.streamText += text
-
-    // Show last few lines of streaming text in live region
-    this.renderLive()
+    // Push through block writer (buffers text, emits in display-sized blocks)
+    this.blockWriter.push(text)
   }
 
   private handleThinkingDelta(thinking: string): void {
@@ -305,8 +322,11 @@ export class TuiApp {
     this.state.committedCount++
   }
 
-  private handleTurnComplete(usage: Partial<Usage>, turnNumber: number, isFinal: boolean): void {
+  private async handleTurnComplete(usage: Partial<Usage>, turnNumber: number, isFinal: boolean): Promise<void> {
     this.state.turnNumber = turnNumber
+
+    // Flush any pending blocks from the writer
+    await this.blockWriter.flush()
 
     if (isFinal) {
       // Commit streaming text as assistant message
