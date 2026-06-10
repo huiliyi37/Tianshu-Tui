@@ -96,9 +96,8 @@ export class SlashRouter {
       } as any,
     }
 
-    // Special-case /exit and /quit — call shutdown
+    // Special-case /exit and /quit — shutdown handler already persists session
     if (command === '/exit' || command === '/quit') {
-      this.ctx.persist.compactOai(this.ctx.session.getMessages())
       this.app.commitStatic('Session saved. Goodbye!')
       this.ctx.shutdown()
       return true

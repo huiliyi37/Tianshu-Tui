@@ -127,7 +127,7 @@ export class TuiApp {
   /** External slash command handler. If set, handleSlashCommand delegates here. */
   private slashHandler?: (input: string) => boolean | Promise<boolean>
   /** SteerBuffer reference for live region display */
-  steerBuffer: { hasPending: () => boolean; getPending: () => readonly string[] } | null = null
+  steerBuffer: { hasPending: () => boolean; getPending: () => readonly string[]; clear?: () => void } | null = null
   /** Ctrl+C double-press window start timestamp (ms), 0 = inactive */
   private ctrlCPendingSince = 0
 
@@ -169,6 +169,8 @@ export class TuiApp {
           }
           this.state.committedCount++
         }
+        // Reset turn timer for the new turn
+        this.state.turnStartMs = Date.now()
         this.onSubmitCallback?.(text)
       },
     })
@@ -561,7 +563,7 @@ export class TuiApp {
 
   private handleAbort(): void {
     // Clear steer buffer on abort to prevent stale guidance
-    this.steerBuffer?.getPending()
+    this.steerBuffer?.clear?.()
     this.state.isStreaming = false
     this.state.isThinking = false
     this.state.phase = 'idle'

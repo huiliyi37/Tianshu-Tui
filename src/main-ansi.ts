@@ -17,7 +17,6 @@ import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
 import { SteerBuffer } from './tui/steer-buffer.js'
 import { killAllSync } from './tools/process-tracker.js'
-import { formatUserMessage } from './tui/format/user-message.js'
 import { getTheme } from './tui/theme.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { readdirSync, readFileSync, existsSync } from 'fs'
@@ -173,13 +172,7 @@ async function main() {
       return
     }
 
-    // Commit user message to scrollback and start new turn
-    const formattedUser = formatUserMessage({
-      content: trimmed,
-      width: stdout.columns,
-    }, theme)
-
-    // Start new turn with bridge callbacks
+    // Start new turn with bridge callbacks (user message already committed by TuiApp)
     isStreaming = true
     const callbacks = wrapCallbacksWithTuiApp(app!, {
       onSteerDrain: () => steerBuffer!.drain(),
