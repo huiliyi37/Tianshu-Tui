@@ -73,7 +73,7 @@ export interface InputHandlerOptions {
   mode?: InputMode
 }
 
-export type InputMode = 'normal' | 'input' | 'overlay'
+export type InputMode = 'normal' | 'input' | 'overlay' | 'approval'
 
 /**
  * Ctrl+key 的 ASCII 范围：Ctrl+A = 0x01 .. Ctrl+Z = 0x1A
