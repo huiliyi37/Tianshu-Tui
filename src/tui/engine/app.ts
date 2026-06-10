@@ -31,6 +31,13 @@ import { formatMarkdown } from '../format/markdown.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData } from '../format/overlay.js'
 
+function formatElapsedShort(ms: number): string {
+  if (ms < 60000) return `${Math.floor(ms / 1000)}s`
+  const mins = Math.floor(ms / 60000)
+  const secs = Math.floor((ms % 60000) / 1000)
+  return `${mins}m${secs}s`
+}
+
 // ── State types ────────────────────────────────────────────────
 
 export type ActivityPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
@@ -230,7 +237,11 @@ export class TuiApp {
         return
       }
       if (key.name === 'escape' && !this.inputLine.vimEnabled) {
-        if (this.state.isStreaming || this.state.isThinking) {
+        if (this.overlay.isActive()) {
+          // Close active overlay
+          this.overlay.deactivate()
+          this.renderLive()
+        } else if (this.state.isStreaming || this.state.isThinking) {
           this.handleAbort()
         } else {
           // Idle: clear input line
@@ -507,6 +518,16 @@ export class TuiApp {
       this.state.phase = 'idle'
       this.state.thinkStartMs = 0
       this.live.clear()
+
+      // Turn summary
+      const elapsed = Date.now() - this.state.turnStartMs
+      const inTokens = usage.input_tokens ?? 0
+      const outTokens = usage.output_tokens ?? 0
+      this.commit.write({
+        text: `Turn ${turnNumber} complete — ${inTokens.toLocaleString()} in / ${outTokens.toLocaleString()} out / ${formatElapsedShort(elapsed)}`,
+        trailingNewline: true,
+      })
+      this.state.committedCount++
     } else {
       // Intermediate turn: archive current text to scrollback, keep writer alive
       if (this.state.streamText) {

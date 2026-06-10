@@ -171,12 +171,18 @@ async function main() {
   stdout.write('\x1B[2J\x1B[H')
 
   // ── Welcome message ──────────────────────────────────────────
+  const existingMsgCount = ctx.session.getMessages().length
+  const restoreNote = existingMsgCount > 0
+    ? `  ║  Session: ${ctx.sessionId.slice(0, 8)}... (${existingMsgCount} prior msgs) ║`
+    : `  ║  Session: ${ctx.sessionId.slice(0, 8)}...                          ║`
+
   const welcomeLines = [
     `  ╔══════════════════════════════════════════╗`,
     `  ║       天枢 (Tiānshū) — T9 ANSI TUI       ║`,
     `  ║                                          ║`,
     `  ║  Model: ${modelName.padEnd(33)}║`,
     `  ║  CWD:   ${(process.cwd().length > 33 ? '...' + process.cwd().slice(-30) : process.cwd()).padEnd(33)}║`,
+    restoreNote,
     `  ║                                          ║`,
     `  ║  /help     Show commands                 ║`,
     `  ║  /exit     Quit                          ║`,
