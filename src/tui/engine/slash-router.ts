@@ -12,6 +12,7 @@
  */
 
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from '../slash-commands.js'
+import { switchAgentRuntime } from '../../bootstrap.js'
 import type { TuiApp } from './app.js'
 import type { BootstrapContext } from '../../bootstrap.js'
 
@@ -62,12 +63,17 @@ export class SlashRouter {
       model: this.app.getModelInfo().modelName,
       maxTokens: this.ctx.provider.models[0]?.contextWindow ?? 128000,
       availableModels: this.ctx.provider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })),
-      onModelSwitch: (_modelId: string): { ok: boolean; error?: string } => {
-        // Model switching in T9 path requires recreating agent with new config.
-        // For now, return not-supported.
-        return { ok: false, error: 'Model switching not yet supported in T9 path. Restart with --model <id>.' }
+      onModelSwitch: (modelId: string): { ok: boolean; error?: string } => {
+        // T9 模型切换：重建 AgentLoop（switchAgentRuntime 原地更新 ctx.agent），
+        // 再刷新 GlanceBar 显示。streaming 中先中止旧 run，避免旧回调写脏屏。
+        try { this.ctx.agent.abort() } catch { /* idle agent abort 无害 */ }
+        const res = switchAgentRuntime(this.ctx, modelId)
+        if (res.ok && res.modelName) {
+          this.app.setModelInfo(res.modelName, res.contextWindow)
+        }
+        return { ok: res.ok, error: res.error }
       },
-      allProviders: { [this.ctx.provider.name]: { models: this.ctx.provider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })) } },
+      allProviders: this.buildAllProviders(),
       currentProvider: this.ctx.provider.name,
       currentSessionId: this.ctx.sessionId,
       cost: 0,
@@ -127,6 +133,15 @@ export class SlashRouter {
       this.app.commitStatic(`Error: ${(err as Error).message}`)
       return true
     }
+  }
+
+  /** 构建全 provider 模型表（供 /model list 跨 provider 显示与切换查找） */
+  private buildAllProviders(): Record<string, { models: Array<{ id: string; alias: string }> }> {
+    const all: Record<string, { models: Array<{ id: string; alias: string }> }> = {}
+    for (const [name, prov] of Object.entries(this.ctx.config.provider.providers)) {
+      all[name] = { models: prov.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })) }
+    }
+    return all
   }
 
   /** Check if input looks like a slash command (starts with /) */

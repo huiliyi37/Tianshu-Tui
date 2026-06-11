@@ -663,6 +663,78 @@ export function createShutdownHandler(ctx: BootstrapContext): () => void {
   }
 }
 
+// ── Model Switch (T9 + React 共用) ─────────────────────────────
+
+export interface SwitchModelResult {
+  ok: boolean
+  error?: string
+  /** 成功时返回的展示名（alias 优先）与上下文窗口，供 UI 刷新 */
+  modelName?: string
+  contextWindow?: number
+}
+
+/**
+ * 跨 provider 查找并切换模型 —— 重建 AgentLoop（与 React main.tsx 的 useMemo 重建同构，
+ * 不存在仅热换 client 的轻量路径）。成功时**原地更新** ctx 的 agent/provider/apiKey/auth，
+ * 使所有持有 ctx 引用的闭包（onSubmit/onAbort）自动用上新 agent。
+ *
+ * session / persist / toolRegistry / refs / fileHistory 等全部复用，前缀缓存与历史不受影响。
+ */
+export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): SwitchModelResult {
+  for (const [provName, prov] of Object.entries(ctx.config.provider.providers)) {
+    const found = prov.models.find(m => m.id === modelId || m.alias === modelId)
+    if (!found) continue
+
+    let provider = ctx.provider
+    let apiKey = ctx.apiKey
+    let auth = ctx.auth
+
+    if (prov.auth?.type === 'oauth') {
+      if (provName !== ctx.provider.name) {
+        provider = prov
+        apiKey = ''
+        auth = createAuthProvider(prov.auth, process.env, prov.apiKey)
+      }
+    } else {
+      const provKey = prov.apiKey ?? process.env[prov.apiKeyEnv ?? ''] ?? (() => {
+        try { return resolveApiKey(prov) } catch { return undefined }
+      })()
+      if (!provKey) {
+        return { ok: false, error: `API key not set for ${provName}. Set ${prov.apiKeyEnv ?? 'apiKey'} in config or environment.` }
+      }
+      if (provName !== ctx.provider.name) {
+        provider = prov
+        apiKey = provKey
+        auth = undefined
+      }
+    }
+
+    const { agent } = createAgentRuntime({
+      provider,
+      apiKey,
+      auth,
+      config: ctx.config,
+      sessionId: ctx.sessionId,
+      cwd: ctx.cwd,
+      toolRegistry: ctx.toolRegistry,
+      persist: ctx.persist,
+      claimStore: ctx.claimStore,
+      fileHistory: ctx.fileHistory,
+      refs: ctx.refs,
+      domainKnowledgeStore: ctx.domainKnowledgeStore,
+      modelId: found.id,
+    })
+
+    ctx.agent = agent
+    ctx.provider = provider
+    ctx.apiKey = apiKey
+    ctx.auth = auth
+
+    return { ok: true, modelName: found.alias ?? found.id, contextWindow: found.contextWindow }
+  }
+  return { ok: false, error: `Model "${modelId}" not found in any provider.` }
+}
+
 // ── Aggregate Bootstrap ────────────────────────────────────────
 
 export interface BootstrapOptions {
