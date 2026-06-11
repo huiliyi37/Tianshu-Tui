@@ -21,6 +21,19 @@ describe('formatUserMessage', () => {
     assert.ok(lines.some(l => l.includes('line1')))
     assert.ok(lines.some(l => l.includes('line2')))
   })
+
+  it('body text is neutral, not the cinnabar accent (no wall of color)', () => {
+    // 水墨原则：accent 只落在 ▍ gutter + You 标签，正文用终端默认前景色。
+    // hex theme 才能产生 SGR；用带色 userColor 验证正文不被着成 userColor。
+    const hexTheme = { ...theme, userColor: '#d4453a' }
+    const lines = formatUserMessage({ content: 'hello', width: 40 }, hexTheme)
+    const gutter = lines[1]!
+    const body = lines[2]!
+    // gutter 仍带 cinnabar SGR
+    assert.ok(/\x1B\[38;2;212;69;58m/.test(gutter), 'gutter carries cinnabar')
+    // body 不得带 cinnabar 前景色
+    assert.ok(!/\x1B\[38;2;212;69;58m/.test(body), `body must not be cinnabar: ${JSON.stringify(body)}`)
+  })
 })
 
 describe('formatAssistantMessage', () => {

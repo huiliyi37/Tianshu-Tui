@@ -18,7 +18,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu'
 
 interface ColorSet {
   primary: string
@@ -169,6 +169,35 @@ const STARFIELD_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
+// Tianshu theme — 紫微北斗·墨夜 (Purple-Star Big-Dipper Ink-Night). Rivet's default.
+// Coordinated 水墨 monochrome: ~95% ink-gray hierarchy carried by whitespace +
+// typography, ONE cold accent (紫微紫 violet) for identity/active state, and the
+// 朱砂印 cinnabar seal reserved for a single warm point (user mark / alert pulse).
+// Functional tones (青/金/赤) are desaturated so they sink into the ink, never neon.
+const TIANSHU_TRUECOLOR: ColorSet = {
+  primary: '#c9b8ff',   // 紫微帝星紫 — identity, links, active/in-progress (faded 青花)
+  secondary: '#9a90c2', // 墨紫 — edit/write, headers (cool, low-sat second violet)
+  success: '#6f9b91',   // 归航青 — tests pass / done (desaturated teal, sunk in ink)
+  warning: '#b09155',   // 星金 — delegation/attention (matte gold, not bright)
+  error: '#c1655c',     // 朱砂赤 — errors (muted, distinct from the vivid seal)
+  dim: '#494c5b',       // 远星灰 — separators / shortcuts / decoration only
+  pulseQuiet: '#2a2d3a', // 极淡墨线 — quiet pulse (faint hairline)
+  pulseActive: '#c9b8ff', // 紫微紫 — active pulse
+  pulseAlert: '#d4453a',  // 朱砂印 — the one vivid warm seal, alert only
+}
+
+const TIANSHU_FALLBACK: ColorSet = {
+  primary: 'magenta',   // closest named violet for 256-color terminals
+  secondary: 'blue',
+  success: 'cyan',
+  warning: 'yellow',
+  error: 'red',
+  dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'magenta',
+  pulseAlert: 'red',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -222,9 +251,16 @@ const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetTheme }>
     truecolor: buildTheme(STARFIELD_TRUECOLOR, { userColor: '#e8ecf8', assistantColor: '#c9a9ff', muted: '#aab4d4' }),
     fallback: buildTheme(STARFIELD_FALLBACK, { userColor: 'white', assistantColor: 'magenta' }),
   },
+  tianshu: {
+    // userColor = 朱砂印 cinnabar (the user ▌ mark, the one warm point);
+    // assistantColor = neutral ink body — emphasis comes from primary, not hue;
+    // muted = 元信息灰 from the approved 墨夜 palette.
+    truecolor: buildTheme(TIANSHU_TRUECOLOR, { userColor: '#d4453a', assistantColor: '#a7aab6', muted: '#6c6f7e' }),
+    fallback: buildTheme(TIANSHU_FALLBACK, { userColor: 'red', assistantColor: 'white' }),
+  },
 }
 
-let activeTheme: ThemeName = 'midnight'
+let activeTheme: ThemeName = 'tianshu'
 
 export function setTheme(name: ThemeName): void {
   activeTheme = name

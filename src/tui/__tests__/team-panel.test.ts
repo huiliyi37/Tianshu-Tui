@@ -92,6 +92,13 @@ describe('TeamPanel model', () => {
     assert.equal(decodeTeamPanelModel(encoded)?.waves.length, 2)
     assert.equal(decodeTeamPanelModel('team standard: 2 dispatched'), null)
   })
+
+  it('decodes even when live activity lines accumulated before the payload (T9 P3)', () => {
+    const model = buildTeamPanelModel(summary(), 0)
+    const encoded = encodeTeamPanelModel(model)
+    const withProgress = '  ↳ [T1·patcher] ⚙ read_file\n  ↳ [T2·reviewer] ✎ 输出中…\n' + encoded
+    assert.equal(decodeTeamPanelModel(withProgress)?.waves.length, 2)
+  })
 })
 
 describe('renderTeamPanelLines', () => {

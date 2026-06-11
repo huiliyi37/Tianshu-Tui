@@ -37,7 +37,7 @@ const HELP_TEXT = `Available commands:
 /domain [list|<name>|auto|off] — Show or switch star domain personality
 /verbose — Toggle verbose tool output
 /auto — Toggle auto-approve
-/theme [midnight|pastel|cyberpunk|observatory|starfield] — Switch color theme
+/theme [tianshu|midnight|pastel|cyberpunk|observatory|starfield] — Switch color theme
 /effort [off|low|medium|high|max] — Set reasoning effort
 /undo [<number>|preview <number>] — Undo file changes with preview
 /clear — Clear screen
@@ -457,7 +457,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
     case '/theme': {
       const raw = parts[1]?.toLowerCase()
-      const validThemes: ThemeName[] = ['midnight', 'pastel', 'cyberpunk', 'observatory', 'starfield']
+      const validThemes: ThemeName[] = ['tianshu', 'midnight', 'pastel', 'cyberpunk', 'observatory', 'starfield']
       if (!raw || raw === 'list') {
         const current = getActiveThemeName()
         const list = validThemes.map(t => `  ${t}${t === current ? ' ← current' : ''}`).join('\n')

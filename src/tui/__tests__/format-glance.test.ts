@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import stringWidth from 'string-width'
 import { formatGlanceBar } from '../format/glance-bar.js'
 import { getTheme } from '../theme.js'
 
@@ -100,5 +101,39 @@ describe('formatGlanceBar', () => {
     const statusLine = result.split('\n')[1]!
     const plain = stripAnsi(statusLine)
     assert.ok(plain.endsWith('1s'), 'elapsed at end of line')
+  })
+
+  // ── 防重复渲染回归：状态行显示宽度绝不能 ≥ 终端宽度 ──────────────────
+  // 根因：旧 stripAnsiLen 用 .length(JS code units)，CJK(天枢/测试)按 1 计，
+  // 实际渲染 2 列 → 行被撑到 width+1 落入末列自动换行临界 → LiveEngine 行数
+  // 计算与终端实际换行错位 → clear() 欠擦 → chrome 顶部残留进 scrollback(重复)。
+  // 修复后所有 zone 用 display width 度量，状态行严格 ≤ width-1，永不换行。
+  it('status line display-width never exceeds terminal width (no wrap → no duplicate)', () => {
+    for (const width of [60, 80, 100, 120]) {
+      const result = formatGlanceBar({
+        width,
+        domainGlyph: '⚙', domainName: '天枢', branch: 't9-ui-refactor',
+        phaseGlyph: '·', phaseLabel: 'idle', modelName: 'opus-4-8',
+        contextRatio: 0, estimatedTokens: 0, maxTokens: 1_000_000,
+        cost: 0, elapsedMs: 0, turnCount: 1,
+      }, theme)
+      const [sepLine, statusLine] = result.split('\n')
+      const sepW = stringWidth(stripAnsi(sepLine!))
+      const statusW = stringWidth(stripAnsi(statusLine!))
+      assert.ok(statusW <= width - 1, `width=${width}: status display-width ${statusW} must be ≤ ${width - 1}`)
+      assert.ok(sepW <= width - 1, `width=${width}: separator display-width ${sepW} must be ≤ ${width - 1}`)
+    }
+  })
+
+  it('status line stays bounded with wide CJK domain names', () => {
+    const result = formatGlanceBar({
+      width: 80, domainGlyph: '❂', domainName: '天枢测试星域', branch: 'feature/中文分支名',
+      phaseGlyph: '◐', phaseLabel: '凝思', modelName: 'claude-opus-4-8',
+      contextRatio: 0.5, estimatedTokens: 123_456, maxTokens: 1_000_000,
+      cost: 1.23, elapsedMs: 65_000,
+    }, theme)
+    const statusLine = result.split('\n')[1]!
+    const statusW = stringWidth(stripAnsi(statusLine))
+    assert.ok(statusW <= 79, `CJK-heavy status display-width ${statusW} must be ≤ 79`)
   })
 })

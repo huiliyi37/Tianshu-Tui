@@ -6,6 +6,7 @@
  */
 
 import { ANSI, color } from '../engine/ansi.js'
+import stringWidth from 'string-width'
 import type { RivetTheme } from '../theme.js'
 
 export interface GlanceBarInput {
@@ -132,7 +133,10 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
 }
 
 function stripAnsiLen(s: string): number {
-  return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').length
+  // 必须用 display width（非 .length）：CJK(天枢)/全角符号每字符占 2 列但 .length 计 1。
+  // 用 .length 会让 padding/截断欠估 → 状态行被撑到 ≥ 终端宽度 → 末列自动换行 →
+  // LiveEngine 行数计算与终端实际换行错位 → clear() 欠擦 → chrome 残留进 scrollback(重复渲染)。
+  return stringWidth(s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, ''))
 }
 
 /** token 计数压缩为可读单位：

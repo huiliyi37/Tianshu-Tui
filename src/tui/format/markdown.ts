@@ -328,7 +328,9 @@ const NUMBERED_LINE_RE = /^\s*\d+│/
 function formatSegment(seg: Segment, theme: RivetTheme): string {
   let s = seg.text
   const opts = { bold: seg.bold, italic: seg.italic, underline: seg.underline, dim: seg.dimmed }
-  const fgHex = seg.color ?? (seg.code ? theme.secondary : theme.primary)
+  // 水墨原则：强调靠字重(bold/italic)而非满屏着色。显式色 > 行内代码(墨紫) > 中性前景。
+  // 旧实现把所有 bold/em 都染成 primary 紫微紫 → 正文一片紫；改为中性默认前景。
+  const fgHex = seg.color ?? (seg.code ? theme.secondary : '')
 
   // 使用 color() 包裹，除非是普通文本
   if (seg.color || seg.code || seg.bold || seg.italic || seg.underline || seg.dimmed) {

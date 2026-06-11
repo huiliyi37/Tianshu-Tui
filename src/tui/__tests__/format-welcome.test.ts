@@ -6,7 +6,7 @@ import { getTheme } from '../theme.js'
 
 const theme = getTheme()
 
-test('welcome 精简为 ≤4 行', () => {
+test('welcome 精简为 ≤7 行（含北斗勺形星图）', () => {
   const lines = formatWelcome({
     modelName: 'opus-4-8',
     cwd: '/Users/x/app/deepseek-tui/opencode-tui',
@@ -14,8 +14,19 @@ test('welcome 精简为 ≤4 行', () => {
     priorMsgCount: 0,
     columns: 80,
   }, theme)
-  assert.ok(lines.length <= 4, `欢迎应 ≤4 行，实际 ${lines.length}`)
+  assert.ok(lines.length <= 7, `欢迎应 ≤7 行，实际 ${lines.length}`)
   assert.ok(lines.length >= 2)
+})
+
+test('welcome 标题为 天枢 · Tiānshū，含北斗勺口首星 ●', () => {
+  const lines = formatWelcome({
+    modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 80,
+  }, theme)
+  const joined = lines.join('\n')
+  assert.ok(joined.includes('天枢'), '应含中文星名')
+  assert.ok(joined.includes('Tiānshū'), '应含罗马音')
+  assert.ok(joined.includes('●'), '北斗勺口首星(天枢)用 ● 落印')
+  assert.ok(joined.includes('·'), '其余星点用 ·')
 })
 
 test('welcome 包含 model 与 session', () => {

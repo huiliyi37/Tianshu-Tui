@@ -116,9 +116,12 @@ export function encodeTeamPanelModel(model: TeamPanelModel): string {
 }
 
 export function decodeTeamPanelModel(value: string): TeamPanelModel | null {
-  if (!value.startsWith(TEAM_PANEL_UI_PREFIX)) return null
+  // T9 P3: live activity lines may accumulate BEFORE the final encoded panel
+  // in the same tool content — locate the prefix anywhere, not only at start.
+  const at = value.indexOf(TEAM_PANEL_UI_PREFIX)
+  if (at === -1) return null
   try {
-    const parsed = JSON.parse(value.slice(TEAM_PANEL_UI_PREFIX.length)) as TeamPanelModel
+    const parsed = JSON.parse(value.slice(at + TEAM_PANEL_UI_PREFIX.length)) as TeamPanelModel
     if (!parsed || !Array.isArray(parsed.waves) || !Array.isArray(parsed.tasks)) return null
     return parsed
   } catch {

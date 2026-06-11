@@ -90,6 +90,7 @@ describe('phaseIndicator', () => {
     assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: '凝思' })
     assert.deepEqual(phaseIndicator('streaming'), { glyph: '✦', label: '书写' })
     assert.deepEqual(phaseIndicator('analyzing'), { glyph: '⚙', label: '工具' })
+    assert.deepEqual(phaseIndicator('waiting'), { glyph: '◌', label: '候待' })
     assert.deepEqual(phaseIndicator('idle'), { glyph: '·', label: 'idle' })
   })
 })

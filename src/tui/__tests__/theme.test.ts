@@ -2,19 +2,26 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
 
-afterEach(() => { setTheme('midnight') })
+afterEach(() => { setTheme('tianshu') })
 
 describe('getTheme', () => {
-  it('defaults to midnight theme', () => {
-    assert.equal(getActiveThemeName(), 'midnight')
+  it('defaults to tianshu theme', () => {
+    assert.equal(getActiveThemeName(), 'tianshu')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#58a6ff')
-    assert.equal(theme.error, '#f85149')
+    assert.equal(theme.primary, '#c9b8ff') // 紫微紫
+    assert.equal(theme.error, '#c1655c')   // 朱砂赤
+  })
+
+  it('tianshu uses cinnabar seal for user mark + alert pulse', () => {
+    const theme = getTheme(3)
+    assert.equal(theme.userColor, '#d4453a')   // 朱砂印 — user ▌ mark
+    assert.equal(theme.pulseAlert, '#d4453a')  // vivid seal, distinct from desaturated error
+    assert.equal(theme.assistantColor, '#a7aab6') // neutral body; emphasis via primary
   })
 
   it('returns 256-color fallback when colorLevel < 3', () => {
     const theme = getTheme(1)
-    assert.equal(theme.primary, 'blue')
+    assert.equal(theme.primary, 'magenta')
     assert.equal(theme.error, 'red')
   })
 
@@ -51,11 +58,11 @@ describe('theme switching', () => {
     assert.equal(theme.error, '#fb7185')
   })
 
-  it('switches back to midnight theme', () => {
+  it('switches back to tianshu theme', () => {
     setTheme('cyberpunk')
-    setTheme('midnight')
-    assert.equal(getActiveThemeName(), 'midnight')
+    setTheme('tianshu')
+    assert.equal(getActiveThemeName(), 'tianshu')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#58a6ff')
+    assert.equal(theme.primary, '#c9b8ff')
   })
 })

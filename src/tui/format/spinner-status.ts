@@ -27,7 +27,7 @@ export function phaseIndicator(phase: SpinnerPhase): { glyph: string; label: str
     case 'thinking': return { glyph: '◐', label: '凝思' }
     case 'streaming': return { glyph: '✦', label: '书写' }
     case 'analyzing': return { glyph: '⚙', label: '工具' }
-    case 'waiting': return { glyph: '…', label: 'waiting' }
+    case 'waiting': return { glyph: '◌', label: '候待' } // 五行·候待 — 与 v2 waiting 字形(远星灰 ◌)对齐
     case 'idle': return { glyph: '·', label: 'idle' }
   }
 }
