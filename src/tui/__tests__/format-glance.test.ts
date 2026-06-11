@@ -58,6 +58,20 @@ describe('formatGlanceBar', () => {
     assert.ok(!plain.includes('very-long-model-name'))
   })
 
+  it('renders ◧ Xk/Yk token counts when estimatedTokens + maxTokens given', () => {
+    const result = formatGlanceBar({ width: 120, estimatedTokens: 12_300, maxTokens: 200_000 }, theme)
+    const plain = stripAnsi(result)
+    assert.ok(plain.includes('◧'), 'has token glyph')
+    assert.ok(plain.includes('12k/200k'), `has Xk/Yk: ${plain}`)
+  })
+
+  it('omits ◧ token counts when maxTokens is missing or zero', () => {
+    const noMax = stripAnsi(formatGlanceBar({ width: 120, estimatedTokens: 12_300 }, theme))
+    assert.ok(!noMax.includes('◧'))
+    const zeroMax = stripAnsi(formatGlanceBar({ width: 120, estimatedTokens: 12_300, maxTokens: 0 }, theme))
+    assert.ok(!zeroMax.includes('◧'))
+  })
+
   it('right-pads elapsed to fill width', () => {
     const result = formatGlanceBar({ width: 80, elapsedMs: 1000 }, theme)
     const statusLine = result.split('\n')[1]!

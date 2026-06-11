@@ -27,6 +27,10 @@ export interface GlanceBarInput {
   cacheHitRate?: number
   /** 上下文占比 0-1 */
   contextRatio?: number
+  /** 估算已用 token（用于 ◧ Xk/Yk 显示，对齐 Ink） */
+  estimatedTokens?: number
+  /** 模型上下文窗口 token 上限（与 estimatedTokens 配套） */
+  maxTokens?: number
   /** 本轮费用（美元） */
   cost?: number
   /** 已用时间（毫秒） */
@@ -75,6 +79,9 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
     const ratioColor = pct >= 88 ? theme.error : pct >= 78 ? theme.warning : theme.primary
     const compactWarn = pct >= 78 ? ' ⚠compact' : ''
     parts.push(color(`ctx ${pct}%${compactWarn}`, ratioColor))
+  }
+  if (!narrow && input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
+    parts.push(color(`◧ ${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, theme.dim))
   }
   if (input.cost !== undefined && input.cost > 0) {
     parts.push(`$${input.cost.toFixed(2)}`)
@@ -126,6 +133,12 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
 
 function stripAnsiLen(s: string): number {
   return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').length
+}
+
+/** token 计数压缩为 k（≥1000 取整 k，否则原值），对齐 Ink token 显示。 */
+function formatTokensK(n: number): string {
+  if (n >= 1000) return `${Math.round(n / 1000)}k`
+  return `${n}`
 }
 
 function formatElapsed(ms: number): string {

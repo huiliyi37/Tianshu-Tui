@@ -1,0 +1,83 @@
+/**
+ * T9 GlanceBar 真实指标测试（B）。
+ *
+ * 契约：
+ *  1. 设置 metricsProvider 后，GlanceBar 用真实 ctx%/Xk·Yk/$cost/⚡% 渲染。
+ *  2. 无 provider 时回退内部估算；cost 单次计算，不随 onTurnComplete 累计膨胀
+ *     （agent 传入的 usage 已是累计快照，旧实现 += 会指数级膨胀）。
+ */
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import type { ReadStream, WriteStream } from 'node:tty'
+import { TuiApp } from '../app.js'
+
+class MockOut {
+  columns = 120
+  rows = 24
+  chunks: string[] = []
+  write = (s: string): boolean => { this.chunks.push(s); return true }
+  on(): this { return this }
+  removeListener(): this { return this }
+}
+class MockIn {
+  isTTY = true
+  dataHandler: ((d: string) => void) | null = null
+  setRawMode(): this { return this }
+  resume(): this { return this }
+  setEncoding(): this { return this }
+  on(ev: string, h: (d: string) => void): this { if (ev === 'data') this.dataHandler = h; return this }
+  removeAllListeners(): this { return this }
+  pause(): this { return this }
+}
+
+function makeApp() {
+  const out = new MockOut()
+  const stdin = new MockIn()
+  const app = new TuiApp({
+    stdout: out as unknown as WriteStream,
+    stdin: stdin as unknown as ReadStream,
+    cols: 120, rows: 24, modelName: 'test', contextWindow: 200_000,
+  })
+  return { app, out }
+}
+
+const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
+const tick = (ms = 10) => new Promise(r => setTimeout(r, ms))
+
+test('metricsProvider 提供真实 ctx%/Xk·Yk/$cost/⚡% ', () => {
+  const { app, out } = makeApp()
+  app.setMetricsProvider(() => ({
+    estimatedTokens: 50_000,
+    maxTokens: 200_000,
+    cacheHitRate: 0.6,
+    cost: 1.23,
+    inputTokens: 50_000,
+    outputTokens: 1_000,
+  }))
+  // setModelInfo 触发一次 renderLive
+  app.setModelInfo('test', 200_000)
+  const plain = stripAnsi(out.chunks.join(''))
+  assert.ok(plain.includes('ctx 25%'), `ctx%: ${plain}`)
+  assert.ok(plain.includes('◧ 50k/200k'), `Xk/Yk: ${plain}`)
+  assert.ok(plain.includes('$1.23'), `cost: ${plain}`)
+  assert.ok(plain.includes('⚡60%'), `cache: ${plain}`)
+})
+
+test('无 provider 回退：cost 单次计算，多次 onTurnComplete 不膨胀', async () => {
+  const { app, out } = makeApp()
+  // agent 每回合传入的是「累计」usage 快照；这里固定为 1M normal-input → $1.00。
+  const cumulative = {
+    input_tokens: 1_000_000,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  }
+  app.callbacks.onTurnComplete(cumulative, 1, false)
+  app.callbacks.onTurnComplete(cumulative, 2, false)
+  app.callbacks.onTurnComplete(cumulative, 3, false)
+  await tick(30)
+  const plain = stripAnsi(out.chunks.join(''))
+  assert.ok(plain.includes('$1.00'), `cost should be single-shot $1.00: ${plain}`)
+  assert.ok(!plain.includes('$3.00'), 'cost must not inflate to $3.00 across turns')
+})

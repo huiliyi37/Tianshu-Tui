@@ -16,6 +16,7 @@ const TOOL_MAP: Record<string, ToolFamilyInfo> = {
   run_tests:       { family: 'run',   glyph: '▶', verb: 'test'     },
   delegate_task:   { family: 'run',   glyph: '▶', verb: 'delegate' },
   delegate_batch:  { family: 'run',   glyph: '▶', verb: 'batch'    },
+  team_orchestrate:{ family: 'run',   glyph: '✸', verb: 'team'     },
   git:             { family: 'run',   glyph: '▶', verb: 'git'      },
   undo:            { family: 'write', glyph: '◈', verb: 'undo'     },
   web_fetch:       { family: 'read',  glyph: '◇', verb: 'fetch'    },

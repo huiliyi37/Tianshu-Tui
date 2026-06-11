@@ -28,6 +28,11 @@ import { formatUserMessage } from '../format/user-message.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar } from '../format/glance-bar.js'
+import { formatTaskList } from '../format/task-list.js'
+import type { TodoItem } from '../../tools/todo-store.js'
+import { formatTeamPanel } from '../format/team-panel.js'
+import { decodeTeamPanelModel } from '../team-panel-model.js'
+import { domainBadge, isDelegationTool } from '../format/tool-domain.js'
 import { formatSpinnerStatus, formatTurnWorkSummary, phaseIndicator } from '../format/spinner-status.js'
 import { formatSlashHint, slashCompletionTarget, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
@@ -71,6 +76,8 @@ export interface TuiState {
   domainName?: string
   /** 已提交的日志行数（用于 GlanceBar） */
   committedCount: number
+  /** 常驻任务面板（todo 列表，canonical 源为 TodoStore） */
+  todos: TodoItem[]
 }
 
 // ── Agent callbacks interface ──────────────────────────────────
@@ -95,6 +102,27 @@ export interface AgentCallbacks {
   onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
   onSteerDrain?: () => string | null
 }
+
+/**
+ * GlanceBar 真实指标快照（由 main-ansi 闭包从 ctx.session 读取）。
+ * 全部为「当前会话累计 / 估算」的真实值，避免 TUI 端自行 += 累加导致膨胀。
+ */
+export interface TuiMetrics {
+  /** 当前估算 prompt token（含 prefix overhead） */
+  estimatedTokens: number
+  /** 模型上下文窗口 token 上限 */
+  maxTokens: number
+  /** 缓存命中率 0-1（近 N 回合优先，回退会话累计）；无数据为 null */
+  cacheHitRate: number | null
+  /** 会话累计费用（美元，单次从 getTotalUsage 计算，不累加） */
+  cost: number
+  /** 会话累计 input / output token（仅用于展示，不参与 += 累加） */
+  inputTokens: number
+  outputTokens: number
+}
+
+/** 指标提供者：返回 null 表示暂无（回退 TUI 内部估算）。 */
+export type TuiMetricsProvider = () => TuiMetrics | null
 
 // ── TuiApp ─────────────────────────────────────────────────────
 
@@ -136,6 +164,10 @@ export class TuiApp {
   private lastCacheHitRate?: number
   /** 最近一轮的上下文占比（0-1） */
   private lastContextRatio?: number
+  /** 真实指标提供者（main-ansi 闭包读 ctx.session）；无则回退内部估算 */
+  private metricsProvider?: TuiMetricsProvider
+  /** todo 列表访问器（main-ansi 读 TodoStore 单例） */
+  private todosProvider?: () => TodoItem[]
   /** Block stream writer: chunks streaming text into display-sized blocks */
   private blockWriter: BlockStreamWriter
   /** Write batcher: coalesces render calls into a single LiveEngine.render() */
@@ -284,6 +316,7 @@ export class TuiApp {
       turnNumber: 0,
       modelName: options.modelName ?? 'unknown',
       committedCount: 0,
+      todos: [],
     }
 
     // Wire resize
@@ -662,6 +695,38 @@ export class TuiApp {
     this.slashHandler = handler
   }
 
+  /**
+   * 注入真实指标提供者（main-ansi 闭包读 ctx.session）。
+   * 设置后 GlanceBar 优先用真实数据；未设置则回退内部估算（保持可独立运行/可测）。
+   */
+  setMetricsProvider(provider: TuiMetricsProvider): void {
+    this.metricsProvider = provider
+  }
+
+  /**
+   * 注入 todo 列表访问器（main-ansi 读 TodoStore 单例），避免 T9 直接 import
+   * 工具层。设置后 todo 工具结果 / turn 完成时拉取刷新常驻任务面板。
+   */
+  setTodosProvider(provider: () => TodoItem[]): void {
+    this.todosProvider = provider
+  }
+
+  /** 直接设置任务面板内容（供测试与 provider 刷新复用）。 */
+  setTodos(items: TodoItem[]): void {
+    this.state.todos = items
+    this.renderLive()
+  }
+
+  /** 从 provider 拉取最新 todo 列表刷新面板（无 provider 时 no-op）。 */
+  private refreshTodos(): void {
+    if (!this.todosProvider) return
+    try {
+      this.state.todos = this.todosProvider()
+    } catch {
+      // provider 失败不应中断渲染
+    }
+  }
+
   // ── Approval state ──────────────────────────────────────────
 
   /** Pending approval request — when set, InputHandler switches to approval mode */
@@ -697,6 +762,14 @@ export class TuiApp {
     this.setPhase('analyzing')
     this.markActivity()
     this.pendingTools.set(id, { name, input, startMs: Date.now() })
+    // 子代理编排（delegate_* / team_orchestrate）切 GlanceBar domain 到天机。
+    if (isDelegationTool(name)) {
+      const badge = domainBadge(name)
+      if (badge) {
+        this.state.domainGlyph = badge.glyph
+        this.state.domainName = badge.name
+      }
+    }
     // Commit thinking if any
     if (this.state.thinkingText) {
       this.commitAbove(() => this.commitThinking())
@@ -725,6 +798,20 @@ export class TuiApp {
     this.pendingTools.delete(id)
     const finalContent = toolAcc ? toolAcc + displayContent : displayContent
 
+    // team_orchestrate：把编码串 rivet:team-panel:v1:{...} 解码为 TeamPanel 面板，
+    // 而非把裸编码串当工具卡片输出（对齐 Ink decodeTeamPanelModel + TeamPanel）。
+    if (name === 'team_orchestrate') {
+      const model = decodeTeamPanelModel(finalContent.trim())
+      if (model) {
+        const panel = formatTeamPanel(model, this.theme, this.columns)
+        this.commitAbove(() => {
+          this.commit.write({ text: panel.join('\n'), trailingNewline: true })
+          this.state.committedCount++
+        })
+        return
+      }
+    }
+
     const cardInput = {
       toolName: name,
       content: finalContent,
@@ -751,6 +838,12 @@ export class TuiApp {
       this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
       this.state.committedCount++
     })
+
+    // todo 工具写入后刷新常驻任务面板（canonical 源为 TodoStore）。
+    if (name === 'todo') {
+      this.refreshTodos()
+      this.renderLive()
+    }
   }
 
   /** ctrl+o：将最近一条被截断的工具结果完整展开重新 commit 到 scrollback */
@@ -793,6 +886,9 @@ export class TuiApp {
     // ── W3: 累计 usage → cache hit / context% / cost ────────────
     this.accumulateUsage(usage)
 
+    // 兜底刷新任务面板（todo 工具结果未必每轮都到达）
+    this.refreshTodos()
+
     if (isFinal) {
       // Reset state
       this.agentBusy = false
@@ -801,6 +897,9 @@ export class TuiApp {
       this.state.isThinking = false
       this.setPhase('idle')
       this.state.thinkStartMs = 0
+      // 复位 GlanceBar domain（子代理编排结束 → 回默认天枢）
+      this.state.domainGlyph = undefined
+      this.state.domainName = undefined
 
       // 回合耗时文案：✦ Worked for 1m 6s · 12.3k in / 890 out
       const elapsed = Date.now() - this.state.turnStartMs
@@ -826,16 +925,19 @@ export class TuiApp {
     }
   }
 
-  /** 从 onTurnComplete 的 Usage 解析 cache hit / context% / session cost */
+  /**
+   * 从 onTurnComplete 的 Usage 解析 cache hit / context% / session cost。
+   *
+   * 关键：agent 传入的 `usage` 已是 `session.getTotalUsage()` 的**累计**快照，
+   * 因此这里是 snapshot 赋值而非 `+=`（旧实现每回合把累计值再累加，导致 cost
+   * 随回合数指数级膨胀）。真实指标优先由 metricsProvider 提供，此处仅作回退。
+   */
   private accumulateUsage(usage: Partial<Usage>): void {
     const input = usage.input_tokens ?? 0
     const output = usage.output_tokens ?? 0
     const cacheRead = usage.cache_read_input_tokens ?? 0
     const cacheCreate = usage.cache_creation_input_tokens ?? 0
-    this.totalUsage.input += input
-    this.totalUsage.output += output
-    this.totalUsage.cacheRead += cacheRead
-    this.totalUsage.cacheCreate += cacheCreate
+    this.totalUsage = { input, output, cacheRead, cacheCreate }
 
     if (input > 0) {
       this.lastCacheHitRate = Math.min(1, cacheRead / input)
@@ -967,12 +1069,38 @@ export class TuiApp {
       lines.push({ text: ` ╰─ [y] approve  [n] deny  [e] edit ──────────────` })
     }
 
-    // ── 底部 chrome 起点：从此往后（GlanceBar + 输入框 + 提示）是恒可见的保留区，
-    //    内容超屏时 LiveEngine 截断的是上方 dynamic 段，不会裁掉输入框。
+    // ── 底部 chrome 起点：从此往后（任务面板 + GlanceBar + 输入框 + 提示）是
+    //    恒可见的保留区，内容超屏时 LiveEngine 截断的是上方 dynamic 段，
+    //    不会裁掉任务面板与输入框。
     const chromeStart = lines.length
 
+    // 3b. 常驻任务面板（todo 列表）——空列表不渲染。
+    const taskLines = formatTaskList(this.state.todos, this.theme, { width: this.columns, maxRows: 6 })
+    if (taskLines.length > 0) {
+      lines.push({ text: '' })
+      for (const taskLine of taskLines) lines.push({ text: taskLine })
+    }
+
     // 4. GlanceBar（phase glyph / context% / cache / cost / git branch）
+    // 优先用真实指标 provider（main-ansi 读 ctx.session）；无则回退内部估算。
     const phaseInd = phaseIndicator(this.state.phase)
+    const metrics = this.metricsProvider?.() ?? null
+    let glanceCacheHitRate: number | undefined
+    let glanceContextRatio: number | undefined
+    let glanceCost: number
+    let glanceEstimatedTokens: number | undefined
+    let glanceMaxTokens: number | undefined
+    if (metrics) {
+      glanceCacheHitRate = metrics.cacheHitRate ?? undefined
+      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, metrics.estimatedTokens / metrics.maxTokens) : undefined
+      glanceCost = metrics.cost
+      glanceEstimatedTokens = metrics.estimatedTokens
+      glanceMaxTokens = metrics.maxTokens
+    } else {
+      glanceCacheHitRate = this.lastCacheHitRate
+      glanceContextRatio = this.lastContextRatio
+      glanceCost = this.estimateSessionCost()
+    }
     const glanceBar = formatGlanceBar({
       width: this.columns,
       domainGlyph: this.state.domainGlyph,
@@ -981,9 +1109,11 @@ export class TuiApp {
       phaseGlyph: phaseInd.glyph,
       phaseLabel: phaseInd.label,
       modelName: this.state.modelName,
-      cacheHitRate: this.lastCacheHitRate,
-      contextRatio: this.lastContextRatio,
-      cost: this.estimateSessionCost(),
+      cacheHitRate: glanceCacheHitRate,
+      contextRatio: glanceContextRatio,
+      estimatedTokens: glanceEstimatedTokens,
+      maxTokens: glanceMaxTokens,
+      cost: glanceCost,
       elapsedMs: Date.now() - this.state.turnStartMs,
       turnCount: this.state.turnNumber,
     }, this.theme)

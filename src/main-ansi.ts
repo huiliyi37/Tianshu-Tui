@@ -16,6 +16,7 @@ import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
 import { getPaletteCommands } from './tui/command-palette.js'
+import { getTodos } from './tools/todo.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
 import { killAllSync } from './tools/process-tracker.js'
@@ -169,6 +170,32 @@ async function main() {
       .filter(c => c.name.startsWith('/'))
       .map(c => ({ name: c.name, description: c.description })),
   )
+
+  // ── 真实指标 provider（GlanceBar cache/ctx/cost）─────────────
+  // 闭包动态读 module-level ctx：/model 切换时 switchAgentRuntime 原地改 ctx.agent，
+  // ctx.session 不变，因此读取始终命中当前 runtime（天然 /model 切换安全）。
+  app.setMetricsProvider(() => {
+    if (!ctx) return null
+    const session = ctx.session
+    const total = session.getTotalUsage()
+    const cacheRead = total.cache_read_input_tokens
+    const normalInput = Math.max(0, total.input_tokens - cacheRead)
+    // Ink 近似定价：normal $1/M · cacheRead $0.1/M · out $4/M（单次计算，不累加）
+    const cost = (normalInput * 1 + cacheRead * 0.1 + total.output_tokens * 4) / 1_000_000
+    const maxTokens = ctx.agent.config.contextWindow ?? currentModel?.contextWindow ?? 0
+    return {
+      estimatedTokens: session.getEstimatedTokens(),
+      maxTokens,
+      cacheHitRate: session.getRecentTurnHitRate(3) ?? session.getCacheHitRate(),
+      cost,
+      inputTokens: total.input_tokens,
+      outputTokens: total.output_tokens,
+    }
+  })
+
+  // ── 常驻任务面板 provider（todo 列表）──────────────────────
+  // 读 TodoStore 单例（todo 工具的 canonical 源），T9 不直接 import 工具层单例。
+  app.setTodosProvider(() => getTodos())
 
   // ── Wire agent → TuiApp ──────────────────────────────────────
   // 消息队列已收编进 TuiApp：streaming 时 Enter 由 TuiApp 入队（steerBuffer），
