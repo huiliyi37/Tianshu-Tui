@@ -1,7 +1,7 @@
 import type { ReasoningEffort } from './auto-reasoning.js'
 import type { PressureResult } from '../context/pressure-monitor.js'
 import type { EvidenceState } from './evidence.js'
-import type { DoomLoopLevel } from './trace-store.js'
+import type { DoomLoopLevel, ToolStormLevel } from './trace-store.js'
 
 // ─── Pheromone reference (minimal type for SensoriumInput) ──────────
 
@@ -259,6 +259,81 @@ export function computeSensorium(input: SensoriumInput): Sensorium {
  *
  * Pure function — deterministic, no side effects.
  */
+// ─── Attention Quality Score (AQS) ───────────────────────────────
+
+/**
+ * Metrics for computing attention quality — how much of the context
+ * is useful signal vs noise.
+ */
+export interface AttentionQualityMetrics {
+  toolDensity: number
+  uniqueToolRatio: number
+  avgToolResultSize: number
+  userMessageRatio: number
+  toolStormLevel?: ToolStormLevel
+}
+
+/**
+ * Compute Attention Quality Score (0-1).
+ *
+ * Low AQS (< 0.3) indicates the context is flooded with repetitive
+ * tool outputs and the model is likely losing track of user intent.
+ * This triggers quality-driven Context Collapse instead of waiting
+ * for token-based compaction.
+ *
+ * Weights:
+ * - toolDensity (0.30): high tool density → low quality
+ * - uniqueToolRatio (0.25): low diversity → low quality (grep storm)
+ * - avgToolResultSize (0.15): large avg results → lower quality
+ * - userMessageRatio (0.20): few user messages → agent self-talk
+ * - toolStormLevel (0.10): active storm → quality penalty
+ */
+export function computeAttentionQuality(metrics: AttentionQualityMetrics): number {
+  const densityScore = 1 - clamp(metrics.toolDensity)
+  const diversityScore = clamp(metrics.uniqueToolRatio)
+  const sizeScore = 1 - clamp(metrics.avgToolResultSize / 10_000)
+  const userScore = clamp(metrics.userMessageRatio * 3)
+  const stormPenalty = metrics.toolStormLevel === 'storm' ? 0
+    : metrics.toolStormLevel === 'warn' ? 0.5
+    : 1.0
+
+  return clamp(
+    0.30 * densityScore +
+    0.25 * diversityScore +
+    0.15 * sizeScore +
+    0.20 * userScore +
+    0.10 * stormPenalty,
+  )
+}
+
+/**
+ * Extract AQS metrics from a message window.
+ */
+export function extractAttentionMetrics(
+  messages: Array<{ role: string; content?: string }>,
+  recentWindow = 20,
+): AttentionQualityMetrics {
+  const recent = messages.slice(-recentWindow)
+  if (recent.length === 0) {
+    return { toolDensity: 0, uniqueToolRatio: 1, avgToolResultSize: 0, userMessageRatio: 1 }
+  }
+
+  const toolMessages = recent.filter(m => m.role === 'tool')
+  const userMessages = recent.filter(m => m.role === 'user')
+  const toolDensity = toolMessages.length / recent.length
+  const userMessageRatio = userMessages.length / recent.length
+
+  const toolNames = new Set<string>()
+  let totalToolSize = 0
+  for (const m of toolMessages) {
+    totalToolSize += (m.content ?? '').length
+  }
+  const avgToolResultSize = toolMessages.length > 0 ? totalToolSize / toolMessages.length : 0
+  const uniqueToolRatio = toolMessages.length > 0 ? Math.min(1, toolNames.size / toolMessages.length) : 1
+
+  return { toolDensity, uniqueToolRatio, avgToolResultSize, userMessageRatio }
+}
+
 export function computeStrategy(s: Sensorium): StrategyProfile {
   let reasoningEffort: ReasoningEffort
   if (s.complexity > 0.7) {
