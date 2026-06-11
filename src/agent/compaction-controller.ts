@@ -287,15 +287,35 @@ export class CompactionController {
     // opens and skips LLM compact for the next 3 turns, preventing repeated
     // 750K-860K token requests from being wasted on a failing pipeline.
     if (this.deps.contextWindow >= 1_000_000) {
-      if (ratio >= 0.75 && this.deps.primaryClient) {
-        // Check circuit breaker before attempting expensive LLM compact
-        const breakerOpen = input.failures.disabledUntilTurn !== undefined
-          && this.deps.session.getTurnCount() < input.failures.disabledUntilTurn
-        if (breakerOpen) {
-          debugLog(`[llm-compact] circuit breaker open until turn ${input.failures.disabledUntilTurn} — skipping`)
-          return { failures: input.failures, compacted: false }
+      // Check circuit breaker before attempting any expensive compact
+      const breakerOpen = input.failures.disabledUntilTurn !== undefined
+        && this.deps.session.getTurnCount() < input.failures.disabledUntilTurn
+      if (breakerOpen) {
+        debugLog(`[llm-compact] circuit breaker open until turn ${input.failures.disabledUntilTurn} — skipping`)
+        return { failures: input.failures, compacted: false }
+      }
+
+      // T8: Partial Compact at 60% — earlier, lighter, preserves recent context.
+      if (ratio >= 0.60 && ratio < 0.75 && this.deps.primaryClient) {
+        debugLog(`[partial-compact] 1M window at ${(ratio * 100).toFixed(0)}% — trying partial compact`)
+        const partialResult = await this.tryPartialCompact(60)
+        if (partialResult) {
+          return { failures: recordCompactSuccess(input.failures), compacted: true }
         }
-        debugLog(`[llm-compact] 1M window at ${(ratio * 100).toFixed(0)}% — triggering LLM compact`)
+        debugLog('[partial-compact] partial compact failed — will wait for 75% full compact')
+        return { failures: input.failures, compacted: false }
+      }
+
+      // Full LLM compact at 75% — fallback when partial was insufficient
+      if (ratio >= 0.75 && this.deps.primaryClient) {
+        // Try partial compact first (lighter)
+        debugLog(`[llm-compact] 1M window at ${(ratio * 100).toFixed(0)}% — trying partial compact before full`)
+        const partialResult = await this.tryPartialCompact(60)
+        if (partialResult) {
+          return { failures: recordCompactSuccess(input.failures), compacted: true }
+        }
+
+        debugLog(`[llm-compact] partial compact insufficient — triggering full LLM compact`)
         const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
         if (this.isAbortRequested()) {
           debugLog('[llm-compact] turn aborted after compact returned — skipping checkpoint replacement')
@@ -311,7 +331,6 @@ export class CompactionController {
           })
           return { failures: recordCompactSuccess(input.failures), compacted: true }
         }
-        // LLM compact returned null — track failure for circuit breaker
         debugLog(`[llm-compact] LLM compact failed (null summary)`)
         return {
           failures: recordCompactFailure(input.failures, this.deps.session.getTurnCount()),
@@ -644,6 +663,103 @@ export class CompactionController {
       createdAt: Date.now(),
     })
     this.deps.refreshLedger()
+  }
+
+  /**
+   * T8: Partial Compact — summarize only old messages, preserve recent ones.
+   * Splits messages into: anchor (first 2) + old zone + recent zone (last N).
+   * Only the old zone is summarized via LLM; recent messages are kept intact.
+   * Returns true if successful, false if LLM summary failed.
+   */
+  async tryPartialCompact(recentToPreserve = 60): Promise<boolean> {
+    if (!this.deps.primaryClient) return false
+    if (this._llmCompactInFlight) return false
+
+    const messages = this.deps.session.getMessages()
+    const anchorCount = CACHE_ANCHOR_MESSAGES
+    if (messages.length <= anchorCount + recentToPreserve + 4) {
+      debugLog(`[partial-compact] not enough messages to split (${messages.length} total, need > ${anchorCount + recentToPreserve + 4})`)
+      return false
+    }
+
+    const anchor = messages.slice(0, anchorCount)
+    const splitPoint = messages.length - recentToPreserve
+    const oldZone = messages.slice(anchorCount, splitPoint)
+    const recentZone = messages.slice(splitPoint)
+
+    debugLog(`[partial-compact] anchor=${anchor.length} old=${oldZone.length} recent=${recentZone.length}`)
+
+    const userIntentChain = extractUserIntentChain(oldZone)
+    const summaryPrompt: OaiMessage = {
+      role: 'user',
+      content: [
+        '请总结以下对话片段的关键信息（这是对话的较早部分，最近的消息会被完整保留）。',
+        '',
+        '## 用户意图链（按时间序）',
+        ...userIntentChain.map((m, i) => `${i + 1}. ${m}`),
+        '',
+        '## 保留',
+        '1. 每条用户消息的核心意图',
+        '2. 关键技术决策和原因',
+        '3. 涉及的文件路径和变更摘要',
+        '4. 错误和修复方法',
+        '',
+        '## 丢弃',
+        '- 工具输出详情（只保留结论）',
+        '- 探索性搜索的中间过程',
+        '',
+        '控制在 2000 字以内。只输出总结，不要调用工具。',
+      ].join('\n'),
+    }
+
+    this._llmCompactInFlight = true
+    try {
+      const compactMessages: OaiMessage[] = [...anchor, ...oldZone, summaryPrompt]
+      const request = this.deps.promptEngine.buildOaiRequest(
+        compactMessages,
+        undefined,
+        this.deps.contextWindow,
+      )
+      request.tools = undefined
+
+      const chunks: string[] = []
+      let errored = false
+      const signal = this.deps.getAbortSignal?.()
+      const timeoutSignal = AbortSignal.timeout(60_000)
+      const combinedSignal = signal
+        ? AbortSignal.any([signal, timeoutSignal])
+        : timeoutSignal
+
+      try {
+        await this.deps.primaryClient.stream(request, {
+          onTextDelta: (text) => { chunks.push(text) },
+          onThinkingDelta: () => {},
+          onContentBlock: () => {},
+          onStopReason: () => {},
+          onError: () => { errored = true },
+        }, combinedSignal)
+      } catch {
+        return false
+      }
+
+      if (errored || chunks.length === 0) return false
+      const summary = chunks.join('').trim()
+      if (summary.length === 0) return false
+
+      const summaryMessage: OaiMessage = {
+        role: 'assistant',
+        content: `<partial-compact-summary turn="${this.deps.session.getTurnCount()}">\n${summary}\n</partial-compact-summary>`,
+      }
+
+      const newMessages = [...anchor, summaryMessage, ...recentZone]
+      this.deps.session.replaceMessages(newMessages)
+      this.deps.refreshLedger()
+
+      debugLog(`[partial-compact] success: ${messages.length} → ${newMessages.length} messages (removed ${oldZone.length} old, kept ${recentZone.length} recent)`)
+      return true
+    } finally {
+      this._llmCompactInFlight = false
+    }
   }
 
   /**
