@@ -905,7 +905,11 @@ export class TuiApp {
     if (this.state.thinkStartMs === 0) {
       this.state.thinkStartMs = Date.now()
     }
-    this.renderLive()
+    // 经 WriteBatcher 合并：DeepSeek reasoning_content 是逐字高频流，旧实现每个
+    // token 直接 renderLive() → 全区域重写 + stringWidth×N，深思期持续刷屏卡顿。
+    // 与正文流（blockWriter → writeBatcher.schedule）同口径：同一 microtask 内多次
+    // delta 只渲染一次；120ms ticker 仍保底 spinner 帧率。
+    this.writeBatcher.schedule()
   }
 
   private handleToolUse(id: string, name: string, input: Record<string, unknown>): void {
@@ -937,7 +941,9 @@ export class TuiApp {
       const toolAcc = this.toolAccumulator.get(id) ?? ''
       this.toolAccumulator.set(id, toolAcc + result)
       this.markActivity()
-      this.renderLive()
+      // 经 WriteBatcher 合并：长输出工具（bash/test）逐 chunk 上行，旧实现每 chunk
+      // 直接 renderLive() 全区域重绘。与正文/思考流同口径合并到 microtask。
+      this.writeBatcher.schedule()
       return
     }
 
