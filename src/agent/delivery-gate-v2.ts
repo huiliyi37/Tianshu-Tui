@@ -73,6 +73,24 @@ export interface DeliveryGateV2 {
   getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[]): DeliveryReport
 }
 
+/**
+ * Track 3 门禁合一：收敛检测 L2+ 时基于权威门禁状态生成结束/修复指引。
+ * GREEN → 指示输出最终摘要结束回合；RED → 指示阻断项与最短下一步；
+ * YELLOW → 可带条件交付。返回的字符串作为 system-reminder 注入。
+ */
+export function buildGateConvergenceHint(gate: Pick<DeliveryGateResult, 'state' | 'reason' | 'blockingReason' | 'shortestNextStep'>): string {
+  if (gate.state === 'GREEN') {
+    return '交付门禁 GREEN：所有 owned 文件已验证。请输出最终摘要并结束回合，不再调用工具。'
+  }
+  if (gate.state === 'RED') {
+    const lines = [`交付门禁 RED：${gate.blockingReason ?? gate.reason ?? 'owned 文件存在未验证或失败项。'}`]
+    if (gate.shortestNextStep) lines.push(`最短下一步：${gate.shortestNextStep}`)
+    lines.push('请先解决阻断项再继续；若无法解决，明确报告阻断原因后结束回合。')
+    return lines.join('\n')
+  }
+  return `交付门禁 YELLOW：${gate.reason ?? '存在外部阻塞，owned 文件已验证。'}\n可带条件交付：输出最终摘要并明确标注 caveat，然后结束回合。`
+}
+
 export function createDeliveryGateV2(opts: {
   taskLedger: TaskLedger
   ownership: OwnershipLedger
