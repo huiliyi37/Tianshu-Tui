@@ -534,4 +534,238 @@ describe('frozenUserMerged eviction', () => {
     const content3 = userMsg3!.content as string
     assert.equal(content3, content1, 'frozen content for first message must be preserved')
   })
+
+  it('does not duplicate frozen snapshots across tool-call turns within one user message', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+    })
+    // Simulate 70 tool-call turns within ONE user message. Before dedup this
+    // pushed 70 identical snapshots → eviction (cap 64) destroyed snapshots
+    // for ALL user messages → 0% cache break on the next boundary.
+    const base: OaiMessage[] = [{ role: 'user', content: 'big task' }]
+    const req1 = engine.buildOaiRequest([...base])
+    const firstContent = req1.messages.find(m => m.role === 'user')!.content as string
+
+    const grow: OaiMessage[] = [...base]
+    for (let i = 0; i < 70; i++) {
+      grow.push({ role: 'assistant', content: null, tool_calls: [{ id: `c${i}`, type: 'function', function: { name: 'bash', arguments: '{}' } }] })
+      grow.push({ role: 'tool', tool_call_id: `c${i}`, content: `result ${i}` })
+      engine.buildOaiRequest([...grow])
+    }
+
+    // New user boundary: the historical 'big task' message must still serve
+    // its frozen snapshot byte-identically (no eviction destroyed it).
+    const next = engine.buildOaiRequest([...grow, { role: 'user', content: 'next task' }])
+    const historical = next.messages.find(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('big task'))
+    assert.ok(historical, 'historical user message present')
+    assert.equal(historical!.content, firstContent, 'historical snapshot is byte-identical — dedup prevented eviction')
+    assert.equal(engine.getCacheEventStats().frozenFallbackRebuilds, 0, 'no fallback rebuild occurred')
+  })
+
+  it('clamps to surviving snapshot instead of volatileBlock rebuild when fetch index overruns', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+    })
+    // Two identical "继续" user messages whose merged content is identical →
+    // dedup stores ONE snapshot. The second historical fetch (idx 1) overruns
+    // the array and must clamp to the surviving snapshot — not rebuild with
+    // the current volatileBlock (which may have swapped).
+    const m1: OaiMessage[] = [{ role: 'user', content: '继续' }]
+    const req1 = engine.buildOaiRequest([...m1])
+    const c1 = req1.messages.find(m => m.role === 'user')!.content as string
+
+    const m2: OaiMessage[] = [...m1, { role: 'assistant', content: 'ok' }, { role: 'user', content: '继续' }]
+    engine.buildOaiRequest([...m2])
+
+    // Swap volatileBlock between boundaries so a naive fallback would differ.
+    engine.updateSessionMemory('<session-memory><entry>new memory</entry></session-memory>')
+
+    const m3: OaiMessage[] = [...m2, { role: 'assistant', content: 'ok2' }, { role: 'user', content: 'final' }]
+    const req3 = engine.buildOaiRequest([...m3])
+    const historicals = req3.messages.filter(m => m.role === 'user' && typeof m.content === 'string' && (m.content as string).includes('继续'))
+    assert.equal(historicals.length, 2)
+    assert.equal(historicals[0]!.content, c1, 'first 继续 uses original snapshot')
+    assert.equal(historicals[1]!.content, c1, 'second 继续 clamps to surviving snapshot (byte-identical)')
+    assert.equal(engine.getCacheEventStats().frozenFallbackRebuilds, 0, 'clamp path avoided volatileBlock rebuild')
+  })
+})
+
+describe('injected system-reminder messages (P1-4)', () => {
+  function makeEngine() {
+    return new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+  }
+
+  it('passes reminder messages through untouched (no volatile merge)', () => {
+    const engine = makeEngine()
+    const reminder = '<system-reminder>\nconvergence kick\n</system-reminder>'
+    const req = engine.buildOaiRequest([
+      { role: 'user', content: 'real task' },
+      { role: 'assistant', content: 'working' },
+      { role: 'user', content: reminder },
+    ])
+    const reminderMsg = req.messages.find(m => typeof m.content === 'string' && m.content.includes('convergence kick'))
+    assert.ok(reminderMsg, 'reminder present in request')
+    assert.equal(reminderMsg!.content, reminder, 'reminder is byte-identical — no volatile/appendix merge')
+  })
+
+  it('reminder injection does not trigger volatile swap or appendix rebuild', () => {
+    const engine = makeEngine()
+    engine.setSessionState('state v1')
+    const base: OaiMessage[] = [{ role: 'user', content: 'real task' }]
+    const req1 = engine.buildOaiRequest([...base])
+    const merged1 = req1.messages.find(m => m.role === 'user')!.content as string
+
+    // Change appendix-feeding state mid-task. Before P1-4, the reminder would
+    // count as a new user boundary and rebuild the appendix with 'state v2'.
+    engine.setSessionState('state v2')
+
+    const withReminder: OaiMessage[] = [
+      ...base,
+      { role: 'assistant', content: 'thinking' },
+      { role: 'user', content: '<system-reminder>\nkick\n</system-reminder>' },
+    ]
+    const req2 = engine.buildOaiRequest(withReminder)
+    const merged2 = req2.messages.find(m => m.role === 'user' && typeof m.content === 'string' && (m.content as string).includes('real task'))!.content as string
+    assert.equal(merged2, merged1, 'real user message stays byte-identical across reminder injection')
+    assert.equal(engine.getCacheEventStats().volatileSwaps, 0, 'no volatile swap on pseudo boundary')
+    assert.doesNotMatch(merged2, /state v2/, 'appendix not rebuilt by pseudo boundary')
+  })
+
+  it('reminder as last message keeps previous real user message as trailer target', () => {
+    const engine = makeEngine()
+    const base: OaiMessage[] = [{ role: 'user', content: 'task' }]
+    engine.buildOaiRequest([...base])
+
+    const withReminder: OaiMessage[] = [
+      ...base,
+      { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'bash', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: 'output' },
+      { role: 'user', content: '<system-reminder>\nnudge\n</system-reminder>' },
+    ]
+    const req = engine.buildOaiRequest(withReminder)
+    const userMsgs = req.messages.filter(m => m.role === 'user')
+    // Real task message keeps the volatile merge; reminder rides bare at the end.
+    assert.ok((userMsgs[0]!.content as string).includes('<environment'), 'real user message has volatile context')
+    assert.equal(userMsgs[userMsgs.length - 1]!.content, '<system-reminder>\nnudge\n</system-reminder>')
+  })
+})
+
+describe('T7 watermark collapse (P0-2)', () => {
+  function makeEngine() {
+    return new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+  }
+
+  function bigHistory(turns: number, charsPerToolResult: number): OaiMessage[] {
+    const msgs: OaiMessage[] = []
+    for (let t = 0; t < turns; t++) {
+      msgs.push({ role: 'user', content: `turn ${t}` })
+      msgs.push({ role: 'assistant', content: null, tool_calls: [{ id: `c${t}`, type: 'function', function: { name: 'bash', arguments: '{}' } }] })
+      msgs.push({ role: 'tool', tool_call_id: `c${t}`, content: `line one of output\n${'x'.repeat(charsPerToolResult)}` })
+    }
+    return msgs
+  }
+
+  it('does not collapse below the 50% token gate', () => {
+    const engine = makeEngine()
+    // 12 turns × 10K chars ≈ 30K tokens — way below 500K gate on 1M window.
+    engine.buildOaiRequest(bigHistory(12, 10_000), undefined, 1_000_000)
+    assert.equal(engine.getCacheEventStats().collapseWatermark, 0, 'watermark untouched below gate')
+  })
+
+  it('watermark advances only when crossing a 50K token step', () => {
+    const engine = makeEngine()
+    // 12 turns × 200K chars ≈ 600K tokens — above the 500K gate.
+    const history = bigHistory(12, 200_000)
+    engine.buildOaiRequest([...history], undefined, 1_000_000)
+    const wm1 = engine.getCacheEventStats().collapseWatermark
+    assert.ok(wm1 > 0, 'watermark set above gate')
+
+    // Same token step: repeated request — watermark must NOT move.
+    engine.buildOaiRequest([...history], undefined, 1_000_000)
+    assert.equal(engine.getCacheEventStats().collapseWatermark, wm1, 'watermark frozen within step')
+
+    // Small growth (well under 50K tokens): still frozen.
+    const grown = [...history,
+      { role: 'assistant' as const, content: null, tool_calls: [{ id: 'cx', type: 'function' as const, function: { name: 'bash', arguments: '{}' } }] },
+      { role: 'tool' as const, tool_call_id: 'cx', content: 'small' },
+    ]
+    engine.buildOaiRequest(grown, undefined, 1_000_000)
+    assert.equal(engine.getCacheEventStats().collapseWatermark, wm1, 'small growth does not advance watermark')
+
+    // Cross the next 50K step (+200K chars ≈ +50K tokens): watermark advances.
+    const crossed = [...grown,
+      { role: 'user' as const, content: 'next turn' },
+      { role: 'assistant' as const, content: null, tool_calls: [{ id: 'cy', type: 'function' as const, function: { name: 'bash', arguments: '{}' } }] },
+      { role: 'tool' as const, tool_call_id: 'cy', content: 'y'.repeat(250_000) },
+    ]
+    engine.buildOaiRequest(crossed, undefined, 1_000_000)
+    const wm2 = engine.getCacheEventStats().collapseWatermark
+    assert.ok(wm2 >= wm1, 'watermark only moves forward')
+    assert.notEqual(wm2, wm1, 'crossing a 50K step advances the watermark')
+  })
+})
+
+describe('prefix evolution integration: multi-round + injection (cache-break repro)', () => {
+  it('request prefix stays byte-stable across tool turns and reminder injections within a round', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+
+    const session: OaiMessage[] = [{ role: 'user', content: 'fix the cache bug' }]
+    const requests: OaiMessage[][] = []
+    const snapshot = () => { requests.push(engine.buildOaiRequest([...session], undefined, 1_000_000).messages) }
+
+    snapshot()
+    // Tool turns within the round
+    for (let i = 0; i < 3; i++) {
+      session.push({ role: 'assistant', content: null, tool_calls: [{ id: `c${i}`, type: 'function', function: { name: 'bash', arguments: '{}' } }] })
+      session.push({ role: 'tool', tool_call_id: `c${i}`, content: `output ${i}: ${'z'.repeat(300)}` })
+      snapshot()
+    }
+    // Injected reminder mid-round (convergence kick)
+    session.push({ role: 'user', content: '<system-reminder>\n收敛提醒\n</system-reminder>' })
+    snapshot()
+    // More tool turns after injection
+    session.push({ role: 'assistant', content: null, tool_calls: [{ id: 'c9', type: 'function', function: { name: 'bash', arguments: '{}' } }] })
+    session.push({ role: 'tool', tool_call_id: 'c9', content: 'final output' })
+    snapshot()
+
+    // Every earlier request must be a byte-exact prefix of every later request.
+    for (let a = 0; a < requests.length - 1; a++) {
+      const earlier = requests[a]!
+      const later = requests[a + 1]!
+      for (let i = 0; i < earlier.length; i++) {
+        assert.deepEqual(later[i], earlier[i],
+          `request#${a + 1} msg[${i}] must byte-match request#${a} (prefix stability)`)
+      }
+    }
+
+    // New REAL user boundary: prefix up to (and including) the old history must
+    // still match — only the new trailer differs.
+    session.push({ role: 'user', content: 'now write the tests' })
+    const next = engine.buildOaiRequest([...session], undefined, 1_000_000).messages
+    const last = requests[requests.length - 1]!
+    for (let i = 0; i < last.length; i++) {
+      assert.deepEqual(next[i], last[i], `new round msg[${i}] preserves historical prefix`)
+    }
+  })
 })
