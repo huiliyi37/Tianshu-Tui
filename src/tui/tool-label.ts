@@ -49,18 +49,37 @@ function readFileDetail(input: Record<string, unknown>): string {
   return details.length > 0 ? ` · ${truncate(details.join(' '), 60)}` : ''
 }
 
+/**
+ * 工具的主参数摘要（不含动词前缀）——供 Claude Code 风格的
+ * `● Verb(arg)` 工具卡片标题使用。
+ */
+export function toolArgSummary(name: string, input: Record<string, unknown>): string {
+  switch (name) {
+    case 'read_file': return `${truncate(pathBasename(input.file_path), 45)}${readFileDetail(input)}`
+    case 'write_file':
+    case 'edit_file': return truncate(pathBasename(input.file_path), 45)
+    case 'bash': return truncate(String(input.command ?? '').split('\n')[0] ?? '', 55)
+    case 'grep':
+    case 'glob': return truncate(String(input.pattern ?? ''), 35)
+    case 'delegate_task': return truncate(String(input.objective ?? ''), 50)
+    case 'delegate_batch': return `${Array.isArray(input.tasks) ? input.tasks.length : '?'} tasks`
+    case 'web_fetch': return truncate(String(input.url ?? ''), 50)
+    default: return ''
+  }
+}
+
 export function toolLabel(name: string, input: Record<string, unknown>): string {
   switch (name) {
-    case 'read_file': return `read ${truncate(pathBasename(input.file_path), 45)}${readFileDetail(input)}`
-    case 'write_file': return `write ${truncate(pathBasename(input.file_path), 45)}`
-    case 'edit_file': return `edit ${truncate(pathBasename(input.file_path), 45)}`
-    case 'bash': return truncate(String(input.command ?? '').split('\n')[0] ?? '', 55)
-    case 'grep': return `grep ${truncate(String(input.pattern ?? ''), 35)}`
-    case 'glob': return `glob ${truncate(String(input.pattern ?? ''), 35)}`
+    case 'read_file': return `read ${toolArgSummary(name, input)}`
+    case 'write_file': return `write ${toolArgSummary(name, input)}`
+    case 'edit_file': return `edit ${toolArgSummary(name, input)}`
+    case 'bash': return toolArgSummary(name, input)
+    case 'grep': return `grep ${toolArgSummary(name, input)}`
+    case 'glob': return `glob ${toolArgSummary(name, input)}`
     case 'diff': return 'diff'
     case 'run_tests': return 'run tests'
-    case 'delegate_task': return truncate(String(input.objective ?? ''), 50)
-    case 'delegate_batch': return `batch ${Array.isArray(input.tasks) ? input.tasks.length : '?'} tasks`
+    case 'delegate_task': return toolArgSummary(name, input)
+    case 'delegate_batch': return `batch ${toolArgSummary(name, input)}`
     default: return name
   }
 }

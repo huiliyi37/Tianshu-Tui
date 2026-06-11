@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatToolCard } from '../format/tool-card.js'
-import { formatDiff } from '../format/diff.js'
+import { formatToolCard, formatToolCardLive, isToolCardTruncated, toolCardTitle } from '../format/tool-card.js'
+import { formatDiff, isDiffContent } from '../format/diff.js'
 import { formatThinking } from '../format/thinking.js'
 import { getTheme } from '../theme.js'
 
@@ -10,41 +10,79 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
 }
 
-describe('formatToolCard', () => {
-  it('renders header with tool glyph and verb', () => {
-    const lines = formatToolCard({ toolName: 'bash', content: 'output' }, theme)
+describe('formatToolCard (Claude Code ●/⎿ style)', () => {
+  it('renders ● header with capitalized verb and arg summary', () => {
+    const lines = formatToolCard({
+      toolName: 'bash',
+      content: 'output',
+      toolInput: { command: 'npm test' },
+    }, theme)
     assert.ok(lines.length >= 2)
-    assert.ok(stripAnsi(lines[0]!).includes('⚡'))
-    assert.ok(stripAnsi(lines[0]!).includes('exec'))
+    const header = stripAnsi(lines[0]!)
+    assert.ok(header.includes('●'), 'has bullet')
+    assert.ok(header.includes('Run(npm test)'), `header: ${header}`)
   })
 
-  it('renders content with border pipe', () => {
+  it('renders body with ⎿ first-line prefix', () => {
     const lines = formatToolCard({ toolName: 'grep', content: 'match1\nmatch2' }, theme)
-    assert.ok(lines.some(l => stripAnsi(l).includes('│')))
-    assert.ok(lines.some(l => stripAnsi(l).includes('match1')))
+    assert.ok(stripAnsi(lines[1]!).includes('⎿'))
+    assert.ok(stripAnsi(lines[1]!).includes('match1'))
+    assert.ok(!stripAnsi(lines[2]!).includes('⎿'), 'continuation lines have no ⎿')
+    assert.ok(stripAnsi(lines[2]!).includes('match2'))
   })
 
   it('uses error color for isError', () => {
     const lines = formatToolCard({ toolName: 'bash', content: 'fail', isError: true }, theme)
-    // Error header should contain ANSI escape sequences (color is applied)
     const headerAnsi = lines[0] ?? ''
-    assert.ok(/\x1B\[3[0-9]/.test(headerAnsi) || /\x1B\[1m/.test(headerAnsi), 'has ANSI SGR codes')
+    // 测试环境下 theme 可能回退到命名色（无 truecolor 序列），但 header 标题
+    // 必然带 bold SGR；只断言存在 ANSI 序列即可
+    assert.ok(/\x1B\[/.test(headerAnsi), 'has ANSI SGR codes')
   })
 
-  it('shows tree connector for depth > 0', () => {
+  it('indents for depth > 0', () => {
     const lines = formatToolCard({ toolName: 'read_file', content: 'data', depth: 2 }, theme)
-    assert.ok(stripAnsi(lines[0]!).includes('├─'))
+    assert.ok(stripAnsi(lines[0]!).startsWith('    '))
   })
 
-  it('truncates to maxLines', () => {
+  it('truncates with `… +N lines (ctrl+o to expand)` marker', () => {
     const long = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n')
-    const lines = formatToolCard({ toolName: 'bash', content: long, maxLines: 10 }, theme)
-    assert.ok(lines.some(l => stripAnsi(l).includes('omitted')))
+    const lines = formatToolCard({ toolName: 'bash', content: long, maxLines: 4 }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain.some(l => l.includes('… +46 lines (ctrl+o to expand)')), plain.join('|'))
+    // 头 4 行保留
+    assert.ok(plain.some(l => l.includes('line 0')))
+    assert.ok(plain.some(l => l.includes('line 3')))
+    assert.ok(!plain.some(l => l.includes('line 4')))
   })
 
-  it('shows elapsed when not streaming', () => {
+  it('read family uses head+tail preview when truncated', () => {
+    const long = Array.from({ length: 60 }, (_, i) => `row ${i}`).join('\n')
+    const lines = formatToolCard({ toolName: 'read_file', content: long }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain.some(l => l.includes('row 0')), 'head shown')
+    assert.ok(plain.some(l => l.includes('row 59')), 'tail shown')
+    assert.ok(plain.some(l => l.includes('ctrl+o to expand')), 'mid marker')
+  })
+
+  it('expanded renders all lines without marker', () => {
+    const long = Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
+    const lines = formatToolCard({ toolName: 'bash', content: long, expanded: true }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain.some(l => l.includes('line 29')))
+    assert.ok(!plain.some(l => l.includes('ctrl+o')))
+  })
+
+  it('edit/write diff content renders via formatDiff (red/green)', () => {
+    const diff = '--- a/foo.ts\n+++ b/foo.ts\n@@ -1,2 +1,2 @@\n-old line\n+new line'
+    const lines = formatToolCard({ toolName: 'edit_file', content: diff }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain.some(l => l.includes('+1')), 'diff summary header present')
+    assert.ok(plain.some(l => l.includes('+new line')))
+  })
+
+  it('shows elapsed when provided', () => {
     const lines = formatToolCard({ toolName: 'bash', content: 'done', elapsedMs: 1500 }, theme)
-    assert.ok(stripAnsi(lines[0]!).includes('1.5s'))
+    assert.ok(stripAnsi(lines[0]!).includes('(1.5s)'))
   })
 
   it('shows streaming indicator', () => {
@@ -55,6 +93,60 @@ describe('formatToolCard', () => {
   it('shows rawPath when not truncated', () => {
     const lines = formatToolCard({ toolName: 'write_file', content: 'ok', rawPath: '/tmp/foo.ts' }, theme)
     assert.ok(lines.some(l => stripAnsi(l).includes('foo.ts')))
+  })
+
+  it('empty content shows (no output)', () => {
+    const lines = formatToolCard({ toolName: 'bash', content: '' }, theme)
+    assert.ok(stripAnsi(lines[1]!).includes('(no output)'))
+  })
+})
+
+describe('toolCardTitle / isToolCardTruncated', () => {
+  it('title falls back to rawPath basename when no input', () => {
+    assert.equal(stripAnsi(toolCardTitle('read_file', undefined, '/a/b/main.ts')), 'Read(main.ts)')
+  })
+
+  it('title without arg is bare verb', () => {
+    assert.equal(stripAnsi(toolCardTitle('run_tests')), 'Test')
+  })
+
+  it('isToolCardTruncated matches collapsed render', () => {
+    const long = Array.from({ length: 10 }, (_, i) => `l${i}`).join('\n')
+    assert.equal(isToolCardTruncated({ toolName: 'bash', content: long }), true)
+    assert.equal(isToolCardTruncated({ toolName: 'bash', content: 'one\ntwo' }), false)
+  })
+})
+
+describe('formatToolCardLive', () => {
+  it('renders dim title + last 3 output lines', () => {
+    const lines = formatToolCardLive({
+      toolName: 'bash',
+      toolInput: { command: 'npm test' },
+      outputTail: 'a\nb\nc\nd\ne',
+      elapsedMs: 3200,
+      columns: 80,
+    }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain[0]!.includes('● Run(npm test)'))
+    assert.ok(plain[0]!.includes('3.2s'))
+    assert.equal(plain.length, 4)
+    assert.ok(plain[1]!.includes('⎿'))
+    assert.ok(plain[1]!.includes('c'))
+    assert.ok(plain[3]!.includes('e'))
+  })
+
+  it('no output tail renders title only', () => {
+    const lines = formatToolCardLive({ toolName: 'grep', columns: 80 }, theme)
+    assert.equal(lines.length, 1)
+  })
+})
+
+describe('isDiffContent (pure format layer)', () => {
+  it('detects unified diff', () => {
+    assert.equal(isDiffContent('--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b'), true)
+  })
+  it('rejects plain text', () => {
+    assert.equal(isDiffContent('just some\nplain output'), false)
   })
 })
 
