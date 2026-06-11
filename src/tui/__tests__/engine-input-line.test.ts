@@ -2,6 +2,52 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { InputLine } from '../engine/input-line.js'
 
+describe('InputLine multi-line (W4b)', () => {
+  it('backslash + Enter continues line instead of submitting', () => {
+    const input = new InputLine({ value: 'first line\\' })
+    let submitted: string | null = null
+    const i2 = new InputLine({ value: 'first line\\', onSubmit: (v) => { submitted = v } })
+    const ev = i2.handleKey('return', '', false, false)
+    assert.equal(ev?.type, 'change')
+    assert.equal(submitted, null)
+    assert.equal(i2.value, 'first line\n')
+    void input
+  })
+
+  it('Enter without trailing backslash submits', () => {
+    let submitted: string | null = null
+    const input = new InputLine({ value: 'hello\nworld', onSubmit: (v) => { submitted = v } })
+    const ev = input.handleKey('return', '', false, false)
+    assert.equal(ev?.type, 'submit')
+    assert.equal(submitted, 'hello\nworld')
+  })
+
+  it('ctrl_j inserts a newline at cursor', () => {
+    const input = new InputLine({ value: 'ab' })
+    input.handleKey('left', '', false, false)
+    const ev = input.handleKey('ctrl_j', '', true, false)
+    assert.equal(ev?.type, 'change')
+    assert.equal(input.value, 'a\nb')
+  })
+
+  it('displayLines renders cursor line with ▸ prefix and █ marker', () => {
+    const input = new InputLine({ value: 'one\ntwo' })
+    // cursor at end → on second line
+    const lines = input.displayLines()
+    assert.deepEqual(lines, ['  one', '▸ two█'])
+  })
+
+  it('displayLines shows placeholder when empty', () => {
+    const input = new InputLine({ placeholder: 'Type here' })
+    assert.deepEqual(input.displayLines(), ['▸ █Type here'])
+  })
+
+  it('placeholder accessor exposes option', () => {
+    const input = new InputLine({ placeholder: 'p' })
+    assert.equal(input.placeholder, 'p')
+  })
+})
+
 describe('InputLine', () => {
   describe('basic editing', () => {
     it('inserts characters', () => {

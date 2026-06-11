@@ -35,6 +35,14 @@ export class SteerBuffer {
       : `[User guidance]:\n${messages.map((m, i) => `${i + 1}. ${m}`).join('\n')}`
   }
 
+  /** 取回最近一条排队消息（Up 箭头取回编辑用） */
+  popLast(): string | null {
+    if (this.pending.length === 0) return null
+    const last = this.pending.pop()!
+    this.notify()
+    return last
+  }
+
   /** Clear all pending messages */
   clear(): void {
     if (this.pending.length === 0) return

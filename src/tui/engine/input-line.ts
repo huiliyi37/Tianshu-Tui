@@ -74,6 +74,29 @@ export class InputLine {
   get cursor(): number { return this._cursor }
   get vimMode(): VimMode { return this._vimMode }
   get vimEnabled(): boolean { return this._vimEnabled }
+  get placeholder(): string { return this._placeholder }
+
+  /**
+   * 多行渲染：返回输入框的显示行数组。
+   * - 空值时显示 placeholder（首行）
+   * - 光标行以 `▸ ` 前缀标识（高亮行），其余行缩进对齐
+   * - 光标位置以 `█` 标记
+   */
+  displayLines(): string[] {
+    if (!this._value) {
+      return [`▸ █${this._placeholder}`]
+    }
+    const before = this._value.slice(0, this._cursor)
+    const cursorLine = before.split('\n').length - 1
+    const cursorCol = before.length - (before.lastIndexOf('\n') + 1)
+
+    return this._value.split('\n').map((line, i) => {
+      const isCursorLine = i === cursorLine
+      const prefix = isCursorLine ? '▸ ' : '  '
+      if (!isCursorLine) return `${prefix}${line}`
+      return `${prefix}${line.slice(0, cursorCol)}█${line.slice(cursorCol)}`
+    })
+  }
 
   /** 设置值（外部更新用） */
   setValue(value: string, cursor?: number): void {
@@ -100,9 +123,23 @@ export class InputLine {
   handleKey(name: string, char: string, ctrl: boolean, meta: boolean): InputLineEvent | null {
     // ── 全局键 ─────────────────────────────────────────────────
     if (name === 'return') {
+      // 多行输入：`\` + Enter 续行（去掉尾部反斜杠，插入换行）
+      if (this._value.slice(0, this._cursor).endsWith('\\')) {
+        const before = this._value.slice(0, this._cursor - 1)
+        const after = this._value.slice(this._cursor)
+        this._value = before + '\n' + after
+        // 光标保持在换行符之后
+        this.onChangeCallback?.(this._value, this._cursor)
+        return { type: 'change', value: this._value, cursor: this._cursor }
+      }
       const submitted = this._value
       this.onSubmitCallback?.(submitted)
       return { type: 'submit', value: submitted }
+    }
+
+    // 多行输入：Ctrl+J 插入换行
+    if (name === 'ctrl_j') {
+      return this.insertChar('\n')
     }
 
     if (name === 'tab' && !ctrl) {

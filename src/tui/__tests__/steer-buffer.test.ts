@@ -65,6 +65,24 @@ describe('SteerBuffer', () => {
     assert.equal(calls.length, 5)
   })
 
+  it('popLast retrieves most recent message and notifies (W4a Up-arrow)', () => {
+    const buf = new SteerBuffer()
+    assert.equal(buf.popLast(), null)
+
+    buf.push('first')
+    buf.push('second')
+
+    let notified = false
+    buf.subscribe(() => { notified = true })
+
+    assert.equal(buf.popLast(), 'second')
+    assert.equal(notified, true)
+    assert.deepEqual([...buf.getPending()], ['first'])
+
+    assert.equal(buf.popLast(), 'first')
+    assert.equal(buf.hasPending(), false)
+  })
+
   it('drain resets buffer so subsequent push starts fresh', () => {
     const buf = new SteerBuffer()
     buf.push('first batch')
