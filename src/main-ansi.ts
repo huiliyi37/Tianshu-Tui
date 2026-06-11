@@ -16,6 +16,7 @@ import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
 import { getPaletteCommands } from './tui/command-palette.js'
+import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme } from './tui/theme.js'
@@ -214,30 +215,25 @@ async function main() {
   // ── Clear screen ─────────────────────────────────────────────
   stdout.write('\x1B[2J\x1B[H')
 
-  // ── Welcome message ──────────────────────────────────────────
+  // ── Welcome message（精简 ≤3 行，自适应终端宽） ───────────────
   const existingMsgCount = ctx.session.getMessages().length
-  const restoreNote = existingMsgCount > 0
-    ? `  ║  Session: ${ctx.sessionId.slice(0, 8)}... (${existingMsgCount} prior msgs) ║`
-    : `  ║  Session: ${ctx.sessionId.slice(0, 8)}...                          ║`
-
-  const welcomeLines = [
-    `  ╔══════════════════════════════════════════╗`,
-    `  ║       天枢 (Tiānshū) — T9 ANSI TUI       ║`,
-    `  ║                                          ║`,
-    `  ║  Model: ${modelName.padEnd(33)}║`,
-    `  ║  CWD:   ${(process.cwd().length > 33 ? '...' + process.cwd().slice(-30) : process.cwd()).padEnd(33)}║`,
-    restoreNote,
-    `  ║                                          ║`,
-    `  ║  /help     Show commands                 ║`,
-    `  ║  /exit     Quit                          ║`,
-    `  ║  Ctrl+C    Interrupt / Exit              ║`,
-    `  ╚══════════════════════════════════════════╝`,
-  ]
+  const welcomeLines = formatWelcome({
+    modelName,
+    cwd: process.cwd(),
+    sessionId: ctx.sessionId,
+    priorMsgCount: existingMsgCount,
+    columns: stdout.columns || 80,
+  }, theme)
   for (const line of welcomeLines) {
     stdout.write(line + '\n')
   }
+  // 欢迎与底部 chrome 之间留一空行
+  stdout.write('\n')
 
   process.stderr.write('[T9] Ready. Type a message and press Enter.\n')
+
+  // 首屏渲染底部 chrome（GlanceBar + 输入框），不必等第一次按键
+  app.start()
 }
 
 main().catch((err) => {
