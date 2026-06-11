@@ -16,6 +16,27 @@ import type { TrajectoryEntry } from './trajectory.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import { extractSessionMemories, type ExtractedMemory } from './session-memory-extract.js'
 
+/**
+ * Extract the user intent chain: all user messages in order,
+ * truncated to a reasonable preview for the compaction prompt.
+ * This ensures the LLM summary preserves the user's full intent
+ * evolution, including corrections and clarifications.
+ */
+function extractUserIntentChain(messages: OaiMessage[]): string[] {
+  const MAX_PER_MESSAGE = 300
+  const MAX_MESSAGES = 20
+
+  return messages
+    .filter(m => m.role === 'user')
+    .slice(-MAX_MESSAGES)
+    .map(m => {
+      const text = m.content.trim().replace(/\n+/g, ' ')
+      return text.length > MAX_PER_MESSAGE
+        ? text.slice(0, MAX_PER_MESSAGE) + '...'
+        : text
+    })
+}
+
 export type HandoffToolStatus = TrajectoryEntry['status'] | 'running'
 
 export interface StructuredHandoffInput {
@@ -642,19 +663,30 @@ export class CompactionController {
       const messages = this.deps.session.getMessages()
       if (messages.length < CACHE_ANCHOR_MESSAGES + 2) return null
 
+      const userIntentChain = extractUserIntentChain(messages)
       const compactMessages: OaiMessage[] = [
         ...messages,
         {
           role: 'user' as const,
           content: [
             '请总结上述对话的关键信息，用于上下文压缩。',
-            '保留以下内容：',
-            '1. 用户的核心需求和意图',
+            '',
+            '## 必须完整保留的用户意图链',
+            '以下是用户所有消息（按时间序），**必须逐条保留核心意图，不得合并或遗漏**：',
+            ...userIntentChain.map((m, i) => `${i + 1}. ${m}`),
+            '',
+            '## 保留以下内容',
+            '1. 用户的核心需求和意图演变（如果用户纠正了 agent 的理解，以用户的纠正为准）',
             '2. 所有关键技术决策及其原因',
             '3. 涉及的文件路径及变更摘要',
             '4. 遇到的错误及修复方法',
             '5. 当前工作状态和进度',
             '6. 明确的待办事项和下一步',
+            '',
+            '## 丢弃以下内容',
+            '- 工具输出的详细内容（只保留结论）',
+            '- 探索性搜索的中间过程',
+            '- 重复的状态汇报',
             '',
             '只输出总结内容，不要调用工具。格式用 markdown，控制在 3000 字以内。',
           ].join('\n'),
