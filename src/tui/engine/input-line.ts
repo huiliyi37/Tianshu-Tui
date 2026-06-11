@@ -40,6 +40,18 @@ export interface InputLineOptions {
 
 export type VimMode = 'normal' | 'insert'
 
+/** Grapheme 分段器（Node 22+）。用于按用户感知字符（CJK/emoji/ZWJ 簇）步进光标。 */
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+/** 返回字符串中所有 grapheme 边界的 code-unit 偏移（含 0 与末尾）。 */
+function graphemeBoundaries(value: string): number[] {
+  const bounds = [0]
+  for (const seg of graphemeSegmenter.segment(value)) {
+    bounds.push(seg.index + seg.segment.length)
+  }
+  return bounds
+}
+
 export class InputLine {
   private _value: string
   private _cursor: number
@@ -79,12 +91,12 @@ export class InputLine {
   /**
    * 多行渲染：返回输入框的显示行数组。
    * - 空值时显示 placeholder（首行）
-   * - 光标行以 `▸ ` 前缀标识（高亮行），其余行缩进对齐
+   * - 光标行以 `〉 ` 前缀标识（高亮行），其余行缩进对齐
    * - 光标位置以 `█` 标记
    */
   displayLines(): string[] {
     if (!this._value) {
-      return [`▸ █${this._placeholder}`]
+      return [`〉 █${this._placeholder}`]
     }
     const before = this._value.slice(0, this._cursor)
     const cursorLine = before.split('\n').length - 1
@@ -92,7 +104,7 @@ export class InputLine {
 
     return this._value.split('\n').map((line, i) => {
       const isCursorLine = i === cursorLine
-      const prefix = isCursorLine ? '▸ ' : '  '
+      const prefix = isCursorLine ? '〉 ' : '  '
       if (!isCursorLine) return `${prefix}${line}`
       return `${prefix}${line.slice(0, cursorCol)}█${line.slice(cursorCol)}`
     })
@@ -108,6 +120,16 @@ export class InputLine {
   /** 追加文本到末尾 */
   append(text: string): void {
     this.setValue(this._value + text, this._value.length + text.length)
+  }
+
+  /** 在光标处插入文本（用于 bracketed paste），光标移动到插入内容之后。 */
+  insertText(text: string): void {
+    if (!text) return
+    const before = this._value.slice(0, this._cursor)
+    const after = this._value.slice(this._cursor)
+    const next = (before + text + after).slice(0, this._maxLength)
+    const cursor = Math.min(before.length + text.length, next.length)
+    this.setValue(next, cursor)
   }
 
   /** 设置历史 */
@@ -128,11 +150,13 @@ export class InputLine {
         const before = this._value.slice(0, this._cursor - 1)
         const after = this._value.slice(this._cursor)
         this._value = before + '\n' + after
-        // 光标保持在换行符之后
+        // 光标落在新插入的换行符之后（去掉了尾部 `\`，补了一个 `\n`）
+        this._cursor = before.length + 1
         this.onChangeCallback?.(this._value, this._cursor)
         return { type: 'change', value: this._value, cursor: this._cursor }
       }
       const submitted = this._value
+      this.clearAfterSubmit()
       this.onSubmitCallback?.(submitted)
       return { type: 'submit', value: submitted }
     }
@@ -178,8 +202,8 @@ export class InputLine {
       case 'right': return this.moveRight()
       case 'home': return this.moveHome()
       case 'end': return this.moveEnd()
-      case 'up': return this.historyPrev()
-      case 'down': return this.historyNext()
+      case 'up': return this.moveUpOrHistory()
+      case 'down': return this.moveDownOrHistory()
 
       default: break
     }
@@ -212,6 +236,17 @@ export class InputLine {
 
   // ── Editing Operations ───────────────────────────────────────
 
+  /**
+   * 提交后重置缓冲：清空文本、归零光标、复位历史游标。
+   * 不触发 onChangeCallback —— submit 路径自己负责后续渲染，
+   * 避免在 submit 回调里又触发一次 change 渲染造成竞态。
+   */
+  private clearAfterSubmit(): void {
+    this._value = ''
+    this._cursor = 0
+    this._historyIdx = -1
+  }
+
   private insertChar(ch: string): InputLineEvent | null {
     if (this._value.length >= this._maxLength) return null
     const before = this._value.slice(0, this._cursor)
@@ -224,18 +259,22 @@ export class InputLine {
 
   private backspace(): InputLineEvent | null {
     if (this._cursor <= 0) return null
-    const before = this._value.slice(0, this._cursor - 1)
+    // grapheme-aware：删除光标左侧一个完整用户字符（CJK/emoji 簇）
+    const start = this.prevGrapheme()
+    const before = this._value.slice(0, start)
     const after = this._value.slice(this._cursor)
     this._value = before + after
-    this._cursor--
+    this._cursor = start
     this.onChangeCallback?.(this._value, this._cursor)
     return { type: 'change', value: this._value, cursor: this._cursor }
   }
 
   private deleteForward(): InputLineEvent | null {
     if (this._cursor >= this._value.length) return null
+    // grapheme-aware：删除光标右侧一个完整用户字符
+    const end = this.nextGrapheme()
     const before = this._value.slice(0, this._cursor)
-    const after = this._value.slice(this._cursor + 1)
+    const after = this._value.slice(end)
     this._value = before + after
     this.onChangeCallback?.(this._value, this._cursor)
     return { type: 'change', value: this._value, cursor: this._cursor }
@@ -281,14 +320,36 @@ export class InputLine {
 
   private moveLeft(): InputLineEvent | null {
     if (this._cursor <= 0) return null
-    this._cursor--
+    this._cursor = this.prevGrapheme()
     return { type: 'change', value: this._value, cursor: this._cursor }
   }
 
   private moveRight(): InputLineEvent | null {
     if (this._cursor >= this._value.length) return null
-    this._cursor++
+    this._cursor = this.nextGrapheme()
     return { type: 'change', value: this._value, cursor: this._cursor }
+  }
+
+  /** 光标左侧最近的 grapheme 边界。 */
+  private prevGrapheme(): number {
+    if (this._cursor <= 0) return 0
+    const bounds = graphemeBoundaries(this._value)
+    let prev = 0
+    for (const b of bounds) {
+      if (b < this._cursor) prev = b
+      else break
+    }
+    return prev
+  }
+
+  /** 光标右侧最近的 grapheme 边界。 */
+  private nextGrapheme(): number {
+    if (this._cursor >= this._value.length) return this._value.length
+    const bounds = graphemeBoundaries(this._value)
+    for (const b of bounds) {
+      if (b > this._cursor) return b
+    }
+    return this._value.length
   }
 
   private moveHome(): InputLineEvent | null {
@@ -315,6 +376,49 @@ export class InputLine {
     if (end === this._cursor || end >= this._value.length && this._cursor === this._value.length) return null
     this._cursor = end
     return { type: 'change', value: this._value, cursor: this._cursor }
+  }
+
+  // ── Multi-line Navigation ────────────────────────────────────
+
+  /** 当前光标的（行,列），列以 code-unit 计。 */
+  private getLineCol(pos: number): { line: number; col: number } {
+    const parts = this._value.slice(0, pos).split('\n')
+    return { line: parts.length - 1, col: parts[parts.length - 1]!.length }
+  }
+
+  /** 由（行,列）还原 code-unit 偏移，col 超出行长则贴到行尾。 */
+  private posFromLineCol(line: number, col: number): number {
+    const lines = this._value.split('\n')
+    const clampedLine = Math.max(0, Math.min(line, lines.length - 1))
+    let pos = 0
+    for (let i = 0; i < clampedLine; i++) pos += lines[i]!.length + 1 // +1 = '\n'
+    pos += Math.min(col, lines[clampedLine]!.length)
+    return pos
+  }
+
+  /** Up：多行且不在首行时上移一行，否则取上一条历史。 */
+  private moveUpOrHistory(): InputLineEvent | null {
+    if (this._value.includes('\n')) {
+      const { line, col } = this.getLineCol(this._cursor)
+      if (line > 0) {
+        this._cursor = this.posFromLineCol(line - 1, col)
+        return { type: 'change', value: this._value, cursor: this._cursor }
+      }
+    }
+    return this.historyPrev()
+  }
+
+  /** Down：多行且不在末行时下移一行，否则取下一条历史。 */
+  private moveDownOrHistory(): InputLineEvent | null {
+    if (this._value.includes('\n')) {
+      const { line, col } = this.getLineCol(this._cursor)
+      const lastLine = this._value.split('\n').length - 1
+      if (line < lastLine) {
+        this._cursor = this.posFromLineCol(line + 1, col)
+        return { type: 'change', value: this._value, cursor: this._cursor }
+      }
+    }
+    return this.historyNext()
   }
 
   // ── History ──────────────────────────────────────────────────
@@ -345,9 +449,12 @@ export class InputLine {
   private handleVimNormal(name: string, _char: string, _ctrl: boolean): InputLineEvent | null {
     switch (name) {
       case 'escape': return null
-      case 'return':
-        this.onSubmitCallback?.(this._value)
-        return { type: 'submit', value: this._value }
+      case 'return': {
+        const submitted = this._value
+        this.clearAfterSubmit()
+        this.onSubmitCallback?.(submitted)
+        return { type: 'submit', value: submitted }
+      }
       case 'left':
       case 'ctrl_b': return this.moveLeft()
       case 'right':

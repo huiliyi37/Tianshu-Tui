@@ -30,16 +30,32 @@ describe('InputLine multi-line (W4b)', () => {
     assert.equal(input.value, 'a\nb')
   })
 
-  it('displayLines renders cursor line with ▸ prefix and █ marker', () => {
+  it('insertText inserts at cursor and advances cursor', () => {
+    const input = new InputLine({ value: 'AB' })
+    input.handleKey('left', '', false, false) // cursor at A|B
+    input.insertText('XY')
+    assert.equal(input.value, 'AXYB')
+    // 续插一个字符应落在 XY 之后
+    input.insertText('Z')
+    assert.equal(input.value, 'AXYZB')
+  })
+
+  it('insertText with multi-line text keeps newlines (no submit)', () => {
+    const input = new InputLine({ value: '' })
+    input.insertText('line1\nline2')
+    assert.equal(input.value, 'line1\nline2')
+  })
+
+  it('displayLines renders cursor line with 〉 prefix and █ marker', () => {
     const input = new InputLine({ value: 'one\ntwo' })
     // cursor at end → on second line
     const lines = input.displayLines()
-    assert.deepEqual(lines, ['  one', '▸ two█'])
+    assert.deepEqual(lines, ['  one', '〉 two█'])
   })
 
   it('displayLines shows placeholder when empty', () => {
     const input = new InputLine({ placeholder: 'Type here' })
-    assert.deepEqual(input.displayLines(), ['▸ █Type here'])
+    assert.deepEqual(input.displayLines(), ['〉 █Type here'])
   })
 
   it('placeholder accessor exposes option', () => {
@@ -159,6 +175,37 @@ describe('InputLine', () => {
       const result = input.handleKey('return', '', false, false)
       assert.equal(result?.type, 'submit')
       assert.equal(submitted, 'query')
+    })
+
+    it('clears the buffer after submit (no residual text in input box)', () => {
+      const input = new InputLine({ value: 'hello world' })
+      const result = input.handleKey('return', '', false, false)
+      assert.equal(result?.type, 'submit')
+      assert.equal(result?.value, 'hello world') // event still carries submitted text
+      assert.equal(input.value, '') // but buffer is cleared
+      assert.equal(input.cursor, 0)
+      // next render shows an empty input line (placeholder), not the sent message
+      assert.equal(input.displayLines().length, 1)
+      assert.ok(!input.displayLines()[0]?.includes('hello world'))
+    })
+
+    it('clears the buffer after vim-normal submit', () => {
+      const input = new InputLine({ vimEnabled: true, value: 'sent' })
+      input.handleKey('escape', '', false, false) // → normal mode
+      const result = input.handleKey('return', '', false, false)
+      assert.equal(result?.type, 'submit')
+      assert.equal(input.value, '')
+      assert.equal(input.cursor, 0)
+    })
+
+    it('resets history index after submit so Up starts fresh', () => {
+      const input = new InputLine({ history: ['old1', 'old2'] })
+      input.handleKey('up', '', false, false) // value = 'old1'
+      input.setValue('new query')
+      input.handleKey('return', '', false, false)
+      assert.equal(input.value, '')
+      input.handleKey('up', '', false, false) // should fetch most recent history
+      assert.equal(input.value, 'old1')
     })
   })
 
