@@ -18,6 +18,7 @@ import {
   type DriftEvent,
 } from './fingerprint.js'
 import { FieldHabituationTracker } from './field-habituation.js'
+import { isSystemReminder } from './system-reminder.js'
 import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
 import { debugLog } from '../utils/debug.js'
 
@@ -91,6 +92,20 @@ export class PromptEngine {
    *  Replaces the old binary chat/task PromptMode — auto-detected from message content. */
   private actionableTurn: boolean = true
   private gitDirty = false
+  /**
+   * T7 watermark: request-copy collapse only applies to message indices below
+   * this boundary. Advancing only on 50K-token steps (not every turn) keeps the
+   * collapse boundary stable across requests — a sliding boundary would rewrite
+   * more request bytes every turn and permanently break the prefix cache.
+   */
+  private collapseWatermark = 0
+  /** Last 50K-token step at which the watermark was advanced. */
+  private collapseTokenStep = -1
+  /** Cache-event counters (P2-6 breadcrumbs): queried per-turn by cache logging. */
+  private frozenSnapshotClamps = 0
+  private frozenFallbackRebuilds = 0
+  private volatileSwapCount = 0
+  private toolsUpdateCount = 0
   /** Tracks message array length to detect true duplicate messages vs tool-call turns. */
   private lastMessageCount: number = 0
   /** Hash of last message array to distinguish exact same call from true duplicate. */
@@ -139,8 +154,17 @@ export class PromptEngine {
     const arr = this.frozenUserMerged.get(content)
     if (!arr || arr.length === 0) return undefined
     const idx = this.frozenFetchIndex.get(content) ?? 0
-    if (idx >= arr.length) return undefined
     this.frozenFetchIndex.set(content, idx + 1)
+    if (idx >= arr.length) {
+      // Eviction shortened this array (or dedup collapsed duplicates) — clamp
+      // to the last surviving snapshot instead of returning undefined. The
+      // undefined path would rebuild with the CURRENT volatileBlock, and if
+      // that block has swapped since, the first user message changes from
+      // byte 0 → full 0% prefix cache break (cache-log #28/#44 root cause).
+      this.frozenSnapshotClamps++
+      debugLog('prompt-engine', `frozen snapshot clamp: key len=${content.length} requested idx=${idx} surviving=${arr.length}`)
+      return arr[arr.length - 1]
+    }
     return arr[idx]
   }
 
@@ -160,7 +184,12 @@ export class PromptEngine {
     let firstUserIdx = -1
     let lastUserIdx = -1
     for (let i = 0; i < oaiMessages.length; i++) {
-      if (oaiMessages[i]!.role === 'user') {
+      const m = oaiMessages[i]!
+      // Injected <system-reminder> messages are pseudo-user messages — they
+      // must NOT act as user boundaries (no volatile swap, no appendix
+      // rebuild, no trailer merge). Otherwise every injection breaks the
+      // prefix cache mid-task.
+      if (m.role === 'user' && !isSystemReminder(m.content)) {
         if (firstUserIdx === -1) firstUserIdx = i
         lastUserIdx = i
       }
@@ -168,7 +197,10 @@ export class PromptEngine {
 
     for (let i = 0; i < oaiMessages.length; i++) {
       const msg = oaiMessages[i]!
-      if (msg.role === 'user' && this.volatileBlock) {
+      if (msg.role === 'user' && isSystemReminder(msg.content)) {
+        // Pass through untouched: bare user message, byte-stable forever.
+        result.push(msg)
+      } else if (msg.role === 'user' && this.volatileBlock) {
         if (i === lastUserIdx) {
           const userContent = msg.content
 
@@ -191,6 +223,7 @@ export class PromptEngine {
             // the old stable volatileBlock → exact-prefix cache preserved.
             if (this.frozenBase !== this.volatileBlock) {
               this.volatileBlock = this.frozenBase
+              this.volatileSwapCount++
               // Old frozen entries embed old volatileBlock, which byte-matches
               // previous API calls — clearing them would force fallback with
               // newVolatileBlock and cause full prefix cache break. Keep them:
@@ -264,7 +297,11 @@ export class PromptEngine {
           const key = typeof msg.content === 'string' ? msg.content : ''
           const arr = this.frozenUserMerged.get(key)
           if (arr) {
-            arr.push(merged)
+            // Dedup: within one user message, every tool-call turn re-invokes
+            // buildOaiRequest with identical merged content. Pushing each time
+            // bloats the array (7 turns = 7 copies) and prematurely triggers
+            // the 64-entry eviction that causes 0% cache breaks.
+            if (arr[arr.length - 1] !== merged) arr.push(merged)
           } else {
             this.frozenUserMerged.set(key, [merged])
           }
@@ -278,6 +315,11 @@ export class PromptEngine {
             // Fallback: trailer-merge volatileBlock to keep message count stable.
             // A 2-message fallback here would shift all subsequent indices and
             // break exact-prefix cache for the entire suffix.
+            // This path only fires when the key's snapshot array was fully
+            // evicted — if volatileBlock has swapped since, the FIRST user
+            // message changes from byte 0 → fatal 0% prefix break. Log it.
+            this.frozenFallbackRebuilds++
+            debugLog('prompt-engine', `FATAL-CACHE: frozen snapshots fully evicted for FIRST user message (len=${typeof msg.content === 'string' ? msg.content.length : 0}) — rebuilding with current volatileBlock`)
             const fc = typeof msg.content === 'string' ? msg.content : ''
             result.push({ role: 'user', content: this.volatileBlock + '\n---\n' + fc })
           }
@@ -291,6 +333,8 @@ export class PromptEngine {
             // Fallback: inject volatileBlock so the message still carries context.
             // Loses dynamic appendix vs frozen snapshot, causing one cache miss but
             // doesn't cascade (message count unchanged).
+            this.frozenFallbackRebuilds++
+            debugLog('prompt-engine', `frozen snapshots fully evicted for historical user message (len=${typeof msg.content === 'string' ? msg.content.length : 0}) — rebuilding with current volatileBlock`)
             const fc = typeof msg.content === 'string' ? msg.content : ''
             result.push({ role: 'user', content: this.volatileBlock + '\n---\n' + fc })
           }
@@ -405,9 +449,32 @@ export class PromptEngine {
     // T7: Cache-Safe Context Collapse for 1M+ windows.
     // Operates on the request copy only — session messages remain intact
     // so DeepSeek exact-prefix cache is preserved up to the collapse point.
+    // Gated at 50% window usage, with a watermark boundary that only advances
+    // when crossing a 50K-token step — so the break happens once per step,
+    // not on every turn (rolling break would defeat the prefix cache).
     if (contextWindow && contextWindow >= 1_000_000) {
       const collapseAge = this.config.attentionProfile?.collapseAgeTurns ?? 8
-      requestTimeCollapse(result, collapseAge, contextWindow)
+      let estChars = 0
+      for (const m of result) {
+        if (typeof m.content === 'string') estChars += m.content.length
+      }
+      const estTokens = Math.ceil(estChars / 4)
+      if (estTokens / contextWindow > 0.5) {
+        // History rewrite (compact / session split) invalidates stored indices.
+        if (this.collapseWatermark > result.length) {
+          this.collapseWatermark = 0
+          this.collapseTokenStep = -1
+        }
+        const step = Math.floor(estTokens / 50_000)
+        if (step > this.collapseTokenStep) {
+          this.collapseTokenStep = step
+          this.collapseWatermark = computeCollapseBoundary(result, collapseAge)
+          debugLog('prompt-engine', `T7 watermark advanced: step=${step} boundary=${this.collapseWatermark} estTokens=${estTokens}`)
+        }
+        if (this.collapseWatermark > 0) {
+          requestTimeCollapse(result, this.collapseWatermark, contextWindow)
+        }
+      }
     }
 
     return {
@@ -441,6 +508,7 @@ export class PromptEngine {
   updateTools(tools: ToolDefinition[]): void {
     this.config.staticCtx.tools = tools
     this.fingerprint = computeFingerprint(this.systemPrompt, tools, this.volatileBlock)
+    this.toolsUpdateCount++
   }
 
   /** Number of tool definitions (for prefix overhead estimation). */
@@ -611,6 +679,20 @@ export class PromptEngine {
   }
 
   /**
+   * Cache-event counters for cache-log breadcrumbs (P2-6).
+   * Cumulative since engine creation — callers diff across turns.
+   */
+  getCacheEventStats(): { volatileSwaps: number; frozenClamps: number; frozenFallbackRebuilds: number; collapseWatermark: number; toolsUpdates: number } {
+    return {
+      volatileSwaps: this.volatileSwapCount,
+      frozenClamps: this.frozenSnapshotClamps,
+      frozenFallbackRebuilds: this.frozenFallbackRebuilds,
+      collapseWatermark: this.collapseWatermark,
+      toolsUpdates: this.toolsUpdateCount,
+    }
+  }
+
+  /**
    * Pre-refresh git status cache when stale. Call in async context before
    * buildOaiRequest() to ensure the model sees fresh git state instead of the
    * up-to-30s-old cached value returned by the synchronous get() path.
@@ -656,27 +738,49 @@ export class PromptEngine {
 }
 
 /**
- * Request-time collapse for 1M+ windows (T7).
- * Mutates the request message array in-place — NOT the stored session messages.
- * Old tool results (age >= collapseAge) are replaced with semantic summaries.
+ * Compute the T7 collapse boundary: the first message index AFTER the last
+ * message whose turn age >= collapseAge. Messages below this index are
+ * eligible for request-time collapse.
  */
-export function requestTimeCollapse(messages: OaiMessage[], collapseAge: number, contextWindow: number): void {
+export function computeCollapseBoundary(messages: OaiMessage[], collapseAge: number): number {
   let currentTurn = 0
   for (const m of messages) {
     if (m.role === 'user') currentTurn++
   }
 
   let turnCounter = 0
+  let boundary = 0
   for (let i = 0; i < messages.length; i++) {
+    if (messages[i]!.role === 'user') turnCounter++
+    if (currentTurn - turnCounter >= collapseAge) boundary = i + 1
+  }
+  return boundary
+}
+
+/**
+ * Request-time collapse for 1M+ windows (T7).
+ * Mutates the request message array in-place — NOT the stored session messages.
+ * Tool results below boundaryIndex (a stable watermark held by PromptEngine)
+ * are replaced with semantic summaries. The watermark — rather than a per-call
+ * sliding age window — keeps the collapsed region byte-stable across requests.
+ */
+export function requestTimeCollapse(messages: OaiMessage[], boundaryIndex: number, contextWindow: number): void {
+  let currentTurn = 0
+  for (const m of messages) {
+    if (m.role === 'user') currentTurn++
+  }
+
+  let turnCounter = 0
+  const end = Math.min(boundaryIndex, messages.length)
+  for (let i = 0; i < end; i++) {
     const msg = messages[i]!
     if (msg.role === 'user') turnCounter++
 
     if (msg.role !== 'tool') continue
-    const turnAge = currentTurn - turnCounter
-    if (turnAge < collapseAge) continue
     if (msg.content.length < 200) continue
     if (msg.content.startsWith('[collapsed ') || msg.content.startsWith('[storm-collapsed') || msg.content.startsWith('[tiered-')) continue
 
+    const turnAge = currentTurn - turnCounter
     const toolName = inferToolName(messages, i)
     const collapsed = collapseToolResult(toolName, msg.content, turnAge, contextWindow)
     if (collapsed) {
