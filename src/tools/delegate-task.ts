@@ -5,6 +5,7 @@ import type { ClaimProposal } from '../context/claims.js'
 import { profileRegistry } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import { progressiveTimeout } from '../agent/timeout-ladder.js'
 
 export interface DelegateTaskCoordinator {
   delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
@@ -31,18 +32,6 @@ function formatUiContent(run: CoordinatorRun): string {
   const base = `delegate_task completed: ${passed} passed, ${blocked} blocked, model=${run.selectedModel ?? 'unknown'}`
   if (run.escalated) return `⚠️ ${base}\n[escalated] 子代理连续失败，建议改为内联执行`
   return base
-}
-
-/** Progressive timeout: single-task workers start fast and grow with session maturity.
- *    turn 0-1 (cold open)  → 30 s
- *    turn 2-4 (warming)    → 75 s
- *    turn 5+  (mature)     → 180 s
- */
-function progressiveTaskTimeout(sessionTurnCount?: number): number {
-  const turn = sessionTurnCount ?? 10
-  if (turn <= 1) return 30_000
-  if (turn <= 4) return 75_000
-  return 180_000
 }
 
 export function createDelegateTaskTool(
@@ -154,6 +143,6 @@ export function createDelegateTaskTool(
     requiresApproval: () => false,
     isConcurrencySafe: () => true,
     isEnabled: () => true,
-    timeoutMs: (params) => progressiveTaskTimeout(params?.sessionTurnCount),
+    timeoutMs: (params) => progressiveTimeout(params?.sessionTurnCount),
   }
 }

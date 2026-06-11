@@ -6,6 +6,7 @@ import type { ClaimProposal } from '../context/claims.js'
 import { profileRegistry } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import { progressiveTimeout } from '../agent/timeout-ladder.js'
 
 export interface DelegateBatchCoordinator {
   delegateBatch(
@@ -69,19 +70,12 @@ function extractClaimsFromRun(run: CoordinatorRun, toolUseId: string, claimStore
   }
 }
 
-/** Progressive timeout: early turns get short budget so the first user
- *  response isn't blocked for 2 minutes.  As the session matures, workers
- *  get more time for deeper analysis.
- *    turn 0-1 (cold open)  → 45 s  — quick scout only
- *    turn 2-4 (warming)    → 90 s  — 2-3 focused tasks
- *    turn 5+  (mature)     → 180 s — full parallel depth
+/** Progressive timeout: batches start fast and grow with session maturity.
+ *  Now unified with delegate-task via timeout-ladder.ts (60→120→180, Δ60s).
+ *    turn 0-1 (cold open)  → 60 s
+ *    turn 2-4 (warming)    → 120 s
+ *    turn 5+  (mature)     → 180 s
  */
-function progressiveBatchTimeout(sessionTurnCount?: number): number {
-  const turn = sessionTurnCount ?? 10 // default to mature when unknown
-  if (turn <= 1) return 45_000
-  if (turn <= 4) return 90_000
-  return 180_000
-}
 
 /** Progressive task cap: don't fan out 5 workers on a cold session.
  *    turn 0-1 (cold open)  → 1 task  — single focused scout
@@ -225,6 +219,6 @@ export function createDelegateBatchTool(
     requiresApproval: () => false,
     isConcurrencySafe: () => true,
     isEnabled: () => true,
-    timeoutMs: (params) => progressiveBatchTimeout(params?.sessionTurnCount),
+    timeoutMs: (params) => progressiveTimeout(params?.sessionTurnCount),
   }
 }

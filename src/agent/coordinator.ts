@@ -20,6 +20,7 @@ import {
   type WorkerResult,
   type WorkOrderScope,
 } from './work-order.js'
+import { capBudgetAtTool } from './timeout-ladder.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
 import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
 import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
@@ -265,7 +266,7 @@ export class DelegationCoordinator {
     return { candidate, gate }
   }
 
-  async delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun> {
+  async delegate(request: DelegationRequest, abortSignal?: AbortSignal, toolTimeoutMs?: number): Promise<CoordinatorRun> {
     // Per-call abort signal override — allows the tool pipeline to propagate
     // its timeout signal to the coordinator without mutating config.
     const savedSignal = this.config.abortSignal
@@ -312,6 +313,11 @@ export class DelegationCoordinator {
             riskTier: request.riskTier,
           })
 
+      // Ladder invariant: cap worker budget at tool timeout so the tool
+      // never aborts a worker mid-flight (budget ≤ tool).
+      if (toolTimeoutMs !== undefined && order.budget.timeoutMs > toolTimeoutMs) {
+        order.budget.timeoutMs = toolTimeoutMs
+      }
       return await this.delegateOrder(order)
     } finally {
       this.config.abortSignal = savedSignal
