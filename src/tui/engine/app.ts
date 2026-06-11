@@ -168,6 +168,8 @@ export class TuiApp {
   private inputHistory: string[] = []
   /** Ctrl+C double-press window start timestamp (ms), 0 = inactive */
   private ctrlCPendingSince = 0
+  /** 原始 stdout（用于直接写 DEC 私有模式如 bracketed paste 开关） */
+  private stdout: WriteStream
 
   constructor(options: {
     stdout: WriteStream
@@ -185,6 +187,7 @@ export class TuiApp {
     gitBranch?: string
   }) {
     this.theme = getTheme()
+    this.stdout = options.stdout
     this.columns = options.cols
     this.rows = options.rows
     this.contextWindow = options.contextWindow
@@ -228,9 +231,8 @@ export class TuiApp {
               content: trimmed,
               width: this.columns,
             }, this.theme)
-            for (const line of formatted) {
-              this.commit.writeRaw(line + '\n')
-            }
+            // 单次提交 + 块尾空行：与 assistant/tool/summary 统一间距契约
+            this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
             this.state.committedCount++
           })
           this.agentBusy = true
@@ -291,12 +293,36 @@ export class TuiApp {
       this.rerender()
     })
 
+    // Wire bracketed paste: 整段插入光标处，批渲染（避免逐 chunk 全量重写）
+    this.input.onPaste((text) => {
+      this.inputLine.insertText(text)
+      this.fileCompletion = null
+      this.writeBatcher.schedule()
+    })
+
     // Wire input: character input → inputLine → live region update
     this.input.onAnyKey((key) => {
+      // ── Approval mode short-circuit (顶部，先于一切普通输入) ──
+      // 审批态只解析审批动作，绝不落入 slash / inputLine —— 杜绝 Enter 双触发
+      // （旧实现：onAnyKey 落入 inputLine 触发 submit + mode-bound approval:return 再 approve）。
+      if (this.input.getMode() === 'approval' && this.approvalPending) {
+        const c = key.char.toLowerCase()
+        if (key.name === 'ctrl_c') {
+          this.resolveApproval(false)
+          // 继续走下方全局 ctrl_c（abort / exit）
+        } else {
+          if (key.name === 'return' || c === 'y') this.resolveApproval({ approved: true })
+          else if (key.name === 'escape' || c === 'n') this.resolveApproval(false)
+          else if (c === 'e') this.resolveApproval({ approved: true })
+          // 其余按键在审批态一律吞掉，不污染输入框
+          return
+        }
+      }
+
       // ── Global shortcuts (before input line processing) ──────
       if (key.name === 'ctrl_c') {
-        if (this.state.isStreaming || this.state.isThinking) {
-          // Streaming: abort current agent run
+        if (this.isAgentActive()) {
+          // Agent active (含首 token 前/纯工具窗口): abort current agent run
           this.handleAbort()
         } else if (this.ctrlCPendingSince > 0) {
           // Second Ctrl+C within window → exit
@@ -324,7 +350,7 @@ export class TuiApp {
           // Close active overlay
           this.overlay.deactivate()
           this.renderLive()
-        } else if (this.state.isStreaming || this.state.isThinking) {
+        } else if (this.isAgentActive()) {
           this.handleAbort()
         } else {
           // Idle: clear input line
@@ -346,19 +372,11 @@ export class TuiApp {
       const inputVal = this.inputLine.value
       if (inputVal.startsWith('/')) {
         if (key.name === 'return') {
-          const handled = this.handleSlashCommand(inputVal)
+          // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
           this.inputLine.setValue('')
-          // If slash was not handled (pass-through like /team, /review),
-          // submit to agent via onSubmitCallback
-          if (!handled) {
-            this.onSubmitCallback?.(inputVal)
-          }
+          void this.submitSlashCommand(inputVal)
           return
         }
-      }
-      // ── Approval mode handling ──────────────────────────────
-      if (this.input.getMode() === 'approval') {
-        if (this.handleApprovalKey(key.char)) return
       }
       // ── W4a: Up 箭头取回最近 queued 消息到输入框编辑 ─────────
       if (key.name === 'up' && !this.inputLine.value && this.steerBuffer.hasPending()) {
@@ -374,8 +392,11 @@ export class TuiApp {
       if (event?.type === 'change') {
         // 输入变化使 @ 补全循环失效
         this.fileCompletion = null
-        this.renderLive()
+        // 批渲染：快速输入/分 chunk 到达时合并为单次 LiveEngine.render，
+        // 避免逐 chunk 全量重写造成的闪烁/残影。
+        this.writeBatcher.schedule()
       } else if (event?.type === 'submit' || event?.type === 'tab') {
+        // 提交/补全需即时反馈，不进批
         this.renderLive()
       }
     })
@@ -416,11 +437,8 @@ export class TuiApp {
       onSteerDrain: () => this.steerBuffer.drain(),
     }
 
-    // ── Approval key bindings ─────────────────────────────────
-    this.input.onKey('approval:y', () => this.resolveApproval({ approved: true }))
-    this.input.onKey('approval:n', () => this.resolveApproval(false))
-    this.input.onKey('approval:escape', () => this.resolveApproval(false))
-    this.input.onKey('approval:return', () => this.resolveApproval({ approved: true }))
+    // 审批按键统一在 onAnyKey 顶部短路处理（见上），不再注册 mode-bound 处理器，
+    // 避免与 onAnyKey 双触发。
   }
 
   // ── Approval resolution ─────────────────────────────────────
@@ -434,6 +452,17 @@ export class TuiApp {
   }
 
   // ── Public API ───────────────────────────────────────────────
+
+  /**
+   * 首屏渲染：启动后立即绘制底部 chrome（GlanceBar + 输入框），
+   * 无需等待第一次按键。main-ansi 在欢迎块写完后调用。
+   */
+  start(): void {
+    // 启用 bracketed paste（DEC 2004）：粘贴被 200~/201~ 包裹，
+    // 避免含 \r 的多行粘贴被逐行当作 Enter 提交、控制字符污染显示。
+    this.stdout.write('\x1B[?2004h')
+    this.renderLive()
+  }
 
   /** 设置提交回调（用户按 Enter 后触发） */
   onSubmit(callback: (text: string) => void): void {
@@ -454,6 +483,11 @@ export class TuiApp {
   setInput(text: string): void {
     this.inputLine.setValue(text, text.length)
     this.renderLive()
+  }
+
+  /** 读取当前输入框文本（测试/外部检视用） */
+  getInputValue(): string {
+    return this.inputLine.value
   }
 
   /** 激活 overlay */
@@ -489,6 +523,8 @@ export class TuiApp {
       clearInterval(this.ticker)
       this.ticker = null
     }
+    // 关闭 bracketed paste，恢复终端默认
+    this.stdout.write('\x1B[?2004l')
     this.input.dispose()
     this.resize.dispose()
   }
@@ -614,6 +650,13 @@ export class TuiApp {
     }
   }
 
+  /** 设置模型信息（/model 切换后刷新 GlanceBar 显示） */
+  setModelInfo(modelName: string, contextWindow?: number): void {
+    this.state.modelName = modelName
+    if (contextWindow !== undefined) this.contextWindow = contextWindow
+    this.renderLive()
+  }
+
   /** 设置外部 slash command 处理器（如 SlashRouter） */
   setSlashHandler(handler: (input: string) => boolean | Promise<boolean>): void {
     this.slashHandler = handler
@@ -704,7 +747,8 @@ export class TuiApp {
     }
 
     this.commitAbove(() => {
-      this.commit.write({ text: formatted.join('\n') })
+      // 块尾空行：与 user/assistant/summary 统一间距契约
+      this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
       this.state.committedCount++
     })
   }
@@ -819,6 +863,15 @@ export class TuiApp {
     })
   }
 
+  /**
+   * Agent 是否在跑（可被打断的窗口）。
+   * isStreaming/isThinking 只覆盖「已出 token」之后；agentBusy（submit 即 true）
+   * 与 phase!=idle 还覆盖首 token 前、纯工具回合、dedup 缓冲期 —— 那些窗口同样应可打断。
+   */
+  private isAgentActive(): boolean {
+    return this.agentBusy || this.state.isStreaming || this.state.isThinking || this.state.phase !== 'idle'
+  }
+
   private handleAbort(): void {
     // Clear steer buffer on abort to prevent stale guidance
     this.steerBuffer.clear()
@@ -914,6 +967,10 @@ export class TuiApp {
       lines.push({ text: ` ╰─ [y] approve  [n] deny  [e] edit ──────────────` })
     }
 
+    // ── 底部 chrome 起点：从此往后（GlanceBar + 输入框 + 提示）是恒可见的保留区，
+    //    内容超屏时 LiveEngine 截断的是上方 dynamic 段，不会裁掉输入框。
+    const chromeStart = lines.length
+
     // 4. GlanceBar（phase glyph / context% / cache / cost / git branch）
     const phaseInd = phaseIndicator(this.state.phase)
     const glanceBar = formatGlanceBar({
@@ -943,7 +1000,7 @@ export class TuiApp {
       // 空输入显示 dim placeholder
       const inputLines = this.inputLine.value
         ? this.inputLine.displayLines()
-        : [`▸ █${color(this.inputLine.placeholder, this.theme.dim)}`]
+        : [`〉 █${color(this.inputLine.placeholder, this.theme.dim)}`]
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
         lines.push({ text: `-- NORMAL -- ${inputLines[0] ?? ''}` })
         for (const extra of inputLines.slice(1)) lines.push({ text: extra })
@@ -972,7 +1029,7 @@ export class TuiApp {
       }
     }
 
-    this.live.render(lines)
+    this.live.render(lines, { reservedTail: lines.length - chromeStart })
   }
 
   /** 强制重绘（resize 后） */
@@ -1013,58 +1070,30 @@ export class TuiApp {
     })
   }
 
-  /** 处理审批模式按键。返回 true 表示已处理。 */
-  private handleApprovalKey(char: string): boolean {
-    if (!this.approvalPending) return false
-
-    const key = char.toLowerCase()
-    if (key === 'y') {
-      const resolve = this.approvalPending.resolve
-      this.approvalPending = null
-      this.input.setMode('input')
-      this.setPhase('idle')
-      this.renderLive()
-      resolve(true)
-      return true
+  /**
+   * 提交 slash 命令：await 外部 handler（SlashRouter）的结果，
+   * handler 返回 false（透传命令如 /team、/review、/plan <x>）时把原始输入交给 agent。
+   * 这修复了「async handler 一律视为已处理」吞掉透传命令的 bug。
+   */
+  private async submitSlashCommand(input: string): Promise<void> {
+    let handled: boolean
+    if (this.slashHandler) {
+      try {
+        handled = await this.slashHandler(input)
+      } catch (err) {
+        this.commitStatic(`Error: ${(err as Error).message}`)
+        handled = true
+      }
+    } else {
+      handled = this.handleSlashCommand(input)
     }
-    if (key === 'n') {
-      const resolve = this.approvalPending.resolve
-      this.approvalPending = null
-      this.input.setMode('input')
-      this.setPhase('idle')
-      this.renderLive()
-      resolve(false)
-      return true
+    if (!handled) {
+      this.onSubmitCallback?.(input)
     }
-    if (key === 'e') {
-      // Edit mode: approve with edited input (for now, approve as-is;
-      // full edit flow requires external editor integration)
-      const resolve = this.approvalPending.resolve
-      this.approvalPending = null
-      this.input.setMode('input')
-      this.setPhase('idle')
-      this.renderLive()
-      resolve(true)
-      return true
-    }
-    return false
   }
 
-  /** 处理斜杠命令，返回 true 表示已处理，false 表示应透传 agent */
+  /** 处理内置斜杠命令（无外部 handler 时的兜底），返回 true 表示已处理 */
   private handleSlashCommand(input: string): boolean {
-    // Delegate to external handler (SlashRouter) if configured
-    if (this.slashHandler) {
-      const result = this.slashHandler(input)
-      if (result instanceof Promise) {
-        result.catch((err) => {
-          this.commit.write({ text: `Error: ${(err as Error).message}`, trailingNewline: true })
-        })
-        // Async handler — assume handled
-        return true
-      }
-      return result
-    }
-
     // Fallback: basic built-in commands
     const trimmed = input.trim()
     switch (trimmed) {
