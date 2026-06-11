@@ -28,7 +28,9 @@ function formatUiContent(run: CoordinatorRun): string {
   if (run.status === 'skipped') return 'delegate_task skipped: objective did not pass budget gate'
   const passed = run.results.filter(r => r.status === 'passed').length
   const blocked = run.results.filter(r => r.status === 'blocked').length
-  return `delegate_task completed: ${passed} passed, ${blocked} blocked, model=${run.selectedModel ?? 'unknown'}`
+  const base = `delegate_task completed: ${passed} passed, ${blocked} blocked, model=${run.selectedModel ?? 'unknown'}`
+  if (run.escalated) return `⚠️ ${base}\n[escalated] 子代理连续失败，建议改为内联执行`
+  return base
 }
 
 /** Progressive timeout: single-task workers start fast and grow with session maturity.

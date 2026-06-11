@@ -19,6 +19,7 @@ import { createHearthObserveHook } from './hooks/hearth-observe-hook.js'
 import { createDedupGuardHook, type DedupGuardHookDeps } from './hooks/dedup-guard-hook.js'
 import { createBlindExplorationHook } from './hooks/blind-exploration-hook.js'
 import { createMCTSPlanningHook } from './hooks/mcts-planning-hook.js'
+import { createDispatcherHook, type DispatcherHookDeps } from './hooks/dispatcher-hook.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
@@ -108,6 +109,10 @@ export interface RuntimeHookDeps {
   getPrevCycleOpen?: () => string | null
   /** Previous session cycle_close for INV-2 relay check. */
   getPrevSessionCycleClose?: () => string | null
+
+  // ── Auto-delegation (lazy getter, wired by main.tsx via loop.ts) ──
+  /** Optional dispatcher hook deps. When set, enables auto-delegation of exploration tasks. */
+  autoDelegate?: DispatcherHookDeps
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -218,6 +223,10 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       setPrevStreamedText: deps.setPrevStreamedText,
       threshold: deps.dedupGuardThreshold,
     }))
+  }
+
+  if (deps.autoDelegate) {
+    hooks.push(createDispatcherHook(deps.autoDelegate))
   }
 
   return hooks

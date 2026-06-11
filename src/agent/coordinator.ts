@@ -3,6 +3,9 @@ import { recommendModelForTask } from '../model/capability.js'
 import type { ProviderConfig } from '../config/schema.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import { ProviderHealthTracker } from './provider-health.js'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { debugLog } from '../utils/debug.js'
 import {
   createReadOnlyWorkOrder,
@@ -71,6 +74,8 @@ export interface CoordinatorRun {
   status: 'completed' | 'skipped'
   order?: WorkOrder
   selectedModel?: string
+  /** True when consecutive failures exceed threshold — primary agent should switch to inline execution. */
+  escalated?: boolean
   /** Batch-only metadata: selected worker model per work order. Telemetry only; never affects dispatch. */
   workerModels?: Array<{ workOrderId: string; model: string }>
   /** Append-only tier recommendation telemetry; shadow-only and never affects dispatch. */
@@ -147,6 +152,17 @@ function workerFailureResult(order: WorkOrder, error: unknown): WorkerResult {
     risks: [`worker failed: ${reason}`],
     nextActions: ['Primary should continue without trusting this worker result'],
     evidenceStatus: 'blocked',
+  }
+}
+
+/** Persist worker result to ~/.rivet/subagents/<orderId>.json for future resume/inspection. */
+function persistWorkerResult(result: WorkerResult): void {
+  try {
+    const dir = join(homedir(), '.rivet', 'subagents')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `${result.workOrderId}.json`), JSON.stringify(result, null, 2), 'utf-8')
+  } catch {
+    // Best-effort: never block primary session on persistence failure
   }
 }
 
@@ -540,7 +556,8 @@ export class DelegationCoordinator {
     if (this.state.shouldEscalate()) {
       this.state.recordEvent({ type: 'escalated', workOrderId: order.id, timestamp: Date.now() })
       return {
-        status: 'completed',
+        status: 'completed' as const,
+        escalated: true,
         order,
         selectedModel: selected.model,
         modelTierShadows: [tierShadow],
@@ -564,8 +581,13 @@ export class DelegationCoordinator {
       })
     }
 
+    // D1: persist worker result to ~/.rivet/subagents/ for future resume/inspection
+    for (const r of results) {
+      persistWorkerResult(r)
+    }
+
     return {
-      status: 'completed',
+      status: 'completed' as const,
       order,
       selectedModel: selected.model,
       modelTierShadows: [tierShadow],
@@ -671,6 +693,11 @@ export class DelegationCoordinator {
 
     const profileMap = new Map(orders.map(o => [o.id, o.profile] as const))
     const aggregated = aggregateResults(allResults, policy, profileMap)
+    // D1: persist worker results to ~/.rivet/subagents/
+    for (const r of aggregated) {
+      persistWorkerResult(r)
+    }
+
     return {
       status: 'completed',
       results: aggregated,

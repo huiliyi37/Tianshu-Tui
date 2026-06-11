@@ -7,25 +7,47 @@ import type { DomainArea } from '../work-order.js'
 import { decomposeByDataContract } from '../dispatcher.js'
 import { matchDomain } from '../star-domain.js'
 import { profileRegistry } from '../profile-registry.js'
+import { shouldDelegateObjective as _shouldDelegate } from '../coordinator.js'
 
 export interface DispatcherHookDeps {
-  coordinator: DelegationCoordinator
+  coordinator: DelegationCoordinator | null
   getTaskContract: () => TaskContract | undefined
   getSensorium: () => Sensorium | null
   complexityThreshold?: number
+  /** Kill-switch: disable auto-delegation entirely. Default: true (enabled). */
+  enabled?: boolean
+  /** Minimum turns between auto-delegation spawns. Default: 3. */
+  cooldownTurns?: number
 }
 
 export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionRuntimeHook {
-  let dispatched = false
+  /** Per-contract.id dedup: track which contracts have been dispatched. */
+  const dispatchedIds = new Set<string>()
+  /** Last turn an auto-delegation was spawned. */
+  let lastDispatchTurn = -Infinity
 
   return {
     phase: 'afterPerception',
     name: 'task-dispatcher',
     async run(ctx) {
-      if (dispatched) return
+      // Kill-switch: respect config.agent.autoDelegateEnabled
+      if (deps.enabled === false) return
+      if (!deps.coordinator) return
+
+      // 冷却: skip if last auto-delegation was within cooldownTurns
+      const cooldown = deps.cooldownTurns ?? 3
+      if (ctx.snapshot.turn - lastDispatchTurn < cooldown) return
 
       const contract = deps.getTaskContract()
       if (!contract || !contract.isActionable) return
+
+      // Per-contract.id dedup: each contract only auto-dispatches once
+      if (dispatchedIds.has(contract.id)) return
+
+      // 复用 shouldDelegateObjective 门槛（内联判断，TaskContract.scope 与 WorkOrderScope 结构不同）
+      const wordCount = contract.objective.trim().split(/\s+/).filter(Boolean).length
+      const fileCount = contract.scope.mentionedFiles?.length ?? 0
+      if (wordCount < 6 && fileCount < 2) return
 
       const sensorium = deps.getSensorium()
       const threshold = deps.complexityThreshold ?? 0.3
@@ -53,7 +75,8 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
         })
       }
 
-      dispatched = true
+      dispatchedIds.add(contract.id)
+      lastDispatchTurn = ctx.snapshot.turn
       ctx.effects.emitPhaseChange('task-decomposed', {
         reason: `${subtasks.length} subtasks by data-flow analysis`,
         suggestion: subtasks.map(t => `${t.domain}:${t.authority}`).join(', '),
@@ -65,8 +88,10 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
 function inferWorkOrderKind(domain: DomainArea): WorkOrderKind {
   if (domain === 'tests') return 'verify'
   if (domain === 'docs') return 'doc_research'
-  // frontend/backend/tools/config 都可能需要修改代码
-  return 'patch_proposal'
+  // Auto-delegation is read-only only. Frontend/backend/tools/config
+  // all get code_search (exploration), never patch_proposal (write).
+  // Write operations require explicit delegate_task from primary agent.
+  return 'code_search'
 }
 
 function inferWorkerProfile(domain: DomainArea): WorkerProfile {

@@ -393,6 +393,12 @@ export class AgentLoop {
           ).catch(() => {})
         },
       },
+      // ── Auto-delegation (lazy getter, wired by main.tsx) ──
+      autoDelegate: this.config.coordinatorRef ? {
+        coordinator: this.config.coordinatorRef(),
+        getTaskContract: () => this.getTaskContract(),
+        getSensorium: () => this.sensorium,
+      } : undefined,
     }))
     this.perception = new TurnPerceptionController({
       cwd: this.cwd,

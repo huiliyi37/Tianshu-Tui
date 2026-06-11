@@ -2,6 +2,7 @@ import { READ_ONLY_WORKER_TOOLS, type WorkOrder, type WorkerResult, type WorkerP
 import { buildMemoryKnowledgePacket, needsMemoryKnowledgePacket } from './worker-knowledge-packet.js'
 import { profileRegistry } from './profile-registry.js'
 import { starDomainRegistry } from './star-domain-registry.js'
+import type { ArtifactStore } from '../artifact/store.js'
 
 // ─── Profile-specific expertise prompts ────────────────────────────
 // Each profile gets targeted guidance on HOW to do its job,
@@ -307,7 +308,7 @@ function truncateArtifactContent(artifacts: Array<Record<string, unknown>>): Arr
   })
 }
 
-export function buildPrimaryWorkerPacket(results: WorkerResult[]): string {
+export function buildPrimaryWorkerPacket(results: WorkerResult[], artifactStore?: ArtifactStore): string {
   const compact = results.map(result => {
     const raw = {
       workOrderId: result.workOrderId,
@@ -327,8 +328,40 @@ export function buildPrimaryWorkerPacket(results: WorkerResult[]): string {
 
   let json = JSON.stringify(compact)
 
-  // Hard cap: if packet exceeds budget, progressively drop low-value fields
+  // Hard cap: if packet exceeds budget, try artifact handoff first
   if (json.length > MAX_WORKER_PACKET_CHARS) {
+    if (artifactStore) {
+      // Save full results to artifact store, return summary-only packet with reference
+      const fullJson = JSON.stringify(results)
+      const artifactId = `worker-packet-${results.map(r => r.workOrderId).join('-')}`
+      artifactStore.save({
+        tool: 'delegate_task',
+        target: 'worker-packet',
+        rawContent: fullJson,
+        summary: `${results.length} worker results (${fullJson.length} chars) — full content in artifact store`,
+        sections: [],
+      }).then(id => {
+        // Fire-and-forget: the artifact ID is embedded in the packet below
+      }).catch(() => {
+        // Fall through to progressive drop if artifact save fails
+      })
+      // Build a compact packet with artifact reference
+      for (const result of compact) {
+        delete result.examinedFiles
+        delete result.risks
+        delete result.nextActions
+        delete result.verification
+        delete result.artifacts
+      }
+      json = JSON.stringify(compact)
+      // Append artifact reference so primary agent can read_section if needed
+      if (json.length > MAX_WORKER_PACKET_CHARS) {
+        json = json.slice(0, MAX_WORKER_PACKET_CHARS - 100) + '…"'
+      }
+      return `<worker_results>${json}\n[artifact:${artifactId}] — full worker results saved to artifact store, use read_section to retrieve</worker_results>`
+    }
+
+    // No artifact store: progressive field drop (fallback)
     for (const result of compact) {
       delete result.examinedFiles
       delete result.risks

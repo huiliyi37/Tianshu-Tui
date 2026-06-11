@@ -97,6 +97,8 @@ export interface AgentConfig {
   streamRules?: StreamRule[]
   /** V3 Component B: per-domain knowledge persistence for worker lesson precipitation. */
   domainKnowledgeStore?: DomainKnowledgeStore
+  /** Lazy getter for DelegationCoordinator — wired by main.tsx for auto-delegation hooks. */
+  coordinatorRef?: () => import('./coordinator.js').DelegationCoordinator | null
 }
 
 export interface AgentCallbacks {
