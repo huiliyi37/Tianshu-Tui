@@ -207,12 +207,42 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
       let timer: ReturnType<typeof setTimeout> | null = null
       let forceKillTimer: ReturnType<typeof setTimeout> | null = null
 
+      const signal = params.abortSignal
+      const cleanupAbort = () => {
+        if (signal) signal.removeEventListener('abort', onAbort)
+      }
+
       const finish = async (code: number, isTimeout = false, clearForceKill = true) => {
         if (settled) return
         settled = true
         if (timer) clearTimeout(timer)
         if (clearForceKill && forceKillTimer) clearTimeout(forceKillTimer)
+        cleanupAbort()
         resolve(await buildResult(code, isTimeout))
+      }
+
+      // 用户中止（Esc/Ctrl+C → AgentLoop.abort → pipeline abortSignal）：
+      // 协作式取消——杀掉 detached 进程树（SIGTERM，3s 后 SIGKILL 兜底），立即 settle。
+      // 没有这一步，bash 子进程会在 abort 后继续在后台运行（detached），是会话"假死"
+      // 期间资源泄漏与副作用的来源。结果值本身可能被 withToolTimeout 的竞速丢弃，
+      // 真正的目的是确保进程被杀。
+      const onAbort = () => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        cleanupAbort()
+        killProcessTree(child, 'SIGTERM')
+        forceKillTimer = setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
+        const raw = stdout + (stderr ? '\n' + stderr : '')
+        resolve({
+          content: raw ? `[aborted] 命令被用户中止，部分输出:\n${raw.slice(-2000)}` : 'Command aborted by user.',
+          uiContent: '⏹ aborted',
+          isError: false,
+        })
+      }
+      if (signal) {
+        if (signal.aborted) onAbort()
+        else signal.addEventListener('abort', onAbort, { once: true })
       }
 
       timer = setTimeout(() => {
@@ -231,6 +261,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         settled = true
         if (timer) clearTimeout(timer)
         if (forceKillTimer) clearTimeout(forceKillTimer)
+        cleanupAbort()
         resolve({ content: err.message, isError: true })
       })
     })

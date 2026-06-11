@@ -483,8 +483,24 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         })
       }, timeout)
 
+      // 用户中止（per-instance abortSignal）：协作式取消，杀掉本实例的测试进程树。
+      // 因 abortSignal 源自各自 AgentLoop 的 abortController，这天然是"范围化 kill 本实例"——
+      // 中止一个实例不会波及另一个实例的进程，无需全局 killAll 硬锤。
+      const signal = params.abortSignal
+      const onAbort = () => {
+        clearTimeout(timer)
+        gracefulKill(child)
+        setTimeout(() => forceKill(child), 3000)
+        resolve({ content: 'Tests aborted by user.', uiContent: '⏹ aborted', isError: false })
+      }
+      if (signal) {
+        if (signal.aborted) onAbort()
+        else signal.addEventListener('abort', onAbort, { once: true })
+      }
+
       child.on('close', async (code) => {
         clearTimeout(timer)
+        if (signal) signal.removeEventListener('abort', onAbort)
         const raw = stdout + (stderr ? '\n' + stderr : '')
         const durationMs = Date.now() - startTime
         const exitCode = code ?? 1
