@@ -335,22 +335,23 @@ export async function buildPrimaryWorkerPacket(results: WorkerResult[], artifact
   if (json.length > MAX_WORKER_PACKET_CHARS) {
     if (artifactStore) {
       const fullJson = JSON.stringify(results)
-      const artifactId = `worker-packet-${results.map(r => r.workOrderId).join('-')}`
-      let artifactSaved = false
+      // Use the ID returned by save() — the store generates its own ID
+      // (`delegate_task:<hex>`), so a fabricated `worker-packet-…` reference
+      // would never resolve via read_section even on a successful save.
+      let artifactId: string | null = null
       try {
-        await artifactStore.save({
+        artifactId = await artifactStore.save({
           tool: 'delegate_task',
           target: 'worker-packet',
           rawContent: fullJson,
           summary: `${results.length} worker results (${fullJson.length} chars) — full content in artifact store`,
           sections: [],
         })
-        artifactSaved = true
       } catch {
         // Save failed — fall through to progressive field drop below
       }
 
-      if (artifactSaved) {
+      if (artifactId) {
         // Build a compact packet with artifact reference
         for (const result of compact) {
           delete result.examinedFiles
