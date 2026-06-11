@@ -104,7 +104,12 @@ export interface WorkerRouteConfig {
 export interface DelegationCoordinatorConfig {
   baseToolRegistry: ToolRegistry
   modelCards: ModelCapabilityCard[]
+  /** Global max concurrent workers (cap for both explore and write pools). */
   maxWorkers: number
+  /** Max concurrent explore (read-only) workers. Default: maxWorkers. */
+  maxExploreWorkers?: number
+  /** Max concurrent hands (write) workers. Default: maxWorkers. */
+  maxWriteWorkers?: number
   runtimeFactory: WorkerRuntimeFactory
   routing?: WorkerRouteConfig
   runWorker?: (config: WorkerSessionConfig) => Promise<WorkerSessionRun>
@@ -613,7 +618,10 @@ export class DelegationCoordinator {
         return { status: 'skipped', results: [], packet: buildPrimaryWorkerPacket([]) }
       }
 
-    const queue = new WorkOrderQueue(this.config.maxWorkers)
+    const queue = new WorkOrderQueue(this.config.maxWorkers, {
+      explore: this.config.maxExploreWorkers,
+      write: this.config.maxWriteWorkers,
+    })
 
     // Pre-create work orders for deduplication and dependency ordering
     const orders: WorkOrder[] = []

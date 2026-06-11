@@ -655,6 +655,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       baseToolRegistry: toolRegistry,
       modelCards,
       maxWorkers: 3,
+      maxExploreWorkers: 5,
+      maxWriteWorkers: 3,
       runtimeFactory,
       routing: workerRouting,
       domainKnowledgeStore,
@@ -1032,6 +1034,8 @@ async function main() {
           baseToolRegistry: toolRegistry,
           modelCards: [{ model: model.id, toolUseReliability: 0.8, jsonStability: 0.8, editSuccessRate: 0.7, testRepairRate: 0.6, contextWindow: model.contextWindow, cacheEconomics: 'strong', recommendedTasks: ['code_search'] }],
           maxWorkers: 3,
+      maxExploreWorkers: 5,
+      maxWriteWorkers: 3,
           runtimeFactory: (order, card, workerRegistry) => ({
             order,
             client: createProviderClient(prov, resolveCapabilities(prov.name, prov.capabilities), { apiKey: key, model: card.model, reasoningEffort: undefined, maxTokens: Math.min(4096, card.contextWindow), thinkingBudget: 4096 }),
