@@ -15,13 +15,15 @@ import type { BootstrapContext } from './bootstrap.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
-import { SteerBuffer } from './tui/steer-buffer.js'
+import { getPaletteCommands } from './tui/command-palette.js'
+import { loadHistory } from './tui/history.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme } from './tui/theme.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { execSync } from 'child_process'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -35,7 +37,6 @@ const requestedProvider = providerArgIdx >= 0 ? args[providerArgIdx + 1] : undef
 
 let app: TuiApp | null = null
 let ctx: BootstrapContext | null = null
-let steerBuffer: SteerBuffer | null = null
 let isStreaming = false
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null
 
@@ -101,13 +102,24 @@ async function main() {
   const currentModel = ctx.provider.models[0]
   const modelName = currentModel?.alias ?? currentModel?.id ?? 'unknown'
 
+  // git branch（启动时读取一次，GlanceBar 显示）
+  let gitBranch: string | undefined
+  try {
+    gitBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim() || undefined
+  } catch { /* 非 git 目录 */ }
+
   app = new TuiApp({
     stdout,
     stdin,
     cols: stdout.columns,
     rows: stdout.rows,
     modelName,
-    history: [],
+    history: loadHistory(),
+    contextWindow: currentModel?.contextWindow,
+    gitBranch,
   })
 
   // Register overlays with real data
@@ -150,25 +162,25 @@ async function main() {
   const slashRouter = new SlashRouter(app, ctx)
   app.setSlashHandler(async (input) => slashRouter.route(input))
 
-  // ── SteerBuffer ──────────────────────────────────────────────
-  steerBuffer = new SteerBuffer()
-  app.steerBuffer = steerBuffer
+  // slash 命令提示列表（仅 / 开头的 command 类，过滤 __surface: 面板项）
+  app.setSlashCommands(
+    getPaletteCommands()
+      .filter(c => c.name.startsWith('/'))
+      .map(c => ({ name: c.name, description: c.description })),
+  )
 
   // ── Wire agent → TuiApp ──────────────────────────────────────
+  // 消息队列已收编进 TuiApp：streaming 时 Enter 由 TuiApp 入队（steerBuffer），
+  // onSteerDrain 由 TuiApp callbacks 真实 drain，此处无需外层 override。
   app.onSubmit((text) => {
     const trimmed = text.trim()
     if (!trimmed) return
 
-    if (isStreaming) {
-      // Agent is streaming — push to steer buffer for later injection
-      steerBuffer!.push(trimmed)
-      return
-    }
+    if (isStreaming) return // TuiApp 已 gate，双保险
 
     // Start new turn with bridge callbacks (user message already committed by TuiApp)
     isStreaming = true
     const callbacks = wrapCallbacksWithTuiApp(app!, {
-      onSteerDrain: () => steerBuffer!.drain(),
       onTurnComplete: (usage, turnNumber, isFinal) => {
         if (isFinal) {
           isStreaming = false

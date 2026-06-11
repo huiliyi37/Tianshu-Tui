@@ -19,15 +19,19 @@ import { InputHandler, type KeyPress } from './input-handler.js'
 import { ResizeHandler } from './resize-handler.js'
 import { InputLine } from './input-line.js'
 import { WriteBatcher } from './write-batcher.js'
+import { StreamRenderer } from './stream-renderer.js'
+import { color } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
+import { SteerBuffer } from '../steer-buffer.js'
 import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
-import { formatAssistantMessage } from '../format/assistant-message.js'
-import { formatToolCard } from '../format/tool-card.js'
+import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar } from '../format/glance-bar.js'
-import { formatDiff } from '../format/diff.js'
-import { formatMarkdown } from '../format/markdown.js'
+import { formatSpinnerStatus, formatTurnWorkSummary, phaseIndicator } from '../format/spinner-status.js'
+import { formatSlashHint, slashCompletionTarget, type SlashHintEntry } from '../format/slash-hint.js'
+import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
+import { appendHistory, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData } from '../format/overlay.js'
 
@@ -43,8 +47,6 @@ function formatElapsedShort(ms: number): string {
 export type ActivityPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
 
 export interface TuiState {
-  /** 流式输出缓冲区（未 commit 的文本） */
-  streamText: string
   /** thinking 文本缓冲区 */
   thinkingText: string
   /** 是否正在流式输出 */
@@ -112,10 +114,36 @@ export class TuiApp {
   private rows: number
   /** Streaming tool result accumulator: id → accumulated text */
   private toolAccumulator = new Map<string, string>()
+  /** 进行中工具元数据：id → 名称/输入/开始时间（live 工具行 + 卡片标题用） */
+  private pendingTools = new Map<string, { name: string; input: Record<string, unknown>; startMs: number }>()
+  /** 最近一条被截断的工具结果（ctrl+o 展开用） */
+  private lastTruncatedTool: { toolName: string; content: string; isError: boolean; rawPath?: string; toolInput?: Record<string, unknown> } | null = null
+
+  // ── W3: 渲染 ticker + 指标 ───────────────────────────────────
+  /** 渲染 ticker（streaming/thinking 时 120ms 驱动 spinner，idle 停止） */
+  private ticker: ReturnType<typeof setInterval> | null = null
+  /** 单调递增的渲染 tick（spinner 帧） */
+  private tick = 0
+  /** 最近收到 token/输出的时间戳（stall 检测） */
+  private lastActivityMs = 0
+  /** 模型上下文窗口（tokens），用于 context% */
+  private contextWindow?: number
+  /** git 分支（启动时读取一次） */
+  private gitBranch?: string
+  /** 累计 usage（cost 估算） */
+  private totalUsage = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }
+  /** 最近一轮的 cache 命中率（0-1） */
+  private lastCacheHitRate?: number
+  /** 最近一轮的上下文占比（0-1） */
+  private lastContextRatio?: number
   /** Block stream writer: chunks streaming text into display-sized blocks */
   private blockWriter: BlockStreamWriter
   /** Write batcher: coalesces render calls into a single LiveEngine.render() */
   private writeBatcher: WriteBatcher
+  /** Stream renderer: incremental markdown commit + live tail (W1) */
+  private streamRenderer: StreamRenderer
+  /** 本段流式输出是否已 commit 过 `▍ Rivet` header */
+  private assistantHeaderDone = false
 
   // Agent callbacks (aligned to loop-types.ts AgentCallbacks)
   readonly callbacks: AgentCallbacks
@@ -126,8 +154,18 @@ export class TuiApp {
   private onExitCallback?: () => void
   /** External slash command handler. If set, handleSlashCommand delegates here. */
   private slashHandler?: (input: string) => boolean | Promise<boolean>
-  /** SteerBuffer reference for live region display */
-  steerBuffer: { hasPending: () => boolean; getPending: () => readonly string[]; clear?: () => void } | null = null
+  /** 消息队列（W4a：streaming 时 Enter 入队，turn 边界 drain 注入） */
+  readonly steerBuffer = new SteerBuffer()
+  /** agent 是否正在执行（submit → final turn complete 之间） */
+  private agentBusy = false
+
+  // ── W4b: 输入辅助 ────────────────────────────────────────────
+  /** slash 命令列表（外部注入，提示 + Tab 补全用） */
+  private slashCommands: SlashHintEntry[] = []
+  /** @ 文件补全状态（Tab 循环） */
+  private fileCompletion: { baseText: string; baseCursor: number; candidates: string[]; idx: number } | null = null
+  /** 输入历史（最新在前，submit 时更新 + 持久化） */
+  private inputHistory: string[] = []
   /** Ctrl+C double-press window start timestamp (ms), 0 = inactive */
   private ctrlCPendingSince = 0
 
@@ -141,10 +179,16 @@ export class TuiApp {
     modelName?: string
     /** 历史记录 */
     history?: string[]
+    /** 模型上下文窗口（tokens） */
+    contextWindow?: number
+    /** git 分支名 */
+    gitBranch?: string
   }) {
     this.theme = getTheme()
     this.columns = options.cols
     this.rows = options.rows
+    this.contextWindow = options.contextWindow
+    this.gitBranch = options.gitBranch
 
     // Initialize engines
     this.commit = new CommitEngine({ stdout: options.stdout })
@@ -155,22 +199,45 @@ export class TuiApp {
     })
     this.input = new InputHandler({ stdin: options.stdin, mode: 'input' })
     this.resize = new ResizeHandler({ stdout: options.stdout })
+    this.inputHistory = options.history ?? []
     this.inputLine = new InputLine({
       history: options.history,
+      placeholder: 'Type a message… (/ commands · @ files · \\⏎ newline)',
+      onTabComplete: () => this.handleTabComplete(),
       onSubmit: (text) => {
+        const trimmed = text.trim()
+
+        // 输入历史：会话内更新 + 持久化（queued 与直接 submit 都记录）
+        if (trimmed) {
+          this.inputHistory = nextHistoryAfterSubmit(this.inputHistory, trimmed)
+          this.inputLine.setHistory(this.inputHistory)
+          try { appendHistory(trimmed) } catch { /* 持久化失败不阻塞输入 */ }
+        }
+
+        // W4a: agent 执行中 → 入队（turn 边界 drain 注入），不直接 submit
+        if (this.agentBusy && trimmed) {
+          this.steerBuffer.push(trimmed)
+          this.renderLive()
+          return
+        }
+
         // Commit user message to scrollback
-        if (text.trim()) {
-          const formatted = formatUserMessage({
-            content: text.trim(),
-            width: this.columns,
-          }, this.theme)
-          for (const line of formatted) {
-            this.commit.writeRaw(line + '\n')
-          }
-          this.state.committedCount++
+        if (trimmed) {
+          this.commitAbove(() => {
+            const formatted = formatUserMessage({
+              content: trimmed,
+              width: this.columns,
+            }, this.theme)
+            for (const line of formatted) {
+              this.commit.writeRaw(line + '\n')
+            }
+            this.state.committedCount++
+          })
+          this.agentBusy = true
         }
         // Reset turn timer for the new turn
         this.state.turnStartMs = Date.now()
+        this.lastActivityMs = Date.now()
         this.onSubmitCallback?.(text)
       },
     })
@@ -178,19 +245,33 @@ export class TuiApp {
     // Write batcher: coalesce render calls
     this.writeBatcher = new WriteBatcher(() => this.renderLive())
 
+    // Stream renderer: stable markdown prefix → scrollback, tail → live region
+    this.streamRenderer = new StreamRenderer({
+      commit: (ansi) => {
+        this.commitAbove(() => {
+          if (!this.assistantHeaderDone) {
+            this.commitAssistantHeader()
+          }
+          this.commit.write({ text: ansi, trailingNewline: true })
+          this.state.committedCount++
+        })
+      },
+      getColumns: () => this.columns,
+      theme: this.theme,
+    })
+
     // Block stream writer: buffers streaming text into display blocks
     this.blockWriter = new BlockStreamWriter(
       { minChars: 60, maxChars: 200, idleMs: 180 },
       (block: string) => {
-        // Append block to stream buffer and schedule render
-        this.state.streamText += block
+        // Feed stream renderer (commits stable markdown blocks) and schedule render
+        this.streamRenderer.push(block)
         this.writeBatcher.schedule()
       },
     )
 
     // Initialize state
     this.state = {
-      streamText: '',
       thinkingText: '',
       isStreaming: false,
       isThinking: false,
@@ -257,6 +338,10 @@ export class TuiApp {
         this.renderLive()
         return
       }
+      if (key.name === 'ctrl_o') {
+        this.expandLastTruncatedTool()
+        return
+      }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
       if (inputVal.startsWith('/')) {
@@ -275,9 +360,22 @@ export class TuiApp {
       if (this.input.getMode() === 'approval') {
         if (this.handleApprovalKey(key.char)) return
       }
+      // ── W4a: Up 箭头取回最近 queued 消息到输入框编辑 ─────────
+      if (key.name === 'up' && !this.inputLine.value && this.steerBuffer.hasPending()) {
+        const msg = this.steerBuffer.popLast()
+        if (msg) {
+          this.inputLine.setValue(msg)
+          this.renderLive()
+        }
+        return
+      }
       // ── Normal input processing ─────────────────────────────
       const event = this.inputLine.handleKey(key.name, key.char, key.ctrl, key.meta)
-      if (event?.type === 'change' || event?.type === 'submit') {
+      if (event?.type === 'change') {
+        // 输入变化使 @ 补全循环失效
+        this.fileCompletion = null
+        this.renderLive()
+      } else if (event?.type === 'submit' || event?.type === 'tab') {
         this.renderLive()
       }
     })
@@ -308,14 +406,14 @@ export class TuiApp {
         }
         const mapped = knownPhases[phase]
         if (mapped) {
-          this.state.phase = mapped
+          this.setPhase(mapped)
           this.renderLive()
         }
         // Unknown phases (heartbeat, convergence-warning, etc.) are ignored
         // for the status bar display
       },
       onIntentPreview: async (_intent) => 'continue',
-      onSteerDrain: () => null, // SteerBuffer integration in Phase B
+      onSteerDrain: () => this.steerBuffer.drain(),
     }
 
     // ── Approval key bindings ─────────────────────────────────
@@ -387,20 +485,122 @@ export class TuiApp {
 
   /** 销毁资源 */
   dispose(): void {
+    if (this.ticker) {
+      clearInterval(this.ticker)
+      this.ticker = null
+    }
     this.input.dispose()
     this.resize.dispose()
   }
 
   /** 将静态文本提交到 scrollback（slash command 输出等） */
   commitStatic(text: string): void {
-    this.commit.write({ text, trailingNewline: true })
+    this.commitAbove(() => {
+      this.commit.write({ text, trailingNewline: true })
+    })
+  }
+
+  /**
+   * Mid-stream commit 协议：先擦除 live region（光标停在其起始行），
+   * 写入 scrollback 内容，再重绘 live region。
+   * 不走该协议的裸 commit 会留下 ghost 行 / 覆盖已提交文本。
+   */
+  private commitAbove(write: () => void): void {
+    this.live.clearForCommit()
+    write()
+    this.renderLive()
+  }
+
+  // ── W3: phase + ticker ───────────────────────────────────────
+
+  /** 统一 phase 设置入口：联动渲染 ticker 启停 */
+  private setPhase(phase: ActivityPhase): void {
+    this.state.phase = phase
+    this.updateTicker()
+  }
+
+  /** streaming/thinking/analyzing/waiting 时启动 120ms ticker，idle 停止 */
+  private updateTicker(): void {
+    const active = this.state.phase !== 'idle'
+    if (active && !this.ticker) {
+      this.ticker = setInterval(() => {
+        this.tick++
+        this.renderLive()
+      }, 120)
+      this.ticker.unref?.()
+    } else if (!active && this.ticker) {
+      clearInterval(this.ticker)
+      this.ticker = null
+    }
+  }
+
+  /** 记录 token/输出活动时间（spinner stall 检测） */
+  private markActivity(): void {
+    this.lastActivityMs = Date.now()
+  }
+
+  // ── W4b: 输入辅助 ────────────────────────────────────────────
+
+  /** 注入 slash 命令列表（main-ansi 启动时调用） */
+  setSlashCommands(commands: SlashHintEntry[]): void {
+    this.slashCommands = commands
+  }
+
+  /**
+   * Tab 补全：
+   * - 输入以 `/` 开头 → 补全为过滤结果首项
+   * - 光标前有 `@token` → git 文件补全（多候选时 Tab 循环）
+   */
+  private handleTabComplete(): boolean {
+    const value = this.inputLine.value
+    const cursor = this.inputLine.cursor
+
+    // slash 命令补全
+    if (value.startsWith('/') && !value.includes(' ')) {
+      const target = slashCompletionTarget(value, this.slashCommands)
+      if (target && target !== value) {
+        this.inputLine.setValue(`${target} `)
+        return true
+      }
+      return false
+    }
+
+    // @ 文件补全（Tab 循环候选）
+    if (this.fileCompletion) {
+      const fc = this.fileCompletion
+      fc.idx = (fc.idx + 1) % fc.candidates.length
+      const applied = applyCompletion(fc.baseText, fc.baseCursor, fc.candidates[fc.idx]!)
+      this.inputLine.setValue(applied.text, applied.cursor)
+      return true
+    }
+
+    const token = extractAtToken(value, cursor)
+    if (token === null) return false
+    const candidates = getCompletions(token, process.cwd(), 8)
+    if (candidates.length === 0) return false
+
+    this.fileCompletion = { baseText: value, baseCursor: cursor, candidates, idx: 0 }
+    const applied = applyCompletion(value, cursor, candidates[0]!)
+    this.inputLine.setValue(applied.text, applied.cursor)
+    if (candidates.length === 1) {
+      this.fileCompletion = null // 唯一候选，无需循环
+    }
+    return true
+  }
+
+  /** Commit `▍ Rivet` 标签行（每段 assistant 流式输出一次） */
+  private commitAssistantHeader(): void {
+    this.commit.write({
+      text: `${color('▍', this.theme.assistantColor, { bold: true })} ${color('Rivet', this.theme.assistantColor, { dim: true })}`,
+    })
+    this.assistantHeaderDone = true
   }
 
   /** 手动设置 streaming 状态 */
   setStreamingState(v: boolean): void {
     this.state.isStreaming = v
     if (!v) {
-      this.state.phase = 'idle'
+      this.setPhase('idle')
       this.live.clear()
     }
     this.renderLive()
@@ -433,14 +633,16 @@ export class TuiApp {
 
   private handleTextDelta(text: string): void {
     this.state.isStreaming = true
-    this.state.phase = 'streaming'
+    this.setPhase('streaming')
+    this.markActivity()
     // Push through block writer (buffers text, emits in display-sized blocks)
     this.blockWriter.push(text)
   }
 
   private handleThinkingDelta(thinking: string): void {
     this.state.isThinking = true
-    this.state.phase = 'thinking'
+    this.setPhase('thinking')
+    this.markActivity()
     this.state.thinkingText += thinking
     if (this.state.thinkStartMs === 0) {
       this.state.thinkStartMs = Date.now()
@@ -448,13 +650,16 @@ export class TuiApp {
     this.renderLive()
   }
 
-  private handleToolUse(_id: string, name: string, _input: Record<string, unknown>): void {
-    this.state.phase = 'analyzing'
+  private handleToolUse(id: string, name: string, input: Record<string, unknown>): void {
+    this.setPhase('analyzing')
+    this.markActivity()
+    this.pendingTools.set(id, { name, input, startMs: Date.now() })
     // Commit thinking if any
     if (this.state.thinkingText) {
-      this.commitThinking()
+      this.commitAbove(() => this.commitThinking())
+    } else {
+      this.renderLive()
     }
-    this.renderLive()
   }
 
   private handleToolResult(id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string): void {
@@ -465,6 +670,7 @@ export class TuiApp {
       // Accumulate for live tool card display — show last lines in live region
       const toolAcc = this.toolAccumulator.get(id) ?? ''
       this.toolAccumulator.set(id, toolAcc + result)
+      this.markActivity()
       this.renderLive()
       return
     }
@@ -472,101 +678,158 @@ export class TuiApp {
     // Terminal result: commit to scrollback
     const toolAcc = this.toolAccumulator.get(id)
     this.toolAccumulator.delete(id)
+    const meta = this.pendingTools.get(id)
+    this.pendingTools.delete(id)
     const finalContent = toolAcc ? toolAcc + displayContent : displayContent
 
-    const formatted = formatToolCard({
+    const cardInput = {
       toolName: name,
       content: finalContent,
       isError,
       rawPath,
-      elapsedMs: Date.now() - this.state.turnStartMs,
-    }, this.theme)
+      toolInput: meta?.input,
+      elapsedMs: meta ? Date.now() - meta.startMs : undefined,
+    }
+    const formatted = formatToolCard(cardInput, this.theme)
 
-    this.commit.write({ text: formatted.join('\n') })
-    this.state.committedCount++
-    this.renderLive()
+    // 记录截断结果供 ctrl+o 展开
+    if (isToolCardTruncated(cardInput)) {
+      this.lastTruncatedTool = {
+        toolName: name,
+        content: finalContent,
+        isError,
+        rawPath,
+        toolInput: meta?.input,
+      }
+    }
+
+    this.commitAbove(() => {
+      this.commit.write({ text: formatted.join('\n') })
+      this.state.committedCount++
+    })
+  }
+
+  /** ctrl+o：将最近一条被截断的工具结果完整展开重新 commit 到 scrollback */
+  private expandLastTruncatedTool(): void {
+    const t = this.lastTruncatedTool
+    if (!t) return
+    this.lastTruncatedTool = null
+    const formatted = formatToolCard({
+      toolName: t.toolName,
+      content: t.content,
+      isError: t.isError,
+      rawPath: t.rawPath,
+      toolInput: t.toolInput,
+      expanded: true,
+    }, this.theme)
+    this.commitAbove(() => {
+      this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+      this.state.committedCount++
+    })
   }
 
   private handleCheckpoint(hash: string): void {
-    this.commit.write({
-      text: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore`,
-      trailingNewline: true,
+    this.commitAbove(() => {
+      this.commit.write({
+        text: `Checkpoint saved: ${hash.slice(0, 7)} — /rollback to restore`,
+        trailingNewline: true,
+      })
+      this.state.committedCount++
     })
-    this.state.committedCount++
   }
 
   private async handleTurnComplete(usage: Partial<Usage>, turnNumber: number, isFinal: boolean): Promise<void> {
     this.state.turnNumber = turnNumber
 
-    // Flush any pending blocks from the writer
+    // Flush any pending blocks from the writer, then commit the remaining tail
     await this.blockWriter.flush()
+    this.streamRenderer.finalize()
+    this.assistantHeaderDone = false
+
+    // ── W3: 累计 usage → cache hit / context% / cost ────────────
+    this.accumulateUsage(usage)
 
     if (isFinal) {
-      // Commit streaming text as assistant message
-      if (this.state.streamText) {
-        const formatted = formatAssistantMessage({
-          content: this.state.streamText,
-          width: this.columns,
-        }, this.theme)
-        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
-        this.state.committedCount++
-      }
-
       // Reset state
-      this.state.streamText = ''
+      this.agentBusy = false
       this.state.thinkingText = ''
       this.state.isStreaming = false
       this.state.isThinking = false
-      this.state.phase = 'idle'
+      this.setPhase('idle')
       this.state.thinkStartMs = 0
-      this.live.clear()
 
-      // Turn summary
+      // 回合耗时文案：✦ Worked for 1m 6s · 12.3k in / 890 out
       const elapsed = Date.now() - this.state.turnStartMs
-      const inTokens = usage.input_tokens ?? 0
-      const outTokens = usage.output_tokens ?? 0
-      this.commit.write({
-        text: `Turn ${turnNumber} complete — ${inTokens.toLocaleString()} in / ${outTokens.toLocaleString()} out / ${formatElapsedShort(elapsed)}`,
-        trailingNewline: true,
+      const summary = formatTurnWorkSummary({
+        elapsedMs: elapsed,
+        inputTokens: usage.input_tokens ?? 0,
+        outputTokens: usage.output_tokens ?? 0,
+      }, this.theme)
+      this.commitAbove(() => {
+        this.commit.write({ text: summary, trailingNewline: true })
+        this.state.committedCount++
       })
-      this.state.committedCount++
     } else {
-      // Intermediate turn: archive current text to scrollback, keep writer alive
-      if (this.state.streamText) {
-        const formatted = formatAssistantMessage({
-          content: this.state.streamText,
-          width: this.columns,
-        }, this.theme)
-        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
-      }
+      // Intermediate turn: archive thinking, keep writer alive
       if (this.state.thinkingText) {
-        this.commitThinkingToScrollback()
+        this.commitAbove(() => this.commitThinkingToScrollback())
       }
-      this.state.streamText = ''
       this.state.thinkingText = ''
       this.state.isThinking = false
       this.state.thinkStartMs = 0
-      this.state.phase = 'waiting'
+      this.setPhase('waiting')
+      this.renderLive()
     }
-    this.renderLive()
+  }
+
+  /** 从 onTurnComplete 的 Usage 解析 cache hit / context% / session cost */
+  private accumulateUsage(usage: Partial<Usage>): void {
+    const input = usage.input_tokens ?? 0
+    const output = usage.output_tokens ?? 0
+    const cacheRead = usage.cache_read_input_tokens ?? 0
+    const cacheCreate = usage.cache_creation_input_tokens ?? 0
+    this.totalUsage.input += input
+    this.totalUsage.output += output
+    this.totalUsage.cacheRead += cacheRead
+    this.totalUsage.cacheCreate += cacheCreate
+
+    if (input > 0) {
+      this.lastCacheHitRate = Math.min(1, cacheRead / input)
+    }
+    if (this.contextWindow && this.contextWindow > 0 && input > 0) {
+      this.lastContextRatio = Math.min(1, (input + output) / this.contextWindow)
+    }
+  }
+
+  /** 估算累计费用（对齐 app.tsx 的近似定价：normal $1/M、cache $0.1/M、out $4/M） */
+  private estimateSessionCost(): number {
+    const normalInput = Math.max(0, this.totalUsage.input - this.totalUsage.cacheRead)
+    return (normalInput * 1 + this.totalUsage.cacheRead * 0.1 + this.totalUsage.output * 4) / 1_000_000
   }
 
   private handleError(error: Error): void {
-    this.commit.write({
-      text: `Error: ${error.message}`,
-      trailingNewline: true,
-    })
-    this.state.phase = 'idle'
+    this.agentBusy = false
+    this.setPhase('idle')
     this.state.isStreaming = false
-    this.renderLive()
+    this.commitAbove(() => {
+      this.commit.write({
+        text: `Error: ${error.message}`,
+        trailingNewline: true,
+      })
+    })
   }
 
   private handleAbort(): void {
     // Clear steer buffer on abort to prevent stale guidance
-    this.steerBuffer?.clear?.()
+    this.steerBuffer.clear()
+    this.streamRenderer.reset()
+    this.assistantHeaderDone = false
+    this.pendingTools.clear()
+    this.toolAccumulator.clear()
+    this.agentBusy = false
     this.state.isStreaming = false
     this.state.isThinking = false
-    this.state.phase = 'idle'
+    this.setPhase('idle')
     this.live.clear()
     this.onAbortCallback?.()
   }
@@ -586,40 +849,57 @@ export class TuiApp {
   private renderLive(): void {
     const lines: LiveRegionLine[] = []
 
-    // 1. Thinking indicator
-    if (this.state.isThinking && this.state.thinkingText) {
+    // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
+    const stalled = this.lastActivityMs > 0 && Date.now() - this.lastActivityMs > 10_000
+    const spinnerLine = formatSpinnerStatus({
+      tick: this.tick,
+      phase: this.state.phase,
+      elapsedMs: Date.now() - this.state.turnStartMs,
+      stalled,
+    }, this.theme)
+    if (spinnerLine) {
+      lines.push({ text: spinnerLine })
+    }
+
+    // 1b. Thinking 展开内容（状态行已由 spinner 承担，仅展开时显示正文）
+    if (this.state.isThinking && this.state.thinkingText && this.state.thinkingExpanded) {
       const thinkingLines = formatThinking({
         text: this.state.thinkingText,
         elapsedMs: Date.now() - this.state.thinkStartMs,
         isStreaming: this.state.isStreaming,
-        expanded: this.state.thinkingExpanded,
+        expanded: true,
       }, this.theme)
       for (const line of thinkingLines) {
         lines.push({ text: line })
       }
     }
 
-    // 2. Streaming text (last N lines from buffer)
-    if (this.state.streamText) {
-      const allLines = this.state.streamText.split('\n')
-      const showLines = allLines.slice(-6) // last 6 lines
-      for (const line of showLines) {
-        lines.push({ text: line })
-      }
+    // 2. Streaming tail (尾部不完整 markdown block，display-width aware 截断)
+    for (const line of this.streamRenderer.getLiveTailLines(6)) {
+      lines.push({ text: line })
     }
 
-    // 2b. Steer buffer indicator (during streaming)
-    if (this.steerBuffer?.hasPending()) {
+    // 2b. 队列预览：⏳ queued: "最后一条前 60 字符"（Up 取回编辑）
+    if (this.steerBuffer.hasPending()) {
       const pending = this.steerBuffer.getPending()
-      lines.push({ text: `⏳ ${pending.length} guidance message(s) queued` })
+      const last = pending[pending.length - 1]!
+      const preview = last.length > 60 ? `${last.slice(0, 60)}…` : last
+      const more = pending.length > 1 ? ` (+${pending.length - 1} more)` : ''
+      lines.push({ text: color(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.muted) })
     }
 
-    // 2c. Tool accumulator (live tool output during streaming)
-    if (this.toolAccumulator.size > 0) {
-      for (const [id, text] of this.toolAccumulator) {
-        const lastLines = text.split('\n').slice(-3)
-        for (const line of lastLines) {
-          lines.push({ text: `  ${line.slice(0, this.columns - 4)}` })
+    // 2c. 进行中工具：● 标题行 + 末 3 行输出（⎿ 缩进）
+    if (this.pendingTools.size > 0) {
+      for (const [id, meta] of this.pendingTools) {
+        const toolLines = formatToolCardLive({
+          toolName: meta.name,
+          toolInput: meta.input,
+          outputTail: this.toolAccumulator.get(id),
+          elapsedMs: Date.now() - meta.startMs,
+          columns: this.columns,
+        }, this.theme)
+        for (const line of toolLines) {
+          lines.push({ text: line })
         }
       }
     }
@@ -634,31 +914,61 @@ export class TuiApp {
       lines.push({ text: ` ╰─ [y] approve  [n] deny  [e] edit ──────────────` })
     }
 
-    // 4. GlanceBar
+    // 4. GlanceBar（phase glyph / context% / cache / cost / git branch）
+    const phaseInd = phaseIndicator(this.state.phase)
     const glanceBar = formatGlanceBar({
       width: this.columns,
       domainGlyph: this.state.domainGlyph,
       domainName: this.state.domainName,
+      branch: this.gitBranch,
+      phaseGlyph: phaseInd.glyph,
+      phaseLabel: phaseInd.label,
       modelName: this.state.modelName,
+      cacheHitRate: this.lastCacheHitRate,
+      contextRatio: this.lastContextRatio,
+      cost: this.estimateSessionCost(),
       elapsedMs: Date.now() - this.state.turnStartMs,
       turnCount: this.state.turnNumber,
     }, this.theme)
-    lines.push({ text: glanceBar })
+    // formatGlanceBar 返回「分隔线\n状态行」两行——必须拆开 push，
+    // LiveEngine 按数组元素计行，内嵌 \n 会破坏重绘的行数计算
+    for (const glanceLine of glanceBar.split('\n')) {
+      lines.push({ text: glanceLine })
+    }
 
-    // 5. Input line / Ctrl+C hint
+    // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
     if (this.ctrlCPendingSince > 0) {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
-      const inputText = this.inputLine.value || 'Type your message...'
-      const cursorPos = this.inputLine.cursor
-      const displayInput = inputText
-        ? `▸ ${inputText.slice(0, cursorPos)}█${inputText.slice(cursorPos)}`
-        : `▸ ${inputText}`
-
+      // 空输入显示 dim placeholder
+      const inputLines = this.inputLine.value
+        ? this.inputLine.displayLines()
+        : [`▸ █${color(this.inputLine.placeholder, this.theme.dim)}`]
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-        lines.push({ text: `-- NORMAL -- ${displayInput}` })
+        lines.push({ text: `-- NORMAL -- ${inputLines[0] ?? ''}` })
+        for (const extra of inputLines.slice(1)) lines.push({ text: extra })
       } else {
-        lines.push({ text: displayInput })
+        for (const inputDisplayLine of inputLines) lines.push({ text: inputDisplayLine })
+      }
+
+      // 5b. slash 命令提示（输入以 / 开头且未含空格）
+      const inputVal = this.inputLine.value
+      if (inputVal.startsWith('/') && !inputVal.includes(' ')) {
+        for (const hintLine of formatSlashHint({ input: inputVal, commands: this.slashCommands }, this.theme)) {
+          lines.push({ text: hintLine })
+        }
+      }
+
+      // 5c. @ 文件补全候选列表（Tab 循环时显示）
+      if (this.fileCompletion && this.fileCompletion.candidates.length > 1) {
+        const fc = this.fileCompletion
+        for (let i = 0; i < Math.min(fc.candidates.length, 6); i++) {
+          const selected = i === fc.idx
+          const marker = selected ? color('❯ ', this.theme.primary) : '  '
+          const name = color(fc.candidates[i]!, selected ? this.theme.primary : this.theme.muted)
+          lines.push({ text: `${marker}${name}` })
+        }
+        lines.push({ text: color('tab to cycle', this.theme.dim) })
       }
     }
 
@@ -698,7 +1008,7 @@ export class TuiApp {
     return new Promise((resolve) => {
       this.approvalPending = { id, name, input, resolve }
       this.input.setMode('approval')
-      this.state.phase = 'waiting'
+      this.setPhase('waiting')
       this.renderLive()
     })
   }
@@ -712,7 +1022,7 @@ export class TuiApp {
       const resolve = this.approvalPending.resolve
       this.approvalPending = null
       this.input.setMode('input')
-      this.state.phase = 'idle'
+      this.setPhase('idle')
       this.renderLive()
       resolve(true)
       return true
@@ -721,7 +1031,7 @@ export class TuiApp {
       const resolve = this.approvalPending.resolve
       this.approvalPending = null
       this.input.setMode('input')
-      this.state.phase = 'idle'
+      this.setPhase('idle')
       this.renderLive()
       resolve(false)
       return true
@@ -732,7 +1042,7 @@ export class TuiApp {
       const resolve = this.approvalPending.resolve
       this.approvalPending = null
       this.input.setMode('input')
-      this.state.phase = 'idle'
+      this.setPhase('idle')
       this.renderLive()
       resolve(true)
       return true
