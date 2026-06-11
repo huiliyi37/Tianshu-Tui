@@ -153,6 +153,12 @@ export class AgentLoop {
   abortController: AbortController | null = null
   /** Count of user interrupts within the current turn (中#5). */
   private _turnInterruptCount = 0
+  /**
+   * Pending-abort latch: set by abort() so an interrupt fired during the
+   * init/warmup window (before the turn loop) is honored rather than lost.
+   * Reset at the start of each run().
+   */
+  private _pendingAbort = false
   cwd: string
   evidence: EvidenceTracker
   private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
@@ -738,6 +744,7 @@ export class AgentLoop {
 
   abort(): void {
     this._turnInterruptCount++
+    this._pendingAbort = true
     this.abortController?.abort()
     // NOTE: killAll() removed — it was a global hammer that killed processes
     // from ALL AgentLoop instances, not just this one (中间层 #1).
@@ -1128,6 +1135,11 @@ export class AgentLoop {
       return
     }
     this._running = true
+    // Eager abort controller: created synchronously before any await so an
+    // Esc/Ctrl+C during warmupMemories()/intent-routing aborts a live signal
+    // instead of a no-op. Pending latch is cleared for this fresh run.
+    this._pendingAbort = false
+    this.abortController = new AbortController()
     try {
       await this._runInner(userInput, callbacks)
     } finally {
@@ -1197,8 +1209,17 @@ export class AgentLoop {
    */
   private async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean }> {
     await this.warmupMemories()
-    this.abortController = new AbortController()
-    this._turnInterruptCount = 0
+    // The controller is created eagerly in run() before any await, so an abort
+    // fired during warmup is honored (not discarded). Only create one here if a
+    // caller invoked the loop outside run().
+    this.abortController ??= new AbortController()
+    if (this._pendingAbort) {
+      // Interrupt arrived during the warmup window — keep the count and ensure
+      // the (already-aborted) controller stays aborted so the turn loop bails.
+      this.abortController.abort()
+    } else {
+      this._turnInterruptCount = 0
+    }
     await this.startFsWatcher()
     // P7: heartbeat watchdog — surfaces "still working" signal during long
     // silent operations so the UI doesn't appear frozen and users don't
