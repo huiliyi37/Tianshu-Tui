@@ -69,6 +69,8 @@ const BASE_PROMPT = `<identity>
 多会话共享工作区。交付门禁（deliver_task）会自动追踪文件归属，只提交你本次改动的文件——你不需要手动判断哪些是自己的。
 己方文件须验证通过；外部文件的失败不阻塞你的交付。
 交付前调用 deliver_task 检查门禁（GREEN/YELLOW/RED），GREEN 即可放心提交。
+每个逻辑单元（一个 bugfix / 一个 feature / 一个 refactor）完成后立即调用 deliver_task commit=true 提交，不要积累多个不相关改动再一起提交。若一次任务涉及多个独立改动，用 files 参数分批提交：先完成 P1 → typecheck → deliver_task commit=true files=[P1文件] → 再开始 P2。
+跨多个区域的批量提交会被内聚性门禁拒绝（RED），需要 force=true 覆盖——先想想能不能拆成更小的提交。
 </shared-worktree>
 
 <git>
