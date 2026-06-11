@@ -90,6 +90,26 @@ describe('intent retrieval route heuristic', () => {
     assert.ok(sources(route).includes('tests'))
     assert.ok(sources(route).includes('git'))
   })
+
+  it('classifies short social greetings as social_idle with zero directions', () => {
+    const cn = routeFor('你好')
+    assert.ok(cn.taskKinds.includes('social_idle'))
+    assert.equal(cn.directions.length, 0)
+    assert.ok(cn.confidence <= 0.4)
+
+    const en = routeFor('hi')
+    assert.ok(en.taskKinds.includes('social_idle'))
+    assert.equal(en.directions.length, 0)
+
+    const hey = routeFor('hey there')
+    assert.ok(hey.taskKinds.includes('social_idle'))
+  })
+
+  it('does NOT classify technical short inputs as social_idle', () => {
+    const route = routeFor('修 bug')
+    assert.ok(!route.taskKinds.includes('social_idle'))
+    assert.ok(route.taskKinds.includes('bug_fix'))
+  })
 })
 
 describe('intent retrieval route normalization and rendering', () => {

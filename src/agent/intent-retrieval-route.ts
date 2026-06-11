@@ -21,6 +21,7 @@ export type IntentTaskKind =
   | 'review_audit'
   | 'verification'
   | 'security_safety'
+  | 'social_idle'
 
 export interface RetrievalDirection {
   source: RetrievalSource
@@ -59,6 +60,7 @@ const TASK_KINDS: readonly IntentTaskKind[] = [
   'review_audit',
   'verification',
   'security_safety',
+  'social_idle',
 ]
 const KIND_SET = new Set<string>(TASK_KINDS)
 const SOURCE_SET = new Set<string>(SOURCES)
@@ -81,6 +83,7 @@ const KIND_RANK: Record<IntentTaskKind, number> = {
   verification: 7,
   usage_question: 8,
   code_explanation: 9,
+  social_idle: 10,
 }
 
 export const TASK_KIND_BASELINES: Record<IntentTaskKind, RetrievalDirection[]> = {
@@ -140,6 +143,7 @@ export const TASK_KIND_BASELINES: Record<IntentTaskKind, RetrievalDirection[]> =
     { source: 'tests', priority: 'must', query: '查安全边界测试和回归验证。', reason: '安全修复需要防回归。' },
     { source: 'memory', priority: 'should', query: '召回历史安全发现和项目规则。', reason: '历史发现能提示易错边界。' },
   ],
+  social_idle: [],
 }
 
 export function buildHeuristicRetrievalRoute(input: RetrievalRouteInput): RetrievalRoute {
@@ -174,7 +178,7 @@ export function normalizeRetrievalRoute(raw: unknown, fallbackInput?: RetrievalR
   const baselineDirections = taskKinds.flatMap(kind => baselineForKind(kind, fallbackInput?.taskContract))
   const directions = mergeDirections([...baselineDirections, ...directionsFromRaw]).slice(0, MAX_DIRECTIONS)
 
-  if (directions.length === 0) {
+  if (directions.length === 0 && !taskKinds.includes('social_idle')) {
     return fallbackInput ? buildHeuristicRetrievalRoute(fallbackInput) : buildHeuristicRetrievalRoute({ userMessage: '' })
   }
 
@@ -213,6 +217,23 @@ export function renderIntentRetrievalRoute(route: RetrievalRoute): string {
   return lines.join('\n')
 }
 
+/** Detect trivial / social inputs that should not trigger tool-driven retrieval. */
+function isTrivialInput(sanitized: string): boolean {
+  const stripped = sanitized.trim()
+  if (stripped.length === 0) return true
+  // CJK-only short: ≤ 4 CJK chars with no technical keywords
+  const cjkChars = (stripped.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length
+  if (cjkChars > 0 && cjkChars <= 4 && stripped.replace(/[\u4e00-\u9fff\u3400-\u4dbf\s!?！？。，,.]/g, '').length === 0) return true
+  // Latin short greeting: ≤ 3 words, no technical keyword (3+ letter English words that aren't common greetings)
+  const wordCount = stripped.split(/\s+/).filter(Boolean).length
+  if (wordCount > 0 && wordCount <= 3) {
+    const lower = stripped.toLowerCase()
+    // Common English greetings/social phrases
+    if (/^(hi|hello|hey|yo|sup|ok|okay|thanks|thx|bye|goodbye|morning|evening|night| greetings?)(\s+(there|you|all|everyone|folks))?$/i.test(lower)) return true
+  }
+  return false
+}
+
 function inferTaskKinds(userMessage: string, lastAssistantMessage?: string, taskList?: readonly TaskListItem[]): IntentTaskKind[] {
   // Step 1: 解析上一轮回复中的关联任务计划（如 P1/P2/T1 等），含持久化 taskList 回溯
   const resolvedContexts = resolveContextualIdentifier(userMessage, lastAssistantMessage, taskList)
@@ -239,6 +260,7 @@ function inferTaskKinds(userMessage: string, lastAssistantMessage?: string, task
   if (/(怎么用|如何用|配置|命令|api|usage|how\s+to|configure|command)/i.test(sanitized)) add('usage_question')
   if (/(解释|看一下|分析|说明|explain|describe|walk through|read)/i.test(sanitized)) add('code_explanation')
 
+  if (kinds.length === 0 && isTrivialInput(sanitized)) add('social_idle')
   if (kinds.length === 0) add('new_feature')
   
   // Step 4: 动词消歧 — 当多种匹配时，动词语义优先
@@ -318,6 +340,7 @@ function summarizeObjective(input: RetrievalRouteInput): string | undefined {
 
 function confidenceFor(kinds: IntentTaskKind[]): number {
   if (kinds.length === 0) return 0.4
+  if (kinds.includes('social_idle')) return 0.3
   if (kinds.length === 1 && kinds[0] === 'new_feature') return 0.55
   return kinds.length > 1 ? 0.65 : 0.75
 }
