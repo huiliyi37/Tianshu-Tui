@@ -24,6 +24,7 @@ export interface TraceStore {
   maxEvents: number
   events: TraceEvent[]
   toolFingerprints: string[]
+  toolNameHistory?: string[]
 }
 
 export function createTraceStore(maxEvents = 50): TraceStore {
@@ -83,6 +84,48 @@ export function fingerprintToolCall(
 
 export function recordToolFingerprint(store: TraceStore, fingerprint: string): TraceStore {
   return { ...store, toolFingerprints: [...store.toolFingerprints, fingerprint].slice(-20) }
+}
+
+export function recordToolNamedFingerprint(
+  store: TraceStore,
+  fingerprint: string,
+  toolName: string,
+): TraceStore {
+  return {
+    ...store,
+    toolFingerprints: [...store.toolFingerprints, fingerprint].slice(-20),
+    toolNameHistory: [...(store.toolNameHistory ?? []), toolName].slice(-20),
+  }
+}
+
+export type ToolStormLevel = 'none' | 'warn' | 'storm'
+
+/**
+ * Detects "tool storms" — consecutive calls to the same tool TYPE
+ * regardless of input parameters (different grep queries still count).
+ *
+ * Thresholds:
+ * - 4+ consecutive same tool type → warn
+ * - 8+ consecutive same tool type → storm
+ */
+export function getToolStormLevel(toolNames: string[]): ToolStormLevel {
+  if (toolNames.length < 4) return 'none'
+
+  const recent = toolNames.slice(-12)
+  let maxConsecutive = 0
+  let currentConsecutive = 0
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i] === recent[i - 1]) {
+      currentConsecutive++
+    } else {
+      currentConsecutive = 0
+    }
+    maxConsecutive = Math.max(maxConsecutive, currentConsecutive)
+  }
+
+  if (maxConsecutive >= 7) return 'storm'
+  if (maxConsecutive >= 3) return 'warn'
+  return 'none'
 }
 
 /**

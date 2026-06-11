@@ -5,6 +5,7 @@ import { ToolExecutionController } from './tool-execution.js'
 import type { RuntimeHookSnapshot } from './runtime-hooks.js'
 import { createRuntimeHookContext } from './runtime-hooks.js'
 import { buildPrewarmValue } from './prewarm-file.js'
+import { recordToolNamedFingerprint } from './trace-store.js'
 import { join } from 'node:path'
 import type { AgentCallbacks } from './loop-types.js'
 
@@ -98,6 +99,12 @@ return new ToolExecutionController({
       p3: self.p3,
       lspManager: self.config.lspManager,
       getEstimatedTokens: () => self.session.getEstimatedTokens(),
+      getToolNameHistory: () => self.traceStore?.toolNameHistory ?? [],
+      recordToolNamedFingerprint: (fingerprint: string, toolName: string) => {
+        if (self.traceStore) {
+          self.traceStore = recordToolNamedFingerprint(self.traceStore, fingerprint, toolName)
+        }
+      },
     })
 }
 export function buildRuntimeSnapshot(self: AgentLoop, extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {

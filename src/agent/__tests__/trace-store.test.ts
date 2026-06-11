@@ -6,8 +6,10 @@ import {
   finishTraceEvent,
   recordTraceEvent,
   getDoomLoopLevel,
+  getToolStormLevel,
   fingerprintToolCall,
   recordToolFingerprint,
+  recordToolNamedFingerprint,
   type TraceEvent,
   type TraceEventStartInput,
 } from '../trace-store.js'
@@ -102,5 +104,65 @@ describe('trace-store', () => {
     // 4 entries → 3 consecutive → blocked
     store = recordToolFingerprint(store, fp)
     assert.equal(getDoomLoopLevel(store.toolFingerprints), 'blocked')
+  })
+})
+
+describe('getToolStormLevel', () => {
+  it('returns none for fewer than 4 tool calls', () => {
+    assert.equal(getToolStormLevel(['grep', 'grep', 'grep']), 'none')
+  })
+
+  it('returns warn for 4 consecutive same-type calls', () => {
+    assert.equal(getToolStormLevel(['grep', 'grep', 'grep', 'grep']), 'warn')
+  })
+
+  it('returns warn for 5-7 consecutive same-type calls', () => {
+    assert.equal(getToolStormLevel(['grep', 'grep', 'grep', 'grep', 'grep']), 'warn')
+    assert.equal(getToolStormLevel(Array(7).fill('grep')), 'warn')
+  })
+
+  it('returns storm for 8+ consecutive same-type calls', () => {
+    assert.equal(getToolStormLevel(Array(8).fill('grep')), 'storm')
+  })
+
+  it('returns none when tool types alternate', () => {
+    assert.equal(getToolStormLevel(['grep', 'read_file', 'grep', 'read_file']), 'none')
+  })
+
+  it('detects storm with different fingerprints but same tool type', () => {
+    const names = Array(10).fill('grep')
+    assert.equal(getToolStormLevel(names), 'storm')
+  })
+
+  it('resets consecutive count on tool type change', () => {
+    const names = ['grep', 'grep', 'grep', 'read_file', 'grep', 'grep', 'grep']
+    assert.equal(getToolStormLevel(names), 'none')
+  })
+
+  it('only considers the last 12 entries', () => {
+    const old = Array(20).fill('read_file')
+    const spacer = ['grep', 'bash', 'read_file', 'write_file', 'grep', 'bash',
+      'read_file', 'write_file', 'grep', 'bash', 'read_file', 'write_file', 'grep']
+    assert.equal(getToolStormLevel([...old, ...spacer]), 'none')
+  })
+})
+
+describe('recordToolNamedFingerprint', () => {
+  it('records both fingerprint and tool name', () => {
+    let store = createTraceStore()
+    store = recordToolNamedFingerprint(store, 'fp1', 'grep')
+    store = recordToolNamedFingerprint(store, 'fp2', 'grep')
+    assert.deepEqual(store.toolFingerprints, ['fp1', 'fp2'])
+    assert.deepEqual(store.toolNameHistory, ['grep', 'grep'])
+  })
+
+  it('caps tool name history to 20', () => {
+    let store = createTraceStore()
+    for (let i = 0; i < 25; i++) {
+      store = recordToolNamedFingerprint(store, `fp${i}`, `tool${i}`)
+    }
+    assert.equal(store.toolNameHistory!.length, 20)
+    assert.equal(store.toolNameHistory![0], 'tool5')
+    assert.equal(store.toolNameHistory![19], 'tool24')
   })
 })
