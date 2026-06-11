@@ -5,6 +5,7 @@ import type { ProviderProfile } from '../api/provider-profile.js'
 import { PromptEngine } from '../prompt/engine.js'
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { getGitInjectedContext } from '../prompt/volatile-git.js'
+import { wrapSystemReminder } from '../prompt/system-reminder.js'
 import { ToolRegistry } from '../tools/registry.js'
 import { SessionContext } from './context.js'
 import { SessionPersist } from './session-persist.js'
@@ -247,6 +248,15 @@ export class AgentLoop {
   currentSeason: CognitiveSeason | null = null
   private lastCompactTurn: number | null = null
   private _prevPhaseHint: string | undefined = undefined
+  /**
+   * P2-5: mid-round history rewrites break the prefix cache between two API
+   * calls inside one user round (cache-log #30: input +319, cacheRead
+   * 50,304→17,792). Pressure detected mid-round is deferred via these flags
+   * and processed at the next user-message boundary (turn 0), keeping the
+   * session append-only within a round.
+   */
+  private pendingStaleCompact = false
+  private pendingHeapCompact = false
   cacheAdvisor: CacheAdvisor
   p3: P3Integration
   immuneHook: ImmuneHook
@@ -407,14 +417,16 @@ export class AgentLoop {
       telemetryWriter: this.telemetryWriter,
       getRuntimeSnapshot: extra => this.buildRuntimeSnapshot(extra),
       getProviderDegradationRatio: () => this.config.providerHealth?.getDegradationRatio() ?? 0,
-      addUserMessage: message => { this.session.addUserMessage(message) },
+      // Hook injections are pseudo-user messages: wrap as <system-reminder>
+      // so PromptEngine doesn't treat them as user boundaries (cache break).
+      addUserMessage: message => { this.session.addUserMessage(wrapSystemReminder(message)) },
       requestThetaCheck: reason => { this.requestThetaCheck(reason) },
       setReasoningEffort: effort => { this.setReasoningEffort(effort) },
       getFingerprint: () => this.config.promptEngine.getFingerprint(),
     })
     this.intent = new TurnIntentController({
       depositDeadEnd: deposit => this.stigmergyStore.deposit(deposit),
-      addUserMessage: message => { this.session.addUserMessage(message) },
+      addUserMessage: message => { this.session.addUserMessage(wrapSystemReminder(message)) },
     })
     this.contextInjection = new ContextInjectionController({
       session: this.session,
@@ -1511,15 +1523,15 @@ export class AgentLoop {
         reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段 ${turn} 轮未收敛 (score=${convergenceCheck.score.toFixed(2)})`,
         suggestion: convergenceCheck.injectedMessage.slice(0, 200),
       })
-      this.session.addUserMessage(convergenceCheck.injectedMessage)
+      this.session.addUserMessage(wrapSystemReminder(convergenceCheck.injectedMessage))
 
       // When convergence is detected AND doom loop is blocked, the agent is
       // likely in a post-completion verification loop. Signal completion
       // instead of letting the model continue alternating between tools.
       if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
-        this.session.addUserMessage(
+        this.session.addUserMessage(wrapSystemReminder(
           '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
-        )
+        ))
       }
     }
 
@@ -1718,7 +1730,11 @@ export class AgentLoop {
 
     // T9: Proactive Quality Compact — trigger partial compact on phase transition
     // or when attention quality drops below threshold on 1M+ windows.
-    if (!compactResult.compacted && this.config.contextWindow >= 500_000) {
+    // P2-5: only at user boundaries (turn 0) — partial compact rewrites stored
+    // history, which mid-round breaks the prefix between two API calls.
+    // _prevPhaseHint is only updated at boundaries so a mid-round transition
+    // is still detected at the next boundary.
+    if (!compactResult.compacted && this.config.contextWindow >= 500_000 && turn === 0) {
       const qTokens = this.session.getEstimatedTokens()
       const qRatio = qTokens / this.config.contextWindow
       const phaseHint = this.config.promptEngine.getPhaseHint?.()
@@ -1746,24 +1762,34 @@ export class AgentLoop {
       const tokenRatio = tokenBudget / contextWindow
       const skipGate = tokenRatio < 0.5
       debugLog(`[token-gate] tokens=${tokenBudget} window=${contextWindow} ratio=${tokenRatio.toFixed(2)} skip=${skipGate}`)
-      if (tokenRatio >= 0.5 && contextWindow < 1_000_000) {
-        // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
-        const dietBefore = this.session.getMessages()
-        const dietResult = this.p3.dietMessages(dietBefore as any)
-        if (dietResult.removedCount > 0) {
-          this.session.replaceMessages(dietResult.messages as any)
-        }
+      if ((tokenRatio >= 0.5 || this.pendingStaleCompact) && contextWindow < 1_000_000) {
+        // P2-5: history rewrites only at user boundaries (turn 0). Mid-round
+        // mutation invalidates the prefix between two API calls of the same
+        // round — defer with a marker instead.
+        if (turn !== 0) {
+          if (tokenRatio >= 0.5) this.pendingStaleCompact = true
+        } else if (this.cacheAdvisor.shouldDelayCompact(tokenRatio >= 0.7 ? 3 : 2)) {
+          debugLog(`[token-gate] cacheAdvisor delayed stale-round compact (cache healthy, ratio=${tokenRatio.toFixed(2)})`)
+        } else {
+          this.pendingStaleCompact = false
+          // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
+          const dietBefore = this.session.getMessages()
+          const dietResult = this.p3.dietMessages(dietBefore as any)
+          if (dietResult.removedCount > 0) {
+            this.session.replaceMessages(dietResult.messages as any)
+          }
 
-        const before = this.session.getMessages()
-        // Take max of cacheAdvisor's adaptive value and the window-aware
-        // default. cacheAdvisor is bounded to 600–2400 (legacy small-window
-        // tuning); on a 1M window staleRoundThresholds gives 30K, which we
-        // want to win unless cacheAdvisor has actually escalated.
-        const advisorPreview = this.cacheAdvisor.getStalePreviewChars()
-        const after = compactStaleRoundsOai(before, contextWindow, Math.max(advisorPreview, staleRoundThresholds(contextWindow).previewChars))
-        if (after !== before) {
-          this.session.replaceMessages(after)
-          if (typeof globalThis.gc === 'function') globalThis.gc()
+          const before = this.session.getMessages()
+          // Take max of cacheAdvisor's adaptive value and the window-aware
+          // default. cacheAdvisor is bounded to 600–2400 (legacy small-window
+          // tuning); on a 1M window staleRoundThresholds gives 30K, which we
+          // want to win unless cacheAdvisor has actually escalated.
+          const advisorPreview = this.cacheAdvisor.getStalePreviewChars()
+          const after = compactStaleRoundsOai(before, contextWindow, Math.max(advisorPreview, staleRoundThresholds(contextWindow).previewChars))
+          if (after !== before) {
+            this.session.replaceMessages(after)
+            if (typeof globalThis.gc === 'function') globalThis.gc()
+          }
         }
       }
     }
@@ -1776,15 +1802,31 @@ export class AgentLoop {
     const heapRatio = snap
       ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
       : 0
-    const heapCompactThreshold = (this.config.contextWindow ?? 1_000_000) >= 1_000_000 ? 0.75 : 0.6
-    if (!compactResult.compacted && heapRatio >= heapCompactThreshold && this.session.getMessages().length >= 10) {
-      debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} threshold=${heapCompactThreshold} msgCount=${this.session.getMessages().length}`)
-      const before = this.session.getMessages()
-      const contextWindow = this.config.contextWindow ?? 1_000_000
-      const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
-      if (trimmed.length < before.length || trimmed !== before) {
-        this.session.replaceMessages(trimmed)
-        if (typeof globalThis.gc === 'function') globalThis.gc()
+    const is1M = (this.config.contextWindow ?? 1_000_000) >= 1_000_000
+    const heapCompactThreshold = is1M ? 0.75 : 0.6
+    const heapPressure = heapRatio >= heapCompactThreshold
+    if (!compactResult.compacted && (heapPressure || this.pendingHeapCompact) && this.session.getMessages().length >= 10) {
+      // P2-5: on 1M windows, heap micro-compact rewrites history mid-round and
+      // breaks the prefix cache between API calls. Defer to the next user
+      // boundary (turn 0). On <1M windows heap pressure is a memory emergency
+      // — allow mid-round mutation (cache loss is the lesser harm).
+      if (is1M && turn !== 0) {
+        if (heapPressure) this.pendingHeapCompact = true
+        debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} deferred to next user boundary (1M window, mid-round)`)
+      } else if (is1M && !heapPressure && this.cacheAdvisor.shouldDelayCompact(2)) {
+        // Deferred marker but pressure subsided and cache is healthy — drop it.
+        this.pendingHeapCompact = false
+        debugLog('[memory-pressure] deferred heap compact dropped (pressure subsided, cache healthy)')
+      } else {
+        this.pendingHeapCompact = false
+        debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} threshold=${heapCompactThreshold} msgCount=${this.session.getMessages().length}`)
+        const before = this.session.getMessages()
+        const contextWindow = this.config.contextWindow ?? 1_000_000
+        const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
+        if (trimmed.length < before.length || trimmed !== before) {
+          this.session.replaceMessages(trimmed)
+          if (typeof globalThis.gc === 'function') globalThis.gc()
+        }
       }
     }
 
@@ -2157,7 +2199,7 @@ export class AgentLoop {
         this.lastThinkingContent = thinkingResult.nextState.lastThinkingContent
         this.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
         if (thinkingResult.shouldRetry) {
-          this.session.addUserMessage(thinkingResult.retryMessage)
+          this.session.addUserMessage(wrapSystemReminder(thinkingResult.retryMessage))
           // Archive any partial streamed text before retrying (same rationale as TTSR above)
           callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
           continue

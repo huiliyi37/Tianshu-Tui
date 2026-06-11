@@ -8,8 +8,15 @@ import { buildPrewarmValue } from './prewarm-file.js'
 import { recordToolNamedFingerprint } from './trace-store.js'
 import { join } from 'node:path'
 import type { AgentCallbacks } from './loop-types.js'
+import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
+import { isSystemReminder } from '../prompt/system-reminder.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
+// P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
+// engine counters and detecting history rewrites / hit-rate cliffs.
+let prevEngineStats = { volatileSwaps: 0, frozenClamps: 0, frozenFallbackRebuilds: 0, toolsUpdates: 0 }
+let prevMsgCount = 0
+let prevHitRate: number | null = null
 return new TurnStreamController({
       client: self.config.client,
       abortSignal: self.abortController?.signal ?? new AbortController().signal,
@@ -27,11 +34,58 @@ return new TurnStreamController({
       addUsage: usage => { self.session.addUsage(usage) },
       recordTurnCache: (turn, usage) => {
         self.session.recordTurnCache(turn, usage)
-        const hitRate = usage.input_tokens > 0
-          ? ((usage.cache_read_input_tokens ?? 0) / usage.input_tokens * 100).toFixed(1)
-          : '0.0'
+        const hitRateNum = usage.input_tokens > 0
+          ? (usage.cache_read_input_tokens ?? 0) / usage.input_tokens * 100
+          : 0
+        const hitRate = hitRateNum.toFixed(1)
         const sid = self.config.sessionId ?? 'anon'
-        const line = JSON.stringify({ t: Date.now(), turn, input: usage.input_tokens, cacheRead: usage.cache_read_input_tokens, cacheCreate: usage.cache_creation_input_tokens, hitRate: `${hitRate}%` })
+
+        // ── P2-6 breadcrumbs: make every break attributable in one read ──
+        const entry: Record<string, unknown> = {
+          t: Date.now(), turn,
+          input: usage.input_tokens,
+          cacheRead: usage.cache_read_input_tokens,
+          cacheCreate: usage.cache_creation_input_tokens,
+          hitRate: `${hitRate}%`,
+        }
+        try {
+          const messages = self.session.getMessages()
+          let userMsgCount = 0
+          let injectedCount = 0
+          for (const m of messages) {
+            if (m.role !== 'user') continue
+            userMsgCount++
+            if (isSystemReminder((m as { content?: unknown }).content)) injectedCount++
+          }
+          entry.userMsgs = userMsgCount
+          if (injectedCount > 0) entry.injected = injectedCount
+
+          // History rewrite detection: message count shrank since last turn
+          // (compact / replace / session split) — the classic mid-round breaker.
+          if (prevMsgCount > 0 && messages.length < prevMsgCount) entry.historyRewritten = true
+          const wasRewritten = entry.historyRewritten === true
+          prevMsgCount = messages.length
+
+          // Engine event diffs (volatile swap / frozen clamp / fallback / tools)
+          const stats = self.config.promptEngine.getCacheEventStats?.()
+          if (stats) {
+            if (stats.volatileSwaps > prevEngineStats.volatileSwaps) entry.volatileSwapped = true
+            if (stats.frozenClamps > prevEngineStats.frozenClamps) entry.frozenClamped = true
+            if (stats.frozenFallbackRebuilds > prevEngineStats.frozenFallbackRebuilds) entry.frozenEvicted = true
+            if (stats.toolsUpdates > prevEngineStats.toolsUpdates) entry.toolsUpdated = true
+            if (stats.collapseWatermark > 0) entry.collapseWatermark = stats.collapseWatermark
+            prevEngineStats = { volatileSwaps: stats.volatileSwaps, frozenClamps: stats.frozenClamps, frozenFallbackRebuilds: stats.frozenFallbackRebuilds, toolsUpdates: stats.toolsUpdates }
+          }
+
+          // Auto-diagnose on a hit-rate cliff (> 15 percentage-point drop).
+          if (prevHitRate !== null && prevHitRate - hitRateNum > 15) {
+            const diag = diagnoseCacheMiss(self.session.getCacheHistory(), turn, null, wasRewritten)
+            if (diag) entry.diagnose = `${diag.reason}: ${diag.message}`
+          }
+          prevHitRate = hitRateNum
+        } catch { /* breadcrumbs are best-effort — never break cache logging */ }
+
+        const line = JSON.stringify(entry)
         import('node:fs/promises').then(fs => {
           const dir = join(self.cwd, '.rivet', 'sessions', sid)
           return fs.mkdir(dir, { recursive: true })
