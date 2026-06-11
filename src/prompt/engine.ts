@@ -1,5 +1,6 @@
 import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from '../api/oai-types.js'
 import { semanticPruneLayer1 } from '../compact/semantic-prune.js'
+import { collapseToolResult } from '../compact/context-collapse.js'
 import { detectStaleness } from '../compact/staleness-detect.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
@@ -36,6 +37,7 @@ export interface PromptEngineConfig {
   staticCtx: StaticPromptContext
   volatileCtx: VolatileContext
   habituationThreshold?: number
+  attentionProfile?: { effectiveAttentionRatio: number; toolDensityThreshold: number; collapseAgeTurns: number }
 }
 
 export class PromptEngine {
@@ -400,6 +402,14 @@ export class PromptEngine {
       totalFrozen--
     }
 
+    // T7: Cache-Safe Context Collapse for 1M+ windows.
+    // Operates on the request copy only — session messages remain intact
+    // so DeepSeek exact-prefix cache is preserved up to the collapse point.
+    if (contextWindow && contextWindow >= 1_000_000) {
+      const collapseAge = this.config.attentionProfile?.collapseAgeTurns ?? 8
+      requestTimeCollapse(result, collapseAge, contextWindow)
+    }
+
     return {
       model: this.config.model,
       messages: [{ role: 'system', content: this.systemPrompt }, ...result],
@@ -643,4 +653,51 @@ export class PromptEngine {
   getContextLayerReport(): ContextLayerReport {
     return this.contextLayerReportData
   }
+}
+
+/**
+ * Request-time collapse for 1M+ windows (T7).
+ * Mutates the request message array in-place — NOT the stored session messages.
+ * Old tool results (age >= collapseAge) are replaced with semantic summaries.
+ */
+export function requestTimeCollapse(messages: OaiMessage[], collapseAge: number, contextWindow: number): void {
+  let currentTurn = 0
+  for (const m of messages) {
+    if (m.role === 'user') currentTurn++
+  }
+
+  let turnCounter = 0
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!
+    if (msg.role === 'user') turnCounter++
+
+    if (msg.role !== 'tool') continue
+    const turnAge = currentTurn - turnCounter
+    if (turnAge < collapseAge) continue
+    if (msg.content.length < 200) continue
+    if (msg.content.startsWith('[collapsed ') || msg.content.startsWith('[storm-collapsed') || msg.content.startsWith('[tiered-')) continue
+
+    const toolName = inferToolName(messages, i)
+    const collapsed = collapseToolResult(toolName, msg.content, turnAge, contextWindow)
+    if (collapsed) {
+      messages[i] = { ...msg, content: collapsed.summary }
+    }
+  }
+}
+
+function inferToolName(messages: OaiMessage[], toolMsgIndex: number): string {
+  const toolMsg = messages[toolMsgIndex]!
+  if (toolMsg.role !== 'tool' || !('tool_call_id' in toolMsg)) return 'unknown'
+  const toolCallId = (toolMsg as { tool_call_id?: string }).tool_call_id
+  if (!toolCallId) return 'unknown'
+
+  for (let j = toolMsgIndex - 1; j >= 0; j--) {
+    const prev = messages[j]!
+    if (prev.role !== 'assistant') continue
+    const tc = (prev as { tool_calls?: Array<{ id: string; function?: { name: string } }> }).tool_calls
+    if (!tc) continue
+    const match = tc.find(c => c.id === toolCallId)
+    if (match?.function?.name) return match.function.name
+  }
+  return 'unknown'
 }
