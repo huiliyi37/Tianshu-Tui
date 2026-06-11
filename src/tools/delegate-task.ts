@@ -6,6 +6,7 @@ import { profileRegistry } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { progressiveTimeout } from '../agent/timeout-ladder.js'
+import { createActivityStreamer } from './worker-activity-stream.js'
 
 export interface DelegateTaskCoordinator {
   delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
@@ -94,6 +95,9 @@ export function createDelegateTaskTool(
           symbols: parsed.data.symbols,
         },
         reviewDepth: params.reviewDepth,
+        delegationDepth: params.delegationDepth ?? 0,
+        // T9 P3: stream live worker progress into the tool card.
+        onActivity: params.onOutput ? createActivityStreamer(params.onOutput) : undefined,
       }, params.abortSignal)
 
       // Extract worker findings into claim store

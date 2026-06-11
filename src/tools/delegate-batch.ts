@@ -7,6 +7,7 @@ import { profileRegistry } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { progressiveTimeout } from '../agent/timeout-ladder.js'
+import { createActivityStreamer } from './worker-activity-stream.js'
 
 export interface DelegateBatchCoordinator {
   delegateBatch(
@@ -149,6 +150,8 @@ export function createDelegateBatchTool(
         }
       }
 
+      // T9 P3: one shared streamer — events from all workers interleave with labels.
+      const streamActivity = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
       const requests: DelegationRequest[] = parsed.data.tasks.map((t, i) => ({
         parentTurnId: `${params.toolUseId}:${i}`,
         objective: t.objective,
@@ -156,6 +159,8 @@ export function createDelegateBatchTool(
         profile: (t.profile ?? 'code_scout') as import('../agent/work-order.js').WorkerProfile,
         scope: { files: t.files, symbols: t.symbols },
         reviewDepth: params.reviewDepth,
+        delegationDepth: params.delegationDepth ?? 0,
+        onActivity: streamActivity,
       }))
 
       // Progressive task cap: trim to the allowed slice on early turns

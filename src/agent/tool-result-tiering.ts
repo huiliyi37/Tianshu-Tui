@@ -31,6 +31,17 @@ export function determineTier(charCount: number): TierLevel {
 }
 
 /**
+ * Convention shared with read-file.ts / prune.ts / stale-round.ts:
+ * [artifact:X] is always the LAST token of an artifact-wrapped content string.
+ */
+const TRAILING_ARTIFACT_REF = /\[artifact:([A-Za-z0-9_-]+)]\s*$/
+
+/** Extract an existing trailing artifact reference from tool result content. */
+export function extractTrailingArtifactId(content: string): string | undefined {
+  return TRAILING_ARTIFACT_REF.exec(content)?.[1]
+}
+
+/**
  * Tier a tool result: for small results, return as-is.
  * For larger results, save to artifact store and return a compact inline summary.
  *
@@ -39,6 +50,10 @@ export function determineTier(charCount: number): TierLevel {
  * @param target      Target path/identifier for artifact indexing
  * @param store       Artifact store for persisting large results
  * @param contextWindow Context window size
+ * @param existingArtifactId Artifact already persisted by the tool itself
+ *   (e.g. grep/bash artifact wrapping). Reused instead of saving a second
+ *   copy — the tool-level artifact holds the untruncated original, while
+ *   the content seen here may already be budget-truncated.
  */
 export async function tierToolResult(
   toolName: string,
@@ -46,6 +61,7 @@ export async function tierToolResult(
   target: string,
   store: ArtifactStore | undefined,
   contextWindow: number,
+  existingArtifactId?: string,
 ): Promise<TieringResult> {
   if (contextWindow < 500_000) {
     return { content, tier: 0, originalChars: content.length }
@@ -57,8 +73,8 @@ export async function tierToolResult(
     return { content, tier: 0, originalChars: content.length }
   }
 
-  let artifactId: string | undefined
-  if (store) {
+  let artifactId: string | undefined = existingArtifactId
+  if (!artifactId && store) {
     try {
       artifactId = await store.save({
         tool: toolName,

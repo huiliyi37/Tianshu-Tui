@@ -26,7 +26,7 @@ import type { LspManager } from '../lsp/manager.js'
 import { classifyFailure } from './failure-classifier.js'
 import { ToolAccumulator } from './tool-accumulator.js'
 import { getToolStormLevel, type ToolStormLevel } from './trace-store.js'
-import { tierToolResult } from './tool-result-tiering.js'
+import { extractTrailingArtifactId, tierToolResult } from './tool-result-tiering.js'
 import {
   getInterventionLevel,
   recordPrediction,
@@ -285,20 +285,6 @@ export class ToolExecutionController {
      }
    }
 
-    // Drain steer guidance ONLY when there is a tool_result to attach it to.
-    // onSteerDrain() empties the buffer, so calling it without a valid injection
-    // target (e.g. abort broke the loop before any result, or last block is not
-    // a tool_result) would discard the guidance. Peek the target first; if absent,
-    // leave the buffer intact so the next tool-using turn injects it.
-    const lastResult = toolResults.length > 0 ? toolResults[toolResults.length - 1]! : null
-    if (lastResult && lastResult.type === 'tool_result') {
-      const steerText = input.callbacks.onSteerDrain?.()
-      if (steerText) {
-        const existing = typeof lastResult.content === 'string' ? lastResult.content : ''
-        toolResults[toolResults.length - 1] = { ...lastResult, content: existing + '\n\n' + steerText }
-      }
-    }
-
     // Enforce per-tool-type cumulative budget before aggregate budget.
     const budgetEntries = toolResults
       .map((r, i) => r.type === 'tool_result'
@@ -400,26 +386,57 @@ export class ToolExecutionController {
     }
 
     // ── T10: Tool Result Tiering for 1M+ windows ──
+    // Read-path tools are exempt: read_file/read_section have their own cap
+    // chain (model-read-cap → artifact wrapping → per-call/turn read budgets →
+    // context-pressure truncation) and deliberately keep full source inline so
+    // the model can construct exact edit_file old_string matches. Tier-1's
+    // head/tail summary on a read result breaks the read→edit workflow.
+    const TIERING_EXEMPT_TOOLS = new Set(['read_file', 'read_section'])
     const ctxWin = this.deps.config.contextWindow
     if (ctxWin >= 500_000) {
       for (let i = 0; i < toolResults.length; i++) {
         const tr = toolResults[i]!
         if (tr.type !== 'tool_result') continue
-        const content = typeof tr.content === 'string' ? tr.content : ''
         const tu = input.toolUses[i]
+        const toolName = tu?.name ?? 'unknown'
+        if (TIERING_EXEMPT_TOOLS.has(toolName)) continue
+        const content = typeof tr.content === 'string' ? tr.content : ''
         const target = typeof tu?.input?.file_path === 'string' ? tu.input.file_path
           : typeof tu?.input?.path === 'string' ? tu.input.path
-          : tu?.name ?? 'unknown'
+          : toolName
+        // Reuse a tool-level artifact when present — it holds the untruncated
+        // original, and saving a second (already budget-truncated) copy both
+        // wastes disk and shadows the better artifact.
+        const existingArtifactId = extractTrailingArtifactId(content)
         const tiered = await tierToolResult(
-          tu?.name ?? 'unknown',
+          toolName,
           content,
           String(target),
           this.deps.artifactStore,
           ctxWin,
+          existingArtifactId,
         )
         if (tiered.tier > 0) {
           toolResults[i] = { ...tr, content: tiered.content }
         }
+      }
+    }
+
+    // Drain steer guidance ONLY when there is a tool_result to attach it to.
+    // onSteerDrain() empties the buffer, so calling it without a valid injection
+    // target (e.g. abort broke the loop before any result, or last block is not
+    // a tool_result) would discard the guidance. Peek the target first; if absent,
+    // leave the buffer intact so the next tool-using turn injects it.
+    //
+    // Runs AFTER budgets/storm-guard/tiering: those transforms replace content
+    // wholesale (tier-2 minimal, budget-summarized), and appending steer text
+    // before them silently dropped the user's guidance for large results.
+    const lastResult = toolResults.length > 0 ? toolResults[toolResults.length - 1]! : null
+    if (lastResult && lastResult.type === 'tool_result') {
+      const steerText = input.callbacks.onSteerDrain?.()
+      if (steerText) {
+        const existing = typeof lastResult.content === 'string' ? lastResult.content : ''
+        toolResults[toolResults.length - 1] = { ...lastResult, content: existing + '\n\n' + steerText }
       }
     }
 

@@ -30,12 +30,17 @@ export interface AgentConfig {
   contextWindow: number
   compact: CompactionConfig
   providerProfile?: ProviderProfile
+  /** Provider registry key (e.g. 'deepseek') — used as ProviderHealthTracker id. */
+  providerName?: string
   /** Primary model's StreamClient — reused for LLM compaction via Forked Agent pattern. */
   primaryClient?: StreamClient
   approvalMode?: ApprovalMode
   sessionId?: string
   /** Review-router re-entrancy depth. Worker contexts spawned by review routing use depth > 0. */
   reviewDepth?: number
+  /** B3: delegation nesting depth of THIS agent (primary=0, worker=1, grand-worker=2).
+   *  Propagated into delegate tool calls so the coordinator can cap recursion. */
+  delegationDepth?: number
   /** Optional session registry for cross-session event communication. */
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   transcriptPath?: string
@@ -88,6 +93,9 @@ export interface AgentConfig {
   fsWatcherEnabled?: boolean
   /** Optional TaskLedger for B1 ownership tracking — records file_read/file_write/tool_exec events. */
   taskLedger?: import('./task-ledger.js').TaskLedger
+  /** Track 3: 权威交付门禁（v2 GREEN/YELLOW/RED）。接入后 evidence badge 与
+   *  收敛检测以 v2 状态为准；缺省回退 v1（EvidenceState 推导）。 */
+  deliveryGateV2?: (currentDirtyFiles?: string[]) => import('./delivery-gate-v2.js').DeliveryGateResult
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. Disabled by default. */
   songlineEnabled?: boolean
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). Disabled by default. */

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { determineTier, tierToolResult, type TierLevel, type TieringResult } from '../tool-result-tiering.js'
+import { determineTier, extractTrailingArtifactId, tierToolResult, type TierLevel, type TieringResult } from '../tool-result-tiering.js'
 
 describe('tool-result-tiering', () => {
   describe('determineTier', () => {
@@ -89,6 +89,36 @@ describe('tool-result-tiering', () => {
 
       assert.equal(result.tier, 0)
       assert.equal(result.content, lines)
+    })
+
+    it('reuses an existing tool-level artifact instead of saving a second copy', async () => {
+      let saveCalls = 0
+      const mockStore = {
+        save: async () => {
+          saveCalls++
+          return 'artifact-dup'
+        },
+      } as any
+
+      const lines = Array.from({ length: 500 }, (_, i) => `line ${i}: ${'data'.repeat(10)}`).join('\n')
+      const result = await tierToolResult('grep', lines, 'src/', mockStore, 1_000_000, 'artifact-orig')
+
+      assert.equal(result.tier, 1)
+      assert.equal(result.artifactId, 'artifact-orig')
+      assert.ok(result.content.includes('[artifact:artifact-orig]'))
+      assert.equal(saveCalls, 0)
+    })
+  })
+
+  describe('extractTrailingArtifactId', () => {
+    it('extracts a trailing artifact reference', () => {
+      assert.equal(extractTrailingArtifactId('big content\n[artifact:abc-123]'), 'abc-123')
+      assert.equal(extractTrailingArtifactId('big content\n[artifact:abc-123]\n'), 'abc-123')
+    })
+
+    it('returns undefined when the reference is not trailing', () => {
+      assert.equal(extractTrailingArtifactId('[artifact:abc-123] then more text'), undefined)
+      assert.equal(extractTrailingArtifactId('no artifact here'), undefined)
     })
   })
 })

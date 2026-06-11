@@ -97,6 +97,9 @@ export const workOrderSchema = z.object({
   domain: domainAreaSchema.optional(),
   workerCwd: z.string().optional(),
   reviewDepth: z.number().int().min(0).optional(),
+  /** B3: delegation nesting depth (0 = spawned by primary). Capped by the
+   *  coordinator at MAX_DELEGATION_DEPTH — nesting allowed but gated. */
+  delegationDepth: z.number().int().min(0).default(0),
   /** Star domain authority for cognitive injection (V3 Component A). */
   authority: z.string().optional(),
   /** Team planner risk tier for shadow-only model tier recommendation. */
@@ -192,6 +195,8 @@ export interface CreateReadOnlyWorkOrderInput {
   domain?: DomainArea
   /** Review-router re-entrancy depth propagated across delegation boundaries. */
   reviewDepth?: number
+  /** B3: delegation nesting depth (0 = spawned by primary). */
+  delegationDepth?: number
   /** Star domain authority for cognitive injection (V3 Component A). */
   authority?: string
   /** Team planner risk tier for shadow-only model tier recommendation. */
@@ -253,6 +258,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     },
     domain: input.domain,
     reviewDepth: input.reviewDepth,
+    delegationDepth: input.delegationDepth ?? 0,
     authority: input.authority,
     riskTier: input.riskTier,
   })
@@ -294,6 +300,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     },
     domain: input.domain,
     reviewDepth: input.reviewDepth,
+    delegationDepth: input.delegationDepth ?? 0,
     authority: input.authority,
     riskTier: input.riskTier,
   })

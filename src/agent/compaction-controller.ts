@@ -1,6 +1,6 @@
 import type { StreamClient } from '../api/stream-client.js'
 import type { OaiMessage } from '../api/oai-types.js'
-import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
+import { CACHE_ANCHOR_MESSAGES, summaryOutputBudgetChars } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 
 import { debugLog } from '../utils/debug.js'
@@ -209,6 +209,15 @@ export interface CompactionControllerDeps {
   contextWindow: number
   providerProfile?: ProviderProfile
   primaryClient?: StreamClient
+  /**
+   * When false, discretionary compaction (ratio tiers, 1M partial/full LLM
+   * compact) is skipped entirely. Emergency paths — session split and the
+   * 95% context ceiling — stay active regardless, because exceeding the
+   * window is a hard API failure, not a tuning preference.
+   * Worker sessions pass `compact.enabled: false` and previously relied on
+   * this being silently ignored.
+   */
+  compactEnabled?: boolean
   pressureMonitor: PressureMonitor
   getTrajectoryEntries: () => TrajectoryEntry[]
   getStreamedText: () => string
@@ -265,6 +274,10 @@ export class CompactionController {
   }
 
   async maybeCompact(input: MaybeCompactInput): Promise<MaybeCompactResult> {
+    if (this.deps.compactEnabled === false) {
+      return { failures: input.failures, compacted: false }
+    }
+
     const messages = this.deps.session.getMessages()
 
     // Prune removed (C4): pruneStaleToolResults was called here solely for debugLog
@@ -355,7 +368,9 @@ export class CompactionController {
       return { failures: input.failures, compacted: false }
     }
 
-    if (this.deps.cacheAdvisor?.shouldDelayCompact(compactDecision.tier)) {
+    // Track 4: 显式 cache-miss 成本 vs 压缩收益权衡 — 传入压力上下文，
+    // 热缓存只在低压力时挡住压缩，高压力时放行（1M 余量 > 前缀重建成本）。
+    if (this.deps.cacheAdvisor?.shouldDelayCompact(compactDecision.tier, { estimatedTokens, contextWindow })) {
       return { failures: input.failures, compacted: false }
     }
 
@@ -690,6 +705,7 @@ export class CompactionController {
     debugLog(`[partial-compact] anchor=${anchor.length} old=${oldZone.length} recent=${recentZone.length}`)
 
     const userIntentChain = extractUserIntentChain(oldZone)
+    const partialBudget = summaryOutputBudgetChars(this.deps.contextWindow).partial
     const summaryPrompt: OaiMessage = {
       role: 'user',
       content: [
@@ -708,7 +724,7 @@ export class CompactionController {
         '- 工具输出详情（只保留结论）',
         '- 探索性搜索的中间过程',
         '',
-        '控制在 2000 字以内。只输出总结，不要调用工具。',
+        `控制在 ${partialBudget} 字以内。只输出总结，不要调用工具。`,
       ].join('\n'),
     }
 
@@ -804,7 +820,7 @@ export class CompactionController {
             '- 探索性搜索的中间过程',
             '- 重复的状态汇报',
             '',
-            '只输出总结内容，不要调用工具。格式用 markdown，控制在 3000 字以内。',
+            `只输出总结内容，不要调用工具。格式用 markdown，控制在 ${summaryOutputBudgetChars(this.deps.contextWindow).full} 字以内。`,
           ].join('\n'),
         },
       ]

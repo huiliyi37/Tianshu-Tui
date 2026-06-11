@@ -92,16 +92,16 @@ describe('DELEGATE_TASK_TOOL', () => {
   describe('progressive timeout', () => {
     const base = { input: {}, toolUseId: 'tu', cwd: '/tmp' }
 
-    it('returns 30s for turn 0-1 (cold open)', () => {
+    it('returns 60s for turn 0-1 (cold open) — arithmetic curve', () => {
       const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 30_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 30_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 60_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 60_000)
     })
 
-    it('returns 75s for turn 2-4 (warming)', () => {
+    it('returns 120s for turn 2-4 (warming) — arithmetic curve', () => {
       const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 75_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 75_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 120_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 120_000)
     })
 
     it('returns 180s for turn 5+ (mature)', () => {

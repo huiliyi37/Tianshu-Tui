@@ -25,6 +25,9 @@ export interface ToolCallParams {
   sessionTurnCount?: number
   /** Review-router re-entrancy depth propagated into worker contexts. */
   reviewDepth?: number
+  /** B3: delegation nesting depth of the calling agent (primary=0, worker=1).
+   *  Delegate tools forward this so the coordinator can enforce the depth cap. */
+  delegationDepth?: number
   /** AbortSignal from the tool pipeline — fires when the tool-level timeout
    *  rejects. Delegate tools propagate this to the coordinator so zombie
    *  workers are cleaned up immediately. */

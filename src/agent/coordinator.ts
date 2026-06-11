@@ -3,7 +3,7 @@ import { recommendModelForTask } from '../model/capability.js'
 import type { ProviderConfig } from '../config/schema.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import { ProviderHealthTracker } from './provider-health.js'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { debugLog } from '../utils/debug.js'
@@ -11,6 +11,7 @@ import {
   createReadOnlyWorkOrder,
   createWriteWorkOrder,
   mapWorkOrderKindToCapabilityTask,
+  parseWorkerResult,
   READ_ONLY_WORKER_TOOLS,
   WRITE_WORKER_TOOLS,
   type AggregationPolicy,
@@ -20,9 +21,9 @@ import {
   type WorkerResult,
   type WorkOrderScope,
 } from './work-order.js'
-import { capBudgetAtTool } from './timeout-ladder.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
 import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
+import { WorkerLiveness, EXPLORE_STALL_MS, WRITE_STALL_MS } from './worker-liveness.js'
 import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
 import { WorktreeCoordinator } from './worktree-coordinator.js'
 import { classifyProfile } from './coordination-policy.js'
@@ -49,6 +50,32 @@ import {
   persistGatedInfluenceAudit,
   type GatedInfluenceAuditEvent,
 } from './gated-influence-audit.js'
+import { buildModelPolicyCandidates, selectModelPolicy } from './model-policy-selection.js'
+import { buildHistoricalModelRewards } from './model-reward-summary.js'
+import type { EFEComponents } from './prediction-error.js'
+import type { Sensorium } from './sensorium.js'
+
+/** Per-turn free-energy signals pulled from the primary loop at delegation time. */
+export interface EFERoutingSignals {
+  efe: EFEComponents
+  sensorium: Pick<Sensorium, 'complexity' | 'pressure' | 'confidence' | 'stability'>
+}
+
+export interface EFERoutingConfig {
+  /** Gated apply. When false, EFE ranking runs shadow-only (audit events, no dispatch effect). */
+  enabled: boolean
+  /** Pull latest EFE + sensorium from the primary loop. Undefined → skip EFE routing this call. */
+  getSignals: () => EFERoutingSignals | undefined
+}
+
+/** Real-time activity event from an in-flight worker (T9 P3 实时上行). */
+export interface WorkerActivityEvent {
+  workOrderId: string
+  profile: string
+  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result'
+  /** Tool name for tool events; text delta for text/thinking. */
+  detail?: string
+}
 
 export interface DelegationRequest {
   parentTurnId: string
@@ -58,6 +85,13 @@ export interface DelegationRequest {
   scope: WorkOrderScope
   /** Review-router re-entrancy depth to pass into worker tool contexts. */
   reviewDepth?: number
+  /** B3: delegation nesting depth (0 = primary → worker). Requests at
+   *  MAX_DELEGATION_DEPTH or deeper are rejected as blocked. */
+  delegationDepth?: number
+  /** Real-time worker activity upstream (T9 P3). Fired for every worker
+   *  text/thinking/tool event so the calling tool can stream live progress
+   *  into the UI tool card. NOT serialized into the WorkOrder. */
+  onActivity?: (event: WorkerActivityEvent) => void
   /** Work order IDs this task depends on — propagated to WorkOrder.dependencies. */
   dependencies?: string[]
   /** Logical group identifier for related tasks (e.g. team wave). */
@@ -139,6 +173,16 @@ export interface DelegationCoordinatorConfig {
   modelTierBanditEnabled?: boolean
   /** Append-only unified gated influence audit store. Defaults to modelTierShadowStore when omitted. */
   gatedInfluenceAuditStore?: import('./gated-influence-audit.js').GatedInfluenceAuditStore | null
+  /** Track 1: EFE × provider-health worker model routing.
+   *  Always audited; applied to dispatch only when enabled (explicit user routing
+   *  config still takes precedence over EFE). */
+  efeRouting?: EFERoutingConfig
+  /** A4: silence tolerance before an in-flight worker is considered stalled
+   *  and aborted by the sweep. Defaults to EXPLORE_STALL_MS (write workers
+   *  get WRITE_STALL_MS). Workers die for silence, never for duration. */
+  workerStallMs?: number
+  /** Injectable clock for liveness tests. */
+  livenessClock?: () => number
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -172,17 +216,137 @@ function persistWorkerResult(result: WorkerResult): void {
   }
 }
 
+/** B1: read back a previously persisted worker result for resume/inspection.
+ *  The persistWorkerResult sink used to have no reader (write-only grave).
+ *  Returns null on cold miss or unparseable content — callers must handle it. */
+export function loadPersistedResult(orderId: string, homeDir = homedir()): WorkerResult | null {
+  try {
+    const path = join(homeDir, '.rivet', 'subagents', `${orderId}.json`)
+    if (!existsSync(path)) return null
+    return parseWorkerResult(readFileSync(path, 'utf-8'), orderId)
+  } catch {
+    return null
+  }
+}
+
+/** B3: max delegation nesting depth — primary(0) → worker(1) → grand-worker(2 ✗).
+ *  Aligned with Cursor's "nested but gated" stance rather than Claude's full ban:
+ *  planner profiles legitimately think-then-delegate, but unbounded recursion
+ *  must be impossible. */
+export const MAX_DELEGATION_DEPTH = 2
+
+/** B2: background (async) work order handle — Cursor `is_background` analog.
+ *  The parent is NOT blocked; results are collected later by id (and are also
+ *  persisted to ~/.rivet/subagents/ by the normal dispatch path). */
+export interface BackgroundRunHandle {
+  id: string
+  objective: string
+  startedAt: number
+  status: 'running' | 'completed' | 'failed'
+  run?: CoordinatorRun
+  error?: string
+}
+
 export class DelegationCoordinator {
   private runWorker: (config: WorkerSessionConfig) => Promise<WorkerSessionRun>
   private runHands: (config: HandsSessionConfig) => Promise<HandsSessionRun>
   private state: CoordinatorState
   private collaboration: CollaborationProtocol | null
+  /** A4: per-worker silence clocks — the runtime primary gate. */
+  private readonly liveness: WorkerLiveness
+  /** A4: per-order controllers so a stall sweep aborts only the wedged worker. */
+  private readonly orderControllers = new Map<string, AbortController>()
+  /** T9 P3: per-order real-time activity upstream (request callback survives
+   *  the zod request→order conversion via this side table). */
+  private readonly activityUpstream = new Map<string, (event: WorkerActivityEvent) => void>()
+  private stallSweep: ReturnType<typeof setInterval> | null = null
 
   constructor(private config: DelegationCoordinatorConfig) {
     this.runWorker = config.runWorker ?? runWorkerSession
     this.runHands = config.runHands ?? runHandsSession
     this.state = new CoordinatorState(config.maxWorkers)
     this.collaboration = config.collaboration ? new CollaborationProtocol(config.collaboration) : null
+    this.liveness = new WorkerLiveness({
+      stallMs: config.workerStallMs ?? EXPLORE_STALL_MS,
+      now: config.livenessClock,
+    })
+  }
+
+  /** Lazily start the stall sweep; stop it when no workers are in flight. */
+  private ensureStallSweep(): void {
+    if (this.stallSweep) return
+    const stallMs = this.config.workerStallMs ?? EXPLORE_STALL_MS
+    const intervalMs = Math.min(Math.max(Math.floor(stallMs / 2), 50), 15_000)
+    const sweep = setInterval(() => {
+      for (const id of this.liveness.stalled()) {
+        // Abort ONLY the wedged worker — its processNext falls to catch →
+        // workerFailureResult; Promise.all(inflight) is unaffected.
+        this.orderControllers.get(id)?.abort()
+        this.liveness.unregister(id)
+      }
+      if (this.liveness.size() === 0) this.stopStallSweep()
+    }, intervalMs)
+    sweep.unref() // never keep the process alive
+    this.stallSweep = sweep
+  }
+
+  private stopStallSweep(): void {
+    if (this.stallSweep) {
+      clearInterval(this.stallSweep)
+      this.stallSweep = null
+    }
+  }
+
+  // ── B2: background (async) work orders ──
+
+  private readonly backgroundRuns = new Map<string, BackgroundRunHandle>()
+  private readonly backgroundPromises = new Map<string, Promise<CoordinatorRun>>()
+
+  /** Dispatch a worker WITHOUT blocking the caller. Returns a handle id —
+   *  poll with getBackgroundRun() or await with waitBackgroundRun(). */
+  delegateBackground(request: DelegationRequest, abortSignal?: AbortSignal): string {
+    const id = `bg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    const handle: BackgroundRunHandle = {
+      id,
+      objective: request.objective,
+      startedAt: Date.now(),
+      status: 'running',
+    }
+    this.backgroundRuns.set(id, handle)
+    const promise = this.delegate(request, abortSignal).then(
+      (run) => {
+        handle.status = 'completed'
+        handle.run = run
+        return run
+      },
+      (error: unknown) => {
+        handle.status = 'failed'
+        handle.error = error instanceof Error ? error.message : String(error)
+        throw error
+      },
+    )
+    // Swallow unhandled rejection — the error is captured on the handle and
+    // re-surfaces when the caller awaits waitBackgroundRun().
+    promise.catch(() => {})
+    this.backgroundPromises.set(id, promise)
+    return id
+  }
+
+  /** Non-blocking status check for a background run. */
+  getBackgroundRun(id: string): BackgroundRunHandle | undefined {
+    return this.backgroundRuns.get(id)
+  }
+
+  /** Await a background run's completion (rethrows its failure). */
+  async waitBackgroundRun(id: string): Promise<CoordinatorRun> {
+    const p = this.backgroundPromises.get(id)
+    if (!p) throw new Error(`Unknown background run: ${id}`)
+    return p
+  }
+
+  /** All background handles, newest first. */
+  listBackgroundRuns(): BackgroundRunHandle[] {
+    return [...this.backgroundRuns.values()].sort((a, b) => b.startedAt - a.startedAt)
   }
 
   getState(): CoordinatorState {
@@ -222,9 +386,118 @@ export class DelegationCoordinator {
         }
       }
     }
+    // Track 1: EFE × provider-health routing — consulted after explicit user
+    // routing (user intent wins) but before the static capability heuristic.
+    const efeChoice = this.selectModelByEFE(task, cards)
+    if (efeChoice) {
+      debugLog(`[worker-model] efe-routing: task=${task} → ${efeChoice.model}`)
+      return efeChoice
+    }
+
     const fallback = recommendModelForTask(task, cards)
     debugLog(`[worker-model] fallback: task=${task} → ${fallback.model} (routing=${this.config.routing ? 'configured' : 'none'})`)
     return fallback
+  }
+
+  /**
+   * EFE model selection over the candidate cards, re-ranked by Physarum
+   * provider health: cold-tier providers are excluded, degraded providers pay
+   * an EFE penalty proportional to lost weight. Every evaluation emits a
+   * gated-influence audit event; dispatch is only affected when
+   * `efeRouting.enabled` is true (shadow→gated pattern).
+   */
+  private selectModelByEFE(task: CapabilityTask, cards: ModelCapabilityCard[]): ModelCapabilityCard | undefined {
+    const cfg = this.config.efeRouting
+    if (!cfg) return undefined
+
+    let signals: EFERoutingSignals | undefined
+    try {
+      signals = cfg.getSignals()
+    } catch {
+      return undefined
+    }
+    if (!signals) return undefined
+
+    const weights = this.config.providerHealth?.getWeights() ?? []
+    const healthFor = (model: string) => {
+      const providerId = this.providerIdForModel(model)
+      if (!providerId) return undefined
+      return weights.find(h => h.providerId === providerId)
+    }
+
+    const warmOrHot = cards.filter(card => healthFor(card.model)?.tier !== 'cold')
+    const pool = warmOrHot.length > 0 ? warmOrHot : cards
+
+    let best: { model: string; expectedFreeEnergy: number; adjustedG: number } | undefined
+    try {
+      const historicalRewards = buildHistoricalModelRewards(this.config.modelTierShadowStore)
+      const ranked = selectModelPolicy({
+        candidates: buildModelPolicyCandidates(pool, { historicalRewards }),
+        efe: signals.efe,
+        sensorium: signals.sensorium,
+      })
+      if (ranked.length === 0) return undefined
+
+      const adjusted = ranked
+        .map(sel => {
+          const h = healthFor(sel.model)
+          const penalty = h ? 0.25 * (1 - h.weight) : 0
+          return { model: sel.model, expectedFreeEnergy: sel.expectedFreeEnergy, adjustedG: sel.expectedFreeEnergy + penalty }
+        })
+        .sort((a, b) => a.adjustedG - b.adjustedG || a.model.localeCompare(b.model))
+      best = adjusted[0]!
+    } catch {
+      return undefined
+    }
+
+    const applied = cfg.enabled
+    persistGatedInfluenceAudit(
+      this.config.gatedInfluenceAuditStore ?? this.config.modelTierShadowStore,
+      buildGatedInfluenceAuditEvent({
+        source: 'model_routing',
+        sessionId: this.config.sessionId ?? 'unknown',
+        targetId: `efe_routing:${task}`,
+        gateOpen: cfg.enabled,
+        applied,
+        reason: applied
+          ? `EFE routing selected ${best.model} (G=${best.expectedFreeEnergy}, health-adjusted=${best.adjustedG})`
+          : 'shadow only — efeRouting.enabled=false',
+        evidenceWindow: {
+          task,
+          selectedModel: best.model,
+          expectedFreeEnergy: best.expectedFreeEnergy,
+          healthAdjustedG: best.adjustedG,
+          candidateCount: pool.length,
+          coldExcluded: cards.length - pool.length,
+        },
+      }),
+    )
+
+    if (!applied) return undefined
+    return cards.find(c => c.model === best.model)
+  }
+
+  /** Resolve which routing provider serves a given model id (or alias). */
+  private providerIdForModel(modelId: string): string | undefined {
+    const providers = this.config.routing?.providers
+    if (!providers) return undefined
+    for (const [id, prov] of Object.entries(providers)) {
+      if (prov.models.some(m => m.id === modelId || m.alias === modelId)) return id
+    }
+    return undefined
+  }
+
+  /** Feed worker run outcomes into the Physarum provider health tracker.
+   *  Only API/runtime-level outcomes count — a worker that completes with a
+   *  failed task verdict still proves the provider is healthy. */
+  private recordProviderOutcome(modelId: string, ok: boolean): void {
+    const health = this.config.providerHealth
+    if (!health) return
+    const providerId = this.providerIdForModel(modelId)
+    if (!providerId) return
+    health.registerProvider(providerId)
+    if (ok) health.recordSuccess(providerId)
+    else health.recordFailure(providerId)
   }
 
   private buildTierRecommendation(order: WorkOrder): ModelTierRecommendation {
@@ -266,12 +539,34 @@ export class DelegationCoordinator {
     return { candidate, gate }
   }
 
-  async delegate(request: DelegationRequest, abortSignal?: AbortSignal, toolTimeoutMs?: number): Promise<CoordinatorRun> {
+  async delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun> {
     // Per-call abort signal override — allows the tool pipeline to propagate
     // its timeout signal to the coordinator without mutating config.
     const savedSignal = this.config.abortSignal
     if (abortSignal) this.config.abortSignal = abortSignal
     try {
+      // B3: hard depth cap — nesting allowed (planner workers think-then-
+      // delegate) but bounded. Reject, don't throw: the requesting worker
+      // gets a structured blocked result it can act on.
+      const depth = request.delegationDepth ?? 0
+      if (depth >= MAX_DELEGATION_DEPTH) {
+        return {
+          status: 'completed',
+          results: [{
+            workOrderId: `depth-capped-${request.parentTurnId}`,
+            status: 'blocked',
+            summary: `Delegation rejected: max delegation depth (${MAX_DELEGATION_DEPTH}) reached — do the work inline instead of delegating further`,
+            findings: [],
+            artifacts: [],
+            changedFiles: [],
+            risks: ['unbounded delegation recursion prevented'],
+            nextActions: ['Perform the objective directly in this worker session'],
+            evidenceStatus: 'blocked',
+          }],
+          packet: await buildPrimaryWorkerPacket([]),
+        }
+      }
+
       if (!shouldDelegateObjective(request.objective, request.scope)) {
         return {
           status: 'skipped',
@@ -296,6 +591,7 @@ export class DelegationCoordinator {
             objective: request.objective,
             scope: request.scope,
             reviewDepth: request.reviewDepth,
+            delegationDepth: (request.delegationDepth ?? 0) + 1,
             dependencies: request.dependencies,
             authority: request.authority,
             riskTier: request.riskTier,
@@ -308,16 +604,14 @@ export class DelegationCoordinator {
             objective: request.objective,
             scope: request.scope,
             reviewDepth: request.reviewDepth,
+            delegationDepth: (request.delegationDepth ?? 0) + 1,
             dependencies: request.dependencies,
             authority: request.authority,
             riskTier: request.riskTier,
           })
 
-      // Ladder invariant: cap worker budget at tool timeout so the tool
-      // never aborts a worker mid-flight (budget ≤ tool).
-      if (toolTimeoutMs !== undefined && order.budget.timeoutMs > toolTimeoutMs) {
-        order.budget.timeoutMs = toolTimeoutMs
-      }
+      // T9 P3: callbacks don't survive zod parsing — stash by order id.
+      if (request.onActivity) this.activityUpstream.set(order.id, request.onActivity)
       return await this.delegateOrder(order)
     } finally {
       this.config.abortSignal = savedSignal
@@ -407,9 +701,30 @@ export class DelegationCoordinator {
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
     workerConfig.reviewDepth = order.reviewDepth
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
-    // Propagate parent abort signal so worker stops immediately on abort
+
+    // A4: per-order AbortController merged with the parent signal — the stall
+    // sweep can abort ONLY this worker without touching its batch siblings,
+    // while a parent abort still kills everything.
+    const parentSignal = this.config.abortSignal
+    const orderController = new AbortController()
+    const mergedSignal = parentSignal
+      ? AbortSignal.any([parentSignal, orderController.signal])
+      : orderController.signal
+    // Propagate merged signal so worker stops immediately on abort
     // instead of waiting for its internal budget timeout (中间层 #1).
-    workerConfig.abortSignal = this.config.abortSignal
+    workerConfig.abortSignal = mergedSignal
+    // A2: worker liveness signal feeds the stall clock.
+    // T9 P3: …and fans out to the per-request real-time upstream, so the
+    // calling tool can stream live worker progress into the UI.
+    const upstreamActivity = workerConfig.onActivity
+    const requestUpstream = this.activityUpstream.get(order.id)
+    workerConfig.onActivity = (kind, detail) => {
+      this.liveness.tick(order.id)
+      upstreamActivity?.(kind, detail)
+      try {
+        requestUpstream?.({ workOrderId: order.id, profile: order.profile, kind, detail })
+      } catch { /* UI upstream must never break dispatch */ }
+    }
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
@@ -423,14 +738,21 @@ export class DelegationCoordinator {
     // IMPORTANT: wrapAbort guarantees listener cleanup. If the worker resolves
     // before the signal fires, the 'abort' listener is removed to prevent
     // accumulation across repeated delegate calls in a long session.
-    const abortSignal = this.config.abortSignal
+    const abortSignal = mergedSignal
 
     const wrapAbort = <T>(p: Promise<T>): Promise<T> => {
       if (!abortSignal) return p
       if (abortSignal.aborted) return Promise.reject(new Error('Delegation aborted: caller signal already fired'))
 
       return new Promise<T>((resolve, reject) => {
-        const onAbort = () => reject(new Error('Delegation aborted: caller signal fired'))
+        const onAbort = () => {
+          // Distinguish a stall-sweep abort (per-order controller fired, parent
+          // did not) from a caller abort — stalls ARE provider-relevant faults.
+          const stallAbort = orderController.signal.aborted && !parentSignal?.aborted
+          reject(new Error(stallAbort
+            ? `Worker ${order.id} stalled: silent past liveness tolerance — aborted by stall sweep`
+            : 'Delegation aborted: caller signal fired'))
+        }
         abortSignal.addEventListener('abort', onAbort, { once: true })
 
         p.then(
@@ -477,6 +799,12 @@ export class DelegationCoordinator {
       }
       semanticLockAcquired = true
     }
+
+    // A4: arm the stall clock only once dispatch is committed (all early
+    // blocked returns above never register, so they can't leak entries).
+    this.orderControllers.set(order.id, orderController)
+    this.liveness.register(order.id, this.config.workerStallMs ?? (isWrite ? WRITE_STALL_MS : EXPLORE_STALL_MS))
+    this.ensureStallSweep()
 
     try {
       if (role === 'hands') {
@@ -556,11 +884,26 @@ export class DelegationCoordinator {
         const workerRun = await wrapAbort(this.runWorker(workerConfig))
         run = { result: workerRun.result, transcript: workerRun.transcript }
       }
+    } catch (error) {
+      // Physarum health: worker run threw (API/runtime fault, not task outcome).
+      // Caller-initiated aborts are not the provider's fault — skip those.
+      const msg = error instanceof Error ? error.message : String(error)
+      const isAbort = (error instanceof Error && error.name === 'AbortError') || msg.includes('Delegation aborted')
+      if (!isAbort) this.recordProviderOutcome(selected.model, false)
+      throw error
     } finally {
+      // A4: stop tracking — no false stall after completion/failure.
+      this.liveness.unregister(order.id)
+      this.orderControllers.delete(order.id)
+      this.activityUpstream.delete(order.id)
+      if (this.liveness.size() === 0) this.stopStallSweep()
       if (semanticLockAcquired && this.collaboration && this.config.sessionId) {
         this.collaboration.releaseLocks(this.config.sessionId)
       }
     }
+
+    // Run completed — regardless of task verdict, the provider's API delivered.
+    this.recordProviderOutcome(selected.model, true)
 
     this.state.recordEvent({ type: run.result.status === 'passed' ? 'passed' : run.result.status === 'blocked' ? 'blocked' : 'failed', workOrderId: order.id, timestamp: Date.now() })
 
@@ -619,9 +962,27 @@ export class DelegationCoordinator {
     const savedSignal = this.config.abortSignal
     if (abortSignal) this.config.abortSignal = abortSignal
     try {
-      const runnables = requests.filter(r => shouldDelegateObjective(r.objective, r.scope))
-      if (runnables.length === 0) {
+      // B3: depth-capped requests are rejected as blocked, not silently dropped.
+      const depthCapped: WorkerResult[] = requests
+        .filter(r => (r.delegationDepth ?? 0) >= MAX_DELEGATION_DEPTH)
+        .map(r => ({
+          workOrderId: `depth-capped-${r.parentTurnId}`,
+          status: 'blocked' as const,
+          summary: `Delegation rejected: max delegation depth (${MAX_DELEGATION_DEPTH}) reached — do the work inline instead of delegating further`,
+          findings: [],
+          artifacts: [],
+          changedFiles: [],
+          risks: ['unbounded delegation recursion prevented'],
+          nextActions: ['Perform the objective directly in this worker session'],
+          evidenceStatus: 'blocked' as const,
+        }))
+      const runnables = requests.filter(r =>
+        (r.delegationDepth ?? 0) < MAX_DELEGATION_DEPTH && shouldDelegateObjective(r.objective, r.scope))
+      if (runnables.length === 0 && depthCapped.length === 0) {
         return { status: 'skipped', results: [], packet: await buildPrimaryWorkerPacket([]) }
+      }
+      if (runnables.length === 0) {
+        return { status: 'completed', results: depthCapped, packet: await buildPrimaryWorkerPacket(depthCapped) }
       }
 
     const queue = new WorkOrderQueue(this.config.maxWorkers, {
@@ -645,6 +1006,7 @@ export class DelegationCoordinator {
             objective: r.objective,
             scope: r.scope,
             reviewDepth: r.reviewDepth,
+            delegationDepth: (r.delegationDepth ?? 0) + 1,
             dependencies: r.dependencies,
             authority: r.authority,
             riskTier: r.riskTier,
@@ -657,12 +1019,15 @@ export class DelegationCoordinator {
             objective: r.objective,
             scope: r.scope,
             reviewDepth: r.reviewDepth,
+            delegationDepth: (r.delegationDepth ?? 0) + 1,
             dependencies: r.dependencies,
             authority: r.authority,
             riskTier: r.riskTier,
           })
       if (queue.enqueue(order)) {
         orders.push(order)
+        // T9 P3: callbacks don't survive zod parsing — stash by order id.
+        if (r.onActivity) this.activityUpstream.set(order.id, r.onActivity)
       }
     }
 
@@ -706,7 +1071,7 @@ export class DelegationCoordinator {
     await Promise.all(inflight)
 
     const profileMap = new Map(orders.map(o => [o.id, o.profile] as const))
-    const aggregated = aggregateResults(allResults, policy, profileMap)
+    const aggregated = [...aggregateResults(allResults, policy, profileMap), ...depthCapped]
     // D1: persist worker results to ~/.rivet/subagents/
     for (const r of aggregated) {
       persistWorkerResult(r)

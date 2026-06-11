@@ -8,10 +8,12 @@ import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from '../agent/team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from '../agent/team-scheduler-shadow.js'
 import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from '../agent/gated-influence-audit.js'
+import { recordTeamEpisodeClosureFromStore } from '../agent/reward-loop.js'
 import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import { validatePathSafe } from './path-validate.js'
+import { createActivityStreamer } from './worker-activity-stream.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 /** Coordinator surface the team tool needs. `delegateBatch` drives planner
@@ -53,7 +55,7 @@ const inputSchema = z.object({
 
 export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string {
   const lines: string[] = [
-    `team ${summary.mode}: ${summary.dispatched} dispatched, ${summary.waves.length} waves, ${summary.blocked.length} blocked`,
+    `team ${summary.mode}: ${summary.dispatched} dispatched, ${summary.waves.length} waves, ${summary.blocked.length} blocked${summary.planCacheHit ? ' (plan cache hit — planner fanout skipped)' : ''}`,
   ]
   if (summary.waves.length > 0) {
     lines.push('Waves:')
@@ -120,6 +122,8 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
             parentTurnId: params.toolUseId,
             abortSignal: params.abortSignal,
             teamSchedulerBanditEnabled: coordinator.isTeamSchedulerBanditEnabled?.() === true,
+            // T9 P3: live worker token/tool stream into the team tool card.
+            onActivity: params.onOutput ? createActivityStreamer(params.onOutput) : undefined,
           },
           {
             delegateBatch: (requests, policy, abortSignal, onProgress) =>
@@ -143,6 +147,8 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
             },
             teamSchedulerState: coordinator.getTeamSchedulerState?.() ?? buildHistoricalTeamSchedulerState(coordinator.getTeamSchedulerRewardStore?.()),
             sessionId: coordinator.getSessionId?.(),
+            // Track 2: 计划骨架缓存与 reward 共用同一 append-only 存储。
+            planCacheStore: coordinator.getTeamSchedulerRewardStore?.(),
           },
         )
       } catch (err) {
@@ -199,6 +205,17 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
           coordinator.recordTeamSchedulerReward?.(closedTelemetry)
         } catch {
           // Scheduler reward must never affect team dispatch or review reporting.
+        }
+        // Track 2 episode 闭环：最后一波收尾时把本 objective 的全部 wave 片段
+        // 聚合成 episode，落 episode 级 reward closure —— 这是晋升闸
+        // (gated-influence-evaluation 的 reward_closure:team_episode: 前缀)
+        // 一直在等的生产者。
+        if (isLastWave) {
+          try {
+            recordTeamEpisodeClosureFromStore(coordinator.getTeamSchedulerRewardStore?.(), closedTelemetry)
+          } catch {
+            // Episode closure must never affect team dispatch or review reporting.
+          }
         }
       }
 

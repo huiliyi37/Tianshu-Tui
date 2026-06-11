@@ -59,6 +59,27 @@ describe('CompactionController', () => {
     assert.ok(session.getEstimatedTokens() < 96_000 || session.getMessages().length <= 8)
   })
 
+  it('skips discretionary compaction when compactEnabled is false', async () => {
+    const session = new SessionContext()
+    const historyMessage = 'x'.repeat(12_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+    ])
+    const controller = makeController(session, { compactEnabled: false })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+
+    assert.equal(result.compacted, false)
+    assert.equal(session.getMessages().length, 8)
+  })
+
   it('falls back to cache anchors plus resume state when over the hard ceiling', async () => {
     const session = new SessionContext()
     const huge = 'x'.repeat(80_000 * 4)

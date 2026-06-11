@@ -286,6 +286,7 @@ describe('Worker Session Isolation', () => {
     const order: WorkOrder = {
       id: 'wo-test-1',
       parentTurnId: 'turn-1',
+      delegationDepth: 1,
       kind: 'code_search',
       profile: 'code_scout',
       objective: 'Test isolation',
@@ -339,6 +340,7 @@ describe('Worker Session Isolation', () => {
     const order: WorkOrder = {
       id: 'wo-test-2',
       parentTurnId: 'turn-2',
+      delegationDepth: 1,
       kind: 'review',
       profile: 'reviewer',
       objective: 'Test repair',

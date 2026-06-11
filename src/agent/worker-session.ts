@@ -38,7 +38,14 @@ export interface WorkerSessionConfig {
   abortSignal?: AbortSignal
   /** V3 Component B: optional per-domain lessons recalled into worker prompt. */
   domainKnowledgeStore?: DomainKnowledgeStore
+  /** Liveness signal — fired on every worker activity (text/thinking/tool)
+   *  so the coordinator can feed a stall clock and the UI can show progress.
+   *  Without this the worker's internal heartbeat fires into the void.
+   *  `detail` carries the tool name for tool events and the delta for text. */
+  onActivity?: (kind: WorkerActivityKind, detail?: string) => void
 }
+
+export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result'
 
 export interface WorkerTranscript {
   text: string
@@ -67,44 +74,71 @@ function emptyTranscript(): WorkerTranscript {
   }
 }
 
-async function runOnce(agent: AgentLoop, prompt: string, transcript: WorkerTranscript): Promise<string> {
+/** Minimal agent surface needed by the retry layer — injectable so tests can
+ *  exercise the real retry→blocked path without constructing a full AgentLoop. */
+export interface RunnableAgent {
+  run: AgentLoop['run']
+}
+
+async function runOnce(
+  agent: RunnableAgent,
+  prompt: string,
+  transcript: WorkerTranscript,
+  onActivity?: (kind: WorkerActivityKind, detail?: string) => void,
+): Promise<string> {
   let text = ''
+  // AgentLoop.run never rethrows stream errors — it reports them via onError
+  // and resolves. Capture and rethrow here so the transient-retry layer above
+  // actually sees ECONNRESET/429/timeout instead of an empty transcript.
+  let streamError: Error | null = null
+  let aborted = false
   await agent.run(prompt, {
     onTextDelta: (delta) => {
       text += delta
       transcript.text += delta
+      onActivity?.('text', delta)
     },
     onThinkingDelta: (delta) => {
       transcript.thinking += delta
+      onActivity?.('thinking', delta)
     },
     onToolUse: (_id, name) => {
       transcript.toolUses.push(name)
+      onActivity?.('tool_use', name)
     },
     onToolResult: (_id, name, result, isError) => {
       transcript.toolResults.push(name)
       if (isError) transcript.errors.push(result)
+      onActivity?.('tool_result', name)
     },
     onTurnComplete: () => {},
     onError: (error) => {
       transcript.errors.push(error.message)
+      streamError = error
     },
     onAbort: () => {
       transcript.errors.push('Worker aborted')
+      aborted = true
     },
     onApprovalRequired: async () => false,
   })
+  // Aborts are a deliberate stop (budget timer / parent signal), not a fault —
+  // return the partial text and let the parse/blocked path handle it.
+  if (streamError && !aborted) throw streamError
   return text
 }
 
-/** Run a single agent turn, retrying transient network/API errors with backoff. */
-async function runOnceWithTransientRetry(
-  agent: AgentLoop,
+/** Run a single agent turn, retrying transient network/API errors with backoff.
+ *  Exported for direct testing with an injected mock agent. */
+export async function runOnceWithTransientRetry(
+  agent: RunnableAgent,
   prompt: string,
   transcript: WorkerTranscript,
+  onActivity?: (kind: WorkerActivityKind, detail?: string) => void,
 ): Promise<string> {
   for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
     try {
-      return await runOnce(agent, prompt, transcript)
+      return await runOnce(agent, prompt, transcript, onActivity)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       const classified = classifyFailure(message)
@@ -146,26 +180,44 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     compact: config.compact,
     sessionId: `worker-${config.order.id}`,
     reviewDepth: config.reviewDepth,
+    // B3: the worker knows its own nesting depth, so any delegate_task it
+    // issues carries it and the coordinator can cap recursion.
+    delegationDepth: config.order.delegationDepth,
     thetaCheckDisabled: true,
   }, session, config.cwd)
 
+  // Abort latch — once the budget timer or the parent signal fires, the
+  // session must STOP. Each agent.run() creates a fresh AbortController, so
+  // without this latch the parse-repair loop below would happily re-run an
+  // "aborted" worker with a live signal and keep issuing API calls.
+  let abortLatched = false
   const timeoutMs = config.order.budget.timeoutMs
-  const timer = setTimeout(() => agent.abort(), timeoutMs)
+  const timer = setTimeout(() => { abortLatched = true; agent.abort() }, timeoutMs)
 
   // Propagate parent abort signal — when parent aborts, worker must stop
   // immediately instead of waiting for the internal budget timeout.
   const onParentAbort = config.abortSignal
-    ? () => { agent.abort(); clearTimeout(timer) }
+    ? () => { abortLatched = true; agent.abort(); clearTimeout(timer) }
     : null
   if (onParentAbort && !config.abortSignal!.aborted) {
     config.abortSignal!.addEventListener('abort', onParentAbort, { once: true })
   }
+  const wasAborted = (): boolean => abortLatched || (config.abortSignal?.aborted ?? false)
 
   try {
     const transcript = emptyTranscript()
-    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript)
+    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity)
 
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
+      // Abort wins over repair: never re-run an aborted worker.
+      if (wasAborted()) {
+        return {
+          result: buildBlockedWorkerResult(config.order, 'Worker aborted (budget timeout or parent signal)'),
+          transcript,
+          session,
+          usage: session.getTotalUsage(),
+        }
+      }
       try {
         const result = parseWorkerResult(latestText, config.order.id)
         return {
@@ -186,7 +238,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           }
         }
         transcript.repairAttempts++
-        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript)
+        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity)
       }
     }
 

@@ -13,6 +13,7 @@ import {
 import { READ_ONLY_WORKER_TOOLS, WRITE_WORKER_TOOLS, type WorkerResult } from '../work-order.js'
 import { CollaborationProtocol } from '../collaboration-protocol.js'
 import { profileRegistry } from '../profile-registry.js'
+import { ProviderHealthTracker } from '../provider-health.js'
 
 function fakeTool(name: string): Tool {
   return {
@@ -1357,5 +1358,254 @@ describe('DelegationCoordinator', () => {
     })
 
     assert.equal(run.results[0]!.status, 'passed')
+  })
+
+  describe('provider health recording', () => {
+    const fastcorpProvider = {
+      name: 'fastcorp',
+      apiKey: 'test-key',
+      baseUrl: 'https://example.com/v1',
+      protocol: 'openai' as const,
+      capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none' as const, prefixCompletion: false },
+      thinking: 'enabled' as const,
+      maxTokens: 4096,
+      models: [{ id: 'fast-json', contextWindow: 128_000, maxTokens: 4096 }],
+      unsupported: [],
+    }
+
+    const routing = {
+      providers: { fastcorp: fastcorpProvider },
+      profiles: { cheap: { provider: 'fastcorp', model: 'fast-json' } },
+      routing: { repo_summarization: 'cheap' },
+    }
+
+    const runtimeFactory: WorkerRuntimeFactory = (order, card, workerRegistry) => ({
+      order,
+      client: {} as StreamClient,
+      promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+      toolRegistry: workerRegistry,
+      cwd: '/repo',
+      maxTurns: 2,
+      contextWindow: card.contextWindow,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+    })
+
+    it('records success on the routed provider when worker run completes', async () => {
+      const health = new ProviderHealthTracker()
+      const coordinator = new DelegationCoordinator({
+        baseToolRegistry: makeRegistry(),
+        modelCards: cards,
+        maxWorkers: 2,
+        runtimeFactory,
+        routing,
+        providerHealth: health,
+        runWorker: async config => ({
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }),
+      })
+
+      await coordinator.delegate({
+        parentTurnId: 'turn_ph1',
+        objective: 'Summarize repository documentation layout for onboarding guide.',
+        kind: 'doc_research',
+        profile: 'code_scout',
+        scope: {},
+      })
+
+      const fastcorp = health.getWeights().find(h => h.providerId === 'fastcorp')
+      assert.ok(fastcorp, 'fastcorp should be registered in the tracker')
+      assert.equal(fastcorp.consecutiveSuccesses, 1)
+      assert.equal(fastcorp.tier, 'hot')
+    })
+
+    it('records failure on the routed provider when worker run throws', async () => {
+      const health = new ProviderHealthTracker()
+      const coordinator = new DelegationCoordinator({
+        baseToolRegistry: makeRegistry(),
+        modelCards: cards,
+        maxWorkers: 2,
+        runtimeFactory,
+        routing,
+        providerHealth: health,
+        runWorker: async () => { throw new Error('502 upstream error') },
+      })
+
+      // delegate() rethrows worker errors — health recording happens inside
+      // delegateOrder before the error propagates.
+      await assert.rejects(() => coordinator.delegate({
+        parentTurnId: 'turn_ph2',
+        objective: 'Summarize repository documentation layout for onboarding guide.',
+        kind: 'doc_research',
+        profile: 'code_scout',
+        scope: {},
+      }), /502 upstream error/)
+
+      const fastcorp = health.getWeights().find(h => h.providerId === 'fastcorp')
+      assert.ok(fastcorp, 'fastcorp should be registered in the tracker')
+      assert.equal(fastcorp.consecutiveFailures, 1)
+      assert.ok(fastcorp.weight < 1, 'failure should reduce weight')
+    })
+
+    it('does not record failure when the worker run is aborted by the caller', async () => {
+      const health = new ProviderHealthTracker()
+      const coordinator = new DelegationCoordinator({
+        baseToolRegistry: makeRegistry(),
+        modelCards: cards,
+        maxWorkers: 2,
+        runtimeFactory,
+        routing,
+        providerHealth: health,
+        runWorker: async () => { throw new Error('Delegation aborted: caller signal fired') },
+      })
+
+      await assert.rejects(() => coordinator.delegate({
+        parentTurnId: 'turn_ph3',
+        objective: 'Summarize repository documentation layout for onboarding guide.',
+        kind: 'doc_research',
+        profile: 'code_scout',
+        scope: {},
+      }), /Delegation aborted/)
+
+      const fastcorp = health.getWeights().find(h => h.providerId === 'fastcorp')
+      assert.equal(fastcorp, undefined, 'abort must not touch provider health')
+    })
+  })
+
+  describe('EFE × provider-health worker routing (Track 1)', () => {
+    const neutralSignals = {
+      efe: { epistemicValue: 0.5, pragmaticValue: 0.5, noveltyBonus: 0.2, precision: 0.5 },
+      sensorium: { complexity: 0.4, pressure: 0.3, confidence: 0.6, stability: 0.8 },
+    }
+
+    function makeProvider(name: string, modelId: string) {
+      return {
+        name,
+        apiKey: 'test-key',
+        baseUrl: 'https://example.com/v1',
+        protocol: 'openai' as const,
+        capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none' as const, prefixCompletion: false },
+        thinking: 'enabled' as const,
+        maxTokens: 4096,
+        models: [{ id: modelId, contextWindow: 128_000, maxTokens: 4096 }],
+        unsupported: [],
+      }
+    }
+
+    // No routing.routing entry for repo_summarization → explicit routing never
+    // matches, so the EFE path (or static fallback) decides.
+    const routing = {
+      providers: {
+        fastcorp: makeProvider('fastcorp', 'fast-json'),
+        bigcorp: makeProvider('bigcorp', 'large-cache'),
+      },
+      profiles: {},
+      routing: {},
+    }
+
+    function makeCoordinator(opts: {
+      health?: ProviderHealthTracker
+      efeEnabled: boolean
+      auditEvents?: Array<{ kind: string; json: string }>
+      selectedModels: string[]
+    }) {
+      return new DelegationCoordinator({
+        baseToolRegistry: makeRegistry(),
+        modelCards: cards,
+        maxWorkers: 2,
+        runtimeFactory: (order, card, workerRegistry) => {
+          opts.selectedModels.push(card.model)
+          return {
+            order,
+            client: {} as StreamClient,
+            promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+            toolRegistry: workerRegistry,
+            cwd: '/repo',
+            maxTurns: 2,
+            contextWindow: card.contextWindow,
+            compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+          }
+        },
+        routing,
+        providerHealth: opts.health,
+        gatedInfluenceAuditStore: opts.auditEvents
+          ? { saveBanditState: (kind, json) => { opts.auditEvents!.push({ kind, json }) } }
+          : undefined,
+        efeRouting: { enabled: opts.efeEnabled, getSignals: () => neutralSignals },
+        runWorker: async config => ({
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }),
+      })
+    }
+
+    const delegateRequest = {
+      parentTurnId: 'turn_efe',
+      objective: 'Summarize repository documentation layout for onboarding guide.',
+      kind: 'doc_research' as const,
+      profile: 'code_scout' as const,
+      scope: {},
+    }
+
+    function coldProvider(health: ProviderHealthTracker, providerId: string) {
+      health.registerProvider(providerId)
+      // hot → warm (2 failures), warm → cold (3 more)
+      for (let i = 0; i < 5; i++) health.recordFailure(providerId)
+    }
+
+    it('shadow mode: emits audit event but dispatch uses the static fallback', async () => {
+      const selectedModels: string[] = []
+      const auditEvents: Array<{ kind: string; json: string }> = []
+      const coordinator = makeCoordinator({ efeEnabled: false, auditEvents, selectedModels })
+
+      await coordinator.delegate(delegateRequest)
+
+      // Static fallback for repo_summarization picks large-cache (strong cache + 1M context)
+      assert.equal(selectedModels[0], 'large-cache')
+
+      const efeAudit = auditEvents
+        .map(e => JSON.parse(e.json))
+        .find(e => e.targetId === 'efe_routing:repo_summarization')
+      assert.ok(efeAudit, 'EFE routing must emit an audit event even in shadow mode')
+      assert.equal(efeAudit.applied, false)
+      assert.equal(efeAudit.gateOpen, false)
+    })
+
+    it('gated mode: cold provider is excluded from the EFE pool and dispatch follows EFE', async () => {
+      const selectedModels: string[] = []
+      const health = new ProviderHealthTracker()
+      coldProvider(health, 'bigcorp') // large-cache's provider goes cold
+
+      const coordinator = makeCoordinator({ health, efeEnabled: true, selectedModels })
+      await coordinator.delegate(delegateRequest)
+
+      // Without health, fallback would pick large-cache; cold exclusion forces fast-json.
+      assert.equal(selectedModels[0], 'fast-json')
+
+      const cold = health.getWeights().find(h => h.providerId === 'bigcorp')
+      assert.equal(cold?.tier, 'cold')
+    })
+
+    it('gated mode audit event records applied=true and the selected model', async () => {
+      const selectedModels: string[] = []
+      const auditEvents: Array<{ kind: string; json: string }> = []
+      const health = new ProviderHealthTracker()
+      coldProvider(health, 'bigcorp')
+
+      const coordinator = makeCoordinator({ health, efeEnabled: true, auditEvents, selectedModels })
+      await coordinator.delegate(delegateRequest)
+
+      const efeAudit = auditEvents
+        .map(e => JSON.parse(e.json))
+        .find(e => e.targetId === 'efe_routing:repo_summarization')
+      assert.ok(efeAudit, 'gated EFE routing must emit an audit event')
+      assert.equal(efeAudit.applied, true)
+      assert.equal(efeAudit.evidenceWindow.selectedModel, 'fast-json')
+      assert.equal(efeAudit.evidenceWindow.coldExcluded, 1)
+    })
   })
 })

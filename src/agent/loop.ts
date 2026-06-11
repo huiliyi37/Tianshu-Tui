@@ -24,6 +24,7 @@ import { createTraceStore, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel } from './trace-store.js'
 import { evaluateConvergence } from './convergence-detector.js'
 import type { PhaseClass } from './convergence-detector.js'
+import { buildGateConvergenceHint } from './delivery-gate-v2.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { ModelCapabilityCard } from '../model/capability.js'
 import type { ImportGraph } from './import-graph.js'
@@ -179,6 +180,8 @@ export class AgentLoop {
   lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
   private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
+  /** Latest per-turn free-energy signals — consumed by coordinator EFE worker routing. */
+  private latestPolicySignals?: { efe: EFEComponents; sensorium: Sensorium }
   private planModeState: PlanModeState = 'off'
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
@@ -456,6 +459,7 @@ export class AgentLoop {
       contextWindow: this.config.contextWindow,
       providerProfile: this.config.providerProfile,
       primaryClient: this.config.primaryClient,
+      compactEnabled: this.config.compact.enabled,
       pressureMonitor: this.pressureMonitor,
       getTrajectoryEntries: () => this.trajectory.getEntries(),
       getStreamedText: () => this.streamedText,
@@ -1027,7 +1031,25 @@ export class AgentLoop {
       requestThetaCheck(this, reason);
   }
 
+  /** Physarum provider health: feed stream outcomes into the tracker.
+   *  Success slowly warms the provider; failure rapidly cools it (4x asymmetry).
+   *  Degradation ratio is consumed by sensorium stability; cold tiers are
+   *  skipped by coordinator worker routing. */
+  private recordProviderOutcome(ok: boolean): void {
+    const health = this.config.providerHealth
+    const providerId = this.config.providerName
+    if (!health || !providerId) return
+    health.registerProvider(providerId)
+    if (ok) health.recordSuccess(providerId)
+    else health.recordFailure(providerId)
+  }
+
   getLatestRisk(): import('./approval-risk.js').RiskAssessment { return this.latestRisk }
+
+  /** Latest free-energy policy signals (EFE + sensorium) for downstream routing. */
+  getPolicySignals(): { efe: EFEComponents; sensorium: Sensorium } | undefined {
+    return this.latestPolicySignals
+  }
 
   /** Enter plan mode — only read-only tools allowed */
   enterPlanMode(): void { this.planModeState = 'planning' }
@@ -1554,10 +1576,15 @@ export class AgentLoop {
       // When convergence is detected AND doom loop is blocked, the agent is
       // likely in a post-completion verification loop. Signal completion
       // instead of letting the model continue alternating between tools.
+      // Track 3 合一：能拿到权威门禁（v2）时按真实 GREEN/YELLOW/RED 给指引，
+      // 不再让模型自己猜门禁状态。
       if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
-        this.session.addUserMessage(wrapSystemReminder(
-          '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
-        ))
+        let gateHint = '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
+        try {
+          const gate = this.config.deliveryGateV2?.([...this.evidence.getState().filesModified])
+          if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate)}`
+        } catch { /* gate evaluation must never break convergence handling */ }
+        this.session.addUserMessage(wrapSystemReminder(gateHint))
       }
     }
 
@@ -1664,7 +1691,11 @@ export class AgentLoop {
     this.config.promptEngine.setAffordanceHint(renderAffordanceHint(affordanceState) || null)
 
     // ── Free Energy Engine: EFE-driven policy guidance ──
-    const efe = computeEFE(this.predictionAccumulator, this.currentSeason, this.vigorState, currentSensorium)
+    // Meridian 结构喂 EFE：探索信息增益由 physarum 图的边疆度估计（Track 1）。
+    let structuralEpistemic: number | undefined
+    try { structuralEpistemic = this.immuneHook.getPhysarum().structuralEpistemic() } catch { /* graph signal is optional */ }
+    const efe = computeEFE(this.predictionAccumulator, this.currentSeason, this.vigorState, currentSensorium, structuralEpistemic)
+    this.latestPolicySignals = { efe, sensorium: currentSensorium }
     const affordances = computeAffordanceScores(affordanceState, this.sessionAffordanceAdaptations)
     const policies = selectPolicy(efe, affordances, { topK: 5 })
     this.config.promptEngine.setPolicyGuidance(renderPolicyGuidance(policies, efe) || null)
@@ -1794,7 +1825,7 @@ export class AgentLoop {
         // round — defer with a marker instead.
         if (turn !== 0) {
           if (tokenRatio >= 0.5) this.pendingStaleCompact = true
-        } else if (this.cacheAdvisor.shouldDelayCompact(tokenRatio >= 0.7 ? 3 : 2)) {
+        } else if (this.cacheAdvisor.shouldDelayCompact(tokenRatio >= 0.7 ? 3 : 2, { estimatedTokens: tokenBudget, contextWindow })) {
           debugLog(`[token-gate] cacheAdvisor delayed stale-round compact (cache healthy, ratio=${tokenRatio.toFixed(2)})`)
         } else {
           this.pendingStaleCompact = false
@@ -2175,11 +2206,15 @@ export class AgentLoop {
         }
 
         if (streamError) {
+          // Abort is a user action, not a provider fault — don't cool the provider.
+          if ((streamError as Error).name !== 'AbortError') this.recordProviderOutcome(false)
           if (collectedBlocks.length > 0 && (streamError as Error).name !== 'AbortError') { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
           if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
           callbacks.onError(streamError)
           return
         }
+
+        this.recordProviderOutcome(true)
 
         if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
 
