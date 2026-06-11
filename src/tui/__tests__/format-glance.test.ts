@@ -14,7 +14,7 @@ describe('formatGlanceBar', () => {
     const result = formatGlanceBar({ width: 80 }, theme)
     const lines = result.split('\n')
     assert.equal(lines.length, 2)
-    assert.ok(stripAnsi(lines[0]!).includes('─'.repeat(80)))
+    assert.ok(stripAnsi(lines[0]!).includes('─'.repeat(79)))
     assert.ok(stripAnsi(lines[1]!).includes('天枢'))
   })
 

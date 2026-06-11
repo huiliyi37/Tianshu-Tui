@@ -71,8 +71,10 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   }
   if (input.contextRatio !== undefined) {
     const pct = Math.round(input.contextRatio * 100)
-    const ratioColor = pct >= 88 ? theme.error : pct >= 60 ? theme.warning : theme.primary
-    parts.push(color(`${pct}%`, ratioColor))
+    // ≥78% 显示 compact 警告（对齐 Claude Code 的 "Context left until auto-compact"）
+    const ratioColor = pct >= 88 ? theme.error : pct >= 78 ? theme.warning : theme.primary
+    const compactWarn = pct >= 78 ? ' ⚠compact' : ''
+    parts.push(color(`ctx ${pct}%${compactWarn}`, ratioColor))
   }
   if (input.cost !== undefined && input.cost > 0) {
     parts.push(`$${input.cost.toFixed(2)}`)
@@ -117,7 +119,7 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   zone4 = ' '.repeat(padding) + zone4
 
   // Separator line above
-  const sepLine = color('─'.repeat(input.width), theme.dim)
+  const sepLine = color('─'.repeat(Math.max(1, input.width - 1)), theme.dim)
 
   return `${sepLine}\n${zone1}${sep}${zone2}${sep}${zone3Clipped}${sep}${zone4}`
 }
