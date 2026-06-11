@@ -275,7 +275,7 @@ export class DelegationCoordinator {
         return {
           status: 'skipped',
           results: [],
-          packet: buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([]),
         }
       }
 
@@ -327,7 +327,7 @@ export class DelegationCoordinator {
         status: 'completed',
         order,
         results: [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'))],
-        packet: buildPrimaryWorkerPacket([]),
+        packet: await buildPrimaryWorkerPacket([]),
       }
     }
 
@@ -354,7 +354,7 @@ export class DelegationCoordinator {
             nextActions: ['Reduce file scope or increase maxFiles budget'],
             evidenceStatus: 'blocked',
           }],
-          packet: buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([]),
         }
       }
     }
@@ -466,7 +466,7 @@ export class DelegationCoordinator {
             nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
             evidenceStatus: 'blocked',
           }],
-          packet: buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([]),
         }
       }
       semanticLockAcquired = true
@@ -503,7 +503,7 @@ export class DelegationCoordinator {
                   nextActions: ['Wait for other session to release claims, or use read-only profile'],
                   evidenceStatus: 'blocked',
                 }],
-                packet: buildPrimaryWorkerPacket([]),
+                packet: await buildPrimaryWorkerPacket([]),
               }
             }
           }
@@ -569,7 +569,7 @@ export class DelegationCoordinator {
         modelTierGatedDecisions: [tierGatedDecision],
         gatedInfluenceAudits: [gatedInfluenceAudit],
         results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
-        packet: buildPrimaryWorkerPacket([run.result]),
+        packet: await buildPrimaryWorkerPacket([run.result]),
       }
     }
 
@@ -599,7 +599,7 @@ export class DelegationCoordinator {
       modelTierGatedDecisions: [tierGatedDecision],
       gatedInfluenceAudits: [gatedInfluenceAudit],
       results,
-      packet: buildPrimaryWorkerPacket(results),
+      packet: await buildPrimaryWorkerPacket(results),
     }
   }
 
@@ -615,7 +615,7 @@ export class DelegationCoordinator {
     try {
       const runnables = requests.filter(r => shouldDelegateObjective(r.objective, r.scope))
       if (runnables.length === 0) {
-        return { status: 'skipped', results: [], packet: buildPrimaryWorkerPacket([]) }
+        return { status: 'skipped', results: [], packet: await buildPrimaryWorkerPacket([]) }
       }
 
     const queue = new WorkOrderQueue(this.config.maxWorkers, {
@@ -709,7 +709,7 @@ export class DelegationCoordinator {
     return {
       status: 'completed',
       results: aggregated,
-      packet: buildPrimaryWorkerPacket(aggregated),
+      packet: await buildPrimaryWorkerPacket(aggregated),
       aggregationPolicy: policy,
       ...(workerModels.length > 0 ? { workerModels } : {}),
       ...(modelTierShadows.length > 0 ? { modelTierShadows } : {}),

@@ -67,7 +67,7 @@ function runHook(options: {
   })
 
   const hook = createDispatcherHook({
-    coordinator,
+    coordinator: () => coordinator,
     getTaskContract: () => options.contract ?? undefined,
     getSensorium: () => options.sensorium ?? null,
     complexityThreshold: options.complexityThreshold,

@@ -64,6 +64,8 @@ export class WorkOrderQueue {
       if (!e.order.dependencies.every(dep => this.completedIds.has(dep))) return false
       // 文件冲突检查
       if (this.hasFileConflict(e.order)) return false
+      // Global concurrency cap: never exceed maxConcurrency regardless of role pools
+      if (this.inFlightKeys.size >= this.maxConcurrency) return false
       // Per-role concurrency: explore workers limited by maxExploreConcurrency,
       // write workers limited by maxWriteConcurrency
       const role = classifyProfile(e.order.profile)

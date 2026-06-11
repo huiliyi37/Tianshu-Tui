@@ -137,8 +137,8 @@ describe('worker prompts', () => {
     assert.ok(!prompt.includes('2026-06-01-project-memory-architecture-conflict.md'))
   })
 
-  it('builds a compact primary packet from worker results', () => {
-    const packet = buildPrimaryWorkerPacket([
+  it('builds a compact primary packet from worker results', async () => {
+    const packet = await buildPrimaryWorkerPacket([
       {
         workOrderId: 'wo_1',
         status: 'passed',
@@ -160,8 +160,8 @@ describe('worker prompts', () => {
     assert.ok(!packet.includes('\n  '))
   })
 
-  it('strips empty arrays from packet to reduce size', () => {
-    const packet = buildPrimaryWorkerPacket([
+  it('strips empty arrays from packet to reduce size', async () => {
+    const packet = await buildPrimaryWorkerPacket([
       {
         workOrderId: 'wo_2',
         status: 'passed',
@@ -183,9 +183,9 @@ describe('worker prompts', () => {
     assert.ok(packet.includes('"summary"'))
   })
 
-  it('truncates non-diff artifact content to 2000 chars', () => {
+  it('truncates non-diff artifact content to 2000 chars', async () => {
     const longContent = 'x'.repeat(3000)
-    const packet = buildPrimaryWorkerPacket([
+    const packet = await buildPrimaryWorkerPacket([
       {
         workOrderId: 'wo_3',
         status: 'passed',
@@ -205,9 +205,9 @@ describe('worker prompts', () => {
     assert.ok(!packet.includes('x'.repeat(3000)))
   })
 
-  it('does not truncate diff artifacts', () => {
+  it('does not truncate diff artifacts', async () => {
     const diffContent = `diff --git a/src/a.ts b/src/a.ts\n${'+'.repeat(3000)}`
-    const packet = buildPrimaryWorkerPacket([
+    const packet = await buildPrimaryWorkerPacket([
       {
         workOrderId: 'wo_diff',
         status: 'passed',
@@ -225,14 +225,14 @@ describe('worker prompts', () => {
     assert.ok(!packet.includes('…'))
   })
 
-  it('caps total packet size at 32K chars by dropping low-value fields', () => {
+  it('caps total packet size at 32K chars by dropping low-value fields', async () => {
     // Create a result with many fields that would exceed 8K
     const manyFindings = Array.from({ length: 50 }, (_, i) => ({
       claim: `Finding ${i}: ${'detail '.repeat(20)}`,
       evidence: `src/file-${i}.ts`,
       confidence: 'high' as const,
     }))
-    const packet = buildPrimaryWorkerPacket([
+    const packet = await buildPrimaryWorkerPacket([
       {
         workOrderId: 'wo_big',
         status: 'passed',

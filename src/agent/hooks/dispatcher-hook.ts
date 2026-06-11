@@ -10,7 +10,8 @@ import { profileRegistry } from '../profile-registry.js'
 import { shouldDelegateObjective as _shouldDelegate } from '../coordinator.js'
 
 export interface DispatcherHookDeps {
-  coordinator: DelegationCoordinator | null
+  /** Lazy getter for coordinator — called each turn so stale references are never used. */
+  coordinator: () => DelegationCoordinator | null
   getTaskContract: () => TaskContract | undefined
   getSensorium: () => Sensorium | null
   complexityThreshold?: number
@@ -32,7 +33,8 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
     async run(ctx) {
       // Kill-switch: respect config.agent.autoDelegateEnabled
       if (deps.enabled === false) return
-      if (!deps.coordinator) return
+      const coordinator = deps.coordinator()
+      if (!coordinator) return
 
       // 冷却: skip if last auto-delegation was within cooldownTurns
       const cooldown = deps.cooldownTurns ?? 3
@@ -69,7 +71,7 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
       // 通过现有 coordinator 执行（复用模型路由、工具过滤、session 隔离）
       // TaskBoard 通过 queue 事件自动更新，不需要手动调用
       for (const req of requests) {
-        deps.coordinator.delegate(req).catch(error => {
+        coordinator.delegate(req).catch(error => {
           const msg = error instanceof Error ? error.message : String(error)
           ctx.effects.emitPhaseChange('worker-failed', { reason: msg })
         })

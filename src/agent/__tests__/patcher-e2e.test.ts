@@ -71,7 +71,7 @@ describe('patcher e2e: untracked scope → worktree edit → diff → apply', ()
     assert.notEqual(gated.status, 'blocked', 'patcher should not be blocked')
     assert.ok(gated.risks.some(r => r.includes('advisory')), 'patcher gets advisory risk')
 
-    const packet = buildPrimaryWorkerPacket([gated])
+    const packet = await buildPrimaryWorkerPacket([gated])
     assert.ok(packet.includes('broken = false'), 'packet preserves diff content')
 
     const check = await applyPatch(repoDir, { diff, checkOnly: true })
