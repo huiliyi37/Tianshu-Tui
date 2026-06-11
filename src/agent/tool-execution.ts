@@ -1,6 +1,6 @@
 import type { ContentBlock } from '../api/types.js'
 import type { TurnBudget } from './turn-budget.js'
-import { enforcePerMessageBudget, enforceTurnReadBudget, enforceContextPressureTruncation } from './per-message-budget.js'
+import { enforcePerMessageBudget, enforceTurnReadBudget, enforceContextPressureTruncation, enforceToolTypeBudgets } from './per-message-budget.js'
 import { perMessageToolResultBudget } from '../compact/constants.js'
 import type { AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { TurnHarness } from './turn-harness.js'
@@ -24,6 +24,9 @@ import type { P3Integration } from './p3-integration.js'
 import type { ImmuneHook } from './immune-hook.js'
 import type { LspManager } from '../lsp/manager.js'
 import { classifyFailure } from './failure-classifier.js'
+import { ToolAccumulator } from './tool-accumulator.js'
+import { getToolStormLevel, type ToolStormLevel } from './trace-store.js'
+import { tierToolResult } from './tool-result-tiering.js'
 import {
   getInterventionLevel,
   recordPrediction,
@@ -81,6 +84,10 @@ export interface ToolExecutionDeps {
   lspManager?: LspManager
   /** Session-level estimated token count — enables context-pressure-aware truncation. */
   getEstimatedTokens?: () => number
+  /** Tool name history — for tool storm detection. */
+  getToolNameHistory?: () => string[]
+  /** Record a named fingerprint (tool name + fingerprint) */
+  recordToolNamedFingerprint?: (fingerprint: string, toolName: string) => void
 }
 
 export interface ToolExecBatchInput {
@@ -112,6 +119,7 @@ export interface ToolExecBatchResult {
 }
 
 export class ToolExecutionController {
+  private accumulator = new ToolAccumulator()
   constructor(private deps: ToolExecutionDeps) {}
 
   /**
@@ -291,13 +299,25 @@ export class ToolExecutionController {
       }
     }
 
-    // Enforce per-message aggregate budget before adding to conversation.
+    // Enforce per-tool-type cumulative budget before aggregate budget.
     const budgetEntries = toolResults
       .map((r, i) => r.type === 'tool_result'
         ? { toolUseId: r.tool_use_id, content: typeof r.content === 'string' ? r.content : '', toolName: input.toolUses[i]?.name ?? '' }
         : null)
       .filter((e): e is NonNullable<typeof e> => e !== null)
-    const enforced = enforcePerMessageBudget(budgetEntries, perMessageToolResultBudget(this.deps.config.contextWindow))
+    const toolTypeBudgeted = enforceToolTypeBudgets(budgetEntries, this.deps.config.contextWindow)
+    for (const entry of toolTypeBudgeted) {
+      const idx = toolResults.findIndex(r => r.type === 'tool_result' && r.tool_use_id === entry.toolUseId)
+      if (idx >= 0) {
+        const orig = toolResults[idx]!
+        if (orig.type === 'tool_result' && entry.content !== (typeof orig.content === 'string' ? orig.content : '')) {
+          toolResults[idx] = { ...orig, content: entry.content }
+        }
+      }
+    }
+
+    // Enforce per-message aggregate budget before adding to conversation.
+    const enforced = enforcePerMessageBudget(toolTypeBudgeted, perMessageToolResultBudget(this.deps.config.contextWindow))
     for (const entry of enforced) {
       const idx = toolResults.findIndex(r => r.type === 'tool_result' && r.tool_use_id === entry.toolUseId)
       if (idx >= 0) {
@@ -338,6 +358,70 @@ export class ToolExecutionController {
      }
      }
    }
+
+    // ── Tool Storm Guard: track & collapse consecutive same-type calls ──
+    for (let i = 0; i < input.toolUses.length; i++) {
+      const tu = input.toolUses[i]!
+      const tr = toolResults[i]
+      if (tr && tr.type === 'tool_result') {
+        const content = typeof tr.content === 'string' ? tr.content : ''
+        this.accumulator.record({ toolName: tu.name, toolUseId: tu.id, content, turn: input.turn })
+        this.deps.recordToolNamedFingerprint?.(tu.id, tu.name)
+      }
+    }
+    if (input.toolUses.length > 0) {
+      const lastToolName = input.toolUses[input.toolUses.length - 1]!.name
+      const collapse = this.accumulator.tryCollapse(lastToolName)
+      if (collapse) {
+        for (const collapsedId of collapse.collapsedIds) {
+          const idx = toolResults.findIndex(r => r.type === 'tool_result' && r.tool_use_id === collapsedId)
+          if (idx >= 0) {
+            const orig = toolResults[idx]!
+            if (orig.type === 'tool_result') {
+              toolResults[idx] = { type: 'tool_result', tool_use_id: orig.tool_use_id, content: collapse.summary }
+            }
+          }
+        }
+      }
+    }
+
+    // Check tool storm level for strategy shift hint
+    const toolNames = this.deps.getToolNameHistory?.() ?? []
+    const stormLevel = getToolStormLevel(toolNames)
+    if (stormLevel === 'storm') {
+      const lastTr = toolResults[toolResults.length - 1]
+      if (lastTr && lastTr.type === 'tool_result') {
+        const existing = typeof lastTr.content === 'string' ? lastTr.content : ''
+        toolResults[toolResults.length - 1] = {
+          ...lastTr,
+          content: existing + '\n\n⚠️ [tool-storm-detected] 同类工具连续调用过多（8+次），请考虑更换策略或汇总已有结果。',
+        }
+      }
+    }
+
+    // ── T10: Tool Result Tiering for 1M+ windows ──
+    const ctxWin = this.deps.config.contextWindow
+    if (ctxWin >= 500_000) {
+      for (let i = 0; i < toolResults.length; i++) {
+        const tr = toolResults[i]!
+        if (tr.type !== 'tool_result') continue
+        const content = typeof tr.content === 'string' ? tr.content : ''
+        const tu = input.toolUses[i]
+        const target = typeof tu?.input?.file_path === 'string' ? tu.input.file_path
+          : typeof tu?.input?.path === 'string' ? tu.input.path
+          : tu?.name ?? 'unknown'
+        const tiered = await tierToolResult(
+          tu?.name ?? 'unknown',
+          content,
+          String(target),
+          this.deps.artifactStore,
+          ctxWin,
+        )
+        if (tiered.tier > 0) {
+          toolResults[i] = { ...tr, content: tiered.content }
+        }
+      }
+    }
 
     this.deps.addToolResults(toolResults)
 
