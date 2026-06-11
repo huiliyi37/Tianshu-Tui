@@ -76,7 +76,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'permissions'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'permissions'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -111,6 +111,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     contextWindow: model.contextWindow,
     compact: input.compact,
     providerProfile: getProviderProfile(provider.name, model.contextWindow),
+    providerName: provider.name,
     primaryClient: client,
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,

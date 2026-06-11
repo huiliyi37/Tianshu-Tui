@@ -50,12 +50,15 @@ function compactOaiReasoning(_msg: OaiMessage): { msg: OaiMessage; changed: bool
 
 export function estimateOaiMessageTokens(msg: OaiMessage): number {
   let content: string
-  if (msg.role === 'assistant' && msg.tool_calls) {
-    content = (msg.content ?? '') + JSON.stringify(msg.tool_calls)
-  } else if (msg.role === 'assistant' && msg.reasoning_content) {
-    content = (msg.content ?? '') + msg.reasoning_content
-  } else if (msg.role === 'assistant') {
-    content = msg.content ?? ''
+  if (msg.role === 'assistant') {
+    // Count content + tool_calls + reasoning together. The old exclusive
+    // branches skipped reasoning_content whenever tool_calls were present —
+    // but tool-call turns are exactly the ones that retain reasoning for
+    // DeepSeek echo, so estimates undercounted the dominant token sink and
+    // compaction fired systematically late in tool-dense sessions.
+    content = (msg.content ?? '')
+      + (msg.tool_calls ? JSON.stringify(msg.tool_calls) : '')
+      + (msg.reasoning_content ?? '')
   } else {
     content = msg.content
   }

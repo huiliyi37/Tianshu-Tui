@@ -1,4 +1,4 @@
-import type { ProviderConfig } from './schema.js'
+import type { ModelConfig, ProviderConfig } from './schema.js'
 
 export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'minimax' | 'codex'
 
@@ -181,4 +181,18 @@ export function cloneProviderPreset(key: ProviderPresetKey): ProviderConfig {
 
 export function isProviderPresetKey(value: string): value is ProviderPresetKey {
   return Object.prototype.hasOwnProperty.call(PROVIDER_PRESETS, value)
+}
+
+/**
+ * Look up a preset model's defaults by provider name and model id/alias.
+ *
+ * Used by CLI setup paths so that known models (e.g. deepseek-v4-pro)
+ * inherit their real context window instead of a silent 128K default —
+ * a wrong small window causes premature compaction tiers on 1M models.
+ */
+export function findPresetModel(providerName: string, modelId: string): ModelConfig | undefined {
+  if (!isProviderPresetKey(providerName)) return undefined
+  return PROVIDER_PRESETS[providerName].provider.models.find(
+    m => m.id === modelId || m.alias === modelId,
+  )
 }

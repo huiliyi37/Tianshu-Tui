@@ -5,10 +5,21 @@ import type { CacheType, ProviderProfile } from '../api/provider-profile.js'
  * then generalized by ACF into provider-aware ratios.
  */
 
-/** Auto compaction trigger: 80% of 1M context window */
+/**
+ * @deprecated Legacy static trigger, superseded by the ratio-based policy
+ * (`compactPolicyRatios` + `decideCompactTier`). Kept only because the config
+ * schema (`compact.autoThreshold`) still defaults to it — runtime compaction
+ * decisions never read this value. Do not add new consumers.
+ */
 export const AUTO_COMPACT_THRESHOLD = 800_000
 
-/** Hard floor: never auto-compact below this token count */
+/**
+ * @deprecated Legacy static floor, superseded by the ratio-based policy.
+ * Kept only for the config schema default (`compact.autoFloor`). The previous
+ * `Math.min(watch, 500K)` clamp in `compactThresholds` inverted the intended
+ * "never compact below" semantics on 1M windows (lowering 720K watch to 500K)
+ * and has been removed. Do not add new consumers.
+ */
 export const MINIMUM_AUTO_COMPACT_TOKENS = 500_000
 
 export interface CompactThresholds {
@@ -76,7 +87,10 @@ export function compactThresholds(input: number | CompactStrategyInput): Compact
 
   return {
     autoThreshold: Math.floor(contextWindow * ratios.reactive),
-    autoFloor: Math.min(Math.floor(contextWindow * ratios.watch), MINIMUM_AUTO_COMPACT_TOKENS),
+    // Pure ratio — the old Math.min(..., 500K) clamp dragged the 1M
+    // cache-preserving watch floor from 720K down to 500K, triggering the
+    // watch tier at 50% of the window instead of the intended 72%.
+    autoFloor: Math.floor(contextWindow * ratios.watch),
     toolResultMaxTokens: Math.min(Math.floor(contextWindow * 0.3), toolResultHardCap),
   }
 }
@@ -93,17 +107,21 @@ export const KEEP_RECENT_MESSAGES = 4
 /** Minimum number of messages before summarizing (avoid summary of nothing) */
 export const MIN_SUMMARIZE_MESSAGES = 6
 
-/** Character limits for summary input sent to compaction model */
-export const SUMMARY_INPUT_MAX_CHARS = 24_000
-export const SUMMARY_INPUT_HEAD_CHARS = 14_000
-export const SUMMARY_INPUT_TAIL_CHARS = 6_000
-
-/** Large context (500K+) summary limits */
+/** Window size at which large-context behaviors activate (tool result caps, summary budgets). */
 export const LARGE_CONTEXT_WINDOW_TOKENS = 500_000
-export const LARGE_CONTEXT_SUMMARY_INPUT_MAX_CHARS = 120_000
-export const LARGE_CONTEXT_SUMMARY_INPUT_HEAD_CHARS = 72_000
-export const LARGE_CONTEXT_SUMMARY_INPUT_TAIL_CHARS = 36_000
-export const LARGE_CONTEXT_SUMMARY_MAX_TOKENS = 2_048
+
+/**
+ * LLM compact summary output budget (chars), scaled by window size.
+ * llmCompact sends the FULL session history to the compact model (reusing
+ * the prefix cache), so input truncation is not the bottleneck — the
+ * summary output budget is. A 1M session squashed into a 3000-char summary
+ * loses most of its decision history; large windows get a larger budget.
+ */
+export function summaryOutputBudgetChars(contextWindow: number): { full: number; partial: number } {
+  if (contextWindow >= 1_000_000) return { full: 8_000, partial: 5_000 }
+  if (contextWindow >= LARGE_CONTEXT_WINDOW_TOKENS) return { full: 6_000, partial: 4_000 }
+  return { full: 3_000, partial: 2_000 }
+}
 
 /** Cache-aligned summary keeps 85% of context budget */
 export const CACHE_ALIGNED_BUDGET_PERCENT = 85

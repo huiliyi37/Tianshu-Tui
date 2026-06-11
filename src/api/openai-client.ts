@@ -71,6 +71,37 @@ const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'mi
 // resetIdleTimer 与 OpenAIClientConfig 注释）。旧的模块级常量已移除——它恒等于
 // SLOW_READ_TIMEOUT_MS（实为禁用），且配套错误文案硬编码"90s"与实际值不符。
 
+/** Recent-progress window for hard-cap extension: a data event within this
+ *  window counts as "still producing" and earns another extension slice. */
+const HARD_CAP_PROGRESS_WINDOW_MS = 30_000
+const HARD_CAP_EXTENSION_SLICE_MS = 60_000
+
+export type StreamHardCapAction =
+  | { kind: 'abort' }
+  | { kind: 'rearm'; rearmMs: number; extended: boolean }
+
+/**
+ * Track 4 自适应流硬顶：固定 10min 硬顶会误杀 1M+max-reasoning 的健康长输出
+ * （死流早被 idle/stall 计时器拦截）。到达基础硬顶后，只要最近 30s 内仍有
+ * data 事件就按 60s 一档续期，绝对上限 3×基础时长兜底 runaway。纯函数，
+ * 由 openai-client 的硬顶计时器驱动。
+ */
+export function decideStreamHardCap(input: {
+  now: number
+  startedAt: number
+  lastDataEventAt: number
+  baseStreamMs: number
+}): StreamHardCapAction {
+  const absoluteMaxMs = input.baseStreamMs * 3
+  const elapsed = input.now - input.startedAt
+  if (elapsed >= absoluteMaxMs) return { kind: 'abort' }
+  if (elapsed >= input.baseStreamMs) {
+    if (input.now - input.lastDataEventAt > HARD_CAP_PROGRESS_WINDOW_MS) return { kind: 'abort' }
+    return { kind: 'rearm', rearmMs: Math.min(HARD_CAP_EXTENSION_SLICE_MS, absoluteMaxMs - elapsed), extended: true }
+  }
+  return { kind: 'rearm', rearmMs: input.baseStreamMs - elapsed, extended: false }
+}
+
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
   private toolCallHintFired = new Set<number>()
@@ -379,10 +410,31 @@ export class OpenAIClient implements StreamClient {
     // Create an internal timeout AbortSignal for hard timeout guarantee.
     // This ensures reader.read() is unblocked even if reader.cancel() alone
     // cannot break the TCP connection (e.g. GLM server keeps connection alive).
-    // Max stream duration = 10 minutes (aligned with withStructuredRetry budget).
+    //
+    // Track 4 自适应硬顶：固定 10min 会误杀 1M+max-reasoning 的健康长输出
+    // （死流早被 idle/stall 计时器拦截，硬顶杀掉的只能是仍在产出的流）。
+    // 改为按输出进度续期：到达基础硬顶时若最近 30s 内仍有 data 事件，
+    // 续 60s 一档，绝对上限 3×基础（30min）兜底 runaway。
     const timeoutController = new AbortController()
-    const maxStreamMs = 10 * 60_000
-    const maxStreamTimer = setTimeout(() => timeoutController.abort(), maxStreamMs)
+    const baseStreamMs = 10 * 60_000
+    const streamStartedAt = Date.now()
+    let lastDataEventAt = streamStartedAt
+    let hardCapExtended = false
+    const checkHardCap = (): void => {
+      const action = decideStreamHardCap({
+        now: Date.now(),
+        startedAt: streamStartedAt,
+        lastDataEventAt,
+        baseStreamMs,
+      })
+      if (action.kind === 'abort') {
+        timeoutController.abort()
+        return
+      }
+      if (action.extended) hardCapExtended = true
+      maxStreamTimer = setTimeout(checkHardCap, action.rearmMs)
+    }
+    let maxStreamTimer: ReturnType<typeof setTimeout> = setTimeout(checkHardCap, baseStreamMs)
 
     // Wire both external and timeout signals to reader.cancel() so that
     // either agent.abort() OR the hard timeout can interrupt blocking read().
@@ -431,7 +483,10 @@ export class OpenAIClient implements StreamClient {
         // Timeout signal: hard 10min ceiling on stream duration
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
         if (timeoutController.signal.aborted) {
-          throw new Error('OpenAI SSE stream hard timeout (10min) — stream exceeded maximum duration')
+          const mins = Math.round((Date.now() - streamStartedAt) / 60_000)
+          throw new Error(hardCapExtended
+            ? `OpenAI SSE stream hard timeout (~${mins}min, progress-extended) — stream exceeded maximum duration`
+            : 'OpenAI SSE stream hard timeout (10min) — stream stopped progressing')
         }
 
         const { done, value } = await reader.read()
@@ -479,7 +534,10 @@ export class OpenAIClient implements StreamClient {
           }
         }
         // 仅在收到真实内容事件时重置 idle timer（心跳不重置）
-        if (sawDataEvent) resetIdleTimer()
+        if (sawDataEvent) {
+          lastDataEventAt = Date.now()
+          resetIdleTimer()
+        }
       }
 
       // Process any residual data in the SSE buffer (final chunk without trailing newline)

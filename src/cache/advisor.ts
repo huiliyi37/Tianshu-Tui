@@ -76,9 +76,24 @@ export class CacheAdvisor {
     this.thresholdController.adjust(this.recentHitRate ?? 0.5, metrics.turn)
   }
 
-  shouldDelayCompact(tier: number): boolean {
+  shouldDelayCompact(tier: number, ctx?: { estimatedTokens: number; contextWindow: number }): boolean {
     // Never delay reactive (tier 3+) or ceiling (tier 4)
     if (tier >= 3) return false
+
+    // Track 4 显式权衡：cache miss 成本 vs 压缩收益。
+    // 压缩后整段前缀作废 → miss 成本 ∝ hitRate（被缓存的输入占比）；
+    // 压缩收益随窗口压力上升（接近阈值时余量价值高于缓存保护）。
+    // protection = hitRate × (1 − pressure)：热缓存+低压力 → 延迟压缩；
+    // 压力升高时即使缓存全热也放行（1M 下 OOM 风险 > 重建成本）。
+    if (ctx && ctx.contextWindow > 0 && this.recentHitRate !== null) {
+      const pressure = Math.min(1, Math.max(0, ctx.estimatedTokens / ctx.contextWindow))
+      const protection = this.recentHitRate * (1 - pressure)
+      if (protection >= 0.45) return true
+      if (this.warmthTracker.predict() === 'hot' && tier <= 1 && pressure < 0.5) return true
+      return false
+    }
+
+    // Legacy fallback (no pressure context provided)
     // Delay watch/compact tier when cache is healthy
     if (this.recentHitRate !== null && this.recentHitRate >= 0.8) return true
     // Delay when warmth is hot and tier is only watch

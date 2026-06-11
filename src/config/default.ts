@@ -110,6 +110,13 @@ export const DEFAULT_CONFIG: Config = {
     teamSchedulerBanditEnabled: false,
     modelTierBanditEnabled: false,
     modelRoutingGatedEnabled: false,
+    banditPromotion: {
+      modelTier: 'shadow',
+      teamScheduler: 'shadow',
+      modelRouting: 'shadow',
+      effort: 'shadow',
+      killSwitch: false,
+    },
     permissions: {
       allow: [],
       bash: { allowlist: [] },

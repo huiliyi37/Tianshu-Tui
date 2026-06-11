@@ -15,7 +15,9 @@ describe('compactThresholds', () => {
     const thresholds = compactThresholds(1_000_000)
 
     assert.equal(thresholds.autoThreshold, 800_000)
-    assert.equal(thresholds.autoFloor, 500_000)
+    // Pure watch-ratio floor — the legacy 500K clamp inverted the "never
+    // compact below" semantics on 1M windows.
+    assert.equal(thresholds.autoFloor, 600_000)
     assert.equal(thresholds.toolResultMaxTokens, 200_000)
   })
 
@@ -33,7 +35,7 @@ describe('compactThresholds', () => {
       ceiling: 0.95,
     })
     assert.equal(thresholds.autoThreshold, 920_000)
-    assert.equal(thresholds.autoFloor, 500_000)
+    assert.equal(thresholds.autoFloor, 720_000)
     assert.equal(thresholds.toolResultMaxTokens, 200_000)
   })
 
@@ -45,7 +47,7 @@ describe('compactThresholds', () => {
 
     assert.equal(compactProviderStrategy({ cacheType: 'none', persistent: false }), 'aggressive')
     assert.equal(thresholds.autoThreshold, 840_000)
-    assert.equal(thresholds.autoFloor, 500_000)
+    assert.equal(thresholds.autoFloor, 500_000) // aggressive watch 0.5 × 1M
     assert.equal(thresholds.toolResultMaxTokens, 200_000)
   })
 

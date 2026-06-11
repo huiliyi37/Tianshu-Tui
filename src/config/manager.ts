@@ -4,7 +4,7 @@ import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { configSchema, type Config, type ProviderConfig, type ModelConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
-import { cloneProviderPreset, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
+import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 
 const APPROVAL_MODES = ['auto-safe', 'manual', 'auto-accept', 'dangerously-skip-permissions'] as const
 type ApprovalModeConfig = typeof APPROVAL_MODES[number]
@@ -400,14 +400,28 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
         }
         const modelId = readFlag(args, '--model')
         const alias = readFlag(args, '--alias')
+        // Preset-aware defaults: known models inherit their real context
+        // window (e.g. deepseek-v4-pro = 1M). A silent 128K default on a
+        // 1M model causes premature compaction tiers for the whole session.
+        const presetModel = modelId ? findPresetModel(providerName, modelId) : undefined
+        const cwFlag = readFlag(args, '--context-window')
+        const mtFlag = readFlag(args, '--max-tokens')
         const model: ModelConfig | undefined = modelId
           ? {
               id: modelId,
               ...(alias ? { alias } : {}),
-              contextWindow: parsePositiveInt(readFlag(args, '--context-window') ?? '128000', 'context-window'),
-              maxTokens: parsePositiveInt(readFlag(args, '--max-tokens') ?? '64000', 'max-tokens'),
+              contextWindow: cwFlag
+                ? parsePositiveInt(cwFlag, 'context-window')
+                : presetModel?.contextWindow ?? 128000,
+              maxTokens: mtFlag
+                ? parsePositiveInt(mtFlag, 'max-tokens')
+                : presetModel?.maxTokens ?? 64000,
+              ...(presetModel?.reasoningEffort ? { reasoningEffort: presetModel.reasoningEffort } : {}),
             }
           : undefined
+        if (modelId && !cwFlag && !presetModel) {
+          cliOut(io, `Warning: unknown model "${modelId}" — defaulting context window to 128000. Pass --context-window with the real value (compaction thresholds depend on it).`)
+        }
         setupProvider({
           providerName,
           apiKey: readFlag(args, '--key'),
@@ -442,11 +456,20 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
           return
         }
         const alias = args[5]
+        const presetModel = findPresetModel(providerName, modelId)
         const model: ModelConfig = {
           id: modelId,
           ...(alias ? { alias } : {}),
-          contextWindow: parsePositiveInt(args[3] ?? '128000', 'context-window'),
-          maxTokens: parsePositiveInt(args[4] ?? '64000', 'max-tokens'),
+          contextWindow: args[3]
+            ? parsePositiveInt(args[3], 'context-window')
+            : presetModel?.contextWindow ?? 128000,
+          maxTokens: args[4]
+            ? parsePositiveInt(args[4], 'max-tokens')
+            : presetModel?.maxTokens ?? 64000,
+          ...(presetModel?.reasoningEffort ? { reasoningEffort: presetModel.reasoningEffort } : {}),
+        }
+        if (!args[3] && !presetModel) {
+          cliOut(io, `Warning: unknown model "${modelId}" — defaulting context window to 128000. Pass an explicit context-window (compaction thresholds depend on it).`)
         }
         upsertProviderModel(providerName, model, { preferred: true })
         cliOut(io, `Preferred model for ${providerName} set to ${modelId}`)

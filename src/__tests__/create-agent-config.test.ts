@@ -34,6 +34,7 @@ const testConfig = {
     teamSchedulerBanditEnabled: false,
     modelTierBanditEnabled: false,
     modelRoutingGatedEnabled: false,
+    banditPromotion: { modelTier: 'shadow', teamScheduler: 'shadow', modelRouting: 'shadow', effort: 'shadow', killSwitch: false },
     permissions: { allow: [], bash: { allowlist: [] } },
   },
   compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },

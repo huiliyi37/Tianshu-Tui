@@ -22,6 +22,10 @@ export interface VolatilePayloadReport {
 
 const SECTION_RE = /<([a-zA-Z][\w-]*)(?:\s[^>]*)?(?:\/>|>[\s\S]*?<\/\1>)/g
 
+/** Volatile payload above this size is flagged as a waste candidate.
+ *  Track 4: also anchors the dynamic-appendix budget cap in prompt/engine. */
+export const LARGE_VOLATILE_PAYLOAD_CHARS = 12_000
+
 export function estimateContextTokens(text: string): number {
   if (text.length === 0) return 0
   return Math.ceil(text.length / 4)
@@ -116,7 +120,7 @@ export function analyzeVolatilePayload(block: string): VolatilePayloadReport {
     .sort((a, b) => b.chars - a.chars || a.id.localeCompare(b.id))
 
   const wasteCandidates = stats.flatMap(stat => wasteCandidatesForSection(stat, sections.get(stat.id)?.text ?? ''))
-  if (block.length > 12000) {
+  if (block.length > LARGE_VOLATILE_PAYLOAD_CHARS) {
     wasteCandidates.push({
       id: 'total',
       chars: block.length,

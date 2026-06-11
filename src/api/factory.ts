@@ -101,6 +101,13 @@ export function createProviderClient(
   })
 }
 
-function modelContextWindow(provider: ProviderConfig, modelId: string): number | undefined {
-  return provider.models.find(model => model.id === modelId || model.alias === modelId)?.contextWindow
+function modelContextWindow(provider: ProviderConfig, modelId: string): number {
+  // Fall back to the provider's first configured model rather than a fixed
+  // small constant: schema requires contextWindow on every model, so the
+  // 128K terminal fallback only applies to a provider with zero models.
+  return (
+    provider.models.find(model => model.id === modelId || model.alias === modelId)?.contextWindow
+    ?? provider.models[0]?.contextWindow
+    ?? 128_000
+  )
 }

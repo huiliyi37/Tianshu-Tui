@@ -40,7 +40,20 @@ const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
   claude: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
 }
 
-export function getProviderProfile(provider: string, contextWindow?: number): ProviderProfile {
-  const base = PROFILES[provider] ?? { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 }
-  return { ...base, contextWindow: contextWindow ?? 128_000 }
+/**
+ * Cache-strategy defaults for a provider, without a context window.
+ * Use this when only cache metadata is needed (e.g. provider registry).
+ */
+export function getProviderCacheDefaults(provider: string): Omit<ProviderProfile, 'contextWindow'> {
+  return PROFILES[provider] ?? { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 }
+}
+
+/**
+ * Full provider profile. `contextWindow` must come from the resolved model
+ * config — the previous silent 128K fallback made 1M models (DeepSeek V4)
+ * inherit premature compaction tiers whenever a caller forgot to plumb the
+ * window through.
+ */
+export function getProviderProfile(provider: string, contextWindow: number): ProviderProfile {
+  return { ...getProviderCacheDefaults(provider), contextWindow }
 }

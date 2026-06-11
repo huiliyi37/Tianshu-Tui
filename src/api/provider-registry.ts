@@ -8,7 +8,7 @@
 
 import { z } from 'zod'
 import type { ProviderProfile } from './provider-profile.js'
-import { getProviderProfile } from './provider-profile.js'
+import { getProviderCacheDefaults } from './provider-profile.js'
 import type { ProviderCapabilities } from './provider.js'
 import { WELL_KNOWN_DEFAULTS } from './provider.js'
 
@@ -53,7 +53,7 @@ function buildEntry(
   caps: ProviderCapabilities,
   notes: string[] = [],
 ): ProviderEntry {
-  const profile = getProviderProfile(key)
+  const profile = getProviderCacheDefaults(key)
   return {
     key,
     label,

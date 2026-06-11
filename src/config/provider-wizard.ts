@@ -2,7 +2,7 @@ import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import type { ModelConfig } from './schema.js'
 import { loadConfig, setupProvider } from './manager.js'
-import { isProviderPresetKey, providerPresetKeys } from './provider-presets.js'
+import { findPresetModel, isProviderPresetKey, providerPresetKeys } from './provider-presets.js'
 
 export interface ProviderWizardIO {
   ask?: (question: string) => Promise<string>
@@ -77,14 +77,21 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
     let model: ModelConfig | undefined
     if (modelId) {
       const aliasAnswer = await ask(askIo, 'Model alias: ')
+      // Preset-aware defaults: a known model (e.g. deepseek-v4-pro) defaults
+      // to its real context window instead of a blanket 128K — compaction
+      // thresholds scale with this value, so a wrong small window silently
+      // triggers premature compaction on 1M models.
+      const presetModel = findPresetModel(providerName, modelId)
+      const defaultContextWindow = presetModel?.contextWindow ?? currentModel?.contextWindow ?? 128000
+      const defaultMaxTokens = presetModel?.maxTokens ?? currentModel?.maxTokens ?? 64000
       const contextWindow = positiveIntOrDefault(
-        await ask(askIo, `Context window [${currentModel?.contextWindow ?? 128000}]: `),
-        currentModel?.contextWindow ?? 128000,
+        await ask(askIo, `Context window [${defaultContextWindow}]: `),
+        defaultContextWindow,
         'context window',
       )
       const maxTokens = positiveIntOrDefault(
-        await ask(askIo, `Max tokens [${currentModel?.maxTokens ?? 64000}]: `),
-        currentModel?.maxTokens ?? 64000,
+        await ask(askIo, `Max tokens [${defaultMaxTokens}]: `),
+        defaultMaxTokens,
         'max tokens',
       )
       model = {
@@ -92,7 +99,7 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
         ...(aliasAnswer ? { alias: aliasAnswer } : {}),
         contextWindow,
         maxTokens,
-        reasoningEffort: currentModel?.reasoningEffort,
+        reasoningEffort: presetModel?.reasoningEffort ?? currentModel?.reasoningEffort,
       }
     }
 

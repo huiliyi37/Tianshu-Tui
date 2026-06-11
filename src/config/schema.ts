@@ -84,6 +84,8 @@ export const intentRetrievalRouterSchema = z.preprocess(
   }).default({}),
 )
 
+export const banditPromotionModeSchema = z.enum(['off', 'shadow', 'auto', 'forced'])
+
 export const agentSchema = z.object({
   approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),
@@ -97,18 +99,34 @@ export const agentSchema = z.object({
   antiAnchoring: antiAnchoringSchema,
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
-  /** Explicit opt-in for P4 team scheduler gated influence. Default false keeps scheduler shadow-only. */
+  /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */
   teamSchedulerBanditEnabled: z.boolean().default(false),
-  /** Explicit opt-in for P4-d worker model-tier gated influence. Default false keeps tier bandit shadow-only. */
+  /** @deprecated Use banditPromotion.modelTier ('forced') instead. True still works as forced. */
   modelTierBanditEnabled: z.boolean().default(false),
-  /** Reserved opt-in for future ModelRouting/ModelG direct switching. Default false; currently shadow-only. */
+  /** @deprecated Use banditPromotion.modelRouting ('forced') instead. True still works as forced. */
   modelRoutingGatedEnabled: z.boolean().default(false),
+  /** Track 1: 统一 bandit shadow→gated 晋升闸。
+   *  off=一键回退 / shadow=只收证据 / auto=证据达标自动 gated / forced=手动覆盖。 */
+  banditPromotion: z.object({
+    modelTier: banditPromotionModeSchema.default('shadow'),
+    teamScheduler: banditPromotionModeSchema.default('shadow'),
+    modelRouting: banditPromotionModeSchema.default('shadow'),
+    effort: banditPromotionModeSchema.default('shadow'),
+    /** One-key rollback: forces every bandit path off, regardless of modes or legacy flags. */
+    killSwitch: z.boolean().default(false),
+  }).default({}),
   permissions: permissionsSchema.default({}),
 })
 
 export const compactSchema = z.object({
+  /** Master switch for discretionary compaction (ratio tiers, 1M LLM compact).
+   *  Emergency paths (session split, 95% ceiling) ignore this. */
   enabled: z.boolean().default(true),
+  /** @deprecated Superseded by ratio-based policy (compactPolicyRatios).
+   *  Retained for config compatibility; not read by the runtime. */
   autoThreshold: z.number().int().positive().default(800_000),
+  /** @deprecated Superseded by ratio-based policy (compactPolicyRatios).
+   *  Retained for config compatibility; not read by the runtime. */
   autoFloor: z.number().int().positive().default(500_000),
   model: z.string().default('deepseek-v4-flash'),
 })
