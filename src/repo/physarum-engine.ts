@@ -48,6 +48,8 @@ export class PhysarumEngine {
   private turnGrowthHistory: number[] = []
   private currentTurn = 0
   private lastFileAccess: { filePath: string; turn: number } | null = null
+  /** Recent distinct file accesses (most recent last) — working set for structural epistemic. */
+  private recentAccess: string[] = []
   private pendingPrediction: {
     sourceFile: string
     predictedAtTurn: number
@@ -71,6 +73,11 @@ export class PhysarumEngine {
 
     this.currentTurn = turn
     this.observePrediction(filePath, turn)
+
+    const existing = this.recentAccess.indexOf(filePath)
+    if (existing >= 0) this.recentAccess.splice(existing, 1)
+    this.recentAccess.push(filePath)
+    if (this.recentAccess.length > 8) this.recentAccess.shift()
 
     const previous = this.lastFileAccess
     this.lastFileAccess = { filePath, turn }
@@ -383,6 +390,37 @@ export class PhysarumEngine {
   }
 
   edgeCount(): number { return this.edges.size }
+
+  /**
+   * Track 1 (经络图×自由能): structural epistemic value for EFE.
+   *
+   * Estimates the information gain of exploring around the current working
+   * set from graph structure: a file with no (or weak) meridian edges sits on
+   * the frontier — exploring it yields high information gain. A file embedded
+   * in heavy, consolidated edges is well-trodden — little left to learn.
+   *
+   * Returns 0 (fully familiar) to 1 (pure frontier), or undefined when there
+   * is no recent file access to anchor the estimate.
+   */
+  structuralEpistemic(): number | undefined {
+    if (this.recentAccess.length === 0) return undefined
+
+    // Edge-weight mass at which a file counts as fully familiar. Calibrated
+    // against synapticBudget so a node at homeostatic capacity scores ~0.
+    const familiarityCap = Math.max(1, this.config.synapticBudget * 0.8)
+
+    let total = 0
+    for (const file of this.recentAccess) {
+      const edges = this.getEdgesFor(file)
+      if (edges.length === 0) {
+        total += 1
+        continue
+      }
+      const weightSum = edges.reduce((sum, e) => sum + e.weight * (e.consolidated ? 1.25 : 1), 0)
+      total += 1 - Math.min(1, weightSum / familiarityCap)
+    }
+    return total / this.recentAccess.length
+  }
 
   /** Persist all edges to MeridianDb */
   save(): void {

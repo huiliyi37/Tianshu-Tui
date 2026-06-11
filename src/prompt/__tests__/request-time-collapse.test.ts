@@ -141,6 +141,57 @@ describe('requestTimeCollapse', () => {
     assert.equal(messages[4]!.content, 'y'.repeat(500))
   })
 
+  it('strips reasoning_content from assistant messages below the boundary', () => {
+    const messages: OaiMessage[] = [
+      makeUser('turn 1'),
+      {
+        role: 'assistant',
+        content: '',
+        reasoning_content: 'long old thinking '.repeat(100),
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'grep', arguments: '{}' } }],
+      },
+      makeToolResult('c1', 'x'.repeat(500)),
+      makeUser('turn 2'),
+      makeUser('turn 3'),
+      makeUser('turn 4'),
+      makeUser('turn 5'),
+      makeUser('turn 6'),
+    ]
+    requestTimeCollapse(messages, 3, 1_000_000)
+    assert.equal('reasoning_content' in messages[1]!, false)
+    // tool_calls preserved — only the reasoning is dropped
+    assert.ok((messages[1] as { tool_calls?: unknown[] }).tool_calls?.length)
+  })
+
+  it('keeps reasoning_content on assistant messages at or above the boundary', () => {
+    const messages: OaiMessage[] = [
+      makeUser('turn 1'),
+      makeAssistantWithToolCall('c1', 'grep'),
+      makeToolResult('c1', 'x'.repeat(500)),
+      {
+        role: 'assistant',
+        content: '',
+        reasoning_content: 'recent thinking',
+        tool_calls: [{ id: 'c2', type: 'function', function: { name: 'grep', arguments: '{}' } }],
+      },
+      makeToolResult('c2', 'y'.repeat(500)),
+      makeUser('turn 2'),
+    ]
+    requestTimeCollapse(messages, 3, 1_000_000)
+    assert.equal((messages[3] as { reasoning_content?: string }).reasoning_content, 'recent thinking')
+  })
+
+  it('ensures content exists after stripping reasoning from a no-tool-call assistant message', () => {
+    const messages: OaiMessage[] = [
+      makeUser('turn 1'),
+      { role: 'assistant', content: null, reasoning_content: 'thinking only' },
+      makeUser('turn 2'),
+    ]
+    requestTimeCollapse(messages, 2, 1_000_000)
+    assert.equal('reasoning_content' in messages[1]!, false)
+    assert.equal(messages[1]!.content, '')
+  })
+
   it('frozen boundary produces byte-identical collapse output across repeated calls', () => {
     const build = (): OaiMessage[] => [
       makeUser('turn 1'),

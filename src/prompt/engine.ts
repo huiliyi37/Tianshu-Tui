@@ -6,7 +6,7 @@ import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import type { ToolDefinition } from '../api/types.js'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
-import { analyzeVolatilePayload, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
+import { analyzeVolatilePayload, LARGE_VOLATILE_PAYLOAD_CHARS, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
@@ -174,11 +174,13 @@ export class PromptEngine {
     this.frozenFetchIndex.clear()
 
     // Compute GWT budget for dynamic appendix (context-update sub-blocks).
-    // Scales with context window; caps at 200K chars to prevent bloat.
-    // On 1M+ windows: 5% × 4 chars/token = 200K chars (hits cap).
-    // On 200K windows: 5% × 4 chars/token = 40K chars. Minimum 2K.
+    // Track 4 预算审计：旧上限 200K chars（1M 窗口 5%≈50K token）是
+    // payload-diagnostic 「large payload」阈值（12K chars）的 16 倍 —
+    // 每轮重建的 appendix 直接顶在 prefix cache 尾部，绝对量必须收紧。
+    // 新上限 = 4×LARGE_VOLATILE_PAYLOAD_CHARS = 48K chars（~12K token，
+    // 1M 下 ~1.2%）。小窗口仍按 5% 缩放（128K 窗口 → 25.6K chars，未触顶）。
     const appendixMaxChars = contextWindow && contextWindow > 0
-      ? Math.min(Math.max(Math.floor(contextWindow * 0.05 * 4), 2_000), 200_000)
+      ? Math.min(Math.max(Math.floor(contextWindow * 0.05 * 4), 2_000), 4 * LARGE_VOLATILE_PAYLOAD_CHARS)
       : undefined
 
     let firstUserIdx = -1
@@ -457,6 +459,12 @@ export class PromptEngine {
       let estChars = 0
       for (const m of result) {
         if (typeof m.content === 'string') estChars += m.content.length
+        // reasoning_content is echoed back on tool-call turns and can dominate
+        // token usage in tool-dense sessions — excluding it from the gate made
+        // reasoning-heavy sessions paradoxically never reach the 50% trigger.
+        if (m.role === 'assistant' && typeof m.reasoning_content === 'string') {
+          estChars += m.reasoning_content.length
+        }
       }
       const estTokens = Math.ceil(estChars / 4)
       if (estTokens / contextWindow > 0.5) {
@@ -763,6 +771,15 @@ export function computeCollapseBoundary(messages: OaiMessage[], collapseAge: num
  * Tool results below boundaryIndex (a stable watermark held by PromptEngine)
  * are replaced with semantic summaries. The watermark — rather than a per-call
  * sliding age window — keeps the collapsed region byte-stable across requests.
+ *
+ * Reasoning stripping rides the same watermark: assistant `reasoning_content`
+ * below the boundary is dropped from the request copy. In tool-dense sessions
+ * reasoning accumulates linearly (DeepSeek requires echoing it on tool-call
+ * turns), becoming the dominant hidden token sink at 1M. Old rounds — the
+ * boundary trails the head by collapseAge (≥8) user turns, so the active
+ * thinking round is never touched — don't need their reasoning echoed, and
+ * because the strip happens at exactly the same boundary/step as the tool
+ * collapse, it adds zero additional prefix-cache breaks.
  */
 export function requestTimeCollapse(messages: OaiMessage[], boundaryIndex: number, contextWindow: number): void {
   let currentTurn = 0
@@ -775,6 +792,14 @@ export function requestTimeCollapse(messages: OaiMessage[], boundaryIndex: numbe
   for (let i = 0; i < end; i++) {
     const msg = messages[i]!
     if (msg.role === 'user') turnCounter++
+
+    if (msg.role === 'assistant' && 'reasoning_content' in msg && msg.reasoning_content) {
+      const { reasoning_content: _dropped, ...rest } = msg
+      messages[i] = rest.content == null && !rest.tool_calls?.length
+        ? { ...rest, content: '' }
+        : rest
+      continue
+    }
 
     if (msg.role !== 'tool') continue
     if (msg.content.length < 200) continue

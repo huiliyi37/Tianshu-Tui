@@ -39,6 +39,8 @@ import { createAuthProvider } from './auth/registry.js'
 import type { AuthProvider } from './auth/types.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
+import { ProviderHealthTracker } from './agent/provider-health.js'
+import { effectiveBanditMode, resolveBanditPromotion } from './agent/bandit-promotion.js'
 import { DomainKnowledgeStore } from './agent/domain-knowledge-store.js'
 import { persistTeamWaveTelemetry, type TeamWaveTelemetry } from './agent/team-wave-telemetry.js'
 import { buildTeamSchedulerRewardEvent, persistTeamSchedulerReward, persistTeamSchedulerShadow, type TeamSchedulerShadowEvent } from './agent/team-scheduler-shadow.js'
@@ -142,6 +144,8 @@ let _sessionRegistryRef: import('./agent/session-registry.js').SessionRegistry |
 // Module-level TaskLedger reference — created in tool registry, read by AgentLoop config
 let _taskLedgerRef: import('./agent/task-ledger.js').TaskLedger | null = null
 let _ownershipLedgerRef: import('./agent/ownership-ledger.js').OwnershipLedger | null = null
+// Track 3: 权威交付门禁（v2）— badge 与收敛检测共用
+let _deliveryGateRef: import('./agent/delivery-gate-v2.js').DeliveryGateV2 | null = null
 
 // Module-level Meridian indexer reference — created lazily, read by repo_graph tool
 let _meridianIndexerRef: import('./repo/meridian-indexer.js').MeridianIndexer | null = null
@@ -189,8 +193,10 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
   const initialInput = _pipedInput
   const cwd = process.cwd()
 
-  // Base tool registry — contains all core tools, no delegate_task.
-  // Used as the worker base registry (delegate_task must not enter worker allowlist).
+  // Base tool registry — contains all core tools INCLUDING delegate_task,
+  // and doubles as the worker base registry. Nested delegation is allowed
+  // (planner workers think-then-delegate) but hard-capped by delegationDepth
+  // (MAX_DELEGATION_DEPTH in coordinator.ts) — never unbounded recursion.
   const [toolRegistry] = useState(() => {
     const reg = createDefaultToolRegistry()
     // Register delegate_task with a mutable coordinator reference.
@@ -254,7 +260,11 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         }))
       },
       getTeamSchedulerRewardStore: () => _meridianIndexerRef?.getDb(),
-      isTeamSchedulerBanditEnabled: () => config.agent.teamSchedulerBanditEnabled === true,
+      isTeamSchedulerBanditEnabled: () => resolveBanditPromotion({
+        source: 'team_scheduler_bandit',
+        mode: effectiveBanditMode(config.agent.banditPromotion?.teamScheduler, config.agent.teamSchedulerBanditEnabled, config.agent.banditPromotion?.killSwitch),
+        store: _meridianIndexerRef?.getDb(),
+      }).enabled,
       getSessionId: () => _sessionIdRef ?? undefined,
     }))
     reg.register(createRecallCapsuleTool(() => cwd))
@@ -280,6 +290,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       ownership: _b1Ownership,
       attribution: _b1Attribution,
     })
+    _deliveryGateRef = _b1Gate
     reg.register(createDeliverTaskTool((params) => ({
       taskLedger: _b1TaskLedger,
       ownership: _b1Ownership,
@@ -569,6 +580,14 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       ? { profiles: config.workers.profiles, routing: config.workers.routing, providers: config.provider.providers }
       : undefined
 
+    // Physarum provider health: shared between main loop (sensorium stability)
+    // and coordinator (cold-tier routing skip). Stream outcomes feed weights.
+    const providerHealth = new ProviderHealthTracker()
+    providerHealth.registerProvider(activeProvider.name)
+    if (workerRouting?.providers) {
+      for (const name of Object.keys(workerRouting.providers)) providerHealth.registerProvider(name)
+    }
+
     const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
       const writeProfiles = profileRegistry.listWriteProfiles()
       const isWrite = writeProfiles.includes(_order.profile)
@@ -651,6 +670,29 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       }
     }
 
+    // EFE routing pulls per-turn signals from the agent, which is constructed
+    // after the coordinator — bridge via late-bound reference.
+    let agentForSignals: AgentLoop | undefined
+
+    // Track 1: unified shadow→gated promotion gate (evaluated per agent rebuild).
+    const promo = config.agent.banditPromotion
+    const promotionStore = _meridianIndexerRef?.getDb()
+    const modelTierGate = resolveBanditPromotion({
+      source: 'model_tier_bandit',
+      mode: effectiveBanditMode(promo?.modelTier, config.agent.modelTierBanditEnabled, promo?.killSwitch),
+      store: promotionStore,
+    })
+    const modelRoutingGate = resolveBanditPromotion({
+      source: 'model_routing',
+      mode: effectiveBanditMode(promo?.modelRouting, config.agent.modelRoutingGatedEnabled, promo?.killSwitch),
+      store: promotionStore,
+    })
+    const effortGate = resolveBanditPromotion({
+      source: 'effort_bandit',
+      mode: effectiveBanditMode(promo?.effort, undefined, promo?.killSwitch),
+      store: promotionStore,
+    })
+
     _coordinatorRef = new DelegationCoordinator({
       baseToolRegistry: toolRegistry,
       modelCards,
@@ -659,13 +701,18 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       maxWriteWorkers: 3,
       runtimeFactory,
       routing: workerRouting,
+      providerHealth,
       domainKnowledgeStore,
       modelTierShadowStore: _meridianIndexerRef?.getDb(),
-      modelTierBanditEnabled: config.agent.modelTierBanditEnabled === true,
+      modelTierBanditEnabled: modelTierGate.enabled,
       gatedInfluenceAuditStore: _meridianIndexerRef?.getDb(),
+      efeRouting: {
+        enabled: modelRoutingGate.enabled,
+        getSignals: () => agentForSignals?.getPolicySignals(),
+      },
     })
 
-    return new AgentLoop(
+    const agentLoop = new AgentLoop(
       {
         ...agentCfg,
         toolRegistry,
@@ -676,8 +723,14 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
         fileHistory,
         contextClaimStore: claimStore,
         playbookStore,
+        providerHealth,
+        effortBanditEnabled: effortGate.enabled,
         taskLedger: _taskLedgerRef ?? undefined,
         ownershipLedger: _ownershipLedgerRef ?? undefined,
+        // Track 3 门禁合一：badge 与收敛检测读权威 v2 状态。
+        deliveryGateV2: _deliveryGateRef
+          ? (dirty) => _deliveryGateRef!.assess([], dirty)
+          : undefined,
         meridianIndexer: _meridianIndexerRef,
         modelRoutingShadowModelCards: modelCards,
         domainKnowledgeStore,
@@ -686,6 +739,8 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       session,
       cwd,
     )
+    agentForSignals = agentLoop
+    return agentLoop
   }, [activeProvider, activeApiKey, activeAuth, currentModel, fileHistory, domainKnowledgeStore])
   agentRef.current = agent
 

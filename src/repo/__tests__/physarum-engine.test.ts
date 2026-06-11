@@ -194,4 +194,45 @@ describe('PhysarumEngine', () => {
     assert.equal(edge.activationCount, 3)
     assert.ok(edge.weight > 1.0)
   })
+
+  describe('structuralEpistemic (Track 1: 经络图×自由能)', () => {
+    it('returns undefined with no recent file access', () => {
+      const engine = new PhysarumEngine(stubDb)
+      assert.equal(engine.structuralEpistemic(), undefined)
+    })
+
+    it('frontier files (no edges) score 1', () => {
+      const engine = new PhysarumEngine(stubDb)
+      engine.recordFileAccess('src/lonely.ts', 1)
+      assert.equal(engine.structuralEpistemic(), 1)
+    })
+
+    it('heavily connected working set scores lower than a frontier one', () => {
+      const trodden = new PhysarumEngine(stubDb)
+      // Build heavy edges around hub.ts via repeated co-access
+      for (let turn = 1; turn <= 30; turn++) {
+        trodden.recordFileAccess('src/hub.ts', turn)
+        trodden.recordFileAccess(`src/peer${turn % 3}.ts`, turn)
+      }
+      const troddenScore = trodden.structuralEpistemic()
+      assert.ok(troddenScore !== undefined)
+
+      const frontier = new PhysarumEngine(stubDb)
+      frontier.recordFileAccess('src/new-module.ts', 1)
+      const frontierScore = frontier.structuralEpistemic()
+
+      assert.ok(frontierScore !== undefined)
+      assert.ok(frontierScore > troddenScore, `frontier ${frontierScore} should exceed trodden ${troddenScore}`)
+    })
+
+    it('bounded to [0, 1]', () => {
+      const engine = new PhysarumEngine(stubDb)
+      for (let turn = 1; turn <= 100; turn++) {
+        engine.recordFileAccess('src/a.ts', turn)
+        engine.recordFileAccess('src/b.ts', turn)
+      }
+      const score = engine.structuralEpistemic()
+      assert.ok(score !== undefined && score >= 0 && score <= 1)
+    })
+  })
 })
