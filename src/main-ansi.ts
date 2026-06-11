@@ -39,7 +39,6 @@ const requestedProvider = providerArgIdx >= 0 ? args[providerArgIdx + 1] : undef
 
 let app: TuiApp | null = null
 let ctx: BootstrapContext | null = null
-let isStreaming = false
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null
 
 let isShuttingDown = false
@@ -204,26 +203,13 @@ async function main() {
     const trimmed = text.trim()
     if (!trimmed) return
 
-    if (isStreaming) return // TuiApp 已 gate，双保险
-
-    // Start new turn with bridge callbacks (user message already committed by TuiApp)
-    isStreaming = true
-    const callbacks = wrapCallbacksWithTuiApp(app!, {
-      onTurnComplete: (usage, turnNumber, isFinal) => {
-        if (isFinal) {
-          isStreaming = false
-        }
-      },
-      onError: (_error) => {
-        isStreaming = false
-      },
-      onAbort: () => {
-        isStreaming = false
-      },
-    })
+    // 单一权威：TuiApp.agentBusy 是唯一的 streaming 闩。app.onSubmit 只在 TuiApp
+    // 判定空闲时触发（busy 时输入已被 TuiApp 入队 steerBuffer），故此处无需再自管
+    // isStreaming 标志——正是「双门异步清除时机不同」造成 Esc 后死会话的根因。
+    // run 生命周期回调（完成/错误/中止）由 bridge 桥接到 TuiApp，并带世代守卫。
+    const callbacks = wrapCallbacksWithTuiApp(app!)
     ctx!.agent.run(trimmed, callbacks).catch((err) => {
       process.stderr.write(`[T9] Agent error: ${(err as Error)?.message}\n`)
-      isStreaming = false
     })
   })
 

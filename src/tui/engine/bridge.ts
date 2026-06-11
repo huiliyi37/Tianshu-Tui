@@ -20,56 +20,77 @@ export function wrapCallbacksWithTuiApp(
   app: TuiApp,
   original: Partial<AgentCallbacks> = {},
 ): AgentCallbacks {
+  // 捕获本 run 的世代。abort 会让 app.runGen 自增；此后本 run 的迟到回调
+  // (gen !== app.runGen) 一律丢弃，杜绝旧 run 的 onAbort 清掉新 run 的 busy，
+  // 或旧 run 的 onTextDelta/onToolResult 污染新 run 的渲染（反向竞态）。
+  const gen = app.runGen
+  const live = () => app.runGen === gen
+
   return {
     onTextDelta: (text) => {
+      if (!live()) return
       app.callbacks.onTextDelta(text)
       original.onTextDelta?.(text)
     },
     onThinkingDelta: (thinking) => {
+      if (!live()) return
       app.callbacks.onThinkingDelta(thinking)
       original.onThinkingDelta?.(thinking)
     },
     onToolUse: (id, name, input) => {
+      if (!live()) return
       app.callbacks.onToolUse(id, name, input)
       original.onToolUse?.(id, name, input)
     },
     onToolResult: (id, name, result, isError, rawPath, uiContent) => {
+      if (!live()) return
       app.callbacks.onToolResult(id, name, result, isError, rawPath, uiContent)
       original.onToolResult?.(id, name, result, isError, rawPath, uiContent)
     },
     onTurnComplete: (usage, turnNumber, isFinal) => {
+      if (!live()) return
       app.callbacks.onTurnComplete(usage, turnNumber, isFinal)
       original.onTurnComplete?.(usage, turnNumber, isFinal)
     },
     onError: (error) => {
+      if (!live()) return
       app.callbacks.onError(error)
       original.onError?.(error)
     },
     onAbort: () => {
+      // 迟到的旧 run onAbort：新 run 已开始（gen 不符）→ 丢弃，否则会清掉新 run 的 busy
+      if (!live()) return
       app.callbacks.onAbort()
       original.onAbort?.()
     },
     onApprovalRequired: async (id, name, input) => {
+      // 旧 run 的审批请求 → 自动拒绝，不为已死的 run 弹审批 UI
+      if (!live()) return false
       if (original.onApprovalRequired) {
         return original.onApprovalRequired(id, name, input)
       }
       return app.callbacks.onApprovalRequired(id, name, input)
     },
     onCheckpoint: (hash) => {
+      if (!live()) return
       app.callbacks.onCheckpoint?.(hash)
       original.onCheckpoint?.(hash)
     },
     onPhaseChange: (phase, detail) => {
+      if (!live()) return
       app.callbacks.onPhaseChange?.(phase, detail)
       original.onPhaseChange?.(phase, detail)
     },
     onIntentPreview: async (intent) => {
+      // 旧 run 的意图预览 → 默认放行（不阻塞已死的 run）
+      if (!live()) return 'continue'
       if (original.onIntentPreview) {
         return original.onIntentPreview(intent)
       }
       return app.callbacks.onIntentPreview?.(intent) ?? 'continue'
     },
     onSteerDrain: () => {
+      if (!live()) return null
       const drained = app.callbacks.onSteerDrain?.() ?? null
       const originalDrained = original.onSteerDrain?.() ?? null
       return drained ?? originalDrained

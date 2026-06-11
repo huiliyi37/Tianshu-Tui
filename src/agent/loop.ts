@@ -87,6 +87,8 @@ import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { TurnHeartbeat } from './turn-heartbeat.js'
 import { rejectOnAbort } from './turn-boundary-abort.js'
+import { abortableDelay } from '../api/retry-engine.js'
+import { classifyApiError } from '../api/error-classifier.js'
 import { createP3Integration, P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
@@ -748,8 +750,11 @@ export class AgentLoop {
     this.abortController?.abort()
     // NOTE: killAll() removed — it was a global hammer that killed processes
     // from ALL AgentLoop instances, not just this one (中间层 #1).
-    // abortController.abort() + reader.cancel() handles in-flight operations.
-    // Process cleanup at exit is still handled by main.tsx's killAllSync().
+    // 范围化进程清理由「协作式取消」实现，而非全局硬锤：abortController 是
+    // 本实例独有的，abort() 翻转其信号 → 经 tool-pipeline 透传到本实例正在跑的
+    // 工具（bash/run_tests 已监听 params.abortSignal，立即 killProcessTree 自身子进程）。
+    // 因信号按实例隔离，中止本实例绝不会波及另一实例的子进程（双实例隔离）。
+    // 进程的最终兜底清理仍由 main.tsx 退出路径的 killAllSync() 负责。
   }
 
   /**
@@ -1987,7 +1992,7 @@ export class AgentLoop {
         // L0 streaming-executor telemetry: measure stream + tool execution latency.
         const turnStartMs = Date.now()
 
-        const streamResult = await this.turnStream!.streamTurn({
+        const streamOnce = () => this.turnStream!.streamTurn({
           request,
           turn,
           lastTurnTextFingerprint: this.lastTurnTextFingerprint,
@@ -2042,6 +2047,43 @@ export class AgentLoop {
             },
           },
         })
+
+        let streamResult = await streamOnce()
+
+        // 2D（默认关）：客户端重试耗尽后，agent 层有界重连。仅当本轮 streamError 被
+        // classifyApiError 判为 shouldReconnect、非 AbortError、且未 abort 时触发。
+        // 守护 prefix cache：丢弃本轮 partial blocks（不入 session）与已累计 streamedText，
+        // 用**相同 request**（消息历史不变）重发，prefix 命中不受污染。
+        const reconnectCfg = this.config.agentReconnect
+        if (reconnectCfg?.enabled && this.abortController) {
+          const maxAttempts = Math.max(0, reconnectCfg.maxAttempts ?? 1)
+          const backoffMs = reconnectCfg.backoffMs ?? 500
+          let attempt = 0
+          while (
+            attempt < maxAttempts &&
+            streamResult.streamError !== null &&
+            (streamResult.streamError as Error).name !== 'AbortError' &&
+            !this.abortController.signal.aborted &&
+            classifyApiError(streamResult.streamError).shouldReconnect
+          ) {
+            attempt++
+            this.streamedText = ''
+            turnTextAccum = ''
+            turnThinkingAccum = ''
+            pendingFlush = ''
+            turnDedupState = 'tracking'
+            rateLimitOccurred = false
+            rateLimitRetryMs = 0
+            callbacks.onPhaseChange?.('working', { reason: `reconnecting (${attempt}/${maxAttempts})` })
+            try {
+              await abortableDelay(backoffMs, this.abortController.signal)
+            } catch {
+              break // aborted during backoff
+            }
+            streamResult = await streamOnce()
+          }
+        }
+
         // Only decide full-turn suppression at the stream boundary. A mid-stream exact
         // fingerprint match is not final; later deltas may add new content.
         if (turnDedupState === 'tracking' && pendingFlush) {
@@ -2097,7 +2139,8 @@ export class AgentLoop {
         if (rateLimitOccurred) {
           // Use server-provided retry delay when available, otherwise fall back to 2s
           const delayMs = rateLimitRetryMs > 0 ? rateLimitRetryMs : 2000
-          await new Promise(r => setTimeout(r, delayMs))
+          // abort-race：429 回退期间 Esc 须立即解锁（abortableDelay 会清定时器并抛 AbortError）
+          await abortableDelay(delayMs, this.abortController!.signal)
         }
 
         // L0 telemetry: stream duration
@@ -2160,12 +2203,20 @@ export class AgentLoop {
             toolCount: toolUses.length,
           } as any)
 
-          const r = await this.toolExecution.executeBatch({
-            toolUses, callbacks, turn, checkpointCreatedThisTurn,
-            abortSignal: this.abortController!.signal,
-            traceStore: this.traceStore, importGraph: this.importGraph,
-            lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk,
-          })
+          // 工具批整体 abort-race：executeBatch 内部虽对单工具有 withToolTimeout，
+          // 但审批/checkpoint 前置 await 与 postTool hooks 不在 timeout 覆盖内，
+          // 一旦卡住，仅靠 240s 心跳看门狗才能解锁 → run() 长时间不 settle、会话假死。
+          // 这里把整批与 abort 信号竞速，Esc 后立即抛 AbortError → 下方 catch 走 onAbort。
+          const r = await rejectOnAbort(
+            this.toolExecution.executeBatch({
+              toolUses, callbacks, turn, checkpointCreatedThisTurn,
+              abortSignal: this.abortController!.signal,
+              traceStore: this.traceStore, importGraph: this.importGraph,
+              lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk,
+            }),
+            this.abortController!.signal,
+            'tools',
+          )
           ;({ traceStore: this.traceStore, importGraph: this.importGraph,
              lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk } = r)
           if (r.checkpointCreated) checkpointCreatedThisTurn = true
@@ -2230,12 +2281,16 @@ export class AgentLoop {
         this.consecutiveNoToolTurns++
 
         this.config.meridianIndexer?.flushTurn()
-        await this.turnCompletion.complete({
-          turn,
-          isFinal: true,
-          emitBadge: true,
-          callbacks,
-        })
+        await rejectOnAbort(
+          this.turnCompletion.complete({
+            turn,
+            isFinal: true,
+            emitBadge: true,
+            callbacks,
+          }),
+          this.abortController!.signal,
+          'final-complete',
+        )
         this.evidence.reset()
         break
       }

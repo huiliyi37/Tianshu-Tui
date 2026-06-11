@@ -61,6 +61,18 @@ export interface AgentConfig {
   /** Turn-level thinking: disable thinking on tool execution turns (GLM turn-level thinking).
    *  Reduces reasoning_content accumulation and prevents context window stalls. */
   turnLevelThinking?: boolean
+  /**
+   * 2D（默认关）：客户端重试耗尽后的 agent 层有界重连。仅当本轮 streamError 被
+   * classifyApiError 判为 shouldReconnect、且未 abort 时，丢弃本轮 partial blocks 与
+   * streamedText（守护 prefix cache 不被污染），用**相同 request** 重新发起流。
+   * 默认禁用——保守特性，需显式开启。 */
+  agentReconnect?: {
+    enabled: boolean
+    /** 最大重连次数（不含首次）。默认 1。 */
+    maxAttempts?: number
+    /** 每次重连前的退避（ms，可被 abort 打断）。默认 500。 */
+    backoffMs?: number
+  }
   lspEnabled?: boolean
   /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
   lspManager?: import('../lsp/manager.js').LspManager
