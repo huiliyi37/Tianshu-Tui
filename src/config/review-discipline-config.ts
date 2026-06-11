@@ -9,19 +9,20 @@
  * Disable with: RIVET_REVIEW_DISCIPLINE=0
  * Force on with:  RIVET_REVIEW_DISCIPLINE=1
  *
- * Default: enabled (true).
+ * Default: disabled (false) — opt-in via RIVET_REVIEW_DISCIPLINE=1.
+ *   Review worker timeout/failure was blocking the commit workflow too often.
  */
 
 /**
  * Returns whether the review discipline gate is enabled.
  *
  * Reads the RIVET_REVIEW_DISCIPLINE env var:
- *   - "0" / "false" / "off" / "no" → disabled
- *   - anything else (including unset) → enabled
+ *   - "1" / "true" / "on" / "yes" → enabled
+ *   - anything else (including unset) → disabled
  */
 export function isReviewDisciplineEnabled(): boolean {
   const raw = process.env.RIVET_REVIEW_DISCIPLINE
-  if (raw === undefined) return true
+  if (raw === undefined) return false
   const lower = raw.trim().toLowerCase()
-  return !(lower === '0' || lower === 'false' || lower === 'off' || lower === 'no')
+  return lower === '1' || lower === 'true' || lower === 'on' || lower === 'yes'
 }

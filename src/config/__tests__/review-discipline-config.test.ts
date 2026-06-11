@@ -10,30 +10,30 @@ describe('isReviewDisciplineEnabled', () => {
   beforeEach(() => { saved = process.env[KEY]; delete process.env[KEY] })
   afterEach(() => { if (saved !== undefined) process.env[KEY] = saved; else delete process.env[KEY] })
 
-  it('defaults to enabled when env is unset', () => {
-    assert.equal(isReviewDisciplineEnabled(), true)
+  it('defaults to disabled when env is unset', () => {
+    assert.equal(isReviewDisciplineEnabled(), false)
   })
 
-  const disabledValues = ['0', 'false', 'off', 'no', 'FALSE', 'OFF', 'NO', ' 0 ', ' false ']
-  for (const val of disabledValues) {
-    it(`returns false for RIVET_REVIEW_DISCIPLINE="${val}"`, () => {
+  const enabledValues = ['1', 'true', 'on', 'yes', 'TRUE', 'ON', 'YES', ' 1 ', ' true ']
+  for (const val of enabledValues) {
+    it(`returns true for RIVET_REVIEW_DISCIPLINE="${val}"`, () => {
       process.env[KEY] = val
-      assert.equal(isReviewDisciplineEnabled(), false)
+      assert.equal(isReviewDisciplineEnabled(), true)
     })
   }
 
-  it('returns true for RIVET_REVIEW_DISCIPLINE=1', () => {
-    process.env[KEY] = '1'
-    assert.equal(isReviewDisciplineEnabled(), true)
+  it('returns false for RIVET_REVIEW_DISCIPLINE=0', () => {
+    process.env[KEY] = '0'
+    assert.equal(isReviewDisciplineEnabled(), false)
   })
 
-  it('returns true for RIVET_REVIEW_DISCIPLINE=true', () => {
-    process.env[KEY] = 'true'
-    assert.equal(isReviewDisciplineEnabled(), true)
+  it('returns false for RIVET_REVIEW_DISCIPLINE=false', () => {
+    process.env[KEY] = 'false'
+    assert.equal(isReviewDisciplineEnabled(), false)
   })
 
-  it('returns true for any unrecognized value', () => {
+  it('returns false for any unrecognized value', () => {
     process.env[KEY] = 'whatever'
-    assert.equal(isReviewDisciplineEnabled(), true)
+    assert.equal(isReviewDisciplineEnabled(), false)
   })
 })
