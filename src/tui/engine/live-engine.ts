@@ -19,7 +19,7 @@
 
 import type { WriteStream } from 'node:tty'
 import stringWidth from 'string-width'
-import { ANSI, cursorUp, cursorTo } from './ansi.js'
+import { ANSI, cursorUp, cursorDown } from './ansi.js'
 
 export interface LiveRegionLine {
   /** 该行的 ANSI 格式化文本（包含颜色码） */
@@ -77,80 +77,129 @@ export class LiveEngine {
   // ── Render ────────────────────────────────────────────────────
 
   /**
-   * 渲染 live region。
+   * 渲染 live region（cursor-resident 协议，对标 aider mdstream / ink createIncremental）。
+   *
+   * 核心不变量：
+   * - 渲染后光标**常驻 live region 最后一行末尾**（尾行不写 `\n`）。
+   *   这避免了在终端底部因尾行换行触发滚屏 → 杜绝"贴底每帧滚动"的卡顿。
+   * - 增量重绘用**相对光标移动**（cursorUp/cursorDown）回到区域顶，不使用
+   *   SAVE/RESTORE 绝对光标——内容滚动后绝对坐标会失效错位。
+   * - **行级 diff**：结构未变（行数 + 单显示行）时只重写变化的行，跳过未变行（少闪）。
+   * - 整帧用 CSI 2026 同步输出包裹，原子刷新防撕裂。
    *
    * @param lines 要显示的行（含 ANSI 格式化）
-   * @param startRow 可选：live region 起始行号（1-based），用于 `cursorTo` 模式
    */
-  render(lines: readonly LiveRegionLine[], startRow?: number): void {
-    const bounded = lines.slice(0, this.maxRows)
+  render(lines: readonly LiveRegionLine[], opts?: { reservedTail?: number }): void {
+    const bounded = this.applyRowBudget(lines, opts?.reservedTail)
     const newDisplayRows = this.countDisplayRows(bounded)
 
-    // 首次渲染 或 clearForCommit 之后（lastDisplayRows === 0）：
-    // 直接在当前位置追加输出。cursorUp(0) 会被 clamp 到 1，
-    // 走重绘路径会向上覆盖已 commit 的 scrollback 行。
+    // 首次渲染 或 clear/clearForCommit 之后（lastDisplayRows === 0）：
+    // 直接在当前位置 append 输出。尾行不带 `\n`，光标停在最后一行末尾。
     if (!this.hasRendered || this.lastDisplayRows === 0) {
-      for (const line of bounded) {
-        this.stdout.write(line.text)
-        if (!line.text.endsWith('\n')) this.stdout.write('\n')
-      }
+      this.stdout.write(this.buildAppend(bounded))
       this.lastDisplayRows = newDisplayRows
       this.lineCache = bounded.map(l => l.text)
       this.hasRendered = true
       return
     }
 
-    // 增量重绘（display-row-aware）：
-    // 1. SAVE_CURSOR 保存当前位置（底部 / 输入行附近）
-    // 2. cursorUp(lastDisplayRows) 到 live region 顶部
-    // 3. Erase from cursor to end of screen（覆盖所有 display rows，含 wrap 行）
-    // 4. 写入全部新内容
-    // 5. RESTORE_CURSOR 恢复光标
-
     const prevDisplayRows = this.lastDisplayRows
-    let out = ''
 
-    out += ANSI.SAVE_CURSOR
+    // 行级 diff 资格：行数相同且新旧每行均为单显示行（多行 wrap 走全量重写更稳）。
+    const canDiff =
+      bounded.length === this.lineCache.length &&
+      bounded.every(l => this.rowsForLine(l.text) === 1) &&
+      this.lineCache.every(t => this.rowsForLine(t) === 1)
 
-    if (startRow !== undefined) {
-      out += cursorTo(startRow, 1)
-    } else {
-      out += cursorUp(prevDisplayRows)
-    }
+    const body = canDiff
+      ? this.buildDiff(bounded, prevDisplayRows)
+      : this.buildFullRewrite(bounded, prevDisplayRows)
 
-    // Erase from cursor to end of screen — covers all display rows including wrapped lines
-    out += '\r' + ANSI.ERASE_SCREEN_END
-
-    // Write all new lines
-    for (const line of bounded) {
-      out += line.text
-      if (!line.text.endsWith('\n')) out += '\n'
-    }
-
-    out += ANSI.RESTORE_CURSOR
-
-    this.stdout.write(out)
+    // CSI 2026 同步输出包裹整帧，原子刷新防撕裂。
+    this.stdout.write(ANSI.BEGIN_SYNC + body + ANSI.END_SYNC)
     this.lastDisplayRows = newDisplayRows
     this.lineCache = bounded.map(l => l.text)
   }
 
   /**
+   * 行预算：内容超过 maxRows 时，**优先保留尾部 chrome**（GlanceBar + 输入框 + 提示），
+   * 截断的是中段 dynamic（streaming tail / 工具输出）的较早部分。
+   *
+   * - `lines.length <= maxRows`：全部保留。
+   * - 未指定 reservedTail：沿用旧行为（保留前 maxRows 行）。
+   * - 指定 reservedTail：尾部 N 行恒保留；剩余预算从 dynamic 段取**最近**的若干行。
+   *   若 chrome 本身已超 maxRows，仍全部显示——宁可超行，也不能让输入框消失。
+   */
+  private applyRowBudget(lines: readonly LiveRegionLine[], reservedTail?: number): LiveRegionLine[] {
+    if (lines.length <= this.maxRows) return lines.slice()
+    if (reservedTail === undefined || reservedTail <= 0) {
+      return lines.slice(0, this.maxRows)
+    }
+    const tail = Math.min(reservedTail, lines.length)
+    const tailLines = lines.slice(lines.length - tail)
+    const budget = this.maxRows - tailLines.length
+    if (budget <= 0) return tailLines.slice()
+    const dynamic = lines.slice(0, lines.length - tail)
+    return [...dynamic.slice(-budget), ...tailLines]
+  }
+
+  /** Append 路径：行间 `\n`，尾行不带 `\n`（光标常驻最后一行末尾）。 */
+  private buildAppend(bounded: readonly LiveRegionLine[]): string {
+    let out = ''
+    for (let i = 0; i < bounded.length; i++) {
+      out += bounded[i]!.text
+      if (i < bounded.length - 1) out += '\n'
+    }
+    return out
+  }
+
+  /** 相对光标回到 live region 顶部显示行（光标当前在最后一个显示行）。 */
+  private moveToTop(prevDisplayRows: number): string {
+    return prevDisplayRows > 1 ? cursorUp(prevDisplayRows - 1) : ''
+  }
+
+  /**
+   * 全量重写：回顶 → 擦到屏幕末（覆盖旧的所有显示行，含 wrap）→ 重写全部行。
+   * 尾行不带 `\n`，光标停在最后一行末尾。
+   */
+  private buildFullRewrite(bounded: readonly LiveRegionLine[], prevDisplayRows: number): string {
+    let out = this.moveToTop(prevDisplayRows)
+    out += '\r' + ANSI.ERASE_SCREEN_END
+    for (let i = 0; i < bounded.length; i++) {
+      out += bounded[i]!.text
+      if (i < bounded.length - 1) out += '\n'
+    }
+    return out
+  }
+
+  /**
+   * 行级 diff（仅在结构未变 + 全单显示行时调用）：
+   * 回顶后逐行——变化行 `\r` + 整行擦除 + 重写；未变行只 cursorDown 跳过不重写。
+   * 不写任何 `\n`（cursorDown 在底行会被 clamp，不触发滚屏）。
+   */
+  private buildDiff(bounded: readonly LiveRegionLine[], prevDisplayRows: number): string {
+    let out = this.moveToTop(prevDisplayRows)
+    for (let i = 0; i < bounded.length; i++) {
+      const text = bounded[i]!.text
+      out += '\r'
+      if (this.lineCache[i] !== text) {
+        out += ANSI.ERASE_LINE + text
+      }
+      if (i < bounded.length - 1) out += cursorDown(1)
+    }
+    return out
+  }
+
+  /**
    * 清空 live region（擦除但不回滚 scrollback）。
    * 用于流式输出完成、切换到新 turn 时。
+   *
+   * 光标常驻协议下，光标在最后一个显示行——回顶后擦到屏幕末，光标停在
+   * 区域起始处。后续 append/commit 从这里开始写，干净无空白带。
    */
   clear(): void {
     if (this.lastDisplayRows === 0) return
-
-    let out = ''
-    out += ANSI.SAVE_CURSOR
-    out += cursorUp(this.lastDisplayRows)
-    for (let i = 0; i < this.lastDisplayRows; i++) {
-      out += ANSI.ERASE_LINE
-      if (i < this.lastDisplayRows - 1) out += '\n'
-    }
-    out += ANSI.RESTORE_CURSOR
-    this.stdout.write(out)
-
+    this.stdout.write(this.moveToTop(this.lastDisplayRows) + '\r' + ANSI.ERASE_SCREEN_END)
     this.lastDisplayRows = 0
     this.lineCache = []
   }
@@ -158,21 +207,13 @@ export class LiveEngine {
   /**
    * 擦除 live region 并把光标停在其起始行——为向 scrollback commit 内容腾位。
    *
-   * 与 clear() 的区别：clear() 用 RESTORE_CURSOR 把光标放回 live region
-   * 之下（留下 N 行空白），而 commit 内容必须写在 live region 原来的
-   * 位置上，否则会出现空白带 + 下一帧重绘覆盖已 commit 的文本。
-   *
    * 正确的 mid-stream commit 协议：
    *   live.clearForCommit() → commit.write(...) → live.render(...)
+   *
+   * cursor-resident 协议下与 clear() 行为一致（光标都回到区域起始处）。
    */
   clearForCommit(): void {
-    if (this.lastDisplayRows === 0) return
-    let out = ''
-    out += cursorUp(this.lastDisplayRows)
-    out += '\r' + ANSI.ERASE_SCREEN_END
-    this.stdout.write(out)
-    this.lastDisplayRows = 0
-    this.lineCache = []
+    this.clear()
   }
 
   /**

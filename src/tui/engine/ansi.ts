@@ -28,6 +28,14 @@ export const ANSI = {
   ALT_SCREEN_ON: '\x1B[?1049h',
   /** 退出 alternate screen buffer，恢复主屏 */
   ALT_SCREEN_OFF: '\x1B[?1049l',
+  /**
+   * 开始同步输出（CSI 2026 / DECSET 2026）。
+   * 终端会缓冲后续输出，直到 END_SYNC 才一次性原子刷新 → 防止增量重绘撕裂/闪烁。
+   * 不支持的终端会静默忽略此私有模式（无副作用）。
+   */
+  BEGIN_SYNC: '\x1B[?2026h',
+  /** 结束同步输出，原子刷新本帧。 */
+  END_SYNC: '\x1B[?2026l',
   /** 隐藏光标 */
   HIDE_CURSOR: '\x1B[?25l',
   /** 显示光标 */

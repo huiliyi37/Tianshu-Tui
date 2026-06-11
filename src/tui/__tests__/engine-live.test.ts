@@ -28,7 +28,7 @@ describe('LiveEngine', () => {
     assert.ok(!output.includes('\x1B[s'))
   })
 
-  it('second render uses cursor save/restore for incremental redraw', () => {
+  it('incremental redraw uses relative cursor (no SAVE/RESTORE), sync-wrapped', () => {
     const { stdout, writes } = mockStdout()
     const engine = new LiveEngine({ stdout })
 
@@ -37,12 +37,14 @@ describe('LiveEngine', () => {
 
     engine.render([{ text: 'updated' }])
     const output = writes.join('')
-    // 增量渲染包含 cursor up + erase + restore
-    assert.ok(output.includes('\x1B[s') || output.includes('\x1B['))
+    // cursor-resident 协议：相对光标、无 SAVE/RESTORE、CSI 2026 同步输出包裹
     assert.ok(output.includes('updated'))
+    assert.ok(!output.includes('\x1B[s'), '不应使用 SAVE_CURSOR')
+    assert.ok(!output.includes('\x1B[u'), '不应使用 RESTORE_CURSOR')
+    assert.ok(output.startsWith('\x1B[?2026h') && output.endsWith('\x1B[?2026l'), '应被同步输出包裹')
   })
 
-  it('clear erases live region and resets state', () => {
+  it('clear erases live region and resets state (no SAVE/RESTORE)', () => {
     const { stdout, writes } = mockStdout()
     const engine = new LiveEngine({ stdout })
 
@@ -51,9 +53,9 @@ describe('LiveEngine', () => {
 
     engine.clear()
     const output = writes.join('')
-    // clear 包含 cursor save + erase lines
-    assert.ok(output.includes('\x1B[s'))
-    assert.ok(output.includes('\x1B[2K'))
+    // clear：擦到屏幕末，不使用绝对光标
+    assert.ok(output.includes('\x1B[0J'), '应擦除到屏幕末')
+    assert.ok(!output.includes('\x1B[s'), '不应使用 SAVE_CURSOR')
   })
 
   it('renderLine is a convenience for single-line live region', () => {

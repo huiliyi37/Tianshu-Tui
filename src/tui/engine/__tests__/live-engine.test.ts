@@ -1,0 +1,249 @@
+/**
+ * T9 LiveEngine 重绘协议测试。
+ *
+ * 阶段 0（复现 RED）+ 阶段 4（协议断言）合一：
+ * - 用最小终端模拟器（MockTerminal）忠实重现"live 区贴底时每帧滚动"的卡顿特征。
+ * - 断言修复后的协议：不用 SAVE/RESTORE、尾行不带 \n、行级 diff 跳过未变行、CSI 2026 同步输出包裹。
+ *
+ * 滚屏类 bug 单测难直接覆盖，这里用确定性的终端模拟器把"滚动次数"变成可断言信号。
+ */
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import type { WriteStream } from 'node:tty'
+import { LiveEngine, type LiveRegionLine } from '../live-engine.js'
+
+/**
+ * 最小终端模拟器：追踪光标行 / 滚动次数 / 全部写入字节。
+ * 只建模垂直移动与滚动（R1 关注点），擦除/SGR 对滚动无影响，按需忽略。
+ */
+class MockTerminal {
+  columns: number
+  rows: number
+  cursorRow = 0
+  cursorCol = 0
+  scrollCount = 0
+  private savedRow = 0
+  private savedCol = 0
+  writes: string[] = []
+
+  constructor(columns: number, rows: number) {
+    this.columns = columns
+    this.rows = rows
+  }
+
+  /** 取出自上次 flush 以来的全部写入字节并清空缓冲。 */
+  flush(): string {
+    const s = this.writes.join('')
+    this.writes = []
+    return s
+  }
+
+  private lineFeed(): void {
+    if (this.cursorRow >= this.rows - 1) {
+      this.scrollCount++ // 在底行换行 → 滚屏，光标留在底行
+    } else {
+      this.cursorRow++
+    }
+  }
+
+  write = (chunk: string): boolean => {
+    this.writes.push(chunk)
+    let i = 0
+    while (i < chunk.length) {
+      const ch = chunk[i]!
+      if (ch === '\x1b' && chunk[i + 1] === '[') {
+        let j = i + 2
+        let isPrivate = false
+        if (chunk[j] === '?') { isPrivate = true; j++ }
+        let params = ''
+        while (j < chunk.length && /[0-9;]/.test(chunk[j]!)) { params += chunk[j]; j++ }
+        const final = chunk[j]
+        const n = params === '' ? 1 : parseInt(params.split(';')[0]!, 10)
+        if (!isPrivate) {
+          switch (final) {
+            case 'A': this.cursorRow = Math.max(0, this.cursorRow - n); break
+            case 'B': this.cursorRow = Math.min(this.rows - 1, this.cursorRow + n); break
+            case 's': this.savedRow = this.cursorRow; this.savedCol = this.cursorCol; break
+            case 'u': this.cursorRow = this.savedRow; this.cursorCol = this.savedCol; break
+            case 'H': {
+              const parts = params.split(';')
+              this.cursorRow = Math.min(this.rows - 1, Math.max(0, (parseInt(parts[0] || '1', 10)) - 1))
+              this.cursorCol = Math.max(0, (parseInt(parts[1] || '1', 10)) - 1)
+              break
+            }
+            case 'G': this.cursorCol = Math.max(0, n - 1); break
+            default: break // J / K (erase) 不影响滚动
+          }
+        }
+        // 私有模式 h/l（CSI ?2026h/l 同步输出）忽略
+        i = j + 1
+        continue
+      }
+      if (ch === '\n') { this.lineFeed(); i++; continue }
+      if (ch === '\r') { this.cursorCol = 0; i++; continue }
+      // 可打印字符
+      this.cursorCol++
+      if (this.cursorCol >= this.columns) {
+        this.cursorCol = 0
+        this.lineFeed()
+      }
+      i++
+    }
+    return true
+  }
+}
+
+function asStdout(term: MockTerminal): WriteStream {
+  return term as unknown as WriteStream
+}
+
+function lines(...texts: string[]): LiveRegionLine[] {
+  return texts.map(text => ({ text }))
+}
+
+// ── R1：贴底重渲不得持续滚屏 ───────────────────────────────────
+
+test('R1: 相同内容重渲多帧，不产生额外滚屏（贴底卡顿复现/修复）', () => {
+  // rows=3，live 区 3 行恰好贴底——原协议尾行 \n 会每帧滚屏一次
+  const term = new MockTerminal(80, 3)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('L0', 'L1', 'L2'))
+  const scrollAfterFirst = term.scrollCount
+
+  // 模拟 ticker：相同内容重渲 10 帧
+  for (let i = 0; i < 10; i++) engine.render(lines('L0', 'L1', 'L2'))
+
+  assert.equal(
+    term.scrollCount,
+    scrollAfterFirst,
+    `相同内容重渲不应继续滚屏（first=${scrollAfterFirst} after10=${term.scrollCount}）`,
+  )
+})
+
+// ── R1：不使用 SAVE/RESTORE 绝对光标 ───────────────────────────
+
+test('R1: 增量重渲不得使用 SAVE_CURSOR/RESTORE_CURSOR（贴底会错位）', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('A', 'B', 'C'))
+  term.flush()
+  engine.render(lines('A', 'B', 'C2'))
+  const frame = term.flush()
+
+  assert.ok(!frame.includes('\x1B[s'), '增量帧不应包含 SAVE_CURSOR (\\x1B[s)')
+  assert.ok(!frame.includes('\x1B[u'), '增量帧不应包含 RESTORE_CURSOR (\\x1B[u)')
+})
+
+// ── R2：行级 diff，未变行不重写 ────────────────────────────────
+
+test('R2: 仅一行变化时，未变行不被重写', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('STATUS-0', 'GLANCE', 'INPUT'))
+  term.flush()
+  // 仅状态行变化（模拟 spinner 帧）
+  engine.render(lines('STATUS-1', 'GLANCE', 'INPUT'))
+  const frame = term.flush()
+
+  assert.ok(frame.includes('STATUS-1'), '变化行应被重写')
+  assert.ok(!frame.includes('GLANCE'), '未变行 GLANCE 不应被重写')
+  assert.ok(!frame.includes('INPUT'), '未变行 INPUT 不应被重写')
+})
+
+// ── R3 / 阶段3：CSI 2026 同步输出包裹增量帧 ─────────────────────
+
+test('阶段3: 增量帧用 CSI 2026 同步输出包裹（防撕裂）', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('A', 'B', 'C'))
+  term.flush()
+  engine.render(lines('A2', 'B', 'C'))
+  const frame = term.flush()
+
+  assert.ok(frame.startsWith('\x1B[?2026h'), '增量帧应以 BEGIN_SYNC (\\x1B[?2026h) 开头')
+  assert.ok(frame.endsWith('\x1B[?2026l'), '增量帧应以 END_SYNC (\\x1B[?2026l) 结尾')
+})
+
+// ── 结构变化（行数变化）走全量重写，仍不滚屏/不用 SAVE/RESTORE ──
+
+test('结构变化（行数增减）安全重绘，不滚屏不用 SAVE/RESTORE', () => {
+  const term = new MockTerminal(80, 3)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('L0', 'L1', 'L2'))
+  const baseScroll = term.scrollCount
+  term.flush()
+
+  // 行数减少
+  engine.render(lines('L0', 'L1'))
+  let frame = term.flush()
+  assert.ok(!frame.includes('\x1B[s') && !frame.includes('\x1B[u'), '不应使用 SAVE/RESTORE')
+
+  // 行数增加
+  engine.render(lines('L0', 'L1', 'L2', 'L3'))
+  frame = term.flush()
+  assert.ok(!frame.includes('\x1B[s') && !frame.includes('\x1B[u'), '不应使用 SAVE/RESTORE')
+
+  // 多帧稳定后不应无限滚屏
+  for (let i = 0; i < 5; i++) engine.render(lines('L0', 'L1', 'L2', 'L3'))
+  // rows=3 而内容 4 行 > 视口，首帧会滚一次进入稳态；之后相同内容不应继续滚
+  const stableScroll = term.scrollCount
+  for (let i = 0; i < 5; i++) engine.render(lines('L0', 'L1', 'L2', 'L3'))
+  assert.equal(term.scrollCount, stableScroll, '稳态相同内容不应继续滚屏')
+
+  assert.ok(term.scrollCount >= baseScroll)
+})
+
+// ── reservedTail：行数超 maxRows 时尾部 chrome（输入框）必须保留 ──
+
+test('reservedTail: 内容超 maxRows 时尾部 chrome 行始终保留（输入框不被截断）', () => {
+  const term = new MockTerminal(80, 50)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 5 })
+
+  // 10 行 dynamic（streaming/tools）+ 3 行尾部 chrome（分隔/glance/输入框）
+  const all = lines(
+    'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9',
+    'GLANCE-SEP', 'GLANCE', '▸ INPUT',
+  )
+  engine.render(all, { reservedTail: 3 })
+  const frame = term.flush()
+
+  assert.ok(frame.includes('▸ INPUT'), '输入框必须出现在首帧')
+  assert.ok(frame.includes('GLANCE'), 'glance 必须保留')
+  assert.ok(frame.includes('D9'), '最近的 dynamic 行应保留')
+  assert.ok(!frame.includes('D0'), '最早的 dynamic 行应被截断（让位给尾部 chrome）')
+})
+
+test('reservedTail: 尾部 chrome 超过 maxRows 时仍全部显示（宁可超行也要见输入框）', () => {
+  const term = new MockTerminal(80, 50)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 2 })
+
+  const all = lines('D0', 'D1', 'GLANCE-SEP', 'GLANCE', '▸ INPUT')
+  engine.render(all, { reservedTail: 3 })
+  const frame = term.flush()
+
+  assert.ok(frame.includes('▸ INPUT'), '输入框必须出现')
+  assert.ok(frame.includes('GLANCE'), 'glance 必须出现')
+  assert.ok(frame.includes('GLANCE-SEP'), 'chrome 全部保留')
+})
+
+// ── clear / clearForCommit 后回到 append 路径不滚屏 ─────────────
+
+test('clearForCommit 后再渲染走 append 路径，贴底不持续滚屏', () => {
+  const term = new MockTerminal(80, 5)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('L0', 'L1', 'L2'))
+  engine.clearForCommit()
+  // 模拟 commit 写入 scrollback
+  asStdout(term).write('committed line\n')
+  engine.render(lines('L0', 'L1', 'L2'))
+  const scrollBefore = term.scrollCount
+  for (let i = 0; i < 10; i++) engine.render(lines('L0', 'L1', 'L2'))
+  assert.equal(term.scrollCount, scrollBefore, 'commit 后稳态重渲不应继续滚屏')
+})
