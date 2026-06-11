@@ -194,6 +194,16 @@ export class OpenAIClient implements StreamClient {
           const budget = budgetMap[this.config.reasoningEffort ?? 'high'] ?? Math.floor(this.config.maxTokens * 0.6)
           ;(body.thinking as Record<string, unknown>)['budget_tokens'] = budget
         }
+        // DeepSeek-style: thinking 块与 reasoning_effort **并存**（官方 curl 样例
+        // 同时带 {thinking:{type:enabled}} 和 {reasoning_effort:high/max}）。
+        // 旧实现只发 thinking 块，配置的 reasoningEffort(v4-pro=max) 被静默丢弃，
+        // DeepSeek 退回服务端默认 effort(high)。Claude/GLM/minimax 各有块内 effort
+        // 编码(budget_tokens/clear_thinking/adaptive)，故仅对 reasoning_effort 格式补发。
+        if (this.config.effortFormat === 'reasoning_effort'
+          && this.config.reasoningEffort
+          && this.config.reasoningEffort !== 'off') {
+          body.reasoning_effort = this.config.reasoningEffort
+        }
       } else if (this.config.effortFormat !== 'none') {
         body.reasoning_effort = this.config.reasoningEffort ?? 'medium'
       }
