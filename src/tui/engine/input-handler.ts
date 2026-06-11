@@ -145,6 +145,14 @@ export class InputHandler {
   private escapeTimer: ReturnType<typeof setTimeout> | null = null
   private pasteActive = false
   private pasteBuffer = ''
+  /**
+   * 跨 chunk 不完整代理对缓冲：上游（stdin）可能把同一 UTF-16 代理对的两个
+   * code unit 拆到两个 `data` 事件里（高强度输入 + 终端流量控制时偶发）。
+   * 若不缓冲，第一段被当成"可打印字符"派发，char 字段就是孤立的
+   * high-surrogate `\uD83D`——输入框会显示成豆腐方块，emoji 簇不可用。
+   * 这里在 handleData 入口预拼，在派发前剥离尾部 high-surrogate。
+   */
+  private pendingData = ''
 
   constructor(options: InputHandlerOptions) {
     this.stdin = options.stdin
@@ -194,6 +202,7 @@ export class InputHandler {
       clearTimeout(this.escapeTimer)
       this.escapeTimer = null
     }
+    this.pendingData = ''
     this.stdin.removeAllListeners('data')
     this.stdin.setRawMode(false)
     this.stdin.pause()
@@ -204,6 +213,25 @@ export class InputHandler {
   // ── internal ─────────────────────────────────────────────────
 
   private handleData(data: string): void {
+    // 0. 拼接上次未处理完的代理对片段
+    if (this.pendingData) {
+      data = this.pendingData + data
+      this.pendingData = ''
+    }
+
+    // 0b. 若末尾是孤立的 high-surrogate，剥出留到下个 chunk 拼接。
+    // 注意：不做内容裁剪对 paste 路径也是安全的——consumePaste 会自己
+    // 累积 pasteBuffer，跨 chunk 的代理对在收到 low-surrogate 后由
+    // pasteActive 路径整体派发，Display 上仍是完整 emoji。
+    if (data.length > 0) {
+      const lastCode = data.charCodeAt(data.length - 1)
+      if (lastCode >= 0xD800 && lastCode <= 0xDBFF) {
+        this.pendingData = data.slice(-1)
+        data = data.slice(0, -1)
+        if (!data) return
+      }
+    }
+
     // 1. 进行中的 paste：累积直到结束标记
     if (this.pasteActive) {
       this.consumePaste(data)
@@ -227,9 +255,17 @@ export class InputHandler {
       this.escapeTimer = null
     }
 
-    const key = this.parseInput(data)
-    if (key) {
-      this.dispatch(key)
+    const parsed = this.parseInput(data)
+    if (parsed.key) {
+      this.dispatch(parsed.key)
+      // 关键：parseInput 只取首字符/首序列；剩余部分递归派发。
+      // 这条路径只在「单 chunk 含多字符」时触发——典型场景：
+      //   (a) surrogate 合并后跟 ASCII：'\uD83D\uDE00a' → 😀 + a
+      //   (b) 高频 typing 把多个按键并到一次 stdin data 事件
+      //   旧实现会派发 {char: 整串} 一个 char 字段，把多字符粘成单键
+      //   ——输入框会显示成一团乱码、insertText 把整串塞在光标后。
+      const rest = data.slice(parsed.consumed)
+      if (rest) this.handleData(rest)
       return
     }
 
@@ -280,8 +316,16 @@ export class InputHandler {
     }
   }
 
-  private parseInput(data: string): KeyPress | null {
-    if (data.length === 0) return null
+  /**
+   * 解析 data 首部的一个按键事件 + 实际消费的 code unit 数。
+   *
+   * 返回 { key: null, consumed: 0 } 表示"等后续字节"（孤 ESC 字节、跨 chunk
+   * 代理对前半），handleData 据此决定是否挂起；否则 key 非 null，consumed
+   * 告诉调用方"data 已被消费的字节数"，剩余 data.slice(consumed) 由 handleData
+   * 递归再派发——这条路径是「单 stdin chunk 含多字符」时的唯一安全通道。
+   */
+  private parseInput(data: string): { key: KeyPress | null; consumed: number } {
+    if (data.length === 0) return { key: null, consumed: 0 }
 
     // 完整 ESC 序列一次到达（如 \x1B[A）——直接解析，不走两阶段状态机
     if (data.startsWith('\x1B') && data.length > 1) {
@@ -289,16 +333,16 @@ export class InputHandler {
       if (name) {
         const meta = data.includes(';3') || data.includes(';4')
         const shift = data.includes(';2')
-        return { raw: data, char: '', name, ctrl: false, meta, shift }
+        return { key: { raw: data, char: '', name, ctrl: false, meta, shift }, consumed: data.length }
       }
-      return { raw: data, char: '', name: 'unknown', ctrl: false, meta: false, shift: false }
+      return { key: { raw: data, char: '', name: 'unknown', ctrl: false, meta: false, shift: false }, consumed: data.length }
     }
 
     // 单独的 ESC 字节 — 进入 escaped 状态，等待后续字节
     if (data === '\x1B') {
       this.escaped = true
       this.escapeSeq = '\x1B'
-      return null
+      return { key: null, consumed: 0 }
     }
 
     if (this.escaped) {
@@ -310,36 +354,47 @@ export class InputHandler {
         this.escapeSeq = ''
         const meta = fullSeq.includes(';3') || fullSeq.includes(';4')
         const shift = fullSeq.includes(';2')
-        return { raw: fullSeq, char: '', name, ctrl: false, meta, shift }
+        return { key: { raw: fullSeq, char: '', name, ctrl: false, meta, shift }, consumed: 0 /* 全路径已消费 */ }
       }
       // 如果序列还没结束（如 `\x1B[1` 等待 `;5D`），保持 escaped 状态
       if (this.escapeSeq.length > 10) {
         // 超长序列，放弃解析
         this.escaped = false
         this.escapeSeq = ''
-        return { raw: data, char: '', name: 'unknown', ctrl: false, meta: false, shift: false }
+        return { key: { raw: data, char: '', name: 'unknown', ctrl: false, meta: false, shift: false }, consumed: data.length }
       }
-      return null
+      return { key: null, consumed: 0 }
     }
 
     // 单字节字符
     const code = data.codePointAt(0)
-    if (code === undefined) return null
+    if (code === undefined) return { key: null, consumed: 0 }
 
-    // Ctrl+key 范围 (0x01-0x1F 和 0x7F)
+    // Ctrl+key 范围 (0x01-0x1F 和 0x7F) — 1 个 UTF-16 code unit
     if (code <= 0x1f || code === 0x7f) {
       const name = CTRL_CODES[code] ?? 'unknown'
-      return { raw: data, char: '', name, ctrl: code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d, meta: false, shift: false }
+      return {
+        key: { raw: data, char: '', name, ctrl: code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d, meta: false, shift: false },
+        consumed: 1,
+      }
     }
 
-    // 可打印字符
+    // 可打印字符：UTF-16 代理对占 2 code unit；BMP 占 1。
+    // ⚠️ 这里关键：data 可能含「emoji 簇（多 codepoint ZWJ 序列）」
+    // 之类的多字符，但 parseInput 只取首「用户字符」——一个 codepoint。
+    // 多 codepoint 簇的拆分留给 InputLine 的 graphemeSegmenter 处理。
+    const charLen = code > 0xFFFF ? 2 : 1
+    const char = data.slice(0, charLen)
     return {
-      raw: data,
-      char: data,
-      name: data === ' ' ? 'space' : 'unknown',
-      ctrl: false,
-      meta: false,
-      shift: data !== data.toLowerCase() && data !== data.toUpperCase() ? false : data === data.toUpperCase() && data.toLowerCase() !== data.toUpperCase(),
+      key: {
+        raw: char,
+        char,
+        name: char === ' ' ? 'space' : 'unknown',
+        ctrl: false,
+        meta: false,
+        shift: char !== char.toLowerCase() && char !== char.toUpperCase() ? false : char === char.toUpperCase() && char.toLowerCase() !== char.toUpperCase(),
+      },
+      consumed: charLen,
     }
   }
 

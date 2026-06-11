@@ -111,3 +111,47 @@ describe('InputHandler · bracketed paste (C1)', () => {
     handler.dispose()
   })
 })
+
+describe('InputHandler · surrogate-pair chunk buffering (领航星 2026-06-11 UX)', () => {
+  it('assembles a split emoji surrogate pair across two data chunks', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const chars: string[] = []
+    handler.onAnyKey((k) => { if (k.char) chars.push(k.char) })
+
+    // 终端流量控制 / 高频输入下，😀 (\uD83D\uDE00) 可能被拆成两段。
+    // 旧实现会把第一段当孤立高代理派发，输入框渲染豆腐方块。
+    // 新行为：第一段先 buffer，不派发；合并第二段后整体派发。
+    stdin.emitData('\uD83D')  // 高代理
+    assert.deepEqual(chars, [], 'lone high surrogate must not dispatch')
+
+    stdin.emitData('\uDE00')  // 低代理
+    assert.deepEqual(chars, ['\uD83D\uDE00'], 'assembled emoji dispatched as one char')
+    handler.dispose()
+  })
+
+  it('a normal key after a buffered surrogate still dispatches', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const chars: string[] = []
+    handler.onAnyKey((k) => { if (k.char) chars.push(k.char) })
+
+    stdin.emitData('\uD83D')        // buffer
+    stdin.emitData('\uDE00a')       // 完成 emoji + 接一个 'a'
+    assert.deepEqual(chars, ['\uD83D\uDE00', 'a'])
+    handler.dispose()
+  })
+
+  it('dispose clears pending surrogate buffer (no late dispatch)', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const chars: string[] = []
+    handler.onAnyKey((k) => { if (k.char) chars.push(k.char) })
+
+    stdin.emitData('\uD83D')  // buffered
+    handler.dispose()
+    // 模拟上游在 dispose 后又来了一段——应当无副作用
+    stdin.emitData('\uDE00')
+    assert.deepEqual(chars, [])
+  })
+})
