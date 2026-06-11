@@ -200,6 +200,18 @@ describe('claim-extractor', () => {
     assert.match(proposals[0]!.text, /def5678/)
   })
 
+  it('commit fact text carries the turn anchor', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'git',
+      input: { action: 'commit', message: 'feat: anchor' },
+      result: '[main abc9999] feat: anchor\n 1 file changed, 1 insertion(+)',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 1)
+    assert.match(proposals[0]!.text, new RegExp(`\\(turn ${meta.turn}\\)`))
+  })
+
   it('does not extract claim from failed commit', () => {
     const ctx: ToolResultContext = {
       toolName: 'git',

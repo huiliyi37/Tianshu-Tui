@@ -548,6 +548,12 @@ When the task implements a complex spec or cross-module integration, include the
           lines.push('', '  ⚠️ Cohesion gate overridden with force=true. Verify this is truly one logical unit.')
         }
 
+        // Capture HEAD before the commit so the result carries verifiable
+        // evidence that a new commit actually landed (vs. agent guessing from
+        // a possibly-stale git status snapshot).
+        const headBefore = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 5000 })
+        const headBeforeHash = headBefore.status === 0 ? headBefore.stdout.trim() : null
+
         const executor = ctx.commitOwnedFiles ?? ((cwd, files, msg) => commitScopedFiles({ cwd, files, message: msg }))
         const commitResult = executor(params.cwd, filesToCommit, message)
         if (!commitResult.ok) {
@@ -557,7 +563,16 @@ When the task implements a complex spec or cross-module integration, include the
         lines.push('', `✅ Scoped commit created with message: "${message}"`)
         lines.push(`   Files: ${filesToCommit.join(', ') || '(none)'}`)
         if (commitResult.output) lines.push(`   ${commitResult.output}`)
-        // Post-commit truth readback: verify actual landed changes + surface hash
+        // Post-commit truth readback: verify HEAD actually moved + surface hash.
+        const headAfter = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 5000 })
+        const headAfterHash = headAfter.status === 0 ? headAfter.stdout.trim() : null
+        if (headBeforeHash && headAfterHash) {
+          if (headBeforeHash !== headAfterHash) {
+            lines.push(`   VERIFIED: HEAD moved ${headBeforeHash} → ${headAfterHash}. The commit is real — do NOT re-attempt it.`)
+          } else {
+            lines.push(`   ⚠️ WARNING: HEAD did not move (still ${headAfterHash}). The commit may not have landed — verify with git log before retrying.`)
+          }
+        }
         const readback = spawnSync('git', ['-c', 'core.quotePath=false', 'show', '--stat', '--format=%h%d', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 10_000 })
         if (readback.status === 0 && readback.stdout.trim()) {
           lines.push('', '--- actual changes (git show --stat) ---')

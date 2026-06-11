@@ -165,7 +165,10 @@ function commitFact(ctx: ToolResultContext, meta: ClaimExtractionMeta, now: numb
     .map(l => l.split('|')[0]!.trim())
     .filter(f => f.length > 0)
   const files = statLines.length > 0 ? statLines.slice(0, 5).join(', ') : 'unknown files'
-  const text = `Commit ${hash}: "${message}" (${files})`
+  // Turn anchor disambiguates old commit claims from "committed this round":
+  // without it the agent may read a stale claim as evidence the current
+  // round's commit already happened (or vice versa).
+  const text = `Commit ${hash} (turn ${meta.turn}): "${message}" (${files})`
   return {
     kind: 'decision',
     scope: 'project',

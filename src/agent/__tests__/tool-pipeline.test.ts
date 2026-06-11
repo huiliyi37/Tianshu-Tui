@@ -273,6 +273,57 @@ describe('executeToolUse', () => {
     assert.equal(event.meta.scope, 'targeted')
   })
 
+  it('marks git dirty after successful deliver_task commit', async () => {
+    const events: any[] = []
+    let gitDirtyCalls = 0
+    const base = makeDeps()
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+      } as any,
+      config: {
+        ...base.config,
+        promptEngine: {
+          setStrategyShift: () => {},
+          setImpactHint: () => {},
+          markGitDirty: () => { gitDirtyCalls++ },
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-deliver-commit', name: 'deliver_task', input: { commit: true, message: 'feat: x' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(gitDirtyCalls, 1, 'markGitDirty must be called after successful deliver_task commit')
+    const event = events.at(-1)
+    assert.equal(event.type, 'git_action')
+  })
+
+  it('does not mark git dirty for deliver_task readiness check (commit=false)', async () => {
+    let gitDirtyCalls = 0
+    const base = makeDeps()
+    const deps = makeDeps({
+      taskLedger: { record: () => {} } as any,
+      config: {
+        ...base.config,
+        promptEngine: {
+          setStrategyShift: () => {},
+          setImpactHint: () => {},
+          markGitDirty: () => { gitDirtyCalls++ },
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-deliver-check', name: 'deliver_task', input: {} },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(gitDirtyCalls, 0)
+  })
+
   it('records run_tests parsed verification counts in task ledger meta', async () => {
     const events: any[] = []
     const deps = makeDeps({

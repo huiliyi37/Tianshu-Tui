@@ -819,6 +819,13 @@ ${check.formatted}`
           if (verification.targetFiles) meta.targetFiles = verification.targetFiles
        }
         deps.taskLedger.record({ type: 'verification', command, status: harnessResult.isError ? 'failed' : 'passed', meta })
+     } else if (tu.name === 'deliver_task' && tu.input.commit === true && !harnessResult.isError) {
+        // Successful scoped commit changed git state — invalidate the frozen
+        // git-status snapshot so the next appendix rebuild shows the post-commit
+        // reality. Without this the model sees stale "modified" files and
+        // re-attempts the commit (cache-log 6c9b3bd6 root cause).
+        deps.config.promptEngine.markGitDirty()
+        deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: 'deliver_task commit' } })
      } else {
         deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
      }
