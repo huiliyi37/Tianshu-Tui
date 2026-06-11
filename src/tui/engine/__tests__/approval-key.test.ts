@@ -79,3 +79,13 @@ test('审批模式 y → approve', async () => {
   await tick()
   assert.deepEqual(resolved, { approved: true }, 'y 应 approve')
 })
+
+test('审批模式 e → 不是 approve（假 edit 已移除，按键被吞）', async () => {
+  const { app, stdin } = makeApp()
+  let resolved: unknown = Symbol('unset')
+  void app.callbacks.onApprovalRequired!('1', 'Bash', { command: 'ls' }).then(r => { resolved = r })
+  stdin.dataHandler!('e')
+  await tick()
+  // 旧实现 e===approve 是误导性假动作；现在 e 被吞，审批仍 pending（resolved 保持哨兵 symbol）
+  assert.ok(typeof resolved === 'symbol', 'e 不应 resolve 审批（仍 pending）')
+})

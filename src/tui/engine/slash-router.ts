@@ -54,6 +54,14 @@ export class SlashRouter {
     const parts = trimmed.split(/\s+/)
     const command = parts[0]!.toLowerCase()
 
+    // 真实指标快照（与 GlanceBar 同源）：让 /cost、maxTokens 读当前 runtime 真实值，
+    // 不再写死 cost: 0 或取 models[0]（非当前模型）。无 provider 时回退。
+    const metrics = this.app.getMetrics()
+    const maxTokens = metrics?.maxTokens && metrics.maxTokens > 0
+      ? metrics.maxTokens
+      : (this.ctx.provider.models[0]?.contextWindow ?? 128000)
+    const cost = metrics?.cost ?? 0
+
     // Build SlashHandlerContext adapter
     const handlerCtx: SlashHandlerContext = {
       parts,
@@ -61,7 +69,7 @@ export class SlashRouter {
       session: this.ctx.session,
       persist: this.ctx.persist,
       model: this.app.getModelInfo().modelName,
-      maxTokens: this.ctx.provider.models[0]?.contextWindow ?? 128000,
+      maxTokens,
       availableModels: this.ctx.provider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })),
       onModelSwitch: (modelId: string): { ok: boolean; error?: string } => {
         // T9 模型切换：重建 AgentLoop（switchAgentRuntime 原地更新 ctx.agent），
@@ -76,8 +84,8 @@ export class SlashRouter {
       allProviders: this.buildAllProviders(),
       currentProvider: this.ctx.provider.name,
       currentSessionId: this.ctx.sessionId,
-      cost: 0,
-      cacheHitRate: this.cacheHitRate,
+      cost,
+      cacheHitRate: metrics?.cacheHitRate ?? this.cacheHitRate,
       autoSafeRef: this.autoSafeRef as unknown as React.MutableRefObject<boolean>,
       verboseRef: this.verboseRef as unknown as React.MutableRefObject<boolean>,
       setVerbose: (v: boolean) => { this.verbose = v; this.verboseRef.current = v },

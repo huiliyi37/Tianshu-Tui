@@ -81,3 +81,21 @@ test('无 provider 回退：cost 单次计算，多次 onTurnComplete 不膨胀'
   assert.ok(plain.includes('$1.00'), `cost should be single-shot $1.00: ${plain}`)
   assert.ok(!plain.includes('$3.00'), 'cost must not inflate to $3.00 across turns')
 })
+
+test('getMetrics 暴露与 GlanceBar 同源的真实指标（供 SlashRouter 读 cost/maxTokens）', () => {
+  const { app } = makeApp()
+  // 无 provider 时为 null（SlashRouter 回退 models[0]/cost:0）
+  assert.equal(app.getMetrics(), null, '无 provider 应返回 null')
+
+  app.setMetricsProvider(() => ({
+    estimatedTokens: 80_000,
+    maxTokens: 200_000,
+    cacheHitRate: 0.5,
+    cost: 2.5,
+    inputTokens: 80_000,
+    outputTokens: 4_000,
+  }))
+  const m = app.getMetrics()
+  assert.equal(m?.cost, 2.5, 'cost 应来自 provider，不再写死 0')
+  assert.equal(m?.maxTokens, 200_000, 'maxTokens 应为当前模型窗口，不再取 models[0]')
+})

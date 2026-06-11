@@ -135,6 +135,19 @@ export class TuiApp {
   private resize: ResizeHandler
   private inputLine: InputLine
 
+  // Overlay 交互导航状态（pager 翻页 / palette 选中）。
+  // 渲染器是纯函数，page/selectedIndex 由此状态注入并在激活时复位。
+  private overlayNav = { pagerPage: 0, paletteIndex: 0 }
+  /** 注册时保存的 overlay 数据提供函数（供导航处理器查边界 / 执行命令） */
+  private overlayData?: {
+    pagerContent?: () => PagerData
+    starmapEntries?: () => StarmapData
+    paletteCommands?: () => PaletteData
+    chronicleEntries?: () => ChronicleData
+  }
+  /** palette Enter 执行回调：参数为选中命令的 0-based 索引 */
+  private paletteExec?: (index: number) => void
+
   // State
   private state: TuiState
   private theme: RivetTheme
@@ -190,6 +203,12 @@ export class TuiApp {
   readonly steerBuffer = new SteerBuffer()
   /** agent 是否正在执行（submit → final turn complete 之间） */
   private agentBusy = false
+  /**
+   * Run 世代计数 —— 唯一权威的「当前 run」标识。
+   * 每次 abort 自增；被中断的旧 run 的迟到回调（经 bridge 包裹时捕获的旧 gen）
+   * 与当前 gen 不符即被丢弃，杜绝旧 run 的 onAbort/onTextDelta 污染新 run 状态。
+   */
+  private _runGen = 0
 
   // ── W4b: 输入辅助 ────────────────────────────────────────────
   /** slash 命令列表（外部注入，提示 + Tab 补全用） */
@@ -346,10 +365,37 @@ export class TuiApp {
         } else {
           if (key.name === 'return' || c === 'y') this.resolveApproval({ approved: true })
           else if (key.name === 'escape' || c === 'n') this.resolveApproval(false)
-          else if (c === 'e') this.resolveApproval({ approved: true })
-          // 其余按键在审批态一律吞掉，不污染输入框
+          // 其余按键在审批态一律吞掉，不污染输入框。
+          // 注意：不提供 [e] edit —— 编辑工具入参的完整流程尚未实装，
+          // 旧实现 e===approve 是误导性假动作（UI 明示可编辑，实际等同 y）。
           return
         }
+      }
+
+      // ── Intent preview mode short-circuit ──
+      // 意图闸是「先确认再动手」的安全机制，旧实现 onIntentPreview 永远 'continue'
+      // 等于旁路了这道闸。这里把按键解析成 IntentPreviewAction，绝不落入普通输入。
+      if (this.input.getMode() === 'intent' && this.intentPending) {
+        const c = key.char.toLowerCase()
+        const hasAlt = (this.intentPending.intent.alternatives?.length ?? 0) > 0
+        if (key.name === 'ctrl_c') {
+          this.resolveIntent('veto')
+          // 继续走下方全局 ctrl_c（abort / exit）
+        } else {
+          if (key.name === 'return' || c === 'y') this.resolveIntent('continue')
+          else if (key.name === 'escape' || c === 'n') this.resolveIntent('veto')
+          else if (c === 'a' && hasAlt) this.resolveIntent('alternative')
+          // 其余按键在意图态一律吞掉，不污染输入框
+          return
+        }
+      }
+
+      // ── Overlay 交互导航（pager 翻页 / palette 选择执行）──
+      // overlay 激活时按键先路由进 overlay：原实现仅 Esc 关闭，pager 不能翻页、
+      // palette 不能选 → overlay 形同只读弹窗。这里补全导航与执行。
+      if (this.overlay.isActive()) {
+        if (this.handleOverlayKey(key)) return
+        // 未被 overlay 消费的键落到下方（Esc/Ctrl+C 等全局兜底）
       }
 
       // ── Global shortcuts (before input line processing) ──────
@@ -466,7 +512,7 @@ export class TuiApp {
         // Unknown phases (heartbeat, convergence-warning, etc.) are ignored
         // for the status bar display
       },
-      onIntentPreview: async (_intent) => 'continue',
+      onIntentPreview: async (intent) => this.handleIntentPreview(intent),
       onSteerDrain: () => this.steerBuffer.drain(),
     }
 
@@ -480,6 +526,16 @@ export class TuiApp {
     if (!this.approvalPending) return
     this.approvalPending.resolve(result)
     this.approvalPending = null
+    this.input.setMode('input')
+    this.renderLive()
+  }
+
+  // ── Intent preview resolution ───────────────────────────────
+
+  private resolveIntent(action: IntentPreviewAction): void {
+    if (!this.intentPending) return
+    this.intentPending.resolve(action)
+    this.intentPending = null
     this.input.setMode('input')
     this.renderLive()
   }
@@ -507,6 +563,16 @@ export class TuiApp {
     this.onAbortCallback = callback
   }
 
+  /** 当前 run 世代（唯一权威；bridge 用它丢弃被中断旧 run 的迟到回调） */
+  get runGen(): number {
+    return this._runGen
+  }
+
+  /** agent 是否正在执行（streaming 状态的唯一权威，供外层入口判定是否可发起新 run） */
+  get busy(): boolean {
+    return this.agentBusy
+  }
+
   /** 设置退出回调（/exit、/quit 时触发，由外部执行 graceful shutdown） */
   onExit(callback: () => void): void {
     this.onExitCallback = callback
@@ -527,13 +593,13 @@ export class TuiApp {
   activateOverlay(id: string): boolean {
     switch (id) {
       case 'pager':
-        return this.overlay.activate(id)
       case 'starmap':
-        return this.overlay.activate(id)
       case 'command-palette':
+      case 'chronicle': {
+        // 复位导航状态，避免上次的翻页/选中残留到新 overlay
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0 }
         return this.overlay.activate(id)
-      case 'chronicle':
-        return this.overlay.activate(id)
+      }
       default:
         return false
     }
@@ -543,6 +609,75 @@ export class TuiApp {
   deactivateOverlay(): void {
     this.overlay.deactivate()
     this.renderLive()
+  }
+
+  /**
+   * Overlay 导航键处理。返回 true 表示已消费（调用方应 return）。
+   * - pager：j/↓/PgDn 下翻，k/↑/PgUp 上翻，Home/End 首末页，q 关闭
+   * - command-palette：↑/↓ 移动选中，Enter 执行并关闭，q 关闭
+   * - 其它 overlay（starmap/chronicle）：仅 q 关闭（无内部导航）
+   * Esc/Ctrl+C 不在此消费，留给全局兜底统一关闭。
+   */
+  private handleOverlayKey(key: { name: string; char: string }): boolean {
+    const id = this.overlay.activeId()
+    const c = key.char.toLowerCase()
+
+    // q 在所有 overlay 内统一关闭
+    if (c === 'q') {
+      this.deactivateOverlay()
+      return true
+    }
+
+    if (id === 'pager') {
+      const total = this.pagerTotalPages()
+      const cur = this.overlayNav.pagerPage
+      let next = cur
+      if (key.name === 'down' || key.name === 'pagedown' || c === 'j') next = cur + 1
+      else if (key.name === 'up' || key.name === 'pageup' || c === 'k') next = cur - 1
+      else if (key.name === 'home') next = 0
+      else if (key.name === 'end') next = total - 1
+      else return false
+      next = Math.max(0, Math.min(total - 1, next))
+      if (next !== cur) {
+        this.overlayNav.pagerPage = next
+        this.overlay.rerender()
+      }
+      return true
+    }
+
+    if (id === 'command-palette') {
+      const count = this.overlayData?.paletteCommands?.().commands.length ?? 0
+      const cur = this.overlayNav.paletteIndex
+      if (key.name === 'down') {
+        if (count > 0) { this.overlayNav.paletteIndex = (cur + 1) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (count > 0) { this.overlayNav.paletteIndex = (cur - 1 + count) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        if (count > 0 && this.paletteExec) {
+          const idx = cur
+          this.deactivateOverlay()
+          this.paletteExec(idx)
+        } else {
+          this.deactivateOverlay()
+        }
+        return true
+      }
+      return false
+    }
+
+    return false
+  }
+
+  /** pager 总页数（与 renderPager 同口径：pageSize = rows - 4）。 */
+  private pagerTotalPages(): number {
+    const content = this.overlayData?.pagerContent?.().content ?? ''
+    const lines = content.split('\n').length
+    const pageSize = Math.max(1, this.rows - 4)
+    return Math.max(1, Math.ceil(lines / pageSize))
   }
 
   /** 获取终端尺寸 */
@@ -704,6 +839,15 @@ export class TuiApp {
   }
 
   /**
+   * 读取当前真实指标快照（与 GlanceBar 同源）。无 provider 时返回 null。
+   * 供 SlashRouter 让 /cost、maxTokens 等命令读到与 GlanceBar 一致的真实值，
+   * 不再写死 cost: 0 或取 models[0]（非当前模型）。
+   */
+  getMetrics(): TuiMetrics | null {
+    return this.metricsProvider?.() ?? null
+  }
+
+  /**
    * 注入 todo 列表访问器（main-ansi 读 TodoStore 单例），避免 T9 直接 import
    * 工具层。设置后 todo 工具结果 / turn 完成时拉取刷新常驻任务面板。
    */
@@ -735,6 +879,12 @@ export class TuiApp {
     name: string
     input: Record<string, unknown>
     resolve: (result: ApprovalResult | boolean) => void
+  } | null = null
+
+  /** Pending intent preview — when set, InputHandler switches to intent mode */
+  private intentPending: {
+    intent: IntentPreview
+    resolve: (action: IntentPreviewAction) => void
   } | null = null
 
   // ── Agent Event Handlers ─────────────────────────────────────
@@ -975,8 +1125,15 @@ export class TuiApp {
   }
 
   private handleAbort(): void {
-    // Clear steer buffer on abort to prevent stale guidance
-    this.steerBuffer.clear()
+    // 世代自增：被中断的旧 run 的迟到回调（bridge 捕获旧 gen）将被丢弃
+    this._runGen++
+    // 中断时若停在审批/意图确认态：解析为拒绝/否决，让 tool-pipeline 的前置 await
+    // 立即 settle，并复位输入模式。否则审批/意图态残留——后续按键被当确认解析、
+    // 输入框无法使用（这是 abort 中途审批"假死"的一个分支）。
+    if (this.approvalPending) this.resolveApproval(false)
+    if (this.intentPending) this.resolveIntent('veto')
+    // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
+    // 下次发起的 run 会在 turn 边界 drain 注入。（此前在此 clear() 会静默吞掉用户输入。）
     this.streamRenderer.reset()
     this.assistantHeaderDone = false
     this.pendingTools.clear()
@@ -986,6 +1143,14 @@ export class TuiApp {
     this.state.isThinking = false
     this.setPhase('idle')
     this.live.clear()
+    // 可见的中断提示：让用户确知 run 已被中止（而非无声卡死）
+    this.commitAbove(() => {
+      this.commit.write({
+        text: color('⏹ Interrupted', this.theme.muted),
+        trailingNewline: true,
+      })
+      this.state.committedCount++
+    })
     this.onAbortCallback?.()
   }
 
@@ -1066,7 +1231,23 @@ export class TuiApp {
       lines.push({ text: ` ╭─ Approval Required ──────────────────────────────` })
       lines.push({ text: ` │ Tool: ${p.name}` })
       lines.push({ text: ` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}` })
-      lines.push({ text: ` ╰─ [y] approve  [n] deny  [e] edit ──────────────` })
+      lines.push({ text: ` ╰─ [y] approve  [n] deny ─────────────────────────` })
+    }
+
+    // 3a. Intent preview prompt (when pending) — 意图闸确认框
+    if (this.intentPending) {
+      const it = this.intentPending.intent
+      const hasAlt = (it.alternatives?.length ?? 0) > 0
+      lines.push({ text: ` ╭─ Intent Preview ─────────────────────────────────` })
+      lines.push({ text: ` │ ${it.summary}` })
+      for (const w of it.warnings ?? []) {
+        lines.push({ text: ` │ ⚠ ${w}` })
+      }
+      for (const alt of it.alternatives ?? []) {
+        lines.push({ text: ` │ ↳ ${alt}` })
+      }
+      const altKey = hasAlt ? '  [a] alternative' : ''
+      lines.push({ text: ` ╰─ [y] continue  [n] veto${altKey} ────────────────` })
     }
 
     // ── 底部 chrome 起点：从此往后（任务面板 + GlanceBar + 输入框 + 提示）是
@@ -1200,6 +1381,15 @@ export class TuiApp {
     })
   }
 
+  private handleIntentPreview(intent: IntentPreview): Promise<IntentPreviewAction> {
+    return new Promise((resolve) => {
+      this.intentPending = { intent, resolve }
+      this.input.setMode('intent')
+      this.setPhase('waiting')
+      this.renderLive()
+    })
+  }
+
   /**
    * 提交 slash 命令：await 外部 handler（SlashRouter）的结果，
    * handler 返回 false（透传命令如 /team、/review、/plan <x>）时把原始输入交给 agent。
@@ -1267,12 +1457,14 @@ export class TuiApp {
     starmapEntries?: () => StarmapData
     paletteCommands?: () => PaletteData
     chronicleEntries?: () => ChronicleData
-  }): void {
-    // Pager
+  }, paletteExec?: (index: number) => void): void {
+    this.overlayData = overlayData
+    this.paletteExec = paletteExec
+    // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {
       render: (_w, _h) => {
         const data = overlayData?.pagerContent?.() ?? { content: '(no content)', page: 0 }
-        return renderPager(data, this.columns, this.rows, this.theme)
+        return renderPager({ ...data, page: this.overlayNav.pagerPage }, this.columns, this.rows, this.theme)
       },
     })
 
@@ -1284,11 +1476,11 @@ export class TuiApp {
       },
     })
 
-    // Command palette
+    // Command palette — selectedIndex 由 overlayNav 注入
     this.overlay.register('command-palette', {
       render: (_w, _h) => {
         const data = overlayData?.paletteCommands?.() ?? { commands: [], selectedIndex: 0 }
-        return renderCommandPalette(data, this.columns, this.rows, this.theme)
+        return renderCommandPalette({ ...data, selectedIndex: this.overlayNav.paletteIndex }, this.columns, this.rows, this.theme)
       },
     })
 

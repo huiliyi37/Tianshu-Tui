@@ -1,0 +1,120 @@
+/**
+ * T9 overlay 交互导航测试（P1-1）。
+ *
+ * Bug：overlay 激活时仅 Esc 关闭，pager 不能翻页、palette 不能选 →
+ * overlay 形同只读弹窗。
+ *
+ * 契约（经真实 stdin 序列 + 渲染输出验证）：
+ *  - pager：j/↓/PgDn 下翻，k/↑ 上翻，Home/End 首末页，越界 clamp，q 关闭
+ *  - command-palette：↑/↓ 循环移动选中，Enter 执行回调并关闭，q 关闭
+ */
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import type { ReadStream, WriteStream } from 'node:tty'
+import { TuiApp } from '../app.js'
+
+class MockOut {
+  columns = 80
+  rows = 24
+  chunks: string[] = []
+  write = (s: string): boolean => { this.chunks.push(s); return true }
+  on(): this { return this }
+  removeListener(): this { return this }
+  clear() { this.chunks = [] }
+}
+class MockIn {
+  isTTY = true
+  dataHandler: ((d: string) => void) | null = null
+  setRawMode(): this { return this }
+  resume(): this { return this }
+  setEncoding(): this { return this }
+  on(ev: string, h: (d: string) => void): this { if (ev === 'data') this.dataHandler = h; return this }
+  removeAllListeners(): this { return this }
+  pause(): this { return this }
+}
+
+function makeApp() {
+  const out = new MockOut()
+  const stdin = new MockIn()
+  const app = new TuiApp({
+    stdout: out as unknown as WriteStream,
+    stdin: stdin as unknown as ReadStream,
+    cols: 80, rows: 24, modelName: 'test',
+  })
+  return { app, out, stdin }
+}
+
+const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;?]*[a-zA-Z]/g, '')
+// rows=24 → pageSize = 24-4 = 20。100 行 → 5 页（0..4）。
+const longContent = Array.from({ length: 100 }, (_, i) => `LN${i}`).join('\n')
+
+// 序列：方向键/翻页是完整 ANSI 序列，立即派发（非 lone-ESC，不走 40ms 计时）。
+const SEQ: Record<string, string> = {
+  down: '\x1B[B', up: '\x1B[A', pagedown: '\x1B[6~', pageup: '\x1B[5~',
+  home: '\x1B[H', end: '\x1B[F', enter: '\r',
+}
+
+test('pager: ↓/j/PgDn 下翻，k 上翻，越界 clamp', () => {
+  const { app, out, stdin } = makeApp()
+  app.registerOverlays({ pagerContent: () => ({ content: longContent, page: 0 }) })
+  app.activateOverlay('pager')
+
+  const press = (k: string) => { out.clear(); stdin.dataHandler!(SEQ[k] ?? k) }
+  const visible = () => stripAnsi(out.chunks.join(''))
+
+  press('down'); assert.ok(visible().includes('LN20'), '↓ → 第 1 页含 LN20')
+  press('j'); assert.ok(visible().includes('LN40'), 'j → 第 2 页含 LN40')
+  press('pagedown'); assert.ok(visible().includes('LN60'), 'PgDn → 第 3 页含 LN60')
+  press('k'); assert.ok(visible().includes('LN40'), 'k → 回第 2 页含 LN40')
+  press('end'); assert.ok(visible().includes('LN80'), 'End → 末页含 LN80')
+  // 末页再下翻 = no-op（不 rerender，输出为空）；随后 up 应回到第 3 页(LN60)，
+  // 证明 down 没把 page 推过 4。
+  press('down'); assert.equal(visible().trim(), '', '末页再下翻 no-op（不 rerender）')
+  press('up'); assert.ok(visible().includes('LN60'), 'clamp 生效：末页 down 后 up 回第 3 页(LN60)')
+  press('home'); assert.ok(visible().includes('LN0') && visible().includes('LN19'), 'Home → 首页含 LN0..LN19')
+  // 首页再上翻 = no-op；随后 down 应到第 1 页(LN20)，证明 up 没把 page 推到负。
+  press('up'); assert.equal(visible().trim(), '', '首页再上翻 no-op（不 rerender）')
+  press('down'); assert.ok(visible().includes('LN20'), 'clamp 生效：首页 up 后 down 到第 1 页(LN20)')
+})
+
+test('command-palette: ↑/↓ 循环选中，Enter 执行回调并关闭', () => {
+  const { app, stdin } = makeApp()
+  let executed = -1
+  app.registerOverlays(
+    { paletteCommands: () => ({ commands: [{ label: 'aa' }, { label: 'bb' }, { label: 'cc' }], selectedIndex: 0 }) },
+    (idx) => { executed = idx },
+  )
+  app.activateOverlay('command-palette')
+  const press = (k: string) => stdin.dataHandler!(SEQ[k] ?? k)
+
+  press('down'); press('down') // 0 → 2
+  press('up')                  // 2 → 1
+  press('enter')
+  assert.equal(executed, 1, 'Enter 执行选中索引 1（↓↓↑ = 1）的命令')
+})
+
+test('command-palette: ↓ 循环到末再回 0', () => {
+  const { app, stdin } = makeApp()
+  let executed = -1
+  app.registerOverlays(
+    { paletteCommands: () => ({ commands: [{ label: 'aa' }, { label: 'bb' }], selectedIndex: 0 }) },
+    (idx) => { executed = idx },
+  )
+  app.activateOverlay('command-palette')
+  const press = (k: string) => stdin.dataHandler!(SEQ[k] ?? k)
+  press('down'); press('down') // 0→1→0（循环）
+  press('enter')
+  assert.equal(executed, 0, '2 项列表 ↓↓ 循环回 0')
+})
+
+test('q 在 overlay 内关闭', async () => {
+  const { app, out, stdin } = makeApp()
+  app.registerOverlays({ pagerContent: () => ({ content: longContent, page: 0 }) })
+  app.activateOverlay('pager')
+  out.clear()
+  stdin.dataHandler!('q')
+  await new Promise(r => setTimeout(r, 10))
+  // 关闭后退出 alt-screen（ALT_SCREEN_OFF = \x1B[?1049l）
+  assert.ok(out.chunks.join('').includes('\x1B[?1049l'), 'q 关闭 overlay（退出 alt-screen）')
+})
