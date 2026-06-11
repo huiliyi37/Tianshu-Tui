@@ -51,8 +51,8 @@ export function formatThinking(input: FormatThinkingInput, theme: RivetTheme): s
 
 function getThinkingStatus(elapsedMs: number): string {
   const s = Math.round(elapsedMs / 1000)
-  if (s < 30) return `Thinking… ${s}s`
-  if (s < 90) return `Collecting context… ${s}s`
+  if (s < 30) return `凝思中… ${s}s`
+  if (s < 90) return `汇集上下文… ${s}s`
   if (s < 180) return 'Still thinking…'
-  return `Long think — Ctrl+C to stop (${Math.floor(s / 60)}m)`
+  return `长考中 — Ctrl+C 终止 (${Math.floor(s / 60)}m)`
 }

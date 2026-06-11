@@ -192,7 +192,7 @@ describe('formatThinking', () => {
 
   it('shows status line when streaming', () => {
     const lines = formatThinking({ text: 'thinking…', elapsedMs: 5000, isStreaming: true }, theme)
-    assert.ok(lines[0]!.includes('Thinking…'))
+    assert.ok(lines[0]!.includes('凝思中…'))
     assert.ok(lines[0]!.includes('5s'))
   })
 

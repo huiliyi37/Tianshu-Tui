@@ -25,7 +25,7 @@ describe('formatSpinnerStatus', () => {
     assert.ok(line)
     const plain = stripAnsi(line!)
     assert.ok(plain.includes(brailleSpinnerFrame(3)), 'spinner frame matches tick')
-    assert.ok(plain.includes('Thinking…'))
+    assert.ok(plain.includes('凝思…'))
     assert.ok(plain.includes('12s'))
     assert.ok(plain.includes('esc to interrupt'))
   })
@@ -34,9 +34,9 @@ describe('formatSpinnerStatus', () => {
     const streaming = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'streaming', elapsedMs: 0 }, theme)!)
     const analyzing = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'analyzing', elapsedMs: 0 }, theme)!)
     const waiting = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'waiting', elapsedMs: 0 }, theme)!)
-    assert.ok(streaming.includes('Writing…'))
-    assert.ok(analyzing.includes('Working…'))
-    assert.ok(waiting.includes('Waiting…'))
+    assert.ok(streaming.includes('书写…'))
+    assert.ok(analyzing.includes('运作…'))
+    assert.ok(waiting.includes('候待…'))
   })
 
   it('spinner frame advances with tick', () => {
@@ -87,9 +87,9 @@ describe('formatTurnWorkSummary', () => {
 
 describe('phaseIndicator', () => {
   it('maps each phase to glyph + label', () => {
-    assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: 'thinking' })
-    assert.deepEqual(phaseIndicator('streaming'), { glyph: '✦', label: 'writing' })
-    assert.deepEqual(phaseIndicator('analyzing'), { glyph: '⚙', label: 'tools' })
+    assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: '凝思' })
+    assert.deepEqual(phaseIndicator('streaming'), { glyph: '✦', label: '书写' })
+    assert.deepEqual(phaseIndicator('analyzing'), { glyph: '⚙', label: '工具' })
     assert.deepEqual(phaseIndicator('idle'), { glyph: '·', label: 'idle' })
   })
 })

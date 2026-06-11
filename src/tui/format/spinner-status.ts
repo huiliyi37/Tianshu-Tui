@@ -15,18 +15,18 @@ import { brailleSpinnerFrame } from '../braille-spinner.js'
 export type SpinnerPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
 
 const PHASE_VERBS: Record<Exclude<SpinnerPhase, 'idle'>, string> = {
-  thinking: 'Thinking',
-  streaming: 'Writing',
-  analyzing: 'Working',
-  waiting: 'Waiting',
+  thinking: '凝思',
+  streaming: '书写',
+  analyzing: '运作',
+  waiting: '候待',
 }
 
 /** GlanceBar 用的 phase glyph + 标签 */
 export function phaseIndicator(phase: SpinnerPhase): { glyph: string; label: string } {
   switch (phase) {
-    case 'thinking': return { glyph: '◐', label: 'thinking' }
-    case 'streaming': return { glyph: '✦', label: 'writing' }
-    case 'analyzing': return { glyph: '⚙', label: 'tools' }
+    case 'thinking': return { glyph: '◐', label: '凝思' }
+    case 'streaming': return { glyph: '✦', label: '书写' }
+    case 'analyzing': return { glyph: '⚙', label: '工具' }
     case 'waiting': return { glyph: '…', label: 'waiting' }
     case 'idle': return { glyph: '·', label: 'idle' }
   }
