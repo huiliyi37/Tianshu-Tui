@@ -246,6 +246,7 @@ export class AgentLoop {
   private latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   currentSeason: CognitiveSeason | null = null
   private lastCompactTurn: number | null = null
+  private _prevPhaseHint: string | undefined = undefined
   cacheAdvisor: CacheAdvisor
   p3: P3Integration
   immuneHook: ImmuneHook
@@ -1707,6 +1708,26 @@ export class AgentLoop {
       this.lastCompactTurn = turn
       // Hint V8 to release freed message objects sooner
       if (typeof globalThis.gc === 'function') globalThis.gc()
+    }
+
+    // T9: Proactive Quality Compact — trigger partial compact on phase transition
+    // or when attention quality drops below threshold on 1M+ windows.
+    if (!compactResult.compacted && this.config.contextWindow >= 500_000) {
+      const qTokens = this.session.getEstimatedTokens()
+      const qRatio = qTokens / this.config.contextWindow
+      const phaseHint = this.config.promptEngine.getPhaseHint?.()
+      const prevPhaseHint = this._prevPhaseHint
+      this._prevPhaseHint = phaseHint
+      const phaseTransition = prevPhaseHint !== undefined && phaseHint !== prevPhaseHint
+
+      if (qRatio > 0.3 && phaseTransition) {
+        debugLog(`[proactive-compact] phase transition ${prevPhaseHint}→${phaseHint} at ${(qRatio * 100).toFixed(0)}% — triggering partial compact`)
+        const partialOk = await this.compaction.tryPartialCompact(30)
+        if (partialOk) {
+          userMessageConsumed = true
+          this.lastCompactTurn = turn
+        }
+      }
     }
 
     // Stale round compaction: proactively shrink N-2+ tool_results
