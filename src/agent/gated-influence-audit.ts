@@ -4,6 +4,7 @@ export type GatedInfluenceSource =
   | 'model_routing'
   | 'plan_cache_advisory'
   | 'physarum_supervision'
+  | 'effort_bandit'
 
 export interface GatedInfluenceAuditEvent {
   schemaVersion: 1

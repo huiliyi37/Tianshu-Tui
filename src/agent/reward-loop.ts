@@ -4,7 +4,7 @@ import { routingShadowKind } from './model-routing-shadow.js'
 import type { TeamWaveTelemetry } from './team-wave-telemetry.js'
 import { teamWaveTelemetryKind } from './team-wave-telemetry.js'
 import type { TeamEpisode } from './team-episode.js'
-import { deriveTeamEpisodeRewardInput, teamEpisodeKey } from './team-episode.js'
+import { buildTeamEpisode, deriveTeamEpisodeRewardInput, persistTeamEpisode, teamEpisodeKey } from './team-episode.js'
 import { buildRoutingRewardRecord, type RoutingRewardInput } from './routing-reward.js'
 import { buildTeamWaveRewardRecord, deriveTeamWaveRewardInput } from './team-reward.js'
 
@@ -212,4 +212,57 @@ export function recordTeamEpisodeRewardClosure(
   if (!record) return null
   persistRewardClosure(store, record)
   return record
+}
+
+export interface TeamEpisodeClosureStore {
+  saveBanditState?(kind: string, json: string): void
+  loadBanditStatesByPrefix?(prefix: string, limit?: number): Array<{ kind: string; json: string }>
+}
+
+function parseWaveFragment(json: string): TeamWaveTelemetry | null {
+  try {
+    const parsed = JSON.parse(json) as TeamWaveTelemetry
+    if (parsed?.schemaVersion !== 1 || typeof parsed.fromWave !== 'number') return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Track 2 episode 闭环：以最后一波的（已带 reviewVerdict 的）遥测为锚，从
+ * append-only 存储里捞回同 objective+session 的全部 wave 片段，聚合成
+ * episode 并落 episode 级 reward closure。
+ *
+ * - 同一 fromWave 的重复片段（同 objective 重跑）只保留最新时间戳的那条，
+ *   避免 duplicateWaveIndexes 误判 episode 不完整。
+ * - episode 不完整（缺波）→ 不产出 reward（deriveTeamEpisodeRewardInput
+ *   返回 null），但 episode 本体仍持久化以便诊断。
+ */
+export function recordTeamEpisodeClosureFromStore(
+  store: TeamEpisodeClosureStore | undefined | null,
+  lastFragment: TeamWaveTelemetry,
+): RewardClosureRecord | null {
+  const byWave = new Map<number, TeamWaveTelemetry>()
+  if (store?.loadBanditStatesByPrefix) {
+    const prefix = `team_wave:${lastFragment.objectiveHash}:${lastFragment.sessionId}:`
+    try {
+      for (const row of store.loadBanditStatesByPrefix(prefix, 200)) {
+        const fragment = parseWaveFragment(row.json)
+        if (!fragment) continue
+        if (fragment.mode !== lastFragment.mode || fragment.waveCount !== lastFragment.waveCount) continue
+        const existing = byWave.get(fragment.fromWave)
+        if (!existing || fragment.timestamp > existing.timestamp) byWave.set(fragment.fromWave, fragment)
+      }
+    } catch {
+      // Fall through to the anchor-only episode below.
+    }
+  }
+  // The anchor fragment carries the final reviewVerdict — it wins its wave slot.
+  byWave.set(lastFragment.fromWave, lastFragment)
+
+  const episode = buildTeamEpisode([...byWave.values()])
+  const persistStore = store?.saveBanditState ? { saveBanditState: store.saveBanditState.bind(store) } : null
+  persistTeamEpisode(persistStore, episode)
+  return recordTeamEpisodeRewardClosure(persistStore, episode)
 }

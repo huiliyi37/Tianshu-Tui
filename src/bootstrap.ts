@@ -45,6 +45,8 @@ import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { createAuthProvider } from './auth/registry.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
+import { ProviderHealthTracker } from './agent/provider-health.js'
+import { effectiveBanditMode, resolveBanditPromotion } from './agent/bandit-promotion.js'
 import { DomainKnowledgeStore } from './agent/domain-knowledge-store.js'
 import { profileRegistry } from './agent/profile-registry.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
@@ -83,6 +85,8 @@ export interface RuntimeRefs {
   sessionRegistry: import('./agent/session-registry.js').SessionRegistry | null
   taskLedger: import('./agent/task-ledger.js').TaskLedger | null
   ownershipLedger: import('./agent/ownership-ledger.js').OwnershipLedger | null
+  /** Track 3: 权威交付门禁（v2）— badge 与收敛检测共用。 */
+  deliveryGate: import('./agent/delivery-gate-v2.js').DeliveryGateV2 | null
   meridianIndexer: MeridianIndexer | null
   mcpManager: any | null
   lspManager: ReturnType<typeof createLspManager> | null
@@ -278,7 +282,11 @@ export function createInteractiveToolRegistry(
       }))
     },
     getTeamSchedulerRewardStore: () => refs.meridianIndexer?.getDb(),
-    isTeamSchedulerBanditEnabled: () => config.agent.teamSchedulerBanditEnabled === true,
+    isTeamSchedulerBanditEnabled: () => resolveBanditPromotion({
+      source: 'team_scheduler_bandit',
+      mode: effectiveBanditMode(config.agent.banditPromotion?.teamScheduler, config.agent.teamSchedulerBanditEnabled, config.agent.banditPromotion?.killSwitch),
+      store: refs.meridianIndexer?.getDb(),
+    }).enabled,
     getSessionId: () => refs.sessionId ?? undefined,
   }))
 
@@ -306,6 +314,7 @@ export function createInteractiveToolRegistry(
     ownership: b1Ownership,
     attribution: b1Attribution,
   })
+  refs.deliveryGate = b1Gate
   reg.register(createDeliverTaskTool((params) => ({
     taskLedger: b1TaskLedger,
     ownership: b1Ownership,
@@ -405,6 +414,14 @@ export function createAgentRuntime(deps: {
     ? { profiles: config.workers.profiles, routing: config.workers.routing, providers: config.provider.providers }
     : undefined
 
+  // Physarum provider health: shared between main loop (sensorium stability)
+  // and coordinator (cold-tier routing skip). Stream outcomes feed weights.
+  const providerHealth = new ProviderHealthTracker()
+  providerHealth.registerProvider(provider.name)
+  if (workerRouting?.providers) {
+    for (const name of Object.keys(workerRouting.providers)) providerHealth.registerProvider(name)
+  }
+
   const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
     const writeProfiles = profileRegistry.listWriteProfiles()
     const isWrite = writeProfiles.includes(_order.profile)
@@ -481,16 +498,45 @@ export function createAgentRuntime(deps: {
     }
   }
 
+  // EFE routing pulls per-turn signals from the agent, which is constructed
+  // after the coordinator — bridge via late-bound reference.
+  let agentForSignals: AgentLoop | undefined
+
+  // Track 1: unified shadow→gated promotion gate. Evidence is evaluated once
+  // per session; `banditPromotion.killSwitch` rolls every path back at once.
+  const promo = config.agent.banditPromotion
+  const promotionStore = refs.meridianIndexer?.getDb()
+  const modelTierGate = resolveBanditPromotion({
+    source: 'model_tier_bandit',
+    mode: effectiveBanditMode(promo?.modelTier, config.agent.modelTierBanditEnabled, promo?.killSwitch),
+    store: promotionStore,
+  })
+  const modelRoutingGate = resolveBanditPromotion({
+    source: 'model_routing',
+    mode: effectiveBanditMode(promo?.modelRouting, config.agent.modelRoutingGatedEnabled, promo?.killSwitch),
+    store: promotionStore,
+  })
+  const effortGate = resolveBanditPromotion({
+    source: 'effort_bandit',
+    mode: effectiveBanditMode(promo?.effort, undefined, promo?.killSwitch),
+    store: promotionStore,
+  })
+
   refs.coordinator = new DelegationCoordinator({
     baseToolRegistry: toolRegistry,
     modelCards,
     maxWorkers: 3,
     runtimeFactory,
     routing: workerRouting,
+    providerHealth,
     domainKnowledgeStore,
     modelTierShadowStore: refs.meridianIndexer?.getDb(),
-    modelTierBanditEnabled: config.agent.modelTierBanditEnabled === true,
+    modelTierBanditEnabled: modelTierGate.enabled,
     gatedInfluenceAuditStore: refs.meridianIndexer?.getDb(),
+    efeRouting: {
+      enabled: modelRoutingGate.enabled,
+      getSignals: () => agentForSignals?.getPolicySignals(),
+    },
   })
 
   const agent = new AgentLoop(
@@ -503,8 +549,14 @@ export function createAgentRuntime(deps: {
       fileHistory,
       contextClaimStore: claimStore,
       playbookStore: new PlaybookStore(cwd),
+      providerHealth,
+      effortBanditEnabled: effortGate.enabled,
       taskLedger: refs.taskLedger ?? undefined,
       ownershipLedger: refs.ownershipLedger ?? undefined,
+      // Track 3 门禁合一：badge 与收敛检测读权威 v2 状态。
+      deliveryGateV2: refs.deliveryGate
+        ? (dirty) => refs.deliveryGate!.assess([], dirty)
+        : undefined,
       meridianIndexer: refs.meridianIndexer,
       modelRoutingShadowModelCards: modelCards,
       domainKnowledgeStore,
@@ -512,6 +564,7 @@ export function createAgentRuntime(deps: {
     new SessionContext(),
     cwd,
   )
+  agentForSignals = agent
 
   return { agent }
 }
@@ -834,6 +887,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     sessionRegistry,
     taskLedger: null,
     ownershipLedger: null,
+    deliveryGate: null,
     meridianIndexer,
     mcpManager: null,
     lspManager: null,

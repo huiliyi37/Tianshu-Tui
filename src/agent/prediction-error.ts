@@ -71,12 +71,17 @@ function clamp(value: number, min = 0, max = 1): number {
  * 映射到 Active Inference 框架的 EFE 四元组。
  *
  * 空状态降级：首次运行时参数可为 null/undefined，返回中性值。
+ *
+ * @param structuralEpistemic Track 1（经络图×自由能）：来自 Physarum/Meridian
+ *   图结构的探索信息增益估计（0=熟路, 1=边疆）。提供时与 confidence 不确定性
+ *   混合，使 epistemic 项从泛化信号变为结构化导航；缺省时保持原公式。
  */
 export function computeEFE(
   acc: PredictionAccumulator,
   season: CognitiveSeason | null,
   vigor: VigorState | null,
   sensorium?: Sensorium | null,
+  structuralEpistemic?: number | null,
 ): EFEComponents {
   const confidence = sensorium?.confidence ?? 0.5
   const freshness = sensorium?.freshness ?? 0.5
@@ -86,9 +91,16 @@ export function computeEFE(
   // ── Epistemic Value: 信息增益预期 ──
   // 低 confidence → 高 epistemic（需要探索减少不确定性）
   // genesis 季节 → 天然偏向探索
+  // Meridian 结构信号可用时：结构边疆度（un-traversed structure）占 30%，
+  // 不确定性权重相应下调，总量保持与原公式同一量级。
   const uncertainty = 1 - confidence
   const seasonEpiBoost = season === 'genesis' ? 0.2 : 0
-  const epistemicValue = clamp(uncertainty * 0.7 + seasonEpiBoost)
+  const structural = (structuralEpistemic !== undefined && structuralEpistemic !== null && Number.isFinite(structuralEpistemic))
+    ? clamp(structuralEpistemic)
+    : null
+  const epistemicValue = structural === null
+    ? clamp(uncertainty * 0.7 + seasonEpiBoost)
+    : clamp(uncertainty * 0.45 + structural * 0.3 + seasonEpiBoost)
 
   // ── Pragmatic Value: 目标推进预期 ──
   // 高 confidence + 高 vigor → 高 pragmatic（可以执行）

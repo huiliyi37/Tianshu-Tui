@@ -31,8 +31,17 @@ export interface EvidenceTrackerPublic {
   trackVerification(result: VerificationMetadata): void
   getState(): EvidenceState
   getVerificationSummary(): VerificationSummary
-  buildBadge(): string | null
+  buildBadge(gateV2?: AuthoritativeGateView): string | null
   reset(): void
+}
+
+/** Track 3: 权威门禁视图（delivery-gate-v2 的最小投影）。注入时 badge 的
+ *  门禁行以 v2 GREEN/YELLOW/RED 为准，替代 v1 的 EvidenceState 推导。 */
+export interface AuthoritativeGateView {
+  state: 'GREEN' | 'YELLOW' | 'RED'
+  reason?: string
+  blockingReason?: string
+  shortestNextStep?: string
 }
 
 export class EvidenceTracker implements EvidenceTrackerPublic {
@@ -127,7 +136,7 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
     }
   }
 
-  buildBadge(): string | null {
+  buildBadge(gateV2?: AuthoritativeGateView): string | null {
     const read = [...this.state.filesRead].sort()
     const modified = [...this.state.filesModified].sort()
 
@@ -145,20 +154,33 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
       for (const f of modified) parts.push(`  - ${f}`)
     }
 
-    const gate = buildDeliveryGate(this.state)
-    const status = gate.status
-    if (status === 'failed') {
-      const failedRun = this.state.verifications.find(r => r.status === 'failed')
-      parts.push(`- **Verification failed**: ${failedRun?.command ?? ''}`)
-    } else if (status === 'blocked') {
-      parts.push('- **Verification blocked**')
-    } else if (status === 'unverified' && modified.length > 0) {
-      parts.push(`- **Unverified changes**: ${modified.join(', ')}`)
-    }
+    if (gateV2) {
+      // Track 3 合一：v2 为权威 — 门禁行直接呈现 GREEN/YELLOW/RED。
+      if (modified.length > 0 || gateV2.state !== 'GREEN') {
+        parts.push(`- **Delivery gate**: ${gateV2.state}${gateV2.reason ? ` — ${gateV2.reason}` : ''}`)
+        if (gateV2.state === 'RED' && gateV2.blockingReason) {
+          parts.push(`- **Blocking**: ${gateV2.blockingReason}`)
+        }
+        if (gateV2.shortestNextStep) {
+          parts.push(`- **Next action**: ${gateV2.shortestNextStep}`)
+        }
+      }
+    } else {
+      const gate = buildDeliveryGate(this.state)
+      const status = gate.status
+      if (status === 'failed') {
+        const failedRun = this.state.verifications.find(r => r.status === 'failed')
+        parts.push(`- **Verification failed**: ${failedRun?.command ?? ''}`)
+      } else if (status === 'blocked') {
+        parts.push('- **Verification blocked**')
+      } else if (status === 'unverified' && modified.length > 0) {
+        parts.push(`- **Unverified changes**: ${modified.join(', ')}`)
+      }
 
-    if (modified.length > 0) {
-      parts.push(`- **Delivery gate**: ${gate.message}`)
-      if (gate.nextAction) parts.push(`- **Next action**: ${gate.nextAction}`)
+      if (modified.length > 0) {
+        parts.push(`- **Delivery gate**: ${gate.message}`)
+        if (gate.nextAction) parts.push(`- **Next action**: ${gate.nextAction}`)
+      }
     }
 
     if (this.state.verifications.length > 0 || modified.length > 0) {

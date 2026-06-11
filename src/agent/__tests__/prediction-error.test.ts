@@ -207,6 +207,23 @@ describe('computeEFE', () => {
     assert.ok(efe.precision >= 0.3 && efe.precision <= 1.0)
   })
 
+  it('structural epistemic (meridian) raises epistemic on frontier, lowers on well-trodden', () => {
+    const sensorium = { momentum: 0.5, pressure: 0.3, confidence: 0.5, complexity: 0.4, freshness: 0.5, stability: 0.7 }
+    const legacy = computeEFE(baseAcc, null, null, sensorium)
+    const frontier = computeEFE(baseAcc, null, null, sensorium, 1)
+    const trodden = computeEFE(baseAcc, null, null, sensorium, 0)
+
+    // frontier (structural=1) must exceed well-trodden (structural=0)
+    assert.ok(frontier.epistemicValue > trodden.epistemicValue)
+    // undefined/null keeps the legacy formula: uncertainty*0.7
+    assert.equal(legacy.epistemicValue, (1 - 0.5) * 0.7)
+    const nullSignal = computeEFE(baseAcc, null, null, sensorium, null)
+    assert.equal(nullSignal.epistemicValue, legacy.epistemicValue)
+    // non-finite structural signal is ignored (legacy path)
+    const nan = computeEFE(baseAcc, null, null, sensorium, Number.NaN)
+    assert.equal(nan.epistemicValue, legacy.epistemicValue)
+  })
+
   it('low freshness + high curiosity → high novelty bonus', () => {
     const novel = computeEFE(baseAcc, 'genesis', {
       tonic: 0.5, phasic: 0, curiosity: 0.9, vigor: 0.5, variability: 0.1, history: [],

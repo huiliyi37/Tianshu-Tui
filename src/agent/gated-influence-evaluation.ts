@@ -50,6 +50,7 @@ const SOURCES: GatedInfluenceSource[] = [
   'model_routing',
   'plan_cache_advisory',
   'physarum_supervision',
+  'effort_bandit',
 ]
 
 const MIN_SAMPLES: Record<GatedInfluenceSource, number> = {
@@ -58,6 +59,7 @@ const MIN_SAMPLES: Record<GatedInfluenceSource, number> = {
   model_routing: 30,
   plan_cache_advisory: 20,
   physarum_supervision: 20,
+  effort_bandit: 30,
 }
 
 const SEVERITY_RANK: Record<TeamScopeHealthSeverity, number> = {
