@@ -32,7 +32,7 @@ T9 ANSI TUI（`main-ansi.ts` 路径）当前已具备日常对话能力，以下
 | **P1** ◑ | Cockpit / `/context` 面板接线 | `/context` 已可用；cockpit 6 面板 overlay deferred→P2 | M |
 | **P1** ✅ | slash handler `cost` 写死 0 | `/cost` 等命令读到假值（GlanceBar 已真实，命令侧未对齐） | S |
 | **P2** | M5 切换与清理 | feature flag 灰度 → 性能基准 → 删 Ink/.tsx → 文档 | L |
-| **P3** | 内层 worker 流式上行 | 子代理实时活动两路 UI 均不显示，需新增 `onSubAgent*` 回调 | L（跨共享层） |
+| **P3** ✅ | 内层 worker 流式上行 | 已落地：`DelegationRequest.onActivity` 实时上行 + `createActivityStreamer` 折叠进度行，经既有 `onOutput` 工具流通道两路 UI 共用 | L（跨共享层） |
 | **P3** | TodoStore 子进程单例覆盖 | 已知 issue，独立排期 | M |
 
 S≈半天 · M≈1–2 天 · L≈3 天+
@@ -95,7 +95,11 @@ S≈半天 · M≈1–2 天 · L≈3 天+
 
 ## 5. P3 — 大改 / 独立排期（不在近期收束）
 
-- **内层 worker 流式上行**：子代理实时活动（worker 的 token/工具）两路 UI 均不显示，需新增 `onSubAgent*` 回调，跨共享层大改。当前 TeamPanel 只在 `team_orchestrate` 终态解码渲染。
+- **内层 worker 流式上行** — ✅ 完成（2026-06-12）：
+  - 信号链：`worker-session.onActivity(kind, detail)`（detail=工具名/文本 delta）→ coordinator side-table（回调不进 zod WorkOrder）→ `DelegationRequest.onActivity({workOrderId, profile, kind, detail})` → 工具侧 `createActivityStreamer` 折叠为有界进度行（tool_use 全量、text 首个+每 400 delta 心跳）→ 既有 `params.onOutput` 工具流通道 → 两路 UI live region 零改动复用。
+  - 覆盖 `delegate_task` / `delegate_batch` / `team_orchestrate`（含 max 模式 planner）。
+  - 顺带修复：`decodeTeamPanelModel` 改为容忍前缀前的累积进度行（此前 `✦ team progress` 行已会让终态 TeamPanel 解码失败回退为裸卡片）。
+  - 测试：`worker-activity-stream.test.ts`（5）、`worker-activity-upstream.test.ts`（4）、`team-panel.test.ts` 解码容忍（1）。
 - **TodoStore 子进程单例覆盖**：已知 issue，与 todo 面板 canonical 源相关，独立排期。
 - **compaction / appendix cache 并行化**：既有 DEFERRED，属 agent/compact 层。
 
