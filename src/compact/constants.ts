@@ -266,3 +266,34 @@ export function perMessageToolResultBudget(contextWindow: number): number {
  * Prune thresholds control what the API sees; this constant controls what stays in JS heap.
  */
 export const INLINE_TOOL_RESULT_MAX_CHARS = 50_000
+
+/**
+ * Per-tool-type budget: independently limits single-call size and cumulative
+ * per-turn output for each tool type. When cumulative output exceeds
+ * `summarizeAfter`, subsequent results are auto-truncated to summary form.
+ *
+ * Addresses session b3d6f29a pattern: 24 grep calls × ~600 tokens each
+ * = 14K tokens of low-density fragmented info. The global per-message budget
+ * (120K chars) never fires because individual results are small.
+ */
+export interface ToolTypeBudget {
+  perCall: number
+  perTurnCumulative: number
+  summarizeAfter: number
+}
+
+export function toolTypeBudgets(contextWindow: number): Record<string, ToolTypeBudget> {
+  const w = contextWindow
+  return {
+    grep:      { perCall: 2_000,  perTurnCumulative: 8_000,   summarizeAfter: 4_000 },
+    search:    { perCall: 2_000,  perTurnCumulative: 8_000,   summarizeAfter: 4_000 },
+    read_file: { perCall: Math.min(w * 0.1, 20_000), perTurnCumulative: Math.min(w * 0.25, 50_000), summarizeAfter: Math.min(w * 0.15, 30_000) },
+    bash:      { perCall: 5_000,  perTurnCumulative: 15_000,  summarizeAfter: 8_000 },
+    default:   { perCall: 5_000,  perTurnCumulative: 20_000,  summarizeAfter: 10_000 },
+  }
+}
+
+export function getToolBudget(toolName: string, contextWindow: number): ToolTypeBudget {
+  const budgets = toolTypeBudgets(contextWindow)
+  return budgets[toolName] ?? budgets['default']!
+}

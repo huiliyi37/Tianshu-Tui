@@ -1,4 +1,4 @@
-import { perMessageToolResultBudget } from '../compact/constants.js'
+import { perMessageToolResultBudget, getToolBudget } from '../compact/constants.js'
 
 const PROTECTED_TOOLS = new Set(['read_file'])
 
@@ -115,5 +115,63 @@ export function enforceContextPressureTruncation(
     ].join('\n')
 
     return { ...r, content: truncated }
+  })
+}
+
+/**
+ * Per-tool-type cumulative budget enforcement.
+ *
+ * Tracks cumulative output for each tool type within a turn. When cumulative
+ * output exceeds `summarizeAfter`, subsequent results of that type are
+ * truncated to a summary form.
+ *
+ * Also enforces perCall limits: individual results exceeding perCall are
+ * truncated to head + tail.
+ */
+export function enforceToolTypeBudgets(
+  results: BudgetEntry[],
+  contextWindow: number,
+): BudgetEntry[] {
+  if (!contextWindow || contextWindow <= 0) return results
+
+  const cumulative = new Map<string, number>()
+
+  return results.map(r => {
+    const budget = getToolBudget(r.toolName, contextWindow)
+    const prevCum = cumulative.get(r.toolName) ?? 0
+    const charLen = r.content.length
+    const tokenEstimate = Math.ceil(charLen / CHARS_PER_TOKEN)
+
+    let content = r.content
+
+    if (tokenEstimate > budget.perCall) {
+      const allowedChars = budget.perCall * CHARS_PER_TOKEN
+      const lines = content.split('\n')
+      if (lines.length > 20) {
+        const headLines = Math.ceil(lines.length * 0.6)
+        const tailLines = 5
+        const head = lines.slice(0, headLines)
+        const tail = lines.slice(-tailLines)
+        const headContent = head.join('\n')
+        const tailContent = tail.join('\n')
+        if (headContent.length + tailContent.length + 200 < allowedChars) {
+          content = headContent + `\n... ${lines.length - headLines - tailLines} lines omitted (per-call budget: ${budget.perCall} tokens) ...\n` + tailContent
+        } else {
+          content = content.slice(0, allowedChars) + `\n... [truncated: ${tokenEstimate} tokens → ${budget.perCall} token budget for ${r.toolName}]`
+        }
+      }
+    }
+
+    const newCum = prevCum + Math.ceil(content.length / CHARS_PER_TOKEN)
+    cumulative.set(r.toolName, newCum)
+
+    if (newCum > budget.summarizeAfter && prevCum >= budget.summarizeAfter) {
+      const lines = content.split('\n')
+      const lineCount = lines.length
+      const preview = lines.slice(0, 5).join('\n')
+      content = `[budget-summarized: ${r.toolName} cumulative ${newCum} tokens (limit: ${budget.summarizeAfter}), ${lineCount} lines]\n${preview}\n... [remaining ${Math.max(0, lineCount - 5)} lines omitted — cumulative budget exceeded]`
+    }
+
+    return { ...r, content }
   })
 }
