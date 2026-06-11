@@ -72,7 +72,13 @@ export interface InputHandlerOptions {
   stdin: ReadStream
   /** 初始输入模式 */
   mode?: InputMode
+  /** 单独 ESC 字节的刷新超时（ms）。期间无后续字节则派发 escape。 */
+  escapeTimeoutMs?: number
 }
+
+/** Bracketed paste 标记（DEC 2004） */
+const PASTE_START = '\x1B[200~'
+const PASTE_END = '\x1B[201~'
 
 export type InputMode = 'normal' | 'input' | 'overlay' | 'approval'
 
@@ -132,12 +138,18 @@ export class InputHandler {
   private stdin: ReadStream
   private mode: InputMode
   private handlers = new Map<string, Set<KeyHandler>>()
+  private pasteHandlers = new Set<(text: string) => void>()
   private escaped = false
   private escapeSeq = ''
+  private escapeTimeoutMs: number
+  private escapeTimer: ReturnType<typeof setTimeout> | null = null
+  private pasteActive = false
+  private pasteBuffer = ''
 
   constructor(options: InputHandlerOptions) {
     this.stdin = options.stdin
     this.mode = options.mode ?? 'input'
+    this.escapeTimeoutMs = options.escapeTimeoutMs ?? 40
     this.stdin.setRawMode(true)
     this.stdin.resume()
     this.stdin.setEncoding('utf8')
@@ -160,6 +172,12 @@ export class InputHandler {
     return this.onKey('*', handler)
   }
 
+  /** 注册 bracketed paste 处理器（一次性收到整段粘贴文本，已规范化换行）。 */
+  onPaste(handler: (text: string) => void): () => void {
+    this.pasteHandlers.add(handler)
+    return () => { this.pasteHandlers.delete(handler) }
+  }
+
   /** 切换输入模式 */
   setMode(mode: InputMode): void {
     this.mode = mode
@@ -172,31 +190,90 @@ export class InputHandler {
 
   /** 关闭 raw mode，恢复终端默认行为。 */
   dispose(): void {
+    if (this.escapeTimer) {
+      clearTimeout(this.escapeTimer)
+      this.escapeTimer = null
+    }
     this.stdin.removeAllListeners('data')
     this.stdin.setRawMode(false)
     this.stdin.pause()
     this.handlers.clear()
+    this.pasteHandlers.clear()
   }
 
   // ── internal ─────────────────────────────────────────────────
 
   private handleData(data: string): void {
-    const key = this.parseInput(data)
-    if (!key) return
+    // 1. 进行中的 paste：累积直到结束标记
+    if (this.pasteActive) {
+      this.consumePaste(data)
+      return
+    }
 
-    // 分发到特定按键处理器
+    // 2. 检测 paste 起始标记（可能与前置/后续字节同 chunk 到达）
+    const startIdx = data.indexOf(PASTE_START)
+    if (startIdx !== -1) {
+      const before = data.slice(0, startIdx)
+      if (before) this.handleData(before)
+      this.pasteActive = true
+      this.pasteBuffer = ''
+      this.consumePaste(data.slice(startIdx + PASTE_START.length))
+      return
+    }
+
+    // 3. 新字节到达 → 取消待定的 lone-ESC 超时（后续序列接管解析）
+    if (this.escapeTimer) {
+      clearTimeout(this.escapeTimer)
+      this.escapeTimer = null
+    }
+
+    const key = this.parseInput(data)
+    if (key) {
+      this.dispatch(key)
+      return
+    }
+
+    // 4. lone ESC 进入 escaped 态 → 起短定时器，无后续则刷新为 escape
+    if (this.escaped && this.escapeSeq === '\x1B') {
+      this.escapeTimer = setTimeout(() => {
+        this.escapeTimer = null
+        if (this.escaped && this.escapeSeq === '\x1B') {
+          this.escaped = false
+          this.escapeSeq = ''
+          this.dispatch({ raw: '\x1B', char: '', name: 'escape', ctrl: false, meta: false, shift: false })
+        }
+      }, this.escapeTimeoutMs)
+    }
+  }
+
+  /** 累积 paste 内容；遇结束标记则规范化换行并一次性派发，再处理尾部字节。 */
+  private consumePaste(chunk: string): void {
+    const endIdx = chunk.indexOf(PASTE_END)
+    if (endIdx === -1) {
+      this.pasteBuffer += chunk
+      return
+    }
+    this.pasteBuffer += chunk.slice(0, endIdx)
+    const text = this.pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    this.pasteActive = false
+    this.pasteBuffer = ''
+    for (const handler of this.pasteHandlers) handler(text)
+    const rest = chunk.slice(endIdx + PASTE_END.length)
+    if (rest) this.handleData(rest)
+  }
+
+  /** 把按键分发到 name / 通配 / mode 前缀三类处理器。 */
+  private dispatch(key: KeyPress): void {
     const nameSet = this.handlers.get(key.name)
     if (nameSet) {
       for (const handler of nameSet) handler(key)
     }
 
-    // 分发到通配符处理器
     const wildSet = this.handlers.get('*')
     if (wildSet) {
       for (const handler of wildSet) handler(key)
     }
 
-    // 分发带 mode 前缀的事件
     const modeSet = this.handlers.get(`${this.mode}:${key.name}`)
     if (modeSet) {
       for (const handler of modeSet) handler(key)
