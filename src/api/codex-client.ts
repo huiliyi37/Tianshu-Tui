@@ -37,6 +37,14 @@ export class CodexClient implements StreamClient {
         : {}
 
       const url = `${this.config.baseUrl.replace(/\/+$/, '')}/responses`
+      // 共享 lifecycle controller（见 openai-client 同名注释）：传给 fetch，
+      // 由外部 signal 联动并在 processSSEStream 的 finally 中 abort，确保 keep-alive
+      // 下连接被真正拆除。
+      const lifecycle = new AbortController()
+      if (signal) {
+        if (signal.aborted) lifecycle.abort()
+        else signal.addEventListener('abort', () => lifecycle.abort(), { once: true })
+      }
       const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
@@ -48,7 +56,7 @@ export class CodexClient implements StreamClient {
           ...authHeaders,
         },
         body: JSON.stringify(body),
-        signal,
+        signal: lifecycle.signal,
       }, 180_000)
 
       if (!response.ok) {
@@ -67,7 +75,7 @@ export class CodexClient implements StreamClient {
         throw err
       }
 
-      await this.processSSEStream(response, callbacks, signal)
+      await this.processSSEStream(response, callbacks, signal, lifecycle)
     }, signal, {
       maxTotalDurationMs: 10 * 60_000,
       onRetry: (info) => {
@@ -171,6 +179,8 @@ export class CodexClient implements StreamClient {
     response: Response,
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
+    /** 共享 lifecycle controller：finally 中 abort 以拆 fetch 连接。见 stream() 注释。 */
+    lifecycle?: AbortController,
   ): Promise<void> {
     const reader = response.body?.getReader()
     if (!reader) throw new Error('No response body')
@@ -275,17 +285,19 @@ export class CodexClient implements StreamClient {
         if (streamTimedOut) throw new Error('Codex SSE stream idle timeout (300s)')
         if (done) break
         receivedFirstChunk = true
-        resetIdleTimer()
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
 
+        // keepalive 感知：只有真实 `data: ` 事件才重置 idle timer，心跳/空行不重置。
+        let sawDataEvent = false
         for (const line of lines) {
           const trimmed = line.trim()
           if (!trimmed.startsWith('data: ')) continue
           const data = trimmed.slice(6)
           if (data === '[DONE]') continue
+          sawDataEvent = true
 
           let parsed: Record<string, unknown>
           try {
@@ -423,12 +435,16 @@ export class CodexClient implements StreamClient {
             }
           }
         }
+        // 仅在收到真实内容事件时重置 idle timer（心跳不重置）
+        if (sawDataEvent) resetIdleTimer()
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
       if (maxStreamTimer) clearTimeout(maxStreamTimer)
       if (signalCleanup) signalCleanup()
       reader.releaseLock()
+      // 拆 fetch 连接（见 openai-client 同名注释）。
+      lifecycle?.abort()
     }
 
     // Flush any buffered message that arrived before reasoning (e.g. no-reasoning responses)

@@ -35,6 +35,14 @@ export interface OpenAIClientConfig {
   useMaxCompletionTokens?: boolean
   /** Custom User-Agent header — required by providers that verify caller identity (e.g. Kimi) */
   userAgent?: string
+  /**
+   * Thinking-stall timeout (ms): once reasoning tokens have arrived but no text/tool
+   * output yet, abort the stream if no further chunk within this window.
+   * 默认 undefined = 禁用（等于 read 超时，不提前触发）—— 故意为之：Opus/GPT-5.5 等
+   * 深思模型会合法地在推理段之间停顿 90s+，过短的 stall 会造成误杀。
+   * 显式设置一个 < read 的值可对易卡死的 provider 开启更早的 stall 检测。
+   */
+  thinkingStallTimeoutMs?: number
   /** Provider-specific capability flags (网#1). */
   capabilities?: {
     /** DeepSeek sometimes emits tool JSON as plain text content. */
@@ -59,16 +67,9 @@ const SLOW_FIRST_BYTE_TIMEOUT_MS = 180_000
 const SLOW_READ_TIMEOUT_MS = 300_000
 /** Providers whose thinking mode can exceed 90s before first token. */
 const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'minimax'])
-/**
- * Thinking-stall timeout: once thinking tokens have been received, if no new
- * SSE chunk arrives within this window the stream is considered stuck.
- * Disabled (set equal to SLOW_READ_TIMEOUT_MS) because models like
- * Opus/GPT-5.5 can legitimately pause 90s+ between reasoning segments.
- * The hard 10min ceiling and SLOW_READ_TIMEOUT_MS (300s) are sufficient
- * to catch genuine hangs; a shorter stall timer produces false-positive
- * aborts on deep-thinking models.
- */
-const THINKING_STALL_TIMEOUT_MS = SLOW_READ_TIMEOUT_MS
+// Thinking-stall timeout 现由 config.thinkingStallTimeoutMs 控制（默认禁用，见
+// resetIdleTimer 与 OpenAIClientConfig 注释）。旧的模块级常量已移除——它恒等于
+// SLOW_READ_TIMEOUT_MS（实为禁用），且配套错误文案硬编码"90s"与实际值不符。
 
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
@@ -279,6 +280,15 @@ export class OpenAIClient implements StreamClient {
       const fetchTimeout = this.config.thinking === 'enabled'
         ? (SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '') ? SLOW_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
         : FIRST_BYTE_TIMEOUT_MS
+      // 共享 lifecycle controller：传给 fetch 的信号。它由外部 user signal 联动，
+      // 也由 parseStreamFromReader 在任何退出路径（idle/硬顶超时、错误、正常结束）
+      // 于 finally 中 abort —— 确保 keep-alive 下仅 reader.cancel() 可能拆不掉的 TCP
+      // 连接被 fetch 侧 abort 真正拆除（mid-body abort 同时拆 fetch）。
+      const lifecycle = new AbortController()
+      if (signal) {
+        if (signal.aborted) lifecycle.abort()
+        else signal.addEventListener('abort', () => lifecycle.abort(), { once: true })
+      }
       const response = await fetchWithTimeout(`${this.config.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -289,7 +299,7 @@ export class OpenAIClient implements StreamClient {
           ...(this.config.sessionId ? { 'X-Request-Session': this.config.sessionId } : {}),
         },
         body: JSON.stringify(effectiveBody),
-        signal,
+        signal: lifecycle.signal,
       }, fetchTimeout)
 
       if (!response.ok) {
@@ -312,7 +322,7 @@ export class OpenAIClient implements StreamClient {
       const reader = response.body?.getReader()
       if (!reader) throw new Error('Response body is not readable')
 
-      await this.parseStreamFromReader(reader, callbacks, signal, reasoningRef)
+      await this.parseStreamFromReader(reader, callbacks, signal, reasoningRef, lifecycle)
     }, signal, {
       maxTotalDurationMs: 10 * 60_000,
       maxTotalRetries: isThinking ? 1 : undefined,
@@ -332,12 +342,22 @@ export class OpenAIClient implements StreamClient {
     callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onContentBlock' | 'onStopReason'>>,
     signal?: AbortSignal,
     reasoningRef?: { content: string },
+    /**
+     * 传给 fetch 的共享 lifecycle controller。任何退出路径（正常结束 / idle 或硬顶
+     * 超时 / 错误 / 用户 abort）都会在 finally 中 abort 它，确保 keep-alive 下
+     * reader.cancel() 拆不掉的连接被 fetch 侧 abort 真正拆除。
+     */
+    lifecycle?: AbortController,
   ): Promise<void> {
     const decoder = new TextDecoder()
     let buffer = ''
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
+    /** 本次 idle timer 实际生效的超时（ms），供触发时输出准确文案。 */
+    let lastIdleTimeoutMs = 0
+    /** 本次 idle timer 是否以"thinking-stall"（短于 read）名义触发。 */
+    let lastFiredAsThinkingStall = false
     /** Whether any reasoning_content has been received — used to detect thinking stalls. */
     let receivedThinking = false
     // GLM-5.1 mandatory thinking mode outputs everything as reasoning_content
@@ -369,17 +389,23 @@ export class OpenAIClient implements StreamClient {
       const readMs = isSlowProvider ? SLOW_READ_TIMEOUT_MS
         : isReasoning ? REASONING_READ_TIMEOUT_MS : READ_TIMEOUT_MS
       // Thinking-stall detection: once thinking tokens have arrived but no text
-      // content yet, use a shorter timeout to catch stalled thinking streams.
-      // If the provider has already sent a complete content block (for example
-      // a tool_use) but no text delta, do not treat the stream as thinking-only:
-      // some APIs finalize tool calls without any text content.
+      // content yet, use a (configurable) shorter timeout to catch stalled thinking
+      // streams. If the provider has already sent a complete content block (for
+      // example a tool_use) but no text delta, do not treat the stream as
+      // thinking-only: some APIs finalize tool calls without any text content.
+      // 默认 thinkingStallTimeoutMs 未配置 → 取 readMs（等于禁用，不提前触发），
+      // 保留对深思模型不误杀的既有行为；显式配置可对易卡死 provider 开启更早 stall。
       const hasActionableBlock = this.toolCallBuffer.size > 0 || this._textAccum.length > 0
-      const thinkingStallMs = (receivedThinking && !textReceived && !hasActionableBlock)
-        ? THINKING_STALL_TIMEOUT_MS
+      const inThinkingOnly = receivedThinking && !textReceived && !hasActionableBlock
+      const thinkingStallMs = inThinkingOnly
+        ? Math.min(this.config.thinkingStallTimeoutMs ?? readMs, readMs)
         : null
       const timeout = receivedFirstChunk
         ? (thinkingStallMs ?? readMs)
         : firstByteMs
+      // 记录本次实际生效的超时，供 idle 触发时输出准确文案（不再硬编码"90s"）。
+      lastIdleTimeoutMs = timeout
+      lastFiredAsThinkingStall = thinkingStallMs !== null && thinkingStallMs < readMs
       idleTimer = setTimeout(() => {
         streamTimedOut = true
         reader.cancel().catch(() => {})
@@ -402,26 +428,31 @@ export class OpenAIClient implements StreamClient {
         // Check timeout AFTER read — reader.cancel() from idle timer causes
         // read() to return done=true, but we must throw, not silently break.
         if (streamTimedOut) {
-          const msg = (receivedThinking && !textReceived)
-            ? 'OpenAI SSE stream thinking stall timeout (90s) — model stopped producing thinking tokens'
-            : 'OpenAI SSE stream idle timeout'
+          const secs = Math.round(lastIdleTimeoutMs / 1000)
+          const msg = lastFiredAsThinkingStall
+            ? `OpenAI SSE stream thinking stall timeout (${secs}s) — model stopped producing thinking tokens`
+            : `OpenAI SSE stream idle timeout (${secs}s)`
           throw new Error(msg)
         }
         if (done) break
 
         receivedFirstChunk = true
-        resetIdleTimer()
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
 
+        // keepalive 感知：只有解析出真正的 `data:` 事件才算"进展"并重置 idle timer。
+        // 服务端心跳是 `:` 注释行 / 空行（被下面 startsWith('data:') 过滤掉），
+        // 若按任意字节重置（旧行为），纯心跳流会让 stall 检测失效、最坏拖到 10min 硬顶。
+        let sawDataEvent = false
         for (const line of lines) {
           const trimmed = line.trim()
           if (!trimmed || !trimmed.startsWith('data:')) continue
 
           const payload = trimmed.slice(5).trimStart()
           if (payload === '[DONE]') { streamDone = true; break }
+          sawDataEvent = true
 
           try {
             const parsed = JSON.parse(payload)
@@ -437,6 +468,8 @@ export class OpenAIClient implements StreamClient {
             // Skip malformed SSE lines
           }
         }
+        // 仅在收到真实内容事件时重置 idle timer（心跳不重置）
+        if (sawDataEvent) resetIdleTimer()
       }
 
       // Process any residual data in the SSE buffer (final chunk without trailing newline)
@@ -492,6 +525,10 @@ export class OpenAIClient implements StreamClient {
       if (idleTimer) clearTimeout(idleTimer)
       if (maxStreamTimer) clearTimeout(maxStreamTimer)
       if (signalCleanup) signalCleanup()
+      // 拆 fetch 连接：keep-alive 下 reader.cancel() 可能把连接还给连接池而非关闭，
+      // abort 传给 fetch 的 lifecycle signal 强制 undici 销毁底层 socket。已结束的
+      // 响应上 abort 为无操作，故正常结束路径安全。
+      lifecycle?.abort()
 
       // Promote reasoning to text even on stream error — prevents GLM "stuck" when
       // stream breaks after receiving reasoning_content but before normal completion.
