@@ -135,8 +135,17 @@ function stripAnsiLen(s: string): number {
   return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').length
 }
 
-/** token 计数压缩为 k（≥1000 取整 k，否则原值），对齐 Ink token 显示。 */
+/** token 计数压缩为可读单位：
+ *  - < 1k   → 原值（"850"）
+ *  - < 1M   → 取整 k（"12k"、"200k"）
+ *  - ≥ 1M   → 一位小数 M（"1.0M"、"2.5M"，≥10M 改取整以避免视觉过宽）
+ *  把 "1000k" 这类宽度怪物压成 "1.0M" 是领航星 2026-06-11 在 T9 GlanceBar 上的
+ *  实测诉求——1M 窗口下原显示宽度把 GlanceBar 顶到换行临界。 */
 function formatTokensK(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000
+    return m >= 10 ? `${Math.round(m)}M` : `${m.toFixed(1)}M`
+  }
   if (n >= 1000) return `${Math.round(n / 1000)}k`
   return `${n}`
 }

@@ -65,6 +65,29 @@ describe('formatGlanceBar', () => {
     assert.ok(plain.includes('12k/200k'), `has Xk/Yk: ${plain}`)
   })
 
+  it('renders 1.0M for 1M-context windows instead of 1000k', () => {
+    // 领航星 2026-06-11 实测：1M 窗口原显示 ◧ Xk/1000k 顶到换行临界。
+    // 验证: maxTokens=1_000_000 必须显示 "1.0M"，不得出现 "1000k"。
+    const result = formatGlanceBar({ width: 140, estimatedTokens: 12_300, maxTokens: 1_000_000 }, theme)
+    const plain = stripAnsi(result)
+    assert.ok(plain.includes('1.0M'), `1.0M present: ${plain}`)
+    assert.ok(!plain.includes('1000k'), `no 1000k artifact: ${plain}`)
+  })
+
+  it('renders 2.5M for 2.5M tokens (one decimal under 10M)', () => {
+    const result = formatGlanceBar({ width: 140, estimatedTokens: 2_500_000, maxTokens: 4_000_000 }, theme)
+    const plain = stripAnsi(result)
+    assert.ok(plain.includes('2.5M'), `2.5M present: ${plain}`)
+    assert.ok(plain.includes('4.0M'), `4.0M present: ${plain}`)
+  })
+
+  it('rounds to integer M for ≥10M tokens (avoid visual width blowup)', () => {
+    const result = formatGlanceBar({ width: 140, estimatedTokens: 12_000_000, maxTokens: 32_000_000 }, theme)
+    const plain = stripAnsi(result)
+    assert.ok(plain.includes('12M'), `12M present: ${plain}`)
+    assert.ok(plain.includes('32M'), `32M present: ${plain}`)
+  })
+
   it('omits ◧ token counts when maxTokens is missing or zero', () => {
     const noMax = stripAnsi(formatGlanceBar({ width: 120, estimatedTokens: 12_300 }, theme))
     assert.ok(!noMax.includes('◧'))
