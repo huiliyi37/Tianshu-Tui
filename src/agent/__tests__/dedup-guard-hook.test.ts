@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createDedupGuardHook, trigramOverlap, trigrams } from '../hooks/dedup-guard-hook.js'
-import type { RuntimeHookContext, RuntimeHookSnapshot, RuntimeHookEffects } from '../../runtime-hooks.js'
+import type { RuntimeHookContext, RuntimeHookSnapshot, RuntimeHookEffects } from '../runtime-hooks.js'
 
 function makeCtx(injected: string[]): RuntimeHookContext {
   return {
