@@ -30,6 +30,14 @@ interface ColorSet {
   pulseQuiet: string
   pulseActive: string
   pulseAlert: string
+  /** bash/grep/glob 工具色，默认回退到 primary */
+  toolShell?: string
+  /** edit_file/write_file 工具色，默认回退到 secondary */
+  toolEdit?: string
+  /** run_tests 工具色，默认回退到 success */
+  toolTest?: string
+  /** delegate_task/delegate_batch 工具色，默认回退到 warning */
+  toolDelegate?: string
 }
 
 // Pastel theme — soft, pleasant, 二次元-inspired (default)
@@ -169,32 +177,34 @@ const STARFIELD_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
-// Tianshu theme — 紫微北斗·墨夜 (Purple-Star Big-Dipper Ink-Night). Rivet's default.
-// Coordinated 水墨 monochrome: ~95% ink-gray hierarchy carried by whitespace +
-// typography, ONE cold accent (紫微紫 violet) for identity/active state, and the
-// 朱砂印 cinnabar seal reserved for a single warm point (user mark / alert pulse).
-// Functional tones (青/金/赤) are desaturated so they sink into the ink, never neon.
+// Tianshu theme — 玄夜墨色多色系 (Ink-Night Multi-Color). Rivet's default.
+// 墨灰文字层级 + 星金 accent + 朱砂用户标记 + 归航青/星金/朱砂赤功能态。
+// 工具按类别分色：shell 中性灰、edit 墨紫灰、test 金褐、delegate 星金。
 const TIANSHU_TRUECOLOR: ColorSet = {
-  primary: '#c9b8ff',   // 紫微帝星紫 — identity, links, active/in-progress (faded 青花)
-  secondary: '#9a90c2', // 墨紫 — edit/write, headers (cool, low-sat second violet)
-  success: '#6f9b91',   // 归航青 — tests pass / done (desaturated teal, sunk in ink)
-  warning: '#b09155',   // 星金 — delegation/attention (matte gold, not bright)
-  error: '#c1655c',     // 朱砂赤 — errors (muted, distinct from the vivid seal)
-  dim: '#494c5b',       // 远星灰 — separators / shortcuts / decoration only
-  pulseQuiet: '#2a2d3a', // 极淡墨线 — quiet pulse (faint hairline)
-  pulseActive: '#c9b8ff', // 紫微紫 — active pulse
-  pulseAlert: '#d4453a',  // 朱砂印 — the one vivid warm seal, alert only
+  primary: '#d4a574',   // 星金 accent — identity, links, active (warm gold, replaces 紫微紫)
+  secondary: '#a095b8', // 墨紫灰 — edit/write headers (desaturated violet-grey)
+  success: '#7db5a0',   // 归航青 — tests pass / done (brightened teal)
+  warning: '#c4a565',   // 星金 — delegation/attention (brightened gold)
+  error: '#d07065',     // 朱砂赤 — errors (brightened muted red)
+  dim: '#787b8a',       // 远星灰 — separators / shortcuts (brightened from #494c5b)
+  pulseQuiet: '#3a3d4a', // 墨线 — quiet pulse
+  pulseActive: '#d4a574', // 星金 — active pulse (matches primary)
+  pulseAlert: '#d4453a',  // 朱砂印 — alert pulse
+  toolShell: '#9a9dab',   // shell grey — bash/grep/glob (from HTML --tc-shell, brightened)
+  toolEdit: '#a095b8',    // 墨紫灰 — edit_file/write_file (from HTML --tc-edit)
+  toolTest: '#a89060',    // 金褐 — run_tests (from HTML --tc-test, brightened)
+  toolDelegate: '#c4a565', // 星金 — delegate (matches warning)
 }
 
 const TIANSHU_FALLBACK: ColorSet = {
-  primary: 'magenta',   // closest named violet for 256-color terminals
-  secondary: 'blue',
+  primary: 'yellow',    // closest named color for warm gold
+  secondary: 'magenta',
   success: 'cyan',
   warning: 'yellow',
   error: 'red',
-  dim: 'gray',
+  dim: 'white',         // brightened for readability
   pulseQuiet: 'gray',
-  pulseActive: 'magenta',
+  pulseActive: 'yellow',
   pulseAlert: 'red',
 }
 
@@ -230,10 +240,10 @@ const CLAUDE_FALLBACK: ColorSet = {
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
-      case 'bash': case 'grep': case 'glob': return c.primary
-      case 'edit_file': case 'write_file': return c.secondary
-      case 'run_tests': return c.success
-      case 'delegate_task': case 'delegate_batch': return c.warning
+      case 'bash': case 'grep': case 'glob': return c.toolShell ?? c.primary
+      case 'edit_file': case 'write_file': return c.toolEdit ?? c.secondary
+      case 'run_tests': return c.toolTest ?? c.success
+      case 'delegate_task': case 'delegate_batch': return c.toolDelegate ?? c.warning
       default: return c.dim
     }
   }
@@ -282,9 +292,9 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
   },
   tianshu: {
     // userColor = 朱砂印 cinnabar (the user ▌ mark, the one warm point);
-    // assistantColor = neutral ink body — emphasis comes from primary, not hue;
-    // muted = 元信息灰 from the approved 墨夜 palette.
-    truecolor: buildTheme(TIANSHU_TRUECOLOR, { userColor: '#d4453a', assistantColor: '#a7aab6', muted: '#6c6f7e' }),
+    // assistantColor = bright neutral body text (was #a7aab6, now readable);
+    // muted = brightened 元信息灰 (was #6c6f7e, too dim).
+    truecolor: buildTheme(TIANSHU_TRUECOLOR, { userColor: '#d4453a', assistantColor: '#c5c8d2', muted: '#9497a6' }),
     fallback: buildTheme(TIANSHU_FALLBACK, { userColor: 'red', assistantColor: 'white' }),
   },
   claude: {
