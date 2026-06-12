@@ -430,10 +430,21 @@ export class SessionPersist {
     return ContextClaimStore.loadDurableClaims(getSessionDir(), previous)
   }
 
-  /** Inject durable claims from previous session into a claim store with confidence decay. */
-  injectDurableClaims(store: ContextClaimStore): void {
+  /** Inject durable claims from previous session into a claim store with confidence decay.
+   *  A4: cross-session pollution gate — only inject claims that intersect with current
+   *  project files AND were created within 7 days. */
+  injectDurableClaims(store: ContextClaimStore, cwd?: string): void {
+    const now = Date.now()
+    const TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
     const durableClaims = this.loadPreviousDurableClaims()
     for (const claim of durableClaims) {
+      // A4 TTL gate: skip claims older than 7 days
+      if (now - claim.createdAt > TTL_MS) continue
+      // A4 file intersection gate: skip claims with no evidence files in current project
+      if (cwd) {
+        const hasRelevantFile = claim.evidence.some(e => e.path?.startsWith(cwd))
+        if (!hasRelevantFile) continue
+      }
       store.propose({
         kind: claim.kind,
         scope: claim.scope,

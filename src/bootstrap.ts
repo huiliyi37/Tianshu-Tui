@@ -833,7 +833,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   // 5. Session persist + claim store
   const persist = new SessionPersist(sessionId)
   const claimStore = persist.createClaimStore()
-  persist.injectDurableClaims(claimStore)
+  persist.injectDurableClaims(claimStore, cwd)
   for (const rule of loadProjectRules(cwd)) {
     claimStore.propose(rule)
   }

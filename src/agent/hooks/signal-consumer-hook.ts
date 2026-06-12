@@ -46,9 +46,23 @@ export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHo
 
       const deadEnds = pheromones.filter(p => p.signal === 'dead-end' && p.strength > 0)
       if (deadEnds.length > 0) {
+        // A4: cross-session relevance gate — only inject dead-end rules for
+        // files that intersect with current working set or recent tool targets.
+        // When no file context is available yet, skip the gate (don't block all).
+        const recentTargets = ctx.snapshot.recentToolHistory.map(t => t.target).filter(Boolean)
+        const hasFileContext = recentTargets.length > 0
+        const relevant = hasFileContext
+          ? deadEnds.filter(p => {
+              for (const rt of recentTargets) {
+                if (p.path.includes(rt) || rt.includes(p.path)) return true
+              }
+              return false
+            })
+          : deadEnds
+        if (relevant.length === 0) return
         const seen = new Set<string>()
         const entries: DeadEndEntry[] = []
-        for (const p of deadEnds) {
+        for (const p of relevant) {
           if (!seen.has(p.path)) {
             seen.add(p.path)
             entries.push({ path: p.path, context: p.context })
