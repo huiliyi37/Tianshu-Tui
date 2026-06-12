@@ -27,6 +27,7 @@ import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatToolGroup, shouldFlushGroup, canCollapse, groupFamily, toolEntryDisplay, type ToolGroup } from '../format/tool-group.js'
+import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar } from '../format/glance-bar.js'
 import { formatTaskList } from '../format/task-list.js'
@@ -1528,6 +1529,16 @@ export class TuiApp {
 
   /** 审批处理器 — 交互式 y/n/e */
   private handleApprovalRequired(id: string, name: string, input: Record<string, unknown>): Promise<ApprovalResult | boolean> {
+    // 权限 diff 预览：write/edit 审批前渲染变更块
+    const diffPreview = formatPermissionDiff({ toolName: name, input, theme: this.theme })
+    if (diffPreview) {
+      this.commitAbove(() => {
+        for (const line of diffPreview) {
+          this.commit.write({ text: line, trailingNewline: line === diffPreview[diffPreview.length - 1] })
+        }
+        this.state.committedCount++
+      })
+    }
     return new Promise((resolve) => {
       this.approvalPending = { id, name, input, resolve }
       this.input.setMode('approval')
