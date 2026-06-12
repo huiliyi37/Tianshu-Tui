@@ -129,7 +129,7 @@ function isOaiMessage(value: unknown): value is OaiMessage {
 
 function parseSessionLine(line: string): unknown | null {
   const parsed = JSON.parse(line) as { type?: string }
-  if (parsed.type === 'compact_start' || parsed.type === 'compact_end') {
+  if (parsed.type === 'compact_start' || parsed.type === 'compact_end' || parsed.type === 'model_switch') {
     return null
   }
   return parsed
@@ -175,6 +175,26 @@ export class SessionPersist {
     const json = serializeOaiSessionMessage(message)
     const line = appendChecksum(json) + '\n'
     await appendFile(this.filePath, line)
+  }
+
+  /**
+   * Append a model-switch event to the session transcript.
+   *
+   * Written as a checksummed `type: 'model_switch'` line so it survives
+   * checksum verification, but parseSessionLine skips it on replay (same
+   * pattern as compact_start/compact_end) — it's an audit breadcrumb, not
+   * part of the conversation history. Lets a session JSONL show exactly
+   * when/what the model changed mid-session.
+   */
+  appendModelSwitch(event: { from?: string; to: string; provider?: string }): void {
+    const line = appendChecksum(JSON.stringify({
+      type: 'model_switch',
+      t: Date.now(),
+      from: event.from,
+      to: event.to,
+      provider: event.provider,
+    })) + '\n'
+    appendFileSync(this.filePath, line)
   }
 
   /** Load messages in OpenAI-native format, migrating legacy rows on read. */

@@ -372,9 +372,30 @@ describe('checksum integration', () => {
     appendFileSync(persist.getFilePath(), '{"invalid": true}|0000000000000000\n')
     
     const loaded = persist.loadWithChecksum()
-    
+
     assert.equal(loaded.length, 1)
     assert.deepEqual(loaded[0], message)
+  })
+
+  it('appendModelSwitch writes a checksummed event that is skipped on replay', async () => {
+    const persist = new SessionPersist('test-model-switch')
+    // 真实消息 + 中间夹一条切换事件
+    await persist.appendOaiWithChecksum({ role: 'user', content: 'before switch' })
+    persist.appendModelSwitch({ from: 'claude-opus-4-8', to: 'deepseek-v4-pro', provider: 'deepseek' })
+    await persist.appendOaiWithChecksum({ role: 'assistant', content: 'after switch' })
+
+    // model_switch 行不进消息历史（与 compact_start/end 同等待遇），不破坏 replay
+    const loaded = persist.loadOai()
+    assert.equal(loaded.length, 2)
+    assert.equal(loaded[0]!.content, 'before switch')
+    assert.equal(loaded[1]!.content, 'after switch')
+
+    // 但事件确实落盘且通过 checksum（裸读文件能看到 model_switch 行）
+    const { readFileSync } = await import('node:fs')
+    const raw = readFileSync(persist.getFilePath(), 'utf-8')
+    assert.match(raw, /"type":"model_switch"/)
+    assert.match(raw, /"to":"deepseek-v4-pro"/)
+    assert.match(raw, /"from":"claude-opus-4-8"/)
   })
 })
 

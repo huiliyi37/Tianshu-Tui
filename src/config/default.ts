@@ -50,7 +50,9 @@ export const DEFAULT_CONFIG: Config = {
         models: [
           {
             id: 'claude-opus-4-8',
-            alias: 'opus-4-8',
+            // 代理（85.137.242.133）将 claude-opus-4-8 映射到 qwen37-max；
+            // alias 用真实后端名，消除"名为 opus 实为 qwen"的迷惑。id 不可改（代理按 id 路由）。
+            alias: 'qwen37-max',
             contextWindow: 1_000_000,
             maxTokens: 128000,
             reasoningEffort: 'max',

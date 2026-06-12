@@ -43,6 +43,9 @@ return new TurnStreamController({
         // ── P2-6 breadcrumbs: make every break attributable in one read ──
         const entry: Record<string, unknown> = {
           t: Date.now(), turn,
+          // model 让每条记录可溯源到具体模型 — /model 运行时切换后，
+          // 同一会话的 cache-log 会跨多个模型，无此字段无法归因。
+          model: self.config.promptEngine.getModel(),
           input: usage.input_tokens,
           cacheRead: usage.cache_read_input_tokens,
           cacheCreate: usage.cache_creation_input_tokens,

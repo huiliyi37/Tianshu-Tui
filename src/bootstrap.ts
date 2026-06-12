@@ -734,6 +734,9 @@ export interface SwitchModelResult {
  * session / persist / toolRegistry / refs / fileHistory 等全部复用，前缀缓存与历史不受影响。
  */
 export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): SwitchModelResult {
+  // 切换前记录当前模型 id，供 JSONL 审计事件的 from 字段。
+  let fromModel: string | undefined
+  try { fromModel = ctx.agent.config.promptEngine.getModel() } catch { /* idle/未初始化 */ }
   for (const [provName, prov] of Object.entries(ctx.config.provider.providers)) {
     const found = prov.models.find(m => m.id === modelId || m.alias === modelId)
     if (!found) continue
@@ -782,6 +785,13 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
     ctx.provider = provider
     ctx.apiKey = apiKey
     ctx.auth = auth
+
+    // 持久化切换：metadata.model/provider 反映当前模型（会话恢复/列表显示用），
+    // 并在 JSONL 落一条审计事件（每次切换可溯源）。best-effort，不阻塞切换。
+    try {
+      ctx.persist.updateMetadata({ model: found.id, provider: provName })
+      ctx.persist.appendModelSwitch({ from: fromModel, to: found.id, provider: provName })
+    } catch { /* persistence is best-effort — never block a model switch */ }
 
     return { ok: true, modelName: found.alias ?? found.id, contextWindow: found.contextWindow }
   }
