@@ -10,7 +10,7 @@ function makeRenderer(columns = 80) {
   const renderer = new StreamRenderer({
     commit: (ansi) => commits.push(ansi),
     getColumns: () => columns,
-    theme,
+    getTheme: () => theme,
   })
   return { renderer, commits }
 }

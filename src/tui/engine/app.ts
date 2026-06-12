@@ -150,7 +150,7 @@ export class TuiApp {
 
   // State
   private state: TuiState
-  private theme: RivetTheme
+  private get theme(): RivetTheme { return getTheme() }
   private columns: number
   private rows: number
   /** Streaming tool result accumulator: id → accumulated text */
@@ -239,7 +239,7 @@ export class TuiApp {
     /** git 分支名 */
     gitBranch?: string
   }) {
-    this.theme = getTheme()
+    // theme is now a dynamic getter — always reads current activeTheme
     this.stdout = options.stdout
     this.columns = options.cols
     this.rows = options.rows
@@ -335,7 +335,7 @@ export class TuiApp {
         })
       },
       getColumns: () => this.columns,
-      theme: this.theme,
+      getTheme: () => this.theme,
     })
 
     // Block stream writer: buffers streaming text into display blocks

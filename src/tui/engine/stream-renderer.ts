@@ -59,7 +59,8 @@ export interface StreamRendererOptions {
   commit: (ansi: string) => void
   /** 终端列数（动态读取，resize 安全） */
   getColumns: () => number
-  theme: RivetTheme
+  /** 主题读取函数（动态，切主题后新 block 立即生效） */
+  getTheme: () => RivetTheme
 }
 
 export class StreamRenderer {
@@ -134,7 +135,7 @@ export class StreamRenderer {
     if (!trimmed.trim()) return
     const rendered = formatMarkdown(
       { text: trimmed, columns: this.options.getColumns() },
-      this.options.theme,
+      this.options.getTheme(),
     )
     if (rendered.length === 0) return
     this.options.commit(rendered.join('\n'))
