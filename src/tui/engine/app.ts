@@ -1026,7 +1026,7 @@ export class TuiApp {
       }
     }
 
-    // 工具折叠组：同族可折叠 tool 到达时入组，异族或不可折叠时 flush
+    // 工具折叠组：同族 tool 到达时，若异族则先 flush 旧组，再开新组
     const family = groupFamily(name)
     if (canCollapse(family)) {
       if (this.toolGroupBuffer && shouldFlushGroup(this.toolGroupBuffer, name)) {
@@ -1041,7 +1041,6 @@ export class TuiApp {
         displayName: toolEntryDisplay(name, input),
       })
     } else {
-      // 不可折叠族 → flush 已有组，该 tool 单独渲染
       if (this.toolGroupBuffer) this.flushToolGroup()
     }
 
@@ -1086,10 +1085,15 @@ export class TuiApp {
     this.pendingTools.delete(id)
     const finalContent = toolAcc ? toolAcc + displayContent : displayContent
 
-    // 已通过折叠组渲染的 tool（read/grep/glob）不再单独 commit
+    // 可折叠 tool（read/grep/glob/ls/semantic_search）：累积内容到折叠组
     const family = groupFamily(name)
-    if (canCollapse(family)) {
-      // 更新 pending — 这些 tool 的结果已在 flushToolGroup 中作为组渲染
+    if (canCollapse(family) && this.toolGroupBuffer) {
+      const entry = this.toolGroupBuffer.entries[this.toolGroupBuffer.entries.length - 1]
+      if (entry && entry.toolName === name) {
+        entry.content = finalContent
+        entry.lineCount = finalContent.split('\n').length
+      }
+      // 不单独 commit — 将在 flushToolGroup 时作为组渲染
       return
     }
 

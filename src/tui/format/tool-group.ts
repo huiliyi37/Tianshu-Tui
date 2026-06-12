@@ -14,6 +14,7 @@ export interface ToolGroupEntry {
   toolName: string
   input: Record<string, unknown>
   displayName: string
+  content?: string
   lineCount?: number
 }
 
@@ -85,10 +86,25 @@ export function formatToolGroup(input: FormatToolGroupInput): string[] {
   lines.push(color(`● ${title}`, theme.primary))
 
   if (expanded || count <= 3) {
-    // 展开或少量文件：逐条列出
-    for (const entry of group.entries.slice(0, expanded ? 20 : 3)) {
-      const lc = entry.lineCount ? ` (${entry.lineCount}L)` : ''
+    // 展开或少量文件：逐条列出 + 内容预览
+    const maxLines = expanded ? 20 : 3
+    for (const entry of group.entries.slice(0, maxLines)) {
+      const lc = entry.content
+        ? ` (${entry.content.split('\n').length}L)`
+        : entry.lineCount ? ` (${entry.lineCount}L)` : ''
       lines.push(`  ⎿  ${color(entry.displayName, theme.muted)}${lc}`)
+      // 内容预览：最多 3 行
+      if (entry.content) {
+        const previewLines = entry.content.split('\n').slice(0, 3)
+        for (const pl of previewLines) {
+          const trimmed = pl.length > 80 ? pl.slice(0, 79) + '…' : pl
+          lines.push(`     ${color(trimmed, theme.dim)}`)
+        }
+        const totalLines = entry.content.split('\n').length
+        if (totalLines > 3) {
+          lines.push(color(`     … +${totalLines - 3} more lines`, theme.dim))
+        }
+      }
     }
     if (!expanded && count > 3) {
       lines.push(color(`     … +${count - 3} more files (ctrl+o to expand)`, theme.dim))
