@@ -90,7 +90,7 @@ export const DEFAULT_CONFIG: Config = {
     approval: 'suggest',
     maxTurns: 50,
     mode: 'code',
-    autoReasoning: false,
+    autoReasoning: true,
     songlineEnabled: false,
     desktopTools: false,
     hearthObserveEnabled: false,

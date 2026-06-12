@@ -34,6 +34,7 @@ export interface AgentConfigInput {
   antiAnchoring?: AntiAnchoringConfig
   intentRetrievalRouter?: IntentRetrievalRouterConfigInput
   autoDelegateEnabled?: boolean
+  autoReasoning?: boolean
   auth?: AuthProvider
   habituationThreshold?: number
   /** Optional permission config — allowlists, bash command prefixes, etc. */
@@ -70,6 +71,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     antiAnchoring: params.config.agent.antiAnchoring,
     intentRetrievalRouter: params.config.agent.intentRetrievalRouter,
     autoDelegateEnabled: params.config.agent.autoDelegateEnabled,
+    autoReasoning: params.config.agent.autoReasoning,
     auth: params.auth,
     habituationThreshold: params.habituationThreshold,
     permissions: params.config.agent.permissions as PermissionConfig,
@@ -122,7 +124,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     antiAnchoring: input.antiAnchoring,
     intentRetrievalRouter: input.intentRetrievalRouter,
     autoDelegateEnabled: input.autoDelegateEnabled,
-    autoReasoning: true,
+    autoReasoning: input.autoReasoning ?? true,
     reasoningFloor: model.reasoningEffort,
     // GLM turn-level thinking: disable thinking on tool execution turns
     // to prevent reasoning_content accumulation and context window stalls.

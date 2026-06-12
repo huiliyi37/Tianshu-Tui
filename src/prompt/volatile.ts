@@ -39,8 +39,6 @@ export interface VolatileContext {
   strategyShift?: string | null
   repairHint?: string | null
   impactHint?: string | null
-  routingReason?: string | null
-  cerebellarHint?: string | null
   /** Affordance hint from Embodied Cognition engine.
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal — changes every turn. */
@@ -161,8 +159,6 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     strategyShift: undefined,
     repairHint: undefined,
     impactHint: undefined,
-    routingReason: undefined,
-    cerebellarHint: undefined,
     affordanceHint: undefined,
     policyGuidance: undefined,
     planCacheAdvisory: undefined,
