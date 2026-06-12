@@ -13,6 +13,19 @@ interface Location {
 interface ServerCapabilities {
   definitionProvider?: boolean
   referencesProvider?: boolean
+  /** LSP 3.17+: server supports textDocument/diagnostic pull model. */
+  diagnosticProvider?: unknown
+}
+
+/** Simplified LSP Diagnostic for file-level error reporting. */
+export interface LspDiagnostic {
+  range: {
+    start: { line: number; character: number }
+    end: { line: number; character: number }
+  }
+  severity: 1 | 2 | 3 | 4  // Error / Warning / Info / Hint
+  message: string
+  source?: string
 }
 
 export interface LspManager {
@@ -25,6 +38,10 @@ export interface LspManager {
   /** Notify the LSP server that a file was modified on disk (e.g. by edit_file/write_file).
    *  Ensures the LSP's internal state stays in sync for subsequent goto-def / find-refs queries. */
   changeFile(filePath: string): void
+  /** T4: file-level diagnostics. Uses pull model (textDocument/diagnostic) if
+   *  supported, otherwise falls back to cached publishDiagnostics.
+   *  Timeout ~2s; returns empty array on timeout or server unavailability. */
+  getFileDiagnostics(filePath: string, timeoutMs?: number): Promise<LspDiagnostic[]>
   dispose(): void
 }
 
@@ -54,6 +71,8 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
   let capabilities: ServerCapabilities | null = null
   let ready = false
   const openedDocs = new Set<string>()
+  /** T4: diagnostic cache keyed by URI, populated from publishDiagnostics notifications. */
+  const diagnosticCache = new Map<string, LspDiagnostic[]>()
 
   /**
    * Ensure the document is opened in the LSP server.
@@ -118,6 +137,14 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
 
         capabilities = initResult.capabilities
         rpc.notify('initialized', {})
+
+        // T4: listen for publishDiagnostics to populate the cache
+        rpc.onNotification('textDocument/publishDiagnostics', (rawParams: Record<string, unknown>) => {
+          const params = rawParams as { uri: string; diagnostics: LspDiagnostic[] }
+          if (params?.uri) {
+            diagnosticCache.set(params.uri, params.diagnostics ?? [])
+          }
+        })
 
         // Wait for server to fully settle after initialization
         await new Promise(r => setTimeout(r, 200))
@@ -199,6 +226,47 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
         })
       } catch {
         // Best-effort: if the notification fails, next LSP query re-reads from disk anyway
+      }
+    },
+
+    async getFileDiagnostics(filePath, timeoutMs = 2000) {
+      if (!rpc || !ready) return []
+      const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
+      const uri = `file://${absPath}`
+
+      try {
+        // Prefer pull model (LSP 3.17+ textDocument/diagnostic)
+        if (capabilities?.diagnosticProvider) {
+          const result = await Promise.race([
+            rpc.request('textDocument/diagnostic', {
+              textDocument: { uri },
+            }) as Promise<{ items?: LspDiagnostic[] }>,
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+          ])
+          if (result?.items) return result.items
+        }
+
+        // Fallback: trigger a didChange to refresh publishDiagnostics, then return cached
+        await ensureDocument(filePath)
+        rpc.notify('textDocument/didChange', {
+          textDocument: { uri, version: Date.now() },
+          contentChanges: [{ text: '' }],
+        })
+        // Wait for publishDiagnostics to arrive (server pushes asynchronously)
+        await new Promise<void>((resolve) => {
+          const start = Date.now()
+          const check = () => {
+            if (diagnosticCache.has(uri) || Date.now() - start > timeoutMs) {
+              resolve()
+            } else {
+              setTimeout(check, 50)
+            }
+          }
+          check()
+        })
+        return diagnosticCache.get(uri) ?? []
+      } catch {
+        return []
       }
     },
 

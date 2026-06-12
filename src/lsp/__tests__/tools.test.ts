@@ -18,6 +18,7 @@ describe('createGotoDefinitionTool', () => {
       gotoDefinition: async () => [],
       findReferences: async () => [],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 
@@ -43,6 +44,7 @@ describe('createGotoDefinitionTool', () => {
       gotoDefinition: async () => [],
       findReferences: async () => [],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 
@@ -59,6 +61,7 @@ describe('createGotoDefinitionTool', () => {
       gotoDefinition: async () => [],
       findReferences: async () => [],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 
@@ -83,6 +86,7 @@ describe('createGotoDefinitionTool', () => {
       },
       findReferences: async () => [],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 
@@ -104,6 +108,7 @@ describe('createGotoDefinitionTool', () => {
       gotoDefinition: async () => [],
       findReferences: async () => [],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 
@@ -122,6 +127,7 @@ describe('createGotoDefinitionTool', () => {
       gotoDefinition: async () => [],
       findReferences: async () => [],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 
@@ -146,6 +152,7 @@ describe('createFindReferencesTool', () => {
         { uri: 'src/b.ts', range: { start: { line: 12, character: 1 }, end: { line: 12, character: 7 } } },
       ],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 
@@ -169,6 +176,7 @@ describe('createFindReferencesTool', () => {
       gotoDefinition: async () => [],
       findReferences: async () => [],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 
@@ -187,6 +195,7 @@ describe('createFindReferencesTool', () => {
       gotoDefinition: async () => [],
       findReferences: async () => [],
       changeFile: () => {},
+      getFileDiagnostics: async () => [],
       dispose: () => {},
     }
 

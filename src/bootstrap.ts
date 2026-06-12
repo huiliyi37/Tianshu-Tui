@@ -547,7 +547,6 @@ export function createAgentRuntime(deps: {
       toolRegistry,
       maxTurns: config.agent.maxTurns,
       getSessionMemoryState: () => persist.getSessionMemoryState(),
-      lspEnabled: false, // LSP initialized separately
       fileHistory,
       contextClaimStore: claimStore,
       playbookStore: new PlaybookStore(cwd),

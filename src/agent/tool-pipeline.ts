@@ -16,7 +16,7 @@ import { detectConflicts } from '../context/conflict-detect.js'
 import { createAntibodyProposal } from '../context/antibody.js'
 import { buildImportGraph, invalidateFile } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
-import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
+import { shouldRunDiagnostics } from '../lsp/client.js'
 import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
@@ -665,20 +665,28 @@ export async function executeToolUse(
     finalContent = finalContent.trimEnd()
 
     // LSP: notify the language server that a file changed on disk.
-    // Must happen BEFORE tsc diagnostics so the server's view is current.
+    // Must happen BEFORE diagnostics so the server's view is current.
     if (!harnessResult.isError && (tu.name === 'edit_file' || tu.name === 'write_file' || tu.name === 'apply_patch')) {
       deps.lspManager?.changeFile(tu.input.file_path as string)
    }
 
-    // LSP diagnostics
-    if (deps.config.lspEnabled && !harnessResult.isError && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
-      const check = runTypeCheck(deps.cwd, tu.input.file_path as string)
-      if (check.formatted) {
-        finalContent = finalContent + `
-
-[LSP Diagnostics]
-${check.formatted}`
-     }
+    // T4: LSP diagnostics via lspManager (async file-level, ~2s timeout)
+    if (!harnessResult.isError && deps.lspManager?.isReady() && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
+      try {
+        const diagnostics = await deps.lspManager.getFileDiagnostics(tu.input.file_path as string)
+        if (diagnostics.length > 0) {
+          const formatted = diagnostics
+            .filter(d => d.severity <= 2) // errors and warnings only
+            .slice(0, 10) // cap at 10 diagnostics
+            .map(d => `${d.severity === 1 ? 'ERROR' : 'WARNING'} L${d.range.start.line + 1}: ${d.message}`)
+            .join('\n')
+          if (formatted) {
+            finalContent = finalContent + `\n\n[LSP Diagnostics]\n${formatted}`
+          }
+        }
+      } catch {
+        // Silent: LSP diagnostics are best-effort, never fail the turn
+      }
    }
 
     if (!harnessResult.isError) {
