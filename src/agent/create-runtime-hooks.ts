@@ -20,6 +20,7 @@ import { createDedupGuardHook, type DedupGuardHookDeps } from './hooks/dedup-gua
 import { createBlindExplorationHook } from './hooks/blind-exploration-hook.js'
 import { createMCTSPlanningHook } from './hooks/mcts-planning-hook.js'
 import { createDispatcherHook, type DispatcherHookDeps } from './hooks/dispatcher-hook.js'
+import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
@@ -113,6 +114,8 @@ export interface RuntimeHookDeps {
   // ── Auto-delegation (lazy getter, wired by main.tsx via loop.ts) ──
   /** Optional dispatcher hook deps. When set, enables auto-delegation of exploration tasks. */
   autoDelegate?: DispatcherHookDeps
+  /** A1: unified advisory bus for noise-gated corrective signals */
+  advisoryBus?: AdvisoryBus
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -222,6 +225,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getPrevStreamedText: deps.getPrevStreamedText,
       setPrevStreamedText: deps.setPrevStreamedText,
       threshold: deps.dedupGuardThreshold,
+      advisoryBus: deps.advisoryBus,
     }))
   }
 

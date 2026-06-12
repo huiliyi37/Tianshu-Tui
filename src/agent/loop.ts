@@ -423,6 +423,7 @@ export class AgentLoop {
         getTaskContract: () => this.getTaskContract(),
         getSensorium: () => this.sensorium,
       } : undefined,
+      advisoryBus: this.advisoryBus,
     }))
     this.perception = new TurnPerceptionController({
       cwd: this.cwd,

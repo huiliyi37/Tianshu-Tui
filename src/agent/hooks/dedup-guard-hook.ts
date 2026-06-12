@@ -1,4 +1,5 @@
 import type { PostTurnRuntimeHook, RuntimeHookContext } from '../runtime-hooks.js'
+import type { AdvisoryBus } from '../advisory-bus.js'
 
 /**
  * P5: Dedup Guard — postTurn hook that detects when the current assistant
@@ -7,6 +8,9 @@ import type { PostTurnRuntimeHook, RuntimeHookContext } from '../runtime-hooks.j
  *
  * Algorithm: trigram overlap ratio on the first 500 chars of each reply.
  * Threshold is configurable (default 60%).
+ *
+ * A1: when advisoryBus is provided, routes through unified advisory bus
+ * instead of injecting a system-reminder (which breaks prefix cache).
  */
 
 export interface DedupGuardHookDeps {
@@ -17,6 +21,8 @@ export interface DedupGuardHookDeps {
   setPrevStreamedText: (text: string) => void
   /** Overlap ratio threshold (0-1). Default: 0.6 */
   threshold?: number
+  /** A1: unified advisory bus for noise-gated corrective signals */
+  advisoryBus?: AdvisoryBus
 }
 
 /** Extract trigrams from text (lowercased, whitespace-normalized). */
@@ -67,6 +73,17 @@ export function createDedupGuardHook(deps: DedupGuardHookDeps): PostTurnRuntimeH
 
       // Generate a short summary of what was repeated (first 150 chars)
       const summary = head.slice(0, 150).replace(/\n/g, ' ').trim()
+
+      // A1: route through advisory bus instead of injectUserMessage (prefix-cache safe)
+      if (deps.advisoryBus) {
+        deps.advisoryBus.submit({
+          key: 'dedup-guard',
+          priority: 0.7,
+          category: 'dedup',
+          content: `重复输出检测 (${Math.round(overlap * 100)}%)："${summary}${head.length > 150 ? '…' : ''}" — 直接回答新问题或推进任务。`,
+        })
+        return
+      }
 
       ctx.effects.injectUserMessage(
         `[dedup-guard] 你在上一轮已经给出了以下内容（相似度 ${Math.round(overlap * 100)}%），不要重复：\n` +
