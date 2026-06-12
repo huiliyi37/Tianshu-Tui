@@ -159,6 +159,18 @@ export function classifyChangeScale(change: ChangeSet): ReviewScale {
   return 'L1'
 }
 
+/**
+ * Upgrade review scale based on task dependency depth.
+ * wiring tasks need at least L2 (adversarial verifier),
+ * system tasks need L3 (review squadron).
+ */
+export function upgradeScaleByDepth(base: ReviewScale, depthLayer?: import('../context/task-contract.js').TaskDepthLayer): ReviewScale {
+  if (!depthLayer || depthLayer === 'unit') return base
+  if (depthLayer === 'system') return 'L3'
+  if (depthLayer === 'wiring' && base === 'L1') return 'L2'
+  return base
+}
+
 /** Route any non-empty delivery through ReviewRouter; L1 remains a non-blocking nudge. */
 export function shouldRouteReviewWorkflow(change: ChangeSet): boolean {
   return change.files.length > 0

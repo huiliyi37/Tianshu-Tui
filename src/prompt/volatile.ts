@@ -10,6 +10,17 @@ import { summarizeGitStatus } from './git-status-summary.js'
 import { scoreLessons } from '../context/lesson-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 import type { WorktreeReality } from '../agent/worktree-reality.js'
+import type { TaskDepthLayer } from '../context/task-contract.js'
+
+const DEPTH_ADVISORY: Record<Exclude<TaskDepthLayer, 'unit'>, string> = {
+  wiring: '<task-depth layer="wiring">此任务跨越模块边界。mock 单测会掩盖接线缺陷。写集成测试时实例化真实依赖（非 mock），RED 必须先证明边界断裂，GREEN 才证明已修复。</task-depth>',
+  system: '<task-depth layer="system">此任务跨越 3+ 层（端到端）。至少写一个不 mock 中间层的测试，验证从输入到输出的完整路径。优先使用真实子系统而非 mock。</task-depth>',
+}
+
+export function renderTaskDepthAdvisory(layer: TaskDepthLayer | undefined): string | null {
+  if (!layer || layer === 'unit') return null
+  return DEPTH_ADVISORY[layer]
+}
 
 export interface ToolHistoryEntry {
   tool: string
@@ -55,6 +66,10 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal and historical user-message injection. */
   intentRetrievalRoute?: string | null
+  /** Task depth advisory — TDD strategy hint for wiring/system tasks.
+   *  Cache-safe: rendered ONLY into the dynamic appendix.
+   *  Only present when taskDepthLayer !== 'unit'. */
+  taskDepthAdvisory?: string | null
   /** Harness advisory block — unified corrective guidance from advisory bus (A1).
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Max 3 advisories per turn. */
@@ -289,6 +304,11 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
   // Place after git/status awareness and before cognitive policy hints.
   if (ctx.intentRetrievalRoute) {
     parts.push(ctx.intentRetrievalRoute)
+  }
+
+  // Task depth advisory: TDD strategy for wiring/system tasks
+  if (ctx.taskDepthAdvisory) {
+    parts.push(ctx.taskDepthAdvisory)
   }
 
   // Session state: may change per-turn — keep at end

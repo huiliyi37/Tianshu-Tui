@@ -1,4 +1,4 @@
-import { classifyChangeScale, isTrivialChange, type ChangeSet, type ReviewScale } from './review-discipline.js'
+import { classifyChangeScale, isTrivialChange, upgradeScaleByDepth, type ChangeSet, type ReviewScale } from './review-discipline.js'
 import { profileRegistry } from './profile-registry.js'
 
 export type ReviewVerdict = 'verified' | 'rejected'
@@ -55,6 +55,8 @@ export interface ReviewRouterOptions {
    *  'manual' — explicit /review (L2) or /review max (L3): full workflows.
    *  Default: 'manual' (preserves direct-caller behavior). */
   mode?: ReviewMode
+  /** Task dependency depth — upgrades review scale for wiring/system tasks. */
+  depthLayer?: import('../context/task-contract.js').TaskDepthLayer
 }
 
 export interface ReviewOutcome {
@@ -214,7 +216,8 @@ export async function routeReviewWorkflow(
     }
   }
 
-  const tier = classifyChangeScale(change)
+  const baseTier = classifyChangeScale(change)
+  const tier = upgradeScaleByDepth(baseTier, options.depthLayer)
   if (tier === 'L1') return { tier, verdict: 'nudge' }
 
   let infraFailures: ReviewInfraFailure[] = []

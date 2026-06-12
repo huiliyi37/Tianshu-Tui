@@ -121,6 +121,7 @@ export async function classifyIntentRetrievalRoute(input: ClassifyIntentRetrieva
     lastAssistantMessage: input.lastAssistantMessage,
     taskList: input.taskList,
     taskContract: input.taskContract,
+    inheritedTaskKinds: input.inheritedTaskKinds,
   })
   const finalize = (route: RetrievalRoute, classifier: IntentRetrievalRouterConfig['classifier']): RetrievalRoute => {
     input.onTelemetry?.({

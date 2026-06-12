@@ -58,6 +58,9 @@ export interface B1Context {
   reviewDeps?: ReviewRouterDeps
   /** Re-entrancy guard: child review contexts must not recursively trigger review routing. */
   reviewDepth?: number
+  /** Task dependency depth — upgrades review scale for wiring/system tasks.
+   *  Accept a getter so the value is resolved at review-time, not context-creation time. */
+  getDepthLayer?: () => import('../context/task-contract.js').TaskDepthLayer | undefined
   /** Test hook for the wrote-but-never-read static check. */
   detectWroteButNeverRead?: typeof detectWroteButNeverRead
 }
@@ -592,7 +595,7 @@ When the task implements a complex spec or cross-module integration, include the
                   }, REVIEW_TIMEOUT_MS)
                 })
                 outcome = await Promise.race([
-                  route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode }),
+                  route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode, depthLayer: ctx.getDepthLayer?.() }),
                   timeoutPromise,
                 ])
               } catch (err) {

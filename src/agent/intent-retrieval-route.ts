@@ -1,4 +1,4 @@
-import type { TaskContract } from '../context/task-contract.js'
+import { isSocialOrTrivial, type TaskContract } from '../context/task-contract.js'
 import type { TaskListItem } from './session-state.js'
 import {
   resolveContextualIdentifier,
@@ -45,6 +45,8 @@ export interface RetrievalRouteInput {
   /** 跨轮持久化的任务列表，用于多轮回溯解析编号引用 */
   taskList?: readonly TaskListItem[]
   taskContract?: TaskContract
+  /** followUp mode: inherit previous turn's taskKinds when current message yields only default classification */
+  inheritedTaskKinds?: IntentTaskKind[]
 }
 
 const SOURCES: readonly RetrievalSource[] = ['codebase', 'git', 'memory', 'docs', 'external', 'tests']
@@ -147,7 +149,15 @@ export const TASK_KIND_BASELINES: Record<IntentTaskKind, RetrievalDirection[]> =
 }
 
 export function buildHeuristicRetrievalRoute(input: RetrievalRouteInput): RetrievalRoute {
-  const taskKinds = inferTaskKinds(input.userMessage, input.lastAssistantMessage, input.taskList)
+  let taskKinds = inferTaskKinds(input.userMessage, input.lastAssistantMessage, input.taskList)
+  // followUp inheritance: when the current message yields only a non-specific classification
+  // (default new_feature or social_idle), prefer the previous turn's task context.
+  if (input.inheritedTaskKinds && input.inheritedTaskKinds.length > 0) {
+    const isNonSpecific = taskKinds.length === 1 && (taskKinds[0] === 'new_feature' || taskKinds[0] === 'social_idle')
+    if (isNonSpecific) {
+      taskKinds = input.inheritedTaskKinds.slice(0, MAX_TASK_KINDS)
+    }
+  }
   const objectiveSummary = summarizeObjective(input)
   const directions = mergeDirections(taskKinds.flatMap(kind => baselineForKind(kind, input.taskContract)))
   return {
@@ -217,21 +227,10 @@ export function renderIntentRetrievalRoute(route: RetrievalRoute): string {
   return lines.join('\n')
 }
 
-/** Detect trivial / social inputs that should not trigger tool-driven retrieval. */
+/** Detect trivial / social inputs that should not trigger tool-driven retrieval.
+ *  Delegates to the unified isSocialOrTrivial from task-contract.ts. */
 function isTrivialInput(sanitized: string): boolean {
-  const stripped = sanitized.trim()
-  if (stripped.length === 0) return true
-  // CJK-only short: ≤ 4 CJK chars with no technical keywords
-  const cjkChars = (stripped.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length
-  if (cjkChars > 0 && cjkChars <= 4 && stripped.replace(/[\u4e00-\u9fff\u3400-\u4dbf\s!?！？。，,.]/g, '').length === 0) return true
-  // Latin short greeting: ≤ 3 words, no technical keyword (3+ letter English words that aren't common greetings)
-  const wordCount = stripped.split(/\s+/).filter(Boolean).length
-  if (wordCount > 0 && wordCount <= 3) {
-    const lower = stripped.toLowerCase()
-    // Common English greetings/social phrases
-    if (/^(hi|hello|hey|yo|sup|ok|okay|thanks|thx|bye|goodbye|morning|evening|night| greetings?)(\s+(there|you|all|everyone|folks))?$/i.test(lower)) return true
-  }
-  return false
+  return isSocialOrTrivial(sanitized)
 }
 
 function inferTaskKinds(userMessage: string, lastAssistantMessage?: string, taskList?: readonly TaskListItem[]): IntentTaskKind[] {

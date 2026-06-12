@@ -5,7 +5,7 @@ import { detectStaleness } from '../compact/staleness-detect.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import type { ToolDefinition } from '../api/types.js'
-import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, renderTaskDepthAdvisory, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import { analyzeVolatilePayload, LARGE_VOLATILE_PAYLOAD_CHARS, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
@@ -73,6 +73,7 @@ export class PromptEngine {
   private policyGuidance?: string | null
   private planCacheAdvisory?: string | null
   private intentRetrievalRoute?: string | null
+  private taskDepthLayer?: import('../context/task-contract.js').TaskDepthLayer
   private harnessAdvisoryBlock?: string | null
   private decisions?: string[]
   private activeDomain?: VolatileContext['activeDomain']
@@ -237,7 +238,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, intentRetrievalRoute: this.intentRetrievalRoute, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -602,6 +603,14 @@ export class PromptEngine {
     this.invalidateFreshCache()
   }
 
+  setTaskDepthLayer(layer: import('../context/task-contract.js').TaskDepthLayer | undefined): void {
+    this.taskDepthLayer = layer
+  }
+
+  getTaskDepthLayer(): import('../context/task-contract.js').TaskDepthLayer | undefined {
+    return this.taskDepthLayer
+  }
+
   setHarnessAdvisoryBlock(block: string | null): void {
     this.harnessAdvisoryBlock = block ?? undefined
   }
@@ -720,6 +729,7 @@ export class PromptEngine {
       policyGuidance: this.policyGuidance,
       planCacheAdvisory: this.planCacheAdvisory,
       intentRetrievalRoute: this.intentRetrievalRoute,
+      taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer),
       harnessAdvisoryBlock: this.harnessAdvisoryBlock,
       decisions: this.decisions,
       activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain,

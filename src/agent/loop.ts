@@ -103,7 +103,7 @@ import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
 import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
-import { advanceContractStatus, contractStatusFromPhaseClass, extractTaskContract, isActionableTurn, type TaskContract } from '../context/task-contract.js'
+import { advanceContractStatus, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, type TaskContract, type TaskDepthLayer, type TurnMode } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import { createStanceTally } from './stance-tally.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -259,6 +259,8 @@ export class AgentLoop {
   private latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   currentSeason: CognitiveSeason | null = null
   private lastCompactTurn: number | null = null
+  private _lastRetrievalRoute: import('./intent-retrieval-route.js').RetrievalRoute | null = null
+  private _taskDepthLayer: TaskDepthLayer | undefined = undefined
   private _prevPhaseHint: string | undefined = undefined
   /**
    * P2-5: mid-round history rewrites break the prefix cache between two API
@@ -701,7 +703,7 @@ export class AgentLoop {
     return null
   }
 
-  private async buildIntentRetrievalRouteForTurn(userInput: string, actionable: boolean): Promise<void> {
+  private async buildIntentRetrievalRouteForTurn(userInput: string, actionable: boolean, turnMode: TurnMode = 'task'): Promise<void> {
     if (!actionable || !this.taskContract) {
       this.config.promptEngine.setIntentRetrievalRoute(null)
       return
@@ -710,12 +712,9 @@ export class AgentLoop {
     try {
       const messages = this.session.getMessages()
       const lastAssistant = this.getLastAssistantMessageContent(messages) || undefined
-      // 从上一轮 Assistant 回复中持久化提取任务列表，支持跨多轮回溯
       if (lastAssistant && this.sessionStateManager) {
         this.sessionStateManager.extractTaskList(lastAssistant, this.session.getTurnCount())
       }
-      // 用户引用某个任务编号（如"做 P1"）时，将其标记为 in_progress —
-      // 让持久化状态机活起来，TUI 任务条得以反映进度而非永远 pending。
       if (this.sessionStateManager) {
         const referenced = userInput.match(/\b([PpTtSs]\d+)\b/g)
         if (referenced) {
@@ -725,19 +724,24 @@ export class AgentLoop {
           }
         }
       }
+      // followUp mode: pass previous route's taskKinds for inheritance
+      const previousRoute = this._lastRetrievalRoute
+      const inheritedTaskKinds = turnMode === 'followUp' && previousRoute ? previousRoute.taskKinds : undefined
       const route = await classifyIntentRetrievalRoute({
         userMessage: userInput,
         lastAssistantMessage: lastAssistant,
         taskList: this.sessionStateManager?.getTaskList(),
         taskContract: this.taskContract,
+        inheritedTaskKinds,
         config: this.config.intentRetrievalRouter,
         client: this.config.client,
         model: this.config.promptEngine.getModel(),
         signal: this.abortController?.signal,
         onTelemetry: telemetry => {
-          debugLog(`[intent-router] classifier=${telemetry.classifier} fallback=${telemetry.fallbackUsed} kinds=${telemetry.taskKinds.join(',')} sources=${telemetry.sources.join(',')} directions=${telemetry.directionCount} latencyMs=${telemetry.latencyMs}`)
+          debugLog(`[intent-router] mode=${turnMode} classifier=${telemetry.classifier} fallback=${telemetry.fallbackUsed} kinds=${telemetry.taskKinds.join(',')} sources=${telemetry.sources.join(',')} directions=${telemetry.directionCount} latencyMs=${telemetry.latencyMs}`)
         },
       })
+      this._lastRetrievalRoute = route
       this.config.promptEngine.setIntentRetrievalRoute(
         route && route.confidence >= 0.6 ? renderIntentRetrievalRoute(route) : null
       )
@@ -1256,7 +1260,7 @@ export class AgentLoop {
    * Returns the heartbeat (for cleanup) and the wrapped callbacks (which
    * the caller must use for the rest of the run).
    */
-  private async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean }> {
+  private async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean, turnMode: TurnMode }> {
     await this.warmupMemories()
     // The controller is created eagerly in run() before any await, so an abort
     // fired during warmup is honored (not discarded). Only create one here if a
@@ -1369,33 +1373,42 @@ export class AgentLoop {
     }
 
     this.session.addUserMessage(userInput)
-    const actionable = isActionableTurn(userInput)
+    const turnMode = classifyTurnMode(userInput, this.taskContract)
+    const actionable = turnMode !== 'chat'
     this.config.promptEngine.setActionableTurn(actionable)
 
-    if (actionable) {
-      // Explicit actionable message → extract fresh contract (may supersede old)
+    if (turnMode === 'task') {
       this.taskContract = extractTaskContract(userInput, this.session.getTurnCount())
+    } else if (turnMode === 'followUp') {
+      // Inherit active contract — no new extraction
     } else if (!this.taskContract || this.taskContract.status === 'ready_to_deliver') {
-      // No active contract to inherit, or previous task already delivered → skip
       this.taskContract = undefined
     }
-    // else: non-actionable follow-up to active task → inherit existing contract
 
-    await this.buildIntentRetrievalRouteForTurn(userInput, actionable)
+    await this.buildIntentRetrievalRouteForTurn(userInput, actionable, turnMode)
+
+    // Classify task dependency depth for TDD strategy / verifier selection
+    if (this.taskContract && actionable) {
+      const routeKinds = this._lastRetrievalRoute?.taskKinds
+      this._taskDepthLayer = classifyTaskDepth(this.taskContract, undefined, routeKinds)
+      this.config.promptEngine.setTaskDepthLayer(this._taskDepthLayer)
+    } else {
+      this._taskDepthLayer = undefined
+      this.config.promptEngine.setTaskDepthLayer(undefined)
+    }
+
     this.config.promptEngine.setPlanCacheAdvisory(
-      actionable ? renderPlanCacheAdvisory(this.p3.planCacheSuggest(userInput)) : null,
+      turnMode === 'task' ? renderPlanCacheAdvisory(this.p3.planCacheSuggest(userInput)) : null,
     )
 
-    if (this.config.autoReasoning && actionable) {
+    if (this.config.autoReasoning && turnMode === 'task') {
       const ruleEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
-      // T2-02 Track A2: apply bandit delta (no-op when flag off or gate closed)
       const banditAdjusted = this.applyEffortDelta(ruleEffort) as import('./auto-reasoning.js').ReasoningEffort
       this.config.reasoningEffort = banditAdjusted
       this.config.client.setReasoningEffort?.(banditAdjusted)
-      // T2-02 P0: shadow telemetry — record bandit recommendation without changing effort
       this.shadowEffortTelemetry(ruleEffort)
     }
-    return { heartbeat, wrappedCallbacks: callbacks, actionable }
+    return { heartbeat, wrappedCallbacks: callbacks, actionable, turnMode }
   }
 
   /**
@@ -1622,7 +1635,7 @@ export class AgentLoop {
         let gateHint = '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
         try {
           const gate = this.config.deliveryGateV2?.([...this.evidence.getState().filesModified])
-          if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate)}`
+          if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
         } catch { /* gate evaluation must never break convergence handling */ }
         this.session.addUserMessage(wrapSystemReminder(gateHint))
       }
@@ -1931,7 +1944,7 @@ export class AgentLoop {
   }
 
   private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {
-    const { heartbeat, wrappedCallbacks, actionable } = await this.initializeRun(userInput, callbacks)
+    const { heartbeat, wrappedCallbacks, actionable, turnMode } = await this.initializeRun(userInput, callbacks)
     callbacks = wrappedCallbacks
     callbacks = wrappedCallbacks
 

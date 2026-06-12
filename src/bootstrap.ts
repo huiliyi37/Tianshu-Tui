@@ -92,6 +92,8 @@ export interface RuntimeRefs {
   lspManager: ReturnType<typeof createLspManager> | null
   /** T5: bandit promotion state for /status observability. */
   banditState: import('./server/routes.js').BanditStatusEntry[] | null
+  /** Prompt engine ref for depth-layer queries at deliver-task time. */
+  promptEngine: import('./prompt/engine.js').PromptEngine | null
 }
 
 /** bootstrapInteractiveSession 的聚合返回值 */
@@ -324,6 +326,7 @@ export function createInteractiveToolRegistry(
     sessionRegistry: refs.sessionRegistry ?? undefined,
     sessionId: refs.sessionId ?? undefined,
     reviewDepth: params?.reviewDepth ?? 0,
+    getDepthLayer: () => refs.promptEngine?.getTaskDepthLayer(),
     reviewDeps: createCoordinatorReviewDeps({
       delegate: async (request, abortSignal) => {
         if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
@@ -797,6 +800,7 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
     })
 
     ctx.agent = agent
+    ctx.refs.promptEngine = agent.config.promptEngine
     ctx.provider = provider
     ctx.apiKey = apiKey
     ctx.auth = auth
@@ -917,6 +921,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     mcpManager: null,
     lspManager: null,
     banditState: null,
+    promptEngine: null,
   }
 
   // 10. Tool registry
@@ -939,6 +944,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     toolRegistry, persist, claimStore, fileHistory, refs,
     domainKnowledgeStore, modelId: opts.modelId,
   })
+  refs.promptEngine = agent.config.promptEngine
 
   // 13. MCP + LSP initialization
   // asyncExtras (default true): fire-and-forget, non-blocking for faster startup

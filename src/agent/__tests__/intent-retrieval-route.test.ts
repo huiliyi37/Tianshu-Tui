@@ -112,6 +112,40 @@ describe('intent retrieval route heuristic', () => {
   })
 })
 
+describe('followUp mode inheritance', () => {
+  it('inherits previous taskKinds when current message yields only default new_feature', () => {
+    const route = buildHeuristicRetrievalRoute({
+      userMessage: '继续',
+      inheritedTaskKinds: ['bug_fix'],
+    })
+    assert.ok(route.taskKinds.includes('bug_fix'), `expected bug_fix from inheritance, got ${route.taskKinds}`)
+    assert.ok(!route.taskKinds.includes('new_feature'), 'should not contain default new_feature')
+  })
+
+  it('does not inherit when current message has a specific classification', () => {
+    const route = buildHeuristicRetrievalRoute({
+      userMessage: '审查这个模块的安全风险',
+      inheritedTaskKinds: ['bug_fix'],
+    })
+    assert.ok(route.taskKinds.includes('review_audit'), `expected review_audit, got ${route.taskKinds}`)
+  })
+
+  it('does not inherit when no inheritedTaskKinds provided', () => {
+    const route = buildHeuristicRetrievalRoute({
+      userMessage: '继续',
+    })
+    assert.ok(route.taskKinds.includes('social_idle'), 'without inheritance, short continuation should be social_idle')
+  })
+
+  it('uses inherited refactor kind for short follow-up', () => {
+    const route = buildHeuristicRetrievalRoute({
+      userMessage: '好的 做吧',
+      inheritedTaskKinds: ['refactor'],
+    })
+    assert.ok(route.taskKinds.includes('refactor'), `expected refactor from inheritance, got ${route.taskKinds}`)
+  })
+})
+
 describe('intent retrieval route normalization and rendering', () => {
   it('normalizes LLM routes and fills missing baseline sources', () => {
     const route = normalizeRetrievalRoute({
