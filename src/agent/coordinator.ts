@@ -200,7 +200,7 @@ export function shouldDelegateObjective(objective: string, scope: WorkOrderScope
   return words >= 6 || (scope.files?.length ?? 0) >= 2 || (scope.symbols?.length ?? 0) >= 2
 }
 
-function workerFailureResult(order: WorkOrder, error: unknown): WorkerResult {
+function workerFailureResult(order: WorkOrder, error: unknown, nextActions?: string[]): WorkerResult {
   const reason = error instanceof Error ? error.message : String(error)
   return {
     workOrderId: order.id,
@@ -210,7 +210,7 @@ function workerFailureResult(order: WorkOrder, error: unknown): WorkerResult {
     artifacts: [{ kind: 'risk', title: 'Worker execution failed', content: reason }],
     changedFiles: [],
     risks: [`worker failed: ${reason}`],
-    nextActions: ['Primary should continue without trusting this worker result'],
+    nextActions: nextActions ?? ['Primary should continue without trusting this worker result'],
     evidenceStatus: 'blocked',
   }
 }
@@ -584,6 +584,24 @@ export class DelegationCoordinator {
     })
   }
 
+  /** Record a Flash→Pro escalation event: increment quota, persist shadow, return event for caller's array. */
+  private recordEscalation(order: WorkOrder, strongCard: ModelCapabilityCard, errorMsg: string): ModelTierShadowEvent {
+    this.proUpgradeCount++
+    const shadow = buildModelTierShadowEvent({
+      sessionId: this.config.sessionId ?? 'unknown',
+      workOrderId: order.id,
+      authority: order.authority,
+      profile: order.profile,
+      kind: order.kind,
+      recommendedTier: 'strong',
+      actualModel: strongCard.model,
+      actualTier: 'strong',
+      reason: `Flash→Pro 升级重试 #${this.proUpgradeCount}: 上次尝试失败 "${errorMsg.slice(0, 200)}"`,
+    })
+    persistModelTierShadow(this.config.modelTierShadowStore, shadow)
+    return shadow
+  }
+
   private evaluateTierInfluence(recommendation: ModelTierRecommendation): { candidate: ModelTierBanditRecommendation; gate: ModelTierGateDecision } {
     const state = buildHistoricalModelTierState(this.config.modelTierShadowStore)
     const candidate = recommendModelTierArm(state)
@@ -906,8 +924,18 @@ export class DelegationCoordinator {
               }
             }
             if (conflictedFiles.length > 0) {
-              // P1-1: first claim conflict — align telemetry with other return paths
-              const degraded = workerFailureResult(order, new Error(`File claim conflict: ${conflictedFiles.join(', ')} held by another session`))
+              // P1-1: first claim conflict — preserve actionable nextActions for the primary model
+              const degraded: WorkerResult = {
+                workOrderId: order.id,
+                status: 'blocked',
+                summary: `文件声明冲突: ${conflictedFiles.join('、')} 被另一会话持有`,
+                findings: [],
+                artifacts: [{ kind: 'risk', title: '声明冲突', content: `以下文件被另一会话锁定: ${conflictedFiles.join('、')}` }],
+                changedFiles: [],
+                risks: [`声明冲突: ${conflictedFiles.join('、')}`],
+                nextActions: ['等待其他会话释放声明后再重试', '或改用只读 profile 避免写冲突'],
+                evidenceStatus: 'blocked',
+              }
               return {
                 status: 'completed',
                 order,
@@ -1017,20 +1045,7 @@ export class DelegationCoordinator {
                 }
 
                 // P1-1: increment quota and write escalation shadow only after claim check passes
-                this.proUpgradeCount++
-                const escalationShadow = buildModelTierShadowEvent({
-                  sessionId: this.config.sessionId ?? 'unknown',
-                  workOrderId: order.id,
-                  authority: order.authority,
-                  profile: order.profile,
-                  kind: order.kind,
-                  recommendedTier: 'strong',
-                  actualModel: strongCard.model,
-                  actualTier: 'strong',
-                  reason: `Flash→Pro escalation retry #${this.proUpgradeCount}: previous attempt failed with "${msg.slice(0, 200)}"`,
-                })
-                persistModelTierShadow(this.config.modelTierShadowStore, escalationShadow)
-                escalationShadows.push(escalationShadow)
+                escalationShadows.push(this.recordEscalation(order, strongCard, msg))
                 const cwd = this.config.cwd ?? upgradedConfig.cwd
                 const handsRun = await wrapAbort(this.runHands({
                   order, wtCoordinator: new WorktreeCoordinator(cwd), cwd,
@@ -1053,20 +1068,7 @@ export class DelegationCoordinator {
               }
             } else {
               // P1-1: increment quota and write escalation shadow for read-only retry
-              this.proUpgradeCount++
-              const escalationShadow = buildModelTierShadowEvent({
-                sessionId: this.config.sessionId ?? 'unknown',
-                workOrderId: order.id,
-                authority: order.authority,
-                profile: order.profile,
-                kind: order.kind,
-                recommendedTier: 'strong',
-                actualModel: strongCard.model,
-                actualTier: 'strong',
-                reason: `Flash→Pro escalation retry #${this.proUpgradeCount}: previous attempt failed with "${msg.slice(0, 200)}"`,
-              })
-              persistModelTierShadow(this.config.modelTierShadowStore, escalationShadow)
-              escalationShadows.push(escalationShadow)
+              escalationShadows.push(this.recordEscalation(order, strongCard, msg))
               const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
               run = { result: workerRun.result, transcript: workerRun.transcript }
             }
