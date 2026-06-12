@@ -10,6 +10,7 @@ import { selectEvictionCandidates } from '../context/claim-budget.js'
 import { extractKeywords } from './playbook.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { RepairHintTracker } from './repair-hint.js'
+import type { AdvisoryBus } from './advisory-bus.js'
 import type { SessionContext } from './context.js'
 import type { PromptEngine } from '../prompt/engine.js'
 
@@ -27,6 +28,8 @@ export interface ContextInjectionDeps {
   getPlaybookStore: () => PlaybookStore | undefined
   /** Project root for recall-gate evidence verification (optional). */
   getCwd?: () => string
+  /** A1: unified advisory bus for corrective signal collection */
+  advisoryBus?: AdvisoryBus
 }
 
 export class ContextInjectionController {
@@ -103,12 +106,30 @@ export class ContextInjectionController {
   }
 
   refreshRepairHint(): void {
-    this.deps.promptEngine.setRepairHint(this.deps.getRepairHintTracker().getHint())
+    const hint = this.deps.getRepairHintTracker().getHint()
+    this.deps.promptEngine.setRepairHint(hint)
+    // A1: also submit to unified advisory bus
+    if (hint && this.deps.advisoryBus) {
+      this.deps.advisoryBus.submit({
+        key: 'repair-hint',
+        priority: 0.8,
+        category: 'repair',
+        content: hint,
+      })
+    }
   }
 
   setCerebellarHint(level: 'none' | 'hint' | 'gate' | 'escalate'): void {
     if (level !== 'none') {
-      this.deps.promptEngine.setCerebellarHint(`Prediction error rate elevated (${level}). Mental model may be stale — verify assumptions before proceeding.`)
+      const msg = `Prediction error rate elevated (${level}). Mental model may be stale — verify assumptions before proceeding.`
+      this.deps.promptEngine.setCerebellarHint(msg)
+      // A6: redirect cerebellar hint to A1 bus instead of dead-end setter
+      this.deps.advisoryBus?.submit({
+        key: 'cerebellar',
+        priority: level === 'escalate' ? 0.9 : level === 'gate' ? 0.85 : 0.7,
+        category: 'cerebellar',
+        content: msg,
+      })
       return
     }
     this.deps.promptEngine.setCerebellarHint(null)

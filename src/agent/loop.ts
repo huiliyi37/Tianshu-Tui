@@ -94,6 +94,7 @@ import { createP3Integration, P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
 import { formatImmuneContext } from './immune-context.js'
+import { AdvisoryBus } from './advisory-bus.js'
 import { checkTddGate } from './tdd-gate.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
@@ -272,6 +273,8 @@ export class AgentLoop {
   p3: P3Integration
   immuneHook: ImmuneHook
   _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
+  /** A1: unified advisory bus — collects corrective signals, renders ≤3 per turn */
+  advisoryBus = new AdvisoryBus()
   lastToolCompleteTime = 0
   private initialUserMessage: string | null = null
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
@@ -452,6 +455,7 @@ export class AgentLoop {
       getContextClaimStore: () => this.config.contextClaimStore,
       getPlaybookStore: () => this.config.playbookStore,
       getCwd: () => this.cwd,
+      advisoryBus: this.advisoryBus,
     })
     this.compaction = new CompactionController({
       session: this.session,
@@ -1440,6 +1444,8 @@ export class AgentLoop {
 
     // Pass 5: adaptive repair hint injection
     this.contextInjection.refreshRepairHint()
+    // A1: flush advisory bus into prompt engine (unified corrective guidance)
+    this.config.promptEngine.setHarnessAdvisoryBlock(this.advisoryBus.render())
 
     this.refreshReliabilityDecision()
 
