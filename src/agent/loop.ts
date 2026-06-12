@@ -21,7 +21,7 @@ import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import type { HookRegistry } from '../hooks/registry.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
-import { getDoomLoopLevel } from './trace-store.js'
+import { getDoomLoopLevel, getClassDoomLoopLevel, combineDoomLoopLevels } from './trace-store.js'
 import { evaluateConvergence } from './convergence-detector.js'
 import type { PhaseClass } from './convergence-detector.js'
 import { buildGateConvergenceHint } from './delivery-gate-v2.js'
@@ -942,7 +942,13 @@ export class AgentLoop {
 
   getRoutingReason() { return this.config.promptEngine.getRoutingReason() }
 
-  getDoomLoopLevel(): 'none' | 'warn' | 'blocked' { return getDoomLoopLevel(this.traceStore.toolFingerprints) }
+  getDoomLoopLevel(): 'none' | 'warn' | 'blocked' {
+    // 精确指纹（同 hash 重复）+ bash 命令类指纹（sed/head/tee 变体归并）取最严级别。
+    return combineDoomLoopLevels(
+      getDoomLoopLevel(this.traceStore.toolFingerprints),
+      getClassDoomLoopLevel(this.traceStore.bashClassFingerprints ?? []),
+    )
+  }
 
   getReliabilityDecision(): ReliabilityDecision | null { return this.latestReliabilityDecision }
 
@@ -1329,6 +1335,22 @@ export class AgentLoop {
     // addUserMessage, otherwise the split replaces the just-added user message
     // and the model never sees the new user input.
     await this.compaction.trySessionSplit()
+
+    // History invariant probe: a new run must start with the previous turn
+    // answered. A trailing user message (or a thinking-only assistant with
+    // empty content and no tool_calls) means the previous reply was never
+    // persisted — the exact precondition for the "re-answers the previous
+    // turn" bug. Log loudly so recurrences are diagnosable from debug logs.
+    {
+      const tailMsgs = this.session.getMessages()
+      const tail = tailMsgs[tailMsgs.length - 1]
+      if (tail && (
+        tail.role === 'user' ||
+        (tail.role === 'assistant' && !tail.content && !tail.tool_calls)
+      )) {
+        debugLog(`[history-invariant] run starts with unanswered tail: role=${tail.role} msgCount=${tailMsgs.length} — previous assistant reply was not persisted; model may re-answer the previous turn`)
+      }
+    }
 
     this.session.addUserMessage(userInput)
     const actionable = isActionableTurn(userInput)
@@ -1916,6 +1938,13 @@ export class AgentLoop {
     const MAX_RULE_RETRIES = 2
     let lastInjectedReminder = ''
 
+    // Whether a final (isFinal: true) turn completion was emitted. The turn
+    // loop can exhaust maxTurns without ever reaching the text-only break
+    // path — in that case the TUI never sees a final completion, its busy
+    // latch stays set, and the next user message gets routed to the steer
+    // buffer instead of starting a new run.
+    let finalTurnCompleted = false
+
     try {
       for (let turn = 0; turn < this.config.maxTurns; turn++) {
         this.thetaRequestsThisTurn = 0
@@ -2216,6 +2245,15 @@ export class AgentLoop {
 
         this.recordProviderOutcome(true)
 
+        // Contract repair: text shown to the user MUST be persisted. If the
+        // client streamed text only via onTextDelta and never emitted a text
+        // content block, synthesize one from the accumulated streamedText.
+        // Otherwise the reply is visible in the TUI but absent from history,
+        // and the model re-answers this turn's question on the next run.
+        if (this.streamedText && !collectedBlocks.some(b => b.type === 'text')) {
+          collectedBlocks.push({ type: 'text', text: this.streamedText })
+        }
+
         if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
 
         // max_output_tokens on text-only turns: accept partial output instead of
@@ -2326,8 +2364,18 @@ export class AgentLoop {
           this.abortController!.signal,
           'final-complete',
         )
+        finalTurnCompleted = true
         this.evidence.reset()
         break
+      }
+
+      // maxTurns exhausted mid-task (every turn used tools / retried): still
+      // emit a final completion so the TUI state machine resets (agentBusy /
+      // isStreaming) and the next user message starts a fresh run instead of
+      // silently landing in the steer buffer.
+      if (!finalTurnCompleted) {
+        debugLog(`[agent] maxTurns=${this.config.maxTurns} exhausted without a final turn — emitting final onTurnComplete`)
+        callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), true)
       }
     } catch (err) {
       this.evidence.reset()

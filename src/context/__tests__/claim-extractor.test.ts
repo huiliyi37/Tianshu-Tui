@@ -212,6 +212,39 @@ describe('claim-extractor', () => {
     assert.match(proposals[0]!.text, new RegExp(`\\(turn ${meta.turn}\\)`))
   })
 
+  it('parses the bracketed commit hash, not another hash embedded in the body', () => {
+    // Regression: commit messages routinely reference OTHER commits. The real
+    // new-commit hash is the bracketed one ([branch <hash>]); the old regex
+    // grabbed the first hex token (here the referenced 411a51f) and mislabeled
+    // ~61% of stored commit facts onto wrong/non-existent commits.
+    const ctx: ToolResultContext = {
+      toolName: 'git',
+      input: { action: 'commit', message: 'fix(server): H4 regression from 411a51f hash_edit' },
+      result: '[t9-ui-refactor 4dbaea0] fix(server): H4 regression from 411a51f hash_edit\n'
+        + ' 1 file changed, 3 insertions(+)\n\n--- actual changes (git show --stat) ---\n'
+        + '4dbaea0 (HEAD -> t9-ui-refactor)\n src/server/cron-scheduler.ts | 3 ++-',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 1)
+    assert.match(proposals[0]!.text, /^Commit 4dbaea0 /, 'must use bracketed hash 4dbaea0, not 411a51f')
+    assert.doesNotMatch(proposals[0]!.text, /Commit 411a51f/)
+  })
+
+  it('falls back to the git-show readback hash when no bracket is present', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'deliver_task',
+      input: { commit: true, message: 'fix: scoped' },
+      // deliver_task output without a [branch hash] line still has the readback.
+      result: 'Delivery Gate: GREEN\n✅ Scoped commit created\n\n'
+        + '--- actual changes (git show --stat) ---\ndef5678 (HEAD -> main)\n src/a.ts | 3 ++-',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 1)
+    assert.match(proposals[0]!.text, /^Commit def5678 /)
+  })
+
   it('does not extract claim from failed commit', () => {
     const ctx: ToolResultContext = {
       toolName: 'git',

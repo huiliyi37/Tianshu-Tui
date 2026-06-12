@@ -18,7 +18,7 @@ import { buildImportGraph, invalidateFile } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
 import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
 import type { LspManager } from '../lsp/manager.js'
-import { startTraceEvent, finishTraceEvent, fingerprintToolCall, recordToolFingerprint, recordTraceEvent } from './trace-store.js'
+import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
@@ -724,8 +724,11 @@ ${check.formatted}`
     if (!isTddRed) {
       deps.recordPrediction?.(!harnessResult.isError)
    }
-    const fp = fingerprintToolCall(tu.name, tu.input, harnessResult.isError ? 'error' : 'success')
-    traceStore = recordToolFingerprint(traceStore, fp)
+    const outputClass = harnessResult.isError ? 'error' : 'success'
+    const fp = fingerprintToolCall(tu.name, tu.input, outputClass)
+    // bash 类指纹：sed/head/python/tee 变体归并为同一命令类，堵 doom-loop 漏检
+    const classFp = fingerprintToolClass(tu.name, tu.input, outputClass)
+    traceStore = recordToolFingerprint(traceStore, fp, classFp)
 
     // P3-A: write path — when a tool resolves a prior failure of itself,
     // record the mistake into MistakeNotebook so getMistakeHints can find

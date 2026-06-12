@@ -153,10 +153,18 @@ function securityFinding(ctx: ToolResultContext, meta: ClaimExtractionMeta, now:
   }
 }
 
-const COMMIT_HASH_RE = /\b([0-9a-f]{7,40})\b/
+// git commit / deliver_task echo the new commit as "[branch <hash>] subject".
+// Anchor on that bracketed hash — NOT the first hex-looking token anywhere in
+// the body. Commit message bodies routinely embed OTHER commit hashes (and
+// branch names / stat numbers can look hex), so the old /\b[0-9a-f]{7,40}\b/
+// misparsed ~61% of hashes onto a wrong/non-existent commit.
+const COMMIT_HASH_RE = /\[[^\]\n]*?\b([0-9a-f]{7,40})\]/
+// Fallback: the post-commit `git show --stat --format=%h%d HEAD` readback,
+// whose header line begins with the real short hash, e.g. "abc1234 (HEAD -> …".
+const SHOW_HASH_RE = /(?:^|\n)([0-9a-f]{7,40}) \(HEAD/
 
 function commitFact(ctx: ToolResultContext, meta: ClaimExtractionMeta, now: number): ClaimProposal {
-  const hashMatch = ctx.result.match(COMMIT_HASH_RE)
+  const hashMatch = ctx.result.match(COMMIT_HASH_RE) ?? ctx.result.match(SHOW_HASH_RE)
   const hash = hashMatch?.[1] ?? 'unknown'
   const message = String(ctx.input.message ?? '').slice(0, 80)
   // Extract file list from stat lines (--stat file rows contain '|'; excludes %h%d header + summary)

@@ -42,6 +42,15 @@ export class BlockStreamWriter {
     await this.sending
   }
 
+  /** Drop buffered text WITHOUT emitting. Used when a stale run never
+   *  finalized (e.g. abort, maxTurns exhaustion) and a new run is starting —
+   *  flushing here would paint the previous run's leftover text into the
+   *  new run's output. */
+  discard(): void {
+    this.clearIdleTimer()
+    this.buffer = ''
+  }
+
   /** The text received but not yet emitted as a block — i.e. the live tail.
    *  Structurally bounded by maxChars/maxBufferSize, so it stays small enough
    *  to render in the live region without exceeding the viewport (真凶②). */

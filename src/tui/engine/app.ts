@@ -275,23 +275,46 @@ export class TuiApp {
           return
         }
 
+        // 跨 run steer 收口：上一 run 结束（text-only 收尾从不 drain）或
+        // busy 闩残留时排队的 guidance 会滞留到这里。若放任不管，它会在
+        // 下一次工具回合作为 [User guidance] 注入 —— 旧指令混进新任务上下文。
+        // 归并进本次 prompt（排队内容本就是用户意图，按时间序拼在新消息前）。
+        let submitText = text
+        if (trimmed && this.steerBuffer.hasPending()) {
+          const pending = [...this.steerBuffer.getPending()]
+          this.steerBuffer.clear()
+          submitText = [...pending, trimmed].join('\n\n')
+          this.commitAbove(() => {
+            this.commit.write({
+              text: color(`↳ ${pending.length} queued message${pending.length > 1 ? 's' : ''} merged into this prompt`, this.theme.muted),
+              trailingNewline: true,
+            })
+            this.state.committedCount++
+          })
+        }
+
         // Commit user message to scrollback
         if (trimmed) {
           this.commitAbove(() => {
             const formatted = formatUserMessage({
-              content: trimmed,
+              content: submitText.trim(),
               width: this.columns,
             }, this.theme)
             // 单次提交 + 块尾空行：与 assistant/tool/summary 统一间距契约
             this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
             this.state.committedCount++
           })
+          // 新 run 启动前丢弃上一 run 未 finalize 的流式残留：blockWriter 缓冲
+          // 与 streamRenderer pending 若不清，会把上一轮文字追加进新轮输出。
+          this.blockWriter.discard()
+          this.streamRenderer.reset()
+          this.assistantHeaderDone = false
           this.agentBusy = true
         }
         // Reset turn timer for the new turn
         this.state.turnStartMs = Date.now()
         this.lastActivityMs = Date.now()
-        this.onSubmitCallback?.(text)
+        this.onSubmitCallback?.(submitText)
       },
     })
 
@@ -1139,8 +1162,9 @@ export class TuiApp {
     if (this.approvalPending) this.resolveApproval(false)
     if (this.intentPending) this.resolveIntent('veto')
     // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
-    // 下次发起的 run 会在 turn 边界 drain 注入。（此前在此 clear() 会静默吞掉用户输入。）
+    // 下次 submit 会把排队内容归并进新 prompt（见 onSubmit 的 steer 收口）。
     this.streamRenderer.reset()
+    this.blockWriter.discard()
     this.assistantHeaderDone = false
     this.pendingTools.clear()
     this.toolAccumulator.clear()

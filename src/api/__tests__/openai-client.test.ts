@@ -92,6 +92,114 @@ describe('parseStream / SSE parsing', () => {
   })
 })
 
+describe('final text content block emission', () => {
+  function sseStream(frames: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder()
+    return new ReadableStream({
+      start(controller) {
+        for (const f of frames) controller.enqueue(encoder.encode(f))
+        controller.close()
+      },
+    })
+  }
+
+  it('emits a text content block at stream end for text-only replies', async () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    const response = new Response(sseStream([
+      'data: {"choices":[{"delta":{"content":"Hello"},"index":0}]}\n\n',
+      'data: {"choices":[{"delta":{"content":" world"},"index":0,"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ]))
+
+    const blocks: any[] = []
+    await (client as any).parseStreamFromReader(
+      response.body!.getReader(),
+      { onTextDelta: () => {}, onContentBlock: (b: any) => blocks.push(b) },
+    )
+
+    const textBlocks = blocks.filter(b => b.type === 'text')
+    assert.equal(textBlocks.length, 1, 'exactly one text content block must be emitted')
+    assert.equal(textBlocks[0].text, 'Hello world')
+  })
+
+  it('emits text block alongside tool_use when text precedes tool calls', async () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    const response = new Response(sseStream([
+      'data: {"choices":[{"delta":{"content":"Checking weather. "},"index":0}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},"index":0,"finish_reason":"tool_calls"}]}\n\n',
+      'data: [DONE]\n\n',
+    ]))
+
+    const blocks: any[] = []
+    await (client as any).parseStreamFromReader(
+      response.body!.getReader(),
+      { onTextDelta: () => {}, onContentBlock: (b: any) => blocks.push(b) },
+    )
+
+    assert.equal(blocks.filter(b => b.type === 'tool_use').length, 1)
+    const textBlocks = blocks.filter(b => b.type === 'text')
+    assert.equal(textBlocks.length, 1)
+    assert.equal(textBlocks[0].text, 'Checking weather. ')
+  })
+
+  it('does NOT emit text block when content was consumed as tool JSON (hasToolJsonInContentBug)', async () => {
+    const client = new OpenAIClient({
+      ...TEST_CONFIG,
+      capabilities: { hasToolJsonInContentBug: true },
+    })
+    const toolJson = '{"name":"read_file","arguments":{"file_path":"/tmp/x"}}'
+    const response = new Response(sseStream([
+      `data: {"choices":[{"delta":{"content":${JSON.stringify(toolJson)}},"index":0,"finish_reason":"stop"}]}\n\n`,
+      'data: [DONE]\n\n',
+    ]))
+
+    const blocks: any[] = []
+    await (client as any).parseStreamFromReader(
+      response.body!.getReader(),
+      { onTextDelta: () => {}, onContentBlock: (b: any) => blocks.push(b) },
+    )
+
+    assert.equal(blocks.filter(b => b.type === 'tool_use').length, 1, 'tool JSON must be parsed into tool_use')
+    assert.equal(blocks.filter(b => b.type === 'text').length, 0, 'tool JSON must not also persist as text')
+  })
+
+  it('emits text block from promoted reasoning for GLM thinking-only replies', async () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'glm' })
+    const response = new Response(sseStream([
+      'data: {"choices":[{"delta":{"reasoning_content":"The answer is 4."},"index":0,"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ]))
+
+    const blocks: any[] = []
+    const texts: string[] = []
+    await (client as any).parseStreamFromReader(
+      response.body!.getReader(),
+      {
+        onTextDelta: (t: string) => texts.push(t),
+        onContentBlock: (b: any) => blocks.push(b),
+      },
+    )
+
+    assert.equal(texts.join(''), 'The answer is 4.', 'reasoning promoted to visible text')
+    const textBlocks = blocks.filter(b => b.type === 'text')
+    assert.equal(textBlocks.length, 1, 'promoted text must persist as a text block')
+    assert.equal(textBlocks[0].text, 'The answer is 4.')
+  })
+
+  it('does not emit a text block when no content arrived', async () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    const response = new Response(sseStream(['data: [DONE]\n\n']))
+
+    const blocks: any[] = []
+    await (client as any).parseStreamFromReader(
+      response.body!.getReader(),
+      { onTextDelta: () => {}, onContentBlock: (b: any) => blocks.push(b) },
+    )
+
+    assert.equal(blocks.filter(b => b.type === 'text').length, 0)
+  })
+})
+
 describe('tool_calls delta buffering', () => {
   it('accumulates fragmented tool_calls deltas into complete tool_use', () => {
     const client = new OpenAIClient(TEST_CONFIG)

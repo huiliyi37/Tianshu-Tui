@@ -562,10 +562,10 @@ export class OpenAIClient implements StreamClient {
 
       this.flushToolCalls(callbacks)
       // 网#1: DeepSeek tool-JSON-in-content fallback
+      let textConsumedAsToolJson = false
       if (this.toolCallBuffer.size === 0 && this._textAccum && this.config.capabilities?.hasToolJsonInContentBug) {
-        this.tryParseToolJsonFromContent(this._textAccum, callbacks)
+        textConsumedAsToolJson = this.tryParseToolJsonFromContent(this._textAccum, callbacks) > 0
       }
-      this._textAccum = ''
 
       // Emit thinking content block so reasoning_content can be passed back
       // in subsequent requests. Mimo, MiniMax, and other OpenAI-compatible
@@ -583,6 +583,19 @@ export class OpenAIClient implements StreamClient {
         callbacks.onTextDelta?.(reasoningAccum)
         promotionFired = true
       }
+
+      // Emit the final text content block (normal completion only — never on
+      // error/retry paths, where a second attempt would re-emit and duplicate).
+      // The agent loop persists assistant turns from content blocks; without
+      // this block, text-only replies never reached session history and the
+      // model re-answered the previous turn. Mirrors anthropic/codex clients.
+      const finalText = !textConsumedAsToolJson && this._textAccum
+        ? this._textAccum
+        : promotionFired ? reasoningAccum : ''
+      if (finalText) {
+        callbacks.onContentBlock?.({ type: 'text', text: finalText })
+      }
+      this._textAccum = ''
 
       // If no usage chunk arrived, emit stop reason now
       if (this.pendingStopReason) {
@@ -646,9 +659,11 @@ export class OpenAIClient implements StreamClient {
 
     if (delta.content) {
       callbacks.onTextDelta?.(delta.content)
-      if (this.config.capabilities?.hasToolJsonInContentBug) {
-        this._textAccum += delta.content
-      }
+      // Always accumulate: the final text content block (emitted at stream end)
+      // is built from this — it is what the agent loop persists into session
+      // history. Without it, text-only replies were displayed but never stored,
+      // and the model re-answered the previous turn on the next user message.
+      this._textAccum += delta.content
     }
 
     if (delta.tool_calls) {
@@ -721,13 +736,15 @@ export class OpenAIClient implements StreamClient {
     this.toolCallBuffer.clear()
   }
 
-  /** 网#1: Parse tool JSON from accumulated text content (DeepSeek bug workaround). */
+  /** 网#1: Parse tool JSON from accumulated text content (DeepSeek bug workaround).
+   *  Returns the number of tool_use blocks emitted so the caller knows whether
+   *  the text was consumed as tool calls (and must not also persist as text). */
   private tryParseToolJsonFromContent(
     text: string,
     callbacks: Partial<Pick<StreamCallbacks, 'onContentBlock'>>,
-  ): void {
+  ): number {
     const trimmed = text.trim()
-    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return 0
     try {
       const parsed: unknown = JSON.parse(trimmed)
       const toolCalls = Array.isArray(parsed) ? parsed : [parsed]
@@ -744,7 +761,8 @@ export class OpenAIClient implements StreamClient {
         callbacks.onContentBlock?.({ type: 'tool_use', id: `fallback_${obj.name}_${emitted}`, name: obj.name, input })
         emitted++
       }
-    } catch { /* Not valid JSON */ }
+      return emitted
+    } catch { return 0 /* Not valid JSON */ }
   }
 }
 

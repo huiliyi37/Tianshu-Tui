@@ -28,6 +28,7 @@ const testConfig = {
     mode: 'code',
     autoReasoning: false,
     songlineEnabled: true,
+    desktopTools: false,
     hearthObserveEnabled: false,
     antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 256 },
     intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 100, maxTokens: 128, temperature: 0 },
