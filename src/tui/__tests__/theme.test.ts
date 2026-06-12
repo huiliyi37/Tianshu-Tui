@@ -8,7 +8,7 @@ describe('getTheme', () => {
   it('defaults to tianshu theme', () => {
     assert.equal(getActiveThemeName(), 'tianshu')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#c9b8ff') // 紫微紫 accent
+    assert.equal(theme.primary, '#d4a574') // 星金 accent (面积受限到极少位置)
     assert.equal(theme.error, '#c1655c')   // 朱砂赤 (desaturated)
   })
 
@@ -69,6 +69,6 @@ describe('theme switching', () => {
     setTheme('tianshu')
     assert.equal(getActiveThemeName(), 'tianshu')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#c9b8ff')
+    assert.equal(theme.primary, '#d4a574')
   })
 })

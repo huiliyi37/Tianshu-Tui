@@ -180,14 +180,14 @@ const STARFIELD_FALLBACK: ColorSet = {
 // Tianshu theme — 玄夜墨色 (Ink-Night). Design: 95% 墨灰 + 紫微紫 accent + 朱砂用户标记.
 // 功能态全部降饱和：归航青/星金/朱砂赤。工具按类别弱分色。
 const TIANSHU_TRUECOLOR: ColorSet = {
-  primary: '#c9b8ff',   // 紫微紫 — THE one cool accent, used sparingly (was #d4a574 gold)
+  primary: '#d4a574',   // 星金 accent — 五行符号/流式指示。面积已限制到极少位置
   secondary: '#9a90c2', // 墨紫灰 — edit/write headers (soft violet, design --tc-edit)
   success: '#6f9b91',   // 归航青 — tests/done (design --qing, desaturated)
   warning: '#b09155',   // 星金 — delegation/attention (design --jin, desaturated)
   error: '#c1655c',     // 朱砂赤 — errors (design --chi, desaturated)
   dim: '#545868',       // 暗墨 — separators/shortcuts (design --dim, +slight for terminal)
   pulseQuiet: '#3a3d4a', // 墨线 — quiet pulse
-  pulseActive: '#c9b8ff', // 紫微紫 — active pulse (matches primary)
+  pulseActive: '#d4a574', // 星金 — active pulse (matches primary)
   pulseAlert: '#d4453a',  // 朱砂印 — alert pulse
   toolShell: '#8c8f9d',   // shell grey — bash/grep/glob (design --tc-shell)
   toolEdit: '#9a90c2',    // 墨紫灰 — edit_file/write_file (design --tc-edit)
