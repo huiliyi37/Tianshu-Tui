@@ -18,7 +18,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude'
 
 interface ColorSet {
   primary: string
@@ -198,6 +198,35 @@ const TIANSHU_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
+// Claude theme — Claude Code TUI palette port. Mirrors the RGB values from
+// claude-code-haha/src/utils/theme.ts darkTheme (Claude Code's own ANSI改造 TUI),
+// so we can switch between the two terminals without retraining the eye.
+// Truecolor RGB values are kept verbatim from upstream; fallback resolves to the
+// matching dark-ansi 16-color names so 256-color terminals get the same identity.
+const CLAUDE_TRUECOLOR: ColorSet = {
+  primary: '#d77757',   // Claude Code `claude` rgb(215,119,87) — brand orange
+  secondary: '#af87ff', // `autoAccept` rgb(175,135,255) — electric violet
+  success: '#4eba65',   // `success` rgb(78,186,101) — bright green
+  warning: '#ffc107',   // `warning` rgb(255,193,7) — bright amber
+  error: '#ff6b80',     // `error` rgb(255,107,128) — bright red
+  dim: '#505050',       // `subtle` rgb(80,80,80) — dark gray
+  pulseQuiet: '#888888',    // `promptBorder` rgb(136,136,136) — medium gray
+  pulseActive: '#d77757',   // = primary (Claude brand orange pulse)
+  pulseAlert: '#ff6b80',    // = error (alert pulse)
+}
+
+const CLAUDE_FALLBACK: ColorSet = {
+  primary: 'redBright',     // dark-ansi `claude` = redBright
+  secondary: 'magentaBright', // `autoAccept` = magentaBright
+  success: 'greenBright',
+  warning: 'yellowBright',
+  error: 'redBright',
+  dim: 'white',            // dark-ansi `subtle` = white
+  pulseQuiet: 'white',     // `promptBorder` = white
+  pulseActive: 'redBright',
+  pulseAlert: 'redBright',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -257,6 +286,13 @@ const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetTheme }>
     // muted = 元信息灰 from the approved 墨夜 palette.
     truecolor: buildTheme(TIANSHU_TRUECOLOR, { userColor: '#d4453a', assistantColor: '#a7aab6', muted: '#6c6f7e' }),
     fallback: buildTheme(TIANSHU_FALLBACK, { userColor: 'red', assistantColor: 'white' }),
+  },
+  claude: {
+    // userColor = Claude brand orange (matches primary — user ▌ mark reuses brand hue);
+    // assistantColor = Claude secondary violet;
+    // muted = Claude `inactive` rgb(153,153,153) → #999999.
+    truecolor: buildTheme(CLAUDE_TRUECOLOR, { userColor: '#d77757', assistantColor: '#af87ff', muted: '#999999' }),
+    fallback: buildTheme(CLAUDE_FALLBACK, { userColor: 'redBright', assistantColor: 'magentaBright' }),
   },
 }
 
