@@ -131,7 +131,15 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/interview', description: 'Deep interview to clarify requirements' },
     { name: '/team', description: 'Run team-mode workflow skeleton' },
     { name: '/team max', description: 'Run team-mode planning-first workflow' },
+    { name: '/plan', description: 'Create implementation plan (writing-plans workflow)' },
+    { name: '/write-plan', description: 'Alias of /plan — same writing-plans workflow' },
+    { name: '/plan-mode', description: 'Enter plan authoring mode (write operations blocked)' },
+    { name: '/plan-list', description: 'List submitted plans awaiting approval' },
+    { name: '/plan-approve', description: 'Approve a plan and start execution' },
+    { name: '/plan-reject', description: 'Reject a plan with feedback for revision' },
     { name: '/plan-close', description: 'Preview or apply implementation plan closure' },
+    { name: '/review', description: 'Trigger L2 adversarial code review on current changes' },
+    { name: '/review max', description: 'Trigger L3 Review Squadron (5 inspectors) on current changes' },
     { name: '/exit', description: 'Save session and exit' },
   ]
 }
