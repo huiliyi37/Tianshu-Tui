@@ -81,7 +81,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     keywords: ['实现', '落地', '按计划', '交付', '测试', '编写', 'implement', 'deliver', 'test', 'build'],
     isCustom: false,
     toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
-    systemPromptSuffix: '你是天梁——执行者。严格按计划，精确交付，不妥协质量。每一步都要有验证。',
+    systemPromptSuffix: '你是天梁——执行者。严格按计划，精确交付，不妥协质量。每一步都要有验证。收到计划后先做分波判断：任务数 > 5 时主动提议拆为 2-3 wave 分批执行，每波 typecheck+test 通过后再继续。不要一次性铺开全部。',
     uiPersona: { separator: 'thin', accent: 'success', glyph: '✧' },
   },
   tianquan: {
