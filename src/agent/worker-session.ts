@@ -22,6 +22,17 @@ import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 const MAX_TRANSIENT_RETRIES = 2
 const TRANSIENT_BACKOFF_BASE_MS = 2_000
 
+/** Checkpoint saved from a previous worker run — allows Flash workers to resume
+ *  from their last successful turn instead of redoing all work on retry. */
+export interface WorkerCheckpoint {
+  /** 0-based index of the last successfully completed turn. */
+  turnIndex: number
+  /** Accumulated partial output from completed turns. */
+  partialResult: string
+  /** Tool calls completed (for audit/dedup). */
+  completedTools: string[]
+}
+
 export interface WorkerSessionConfig {
   order: WorkOrder
   client: StreamClient
@@ -43,6 +54,10 @@ export interface WorkerSessionConfig {
    *  Without this the worker's internal heartbeat fires into the void.
    *  `detail` carries the tool name for tool events and the delta for text. */
   onActivity?: (kind: WorkerActivityKind, detail?: string) => void
+  /** Resume from a previous checkpoint — inject partial results as context so
+   *  the worker doesn't redo completed work. Especially valuable for multi-turn
+   *  Flash workers (test_scaffolder generating multiple files). */
+  checkpoint?: WorkerCheckpoint
 }
 
 export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result'
@@ -61,6 +76,9 @@ export interface WorkerSessionRun {
   transcript: WorkerTranscript
   session: SessionContext
   usage: Usage
+  /** Extracted checkpoint when the worker was aborted mid-work — can be passed
+   *  back as config.checkpoint to resume on retry. */
+  checkpoint?: WorkerCheckpoint
 }
 
 function emptyTranscript(): WorkerTranscript {
@@ -168,7 +186,17 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
       ? buildDomainKnowledgeBlock(config.domainKnowledgeStore, config.order.authority)
       : '',
   ].filter(Boolean)
-  const prompt = [...knowledgeBlocks, buildWorkerPrompt(config.order)].join('\n\n')
+  const baseParts = [...knowledgeBlocks, buildWorkerPrompt(config.order)]
+  // Checkpoint resume: inject partial results so the worker doesn't redo completed work
+  if (config.checkpoint && config.checkpoint.partialResult) {
+    baseParts.push(
+      `<checkpoint turn="${config.checkpoint.turnIndex}" tools="${config.checkpoint.completedTools.length}">`,
+      'The following work was already completed in a previous run. Do NOT redo it — continue from where it stopped:',
+      config.checkpoint.partialResult,
+      '</checkpoint>',
+    )
+  }
+  const prompt = baseParts.join('\n\n')
 
   const session = new SessionContext()
   const agent = new AgentLoop({
@@ -211,10 +239,13 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
       // Abort wins over repair: never re-run an aborted worker.
       if (wasAborted()) {
-        // Preserve partial work — when budget timer fires, the worker may have
-        // already generated substantial analysis. Return it alongside the blocked
-        // status so the primary agent can read whatever was completed.
         const partialSummary = latestText.slice(0, 500)
+        // Extract checkpoint for potential resume
+        const abortCheckpoint: WorkerCheckpoint = {
+          turnIndex: attempt,
+          partialResult: latestText.slice(0, 8000),
+          completedTools: [...transcript.toolUses],
+        }
         return {
           result: {
             ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}`),
@@ -225,6 +256,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           transcript,
           session,
           usage: session.getTotalUsage(),
+          checkpoint: abortCheckpoint,
         }
       }
       try {

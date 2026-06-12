@@ -1336,7 +1336,7 @@ describe('DelegationCoordinator', () => {
 
     assert.equal(run.status, 'completed')
     assert.equal(run.results[0]?.status, 'blocked')
-    assert.ok(run.results[0]?.summary?.includes('File claim conflict'))
+    assert.ok(run.results[0]?.summary?.includes('文件声明冲突'))
     assert.ok(run.results[0]?.summary?.includes('src/blocked-file.ts'))
     // Worker should NOT be dispatched
     assert.equal(runHandsCalled, false)
@@ -1399,7 +1399,7 @@ describe('DelegationCoordinator', () => {
     assert.equal(modelsUsed[1], 'deepseek-pro')
     // Escalation shadow event emitted
     assert.ok(run.modelTierShadows && run.modelTierShadows.length >= 2, 'expected at least 2 tier shadows')
-    const escShadow = run.modelTierShadows!.find(s => s.actualTier === 'strong' && s.reason.includes('Flash→Pro escalation'))
+    const escShadow = run.modelTierShadows!.find(s => s.actualTier === 'strong' && s.reason.includes('Flash→Pro 升级重试'))
     assert.ok(escShadow, 'escalation shadow must be emitted')
     assert.equal(escShadow!.actualModel, 'deepseek-pro')
     assert.ok(run.selectedModel === 'deepseek-pro', 'selected model should be the Pro model')

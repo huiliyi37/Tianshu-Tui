@@ -8,6 +8,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { debugLog } from '../utils/debug.js'
+import { CircuitBreakerManager } from './worker-circuit-breaker.js'
+import { InMemoryMailbox, type WorkerMailbox } from './worker-mailbox.js'
+import { profileRegistry } from './profile-registry.js'
 import {
   createReadOnlyWorkOrder,
   createWriteWorkOrder,
@@ -193,6 +196,10 @@ export interface DelegationCoordinatorConfig {
   livenessClock?: () => number
   /** T5: enable fingerprint-based result resume. Default false (opt-in); set true in bootstrap. */
   resumeEnabled?: boolean
+  /** Per-profile circuit breaker — fast-fails delegation to profiles that are
+   *  repeatedly failing, preventing cascade waste. When omitted a default
+   *  instance is created internally. */
+  circuitBreaker?: CircuitBreakerManager
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -308,6 +315,10 @@ export class DelegationCoordinator {
   /** T3: Flash→Pro escalation counter per session. Max 3 Pro upgrades. */
   private proUpgradeCount = 0
   private static readonly MAX_PRO_UPGRADES = 3
+  /** Per-profile circuit breaker for fast-failing repeatedly broken profiles. */
+  readonly circuitBreaker: CircuitBreakerManager
+  /** Structured mailbox for inter-agent communication within a delegation wave. */
+  readonly mailbox: WorkerMailbox
 
   constructor(private config: DelegationCoordinatorConfig) {
     this.runWorker = config.runWorker ?? runWorkerSession
@@ -318,6 +329,8 @@ export class DelegationCoordinator {
       stallMs: config.workerStallMs ?? EXPLORE_STALL_MS,
       now: config.livenessClock,
     })
+    this.circuitBreaker = config.circuitBreaker ?? new CircuitBreakerManager()
+    this.mailbox = new InMemoryMailbox()
   }
 
   /** Lazily start the stall sweep; stop it when no workers are in flight. */
@@ -649,6 +662,30 @@ export class DelegationCoordinator {
           status: 'skipped',
           results: [],
           packet: await buildPrimaryWorkerPacket([]),
+        }
+      }
+
+      // Circuit breaker: fast-fail tier-locked profiles (Flash army) that are tripped.
+      // Non-locked profiles use Flash→Pro escalation as their resilience mechanism.
+      const profileDef = profileRegistry.get(request.profile)
+      if (profileDef?.tierLock) {
+        const circuitCheck = this.circuitBreaker.canDelegate(request.profile)
+        if (!circuitCheck.allowed) {
+          return {
+            status: 'completed',
+            results: [{
+              workOrderId: `circuit-open-${request.parentTurnId}`,
+              status: 'blocked',
+              summary: `Circuit breaker open: ${circuitCheck.reason}`,
+              findings: [],
+              artifacts: [{ kind: 'risk', title: 'Circuit breaker tripped', content: circuitCheck.reason ?? 'Profile circuit is open' }],
+              changedFiles: [],
+              risks: [`circuit breaker: ${request.profile} is open`],
+              nextActions: ['Wait for cooldown or use a different profile'],
+              evidenceStatus: 'blocked',
+            }],
+            packet: await buildPrimaryWorkerPacket([]),
+          }
         }
       }
 
@@ -1072,8 +1109,9 @@ export class DelegationCoordinator {
               const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
               run = { result: workerRun.result, transcript: workerRun.transcript }
             }
-            // Upgrade succeeded — record provider outcome, update selected model, rebuild tierShadow
+            // Upgrade succeeded — record provider outcome; circuit recovery for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, true)
+            if (profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordSuccess(order.profile)
             selected = strongCard
             // Rebuild tierShadow for the Pro model so telemetry is coherent
             const freshTierShadow = this.buildTierShadow(order, selected, tierRecommendation)
@@ -1081,8 +1119,9 @@ export class DelegationCoordinator {
             // Replace the stale flash-tier tierShadow; escalation shadow records the retry event
             escalationShadows.push(freshTierShadow)
           } catch (_retryError) {
-            // Pro upgrade also failed — record provider outcome, return degraded
+            // Pro upgrade also failed — record provider outcome; circuit failure for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, false)
+            if (profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
             const degraded = workerFailureResult(order, error)
             return {
               status: 'completed' as const,
@@ -1098,8 +1137,9 @@ export class DelegationCoordinator {
         }
       }
 
-      // If retry didn't happen, return degraded
+      // If retry didn't happen, return degraded — circuit records failure for tier-locked profiles
       if (!run) {
+        if (!isAbort && profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
         const degraded = workerFailureResult(order, error)
         return {
           status: 'completed' as const,
@@ -1125,6 +1165,15 @@ export class DelegationCoordinator {
 
     // Run completed — regardless of task verdict, the provider's API delivered.
     this.recordProviderOutcome(selected.model, true)
+
+    // Circuit breaker: record outcome for tier-locked profiles (Flash army)
+    if (profileRegistry.get(order.profile)?.tierLock) {
+      if (run.result.status === 'passed') {
+        this.circuitBreaker.recordSuccess(order.profile)
+      } else {
+        this.circuitBreaker.recordFailure(order.profile)
+      }
+    }
 
     this.state.recordEvent({ type: run.result.status === 'passed' ? 'passed' : run.result.status === 'blocked' ? 'blocked' : 'failed', workOrderId: order.id, timestamp: Date.now() })
 
