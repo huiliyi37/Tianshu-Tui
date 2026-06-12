@@ -474,9 +474,6 @@ export class TuiApp {
       }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
-      if (inputVal.startsWith('/') && !inputVal.includes(' ')) {
-      // ── Slash command handling ──────────────────────────────
-      const inputVal = this.inputLine.value
       if (inputVal.startsWith('/')) {
         // ↑↓ 选择仅对无参数命令生效（Tab 补全同理）
         if (!inputVal.includes(' ')) {
@@ -502,7 +499,6 @@ export class TuiApp {
         }
       } else {
         this.slashSelectedIdx = 0
-      }
       }
       // ── W4a: Up 箭头取回最近 queued 消息到输入框编辑 ─────────
       if (key.name === 'up' && !this.inputLine.value && this.steerBuffer.hasPending()) {
