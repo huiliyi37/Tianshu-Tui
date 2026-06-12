@@ -71,13 +71,20 @@ function matchesResult(taskId: string, result: WorkerResult): boolean {
     || result.workOrderId === taskId
 }
 
-function taskStatus(taskId: string, currentWave: TeamWave | undefined, runResults: readonly WorkerResult[] | undefined): TeamPanelStatus {
+function taskStatus(
+  taskId: string,
+  currentWave: TeamWave | undefined,
+  runResults: readonly WorkerResult[] | undefined,
+  activeTaskIds?: ReadonlySet<string>,
+): TeamPanelStatus {
   const result = runResults?.find(r => matchesResult(taskId, r))
   if (result) {
     if (result.status === 'passed') return 'done'
     if (result.status === 'blocked') return 'blocked'
     return 'failed'
   }
+  // B3: activity-driven incremental state — tasks with live activity are 'running'
+  if (activeTaskIds?.has(taskId)) return 'running'
   return currentWave?.taskIds.includes(taskId) ? 'running' : 'waiting'
 }
 
@@ -85,7 +92,13 @@ function taskSummary(taskId: string, runResults: readonly WorkerResult[] | undef
   return runResults?.find(r => matchesResult(taskId, r))?.summary
 }
 
-export function buildTeamPanelModel(summary: TeamRunSummary, currentWave = 0, reviewVerdict?: string): TeamPanelModel {
+export function buildTeamPanelModel(
+  summary: TeamRunSummary,
+  currentWave = 0,
+  reviewVerdict?: string,
+  /** B3: active task IDs from live worker activity — marks tasks as 'running' */
+  activeTaskIds?: ReadonlySet<string>,
+): TeamPanelModel {
   const current = summary.waves[currentWave]
   return {
     mode: summary.mode,
@@ -103,7 +116,7 @@ export function buildTeamPanelModel(summary: TeamRunSummary, currentWave = 0, re
       dependsOn: [...task.dependsOn],
       riskTier: task.riskTier,
       files: [...task.files],
-      status: taskStatus(task.id, current, summary.run?.results),
+      status: taskStatus(task.id, current, summary.run?.results, activeTaskIds),
       identity: partnerIdentityForTask(task),
       summary: taskSummary(task.id, summary.run?.results),
     })),
@@ -133,4 +146,14 @@ export function starFor(authority: string): { name: string; glyph: string; color
   const domain = STAR_DOMAINS[authority as StarDomainId]
   if (!domain) return { name: authority || '未知', glyph: '☆', colorKey: 'secondary' }
   return { name: domain.name, glyph: domain.uiPersona.glyph, colorKey: domain.uiPersona.accent }
+}
+
+/**
+ * B3: extract likely task IDs from a worker activity event's workOrderId.
+ * Team work orders have IDs like "wo_team:T1" or "team:T1".
+ * Returns the task ID (e.g. "T1") or undefined if not a team task.
+ */
+export function taskIdFromActivity(workOrderId: string): string | undefined {
+  const match = workOrderId.match(/team:(\S+)/)
+  return match ? match[1] : undefined
 }

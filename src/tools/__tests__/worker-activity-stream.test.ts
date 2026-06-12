@@ -42,11 +42,12 @@ describe('createActivityStreamer', () => {
     assert.match(lines[2]!, /20 deltas/)
   })
 
-  it('tool_result events are silent (tool_use already covered the beat)', () => {
+  it('tool_result events emit a done line (B3: no longer silent)', () => {
     const lines: string[] = []
     const stream = createActivityStreamer(l => lines.push(l))
     stream(ev({ kind: 'tool_result', detail: 'read_file' }))
-    assert.equal(lines.length, 0)
+    assert.equal(lines.length, 1)
+    assert.match(lines[0]!, /done/)
   })
 
   it('tracks text counters per work order independently', () => {
