@@ -1,5 +1,5 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
-import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatWeighingReviewStance, type ChangeSet } from './review-discipline.js'
+import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatWeighingReviewStance, formatWiringEffectivenessReviewStance, type ChangeSet } from './review-discipline.js'
 import type { PatcherResult, ReviewFinding, ReviewInfraFailure, ReviewRouterDeps, SquadronResult, VerifierResult } from './review-router.js'
 import type { AggregationPolicy, WorkerProfile, WorkerResult, WorkOrderKind } from './work-order.js'
 
@@ -58,6 +58,13 @@ function weighingReviewBlock(): string {
   return [
     'Weighing review stance (天权 称量者 lesson; apply to refactors, extractions, encapsulation/scope changes — verify truth AND weigh cost):',
     formatWeighingReviewStance(),
+  ].join('\n')
+}
+
+function wiringEffectivenessBlock(): string {
+  return [
+    'Wiring & effectiveness review stance (2026-06-12 噪音治理复审教训; "built ≠ wired ≠ effective" — apply to every feature/config/param/bus/gate addition):',
+    formatWiringEffectivenessReviewStance(),
   ].join('\n')
 }
 
@@ -187,6 +194,7 @@ function verifierObjective(change: ChangeSet): string {
     dataflowVerifierBlock(),
     pathBoundaryReviewBlock(),
     weighingReviewBlock(),
+    wiringEffectivenessBlock(),
     `Files: ${files(change).join(', ') || '(none)'}`,
     'Run targeted existing tests when possible and return command + observed output evidence.',
     'Do not stop at green tests: try at least one counterexample or boundary/error-path probe relevant to the changed files.',
@@ -206,12 +214,74 @@ function patcherObjective(change: ChangeSet, verifier: VerifierResult): string {
   ].join('\n')
 }
 
-const INSPECTORS: Array<{ name: string; objective: string }> = [
-  { name: 'Security', objective: 'Review authentication, authorization, path validation, secret exposure, and fail-open/fail-closed behavior.' },
-  { name: 'Lifecycle', objective: 'Review state transitions, async races, cancellation, timeout propagation, and load-check-save atomicity.' },
-  { name: 'Data Flow', objective: 'Review parameter propagation, allowlist/tool scope propagation, persistence paths, and data loss risks.' },
-  { name: 'Silence', objective: 'Review swallowed errors, empty catch blocks, missing diagnostics, and false green verification claims.' },
+// ─── Inspector definitions ──────────────────────────────────────────
+// Prompt economy: every inspector carries the core objective stance
+// (anti-rubber-stamp), plus ONLY the stances relevant to its own axis.
+// Stacking all stances on all five inspectors quintupled prompt size and
+// diluted each inspector's focus — the axis IS the specialization.
+
+type InspectorStance = 'dataflow' | 'pathBoundary' | 'wiring'
+
+const WIRING_INSPECTOR_METHOD = [
+  'Method (run these checks, cite file:line evidence for each):',
+  '1. For every new param/field/setter/config flag in the diff: grep ALL call sites — zero callers passing/reading it means dead wiring, report it.',
+  '2. For every gate/filter condition: enumerate the real runtime input shapes (relative vs absolute paths, missing optional fields, empty collections) and estimate the pass rate — ~0% = silently disabled feature, ~100% = no-op gate.',
+  '3. For every stated goal (less noise / fewer calls / faster): construct the before/after scenario and verify the metric actually moves in the stated direction.',
+  '4. For removed call sites: check the producer/setter/field left behind is also removed or still has a live consumer.',
+].join('\n')
+
+const INSPECTORS: Array<{ name: string; objective: string; stances: InspectorStance[]; method?: string }> = [
+  {
+    name: 'Security',
+    objective: 'Review authentication, authorization, path validation, secret exposure, and fail-open/fail-closed behavior.',
+    stances: ['pathBoundary'],
+  },
+  {
+    name: 'Lifecycle',
+    objective: 'Review state transitions, async races, cancellation, timeout propagation, and load-check-save atomicity. Verify outer timeouts strictly dominate inner budgets (inner must fire first to preserve partial results).',
+    stances: ['dataflow'],
+  },
+  {
+    name: 'Data Flow',
+    objective: 'Review parameter propagation, allowlist/tool scope propagation, persistence paths, and data loss risks.',
+    stances: ['dataflow', 'pathBoundary'],
+  },
+  {
+    name: 'Silence',
+    objective: 'Review swallowed errors, empty catch blocks, missing diagnostics, and false green verification claims. Treat "tests pass / already fixed" assertions as the highest-priority review target: demand the command + observed output.',
+    stances: [],
+  },
+  {
+    name: 'Wiring',
+    objective: 'Review end-to-end wiring and effectiveness — "built ≠ wired ≠ effective". Hunt: plan items half-done (field added but never enforced), new optional params with zero callers, setters/buses/config flags never read or flushed, gates whose real-world data shapes filter ~everything (silent feature kill), and changes that backfire against their stated goal (e.g. old channel kept alongside new one — duplicate rendering in a noise-reduction change).',
+    stances: ['wiring'],
+    method: WIRING_INSPECTOR_METHOD,
+  },
 ]
+
+function stanceBlocks(stances: InspectorStance[]): string[] {
+  const blocks: string[] = []
+  if (stances.includes('dataflow')) blocks.push(dataflowVerifierBlock())
+  if (stances.includes('pathBoundary')) blocks.push(pathBoundaryReviewBlock())
+  if (stances.includes('wiring')) blocks.push(wiringEffectivenessBlock())
+  return blocks
+}
+
+const FINDING_CONTRACT = 'Report each finding with severity CRITICAL/HIGH/MEDIUM/LOW, claim, evidence (file:line), and minimal fix suggestion. Report "no findings" explicitly if the axis is clean — silence is not a verdict.'
+
+function inspectorObjective(inspector: typeof INSPECTORS[number], change: ChangeSet): string {
+  return [
+    `${inspector.name} Inspector: ${inspector.objective}`,
+    objectiveReviewStanceBlock(),
+    ...stanceBlocks(inspector.stances),
+    ...(inspector.method ? [inspector.method] : []),
+    `Files: ${files(change).join(', ') || '(none)'}`,
+    ...(inspector.stances.includes('dataflow')
+      ? ['For spec/integration changes, review the fact-flow graph, condition matrix, and counterexample tests before accepting checklist-style coverage.']
+      : []),
+    FINDING_CONTRACT,
+  ].join('\n')
+}
 
 function squadronRequests(change: ChangeSet, options: CoordinatorReviewDepsOptions): DelegationRequest[] {
   return INSPECTORS.map(inspector => request({
@@ -219,16 +289,32 @@ function squadronRequests(change: ChangeSet, options: CoordinatorReviewDepsOptio
     options,
     kind: 'review',
     profile: 'reviewer',
-    objective: [
-      `${inspector.name} Inspector: ${inspector.objective}`,
-      objectiveReviewStanceBlock(),
-      dataflowVerifierBlock(),
-      pathBoundaryReviewBlock(),
-      `Files: ${files(change).join(', ') || '(none)'}`,
-      'For spec/integration changes, review the fact-flow graph, condition matrix, and counterexample tests before accepting checklist-style coverage.',
-      'Report each finding with severity CRITICAL/HIGH/MEDIUM/LOW, claim, evidence, and minimal fix suggestion.',
-    ].join('\n'),
+    objective: inspectorObjective(inspector, change),
   }))
+}
+
+// ─── Auto in-task review: single wiring inspector, short budget ─────
+// Auto review must never stall the main loop: 150s internal worker budget
+// (< AUTO_REVIEW_BUDGET_MS 180s outer cap, so the worker's own timer fires
+// first and preserves partial output), bounded turns, read-only profile.
+const AUTO_WIRING_WORKER_TIMEOUT_MS = 150_000
+const AUTO_WIRING_WORKER_MAX_TURNS = 6
+
+function wiringReviewerRequest(change: ChangeSet, options: CoordinatorReviewDepsOptions): DelegationRequest {
+  const wiring = INSPECTORS.find(i => i.name === 'Wiring')!
+  return {
+    ...request({
+      change,
+      options,
+      kind: 'review',
+      profile: 'reviewer',
+      objective: [
+        inspectorObjective(wiring, change),
+        `Time budget is tight (~${Math.round(AUTO_WIRING_WORKER_TIMEOUT_MS / 1000)}s): review the DIFF of the listed files first (git diff/read targeted ranges), do not read whole files or explore beyond scope. Prioritize check 1 and 2 of the method; report what you covered.`,
+      ].join('\n'),
+    }),
+    budget: { timeoutMs: AUTO_WIRING_WORKER_TIMEOUT_MS, maxTurns: AUTO_WIRING_WORKER_MAX_TURNS },
+  }
 }
 
 export function createCoordinatorReviewDeps(
@@ -263,6 +349,11 @@ export function createCoordinatorReviewDeps(
       const run = coordinator.delegateBatch
         ? await coordinator.delegateBatch(requests, 'all_required', options.abortSignal)
         : await runSquadronSerially(coordinator, requests, options.abortSignal)
+      return { findings: mapSquadronFindings(run), infraFailures: mapSquadronInfraFailures(run) }
+    },
+
+    spawnWiringReviewer: async (change): Promise<SquadronResult> => {
+      const run = await coordinator.delegate(wiringReviewerRequest(change, options), options.abortSignal)
       return { findings: mapSquadronFindings(run), infraFailures: mapSquadronInfraFailures(run) }
     },
   }

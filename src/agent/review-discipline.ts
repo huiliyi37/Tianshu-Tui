@@ -62,6 +62,25 @@ export function formatWeighingReviewStance(): string {
   return WEIGHING_REVIEW_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
 }
 
+/**
+ * 接线生效审查姿态（2026-06-12 噪音治理/委派质量复审教训）：
+ * 「功能建好」≠「接好」≠「生效」。专抓建好但断线、半做、或实际效果与声称
+ * 目标相反的改动。对抗验证回答"对不对"，称量回答"值不值"，本姿态回答
+ * "通没通、灵不灵"——一次复审抓出双渲染增噪、门控静默全关、死参数无人传
+ * 三类问题，全部带着绿测试通过了交付。
+ */
+export const WIRING_EFFECTIVENESS_REVIEW_STANCE: readonly string[] = [
+  '逐条对照计划/提交声明的验收标准审"做没做完"，不以"提交存在、代码在场、测试绿"为完成；专找半做：字段加了但无消费端执行、能力建了但生产路径不调用、预算换了来源但仍然无人检查。',
+  '新能力沿 生产者→传输→消费者→渲染/执行 全链路走通才算接好：新增可选参数必须 grep 全部调用方，零调用方传值即死参数；新增 setter/store/bus 必须确认存在 flush/失效/读取路径，否则是死 setter；新增 config 字段必须确认运行时真的读取。',
+  '目标反效检查：改动声称减少 X（噪音/重复/成本/延迟），就构造场景验证 X 实际下降。旧通道未删、新通道又渲染同一内容的"双渲染"是典型反效——减噪提交反而增噪，按 HIGH 上报。',
+  '门控/过滤条件用运行时真实数据形态核对，不信类型签名：相对 vs 绝对路径、可选字段缺失、空集合、模型自由输入。估算真实通过率——过滤掉 ~100% 的门控等于静默关闭功能，与放行 100% 同等严重。',
+  '对结构化内容（XML/JSON/markdown 块）的截断或 slice，验证不变式保持：闭合标签、转义、配对符号不被切断；并确认截断结果是确定性的，不引入前缀缓存抖动。',
+]
+
+export function formatWiringEffectivenessReviewStance(): string {
+  return WIRING_EFFECTIVENESS_REVIEW_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
+}
+
 const FIX_PATTERNS = [
   /\bfix(?:\(|:|\b)/i,
   /\bbugfix\b/i,
@@ -102,6 +121,13 @@ const SECURITY_BOUNDARY_PATTERNS = [
 
 function isTestOnlyFile(file: string): boolean {
   return TEST_ONLY_PATTERN.test(file)
+}
+
+/** Docs/test-only change — auto review adds no value here, nudge suffices. */
+export function isTrivialChange(files: readonly string[]): boolean {
+  return files.length > 0 && files.every(file =>
+    TRIVIAL_FILE_PATTERN.test(file) || isTestOnlyFile(file)
+  )
 }
 
 function touchesSecurityBoundary(files: readonly string[]): boolean {

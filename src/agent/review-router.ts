@@ -1,4 +1,5 @@
-import { classifyChangeScale, type ChangeSet, type ReviewScale } from './review-discipline.js'
+import { classifyChangeScale, isTrivialChange, type ChangeSet, type ReviewScale } from './review-discipline.js'
+import { profileRegistry } from './profile-registry.js'
 
 export type ReviewVerdict = 'verified' | 'rejected'
 
@@ -37,23 +38,52 @@ export interface ReviewRouterDeps {
   spawnVerifier: (change: ChangeSet, signal?: AbortSignal) => Promise<VerifierResult>
   spawnPatcher: (change: ChangeSet, verifier: VerifierResult, signal?: AbortSignal) => Promise<PatcherResult>
   spawnSquadron: (change: ChangeSet, signal?: AbortSignal) => Promise<SquadronResult>
+  /** Auto mode: single wiring-effectiveness inspector on a short budget.
+   *  When absent, auto mode degrades to a non-blocking nudge. */
+  spawnWiringReviewer?: (change: ChangeSet, signal?: AbortSignal) => Promise<SquadronResult>
 }
+
+export type ReviewMode = 'auto' | 'manual'
 
 export interface ReviewRouterOptions {
   maxRounds?: number
   /** AbortSignal to propagate to spawned verifier/patcher/squadron workers.
    *  When aborted, coordinator.delegate() will cancel in-flight worker sessions. */
   abortSignal?: AbortSignal
+  /** 'auto'  — in-task review without explicit review_level: one wiring
+   *            inspector, infra failures NEVER block delivery.
+   *  'manual' — explicit /review (L2) or /review max (L3): full workflows.
+   *  Default: 'manual' (preserves direct-caller behavior). */
+  mode?: ReviewMode
 }
 
 export interface ReviewOutcome {
-  tier: ReviewScale
+  tier: ReviewScale | 'auto'
   verdict: ReviewVerdict | 'nudge'
   evidence?: string
   escalated?: boolean
   rounds?: number
   /** Non-code review infrastructure caveats from L3 squadron workers. */
   infraFailures?: ReviewInfraFailure[]
+}
+
+// ─── Review workflow budgets ────────────────────────────────────────
+// P0 timeout alignment: the outer review-workflow cap must dominate the
+// inner worker budgets (profile defaultTimeoutMs), otherwise deep review
+// budgets are dead wiring — the old fixed 90s cap killed every reviewer
+// long before its 600s budget could matter.
+
+/** Auto in-task review: short and predictable — never stalls the main loop. */
+export const AUTO_REVIEW_BUDGET_MS = 180_000
+/** Extra slack so worker-internal timers fire before the workflow cap. */
+const REVIEW_BUDGET_GRACE_MS = 60_000
+
+/** Outer budget for one review workflow run, derived from worker budgets. */
+export function reviewWorkflowBudgetMs(mode: ReviewMode, tier?: ReviewScale): number {
+  if (mode === 'auto') return AUTO_REVIEW_BUDGET_MS
+  const profile = tier === 'L2' ? 'adversarial_verifier' : 'reviewer'
+  const workerBudget = profileRegistry.get(profile)?.defaultTimeoutMs ?? 600_000
+  return workerBudget + REVIEW_BUDGET_GRACE_MS
 }
 
 function hasEvidence(result: VerifierResult): boolean {
@@ -92,11 +122,18 @@ function summarizeInfraFailures(failures: ReviewInfraFailure[]): string {
 }
 
 /**
- * Route a change set through the review workflow selected by its scale.
+ * Route a change set through the review workflow selected by mode and scale.
  *
- * L1: nudge only, no child agents.
- * L2: single adversarial verifier, then bounded patch→verify loop on rejection.
- * L3: Review Squadron (4 inspectors). Squadron pass → verified (skip L2 loop).
+ * auto (in-task, no explicit review_level):
+ *   - trivial change (docs/test-only) → nudge, no child agents
+ *   - everything else → ONE wiring-effectiveness inspector on a short budget;
+ *     CRITICAL/HIGH findings block, infra failures NEVER block (fail-open
+ *     with caveat) — auto review must not stall the main workflow.
+ *
+ * manual (explicit /review or /review max):
+ *   - L1: nudge only, no child agents.
+ *   - L2: single adversarial verifier, then bounded patch→verify loop on rejection.
+ *   - L3: Review Squadron (5 inspectors). Squadron pass → verified (skip L2 loop).
  *     Squadron finds blocking issues → rejected.
  */
 export async function routeReviewWorkflow(
@@ -104,10 +141,37 @@ export async function routeReviewWorkflow(
   deps: ReviewRouterDeps,
   options: ReviewRouterOptions = {},
 ): Promise<ReviewOutcome> {
+  const signal = options.abortSignal
+
+  if (options.mode === 'auto') {
+    if (isTrivialChange(change.files)) return { tier: 'auto', verdict: 'nudge' }
+    if (!deps.spawnWiringReviewer) return { tier: 'auto', verdict: 'nudge' }
+    const wiring = await deps.spawnWiringReviewer(change, signal)
+    const infraFailures = wiring.infraFailures ?? []
+    if (hasBlockingSquadronFinding(wiring)) {
+      return {
+        tier: 'auto',
+        verdict: 'rejected',
+        evidence: summarizeSquadronFindings(wiring),
+        rounds: 0,
+        ...(infraFailures.length > 0 ? { infraFailures } : {}),
+      }
+    }
+    // Fail-open on infra: a crashed/timed-out auto reviewer must not block
+    // delivery — surface the caveat and let the commit proceed.
+    return {
+      tier: 'auto',
+      verdict: 'verified',
+      evidence: infraFailures.length > 0
+        ? 'auto wiring review inconclusive (infra failure) — delivery not blocked'
+        : 'auto wiring review: no blocking findings',
+      rounds: 0,
+      ...(infraFailures.length > 0 ? { infraFailures } : {}),
+    }
+  }
+
   const tier = classifyChangeScale(change)
   if (tier === 'L1') return { tier, verdict: 'nudge' }
-
-  const signal = options.abortSignal
 
   let infraFailures: ReviewInfraFailure[] = []
   if (tier === 'L3') {
@@ -124,11 +188,11 @@ export async function routeReviewWorkflow(
       }
     }
     // Squadron passed without blocking findings — skip L2 verifier loop.
-    // The 4-inspector squadron already covers Security/Lifecycle/DataFlow/Silence.
+    // The 5-inspector squadron covers Security/Lifecycle/DataFlow/Silence/Wiring.
     return {
       tier,
       verdict: 'verified',
-      evidence: `L3 squadron verified (4 inspectors): no blocking findings`,
+      evidence: `L3 squadron verified (5 inspectors): no blocking findings`,
       rounds: 0,
       ...(infraFailures.length > 0 ? { infraFailures } : {}),
     }

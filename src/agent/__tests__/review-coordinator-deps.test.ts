@@ -68,6 +68,10 @@ describe('createCoordinatorReviewDeps', () => {
     assert.match(captured?.objective ?? '', /repo-relative.*absolute inside cwd.*absolute outside cwd.*\.\.\/ traversal/)
     assert.match(captured?.objective ?? '', /producer.*normalizer.*classifier.*consumer.*DB key.*assertion/)
     assert.match(captured?.objective ?? '', /显式目标.*默认发现/)
+    assert.match(captured?.objective ?? '', /Wiring & effectiveness review stance/)
+    assert.match(captured?.objective ?? '', /零调用方传值即死参数/)
+    assert.match(captured?.objective ?? '', /双渲染/)
+    assert.match(captured?.objective ?? '', /过滤掉 ~100% 的门控等于静默关闭功能/)
     assert.match(captured?.objective ?? '', /Do not stop at green tests/)
     assert.equal(result.verdict, 'verified')
     assert.match(result.evidence, /ran: npm exec -- tsx --test/)
@@ -133,24 +137,82 @@ describe('createCoordinatorReviewDeps', () => {
     const result = await deps.spawnSquadron({ files: ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'], crossModule: false, isFix: false })
 
     assert.equal(capturedPolicy, 'all_required')
-    assert.equal(capturedRequests.length, 4)
+    assert.equal(capturedRequests.length, 5)
     assert.ok(capturedRequests.every(request => request.profile === 'reviewer'))
     assert.ok(capturedRequests.every(request => request.kind === 'review'))
     assert.ok(capturedRequests.every(request => request.reviewDepth === 1))
     assert.deepEqual(capturedRequests[0]?.scope.files, ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'])
-    assert.match(capturedRequests[0]?.objective ?? '', /Objective review stance/)
-    assert.match(capturedRequests[0]?.objective ?? '', /提交存在、测试绿、作者声称已修/)
-    assert.match(capturedRequests[0]?.objective ?? '', /Dataflow verifier stance/)
-    assert.match(capturedRequests[0]?.objective ?? '', /fact-flow graph/)
-    assert.match(capturedRequests[0]?.objective ?? '', /condition matrix/)
-    assert.match(capturedRequests[0]?.objective ?? '', /counterexample tests/)
-    assert.match(capturedRequests[0]?.objective ?? '', /Path boundary \/ attention-gate review stance/)
-    assert.match(capturedRequests[0]?.objective ?? '', /repo-relative.*absolute inside cwd.*absolute outside cwd.*\.\.\/ traversal/)
-    assert.match(capturedRequests[0]?.objective ?? '', /producer.*normalizer.*classifier.*consumer.*DB key.*assertion/)
-    assert.match(capturedRequests[0]?.objective ?? '', /fail-closed.*fail-toward-content/)
+
+    // Every inspector carries the core anti-rubber-stamp stance
+    for (const req of capturedRequests) {
+      assert.match(req.objective, /Objective review stance/)
+      assert.match(req.objective, /提交存在、测试绿、作者声称已修/)
+      assert.match(req.objective, /severity CRITICAL\/HIGH\/MEDIUM\/LOW/)
+    }
+
+    // Prompt economy: stances are assigned per axis, not stacked on all five.
+    const security = capturedRequests[0]!.objective
+    assert.match(security, /^Security Inspector:/m)
+    assert.match(security, /Path boundary \/ attention-gate review stance/)
+    assert.match(security, /repo-relative.*absolute inside cwd.*absolute outside cwd.*\.\.\/ traversal/)
+    assert.doesNotMatch(security, /Dataflow verifier stance/)
+    assert.doesNotMatch(security, /Wiring & effectiveness review stance/)
+
+    const lifecycle = capturedRequests[1]!.objective
+    assert.match(lifecycle, /^Lifecycle Inspector:/m)
+    assert.match(lifecycle, /Dataflow verifier stance/)
+    assert.match(lifecycle, /outer timeouts strictly dominate inner budgets/i)
+    assert.doesNotMatch(lifecycle, /Path boundary \/ attention-gate review stance/)
+
+    const dataFlow = capturedRequests[2]!.objective
+    assert.match(dataFlow, /^Data Flow Inspector:/m)
+    assert.match(dataFlow, /Dataflow verifier stance/)
+    assert.match(dataFlow, /fact-flow graph/)
+    assert.match(dataFlow, /Path boundary \/ attention-gate review stance/)
+
+    const silence = capturedRequests[3]!.objective
+    assert.match(silence, /^Silence Inspector:/m)
+    assert.doesNotMatch(silence, /Dataflow verifier stance/)
+    assert.doesNotMatch(silence, /Path boundary \/ attention-gate review stance/)
+
+    const wiring = capturedRequests[4]!.objective
+    assert.match(wiring, /^Wiring Inspector:/m)
+    assert.match(wiring, /Wiring & effectiveness review stance/)
+    assert.match(wiring, /zero callers/)
+    assert.match(wiring, /silent feature kill/)
+    assert.match(wiring, /Method \(run these checks/)
+    assert.doesNotMatch(wiring, /Dataflow verifier stance/)
+
     assert.equal(result.findings[0]?.severity, 'HIGH')
     assert.match(result.findings[0]?.claim ?? '', /race/)
     assert.deepEqual(result.infraFailures, [])
+  })
+
+  it('spawns the auto wiring reviewer as a single short-budget reviewer worker', async () => {
+    const requests: DelegationRequest[] = []
+    const coordinator: ReviewCoordinator = {
+      delegate: async request => {
+        requests.push(request)
+        return run([worker({
+          summary: 'Wiring HIGH: budget field never enforced',
+          findings: [{ claim: 'HIGH dead wiring: maxTokens never enforced', evidence: 'src/agent/worker-session.ts:210', confidence: 'high' }],
+          evidenceStatus: 'skipped',
+        })])
+      },
+    }
+
+    const deps = createCoordinatorReviewDeps(coordinator)
+    const result = await deps.spawnWiringReviewer!({ files: ['src/a.ts'], crossModule: false, isFix: false })
+
+    assert.equal(requests.length, 1, 'auto review must spawn exactly one worker')
+    assert.equal(requests[0]?.profile, 'reviewer')
+    assert.equal(requests[0]?.kind, 'review')
+    assert.equal(requests[0]?.budget?.timeoutMs, 150_000)
+    assert.equal(requests[0]?.budget?.maxTurns, 6)
+    assert.match(requests[0]?.objective ?? '', /^Wiring Inspector:/m)
+    assert.match(requests[0]?.objective ?? '', /Time budget is tight/)
+    assert.match(requests[0]?.objective ?? '', /review the DIFF/)
+    assert.equal(result.findings[0]?.severity, 'HIGH')
   })
 
   it('keeps squadron worker contract failures separate from real findings', async () => {

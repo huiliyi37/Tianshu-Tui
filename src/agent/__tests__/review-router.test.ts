@@ -179,6 +179,91 @@ describe('routeReviewWorkflow', () => {
     assert.equal(outcome.infraFailures?.length, 1)
   })
 
+  describe('auto mode (in-task review)', () => {
+    const codeChange: ChangeSet = { files: ['src/agent/loop.ts'], crossModule: false, isFix: false }
+
+    it('routes non-trivial change to a single wiring reviewer, not squadron/verifier', async () => {
+      let wiringCalls = 0
+      let squadronCalls = 0
+      let verifierCalls = 0
+      const outcome = await routeReviewWorkflow(codeChange, {
+        spawnVerifier: async () => { verifierCalls++; return { verdict: 'verified', evidence: 'ran: x' } },
+        spawnPatcher: async () => ({ patched: true }),
+        spawnSquadron: async () => { squadronCalls++; return { findings: [] } },
+        spawnWiringReviewer: async () => { wiringCalls++; return { findings: [], infraFailures: [] } },
+      }, { mode: 'auto' })
+
+      assert.equal(outcome.tier, 'auto')
+      assert.equal(outcome.verdict, 'verified')
+      assert.equal(wiringCalls, 1)
+      assert.equal(squadronCalls, 0, 'auto mode must never spawn the full squadron')
+      assert.equal(verifierCalls, 0, 'auto mode must never spawn the adversarial verifier')
+    })
+
+    it('downgrades structural L3 signals to the single wiring reviewer in auto mode', async () => {
+      let wiringCalls = 0
+      let squadronCalls = 0
+      const outcome = await routeReviewWorkflow(
+        { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: true, isFix: false },
+        {
+          ...okDeps,
+          spawnSquadron: async () => { squadronCalls++; return { findings: [] } },
+          spawnWiringReviewer: async () => { wiringCalls++; return { findings: [] } },
+        },
+        { mode: 'auto' },
+      )
+
+      assert.equal(outcome.tier, 'auto')
+      assert.equal(wiringCalls, 1)
+      assert.equal(squadronCalls, 0)
+    })
+
+    it('blocks on CRITICAL/HIGH wiring findings', async () => {
+      const outcome = await routeReviewWorkflow(codeChange, {
+        ...okDeps,
+        spawnWiringReviewer: async () => ({
+          findings: [{ severity: 'HIGH', claim: 'dead param: activeTaskIds has zero callers' }],
+        }),
+      }, { mode: 'auto' })
+
+      assert.equal(outcome.tier, 'auto')
+      assert.equal(outcome.verdict, 'rejected')
+      assert.match(outcome.evidence ?? '', /dead param/)
+    })
+
+    it('fails open on infra failures — auto review must not block delivery', async () => {
+      const outcome = await routeReviewWorkflow(codeChange, {
+        ...okDeps,
+        spawnWiringReviewer: async () => ({
+          findings: [],
+          infraFailures: [{ kind: 'timeout', claim: 'wiring reviewer timed out' }],
+        }),
+      }, { mode: 'auto' })
+
+      assert.equal(outcome.verdict, 'verified')
+      assert.equal(outcome.infraFailures?.length, 1)
+      assert.match(outcome.evidence ?? '', /not blocked|inconclusive/)
+    })
+
+    it('keeps trivial docs/test-only changes at nudge with no child agents', async () => {
+      let wiringCalls = 0
+      const outcome = await routeReviewWorkflow(
+        { files: ['README.md', 'src/agent/__tests__/x.test.ts'], crossModule: false, isFix: false },
+        { ...okDeps, spawnWiringReviewer: async () => { wiringCalls++; return { findings: [] } } },
+        { mode: 'auto' },
+      )
+
+      assert.equal(outcome.verdict, 'nudge')
+      assert.equal(wiringCalls, 0)
+    })
+
+    it('degrades to nudge when spawnWiringReviewer is not wired', async () => {
+      const outcome = await routeReviewWorkflow(codeChange, okDeps, { mode: 'auto' })
+      assert.equal(outcome.tier, 'auto')
+      assert.equal(outcome.verdict, 'nudge')
+    })
+  })
+
   it('escalates immediately when patcher reports it did not patch a verifier rejection', async () => {
     let verifierCalls = 0
     let patcherCalls = 0
