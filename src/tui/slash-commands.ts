@@ -59,7 +59,8 @@ const HELP_TEXT = `Available commands:
 /team <task|plan> — Run team-mode workflow through team_orchestrate
 /team max <task> — Run team-mode max planning through team_orchestrate
 /review — Manually trigger L2 review (single adversarial verifier) on current changes via deliver_task
-/review max — Manually trigger L3 review (Review Squadron, 4 inspectors) on current changes via deliver_task
+/review max — Manually trigger L3 review (Review Squadron, 5 inspectors) on current changes via deliver_task
+(auto: every non-trivial deliver_task commit runs a single Wiring inspector — short budget, never blocks on infra failure)
 /sensorium — Show 天枢 3D self-awareness state
 /dream — Distill session decisions into project memory
 /index — Rebuild codebase index (modules + CLI entries)
@@ -189,7 +190,7 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   const reviewMatch = input.match(/^\/review(\s+max)?$/i)
   if (reviewMatch) {
     const level = reviewMatch[1] ? 'L3' : 'L2'
-    const levelLabel = level === 'L3' ? 'L3 Review Squadron (4 inspectors)' : 'L2 adversarial verifier'
+    const levelLabel = level === 'L3' ? 'L3 Review Squadron (5 inspectors)' : 'L2 adversarial verifier'
     return `Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="${level}". This triggers ${levelLabel}.`
   }
   // Unrecognized slash command — return null to signal "blocked"

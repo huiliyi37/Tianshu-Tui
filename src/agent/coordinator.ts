@@ -19,6 +19,7 @@ import {
   type WorkOrderKind,
   type WorkerProfile,
   type WorkerResult,
+  type WorkerBudget,
   type WorkOrderScope,
 } from './work-order.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
@@ -105,6 +106,10 @@ export interface DelegationRequest {
   riskTier?: ModelRiskTier
   /** B2: current session turn for progressive timeout alignment. */
   sessionTurn?: number
+  /** Per-request budget overrides (timeout/turns/tokens/retries). Takes
+   *  precedence over profile defaults — used e.g. by the auto wiring review
+   *  to run a reviewer-profile worker on a short, non-blocking budget. */
+  budget?: Partial<WorkerBudget>
 }
 
 export interface CoordinatorRun {
@@ -598,6 +603,7 @@ export class DelegationCoordinator {
             authority: request.authority,
             riskTier: request.riskTier,
             sessionTurn: request.sessionTurn,
+            budget: request.budget,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -612,6 +618,7 @@ export class DelegationCoordinator {
             authority: request.authority,
             riskTier: request.riskTier,
             sessionTurn: request.sessionTurn,
+            budget: request.budget,
           })
 
       // T9 P3: callbacks don't survive zod parsing — stash by order id.
@@ -1027,6 +1034,7 @@ export class DelegationCoordinator {
             authority: r.authority,
             riskTier: r.riskTier,
             sessionTurn: r.sessionTurn,
+            budget: r.budget,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -1041,6 +1049,7 @@ export class DelegationCoordinator {
             authority: r.authority,
             riskTier: r.riskTier,
             sessionTurn: r.sessionTurn,
+            budget: r.budget,
           })
       if (queue.enqueue(order)) {
         orders.push(order)
