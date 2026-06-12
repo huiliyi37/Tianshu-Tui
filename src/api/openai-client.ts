@@ -248,6 +248,10 @@ export class OpenAIClient implements StreamClient {
     if (this.config.providerName === 'codex' && body.reasoning_effort === 'max') {
       body.reasoning_effort = 'xhigh'
     }
+    // Kimi (kimi-for-coding) does not support 'max'; cap at 'high'.
+    if (this.config.providerName === 'kimi' && body.reasoning_effort === 'max') {
+      body.reasoning_effort = 'high'
+    }
 
     // Apply stable system suffix (Chinese thinking instruction) — computed once at construction.
     if (this.systemSuffix) {
