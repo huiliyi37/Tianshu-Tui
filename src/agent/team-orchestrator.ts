@@ -31,6 +31,10 @@ export interface TeamRunInput {
   mode: 'standard' | 'max'
   objective: string
   planMarkdown?: string
+  /** Pre-parsed team tasks — skip Markdown parsing entirely.
+   *  When provided, both planMarkdown and max planner fanout are bypassed.
+   *  This is the bridge for plan_task → team_orchestrate integration. */
+  tasks?: TeamTask[]
   maxParallel?: number
   parentTurnId?: string
   abortSignal?: AbortSignal
@@ -311,6 +315,33 @@ async function dispatchWaveAt(
 
 export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestratorDeps): Promise<TeamRunSummary> {
   const maxParallel = Math.max(1, Math.min(input.maxParallel ?? 3, 5))
+
+  // ── Fast path: pre-parsed tasks (plan_task → team_orchestrate bridge) ──
+  if (input.tasks && input.tasks.length > 0) {
+    const enrichedTasks = input.tasks
+    const waves = groupTeamTasks(enrichedTasks)
+    const taskMap = new Map(enrichedTasks.map(t => [t.id, t]))
+
+    if (waves.length === 0) {
+      return {
+        mode: 'standard',
+        planned: [],
+        tasks: enrichedTasks,
+        waves: [],
+        dispatched: 0,
+        blocked: ['pre-parsed tasks produced no dispatchable waves'],
+        packet: 'team: pre-parsed tasks — no waves to dispatch.',
+      }
+    }
+
+    return dispatchWaveAt(waves, input.fromWave ?? 0, {
+      taskMap,
+      tasks: enrichedTasks,
+      planned: [],
+      input,
+      deps,
+    })
+  }
 
   const drafts = input.mode === 'standard' && input.planMarkdown
     ? parseTeamTaskDrafts(input.planMarkdown)

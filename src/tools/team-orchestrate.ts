@@ -5,6 +5,7 @@ import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js
 import { isCrossModule, isFixContext, type ChangeSet } from '../agent/review-discipline.js'
 import { routeReviewWorkflow } from '../agent/review-router.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
+import { deserializeUnifiedPlan, unifiedPlanToTeamTasks, validateUnifiedPlan } from '../agent/unified-plan.js'
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from '../agent/team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from '../agent/team-scheduler-shadow.js'
 import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from '../agent/gated-influence-audit.js'
@@ -49,6 +50,8 @@ const inputSchema = z.object({
   objective: z.string().min(1),
   planPath: z.string().optional(),
   planMarkdown: z.string().optional(),
+  /** UnifiedPlan JSON from plan_task output — bypasses Markdown parsing and max planner fanout. */
+  planJson: z.string().optional(),
   maxParallel: z.number().int().min(1).max(5).optional(),
   fromWave: z.number().int().min(0).optional(),
 })
@@ -78,7 +81,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
     definition: {
       name: 'team_orchestrate',
       description:
-        'Run the deterministic team orchestrator: parse a plan (standard), group tasks into waves respecting file conflicts and dependencies, and dispatch the first ready wave of workers. Returns the wave schedule and dispatch summary. Does NOT auto-commit — the main controller integrates worker diffs.',
+        'Run the deterministic team orchestrator: parse a plan (standard), group tasks into waves respecting file conflicts and dependencies, and dispatch the first ready wave of workers. Returns the wave schedule and dispatch summary. Does NOT auto-commit — the main controller integrates worker diffs.\n\nPass planJson (UnifiedPlan from plan_task) to skip Markdown/planner fanout and execute directly.',
       input_schema: {
         type: 'object',
         properties: {
@@ -86,6 +89,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
           objective: { type: 'string', description: 'The mission statement.' },
           planPath: { type: 'string', description: 'Optional path to a Markdown plan inside the project (standard mode).' },
           planMarkdown: { type: 'string', description: 'Optional inline Markdown plan; takes precedence over planPath.' },
+          planJson: { type: 'string', description: 'UnifiedPlan JSON from plan_task output. When provided, bypasses Markdown parsing and max planner fanout.' },
           maxParallel: { type: 'number', description: 'Max parallel workers per wave (1-5, default 3).' },
           fromWave: { type: 'number', description: 'Dispatch this zero-based wave index after integrating prior wave diffs.' },
         },
@@ -95,10 +99,23 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
     async execute(params: ToolCallParams): Promise<ToolResult> {
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
-      const { mode, objective, planPath, planMarkdown, maxParallel, fromWave } = parsed.data
+      const { mode, objective, planPath, planMarkdown, planJson, maxParallel, fromWave } = parsed.data
+
+      // Pre-parsed tasks from plan_task UnifiedPlan JSON
+      let tasks: ReturnType<typeof unifiedPlanToTeamTasks> | undefined
+      if (planJson) {
+        const plan = deserializeUnifiedPlan(planJson)
+        if (!plan) return { content: 'team_orchestrate blocked: planJson is not a valid UnifiedPlan', isError: true }
+        const validation = validateUnifiedPlan(plan)
+        if (!validation.valid) {
+          const errors = [...validation.errors, ...validation.nodeErrors.map(ne => `[${ne.nodeId}] ${ne.error}`)]
+          return { content: `team_orchestrate blocked: plan validation failed:\n${errors.map(e => `  - ${e}`).join('\n')}`, isError: true }
+        }
+        tasks = unifiedPlanToTeamTasks(plan)
+      }
 
       let markdown = planMarkdown
-      if (!markdown && planPath) {
+      if (!markdown && !tasks && planPath) {
         const safe = validatePathSafe(params.cwd, planPath)
         if (!safe.ok) return { content: `team_orchestrate blocked: ${safe.error}`, isError: true }
         try {
@@ -117,6 +134,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
             mode,
             objective,
             planMarkdown: markdown,
+            tasks,
             maxParallel,
             fromWave,
             parentTurnId: params.toolUseId,

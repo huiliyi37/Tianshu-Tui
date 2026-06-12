@@ -1,8 +1,17 @@
 /**
  * PlanExecutor — plan-then-execute loop with validation and refinement.
  *
+ * **DEPRECATED**: Plan execution now flows through `runTeamSkeleton` in
+ * `team-orchestrator.ts`. `plan_task` converts its TaskGraph to a UnifiedPlan
+ * and dispatches via the same execution path as `team_orchestrate`.
+ *
+ * This file is retained as a compatibility re-export. New code should use
+ * `runTeamSkeleton` from `team-orchestrator.ts`.
+ *
  * Converts a TaskGraph into DelegationRequest batches (wave by wave),
  * executes via coordinator, and refines the plan when tasks fail.
+ *
+ * @deprecated Use `runTeamSkeleton` from `./team-orchestrator.js` instead.
  */
 
 import type { DelegationCoordinator, DelegationRequest, CoordinatorRun } from './coordinator.js'
