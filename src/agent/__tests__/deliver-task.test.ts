@@ -328,7 +328,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /ReviewRouter verified \(L2\)/)
   })
 
-  it('blocks fix commit when ReviewRouter rejects or escalates', async () => {
+  it('commit succeeds when ReviewRouter rejects — review is advisory post-commit', async () => {
     let committed = false
     const { tool, params } = makeContext({
       taskId: 't1',
@@ -345,10 +345,12 @@ describe('deliver-task — semantic task delivery tool', () => {
 
     const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: scoped delivery' } })
 
-    assert.equal(result.isError, true)
-    assert.equal(committed, false)
-    assert.match(result.content, /ReviewRouter RED \(L2\)/)
+    // Post-commit advisory: the commit has landed even if review found issues.
+    assert.equal(result.isError ?? false, false)
+    assert.equal(committed, true)
+    assert.match(result.content, /ReviewRouter flagged issues \(L2\)/)
     assert.match(result.content, /still broken/)
+    assert.match(result.content, /commit has landed/)
   })
 
   it('renders auto-review infra failure as INCONCLUSIVE, never as verified (B-fix)', async () => {
@@ -460,7 +462,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /Scoped commit created/)
   })
 
-  it('blocks commit when review workflow should run but review deps are not wired', async () => {
+  it('commit succeeds when review deps are not wired — advisory skip, not block', async () => {
     let committed = false
     const { tool, params } = makeContext({
       taskId: 't1',
@@ -476,13 +478,14 @@ describe('deliver-task — semantic task delivery tool', () => {
 
     const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
 
-    assert.equal(result.isError, true)
-    assert.equal(committed, false)
-    assert.match(result.content, /ReviewRouter RED \(unwired\)/)
-    assert.match(result.content, /review dependencies are unavailable/)
+    // Post-commit: unwired review is advisory, not a blocker.
+    assert.equal(result.isError ?? false, false)
+    assert.equal(committed, true)
+    assert.match(result.content, /Post-commit review skipped.*review dependencies are unavailable/)
+    assert.match(result.content, /Scoped commit created/)
   })
 
-  it('allows force=true to skip an unwired review workflow explicitly', async () => {
+  it('unwired review with force=true — commit succeeds, advisory skip', async () => {
     let committed = false
     const { tool, params } = makeContext({
       taskId: 't1',
@@ -498,9 +501,10 @@ describe('deliver-task — semantic task delivery tool', () => {
 
     const result = await tool.execute({ ...params, input: { commit: true, force: true, message: 'feat: scoped delivery' } })
 
+    // Post-commit: force no longer needed for unwired review, but commit still succeeds.
     assert.equal(result.isError ?? false, false)
     assert.equal(committed, true)
-    assert.match(result.content, /ReviewRouter skipped \(force=true\)/)
+    assert.match(result.content, /Post-commit review skipped.*review dependencies are unavailable/)
     assert.match(result.content, /Scoped commit created/)
   })
 

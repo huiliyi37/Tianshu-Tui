@@ -487,114 +487,8 @@ When the task implements a complex spec or cross-module integration, include the
           lines.push('', '⚠️ Cross-session claim conflicts overridden with force=true. Verify the other session has finished or approved the takeover.')
         }
 
-        // Review discipline gate: deliverable commits pass through the review route when wired.
-        // L1 stays advisory, while L2/L3 require independent evidence before commit.
-        // The reviewDepth guard prevents verifier/patcher child contexts from recursively reviewing themselves.
-        // RIVET_REVIEW_DISCIPLINE=0 / false / off / no disables the gate (default: enabled).
-        const explicitReviewLevel = params.input.review_level as ReviewScale | undefined
-        const change: ChangeSet = {
-          files: filesToCommit,
-          crossModule: isCrossModule(filesToCommit),
-          isFix: isFixContext(message),
-          ...(explicitReviewLevel ? { forceLevel: explicitReviewLevel } : {}),
-        }
-        if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
-          const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
-          if (!route || !ctx.reviewDeps) {
-            if (!forceGate) {
-              lines.push('', '❌ ReviewRouter RED (unwired): review dependencies are unavailable.')
-              lines.push('   → Wire reviewDeps/routeReviewWorkflow, or use force=true only when an equivalent independent review has already been captured.')
-              return { content: lines.join('\n'), isError: true }
-            }
-            lines.push('', '⚠️ ReviewRouter skipped (force=true): review dependencies are unavailable. Verify equivalent independent review evidence exists.')
-          } else {
-            // P0 timeout alignment: the workflow cap is derived from the worker
-            // budgets instead of a fixed 90s (which killed every reviewer long
-            // before its profile budget could matter — dead wiring).
-            //   auto   (no review_level): 180s — single wiring inspector, never stalls.
-            //   manual (review_level)   : worker profile budget + grace. The
-            //   deliver_task tool-level timeout is raised accordingly (see timeoutMs).
-            // On timeout: reject with a clear message and ABORT child workers
-            // (zombie workers previously kept consuming API quota — 245s stalls).
-            const reviewMode: ReviewMode = change.forceLevel ? 'manual' : 'auto'
-            const REVIEW_TIMEOUT_MS = reviewWorkflowBudgetMs(reviewMode, change.forceLevel)
-            const reviewAbort = new AbortController()
-            // Link to tool-level abort signal so tool cancellation also stops workers
-            if (params.abortSignal) {
-              if (params.abortSignal.aborted) {
-                lines.push('', '⚠️  Review workflow aborted: tool was cancelled.')
-                return { content: lines.join('\n'), isError: true }
-              }
-              params.abortSignal.addEventListener('abort', () => reviewAbort.abort(), { once: true })
-            }
-            let outcome: ReviewOutcome
-            // The timer must be cleared on the success path too — a dangling
-            // multi-minute timeout keeps the event loop (and test runners) alive.
-            let reviewTimer: NodeJS.Timeout | undefined
-            try {
-              const timeoutPromise = new Promise<never>((_, reject) => {
-                reviewTimer = setTimeout(() => {
-                  reviewAbort.abort()
-                  reject(new Error('Review workflow timed out'))
-                }, REVIEW_TIMEOUT_MS)
-              })
-              outcome = await Promise.race([
-                route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode }),
-                timeoutPromise,
-              ])
-            } catch (err) {
-              const reason = err instanceof Error ? err.message : String(err)
-              if (reviewMode === 'auto') {
-                // Auto review is best-effort: a timeout/crash must never block
-                // the delivery it was meant to assist. Report honestly — the
-                // review DID NOT run; never imply it passed. Rendering happens
-                // in the common 'inconclusive' branch below.
-                outcome = {
-                  tier: 'auto',
-                  verdict: 'inconclusive',
-                  rounds: 0,
-                  evidence: `review DID NOT run (${reason.includes('timed out') ? 'timed out' : 'infra failure'}: ${reason})`,
-                  infraFailures: [{ kind: reason.includes('timed out') ? 'timeout' : 'crash', claim: reason }],
-                }
-              } else {
-                lines.push('', `⚠️  Review workflow ${reason.includes('timed out') ? 'timed out' : 'failed'}: ${reason}`)
-                lines.push('   → Use force=true to skip review for this delivery.')
-                return { content: lines.join('\n'), isError: true }
-              }
-            } finally {
-              if (reviewTimer) clearTimeout(reviewTimer)
-            }
-            // Review infra health observability (/status): auto runs only.
-            if (reviewMode === 'auto' && outcome.rounds !== undefined && outcome.verdict !== 'nudge') {
-              if (outcome.verdict === 'inconclusive') {
-                recordAutoReviewRun({ ran: false, failureKinds: (outcome.infraFailures ?? []).map(f => f.kind) })
-              } else {
-                recordAutoReviewRun({ ran: true, ...(outcome.recoveredByRetry ? { recoveredByRetry: true } : {}) })
-              }
-            }
-            if (outcome.verdict === 'rejected' || outcome.escalated) {
-              lines.push('', `❌ ReviewRouter RED (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this delivery'}`)
-              if (typeof outcome.rounds === 'number') lines.push(`   Rounds: ${outcome.rounds}`)
-              lines.push('   → Fix the review finding, collect command + observed output evidence, then re-run deliver_task.')
-              return { content: lines.join('\n'), isError: true }
-            }
-            if (outcome.verdict === 'verified') {
-              if (outcome.infraFailures && outcome.infraFailures.length > 0) {
-                lines.push('', `⚠️ ReviewRouter YELLOW (${outcome.tier}): review infrastructure caveat(s), delivery verified by available evidence.`)
-                lines.push(`   ${outcome.evidence ?? 'verified with review infra caveats'}`)
-              } else {
-                lines.push('', `✅ ReviewRouter verified (${outcome.tier}): ${outcome.evidence ?? 'verified'}`)
-              }
-            } else if (outcome.verdict === 'inconclusive') {
-              // Honest fail-open: the review never produced a verdict. The word
-              // "verified" must NOT appear here (session 803d897d, T3).
-              lines.push('', `⚠️ ReviewRouter INCONCLUSIVE (${outcome.tier}): ${outcome.evidence ?? 'review DID NOT run (infra failure)'}`)
-              lines.push('   → Delivery not blocked, but this change is UNREVIEWED. Run /review max for a full squadron review.')
-            } else if (outcome.verdict === 'nudge') {
-              lines.push('', `⚠️ ReviewRouter nudge (${outcome.tier}): apply review disciplines before committing.`)
-            }
-          }
-        }
+        // ── PRE-COMMIT GATES (blocking) ──────────────────────────────────
+        // Static checks that don't need worker API calls — run before commit.
 
         // D-fix: cheap static wrote-but-never-read check. Mechanically catches
         // the modelOverride class of dead wiring (field/symbol added, zero
@@ -619,6 +513,10 @@ When the task implements a complex spec or cross-module integration, include the
         if (cohesion.needsWarning && cohesionOverride) {
           lines.push('', '  ⚠️ Cohesion gate overridden with force=true. Verify this is truly one logical unit.')
         }
+
+        // ── COMMIT (no longer blocked by review) ─────────────────────────
+        // Review is post-commit (advisory) — the commit must land first so
+        // the main loop never stalls on a slow/timeout review worker.
 
         // Capture HEAD before the commit so the result carries verifiable
         // evidence that a new commit actually landed (vs. agent guessing from
@@ -652,6 +550,95 @@ When the task implements a complex spec or cross-module integration, include the
         }
         // Acknowledge recovery journal entries — the commit confirms intent was preserved.
         if (recoveries.length > 0) acknowledgeAll(params.cwd)
+
+        // ── POST-COMMIT REVIEW (advisory, non-blocking) ──────────────────
+        // Review runs AFTER the commit so a slow/timeout worker never stalls
+        // the main loop or blocks delivery. Findings are surfaced as warnings;
+        // the commit has already landed and cannot be un-done by review.
+        // The reviewDepth guard prevents verifier/patcher child contexts from
+        // recursively reviewing themselves.
+        // RIVET_REVIEW_DISCIPLINE=0 / false / off / no disables the gate (default: enabled).
+        const explicitReviewLevel = params.input.review_level as ReviewScale | undefined
+        const change: ChangeSet = {
+          files: filesToCommit,
+          crossModule: isCrossModule(filesToCommit),
+          isFix: isFixContext(message),
+          ...(explicitReviewLevel ? { forceLevel: explicitReviewLevel } : {}),
+        }
+        if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
+          const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
+          if (!route || !ctx.reviewDeps) {
+            // Advisory: review deps unavailable is a caveat, not a blocker.
+            lines.push('', '⚠️ Post-commit review skipped: review dependencies are unavailable (ReviewRouter unwired).')
+          } else {
+            const reviewMode: ReviewMode = change.forceLevel ? 'manual' : 'auto'
+            const REVIEW_TIMEOUT_MS = reviewWorkflowBudgetMs(reviewMode, change.forceLevel)
+            const reviewAbort = new AbortController()
+            if (params.abortSignal) {
+              if (params.abortSignal.aborted) {
+                lines.push('', '⚠️  Post-commit review skipped: tool was cancelled.')
+              } else {
+                params.abortSignal.addEventListener('abort', () => reviewAbort.abort(), { once: true })
+              }
+            }
+            if (!params.abortSignal?.aborted) {
+              let outcome: ReviewOutcome
+              let reviewTimer: NodeJS.Timeout | undefined
+              try {
+                const timeoutPromise = new Promise<never>((_, reject) => {
+                  reviewTimer = setTimeout(() => {
+                    reviewAbort.abort()
+                    reject(new Error('Review workflow timed out'))
+                  }, REVIEW_TIMEOUT_MS)
+                })
+                outcome = await Promise.race([
+                  route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode }),
+                  timeoutPromise,
+                ])
+              } catch (err) {
+                const reason = err instanceof Error ? err.message : String(err)
+                // Review is best-effort post-commit: a timeout/crash never blocks
+                // delivery — the commit already landed. Report honestly.
+                outcome = {
+                  tier: reviewMode === 'auto' ? 'auto' : (explicitReviewLevel ?? 'L2'),
+                  verdict: 'inconclusive',
+                  rounds: 0,
+                  evidence: `post-commit review DID NOT run (${reason.includes('timed out') ? 'timed out' : 'infra failure'}: ${reason})`,
+                  infraFailures: [{ kind: reason.includes('timed out') ? 'timeout' : 'crash', claim: reason }],
+                }
+              } finally {
+                if (reviewTimer) clearTimeout(reviewTimer)
+              }
+              // Review infra health observability (/status): auto runs only.
+              if (reviewMode === 'auto' && outcome.rounds !== undefined && outcome.verdict !== 'nudge') {
+                if (outcome.verdict === 'inconclusive') {
+                  recordAutoReviewRun({ ran: false, failureKinds: (outcome.infraFailures ?? []).map(f => f.kind) })
+                } else {
+                  recordAutoReviewRun({ ran: true, ...(outcome.recoveredByRetry ? { recoveredByRetry: true } : {}) })
+                }
+              }
+              if (outcome.verdict === 'rejected' || outcome.escalated) {
+                // Advisory: the commit has already landed. Surface the finding
+                // as a strong warning + follow-up recommendation, not a block.
+                lines.push('', `⚠️ ReviewRouter flagged issues (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this delivery'}`)
+                if (typeof outcome.rounds === 'number') lines.push(`   Rounds: ${outcome.rounds}`)
+                lines.push('   → The commit has landed. Address the review finding in a follow-up commit.')
+              } else if (outcome.verdict === 'verified') {
+                if (outcome.infraFailures && outcome.infraFailures.length > 0) {
+                  lines.push('', `⚠️ ReviewRouter YELLOW (${outcome.tier}): review infrastructure caveat(s), delivery verified by available evidence.`)
+                  lines.push(`   ${outcome.evidence ?? 'verified with review infra caveats'}`)
+                } else {
+                  lines.push('', `✅ ReviewRouter verified (${outcome.tier}): ${outcome.evidence ?? 'verified'}`)
+                }
+              } else if (outcome.verdict === 'inconclusive') {
+                lines.push('', `⚠️ ReviewRouter INCONCLUSIVE (${outcome.tier}): ${outcome.evidence ?? 'post-commit review DID NOT run (infra failure)'}`)
+                lines.push('   → This change is UNREVIEWED. Run /review max for a full squadron review.')
+              } else if (outcome.verdict === 'nudge') {
+                lines.push('', `⚠️ ReviewRouter nudge (${outcome.tier}): apply review disciplines in follow-up work.`)
+              }
+            }
+          }
+        }
       }
 
       return { content: lines.join('\n') }
@@ -664,10 +651,10 @@ When the task implements a complex spec or cross-module integration, include the
     isConcurrencySafe: () => true,
     isEnabled: () => true,
 
-    // P0 timeout alignment: the tool-level timeout must dominate the review
-    // workflow cap, otherwise the pipeline default (120s) kills the review
-    // before its own budget fires (which is why the cap used to be 90s).
-    // +60s slack covers gates/commit work around the review itself.
+    // Review is now post-commit (advisory). The commit itself is sub-second,
+    // and the review worker budget no longer blocks the main loop — the tool
+    // timeout must still dominate the review budget so the worker can finish,
+    // but the main loop is never stalled waiting for it to gate the commit.
     timeoutMs: (params) => {
       const level = params?.input?.review_level as ReviewScale | undefined
       const mode: ReviewMode = level ? 'manual' : 'auto'
