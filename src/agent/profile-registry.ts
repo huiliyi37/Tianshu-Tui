@@ -7,6 +7,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { progressiveTimeout, WORKER_EXIT_GRACE_MS } from './timeout-ladder.js'
 
 export type AgentRole = 'brain' | 'hands' | 'readonly' | 'readonly_plus_test'
 
@@ -327,3 +328,24 @@ function parseAgentMarkdown(content: string): ProfileDefinition {
 
 /** 全局单例 */
 export const profileRegistry = new ProfileRegistry()
+
+/**
+ * P0 超时对齐：delegate 工具层超时 = max(阶梯, 各 profile 预算) + 宽限。
+ *
+ * worker 内部预算（work-order.budget.timeoutMs）回退顺序是
+ * profile.defaultTimeoutMs → progressiveTimeout(sessionTurn)；外层工具超时
+ * 必须覆盖同一来源并加 WORKER_EXIT_GRACE_MS，否则外层先开枪 reject 整个
+ * delegate 调用，worker 的 blocked+partial-output 收尾路径永远走不到
+ * （reviewer/planner 600s 预算曾因此在 180s 工具超时下完全死接线）。
+ */
+export function delegationToolTimeoutMs(
+  sessionTurnCount: number | undefined,
+  profiles: ReadonlyArray<string | undefined>,
+): number {
+  let budget = progressiveTimeout(sessionTurnCount)
+  for (const name of profiles) {
+    const profileBudget = name ? profileRegistry.get(name)?.defaultTimeoutMs : undefined
+    if (profileBudget && profileBudget > budget) budget = profileBudget
+  }
+  return budget + WORKER_EXIT_GRACE_MS
+}

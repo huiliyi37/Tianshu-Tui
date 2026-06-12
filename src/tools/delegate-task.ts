@@ -2,10 +2,9 @@ import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
-import { profileRegistry } from '../agent/profile-registry.js'
+import { profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { progressiveTimeout } from '../agent/timeout-ladder.js'
 import { createActivityStreamer } from './worker-activity-stream.js'
 
 export interface DelegateTaskCoordinator {
@@ -148,6 +147,12 @@ export function createDelegateTaskTool(
     requiresApproval: () => false,
     isConcurrencySafe: () => true,
     isEnabled: () => true,
-    timeoutMs: (params) => progressiveTimeout(params?.sessionTurnCount),
+    // P0: outer tool timeout must dominate the worker's internal budget
+    // (profile defaultTimeoutMs or ladder) so the worker's graceful
+    // blocked+partial-output path always wins the race.
+    timeoutMs: (params) => delegationToolTimeoutMs(
+      params?.sessionTurnCount,
+      [params?.input?.profile as string | undefined],
+    ),
   }
 }

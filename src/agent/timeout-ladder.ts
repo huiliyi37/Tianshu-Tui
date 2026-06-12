@@ -11,6 +11,14 @@
 /** 默认 worker 预算 —— 远兜底，防死循环，不当日常杀手。 */
 export const DEFAULT_WORKER_BUDGET_MS = 180_000
 
+/**
+ * 工具层超时相对 worker 内部预算的宽限。
+ * 外层（tool pipeline）必须严格晚于内层（worker-session budget timer）开枪：
+ * 内层先 abort 才能走 blocked+partial-output 的体面收尾路径；
+ * 外层先开枪则整个 delegate 工具调用被 reject，partial 全部丢失。
+ */
+export const WORKER_EXIT_GRACE_MS = 30_000
+
 /** 等差 progressive 超时：turn≤1→60s，turn≤4→120s，否则 180s（公差 60s）。
  * @param sessionTurnCount current session turn (0-based). Defaults to mature. */
 export function progressiveTimeout(sessionTurnCount?: number): number {

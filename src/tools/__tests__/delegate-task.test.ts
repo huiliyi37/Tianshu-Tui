@@ -91,29 +91,45 @@ describe('DELEGATE_TASK_TOOL', () => {
 
   describe('progressive timeout', () => {
     const base = { input: {}, toolUseId: 'tu', cwd: '/tmp' }
+    // P0: tool-level timeout = ladder/profile budget + 30s exit grace, so the
+    // worker's internal budget timer always fires first (preserving partial output).
+    const GRACE = 30_000
 
-    it('returns 60s for turn 0-1 (cold open) — arithmetic curve', () => {
+    it('returns 60s ladder + grace for turn 0-1 (cold open)', () => {
       const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 60_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 60_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 60_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 60_000 + GRACE)
     })
 
-    it('returns 120s for turn 2-4 (warming) — arithmetic curve', () => {
+    it('returns 120s ladder + grace for turn 2-4 (warming)', () => {
       const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 120_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 120_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 120_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 120_000 + GRACE)
     })
 
-    it('returns 180s for turn 5+ (mature)', () => {
+    it('returns 180s ladder + grace for turn 5+ (mature)', () => {
       const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 180_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 30 }), 180_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 180_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 30 }), 180_000 + GRACE)
     })
 
-    it('defaults to mature (180s) when sessionTurnCount is undefined', () => {
+    it('defaults to mature (180s + grace) when sessionTurnCount is undefined', () => {
       const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-      assert.equal(tool.timeoutMs?.(base), 180_000)
-      assert.equal(tool.timeoutMs?.(), 180_000)
+      assert.equal(tool.timeoutMs?.(base), 180_000 + GRACE)
+      assert.equal(tool.timeoutMs?.(), 180_000 + GRACE)
+    })
+
+    it('profile defaultTimeoutMs dominates the ladder (reviewer = 600s + grace)', () => {
+      const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
+      assert.equal(
+        tool.timeoutMs?.({ ...base, input: { profile: 'reviewer' }, sessionTurnCount: 0 }),
+        600_000 + GRACE,
+      )
+      // Profiles without defaultTimeoutMs keep the ladder
+      assert.equal(
+        tool.timeoutMs?.({ ...base, input: { profile: 'code_scout' }, sessionTurnCount: 0 }),
+        60_000 + GRACE,
+      )
     })
   })
 })

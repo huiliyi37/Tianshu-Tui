@@ -3,10 +3,9 @@ import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { aggregationPolicySchema, workOrderKindSchema, type AggregationPolicy } from '../agent/work-order.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
-import { profileRegistry } from '../agent/profile-registry.js'
+import { profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { progressiveTimeout } from '../agent/timeout-ladder.js'
 import { createActivityStreamer } from './worker-activity-stream.js'
 
 export interface DelegateBatchCoordinator {
@@ -225,6 +224,12 @@ export function createDelegateBatchTool(
     requiresApproval: () => false,
     isConcurrencySafe: () => true,
     isEnabled: () => true,
-    timeoutMs: (params) => progressiveTimeout(params?.sessionTurnCount),
+    // P0: outer tool timeout dominates max(profile budgets) of all batch tasks
+    // so any single slow profile (reviewer/planner 600s) is not killed by the
+    // 60-180s ladder before its internal budget timer can preserve partial output.
+    timeoutMs: (params) => delegationToolTimeoutMs(
+      params?.sessionTurnCount,
+      ((params?.input?.tasks as Array<{ profile?: string }> | undefined) ?? []).map(t => t.profile),
+    ),
   }
 }
