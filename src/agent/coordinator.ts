@@ -267,6 +267,9 @@ export class DelegationCoordinator {
    *  the zod request→order conversion via this side table). */
   private readonly activityUpstream = new Map<string, (event: WorkerActivityEvent) => void>()
   private stallSweep: ReturnType<typeof setInterval> | null = null
+  /** T3: Flash→Pro escalation counter per session. Max 3 Pro upgrades. */
+  private proUpgradeCount = 0
+  private static readonly MAX_PRO_UPGRADES = 3
 
   constructor(private config: DelegationCoordinatorConfig) {
     this.runWorker = config.runWorker ?? runWorkerSession
@@ -672,7 +675,7 @@ export class DelegationCoordinator {
 
     const tierRecommendation = this.buildTierRecommendation(order)
     const tierInfluence = this.evaluateTierInfluence(tierRecommendation)
-    const selected = this.selectModelForTask(task, tierInfluence.gate.applied ? tierInfluence.gate.effectiveTier : undefined)
+    let selected = this.selectModelForTask(task, tierInfluence.gate.applied ? tierInfluence.gate.effectiveTier : undefined)
     const selectedTier = inferModelTierFromCard(selected)
     const tierShadow = this.buildTierShadow(order, selected, tierRecommendation)
     const tierGatedDecision = buildModelTierGatedDecisionEvent({
@@ -739,7 +742,10 @@ export class DelegationCoordinator {
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
-    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript'] }
+    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript'] } | undefined
+
+    // T3: escalation shadow events collected during retry
+    const escalationShadows: ModelTierShadowEvent[] = []
 
     // Wrap worker execution with abort signal so the caller unblocks immediately
     // when the tool-level timeout fires, instead of waiting for the worker's
@@ -901,18 +907,110 @@ export class DelegationCoordinator {
       const msg = error instanceof Error ? error.message : String(error)
       const isAbort = (error instanceof Error && error.name === 'AbortError') || msg.includes('Delegation aborted')
       if (!isAbort) this.recordProviderOutcome(selected.model, false)
-      // B1: align with delegateBatch — return structured degradation instead
-      // of re-throwing, so the primary agent always gets a packet it can read.
-      const degraded = workerFailureResult(order, error)
-      return {
-        status: 'completed' as const,
-        order,
-        selectedModel: selected.model,
-        modelTierShadows: [tierShadow],
-        modelTierGatedDecisions: [tierGatedDecision],
-        gatedInfluenceAudits: [gatedInfluenceAudit],
-        results: [degraded],
-        packet: await buildPrimaryWorkerPacket([degraded]),
+
+      // T3: Flash→Pro escalation — retry with strong-tier model if budget allows
+      const flashTier = inferModelTierFromCard(selected)
+      const canUpgrade = !isAbort
+        && (order.budget.maxRetries > 0)
+        && this.proUpgradeCount < DelegationCoordinator.MAX_PRO_UPGRADES
+        && flashTier !== 'strong'
+      if (canUpgrade) {
+        const strongCards = this.config.modelCards.filter(c => inferModelTierFromCard(c) === 'strong')
+        const strongCard = strongCards[0]
+        if (strongCard) {
+          this.proUpgradeCount++
+          order.budget.modelOverride = strongCard.model
+          // Re-create worker config with Pro model
+          const upgradedConfig = this.config.runtimeFactory(order, strongCard, workerRegistry)
+          upgradedConfig.reviewDepth = order.reviewDepth
+          upgradedConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
+          upgradedConfig.abortSignal = mergedSignal
+          upgradedConfig.onActivity = (kind, detail) => {
+            this.liveness.tick(order.id)
+            upstreamActivity?.(kind, detail)
+          }
+
+          // Re-register liveness for retry
+          this.liveness.register(order.id, this.config.workerStallMs ?? (isWrite ? WRITE_STALL_MS : EXPLORE_STALL_MS))
+
+          // Write escalation shadow event
+          const escalationShadow = buildModelTierShadowEvent({
+            sessionId: this.config.sessionId ?? 'unknown',
+            workOrderId: order.id,
+            authority: order.authority,
+            profile: order.profile,
+            kind: order.kind,
+            recommendedTier: 'strong',
+            actualModel: strongCard.model,
+            actualTier: 'strong',
+            reason: `Flash→Pro escalation retry #${this.proUpgradeCount}: previous attempt failed with "${msg.slice(0, 200)}"`,
+          })
+          persistModelTierShadow(this.config.modelTierShadowStore, escalationShadow)
+          escalationShadows.push(escalationShadow)
+
+          try {
+            if (role === 'hands') {
+              const cwd = this.config.cwd ?? upgradedConfig.cwd
+              const handsRun = await wrapAbort(this.runHands({
+                order,
+                wtCoordinator: new WorktreeCoordinator(cwd),
+                cwd,
+                maxTurns: upgradedConfig.maxTurns,
+                contextWindow: upgradedConfig.contextWindow,
+                compact: upgradedConfig.compact,
+                activeClaims: upgradedConfig.activeClaims ?? [],
+                domainKnowledgeStore: this.config.domainKnowledgeStore,
+                runAgent: async (prompt, callbacks, workerCwd) => {
+                  const sessionRun = await this.runWorker({
+                    ...upgradedConfig,
+                    order,
+                    cwd: workerCwd,
+                    activeClaims: upgradedConfig.activeClaims ?? [],
+                    domainKnowledgeStore: this.config.domainKnowledgeStore,
+                  })
+                  callbacks.onTurnComplete(sessionRun.usage, 1, true)
+                  return JSON.stringify(sessionRun.result)
+                },
+              }))
+              run = { result: handsRun.result }
+            } else {
+              const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
+              run = { result: workerRun.result, transcript: workerRun.transcript }
+            }
+            // Upgrade succeeded — record provider outcome and update selected model
+            this.recordProviderOutcome(strongCard.model, true)
+            selected = strongCard
+          } catch (_retryError) {
+            // Pro upgrade also failed — record provider outcome, return degraded
+            this.recordProviderOutcome(strongCard.model, false)
+            const degraded = workerFailureResult(order, error)
+            return {
+              status: 'completed' as const,
+              order,
+              selectedModel: strongCard.model,
+              modelTierShadows: [tierShadow, ...escalationShadows],
+              modelTierGatedDecisions: [tierGatedDecision],
+              gatedInfluenceAudits: [gatedInfluenceAudit],
+              results: [degraded],
+              packet: await buildPrimaryWorkerPacket([degraded]),
+            }
+          }
+        }
+      }
+
+      // If retry didn't happen, return degraded
+      if (!run) {
+        const degraded = workerFailureResult(order, error)
+        return {
+          status: 'completed' as const,
+          order,
+          selectedModel: selected.model,
+          modelTierShadows: [tierShadow],
+          modelTierGatedDecisions: [tierGatedDecision],
+          gatedInfluenceAudits: [gatedInfluenceAudit],
+          results: [degraded],
+          packet: await buildPrimaryWorkerPacket([degraded]),
+        }
       }
     } finally {
       // A4: stop tracking — no false stall after completion/failure.
@@ -937,7 +1035,7 @@ export class DelegationCoordinator {
         escalated: true,
         order,
         selectedModel: selected.model,
-        modelTierShadows: [tierShadow],
+        modelTierShadows: [tierShadow, ...escalationShadows],
         modelTierGatedDecisions: [tierGatedDecision],
         gatedInfluenceAudits: [gatedInfluenceAudit],
         results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
@@ -967,7 +1065,7 @@ export class DelegationCoordinator {
       status: 'completed' as const,
       order,
       selectedModel: selected.model,
-      modelTierShadows: [tierShadow],
+      modelTierShadows: [tierShadow, ...escalationShadows],
       modelTierGatedDecisions: [tierGatedDecision],
       gatedInfluenceAudits: [gatedInfluenceAudit],
       results,

@@ -77,6 +77,8 @@ const workerBudgetSchema = z.object({
   maxTokens: z.number().int().positive(),
   timeoutMs: z.number().int().positive(),
   maxRetries: z.number().int().min(0),
+  /** Flash→Pro escalation retry: overrides the model card in runtimeFactory. */
+  modelOverride: z.string().optional(),
 })
 
 export type WorkerBudget = z.infer<typeof workerBudgetSchema>

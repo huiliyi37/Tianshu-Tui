@@ -1345,6 +1345,117 @@ describe('DelegationCoordinator', () => {
     assert.equal(sessionRegistry.acquireClaim('s-main', 'src/blocked-file.ts'), false)
   })
 
+  it('T3: retries failed worker with Pro model when budget allows (Flash→Pro escalation)', async () => {
+    const escalateCards: ModelCapabilityCard[] = [
+      { model: 'cheap-flash', toolUseReliability: 0.7, jsonStability: 0.7, editSuccessRate: 0.5, testRepairRate: 0.5, contextWindow: 1_000_000, cacheEconomics: 'strong', recommendedTasks: ['code_search'] },
+      { model: 'deepseek-pro', toolUseReliability: 0.95, jsonStability: 0.95, editSuccessRate: 0.9, testRepairRate: 0.85, contextWindow: 128_000, cacheEconomics: 'medium', recommendedTasks: ['patch_proposal'] },
+    ]
+    const modelsUsed: string[] = []
+    let firstCall = true
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: escalateCards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        modelsUsed.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 4,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async (config) => {
+        if (firstCall) {
+          firstCall = false
+          throw new Error('Flash worker transient failure')
+        }
+        return {
+          result: resultFor('pro-retry'),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_escalation',
+      objective: 'Investigate the Flash→Pro escalation when a worker fails transiently.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/test.ts'] },
+      budget: { maxRetries: 1, maxTurns: 4, maxTokens: 4096, timeoutMs: 30000 },
+    })
+
+    assert.equal(run.status, 'completed')
+    // First call used cheap-flash, retry used deepseek-pro
+    assert.equal(modelsUsed.length, 2)
+    assert.equal(modelsUsed[0], 'cheap-flash')
+    assert.equal(modelsUsed[1], 'deepseek-pro')
+    // Escalation shadow event emitted
+    assert.ok(run.modelTierShadows && run.modelTierShadows.length >= 2, 'expected at least 2 tier shadows')
+    const escShadow = run.modelTierShadows!.find(s => s.actualTier === 'strong' && s.reason.includes('Flash→Pro escalation'))
+    assert.ok(escShadow, 'escalation shadow must be emitted')
+    assert.equal(escShadow!.actualModel, 'deepseek-pro')
+    assert.ok(run.selectedModel === 'deepseek-pro', 'selected model should be the Pro model')
+  })
+
+  it('T3: respects Pro upgrade limit (max 3 per session)', async () => {
+    const escalateCards: ModelCapabilityCard[] = [
+      { model: 'cheap-flash', toolUseReliability: 0.7, jsonStability: 0.7, editSuccessRate: 0.5, testRepairRate: 0.5, contextWindow: 1_000_000, cacheEconomics: 'strong', recommendedTasks: ['code_search'] },
+      { model: 'deepseek-pro', toolUseReliability: 0.95, jsonStability: 0.95, editSuccessRate: 0.9, testRepairRate: 0.85, contextWindow: 128_000, cacheEconomics: 'medium', recommendedTasks: ['patch_proposal'] },
+    ]
+    const modelsUsed: string[] = []
+    let failCount = 0
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: escalateCards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        modelsUsed.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 4,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async (config) => {
+        // Fail all 4 attempts — first 3 escalate to Pro, 4th stays Flash
+        failCount++
+        throw new Error(`Worker failure #${failCount}`)
+      },
+    })
+
+    // Run 4 failing delegates — only first 3 should escalate
+    for (let i = 0; i < 4; i++) {
+      await coordinator.delegate({
+        parentTurnId: `turn_limit_${i}`,
+        objective: `Test escalation limit attempt number ${i + 1} with more words.`,
+        kind: 'code_search',
+        profile: 'code_scout',
+        scope: { files: ['src/test.ts'] },
+        budget: { maxRetries: 1, maxTurns: 4, maxTokens: 4096, timeoutMs: 30000 },
+      })
+    }
+
+    // Models used: flash(×4) + pro(×3) = 7 runtimeFactory calls
+    assert.equal(modelsUsed.length, 7)
+    // First 3 delegates: flash → pro escalation
+    assert.equal(modelsUsed.filter(m => m === 'deepseek-pro').length, 3)
+    // 4th delegate: flash only (no escalation)
+    assert.equal(modelsUsed.filter(m => m === 'cheap-flash').length, 4)
+  })
+
   it('blocks exploration worker when scope exceeds maxFiles budget without acquiring semantic locks', async () => {
     let runtimeCalled = false
     const coordinator = new DelegationCoordinator({
