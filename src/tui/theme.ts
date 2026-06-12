@@ -259,7 +259,7 @@ function buildTheme(colors: ColorSet, overrides?: { userColor?: string; assistan
   }
 }
 
-const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetTheme }> = {
+export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetTheme }> = {
   pastel: {
     truecolor: buildTheme(PASTEL_TRUECOLOR),
     fallback: buildTheme(PASTEL_FALLBACK),

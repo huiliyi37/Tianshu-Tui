@@ -7,7 +7,7 @@ import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { resolveCustomCommand } from '../commands/loader.js'
-import { getTheme, setTheme, getActiveThemeName, type ThemeName } from './theme.js'
+import { getTheme, setTheme, getActiveThemeName, THEMES, type ThemeName } from './theme.js'
 import { PhaseTracker } from './phase-tracker.js'
 import { createLogEntry, type LogEntry } from './log-state.js'
 import { getPaletteCommands } from './command-palette.js'
@@ -38,7 +38,7 @@ const HELP_TEXT = `Available commands:
 /domain [list|<name>|auto|off] — Show or switch star domain personality
 /verbose — Toggle verbose tool output
 /auto — Toggle auto-approve
-/theme [tianshu|midnight|pastel|cyberpunk|observatory|starfield] — Switch color theme
+/theme [tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme
 /effort [off|low|medium|high|max] — Set reasoning effort
 /undo [<number>|preview <number>] — Undo file changes with preview
 /clear — Clear screen
@@ -479,7 +479,8 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
     case '/theme': {
       const raw = parts[1]?.toLowerCase()
-      const validThemes: ThemeName[] = ['tianshu', 'midnight', 'pastel', 'cyberpunk', 'observatory', 'starfield']
+      // validThemes derives from THEMES so theme.ts remains the single source of truth.
+      const validThemes = Object.keys(THEMES) as ThemeName[]
       if (!raw || raw === 'list') {
         const current = getActiveThemeName()
         const list = validThemes.map(t => `  ${t}${t === current ? ' ← current' : ''}`).join('\n')
