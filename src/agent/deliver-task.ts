@@ -26,6 +26,7 @@ import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
 import type { DeliveryGateV2 } from './delivery-gate-v2.js'
+import { filterExternalNoise } from './delivery-gate-v2.js'
 import { summarizeOwnershipHealth } from './ownership-health.js'
 import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
@@ -33,6 +34,8 @@ import { checkCommitCohesion } from './commit-cohesion.js'
 import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet, type ReviewScale } from './review-discipline.js'
 import { routeReviewWorkflow, reviewWorkflowBudgetMs, type ReviewRouterDeps, type ReviewOutcome, type ReviewMode } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
+import { recordAutoReviewRun } from './review-health.js'
+import { detectWroteButNeverRead, formatWroteButNeverRead } from './wiring-nudge.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 
 export interface B1Context {
@@ -55,6 +58,8 @@ export interface B1Context {
   reviewDeps?: ReviewRouterDeps
   /** Re-entrancy guard: child review contexts must not recursively trigger review routing. */
   reviewDepth?: number
+  /** Test hook for the wrote-but-never-read static check. */
+  detectWroteButNeverRead?: typeof detectWroteButNeverRead
 }
 
 function parseNulFileList(output: string): string[] {
@@ -181,29 +186,33 @@ When the task implements a complex spec or cross-module integration, include the
       if (currentDirtyFiles) ctx.ownership.autoOwnFromBaseline(currentDirtyFiles)
       const report = ctx.gate.getReport([], currentDirtyFiles)
 
+      // C-fix (session 803d897d): cap file lists and filter external noise.
+      // 67 untracked .test-tmp files used to drown the GREEN/YELLOW signal.
+      const FILE_LIST_CAP = 5
+      const renderFileList = (files: string[], extraHiddenCount = 0): string[] => {
+        if (files.length === 0 && extraHiddenCount === 0) return ['  (none)']
+        const shown = files.slice(0, FILE_LIST_CAP).map(f => `  ${f}`)
+        const hidden = files.length - Math.min(files.length, FILE_LIST_CAP) + extraHiddenCount
+        if (hidden > 0) shown.push(`  (+${hidden} more${extraHiddenCount > 0 ? `, ${extraHiddenCount} junk/gitignored` : ''})`)
+        return shown
+      }
+      const externalSplit = filterExternalNoise(report.externalFiles, params.cwd)
+
       const lines: string[] = [
         `Delivery Gate: ${report.state}`,
         `Task: ${report.taskId}`,
         '',
         `Owned files (${report.ownedFileCount}):`,
-        ...(report.ownedFiles.length > 0
-          ? report.ownedFiles.map(f => `  ${f}`)
-          : ['  (none)']),
+        ...renderFileList(report.ownedFiles),
         '',
         `Co-owned files (${report.coOwnedFileCount}):`,
-        ...(report.coOwnedFiles.length > 0
-          ? report.coOwnedFiles.map(f => `  ${f}`)
-          : ['  (none)']),
+        ...renderFileList(report.coOwnedFiles),
         '',
         `Historical owned files (${report.historicalOwnedFileCount}):`,
-        ...(report.historicalOwnedFiles.length > 0
-          ? report.historicalOwnedFiles.map(f => `  ${f}`)
-          : ['  (none)']),
+        ...renderFileList(report.historicalOwnedFiles),
         '',
         `External files (${report.externalFileCount}):`,
-        ...(report.externalFiles.length > 0
-          ? report.externalFiles.map(f => `  ${f}`)
-          : ['  (none)']),
+        ...renderFileList(externalSplit.files, externalSplit.noiseCount),
         '',
         `Verifications: ${report.verificationCount}`,
       ]
@@ -331,7 +340,9 @@ When the task implements a complex spec or cross-module integration, include the
           // suggest finishing the current wave before starting the next batch.
           const totalCount = auditList.length
           const doneCount = complete.length
-          if (totalCount > 5) {
+          // E-fix: threshold lowered from >5 to >=4 — a 5-task plan executed in
+          // one unbroken batch is exactly the failure mode (session 803d897d).
+          if (totalCount >= 4) {
             const remainingRatio = incomplete.length / totalCount
             if (remainingRatio > 0.4) {
               lines.push('', `  💡 ${incomplete.length}/${totalCount} tasks remaining (${Math.round(remainingRatio * 100)}%). Consider pausing after this wave — typecheck+test the completed batch, then continue with the next ${Math.min(incomplete.length, 3)} tasks.`)
@@ -535,9 +546,16 @@ When the task implements a complex spec or cross-module integration, include the
               const reason = err instanceof Error ? err.message : String(err)
               if (reviewMode === 'auto') {
                 // Auto review is best-effort: a timeout/crash must never block
-                // the delivery it was meant to assist. Surface and proceed.
-                lines.push('', `⚠️ Auto review ${reason.includes('timed out') ? 'timed out' : 'failed'} (${reason}) — delivery not blocked. Run /review max for a full squadron review.`)
-                outcome = { tier: 'auto', verdict: 'nudge', rounds: 0 }
+                // the delivery it was meant to assist. Report honestly — the
+                // review DID NOT run; never imply it passed. Rendering happens
+                // in the common 'inconclusive' branch below.
+                outcome = {
+                  tier: 'auto',
+                  verdict: 'inconclusive',
+                  rounds: 0,
+                  evidence: `review DID NOT run (${reason.includes('timed out') ? 'timed out' : 'infra failure'}: ${reason})`,
+                  infraFailures: [{ kind: reason.includes('timed out') ? 'timeout' : 'crash', claim: reason }],
+                }
               } else {
                 lines.push('', `⚠️  Review workflow ${reason.includes('timed out') ? 'timed out' : 'failed'}: ${reason}`)
                 lines.push('   → Use force=true to skip review for this delivery.')
@@ -545,6 +563,14 @@ When the task implements a complex spec or cross-module integration, include the
               }
             } finally {
               if (reviewTimer) clearTimeout(reviewTimer)
+            }
+            // Review infra health observability (/status): auto runs only.
+            if (reviewMode === 'auto' && outcome.rounds !== undefined && outcome.verdict !== 'nudge') {
+              if (outcome.verdict === 'inconclusive') {
+                recordAutoReviewRun({ ran: false, failureKinds: (outcome.infraFailures ?? []).map(f => f.kind) })
+              } else {
+                recordAutoReviewRun({ ran: true, ...(outcome.recoveredByRetry ? { recoveredByRetry: true } : {}) })
+              }
             }
             if (outcome.verdict === 'rejected' || outcome.escalated) {
               lines.push('', `❌ ReviewRouter RED (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this delivery'}`)
@@ -559,10 +585,25 @@ When the task implements a complex spec or cross-module integration, include the
               } else {
                 lines.push('', `✅ ReviewRouter verified (${outcome.tier}): ${outcome.evidence ?? 'verified'}`)
               }
+            } else if (outcome.verdict === 'inconclusive') {
+              // Honest fail-open: the review never produced a verdict. The word
+              // "verified" must NOT appear here (session 803d897d, T3).
+              lines.push('', `⚠️ ReviewRouter INCONCLUSIVE (${outcome.tier}): ${outcome.evidence ?? 'review DID NOT run (infra failure)'}`)
+              lines.push('   → Delivery not blocked, but this change is UNREVIEWED. Run /review max for a full squadron review.')
             } else if (outcome.verdict === 'nudge') {
               lines.push('', `⚠️ ReviewRouter nudge (${outcome.tier}): apply review disciplines before committing.`)
             }
           }
+        }
+
+        // D-fix: cheap static wrote-but-never-read check. Mechanically catches
+        // the modelOverride class of dead wiring (field/symbol added, zero
+        // read-side consumers) at the moment of delivery. YELLOW, non-blocking.
+        try {
+          const deadSymbols = (ctx.detectWroteButNeverRead ?? detectWroteButNeverRead)(params.cwd, filesToCommit)
+          lines.push(...formatWroteButNeverRead(deadSymbols))
+        } catch {
+          // best-effort: never let the nudge break delivery
         }
 
         // Cohesion gate: RED if files span too many areas (unless force=true)

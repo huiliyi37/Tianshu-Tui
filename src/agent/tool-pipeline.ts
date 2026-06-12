@@ -1028,8 +1028,15 @@ export async function executeToolUse(
     // AbortError: user cancelled — not a tool failure.
     // Skip failure recording so immune/doom-loop signals aren't polluted.
     if ((err as Error).name === 'AbortError') {
-      callbacks.onToolResult(tu.id, tu.name, '', false)
-      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: '', is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+      // NEVER return empty content: a silent '' success made the model fly
+      // blind on its most critical deliveries (session 803d897d: two
+      // deliver_task results came back empty after user steering aborted the
+      // batch, while the detached execute kept running and landed commits).
+      // The model must know (a) the call was interrupted and (b) the work may
+      // still have completed in the background.
+      const abortedNote = `[interrupted] ${tu.name} was cancelled before its result could be returned. The underlying operation may still have completed in the background — verify actual state (e.g. git log, file contents, test output) before assuming it failed or retrying.`
+      callbacks.onToolResult(tu.id, tu.name, abortedNote, false)
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: abortedNote, is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }
     const msg = err instanceof Error ? err.message : String(err)
     deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)

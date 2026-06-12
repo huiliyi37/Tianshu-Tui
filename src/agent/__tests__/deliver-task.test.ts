@@ -14,6 +14,7 @@ import { createDeliveryGateV2 } from '../delivery-gate-v2.js'
 import { createVerificationAttribution } from '../verification-attribution.js'
 import type { ToolCallParams, ToolResult } from '../../tools/types.js'
 import type { SessionRegistry } from '../session-registry.js'
+import { getReviewHealth, resetReviewHealth } from '../review-health.js'
 
 function makeContext(opts: {
   taskId: string
@@ -30,6 +31,7 @@ function makeContext(opts: {
   reviewDepth?: number
   sessionRegistry?: SessionRegistry
   sessionId?: string
+  detectWroteButNeverRead?: (cwd: string, files: string[]) => Array<{ symbol: string; file: string; kind: 'export' | 'field' }>
 }) {
   const baseline = createWorktreeBaseline({
     branch: 'feat/b1',
@@ -60,6 +62,7 @@ function makeContext(opts: {
       : (opts.routeReviewWorkflow ?? (async () => ({ tier: 'L2', verdict: 'verified', evidence: 'test review shim', rounds: 1 }))),
     reviewDeps: opts.disableReviewDeps ? undefined : (opts.reviewDeps ?? {} as ReviewRouterDeps),
     reviewDepth: opts.reviewDepth,
+    detectWroteButNeverRead: opts.detectWroteButNeverRead ?? (() => []),
   }))
 
   const params: ToolCallParams = {
@@ -234,6 +237,70 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(description, /counterexample tests verified/)
   })
 
+  it('denoises junk external files: capped list + summary count (C-fix)', async () => {
+    const junk = Array.from({ length: 67 }, (_, i) => `.test-tmp/corrupt-${i}.json`)
+    const signal = ['src/important.ts', 'docs/notes.md']
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      externalFiles: [...junk, ...signal],
+      dirtyFiles: ['src/a.ts', ...junk, ...signal],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+    })
+
+    const result = await tool.execute(params)
+
+    assert.doesNotMatch(result.content, /\.test-tmp\/corrupt-/, 'junk paths must not be listed')
+    assert.match(result.content, /src\/important\.ts/)
+    assert.match(result.content, /\(\+67 more, 67 junk\/gitignored\)/)
+    assert.match(result.content, /External files \(69\)/, 'count stays truthful even when display is filtered')
+    // Gate section (up to "Verifications:") must stay compact.
+    const gateSection = result.content.split('\n')
+    const verifIdx = gateSection.findIndex(l => l.startsWith('Verifications:'))
+    assert.ok(verifIdx >= 0 && verifIdx < 25, `gate file lists must stay compact, got ${verifIdx + 1} lines`)
+  })
+
+  it('caps long owned-file lists at 5 with a (+N more) summary (C-fix)', async () => {
+    const owned = Array.from({ length: 12 }, (_, i) => `src/mod-${i}.ts`)
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: owned,
+      dirtyFiles: owned,
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+    })
+
+    const result = await tool.execute({ ...params, ownedFiles: owned })
+
+    assert.match(result.content, /Owned files \(12\)/)
+    assert.match(result.content, /\(\+7 more\)/)
+    assert.doesNotMatch(result.content, /src\/mod-9\.ts/, 'files beyond the cap are summarized, not listed')
+  })
+
+  it('surfaces wrote-but-never-read findings as a YELLOW hint without blocking the commit (D-fix)', async () => {
+    let committed = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      detectWroteButNeverRead: () => [
+        { symbol: 'modelOverride', file: 'src/a.ts', kind: 'field' },
+      ],
+      commitOwnedFiles: () => {
+        committed = true
+        return { ok: true, output: 'commit abc123' }
+      },
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: add override' } })
+
+    assert.equal(result.isError ?? false, false, 'nudge must not block delivery')
+    assert.equal(committed, true)
+    assert.match(result.content, /wrote-but-never-read/)
+    assert.match(result.content, /modelOverride/)
+    assert.match(result.content, /non-blocking/)
+  })
+
   it('routes fix commits through ReviewRouter before scoped commit', async () => {
     const calls: Array<{ files: string[]; message: string }> = []
     let routedChange: ChangeSet | undefined
@@ -282,6 +349,92 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(committed, false)
     assert.match(result.content, /ReviewRouter RED \(L2\)/)
     assert.match(result.content, /still broken/)
+  })
+
+  it('renders auto-review infra failure as INCONCLUSIVE, never as verified (B-fix)', async () => {
+    resetReviewHealth()
+    let committed = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => ({
+        tier: 'auto',
+        verdict: 'inconclusive',
+        evidence: 'review DID NOT run (infra failure): worker: reviewer crashed',
+        rounds: 1,
+        infraFailures: [{ kind: 'worker', claim: 'reviewer crashed' }],
+      }),
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => {
+        committed = true
+        return { ok: true, output: 'commit abc123' }
+      },
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
+
+    assert.equal(result.isError ?? false, false, 'inconclusive auto review must fail open')
+    assert.equal(committed, true, 'delivery proceeds despite infra failure')
+    assert.match(result.content, /ReviewRouter INCONCLUSIVE/)
+    assert.match(result.content, /DID NOT run/)
+    assert.match(result.content, /UNREVIEWED/)
+    assert.doesNotMatch(result.content, /ReviewRouter verified/, 'the word verified must not describe a review that never ran')
+    assert.ok(result.content.length > 0, 'sentinel: content must never be empty')
+    const health = getReviewHealth()
+    assert.equal(health.infraFailureCount, 1)
+    assert.equal(health.consecutiveInfraFailures, 1)
+    assert.deepEqual(health.lastFailureKinds, ['worker'])
+  })
+
+  it('reports an honest INCONCLUSIVE when the auto review workflow throws (B-fix)', async () => {
+    resetReviewHealth()
+    let committed = false
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => { throw new Error('Review workflow timed out') },
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => {
+        committed = true
+        return { ok: true, output: 'commit abc123' }
+      },
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
+
+    assert.equal(result.isError ?? false, false, 'auto review crash must fail open')
+    assert.equal(committed, true)
+    assert.match(result.content, /ReviewRouter INCONCLUSIVE/)
+    assert.match(result.content, /DID NOT run/)
+    assert.doesNotMatch(result.content, /ReviewRouter verified/)
+    assert.ok(result.content.length > 0, 'sentinel: content must never be empty')
+    const health = getReviewHealth()
+    assert.equal(health.infraFailureCount, 1)
+    assert.deepEqual(health.lastFailureKinds, ['timeout'])
+  })
+
+  it('records healthy auto-review runs in review health (B-fix)', async () => {
+    resetReviewHealth()
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => ({ tier: 'auto', verdict: 'verified', evidence: 'no blocking findings', rounds: 1 }),
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+    })
+
+    await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
+
+    const health = getReviewHealth()
+    assert.equal(health.totalRuns, 1)
+    assert.equal(health.infraFailureCount, 0)
+    assert.equal(health.consecutiveInfraFailures, 0)
   })
 
   it('routes non-fix code commits through ReviewRouter as objective review assistance', async () => {
