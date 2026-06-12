@@ -27,6 +27,7 @@ import { homedir } from 'node:os'
 import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
+import { renderRecoveryStack } from '../agent/recovery-stack.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
 
 const HELP_TEXT = `Available commands:
@@ -753,7 +754,9 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
     }
 
     case '/verify': {
-      pushStatic(createLogEntry({ type: 'system', content: formatVerificationStatus(ctx.agent) }))
+      const verify = formatVerificationStatus(ctx.agent)
+      const recovery = renderRecoveryStack(process.cwd())
+      pushStatic(createLogEntry({ type: 'system', content: `${verify}\n\n${recovery}` }))
       setIsStreaming(false)
       return true
     }
@@ -923,15 +926,35 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const sub = parts[1]?.toLowerCase()
       const cwd = process.cwd()
 
-      // Scan .claude/skills/*/SKILL.md in project + home
+      // Scan .rivet/skills/, .claude/skills/*/SKILL.md in project + home
       const skillDirs = [
-        { label: 'project', path: join(cwd, '.claude', 'skills') },
-        { label: 'global', path: join(homedir(), '.claude', 'skills') },
+        { label: 'rivet', path: join(cwd, '.rivet', 'skills'), rivetMd: true },
+        { label: 'project', path: join(cwd, '.claude', 'skills'), rivetMd: false },
+        { label: 'global', path: join(homedir(), '.claude', 'skills'), rivetMd: false },
       ]
 
       const skills: Array<{ name: string; path: string; source: string; desc: string; size: number }> = []
       for (const dir of skillDirs) {
         if (!existsSync(dir.path)) continue
+        if (dir.rivetMd) {
+          for (const file of readdirSync(dir.path).filter(f => f.endsWith('.md'))) {
+            const skillFile = join(dir.path, file)
+            const content = readFileSync(skillFile, 'utf8')
+            const descMatch = content.match(/^---\n([\s\S]*?\n)---/)?.[1] ?? ''
+            const descLine = descMatch.split('\n').find(l => l.startsWith('description:'))
+            const desc = descLine
+              ? descLine.replace(/^description:\s*(?:\|\s*)?/, '').replace(/^\s+/, '').slice(0, 120)
+              : ''
+            skills.push({
+              name: file.replace(/\.md$/, ''),
+              path: skillFile,
+              source: dir.label,
+              desc: desc || '(no description)',
+              size: content.length,
+            })
+          }
+          continue
+        }
         for (const entry of readdirSync(dir.path, { withFileTypes: true })) {
           if (!entry.isDirectory()) continue
           const skillFile = join(dir.path, entry.name, 'SKILL.md')

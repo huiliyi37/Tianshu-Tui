@@ -55,10 +55,13 @@ import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { PlaybookStore } from './agent/playbook-store.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
+import { SEMANTIC_SEARCH_TOOL } from './tools/semantic-search.js'
+import { createPlanTaskTool } from './tools/plan-task.js'
 import { createRecallTool } from './tools/recall.js'
 import { createRememberTool } from './tools/remember.js'
 import { MeridianIndexer } from './repo/meridian-indexer.js'
 import { loadProjectRules } from './context/rules-loader.js'
+import { loadProjectSkills } from './skills/skill-loader.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { persistFileHistory } from './agent/file-history-persist.js'
 import { cleanupOrphanedTmpFiles } from './fs-atomic.js'
@@ -302,6 +305,11 @@ export function createInteractiveToolRegistry(
 
   // repo_graph
   reg.register(createRepoGraphTool(() => refs.meridianIndexer))
+
+  reg.register(SEMANTIC_SEARCH_TOOL)
+  reg.register(createPlanTaskTool({
+    getCoordinator: () => refs.coordinator,
+  }))
 
   // B1 deliver_task
   const b1TaskLedger = createTaskLedger({ taskId: getOrCreateSessionId() })
@@ -855,6 +863,13 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   persist.injectDurableClaims(claimStore, cwd)
   for (const rule of loadProjectRules(cwd)) {
     claimStore.propose(rule)
+  }
+  const skillLoad = loadProjectSkills(cwd)
+  if (skillLoad.loaded.length > 0) {
+    console.error(`[skills] Loaded ${skillLoad.loaded.length} skill(s) from .rivet/skills/`)
+  }
+  for (const err of skillLoad.errors) {
+    console.warn(`[skills] ${err}`)
   }
   const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
   const session = new SessionContext()

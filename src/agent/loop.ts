@@ -104,6 +104,9 @@ import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
 import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
 import { advanceContractStatus, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, type TaskContract, type TaskDepthLayer, type TurnMode } from '../context/task-contract.js'
+import { skillRegistry } from '../skills/skill-loader.js'
+import { renderMemoryBlock } from '../memory/observation-store.js'
+import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import { createStanceTally } from './stance-tally.js'
 import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
@@ -427,6 +430,17 @@ export class AgentLoop {
         getTaskContract: () => this.getTaskContract(),
         getSensorium: () => this.sensorium,
       } : undefined,
+      memoryLearning: {
+        cwd: this.cwd,
+        sessionId: this.config.sessionId,
+        getUserMessage: () => this.initialUserMessage,
+        getStreamedText: () => this.streamedText,
+      },
+      userHooksBridge: {
+        cwd: this.cwd,
+        sessionId: this.config.sessionId,
+        getTurn: () => this.session.getTurnCount(),
+      },
       advisoryBus: this.advisoryBus,
     }))
     this.perception = new TurnPerceptionController({
@@ -1412,6 +1426,10 @@ export class AgentLoop {
       this._taskDepthLayer = undefined
       this.config.promptEngine.setTaskDepthLayer(undefined)
     }
+
+    this.config.promptEngine.setSkillAdvisoryBlock(skillRegistry.renderMatchedBlock(userInput))
+    this.config.promptEngine.setCrossSessionMemoryBlock(renderMemoryBlock(this.cwd, userInput))
+    this.config.promptEngine.setMentionContextBlock(renderMentionContext(parseMentions(userInput)))
 
     this.config.promptEngine.setPlanCacheAdvisory(
       turnMode === 'task' ? renderPlanCacheAdvisory(this.p3.planCacheSuggest(userInput)) : null,

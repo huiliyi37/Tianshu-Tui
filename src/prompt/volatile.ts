@@ -70,6 +70,12 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Only present when taskDepthLayer !== 'unit'. */
   taskDepthAdvisory?: string | null
+  /** Matched .rivet/skills — cache-safe dynamic appendix. */
+  skillAdvisoryBlock?: string | null
+  /** Cross-session memory recall — cache-safe dynamic appendix. */
+  crossSessionMemoryBlock?: string | null
+  /** @mention context hints — cache-safe dynamic appendix. */
+  mentionContextBlock?: string | null
   /** Harness advisory block — unified corrective guidance from advisory bus (A1).
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Max 3 advisories per turn. */
@@ -309,6 +315,18 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
   // Task depth advisory: TDD strategy for wiring/system tasks
   if (ctx.taskDepthAdvisory) {
     parts.push(ctx.taskDepthAdvisory)
+  }
+
+  if (ctx.skillAdvisoryBlock) {
+    parts.push(ctx.skillAdvisoryBlock)
+  }
+
+  if (ctx.crossSessionMemoryBlock) {
+    parts.push(ctx.crossSessionMemoryBlock)
+  }
+
+  if (ctx.mentionContextBlock) {
+    parts.push(ctx.mentionContextBlock)
   }
 
   // Session state: may change per-turn — keep at end

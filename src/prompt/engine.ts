@@ -74,6 +74,9 @@ export class PromptEngine {
   private planCacheAdvisory?: string | null
   private intentRetrievalRoute?: string | null
   private taskDepthLayer?: import('../context/task-contract.js').TaskDepthLayer
+  private skillAdvisoryBlock?: string | null
+  private crossSessionMemoryBlock?: string | null
+  private mentionContextBlock?: string | null
   private harnessAdvisoryBlock?: string | null
   private decisions?: string[]
   private activeDomain?: VolatileContext['activeDomain']
@@ -238,7 +241,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -605,6 +608,18 @@ export class PromptEngine {
 
   setTaskDepthLayer(layer: import('../context/task-contract.js').TaskDepthLayer | undefined): void {
     this.taskDepthLayer = layer
+  }
+
+  setSkillAdvisoryBlock(block: string | null): void {
+    this.skillAdvisoryBlock = block
+  }
+
+  setCrossSessionMemoryBlock(block: string | null): void {
+    this.crossSessionMemoryBlock = block
+  }
+
+  setMentionContextBlock(block: string | null): void {
+    this.mentionContextBlock = block
   }
 
   getTaskDepthLayer(): import('../context/task-contract.js').TaskDepthLayer | undefined {
