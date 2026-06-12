@@ -198,7 +198,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
   // (planner workers think-then-delegate) but hard-capped by delegationDepth
   // (MAX_DELEGATION_DEPTH in coordinator.ts) — never unbounded recursion.
   const [toolRegistry] = useState(() => {
-    const reg = createDefaultToolRegistry()
+    const reg = createDefaultToolRegistry([], { desktopTools: config.agent.desktopTools })
     // Register delegate_task with a mutable coordinator reference.
     // The coordinator is recreated in useMemo on model switch; the tool reads
     // the latest via a closure over a module-level ref.
@@ -966,7 +966,7 @@ async function main() {
         for (const rule of loadProjectRules(process.cwd())) claimStore.propose(rule)
         const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
         const playbookStore = new PlaybookStore(process.cwd())
-        const toolRegistry = createDefaultToolRegistry()
+        const toolRegistry = createDefaultToolRegistry([], { desktopTools: config.agent.desktopTools })
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey,
           model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
@@ -1071,7 +1071,7 @@ async function main() {
       goal: parsed.goal,
       budget: parsed.budget ?? 100,
       createAgent: () => {
-        const toolRegistry = createDefaultToolRegistry()
+        const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,
@@ -1169,7 +1169,7 @@ async function main() {
       json: parsed.json,
       streamJson: parsed.streamJson,
       createAgent: () => {
-        const toolRegistry = createDefaultToolRegistry()
+        const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,
           model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },

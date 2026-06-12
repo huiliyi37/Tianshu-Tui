@@ -93,6 +93,8 @@ export const agentSchema = z.object({
   autoReasoning: z.boolean().default(false),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
   songlineEnabled: z.boolean().default(false),
+  /** T8 桌面化办公工具（create_document 等 7 个）。默认关闭以守住工具数 kernel budget（≤25）。 */
+  desktopTools: z.boolean().default(false),
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). */
   hearthObserveEnabled: z.boolean().default(false),
   /** Explicit opt-in for anti-anchoring harness hooks (prompt-flow intervention). */

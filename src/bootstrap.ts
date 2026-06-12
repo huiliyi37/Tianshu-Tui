@@ -214,7 +214,7 @@ export function createInteractiveToolRegistry(
   config: Config,
   cwd: string,
 ): { registry: ReturnType<typeof createDefaultToolRegistry> } {
-  const reg = createDefaultToolRegistry()
+  const reg = createDefaultToolRegistry([], { desktopTools: config.agent.desktopTools })
 
   // delegate_task
   reg.register(createDelegateTaskTool(

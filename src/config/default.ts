@@ -90,6 +90,7 @@ export const DEFAULT_CONFIG: Config = {
     mode: 'code',
     autoReasoning: false,
     songlineEnabled: false,
+    desktopTools: false,
     hearthObserveEnabled: false,
     antiAnchoring: {
       enabled: false,

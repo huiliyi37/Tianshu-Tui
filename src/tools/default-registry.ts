@@ -29,19 +29,28 @@ import type { Tool } from './types.js'
 import { WEB_FETCH_TOOL } from './web-fetch.js'
 import { WRITE_FILE_TOOL } from './write-file.js'
 
-export function createDefaultToolRegistry(extraTools: Tool[] = []): ToolRegistry {
+export interface DefaultRegistryOptions {
+  /** T8 桌面化办公工具（create_document/spreadsheet/image/presentation/pdf + export_file/open_path）。
+   *  默认关闭：工具数必须守住 kernel budget（≤25），超过会触发认知过载退化
+   *  （见 kernel-budget.test.ts / trained-mode-analysis.md 3.2.B）。 */
+  desktopTools?: boolean
+}
+
+export function createDefaultToolRegistry(extraTools: Tool[] = [], options: DefaultRegistryOptions = {}): ToolRegistry {
   const registry = new ToolRegistry()
   registry.register(APPLY_PATCH_TOOL)
   registry.register(IMPORT_RESOURCE_TOOL)
   registry.register(READ_FILE_TOOL)
   registry.register(WRITE_FILE_TOOL)
-  registry.register(EXPORT_FILE_TOOL)
-  registry.register(OPEN_PATH_TOOL)
-  registry.register(CREATE_DOCUMENT_TOOL)
-  registry.register(CREATE_SPREADSHEET_TOOL)
-  registry.register(CREATE_IMAGE_TOOL)
-  registry.register(CREATE_PRESENTATION_TOOL)
-  registry.register(CREATE_PDF_TOOL)
+  if (options.desktopTools) {
+    registry.register(EXPORT_FILE_TOOL)
+    registry.register(OPEN_PATH_TOOL)
+    registry.register(CREATE_DOCUMENT_TOOL)
+    registry.register(CREATE_SPREADSHEET_TOOL)
+    registry.register(CREATE_IMAGE_TOOL)
+    registry.register(CREATE_PRESENTATION_TOOL)
+    registry.register(CREATE_PDF_TOOL)
+  }
   registry.register(PLAN_CLOSE_TOOL)
   registry.register(PLAN_SUBMIT_TOOL)
   registry.register(BASH_TOOL)

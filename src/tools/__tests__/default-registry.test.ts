@@ -24,13 +24,6 @@ describe('createDefaultToolRegistry', () => {
 
     assert.ok(names.includes('read_file'))
     assert.ok(names.includes('write_file'))
-    assert.ok(names.includes('export_file'))
-    assert.ok(names.includes('open_path'))
-    assert.ok(names.includes('create_document'))
-    assert.ok(names.includes('create_spreadsheet'))
-    assert.ok(names.includes('create_image'))
-    assert.ok(names.includes('create_presentation'))
-    assert.ok(names.includes('create_pdf'))
     assert.ok(names.includes('plan_close'))
     assert.ok(names.includes('bash'))
     assert.ok(names.includes('edit_file'))
@@ -38,6 +31,30 @@ describe('createDefaultToolRegistry', () => {
     assert.ok(names.includes('glob'))
     assert.ok(names.includes('diff'))
     assert.ok(names.includes('run_tests'))
+  })
+
+  it('keeps desktop tools out of the default registry (kernel budget ≤25)', () => {
+    const registry = createDefaultToolRegistry()
+    const names = registry.getDefinitions().map(t => t.name)
+    const desktop = ['export_file', 'open_path', 'create_document', 'create_spreadsheet', 'create_image', 'create_presentation', 'create_pdf']
+
+    for (const name of desktop) {
+      assert.equal(names.includes(name), false, `${name} should be gated behind desktopTools`)
+    }
+    assert.ok(registry.getAll().length <= 25, `registry has ${registry.getAll().length} tools (kernel budget: 25)`)
+  })
+
+  it('registers desktop tools when desktopTools option is enabled', () => {
+    const registry = createDefaultToolRegistry([], { desktopTools: true })
+    const names = registry.getDefinitions().map(t => t.name)
+
+    assert.ok(names.includes('export_file'))
+    assert.ok(names.includes('open_path'))
+    assert.ok(names.includes('create_document'))
+    assert.ok(names.includes('create_spreadsheet'))
+    assert.ok(names.includes('create_image'))
+    assert.ok(names.includes('create_presentation'))
+    assert.ok(names.includes('create_pdf'))
   })
 
   it('keeps delegate_task out of the base worker registry', () => {
