@@ -1,5 +1,6 @@
 import type { Tool, ToolCallParams } from './types.js'
 import type { FileHistory } from '../agent/file-history.js'
+import { trackFileRestore } from '../agent/recovery-stack.js'
 
 export function createUndoTool(getFileHistory: () => FileHistory | undefined): Tool {
   return {
@@ -52,6 +53,9 @@ export function createUndoTool(getFileHistory: () => FileHistory | undefined): T
         const restored = await history.rewind(latestId)
         if (restored.length === 0) {
           return { content: 'No files needed restoration.' }
+        }
+        for (const file of restored) {
+          trackFileRestore(params.cwd, file, 'undo tool restore')
         }
         // B1: report if any restored files were not owned
         const unownedRestored = params.ownedFiles?.length

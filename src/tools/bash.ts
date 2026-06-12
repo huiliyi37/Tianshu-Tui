@@ -50,6 +50,44 @@ export function isExecFailure(exitCode: number): boolean {
   return exitCode === -1 || exitCode === 126 || exitCode === 127 || exitCode > 128
 }
 
+/** Wrap command in a lightweight sandbox when RIVET_BASH_SANDBOX=1. */
+export function wrapSandboxCommand(command: string): { command: string; sandboxed: boolean; note?: string } {
+  if (process.env.RIVET_BASH_SANDBOX !== '1') {
+    return { command, sandboxed: false }
+  }
+
+  const tryWhich = (bin: string): boolean => {
+    try {
+      execFileSync('which', [bin], { encoding: 'utf-8', timeout: 500 })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const escaped = command.replace(/'/g, `'\\''`)
+  if (tryWhich('firejail')) {
+    return {
+      command: `firejail --private --net=none -- bash -lc '${escaped}'`,
+      sandboxed: true,
+      note: 'firejail (network disabled)',
+    }
+  }
+  if (tryWhich('bwrap')) {
+    return {
+      command: `bwrap --ro-bind / / --dev-bind /dev /dev --unshare-net -- bash -lc '${escaped}'`,
+      sandboxed: true,
+      note: 'bwrap (network disabled)',
+    }
+  }
+
+  return {
+    command,
+    sandboxed: false,
+    note: 'RIVET_BASH_SANDBOX=1 but firejail/bwrap not found — running unsandboxed',
+  }
+}
+
 /**
  * Per-call cache to avoid calling rtkRewrite twice for the same command
  * within a single tool invocation (requiresApproval → execute).
@@ -99,7 +137,9 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
 
   async execute(params: ToolCallParams) {
     const rawCommand = params.input.command as string
-    const command = rtkRewrite(rawCommand, params.toolUseId)
+    const rewritten = rtkRewrite(rawCommand, params.toolUseId)
+    const sandbox = wrapSandboxCommand(rewritten)
+    const command = sandbox.command
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
 
