@@ -151,3 +151,91 @@ describe('background work orders (B2: delegateBackground)', () => {
     await assert.rejects(coordinator.waitBackgroundRun('bg_nope'), /Unknown background run/)
   })
 })
+
+// ── P1-1: retry claim conflict ──
+
+describe('P1-1 retry claim conflict (Pro upgrade blocked by lock)', () => {
+  it('returns blocked when retry claim is held by another session, with rollback', async () => {
+    // Stateful mock: first acquire succeeds (2 files), retry partial failure
+    let acquireCallCount = 0
+    const releasedFiles: string[][] = []
+    const sessionRegistry = {
+      acquireClaim: (_sid: string, _file: string, _type: string) => {
+        acquireCallCount++
+        // Calls 1-2 (first attempt): succeed
+        // Call 3 (retry, first file): succeed — added to retryClaimFiles
+        // Call 4 (retry, second file): fail — simulating another session holding this lock
+        return acquireCallCount <= 3
+      },
+      releaseClaim: (_sid: string, file: string) => {
+        if (releasedFiles.length === 0 || releasedFiles[releasedFiles.length - 1]!.length >= 2) {
+          releasedFiles.push([])
+        }
+        releasedFiles[releasedFiles.length - 1]!.push(file)
+      },
+      publishEvent: () => {},
+      getLastCycleClose: () => undefined,
+      setCycleClose: () => {},
+    }
+
+    // runHands mock: throws on every call to trigger retry
+    let handsCallCount = 0
+    const runHands = async () => {
+      handsCallCount++
+      throw new Error('ECONNRESET socket hang up')
+    }
+
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: (() => {
+        const reg = makeRegistry()
+        for (const name of ['edit_file', 'write_file', 'bash', 'run_tests']) reg.register(fakeTool(name))
+        return reg
+      })(),
+      modelCards: [
+        ...cards,
+        // Strong-tier card for retry: lower capability scores so balanced card
+        // is selected first, triggering Flash→Pro escalation
+        { model: 'pro-model', toolUseReliability: 0.5, jsonStability: 0.5, editSuccessRate: 0.4, testRepairRate: 0.3, contextWindow: 1_000_000, cacheEconomics: 'medium', recommendedTasks: [] },
+      ],
+      maxWorkers: 1,
+      sessionRegistry: sessionRegistry as any,
+      sessionId: 'session-1',
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async () => {
+        throw new Error('should not be reached — runHands is mocked')
+      },
+      runHands,
+    })
+
+    const patcherRequest = {
+      parentTurnId: 't-p1',
+      objective: 'apply patch to fix the authentication race condition across modules',
+      kind: 'patch_proposal' as const,
+      profile: 'patcher' as const,
+      scope: { files: ['auth.ts', 'session.ts'] },
+    }
+
+    const run = await coordinator.delegate(patcherRequest)
+
+    // Assert: first attempt was made (runHands called once)
+    assert.equal(handsCallCount, 1, 'first attempt should call runHands')
+    // Assert: retry was blocked by claim conflict
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results[0]?.status, 'blocked')
+    assert.match(run.results[0]?.summary ?? '', /Retry blocked.*claimed by another session/)
+    // Assert: original claims were released (first release) + retry rollback
+    assert.ok(releasedFiles.length >= 2, `claims released ${releasedFiles.length} times, expected >=2`)
+    // Assert: telemetry fields present
+    assert.equal(run.selectedModel, 'pro-model')
+    assert.ok(Array.isArray(run.modelTierShadows))
+  })
+})

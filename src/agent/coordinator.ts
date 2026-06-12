@@ -906,21 +906,17 @@ export class DelegationCoordinator {
               }
             }
             if (conflictedFiles.length > 0) {
+              // P1-1: first claim conflict — align telemetry with other return paths
+              const degraded = workerFailureResult(order, new Error(`File claim conflict: ${conflictedFiles.join(', ')} held by another session`))
               return {
                 status: 'completed',
                 order,
-                results: [{
-                  workOrderId: order.id,
-                  status: 'blocked',
-                  summary: `File claim conflict: ${conflictedFiles.join(', ')} held by another session`,
-                  findings: [],
-                  artifacts: [{ kind: 'risk', title: 'Claim conflict', content: `Files claimed by another session: ${conflictedFiles.join(', ')}` }],
-                  changedFiles: [],
-                  risks: [`file claim conflict: ${conflictedFiles.join(', ')}`],
-                  nextActions: ['Wait for other session to release claims, or use read-only profile'],
-                  evidenceStatus: 'blocked',
-                }],
-                packet: await buildPrimaryWorkerPacket([]),
+                selectedModel: selected.model,
+                modelTierShadows: [tierShadow],
+                modelTierGatedDecisions: [tierGatedDecision],
+                gatedInfluenceAudits: [gatedInfluenceAudit],
+                results: [degraded],
+                packet: await buildPrimaryWorkerPacket([degraded]),
               }
             }
           }
@@ -984,7 +980,6 @@ export class DelegationCoordinator {
         const strongCards = this.config.modelCards.filter(c => inferModelTierFromCard(c) === 'strong')
         const strongCard = strongCards[0]
         if (strongCard) {
-          this.proUpgradeCount++
           // Re-create worker config with Pro model
           const upgradedConfig = this.config.runtimeFactory(order, strongCard, workerRegistry)
           upgradedConfig.reviewDepth = order.reviewDepth
@@ -997,21 +992,6 @@ export class DelegationCoordinator {
 
           // Re-register liveness for retry
           this.liveness.register(order.id, this.config.workerStallMs ?? (isWrite ? WRITE_STALL_MS : EXPLORE_STALL_MS))
-
-          // Write escalation shadow event
-          const escalationShadow = buildModelTierShadowEvent({
-            sessionId: this.config.sessionId ?? 'unknown',
-            workOrderId: order.id,
-            authority: order.authority,
-            profile: order.profile,
-            kind: order.kind,
-            recommendedTier: 'strong',
-            actualModel: strongCard.model,
-            actualTier: 'strong',
-            reason: `Flash→Pro escalation retry #${this.proUpgradeCount}: previous attempt failed with "${msg.slice(0, 200)}"`,
-          })
-          persistModelTierShadow(this.config.modelTierShadowStore, escalationShadow)
-          escalationShadows.push(escalationShadow)
 
           try {
             if (role === 'hands') {
@@ -1035,6 +1015,22 @@ export class DelegationCoordinator {
                     return { status: 'completed' as const, order, selectedModel: strongCard.model, modelTierShadows: [tierShadow, ...escalationShadows], modelTierGatedDecisions: [tierGatedDecision], gatedInfluenceAudits: [gatedInfluenceAudit], results: [degraded], packet: await buildPrimaryWorkerPacket([degraded]) }
                   }
                 }
+
+                // P1-1: increment quota and write escalation shadow only after claim check passes
+                this.proUpgradeCount++
+                const escalationShadow = buildModelTierShadowEvent({
+                  sessionId: this.config.sessionId ?? 'unknown',
+                  workOrderId: order.id,
+                  authority: order.authority,
+                  profile: order.profile,
+                  kind: order.kind,
+                  recommendedTier: 'strong',
+                  actualModel: strongCard.model,
+                  actualTier: 'strong',
+                  reason: `Flash→Pro escalation retry #${this.proUpgradeCount}: previous attempt failed with "${msg.slice(0, 200)}"`,
+                })
+                persistModelTierShadow(this.config.modelTierShadowStore, escalationShadow)
+                escalationShadows.push(escalationShadow)
                 const cwd = this.config.cwd ?? upgradedConfig.cwd
                 const handsRun = await wrapAbort(this.runHands({
                   order, wtCoordinator: new WorktreeCoordinator(cwd), cwd,
@@ -1056,6 +1052,21 @@ export class DelegationCoordinator {
                     this.config.sessionRegistry.releaseClaim(this.config.sessionId, f)
               }
             } else {
+              // P1-1: increment quota and write escalation shadow for read-only retry
+              this.proUpgradeCount++
+              const escalationShadow = buildModelTierShadowEvent({
+                sessionId: this.config.sessionId ?? 'unknown',
+                workOrderId: order.id,
+                authority: order.authority,
+                profile: order.profile,
+                kind: order.kind,
+                recommendedTier: 'strong',
+                actualModel: strongCard.model,
+                actualTier: 'strong',
+                reason: `Flash→Pro escalation retry #${this.proUpgradeCount}: previous attempt failed with "${msg.slice(0, 200)}"`,
+              })
+              persistModelTierShadow(this.config.modelTierShadowStore, escalationShadow)
+              escalationShadows.push(escalationShadow)
               const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
               run = { result: workerRun.result, transcript: workerRun.transcript }
             }
