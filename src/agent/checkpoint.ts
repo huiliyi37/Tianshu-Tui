@@ -1,5 +1,5 @@
 import { execFile } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -119,9 +119,69 @@ async function getDirtySnapshot(cwd: string): Promise<{ dirty: string[]; untrack
   }
 }
 
+/** Hard cap on retained checkpoint files. Session-scoped checkpoints are
+ *  named per sessionId and were never reclaimed — ephemeral/test runs (cwd in
+ *  a temp dir that's later deleted) left ~14k orphans accumulating forever. */
+const MAX_CHECKPOINTS = 500
+
+/**
+ * Reclaim stale checkpoint files: drop any whose `cwd` no longer exists
+ * (orphaned by ephemeral/test workspaces), then trim the survivors to
+ * MAX_CHECKPOINTS most-recent by mtime. Best-effort and self-contained — any
+ * fs error on a single file is swallowed so a prune never blocks a checkpoint.
+ * Returns the number of files removed.
+ */
+export function pruneOrphanCheckpoints(max = MAX_CHECKPOINTS): number {
+  let removed = 0
+  let entries: { file: string; mtime: number }[]
+  try {
+    entries = readdirSync(RIVET_DIR)
+      .filter(n => n.startsWith('checkpoint-') && n.endsWith('.json') && !n.startsWith('checkpoint-index-'))
+      .map(n => join(RIVET_DIR, n))
+      .map(file => ({ file, mtime: safeMtime(file) }))
+  } catch {
+    return 0
+  }
+
+  // 1. Drop orphans whose recorded cwd is gone.
+  const live: { file: string; mtime: number }[] = []
+  for (const e of entries) {
+    let cwd = ''
+    try {
+      cwd = (JSON.parse(readFileSync(e.file, 'utf-8')) as CheckpointData).cwd ?? ''
+    } catch { /* unreadable → treat as orphan */ }
+    if (cwd && existsSync(cwd)) {
+      live.push(e)
+    } else {
+      try { rmSync(e.file, { force: true }); removed++ } catch { /* ignore */ }
+    }
+  }
+
+  // 2. Trim survivors to the cap, oldest first.
+  if (live.length > max) {
+    live.sort((a, b) => a.mtime - b.mtime)
+    for (const e of live.slice(0, live.length - max)) {
+      try { rmSync(e.file, { force: true }); removed++ } catch { /* ignore */ }
+    }
+  }
+  return removed
+}
+
+function safeMtime(file: string): number {
+  try { return statSync(file).mtimeMs } catch { return 0 }
+}
+
+// Prune at most once per process, lazily on first checkpoint write, so the
+// scan cost (one readdir + stat/parse per file) is paid once — not per tool.
+let prunedThisProcess = false
+
 /** Create a checkpoint by recording the current HEAD hash and dirty worktree state. */
 export async function createCheckpoint(cwd: string, label?: string, sessionId?: string): Promise<Checkpoint | null> {
   try {
+    if (!prunedThisProcess) {
+      prunedThisProcess = true
+      pruneOrphanCheckpoints()
+    }
     const { stdout } = await execFileP('git', ['rev-parse', 'HEAD'], {
       cwd, timeout: 5000, encoding: 'utf-8',
     })

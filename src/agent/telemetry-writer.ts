@@ -6,16 +6,37 @@ export interface TelemetryWriter {
   flush(): Promise<void>
 }
 
+// The top-level (session-less) sensorium.jsonl accumulates across every session
+// and was never bounded — it had grown to ~6MB / 10k+ lines over weeks. Keep a
+// rolling tail instead. Checked on a throttled cadence so the trim cost (read +
+// rewrite) is amortised, not paid per append.
+const MAX_SENSORIUM_LINES = 2_000
+const TRIM_CHECK_EVERY = 200
+
 export function createTelemetryWriter(cwd: string, sessionId?: string): TelemetryWriter {
   const dir = sessionId ? join(cwd, '.rivet', 'sessions', sessionId) : join(cwd, '.rivet')
   const path = join(dir, 'sensorium.jsonl')
   const pendingWrites: Promise<void>[] = []
+  let writesSinceTrim = 0
   return {
     write(snapshot) {
       const line = JSON.stringify(snapshot)
+      const shouldTrim = ++writesSinceTrim >= TRIM_CHECK_EVERY
+      if (shouldTrim) writesSinceTrim = 0
       const writePromise = import('node:fs/promises').then(async fs => {
         await fs.mkdir(dir, { recursive: true })
         await fs.appendFile(path, line + '\n', 'utf-8')
+        if (shouldTrim) {
+          // Best-effort rolling trim: keep only the most recent lines.
+          try {
+            const raw = await fs.readFile(path, 'utf-8')
+            const lines = raw.split('\n').filter(l => l.length > 0)
+            if (lines.length > MAX_SENSORIUM_LINES) {
+              const tail = lines.slice(lines.length - MAX_SENSORIUM_LINES)
+              await fs.writeFile(path, tail.join('\n') + '\n', 'utf-8')
+            }
+          } catch { /* trim is best-effort — never break telemetry */ }
+        }
       }).catch(() => {})
       pendingWrites.push(writePromise)
       writePromise.finally(() => {

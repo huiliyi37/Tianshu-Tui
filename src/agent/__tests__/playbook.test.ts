@@ -73,6 +73,29 @@ describe('playbook core', () => {
 
 ## 3. 根因判定
 
+- **Probable Cause**: hash_edit 在 cron-scheduler.ts 误删紧随的 if 块
+- **Contributing Factors**: anchor 替换跨越了相邻语句边界
+
+## 4. 寻址建议
+
+- **致系统设计**: hash_edit 替换前校验 anchor 不跨越语句块
+- **致用户**: 改用 edit_file 做多行结构替换
+`, { now: 10_000 })
+
+    assert.ok(bullets.length >= 2)
+    assert.ok(bullets.length <= 3)
+    assert.ok(bullets.some(b => b.lesson.includes('hash_edit')))
+    assert.ok(bullets.every(b => b.createdAt === 10_000))
+    assert.ok(bullets.every(b => b.keywords.length > 0))
+  })
+
+  it('filters out retrospect template boilerplate (zero-signal canned lines)', () => {
+    // These are the fixed strings retrospect.ts emits by metric threshold; they
+    // carry no session-specific signal and must not enter the playbook.
+    const bullets = extractBullets(`# Session Retrospective
+
+## 3. 根因判定
+
 - **Probable Cause**: 验证反馈不足 + 策略振荡组合
 - **Contributing Factors**: 上下文压力、任务拆解粒度、工具输出截断策略
 
@@ -82,12 +105,7 @@ describe('playbook core', () => {
 - **致用户**: 考虑在关键修改后手动运行测试验证
 `, { now: 10_000 })
 
-    assert.ok(bullets.length >= 2)
-    assert.ok(bullets.length <= 3)
-    assert.ok(bullets.some(b => b.lesson.includes('验证反馈不足')))
-    assert.ok(bullets.some(b => b.lesson.includes('检查 doom loop')))
-    assert.ok(bullets.every(b => b.createdAt === 10_000))
-    assert.ok(bullets.every(b => b.keywords.length > 0))
+    assert.equal(bullets.length, 0, 'template boilerplate must be blocked at the gate')
   })
 
   it('deduplicates similar bullets by keyword overlap and boosts importance', () => {

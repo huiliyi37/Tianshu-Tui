@@ -10,7 +10,9 @@ import {
   rollbackToCheckpoint,
   listCheckpoints,
   recordAgentTouchedFile,
+  pruneOrphanCheckpoints,
 } from '../checkpoint.js'
+import { homedir } from 'os'
 
 function makeTempGitRepo(): string {
   const repo = join(tmpdir(), `rivet-ck-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
@@ -29,6 +31,38 @@ function cleanupRepo(repo: string): void {
 }
 
 describe('checkpoint module', () => {
+  describe('pruneOrphanCheckpoints', () => {
+    it('removes checkpoint files whose cwd no longer exists', () => {
+      const rivetDir = join(homedir(), '.rivet')
+      mkdirSync(rivetDir, { recursive: true })
+      const deadCwd = join(tmpdir(), `rivet-ck-gone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+      // deadCwd is never created → orphan.
+      const tag = `prunetest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const orphan = join(rivetDir, `checkpoint-${tag}.json`)
+      writeFileSync(orphan, JSON.stringify({ version: 2, hash: 'x', timestamp: Date.now(), label: 'auto', cwd: deadCwd, preExistingDirtyFiles: [], preExistingUntrackedFiles: [], agentTouchedFiles: [] }))
+      assert.ok(existsSync(orphan))
+
+      const removed = pruneOrphanCheckpoints()
+      assert.ok(removed >= 1, 'should remove at least the orphan we planted')
+      assert.equal(existsSync(orphan), false, 'orphan checkpoint must be deleted')
+    })
+
+    it('keeps checkpoints whose cwd still exists', () => {
+      const repo = makeTempGitRepo()
+      try {
+        const rivetDir = join(homedir(), '.rivet')
+        const tag = `prunekeep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        const live = join(rivetDir, `checkpoint-${tag}.json`)
+        writeFileSync(live, JSON.stringify({ version: 2, hash: 'x', timestamp: Date.now(), label: 'auto', cwd: repo, preExistingDirtyFiles: [], preExistingUntrackedFiles: [], agentTouchedFiles: [] }))
+        pruneOrphanCheckpoints()
+        assert.ok(existsSync(live), 'checkpoint with a live cwd must survive')
+        rmSync(live, { force: true })
+      } finally {
+        cleanupRepo(repo)
+      }
+    })
+  })
+
   describe('createCheckpoint', () => {
     it('returns a valid Checkpoint with hash and timestamp in a git repo', async () => {
       const repo = makeTempGitRepo()

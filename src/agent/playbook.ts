@@ -95,6 +95,35 @@ export function shouldReflect(vigor: VigorState, sensorium: Sensorium, doomLevel
   return false
 }
 
+/**
+ * retrospect.ts sections 3/4 emit a fixed set of canned template lines chosen
+ * by metric thresholds (not session-specific content). Harvested verbatim they
+ * become zero-signal "lessons" ("本次会话表现良好", "策略稳定性下降…") that get
+ * injected into every prompt and inflate useCount without ever teaching
+ * anything. Block these exact template right-hand sides at the gate; real
+ * lessons enter via the remember/claim path, not this auto-harvest.
+ */
+const TEMPLATE_NOISE_FRAGMENTS = [
+  '数据不足，无法判定',
+  '无足够遥测数据',
+  '验证反馈不足 + 策略振荡组合',
+  '上下文压力、任务拆解粒度、工具输出截断策略',
+  '策略稳定性下降（重复操作或振荡）',
+  'doom loop 检测阈值、工具指纹哈希精度',
+  '验证置信度下降（测试未覆盖修改范围）',
+  '文件修改后未及时运行测试、测试覆盖率不足',
+  '上下文压力过高',
+  'compact 触发时机、工具输出长度、消息历史积累',
+  '本次会话表现良好',
+  '考虑在关键修改后手动运行测试验证',
+  '检查 compact 策略是否及时触发',
+  '检查 doom loop 检测阈值是否过于敏感',
+]
+
+function isTemplateNoise(lesson: string): boolean {
+  return TEMPLATE_NOISE_FRAGMENTS.some(frag => lesson.includes(frag))
+}
+
 export function extractBullets(report: string, options: ExtractBulletsOptions = {}): PlaybookBullet[] {
   const now = options.now ?? Date.now()
   const maxBullets = options.maxBullets ?? DEFAULT_MAX_BULLETS
@@ -113,7 +142,8 @@ export function extractBullets(report: string, options: ExtractBulletsOptions = 
 
   const candidates = allRawLines
     .map(lessonFromLine)
-    .filter((lesson): lesson is string => Boolean(lesson && !lesson.includes('无需特别调整') && !lesson.includes('无明显故障模式')))
+    .filter((lesson): lesson is string =>
+      Boolean(lesson && !lesson.includes('无需特别调整') && !lesson.includes('无明显故障模式') && !isTemplateNoise(lesson)))
 
   return unique(candidates)
     .slice(0, maxBullets)

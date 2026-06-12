@@ -75,7 +75,10 @@ function createMockRegistry(fingerprints: Array<{ sessionId: string; createdAt: 
 }
 
 describe('createPlaybookReflectHook', () => {
-  it('stores extracted bullets when reflection criteria are met (full mode)', () => {
+  it('does not store template-only retrospect output (full mode harvests no canned lines)', () => {
+    // retrospect.ts sections 3/4 are 100% static template strings, so
+    // extractBullets yields nothing real; with no cross-session patterns the
+    // hook must store zero bullets rather than persisting boilerplate noise.
     withStore((store) => {
       const phases: Array<{ phase: string; suggestion?: string }> = []
       const registry = createMockRegistry()
@@ -89,10 +92,10 @@ describe('createPlaybookReflectHook', () => {
 
       hook.run(ctx(phases))
 
-      const bullets = store.load()
-      assert.ok(bullets.length > 0)
-      assert.equal(phases[0]!.phase, 'playbook-reflect')
-      assert.ok(phases[0]!.suggestion?.includes('lesson(s)'))
+      // Template boilerplate is blocked at the gate → nothing harvested,
+      // nothing stored, no phase emitted (hook early-returns).
+      assert.equal(store.load().length, 0)
+      assert.equal(phases.length, 0)
     })
   })
 
