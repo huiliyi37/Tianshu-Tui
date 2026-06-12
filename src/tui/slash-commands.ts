@@ -27,6 +27,7 @@ import { homedir } from 'node:os'
 import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
+import { formatReviewHealthLine } from '../agent/review-health.js'
 
 const HELP_TEXT = `Available commands:
 /help — Show this help
@@ -220,6 +221,8 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       } else {
         lines.push('(no bandit state available — run bootstrap first)')
       }
+      lines.push('', 'Review Infra Health', '═══════════════════════')
+      lines.push(formatReviewHealthLine())
       pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
       setIsStreaming(false)
       return true

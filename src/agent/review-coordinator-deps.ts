@@ -224,10 +224,11 @@ type InspectorStance = 'dataflow' | 'pathBoundary' | 'wiring'
 
 const WIRING_INSPECTOR_METHOD = [
   'Method (run these checks, cite file:line evidence for each):',
-  '1. For every new param/field/setter/config flag in the diff: grep ALL call sites — zero callers passing/reading it means dead wiring, report it.',
-  '2. For every gate/filter condition: enumerate the real runtime input shapes (relative vs absolute paths, missing optional fields, empty collections) and estimate the pass rate — ~0% = silently disabled feature, ~100% = no-op gate.',
-  '3. For every stated goal (less noise / fewer calls / faster): construct the before/after scenario and verify the metric actually moves in the stated direction.',
-  '4. For removed call sites: check the producer/setter/field left behind is also removed or still has a live consumer.',
+  '1. Entry-anchor closure: FIRST identify the target project\'s real production entrypoint(s) — package.json bin/main/start scripts, server boot file, CLI entry, or framework entry convention (next/vite/django app root). THEN trace FORWARD from that entry through the composition root (bootstrap / DI container / route registration / constructor & param chain) to each changed symbol, hop by hop. A hookup found only in a legacy or parallel entrypoint, example/script code, or tests is NOT closure evidence; in multi-entry projects (CLI+server, old+new UI) confirm the hookup sits on the entry chain this change actually affects. No forward path from a live entry to the change = dead wiring, report HIGH.',
+  '2. For every new param/field/setter/config flag in the diff: grep ALL call sites — zero callers passing/reading it means dead wiring, report it.',
+  '3. For every gate/filter condition: enumerate the real runtime input shapes (relative vs absolute paths, missing optional fields, empty collections) and estimate the pass rate — ~0% = silently disabled feature, ~100% = no-op gate.',
+  '4. For every stated goal (less noise / fewer calls / faster): construct the before/after scenario and verify the metric actually moves in the stated direction.',
+  '5. For removed call sites: check the producer/setter/field left behind is also removed or still has a live consumer.',
 ].join('\n')
 
 const INSPECTORS: Array<{ name: string; objective: string; stances: InspectorStance[]; method?: string }> = [

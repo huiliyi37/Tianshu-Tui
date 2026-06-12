@@ -59,10 +59,14 @@ export interface ReviewRouterOptions {
 
 export interface ReviewOutcome {
   tier: ReviewScale | 'auto'
-  verdict: ReviewVerdict | 'nudge'
+  /** 'inconclusive' (auto only): the review DID NOT run — infra failure, no
+   *  usable verdict. Renderers must never describe this as verified. */
+  verdict: ReviewVerdict | 'nudge' | 'inconclusive'
   evidence?: string
   escalated?: boolean
   rounds?: number
+  /** True when the auto-mode quick retry recovered a usable verdict. */
+  recoveredByRetry?: boolean
   /** Non-code review infrastructure caveats from L3 squadron workers. */
   infraFailures?: ReviewInfraFailure[]
 }
@@ -146,26 +150,66 @@ export async function routeReviewWorkflow(
   if (options.mode === 'auto') {
     if (isTrivialChange(change.files)) return { tier: 'auto', verdict: 'nudge' }
     if (!deps.spawnWiringReviewer) return { tier: 'auto', verdict: 'nudge' }
-    const wiring = await deps.spawnWiringReviewer(change, signal)
-    const infraFailures = wiring.infraFailures ?? []
+
+    // "The review did not run": no findings at all AND infra failures present.
+    // For the single wiring inspector this means its output was unusable.
+    const reviewDidNotRun = (w: SquadronResult): boolean =>
+      w.findings.length === 0 && (w.infraFailures?.length ?? 0) > 0
+
+    let wiring = await deps.spawnWiringReviewer(change, signal)
+    let infraFailures = wiring.infraFailures ?? []
+    let recoveredByRetry = false
+    let attempts = 1
+
+    // Quick in-budget retry on infra failure (worker crash / bad JSON).
+    // Skip when the first attempt timed out (budget is likely exhausted) or
+    // the workflow was aborted. The outer reviewWorkflowBudgetMs race in
+    // deliver-task still caps total wall-clock, so the retry can never extend
+    // the delivery block beyond the existing budget.
+    const firstAttemptTimedOut = infraFailures.some(f => f.kind === 'timeout')
+    if (reviewDidNotRun(wiring) && !firstAttemptTimedOut && !signal?.aborted) {
+      attempts = 2
+      const retry = await deps.spawnWiringReviewer(change, signal)
+      if (!reviewDidNotRun(retry)) {
+        wiring = retry
+        infraFailures = retry.infraFailures ?? []
+        recoveredByRetry = true
+      } else {
+        infraFailures = [...infraFailures, ...(retry.infraFailures ?? [])]
+      }
+    }
+
     if (hasBlockingSquadronFinding(wiring)) {
       return {
         tier: 'auto',
         verdict: 'rejected',
         evidence: summarizeSquadronFindings(wiring),
-        rounds: 0,
+        rounds: attempts,
+        ...(recoveredByRetry ? { recoveredByRetry } : {}),
         ...(infraFailures.length > 0 ? { infraFailures } : {}),
       }
     }
-    // Fail-open on infra: a crashed/timed-out auto reviewer must not block
-    // delivery — surface the caveat and let the commit proceed.
+    // Infra failure with no usable verdict: report honestly as inconclusive.
+    // Fail-open (delivery proceeds) but NEVER described as verified — the
+    // previous wording ("delivery verified by available evidence") let a dead
+    // defense line masquerade as a passed review (session 803d897d, T3).
+    if (reviewDidNotRun(wiring)) {
+      return {
+        tier: 'auto',
+        verdict: 'inconclusive',
+        evidence: `review DID NOT run (infra failure${attempts > 1 ? '; retry also failed' : ''}): ${summarizeInfraFailures(infraFailures)}`,
+        rounds: attempts,
+        infraFailures,
+      }
+    }
     return {
       tier: 'auto',
       verdict: 'verified',
-      evidence: infraFailures.length > 0
-        ? 'auto wiring review inconclusive (infra failure) — delivery not blocked'
+      evidence: recoveredByRetry
+        ? 'auto wiring review: no blocking findings (recovered by retry after infra failure)'
         : 'auto wiring review: no blocking findings',
-      rounds: 0,
+      rounds: attempts,
+      ...(recoveredByRetry ? { recoveredByRetry } : {}),
       ...(infraFailures.length > 0 ? { infraFailures } : {}),
     }
   }

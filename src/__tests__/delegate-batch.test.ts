@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createDelegateBatchTool, progressiveTaskCap } from '../tools/delegate-batch.js'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { profileRegistry } from '../agent/profile-registry.js'
+import { WORKER_EXIT_GRACE_MS } from '../agent/timeout-ladder.js'
 import type { ClaimProposal } from '../context/claims.js'
 
 function makeFiveTasks(): Array<{ objective: string; kind: string; profile: string }> {
@@ -137,23 +138,24 @@ describe('delegate_batch tool', () => {
 
   describe('progressive timeout', () => {
     const base = { input: {}, toolUseId: 'tu', cwd: '/tmp' }
+    const GRACE = WORKER_EXIT_GRACE_MS
 
-    it('returns 60s for turn 0-1 (cold open)', () => {
+    it('returns 60s+grace for turn 0-1 (cold open)', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 60_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 60_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 60_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 60_000 + GRACE)
     })
 
-    it('returns 120s for turn 2-4 (warming)', () => {
+    it('returns 120s+grace for turn 2-4 (warming)', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 120_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 120_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 120_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 120_000 + GRACE)
     })
 
-    it('returns 180s for turn 5+ (mature)', () => {
+    it('returns 180s+grace for turn 5+ (mature)', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 180_000)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 20 }), 180_000)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 180_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 20 }), 180_000 + GRACE)
     })
 
     it('is arithmetic (common difference 60s)', () => {
@@ -165,10 +167,10 @@ describe('delegate_batch tool', () => {
       assert.equal(mature - warming, 60_000)
     })
 
-    it('defaults to mature (180s) when sessionTurnCount is undefined', () => {
+    it('defaults to mature (180s+grace) when sessionTurnCount is undefined', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
-      assert.equal(tool.timeoutMs?.(base), 180_000)
-      assert.equal(tool.timeoutMs?.(), 180_000)
+      assert.equal(tool.timeoutMs?.(base), 180_000 + GRACE)
+      assert.equal(tool.timeoutMs?.(), 180_000 + GRACE)
     })
   })
 

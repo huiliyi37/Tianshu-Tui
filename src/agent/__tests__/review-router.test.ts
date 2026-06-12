@@ -231,18 +231,58 @@ describe('routeReviewWorkflow', () => {
       assert.match(outcome.evidence ?? '', /dead param/)
     })
 
-    it('fails open on infra failures — auto review must not block delivery', async () => {
+    it('fails open on infra failures as INCONCLUSIVE — never claims verified', async () => {
+      let calls = 0
       const outcome = await routeReviewWorkflow(codeChange, {
         ...okDeps,
-        spawnWiringReviewer: async () => ({
-          findings: [],
-          infraFailures: [{ kind: 'timeout', claim: 'wiring reviewer timed out' }],
-        }),
+        spawnWiringReviewer: async () => {
+          calls++
+          return {
+            findings: [],
+            infraFailures: [{ kind: 'timeout', claim: 'wiring reviewer timed out' }],
+          }
+        },
       }, { mode: 'auto' })
 
-      assert.equal(outcome.verdict, 'verified')
+      assert.equal(outcome.verdict, 'inconclusive', 'infra failure must not produce a verified verdict')
       assert.equal(outcome.infraFailures?.length, 1)
-      assert.match(outcome.evidence ?? '', /not blocked|inconclusive/)
+      assert.match(outcome.evidence ?? '', /DID NOT run/)
+      assert.doesNotMatch(outcome.evidence ?? '', /verified/i)
+      assert.equal(calls, 1, 'timeout infra failure must NOT be retried — budget is exhausted')
+    })
+
+    it('retries once on non-timeout infra failure and recovers a real verdict', async () => {
+      let calls = 0
+      const outcome = await routeReviewWorkflow(codeChange, {
+        ...okDeps,
+        spawnWiringReviewer: async () => {
+          calls++
+          if (calls === 1) {
+            return { findings: [], infraFailures: [{ kind: 'json', claim: 'non-JSON worker output' }] }
+          }
+          return { findings: [], infraFailures: [] }
+        },
+      }, { mode: 'auto' })
+
+      assert.equal(calls, 2, 'one quick retry on worker/json infra failure')
+      assert.equal(outcome.verdict, 'verified')
+      assert.equal(outcome.recoveredByRetry, true)
+    })
+
+    it('stays inconclusive when the retry also fails, accumulating failure kinds', async () => {
+      let calls = 0
+      const outcome = await routeReviewWorkflow(codeChange, {
+        ...okDeps,
+        spawnWiringReviewer: async () => {
+          calls++
+          return { findings: [], infraFailures: [{ kind: 'worker', claim: `attempt ${calls} crashed` }] }
+        },
+      }, { mode: 'auto' })
+
+      assert.equal(calls, 2)
+      assert.equal(outcome.verdict, 'inconclusive')
+      assert.equal(outcome.infraFailures?.length, 2, 'both attempts recorded')
+      assert.match(outcome.evidence ?? '', /retry also failed/)
     })
 
     it('keeps trivial docs/test-only changes at nudge with no child agents', async () => {
