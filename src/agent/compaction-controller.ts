@@ -860,4 +860,64 @@ export class CompactionController {
       this._llmCompactInFlight = false
     }
   }
+
+  /**
+   * Build a structured handoff text from current session state.
+   * Called by AgentLoop.runPostSession to persist for the next session.
+   */
+  buildSessionHandoff(): string {
+    const messages = this.deps.session.getMessages()
+    const trajectory = this.deps.getTrajectoryEntries()
+    const streamedText = this.deps.getStreamedText()
+    const taskState = extractTaskState(trajectory, streamedText)
+    const turnCount = this.deps.session.getTurnCount()
+
+    // Extract files seen from user + assistant messages
+    const filesSeen = new Set<string>()
+    for (const m of messages) {
+      if (m.role === 'user' && typeof m.content === 'string') {
+        const matches = m.content.matchAll(/(?:^|\s)([a-zA-Z0-9_./-]+\.(?:ts|tsx|js|jsx|py|md|json|yaml|yml))/g)
+        for (const match of matches) {
+          if (match[1]) filesSeen.add(match[1])
+        }
+      }
+    }
+
+    // Extract errors from trajectory
+    const errors: StructuredHandoffInput['errors'] = trajectory
+      .filter(t => t.status === 'failed' || t.status === 'retried-failed')
+      .map(t => ({
+        turn: t.turn,
+        tool: t.tool,
+        target: t.target,
+        errorClass: t.errorClass ?? 'unknown',
+        summary: t.resultSummary.slice(0, 120),
+      }))
+
+    // Build tool history
+    const toolHistory: StructuredHandoffInput['toolHistory'] = trajectory.map(t => ({
+      tool: t.tool,
+      target: t.target,
+      status: t.status,
+    }))
+
+    const reasoningParts: string[] = []
+    for (const m of messages) {
+      if (m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()) {
+        reasoningParts.push(m.content)
+      }
+    }
+    const reasoningSnippet = reasoningParts.slice(-3).join('\n')
+
+    return buildStructuredHandoff({
+      taskState,
+      turnCount,
+      filesSeen: [...filesSeen].sort(),
+      reasoningSnippet,
+      errorCount: errors.length,
+      errors,
+      toolHistory,
+      stanceSummary: this.deps.getStanceSummary?.() ?? null,
+    })
+  }
 }

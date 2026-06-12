@@ -181,4 +181,6 @@ export interface SessionMetadata {
   turnCount?: number
   /** Total tool calls executed */
   toolCallCount?: number
+  /** Star-domain id for cross-session handoff routing (e.g. 'tianji', 'tanlang') */
+  domain?: string
 }

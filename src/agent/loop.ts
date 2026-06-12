@@ -1164,6 +1164,22 @@ export class AgentLoop {
         db.saveBanditState('p3:plan_cache', this.p3.serializePlanCache())
       }
     } catch { /* non-critical */ }
+
+    // Persist structured handoff for the next session
+    try {
+      const handoffText = this.compaction.buildSessionHandoff()
+      const sp = this.persist
+      if (sp) {
+        sp.writeHandoff(handoffText)
+        const domainId = this.sessionDomain?.id
+        if (domainId) sp.updateMetadata({ domain: domainId })
+      }
+      if (sp) {
+        sp.writeHandoff(handoffText)
+        const domainId = this.sessionDomain?.id
+        if (domainId) sp.updateMetadata({ domain: domainId })
+      }
+    } catch { /* non-critical */ }
   }
 
   private async startFsWatcher(): Promise<void> {
@@ -1502,8 +1518,16 @@ export class AgentLoop {
         }
         const claimLines = [...grouped.entries()].map(([file, holders]) =>
           `  ${file} — claimed by ${holders.join(', ')}`)
-        appendix = (appendix ? appendix + '\n' : '') +
-          `<cross-session-claims count="${claims.length}">\n${claimLines.join('\n')}\n</cross-session-claims>`
+      }
+      if (this.persist) {
+        const prevHandoff = SessionPersist.loadPrevHandoff(
+          this.config.sessionId,
+          this.sessionDomain?.id,
+        )
+        if (prevHandoff) {
+          appendix = (appendix ? appendix + '\n' : '') +
+            '<prev-session-handoff>\n' + prevHandoff + '\n</prev-session-handoff>'
+        }
       }
       this.config.promptEngine.setCrossSessionEvents(appendix || null)
     }

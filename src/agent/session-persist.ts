@@ -470,6 +470,42 @@ export class SessionPersist {
     }
   }
 
+  /** Write structured handoff text for this session. */
+  writeHandoff(text: string): void {
+    const handoffPath = join(getSessionDir(), `${this.sessionId}.handoff.md`)
+    writeFileAtomicSync(handoffPath, text)
+  }
+
+  /**
+   * Load the most relevant previous session's handoff text.
+   * Routes by domain if both sessions have a domain tag; otherwise falls back
+   * to the most recently updated session. Returns null if none found.
+   */
+  static loadPrevHandoff(currentSessionId: string, currentDomain?: string): string | null {
+    const sessions = SessionPersist.listSessionsWithMetadata()
+      .filter(s => s.id !== currentSessionId)
+    if (sessions.length === 0) return null
+
+    // Prefer same-domain sessions; fall back to all
+    let candidates = sessions
+    if (currentDomain) {
+      const sameDomain = sessions.filter(s => s.domain === currentDomain)
+      if (sameDomain.length > 0) candidates = sameDomain
+    }
+
+    // listSessionsWithMetadata already sorts by updatedAt desc
+    const prev = candidates[0]
+    if (!prev) return null
+
+    const handoffPath = join(getSessionDir(), `${prev.id}.handoff.md`)
+    if (!existsSync(handoffPath)) return null
+    try {
+      return readFileSync(handoffPath, 'utf-8')
+    } catch {
+      return null
+    }
+  }
+
   /** List all session files */
   static listSessions(): string[] {
     ensureDir(getSessionDir())
