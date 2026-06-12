@@ -44,6 +44,9 @@ test('claude truecolor palette mirrors Claude Code darkTheme RGB values', () => 
   assert.equal(t.pulseQuiet, '#888888', 'pulseQuiet must equal Claude Code promptBorder: rgb(136,136,136)')
   assert.equal(t.pulseActive, '#d77757', 'pulseActive must mirror primary (Claude brand orange)')
   assert.equal(t.pulseAlert, '#ff6b80', 'pulseAlert must mirror error')
+  // assistantColor = neutral gray-white (Claude text rgb(217,217,217)), NOT violet —
+  // violet is a small badge in upstream; full-body violet clashed with amber tools.
+  assert.equal(t.assistantColor, '#d9d9d9', 'assistantColor must be Claude text neutral gray, not violet')
 })
 
 test('claude fallback uses dark-ansi 16-color palette (ANSI改造 alignment)', () => {
@@ -55,6 +58,7 @@ test('claude fallback uses dark-ansi 16-color palette (ANSI改造 alignment)', (
   assert.equal(t.success, 'greenBright', 'fallback success = greenBright')
   assert.equal(t.warning, 'yellowBright', 'fallback warning = yellowBright')
   assert.equal(t.error, 'redBright', 'fallback error = redBright')
+  assert.equal(t.assistantColor, 'white', 'fallback assistantColor = white (neutral, not magentaBright)')
   assert.equal(t.dim, 'white', 'fallback dim = white (subtle: ansi:white in dark-ansi)')
   assert.equal(t.pulseQuiet, 'white', 'fallback pulseQuiet = white (promptBorder)')
   assert.equal(t.pulseActive, 'redBright', 'fallback pulseActive = redBright')

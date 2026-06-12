@@ -289,10 +289,12 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
   },
   claude: {
     // userColor = Claude brand orange (matches primary — user ▌ mark reuses brand hue);
-    // assistantColor = Claude secondary violet;
+    // assistantColor = Claude text rgb(217,217,217) neutral gray-white — the assistant
+    //   body is NOT violet in upstream; autoAccept violet is a small badge only.
+    //   Using violet for the full message body clashed with amber warning tools.
     // muted = Claude `inactive` rgb(153,153,153) → #999999.
-    truecolor: buildTheme(CLAUDE_TRUECOLOR, { userColor: '#d77757', assistantColor: '#af87ff', muted: '#999999' }),
-    fallback: buildTheme(CLAUDE_FALLBACK, { userColor: 'redBright', assistantColor: 'magentaBright' }),
+    truecolor: buildTheme(CLAUDE_TRUECOLOR, { userColor: '#d77757', assistantColor: '#d9d9d9', muted: '#999999' }),
+    fallback: buildTheme(CLAUDE_FALLBACK, { userColor: 'redBright', assistantColor: 'white' }),
   },
 }
 
