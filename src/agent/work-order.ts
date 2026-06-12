@@ -4,6 +4,7 @@ import type { CapabilityTask } from '../model/capability.js'
 import type { VerificationMetadata } from '../tools/types.js'
 import { profileRegistry } from './profile-registry.js'
 import { starDomainRegistry } from './star-domain-registry.js'
+import { progressiveTimeout } from './timeout-ladder.js'
 
 export const READ_ONLY_WORKER_TOOLS = ['read_file', 'read_section', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'repo_graph', 'related_tests'] as const
 
@@ -201,6 +202,8 @@ export interface CreateReadOnlyWorkOrderInput {
   authority?: string
   /** Team planner risk tier for shadow-only model tier recommendation. */
   riskTier?: 'low' | 'medium' | 'high'
+  /** B2: current session turn for progressive timeout calculation. */
+  sessionTurn?: number
 }
 
 function toolsForAuthority(tools: string[], authority?: string): string[] {
@@ -252,8 +255,8 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
       maxTurns: input.budget?.maxTurns ?? 8,
-      maxTokens: input.budget?.maxTokens ?? 4096,
-      timeoutMs: input.budget?.timeoutMs ?? 180_000,
+      maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile)?.defaultMaxTokens ?? 4096,
+      timeoutMs: input.budget?.timeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 2,
     },
     domain: input.domain,
@@ -294,8 +297,8 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
       maxTurns: input.budget?.maxTurns ?? 8,
-      maxTokens: input.budget?.maxTokens ?? 16384,
-      timeoutMs: input.budget?.timeoutMs ?? 180_000,
+      maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultMaxTokens ?? 16384,
+      timeoutMs: input.budget?.timeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 1,
     },
     domain: input.domain,

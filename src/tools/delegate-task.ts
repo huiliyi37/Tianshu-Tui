@@ -96,6 +96,7 @@ export function createDelegateTaskTool(
         },
         reviewDepth: params.reviewDepth,
         delegationDepth: params.delegationDepth ?? 0,
+        sessionTurn: params.sessionTurnCount,
         // T9 P3: stream live worker progress into the tool card.
         onActivity: params.onOutput ? createActivityStreamer(params.onOutput) : undefined,
       }, params.abortSignal)

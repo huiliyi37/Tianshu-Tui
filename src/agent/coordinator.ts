@@ -103,6 +103,8 @@ export interface DelegationRequest {
   authority?: string
   /** Team planner risk tier for shadow-only model tier recommendation. */
   riskTier?: ModelRiskTier
+  /** B2: current session turn for progressive timeout alignment. */
+  sessionTurn?: number
 }
 
 export interface CoordinatorRun {
@@ -595,6 +597,7 @@ export class DelegationCoordinator {
             dependencies: request.dependencies,
             authority: request.authority,
             riskTier: request.riskTier,
+            sessionTurn: request.sessionTurn,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -608,6 +611,7 @@ export class DelegationCoordinator {
             dependencies: request.dependencies,
             authority: request.authority,
             riskTier: request.riskTier,
+            sessionTurn: request.sessionTurn,
           })
 
       // T9 P3: callbacks don't survive zod parsing — stash by order id.
@@ -1022,6 +1026,7 @@ export class DelegationCoordinator {
             dependencies: r.dependencies,
             authority: r.authority,
             riskTier: r.riskTier,
+            sessionTurn: r.sessionTurn,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -1035,6 +1040,7 @@ export class DelegationCoordinator {
             dependencies: r.dependencies,
             authority: r.authority,
             riskTier: r.riskTier,
+            sessionTurn: r.sessionTurn,
           })
       if (queue.enqueue(order)) {
         orders.push(order)

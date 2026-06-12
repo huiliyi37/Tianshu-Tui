@@ -160,6 +160,7 @@ export function createDelegateBatchTool(
         scope: { files: t.files, symbols: t.symbols },
         reviewDepth: params.reviewDepth,
         delegationDepth: params.delegationDepth ?? 0,
+        sessionTurn: params.sessionTurnCount,
         onActivity: streamActivity,
       }))
 
