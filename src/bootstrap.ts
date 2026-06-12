@@ -90,6 +90,8 @@ export interface RuntimeRefs {
   meridianIndexer: MeridianIndexer | null
   mcpManager: any | null
   lspManager: ReturnType<typeof createLspManager> | null
+  /** T5: bandit promotion state for /status observability. */
+  banditState: import('./server/routes.js').BanditStatusEntry[] | null
 }
 
 /** bootstrapInteractiveSession 的聚合返回值 */
@@ -522,6 +524,15 @@ export function createAgentRuntime(deps: {
     store: promotionStore,
   })
 
+  // T5: expose bandit state for /status observability
+  refs.banditState = [modelTierGate, modelRoutingGate, effortGate].map(g => ({
+    source: g.source,
+    mode: g.mode,
+    enabled: g.enabled,
+    reason: g.reason,
+    totalShadowSamples: g.evidence.totalShadowSamples,
+  }))
+
   refs.coordinator = new DelegationCoordinator({
     baseToolRegistry: toolRegistry,
     modelCards,
@@ -902,6 +913,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     meridianIndexer,
     mcpManager: null,
     lspManager: null,
+    banditState: null,
   }
 
   // 10. Tool registry

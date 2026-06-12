@@ -4,12 +4,22 @@ import { buildPromptHandler } from './prompt-route.js'
 import { buildTaskRoutes, type TaskRoutesDeps } from './task-routes.js'
 import { isAuthorizedRequest } from './auth.js'
 
+export interface BanditStatusEntry {
+  source: string
+  mode: string
+  enabled: boolean
+  reason: string
+  totalShadowSamples: number
+}
+
 export interface ServerState {
   running: boolean
   sessionId?: string
   abort?: () => void
   /** Shared Bearer token for all server routes. Missing token means fail-closed. */
   apiToken?: string
+  /** T5: bandit promotion state for /status observability. */
+  banditState?: BanditStatusEntry[]
 }
 
 function unauthorized() {
@@ -28,7 +38,11 @@ export function createRoutes(state: ServerState, deps?: PromptRouteDeps, taskDep
   const routes: Record<string, RouteHandler> = {
     'GET /status': withAuth(() => ({
       status: 200,
-      body: { running: state.running, sessionId: state.sessionId ?? null },
+      body: {
+        running: state.running,
+        sessionId: state.sessionId ?? null,
+        ...(state.banditState ? { bandit: state.banditState } : {}),
+      },
     }), apiToken),
 
     'POST /abort': withAuth(() => {

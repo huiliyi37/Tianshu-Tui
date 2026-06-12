@@ -3,9 +3,10 @@ import { recommendModelForTask } from '../model/capability.js'
 import type { ProviderConfig } from '../config/schema.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import { ProviderHealthTracker } from './provider-health.js'
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { debugLog } from '../utils/debug.js'
 import {
   createReadOnlyWorkOrder,
@@ -190,6 +191,8 @@ export interface DelegationCoordinatorConfig {
   workerStallMs?: number
   /** Injectable clock for liveness tests. */
   livenessClock?: () => number
+  /** T5: enable fingerprint-based result resume. Default true; set false in tests. */
+  resumeEnabled?: boolean
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -213,11 +216,16 @@ function workerFailureResult(order: WorkOrder, error: unknown): WorkerResult {
 }
 
 /** Persist worker result to ~/.rivet/subagents/<orderId>.json for future resume/inspection. */
-function persistWorkerResult(result: WorkerResult): void {
+function persistWorkerResult(result: WorkerResult, fingerprint?: string): void {
   try {
     const dir = join(homedir(), '.rivet', 'subagents')
     mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, `${result.workOrderId}.json`), JSON.stringify(result, null, 2), 'utf-8')
+    const json = JSON.stringify(result, null, 2)
+    writeFileSync(join(dir, `${result.workOrderId}.json`), json, 'utf-8')
+    // T5: also write a fingerprint-indexed copy for resume lookup
+    if (fingerprint) {
+      writeFileSync(join(dir, `${fingerprint}.json`), json, 'utf-8')
+    }
   } catch {
     // Best-effort: never block primary session on persistence failure
   }
@@ -234,6 +242,36 @@ export function loadPersistedResult(orderId: string, homeDir = homedir()): Worke
   } catch {
     return null
   }
+}
+
+/** T5: fingerprint a delegation request for result reuse. */
+function fingerprintRequest(objective: string, files: string[] | undefined, profile: string): string {
+  const key = `${objective}|${(files ?? []).sort().join(',')}|${profile}`
+  return createHash('sha256').update(key).digest('hex').slice(0, 16)
+}
+
+/** T5: scan ~/.rivet/subagents/ for a matching completed result within the last hour. */
+function tryResumeWorkerResult(
+  objective: string,
+  files: string[] | undefined,
+  profile: string,
+  nowMs: number,
+  homeDir = homedir(),
+): WorkerResult | null {
+  const fp = fingerprintRequest(objective, files, profile)
+  const path = join(homeDir, '.rivet', 'subagents', `${fp}.json`)
+  if (!existsSync(path)) return null
+  try {
+    const stat = statSync(path)
+    if (nowMs - stat.mtimeMs > 3_600_000) return null
+    const result = parseWorkerResult(readFileSync(path, 'utf-8'), fp)
+    if (result && result.status === 'passed') {
+      return { ...result, summary: `[resumed] ${result.summary}` }
+    }
+  } catch {
+    // Corrupt file — skip
+  }
+  return null
 }
 
 /** B3: max delegation nesting depth — primary(0) → worker(1) → grand-worker(2 ✗).
@@ -582,6 +620,18 @@ export class DelegationCoordinator {
           status: 'skipped',
           results: [],
           packet: await buildPrimaryWorkerPacket([]),
+        }
+      }
+
+      // T5: fingerprint-based resume — reuse a recently completed identical worker result
+      const resumeHit = this.config.resumeEnabled !== false
+        ? tryResumeWorkerResult(request.objective, request.scope.files, request.profile, Date.now())
+        : null
+      if (resumeHit) {
+        return {
+          status: 'completed',
+          results: [resumeHit],
+          packet: await buildPrimaryWorkerPacket([resumeHit]),
         }
       }
 
@@ -1062,8 +1112,9 @@ export class DelegationCoordinator {
     }
 
     // D1: persist worker result to ~/.rivet/subagents/ for future resume/inspection
+    const fp = fingerprintRequest(order.objective, order.scope.files, order.profile)
     for (const r of results) {
-      persistWorkerResult(r)
+      persistWorkerResult(r, fp)
     }
 
     return {
