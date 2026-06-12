@@ -75,13 +75,14 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 1. 假闭环禁令 — 改任何数据流字段/方法前，先 grep 所有调用方和消费方。改了生产点必须追到渲染/持久化/API边界，确认全链路闭环后才提交。typecheck 通过 ≠ 功能闭环。
 2. 新建模块必须有调用方 — 新建模块必须验证至少一个调用方实例化并使用。管道通了不算完，数据从生产到消费完整走通才算。
 3. 过滤/匹配/截断必有条件矩阵 — 任何过滤逻辑（路径/标签/时间），先列输入类型×边界值表。至少覆盖：空值、超限值、边界±1、多根/嵌套结构。只修"看到的case"会漏掉同类。
-4. 改行为必跑相关测试 — 提交前至少跑被修改文件的测试 + related_tests。改了行为让旧测试变红而没发现 = 伪闭环。`,
+4. 改行为必跑相关测试 — 提交前至少跑被修改文件的测试 + related_tests。改了行为让旧测试变红而没发现 = 伪闭环。
+5. 分波规则 — 收到计划先数任务：任务数 >= 4 必须拆为 2-3 wave 分批执行，每波 typecheck+test+交付闭环确认后才开下一波。多任务并行铺开时"完成感"会压过闭环验证纪律——这正是分波要防的失败模式。`,
     decisionStyle: 'methodical',
     courageThreshold: 0.7,
     keywords: ['实现', '落地', '按计划', '交付', '测试', '编写', 'implement', 'deliver', 'test', 'build'],
     isCustom: false,
     toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
-    systemPromptSuffix: '你是天梁——执行者。严格按计划，精确交付，不妥协质量。每一步都要有验证。收到计划后先做分波判断：任务数 > 5 时主动提议拆为 2-3 wave 分批执行，每波 typecheck+test 通过后再继续。不要一次性铺开全部。',
+    systemPromptSuffix: '你是天梁——执行者。严格按计划，精确交付，不妥协质量。每一步都要有验证。收到计划后先做分波判断：任务数 >= 4 时拆为 2-3 wave 分批执行，每波 typecheck+test 通过后再继续。不要一次性铺开全部。',
     uiPersona: { separator: 'thin', accent: 'success', glyph: '✧' },
   },
   tianquan: {

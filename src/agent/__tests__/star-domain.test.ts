@@ -95,3 +95,17 @@ describe('buildActiveDomain', () => {
     assert.equal(buildActiveDomain('帮我看看'), null)
   })
 })
+
+describe('tianliang main-session discipline (E-fix, session 803d897d)', () => {
+  it('carries the wave-split rule in volatileBlock so the MAIN session sees it', () => {
+    const tianliang = STAR_DOMAINS.tianliang
+    assert.match(tianliang.volatileBlock, /分波规则/, 'wave-split rule must live in the main-session-visible volatileBlock, not only in the worker-only systemPromptSuffix')
+    assert.match(tianliang.volatileBlock, />= 4/, 'threshold is >=4 — a 5-task plan in one batch was the observed failure mode')
+  })
+
+  it('aligns the worker suffix threshold with the volatileBlock (>=4)', () => {
+    const tianliang = STAR_DOMAINS.tianliang
+    assert.match(tianliang.systemPromptSuffix, />= 4/)
+    assert.doesNotMatch(tianliang.systemPromptSuffix, /> 5/)
+  })
+})
