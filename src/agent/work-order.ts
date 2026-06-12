@@ -256,7 +256,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     budget: {
       maxTurns: input.budget?.maxTurns ?? 8,
       maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile)?.defaultMaxTokens ?? 4096,
-      timeoutMs: input.budget?.timeoutMs ?? progressiveTimeout(input.sessionTurn),
+      timeoutMs: input.budget?.timeoutMs ?? profileRegistry.get(input.profile)?.defaultTimeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 2,
     },
     domain: input.domain,
@@ -298,7 +298,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     budget: {
       maxTurns: input.budget?.maxTurns ?? 8,
       maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultMaxTokens ?? 16384,
-      timeoutMs: input.budget?.timeoutMs ?? progressiveTimeout(input.sessionTurn),
+      timeoutMs: input.budget?.timeoutMs ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultTimeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 1,
     },
     domain: input.domain,

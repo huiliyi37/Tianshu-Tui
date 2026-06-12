@@ -24,6 +24,9 @@ export interface ProfileDefinition {
   defaultKind?: string
   /** 默认 maxTokens budget */
   defaultMaxTokens?: number
+  /** 默认 timeout budget (ms)。review/plan 型 profile 应远大于 code_scout。
+   *  不设置时回退到 progressiveTimeout(sessionTurn)。 */
+  defaultTimeoutMs?: number
   /** 是否为内置 profile */
   builtIn?: boolean
 }
@@ -61,6 +64,7 @@ Do NOT modify any files.`,
     allowedTools: ['delegate_task', 'delegate_batch'],
     expertisePrompt: `You are a planner. Analyze the task, decompose it, and delegate to appropriate workers. You have access to delegation tools only.`,
     defaultKind: 'plan',
+    defaultTimeoutMs: 600_000, // 10min — plan/decompose needs deep thinking
     builtIn: true,
   },
   {
@@ -68,6 +72,7 @@ Do NOT modify any files.`,
     role: 'readonly',
     allowedTools: [...READ_ONLY_TOOLS],
     expertisePrompt: `You are a code reviewer. Read the code carefully, identify issues, and provide actionable feedback.`,
+    defaultTimeoutMs: 600_000, // 10min — review needs thorough analysis
     builtIn: true,
   },
   {
@@ -120,6 +125,7 @@ End every verification with:
 \`\`\`
 If failed or blocked, include: "counterexample": "the specific input/scenario that triggered the failure"`,
     defaultMaxTokens: 16384,
+    defaultTimeoutMs: 600_000, // 10min — adversarial verification requires deep probing
     defaultKind: 'verify',
     builtIn: true,
   },

@@ -211,8 +211,17 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
       // Abort wins over repair: never re-run an aborted worker.
       if (wasAborted()) {
+        // Preserve partial work — when budget timer fires, the worker may have
+        // already generated substantial analysis. Return it alongside the blocked
+        // status so the primary agent can read whatever was completed.
+        const partialSummary = latestText.slice(0, 500)
         return {
-          result: buildBlockedWorkerResult(config.order, 'Worker aborted (budget timeout or parent signal)'),
+          result: {
+            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}`),
+            artifacts: [
+              { kind: 'note' as const, title: 'Aborted worker partial output', content: latestText.slice(0, 2000) },
+            ],
+          },
           transcript,
           session,
           usage: session.getTotalUsage(),
@@ -230,8 +239,14 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
         const message = error instanceof Error ? error.message : String(error)
         transcript.errors.push(message)
         if (attempt === config.order.budget.maxRetries) {
+          const partialSummary = latestText.slice(0, 300)
           return {
-            result: buildBlockedWorkerResult(config.order, message),
+            result: {
+              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}`),
+              artifacts: [
+                { kind: 'note' as const, title: 'Unparseable worker output', content: latestText.slice(0, 2000) },
+              ],
+            },
             transcript,
             session,
             usage: session.getTotalUsage(),
