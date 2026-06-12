@@ -99,6 +99,7 @@ export interface SlashHandlerContext {
   claimStoreRef: React.MutableRefObject<ContextClaimStore | null>
   setReasoningEffort?: (effort: import('../agent/auto-reasoning.js').ReasoningEffort) => void
   reasoningEffort?: string
+  onDomainChange?: (domainName: string | undefined) => void
   /** T5: bandit promotion state for /status observability. */
   banditState?: import('../server/routes.js').BanditStatusEntry[]
 }
@@ -356,9 +357,11 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         pushStatic(createLogEntry({ type: 'system', content: `星域一览\n\n${lines.join('\n\n')}\n\n使用 /domain <id|名称> 切换，/domain auto 恢复自动检测。` }))
       } else if (sub === 'auto') {
         ctx.agent.resetSessionDomain()
+        ctx.onDomainChange?.(undefined)
         pushStatic(createLogEntry({ type: 'system', content: '星域已重置为自动检测模式。下一次对话将根据输入内容自动匹配星域。' }))
       } else if (sub === 'off' || sub === 'none') {
         ctx.agent.setSessionDomain(null)
+        ctx.onDomainChange?.(undefined)
         pushStatic(createLogEntry({ type: 'system', content: '星域已关闭。本会话将不激活任何星域人格。' }))
       } else {
         // Try to match by id or Chinese name
@@ -367,6 +370,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         if (matched) {
           const domain = { id: matched.id, name: matched.name, volatileBlock: matched.volatileBlock, motto: matched.motto }
           ctx.agent.setSessionDomain(domain)
+          ctx.onDomainChange?.(domain.name)
           pushStatic(createLogEntry({ type: 'system', content: `星域切换: ${domain.name} (${domain.id})\n${domain.motto}\n\n${domain.volatileBlock}` }))
         } else {
           const validNames = allDomains.map(d => `${d.name}|${d.id}`).join(', ')

@@ -804,6 +804,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         },
         reasoningEffort: agent.getReasoningEffort() ?? 'medium',
         banditState,
+        onDomainChange: (dn: string | undefined) => setStarDomain(dn),
       }
       if (await handleSlashCommand(slashCtx)) return
     }
