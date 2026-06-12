@@ -890,7 +890,19 @@ export class DelegationCoordinator {
       const msg = error instanceof Error ? error.message : String(error)
       const isAbort = (error instanceof Error && error.name === 'AbortError') || msg.includes('Delegation aborted')
       if (!isAbort) this.recordProviderOutcome(selected.model, false)
-      throw error
+      // B1: align with delegateBatch — return structured degradation instead
+      // of re-throwing, so the primary agent always gets a packet it can read.
+      const degraded = workerFailureResult(order, error)
+      return {
+        status: 'completed' as const,
+        order,
+        selectedModel: selected.model,
+        modelTierShadows: [tierShadow],
+        modelTierGatedDecisions: [tierGatedDecision],
+        gatedInfluenceAudits: [gatedInfluenceAudit],
+        results: [degraded],
+        packet: await buildPrimaryWorkerPacket([degraded]),
+      }
     } finally {
       // A4: stop tracking — no false stall after completion/failure.
       this.liveness.unregister(order.id)

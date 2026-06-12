@@ -1180,13 +1180,17 @@ describe('DelegationCoordinator', () => {
       runHands: async () => { throw new Error('worker crashed after lock') },
     })
 
-    await assert.rejects(() => coordinator.delegate({
+    // B1: delegate no longer rethrows — returns structured degradation.
+    // Locks must still be released (finally block runs regardless).
+    const degradedRun = await coordinator.delegate({
       parentTurnId: 'turn_lock_throw',
       objective: 'Patch the locked file and intentionally exercise lock cleanup on worker failure.',
       kind: 'patch_proposal',
       profile: 'patcher',
       scope: { files: ['src/semantic-lock-cleanup.ts'] },
-    }), /worker crashed after lock/)
+    })
+    assert.equal(degradedRun.results[0]?.status, 'blocked')
+    assert.ok(degradedRun.results[0]?.summary?.includes('worker crashed after lock'))
 
     const cp = (coordinator as unknown as { collaboration: CollaborationProtocol }).collaboration
     assert.equal(cp.getSessionLocks('s-main').length, 0)
@@ -1269,13 +1273,17 @@ describe('DelegationCoordinator', () => {
       runHands: async () => { throw new Error('worker crashed after claim') },
     })
 
-    await assert.rejects(() => coordinator.delegate({
+    // B1: delegate no longer rethrows — returns structured degradation.
+    // File claims must still be released (finally block runs regardless).
+    const degradedRun = await coordinator.delegate({
       parentTurnId: 'turn_claim_throw',
       objective: 'Patch the claimed file and intentionally exercise file claim cleanup on worker failure.',
       kind: 'patch_proposal',
       profile: 'patcher',
       scope: { files: ['src/claim-failure-cleanup.ts'] },
-    }), /worker crashed after claim/)
+    })
+    assert.equal(degradedRun.results[0]?.status, 'blocked')
+    assert.ok(degradedRun.results[0]?.summary?.includes('worker crashed after claim'))
 
     assert.equal(sessionRegistry.acquireClaim('other-session', 'src/claim-failure-cleanup.ts'), true)
   })
@@ -1433,15 +1441,17 @@ describe('DelegationCoordinator', () => {
         runWorker: async () => { throw new Error('502 upstream error') },
       })
 
-      // delegate() rethrows worker errors — health recording happens inside
-      // delegateOrder before the error propagates.
-      await assert.rejects(() => coordinator.delegate({
+      // B1: delegate() no longer rethrows — returns structured degradation
+      const degradedRun = await coordinator.delegate({
         parentTurnId: 'turn_ph2',
         objective: 'Summarize repository documentation layout for onboarding guide.',
         kind: 'doc_research',
         profile: 'code_scout',
         scope: {},
-      }), /502 upstream error/)
+      })
+      assert.equal(degradedRun.status, 'completed')
+      assert.equal(degradedRun.results[0]?.status, 'blocked')
+      assert.ok(degradedRun.results[0]?.summary?.includes('502 upstream error'))
 
       const fastcorp = health.getWeights().find(h => h.providerId === 'fastcorp')
       assert.ok(fastcorp, 'fastcorp should be registered in the tracker')
@@ -1461,13 +1471,17 @@ describe('DelegationCoordinator', () => {
         runWorker: async () => { throw new Error('Delegation aborted: caller signal fired') },
       })
 
-      await assert.rejects(() => coordinator.delegate({
+      // B1: delegate no longer rethrows — it returns structured degradation
+      const degradedRun = await coordinator.delegate({
         parentTurnId: 'turn_ph3',
         objective: 'Summarize repository documentation layout for onboarding guide.',
         kind: 'doc_research',
         profile: 'code_scout',
         scope: {},
-      }), /Delegation aborted/)
+      })
+      assert.equal(degradedRun.status, 'completed')
+      assert.equal(degradedRun.results[0]?.status, 'blocked')
+      assert.ok(degradedRun.results[0]?.summary?.includes('Delegation aborted'))
 
       const fastcorp = health.getWeights().find(h => h.providerId === 'fastcorp')
       assert.equal(fastcorp, undefined, 'abort must not touch provider health')
