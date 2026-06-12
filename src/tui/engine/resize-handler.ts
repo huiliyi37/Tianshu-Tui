@@ -1,10 +1,13 @@
 /**
  * T9 ResizeHandler — 终端 resize 事件的防抖处理。
  *
- * 当前 Ink TUI 的方案已在 `use-terminal-size.ts` 中实现了
- * trailing-edge debounce + `inkInstance.clear()` workaround。
- * T9 中不再需要 clear workaround——resize 时只重绘 live region，
- * scrollback 完全不受影响。
+ * trailing-edge debounce（默认 150ms）合并连发的 resize 事件，settle 后回调一次。
+ *
+ * **scrollback 不受影响的前提**：resize 时只重绘 live region；但终端会把已绘的
+ * live 内容按新宽度 reflow，其占用行数随之变化。LiveEngine.render()/clear() 内的
+ * reconcileWidth() 检测到宽度变化时按新宽从 lineCache 重算行数再相对回顶，
+ * 否则旧帧顶部会残留进 scrollback（多份不同宽度的 chrome/面板叠屏）。
+ * 这条 reflow 协调是 resize 正确性的关键 —— 改 LiveEngine 回顶逻辑时务必保留。
  */
 
 import type { WriteStream } from 'node:tty'

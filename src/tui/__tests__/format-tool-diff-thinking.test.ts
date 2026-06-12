@@ -39,6 +39,24 @@ describe('formatToolCard (Claude Code ●/⎿ style)', () => {
     assert.ok(/\x1B\[/.test(headerAnsi), 'has ANSI SGR codes')
   })
 
+  // 可读性回归：工具输出正文是「数据」(git status / 文件列表 / 命令输出)，
+  // 必须用可读的 muted 前景，绝不能用 theme.dim(远星灰，仅装饰用，~2:1 对比度
+  // 在墨夜底上几乎不可见)。截图实证 `M CLAUDE.md` 这类数据被 dim 染到看不清。
+  it('body content uses readable muted color, NOT decoration-only dim', () => {
+    const tc = getTheme(3) // truecolor Tianshu
+    const lines = formatToolCard({ toolName: 'bash', content: 'M CLAUDE.md\nM src/foo.ts' }, tc)
+    const bodyAnsi = lines.slice(1).join('\n')
+    const seq = (hex: string) => {
+      const h = hex.replace('#', '')
+      return `38;2;${parseInt(h.slice(0, 2), 16)};${parseInt(h.slice(2, 4), 16)};${parseInt(h.slice(4, 6), 16)}`
+    }
+    assert.ok(stripAnsi(bodyAnsi).includes('M CLAUDE.md'), 'content present')
+    // content 文本必须被 muted 包裹，而非 dim。(⎿ 连接符用 dim 是合理装饰，
+    // 故只断言 content 文本紧跟的 SGR 是 muted。)
+    assert.ok(bodyAnsi.includes(`${seq(tc.muted)}m` + 'M CLAUDE.md'), `content text must use muted ${tc.muted}: ${JSON.stringify(bodyAnsi)}`)
+    assert.ok(!bodyAnsi.includes(`${seq(tc.dim)}m` + 'M CLAUDE.md'), `content text must NOT use decoration-only dim ${tc.dim}`)
+  })
+
   it('indents for depth > 0', () => {
     const lines = formatToolCard({ toolName: 'read_file', content: 'data', depth: 2 }, theme)
     assert.ok(stripAnsi(lines[0]!).startsWith('    '))

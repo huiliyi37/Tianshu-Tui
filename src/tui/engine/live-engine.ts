@@ -43,6 +43,8 @@ export class LiveEngine {
 
   /** 上一帧渲染的 display rows（wrapping-aware）。用于计算上移量。 */
   private lastDisplayRows = 0
+  /** lineCache 渲染时的终端宽度。resize 检测：宽度变了说明屏上内容已被 reflow。 */
+  private lastColumns = 0
   /** 是否已执行过首次渲染（用于判断是否需要 save cursor） */
   private hasRendered = false
   /** live region 行缓存：每行的原始文本（不含 ANSI）用于 diff */
@@ -77,6 +79,23 @@ export class LiveEngine {
   // ── Render ────────────────────────────────────────────────────
 
   /**
+   * resize 协调：终端宽度变化时，已绘制的 live region 内容会被终端按新宽 reflow，
+   * 其占用的 display rows 随之改变。但 `lastDisplayRows` 是上一帧在**旧宽度**下数的，
+   * 若直接用于 `moveToTop`，cursorUp 量与屏上实际行数不符 → 回顶欠/过 → 旧帧顶部
+   * 残留进 scrollback（多份不同宽度的 chrome/面板叠屏，见 resize 回归测试）。
+   *
+   * 修复：检测到宽度变化时，按**当前宽度**从 `lineCache` 重算 `lastDisplayRows`，
+   * 使其与终端 reflow 后的屏上行数一致，再做相对回顶。
+   */
+  private reconcileWidth(): void {
+    const currentColumns = this.stdout.columns || 80
+    if (this.hasRendered && this.lastDisplayRows > 0 && currentColumns !== this.lastColumns) {
+      this.lastDisplayRows = this.countDisplayRows(this.lineCache.map(text => ({ text })))
+    }
+    this.lastColumns = currentColumns
+  }
+
+  /**
    * 渲染 live region（cursor-resident 协议，对标 aider mdstream / ink createIncremental）。
    *
    * 核心不变量：
@@ -90,6 +109,7 @@ export class LiveEngine {
    * @param lines 要显示的行（含 ANSI 格式化）
    */
   render(lines: readonly LiveRegionLine[], opts?: { reservedTail?: number }): void {
+    this.reconcileWidth()
     const bounded = this.applyRowBudget(lines, opts?.reservedTail)
     const newDisplayRows = this.countDisplayRows(bounded)
 
@@ -198,6 +218,7 @@ export class LiveEngine {
    * 区域起始处。后续 append/commit 从这里开始写，干净无空白带。
    */
   clear(): void {
+    this.reconcileWidth()
     if (this.lastDisplayRows === 0) return
     this.stdout.write(this.moveToTop(this.lastDisplayRows) + '\r' + ANSI.ERASE_SCREEN_END)
     this.lastDisplayRows = 0

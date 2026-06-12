@@ -131,7 +131,10 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   const contentLines = trimmed.split('\n')
   const totalLines = contentLines.length
   const maxLines = input.maxLines ?? DEFAULT_MAX_LINES
-  const bodyColor = isError ? theme.error : theme.dim
+  // 正文是「数据」(命令输出/文件列表/git status)，用可读的 muted 前景。
+  // 绝不能用 theme.dim —— dim 是装饰专用色(分隔线/快捷键)，在墨夜底上 ~2:1
+  // 对比度几乎不可见，会把真实数据染到看不清。
+  const bodyColor = isError ? theme.error : theme.muted
 
   const renderLine = (l: string) => color(l, bodyColor)
 

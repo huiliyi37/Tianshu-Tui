@@ -247,3 +247,48 @@ test('clearForCommit 后再渲染走 append 路径，贴底不持续滚屏', () 
   for (let i = 0; i < 10; i++) engine.render(lines('L0', 'L1', 'L2'))
   assert.equal(term.scrollCount, scrollBefore, 'commit 后稳态重渲不应继续滚屏')
 })
+
+// ── resize：宽度变化后增量帧的 cursorUp 必须按「新宽度下缓存内容的行数」回顶 ──
+// 根因：render() 用当前 columns 算 rowsForLine，但 lastDisplayRows 是上一帧在
+// 旧宽度下存的。终端 resize 会把已绘内容按新宽 reflow，行数变了；若 moveToTop
+// 仍用旧 lastDisplayRows，cursorUp 量不足 → reflow 后的顶部行擦不掉 → 多份不同
+// 宽度的 chrome/面板叠在 scrollback 里（截图实证：任务面板在三种宽度同屏）。
+// 修复：render() 检测 columns 变化，按新宽度从 lineCache 重算 lastDisplayRows 再回顶。
+test('resize: 宽度变窄后，增量帧按新宽度的 reflow 行数回顶（不残留旧帧）', () => {
+  const term = new MockTerminal(100, 40)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 30 })
+
+  // 一行 90 字符：宽 100 时占 1 显示行
+  const wide = 'X'.repeat(90)
+  engine.render(lines(wide, 'INPUT'))
+  term.flush()
+
+  // 终端变窄到 40：那 90 字符行 reflow 成 ceil(90/40)=3 显示行 → 旧帧实际占 3+1=4 行
+  term.columns = 40
+  engine.render(lines(wide, 'INPUT2'))
+  const frame = term.flush()
+
+  // moveToTop 必须按新宽度回顶（覆盖 reflow 后的 4 行），即 cursorUp(3)（4-1）。
+  // 修复前用旧 lastDisplayRows=2 → cursorUp(1)，欠回 2 行 → 残留。
+  const upMatch = frame.match(/\x1B\[(\d+)A/)
+  assert.ok(upMatch, `增量帧应含 cursorUp：${JSON.stringify(frame)}`)
+  const upCount = parseInt(upMatch![1]!, 10)
+  assert.ok(
+    upCount >= 3,
+    `宽度变窄后 cursorUp 应 ≥3（新宽下缓存内容 reflow 行数-1），实际 ${upCount} —— 欠回会残留旧帧`,
+  )
+})
+
+test('resize: 宽度变化后稳态重渲不持续滚屏且不残留', () => {
+  const term = new MockTerminal(100, 10)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 30 })
+
+  const wide = 'Y'.repeat(85)
+  engine.render(lines(wide, 'SEP', 'INPUT'))
+  term.flush()
+  term.columns = 50
+  engine.render(lines(wide, 'SEP', 'INPUT'))
+  const scrollAfterResize = term.scrollCount
+  for (let i = 0; i < 8; i++) engine.render(lines(wide, 'SEP', 'INPUT'))
+  assert.equal(term.scrollCount, scrollAfterResize, 'resize 后稳态相同内容不应继续滚屏')
+})
