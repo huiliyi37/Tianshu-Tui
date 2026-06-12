@@ -115,7 +115,7 @@ describe('config permissions schema', () => {
     const fromObject = agentSchema.parse({ intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 123 } })
 
     assert.equal(fromBoolean.intentRetrievalRouter.enabled, true)
-    assert.equal(fromBoolean.intentRetrievalRouter.classifier, 'llm')
+    assert.equal(fromBoolean.intentRetrievalRouter.classifier, 'heuristic')
     assert.equal(fromBoolean.intentRetrievalRouter.timeoutMs, 4_000)
     assert.equal(fromObject.intentRetrievalRouter.enabled, true)
     assert.equal(fromObject.intentRetrievalRouter.classifier, 'heuristic')

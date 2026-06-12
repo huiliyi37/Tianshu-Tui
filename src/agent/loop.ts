@@ -722,7 +722,9 @@ export class AgentLoop {
           debugLog(`[intent-router] classifier=${telemetry.classifier} fallback=${telemetry.fallbackUsed} kinds=${telemetry.taskKinds.join(',')} sources=${telemetry.sources.join(',')} directions=${telemetry.directionCount} latencyMs=${telemetry.latencyMs}`)
         },
       })
-      this.config.promptEngine.setIntentRetrievalRoute(route ? renderIntentRetrievalRoute(route) : null)
+      this.config.promptEngine.setIntentRetrievalRoute(
+        route && route.confidence >= 0.6 ? renderIntentRetrievalRoute(route) : null
+      )
     } catch (err) {
       debugLog(`[intent-router] failed: ${(err as Error).message}`)
       this.config.promptEngine.setIntentRetrievalRoute(null)

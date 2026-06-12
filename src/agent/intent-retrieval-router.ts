@@ -28,7 +28,7 @@ export type IntentRetrievalRouterConfigInput = Partial<IntentRetrievalRouterConf
 
 export const DEFAULT_INTENT_RETRIEVAL_ROUTER_CONFIG: IntentRetrievalRouterConfig = {
   enabled: true,
-  classifier: 'llm',
+  classifier: 'heuristic',
   timeoutMs: 4_000,
   maxTokens: 600,
   temperature: 0,

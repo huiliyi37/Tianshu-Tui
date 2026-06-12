@@ -77,7 +77,7 @@ export const intentRetrievalRouterSchema = z.preprocess(
   },
   z.object({
     enabled: z.boolean().default(true),
-    classifier: z.enum(['heuristic', 'llm']).default('llm'),
+    classifier: z.enum(['heuristic', 'llm']).default('heuristic'),
     timeoutMs: z.number().int().positive().default(4_000),
     maxTokens: z.number().int().positive().default(600),
     temperature: z.number().min(0).max(2).default(0),

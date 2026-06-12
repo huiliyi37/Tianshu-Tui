@@ -105,7 +105,7 @@ export const DEFAULT_CONFIG: Config = {
     },
     intentRetrievalRouter: {
       enabled: true,
-      classifier: 'llm',
+      classifier: 'heuristic',
       timeoutMs: 4_000,
       maxTokens: 600,
       temperature: 0,
