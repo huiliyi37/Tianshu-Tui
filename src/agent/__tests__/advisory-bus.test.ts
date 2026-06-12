@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { AdvisoryBus } from '../advisory-bus.js'
+import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry } from '../advisory-bus.js'
 
 describe('AdvisoryBus', () => {
   it('renders empty when no entries', () => {
@@ -83,5 +83,35 @@ describe('AdvisoryBus', () => {
     assert.match(r1, /one time/)
     const r2 = bus.render()
     assert.equal(r2, '')
+  })
+})
+
+describe('discipline re-anchor (F-fix, session 803d897d)', () => {
+  it('exposes a sane re-anchor interval', () => {
+    assert.ok(DISCIPLINE_REANCHOR_INTERVAL >= 10 && DISCIPLINE_REANCHOR_INTERVAL <= 30)
+  })
+
+  it('renders the discipline summary through the bus, deduped by key', () => {
+    const bus = new AdvisoryBus()
+    bus.submit(disciplineReanchorEntry())
+    bus.submit(disciplineReanchorEntry())
+    const rendered = bus.render()
+    assert.match(rendered, /交付纪律重锚/)
+    assert.match(rendered, /category="discipline"/)
+    const occurrences = rendered.split('discipline-reanchor').length - 1
+    assert.equal(occurrences, 1, 'same-key entries must dedupe to one line')
+  })
+
+  it('does not crowd out higher-priority corrective advisories', () => {
+    const bus = new AdvisoryBus()
+    bus.submit(disciplineReanchorEntry())
+    bus.submit({ key: 'immune-1', priority: 0.9, category: 'immune', content: 'stop repeating failed edit' })
+    bus.submit({ key: 'repair-1', priority: 0.8, category: 'repair', content: 'fix type error first' })
+    bus.submit({ key: 'dedup-1', priority: 0.7, category: 'dedup', content: 'duplicate output detected' })
+    const rendered = bus.render()
+    assert.match(rendered, /immune-1/)
+    assert.match(rendered, /repair-1/)
+    assert.match(rendered, /dedup-1/)
+    assert.doesNotMatch(rendered, /discipline-reanchor/, 'discipline anchor yields to top-3 corrective signals')
   })
 })

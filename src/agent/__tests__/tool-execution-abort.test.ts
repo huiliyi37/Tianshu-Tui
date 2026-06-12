@@ -107,3 +107,87 @@ describe('ToolExecutionController abort-signal threading', () => {
     assert.equal(captured.signal, ac.signal, 'non-safe-tool path must forward the batch abortSignal, not undefined')
   })
 })
+
+/**
+ * Sentinel for the empty-tool-result blindspot (session 803d897d): when a tool
+ * is aborted mid-flight, the pipeline used to return `content: ''` with
+ * is_error: false. The model received zero feedback on its most critical
+ * deliveries and could not know the underlying work may have completed in the
+ * background. Tool results must NEVER be empty.
+ */
+describe('aborted tool result is never empty', () => {
+  it('returns a non-empty interruption note when the tool throws AbortError', async () => {
+    const collected: any[] = []
+    const deps = {
+      config: {
+        toolRegistry: {
+          execute: async () => { throw new DOMException('Aborted', 'AbortError') },
+          get: () => ({
+            definition: { input_schema: {} },
+            isConcurrencySafe: () => false,
+            timeoutMs: () => 5000,
+          }),
+          needsApproval: () => false,
+        },
+        hooks: null,
+        lspEnabled: false,
+        sessionId: 'test-session',
+        contextWindow: 200_000,
+        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {} },
+      },
+      cwd: '/tmp/test',
+      harness: {
+        executeTool: async ({ execute }: any) => {
+          const r = await execute()
+          return { content: r.content, isError: r.isError ?? false, retried: false }
+        },
+      },
+      prewarm: { get: () => null, invalidate: () => {} },
+      evidence: {
+        getState: () => ({ filesModified: new Set<string>() }),
+        trackFileRead: () => {}, trackFileModified: () => {},
+      },
+      repairHintTracker: { recordSuccess: () => {}, recordFailure: () => {} },
+      repairPipeline: { run: (input: any) => ({ output: input, telemetry: [] }) },
+      runtimeHooks: { runPostTool: async () => {} },
+      contextInjection: { setCerebellarHint: () => {}, clearCerebellarHint: () => {} },
+      buildRuntimeSnapshot: () => ({}),
+      requestThetaCheck: () => {},
+      getAutoReasoning: () => false,
+      getReasoningEffort: () => undefined,
+      setClientReasoningEffort: () => {},
+      getVigorState: () => ({}),
+      setVigorState: () => {},
+      trajectory: { getEntries: () => [] },
+      getPredictionAccumulator: () => createPredictionAccumulator(),
+      setPredictionAccumulator: () => {},
+      getDoomLoopLevel: () => 'none' as const,
+      getSessionTurnCount: () => 1,
+      getSessionId: () => 'test-session',
+      addToolResults: (results: any[]) => { collected.push(...results) },
+      recordToolHistory: () => {},
+      getSensorium: () => null,
+      getReliabilityDecision: () => null,
+      getTurnBudget: () => createTurnBudget(0),
+    } as unknown as ToolExecutionDeps
+    const controller = new ToolExecutionController(deps)
+    const ac = new AbortController()
+    await controller.executeBatch({
+      toolUses: [{ id: 't1', name: 'deliver_task', input: {} }],
+      callbacks: { onToolResult: () => {} } as any,
+      turn: 1,
+      checkpointCreatedThisTurn: false,
+      abortSignal: ac.signal,
+      traceStore: { events: [], toolFingerprints: [] } as any,
+      importGraph: null,
+      lastConflictCheckCount: 0,
+      latestRisk: { level: 'none', reasons: [], suggestedAction: '' } as any,
+    })
+    const result = collected.find(r => r.type === 'tool_result' && r.tool_use_id === 't1')
+    assert.ok(result, 'aborted tool must still produce a tool_result')
+    assert.ok(typeof result.content === 'string' && result.content.length > 0, 'aborted tool_result content must not be empty')
+    assert.match(result.content, /interrupted/i, 'content should tell the model the call was interrupted')
+    assert.match(result.content, /background/i, 'content should warn that work may have completed in the background')
+    assert.equal(result.is_error, false, 'user cancellation is not a tool failure')
+  })
+})

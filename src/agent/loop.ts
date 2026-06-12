@@ -94,7 +94,7 @@ import { createP3Integration, P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
 import { formatImmuneContext } from './immune-context.js'
-import { AdvisoryBus } from './advisory-bus.js'
+import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry } from './advisory-bus.js'
 import { checkTddGate } from './tdd-gate.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
@@ -275,6 +275,8 @@ export class AgentLoop {
   _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
   /** A1: unified advisory bus — collects corrective signals, renders ≤3 per turn */
   advisoryBus = new AdvisoryBus()
+  /** F-fix: tool calls since the last discipline re-anchor advisory. */
+  private toolCallsSinceReanchor = 0
   lastToolCompleteTime = 0
   private initialUserMessage: string | null = null
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
@@ -579,6 +581,15 @@ export class AgentLoop {
 
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
       recordToolHistory(this, name, input, isError, result);
+      // F-fix (session 803d897d): field habituation moves discipline text out of
+      // focus after ~4 turns while a heavy turn can run 20+ tool calls. Re-anchor
+      // a one-line discipline summary through the advisory bus every N calls —
+      // appendix-rendered, cache-safe, no frozen-prefix changes.
+      this.toolCallsSinceReanchor++
+      if (this.toolCallsSinceReanchor >= DISCIPLINE_REANCHOR_INTERVAL) {
+        this.toolCallsSinceReanchor = 0
+        this.advisoryBus.submit(disciplineReanchorEntry())
+      }
   }
 
   private recordModelRoutingShadow(currentSensorium: Sensorium, efe: EFEComponents): void {

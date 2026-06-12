@@ -34,9 +34,29 @@ export type AdvisoryCategory =
   | 'dedup'
   | 'dead_end'
   | 'cerebellar'
+  | 'discipline'
 
 /** 每轮最大渲染条数 */
 const MAX_ADVISORIES_PER_TURN = 3
+
+// ─── F-fix（session 803d897d）：纪律抗习惯化重锚 ─────────────────────
+// execute 阶段 field habituation（alpha=0.35）让 activeDomain 纪律约 4 轮后
+// 移入 consolidated 区；单轮 20+ 工具调用后纪律文本落后数万 token。
+// 每 N 次工具调用经 advisory bus 重锚一行纪律摘要——走 dynamic appendix
+// 单一出口，缓存安全，不豁免习惯化、不动 frozen 前缀。
+
+/** 每多少次工具调用重锚一次纪律摘要 */
+export const DISCIPLINE_REANCHOR_INTERVAL = 15
+
+/** 单行交付纪律摘要 — 与天梁 volatileBlock 的纪律条目保持一致的精简版 */
+export function disciplineReanchorEntry(): AdvisoryEntry {
+  return {
+    key: 'discipline-reanchor',
+    priority: 0.55,
+    category: 'discipline',
+    content: '交付纪律重锚：新增字段/符号先 grep 读侧消费方（0 消费方 = 死接线）；改行为先跑 related_tests；闭环 = 从生产入口正向追到改动点，typecheck 绿 ≠ 闭环。',
+  }
+}
 
 export class AdvisoryBus {
   private entries: AdvisoryEntry[] = []
