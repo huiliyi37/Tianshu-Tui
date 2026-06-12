@@ -212,9 +212,10 @@ export function buildScopeNotice(
   const lines: string[] = []
   if (risk.level === 'high') {
     lines.push(`⚠️ 范围风险偏高：${risk.reasons.join('；')}。`)
-    lines.push('建议先停下来与用户确认范围/优先级，把任务拆成可独立交付的小块，而不是一次推进全部。若已与用户对齐，可继续。')
+    lines.push('建议立刻停下来与用户确认范围/优先级，拆为 2-3 wave 分批执行。每波 typecheck+test 通过后再继续下一波。若已与用户对齐，可继续。')
   } else if (risk.level === 'elevated') {
-    lines.push(`提示：${risk.reasons.join('；')}。可考虑先确认优先级，逐项推进。`)
+    lines.push(`提示：${risk.reasons.join('；')}。`)
+    lines.push('建议提前拆为 2-3 wave 分批执行，每波 typecheck+test 通过后再做下一波——不要一次性铺开全部。若用户确认扁平执行，可继续。')
   }
   if (blocked.length > 0) {
     lines.push(`依赖未满足 (${blocked.length} 项，仍保留在列表中):`)
