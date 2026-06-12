@@ -147,6 +147,8 @@ export class TuiApp {
     starmapEntries?: () => StarmapData
     paletteCommands?: () => PaletteData
     chronicleEntries?: () => ChronicleData
+    cockpitSnapshot?: () => CockpitSnapshot
+    rewindEntries?: () => RewindData
   }
   /** palette Enter 执行回调：参数为选中命令的 0-based 索引 */
   private paletteExec?: (index: number) => void
@@ -731,7 +733,7 @@ export class TuiApp {
     }
 
     if (id === 'rewind') {
-      const count = (this.overlayData as any)?.rewindEntries?.().entries.length ?? 0
+      const count = this.overlayData?.rewindEntries?.().entries.length ?? 0
       const cur = this.overlayNav.rewindIndex
       if (key.name === 'down') {
         if (count > 0) { this.overlayNav.rewindIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
@@ -743,10 +745,11 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         if (count > 0) {
-          const entry = (this.overlayData as any)?.rewindEntries?.().entries[cur]
+          const entry = this.overlayData?.rewindEntries?.().entries[cur]
           this.deactivateOverlay()
           if (entry) {
-            this.commitStatic(`[Rewind] Would undo to message #${entry.index}: ${entry.content.slice(0, 80)}…`)
+            // 将选中消息回填到输入框，用户可编辑后重新提交
+            this.setInput(entry.content)
           }
         } else {
           this.deactivateOverlay()
@@ -1555,7 +1558,7 @@ export class TuiApp {
     cockpitSnapshot?: () => CockpitSnapshot
     rewindEntries?: () => RewindData
   }, paletteExec?: (index: number) => void): void {
-    this.overlayData = overlayData as any
+    this.overlayData = overlayData
     this.paletteExec = paletteExec
     // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {

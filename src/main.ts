@@ -15,6 +15,8 @@ import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
 import { getPaletteCommands } from './tui/command-palette.js'
+import type { PaletteCommand } from './tui/command-palette.js'
+import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { getTodos } from './tools/todo.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
@@ -123,7 +125,16 @@ async function main() {
   })
 
   // Register overlays with real data
-  app.registerOverlays({
+  // app 在此处必定非 null（前有 app = new TuiApp 赋值，无重赋 null 路径）
+  const tuiApp = app!
+  tuiApp.registerOverlays({
+    // Pager — scrollback 内容
+    pagerContent: () => ({
+      content: tuiApp.getScrollbackContent() || '(no messages yet)',
+      page: 0,
+      title: 'Scrollback',
+    }),
+    // Starmap
     starmapEntries: () => {
       const domains = starDomainRegistry.list()
       return {
@@ -135,6 +146,40 @@ async function main() {
         })),
       }
     },
+    // Command palette
+    paletteCommands: () => {
+      const cmds: PaletteCommand[] = getPaletteCommands().filter(c => c.name.startsWith('/') || c.name.startsWith('__surface:'))
+      return {
+        commands: cmds.map(c => ({ label: c.name, description: c.description, hotkey: c.hotkey })),
+        selectedIndex: 0,
+      }
+    },
+    // Cockpit — 运行时仪表盘
+    cockpitSnapshot: () => {
+      if (!ctx) return undefined as any
+      const metrics = tuiApp.getMetrics()
+      return buildCockpitSnapshot({
+        agent: ctx.agent,
+        session: ctx.session,
+        model: ctx.provider.models[0]?.alias ?? ctx.provider.models[0]?.id ?? 'unknown',
+        cacheHitRate: ctx.session.getRecentTurnHitRate(3) ?? ctx.session.getCacheHitRate(),
+        cost: metrics?.cost ?? 0,
+        mcpManager: ctx.refs.mcpManager,
+      })
+    },
+    // Rewind — 最近用户消息
+    rewindEntries: () => {
+      const messages = ctx?.session.getMessages() ?? []
+      const userMsgs = messages
+        .filter(m => m.role === 'user')
+        .slice(-30)
+        .map((m, i) => ({
+          index: i + 1,
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        }))
+      return { entries: userMsgs, selectedIndex: 0 }
+    },
+    // Chronicle
     chronicleEntries: () => {
       const sessionsDir = join(homedir(), '.rivet', 'sessions')
       if (!existsSync(sessionsDir)) return { entries: [] }
@@ -156,6 +201,29 @@ async function main() {
         return { entries: [] }
       }
     },
+  }, /* paletteExec: */ (index: number) => {
+    // Command palette Enter 回调：执行选中命令
+    const cmds = getPaletteCommands()
+    const name = cmds[index]?.name
+    if (!name) return
+    if (name.startsWith('__surface:')) {
+      const surfaceId = name.slice('__surface:'.length)
+      if (['pager', 'cockpit', 'starmap', 'chronicle'].includes(surfaceId)) {
+        tuiApp.activateOverlay(surfaceId)
+      }
+    } else if (name.startsWith('/')) {
+      if (name === '/starmap' || name === '/chronicle') {
+        tuiApp.activateOverlay(name.slice(1))
+      } else if (name === '/scroll' || name === '/pager') {
+        tuiApp.activateOverlay('pager')
+      } else if (name === '/cockpit') {
+        tuiApp.activateOverlay('cockpit')
+      } else if (name === '/rewind') {
+        tuiApp.activateOverlay('rewind')
+      } else {
+        tuiApp.setInput(name + ' ')
+      }
+    }
   })
 
   // ── SlashRouter ──────────────────────────────────────────────
