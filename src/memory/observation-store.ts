@@ -6,6 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { appendMemoryEntry } from './unified-memory.js'
 
 export interface Observation {
   id: string
@@ -46,6 +47,19 @@ export function appendObservation(cwd: string, obs: Omit<Observation, 'id' | 'ts
   }
 
   appendFileSync(observationsPath(cwd), JSON.stringify(record) + '\n', 'utf-8')
+
+  // Dual-write to unified memory log for cross-system recall
+  appendMemoryEntry(cwd, {
+    id: record.id,
+    text: record.text,
+    kind: record.kind,
+    confidence: record.confidence,
+    source: record.source === 'user' ? 'manual' : record.source === 'agent' ? 'manual' : record.source,
+    status: 'observed',
+    tags: record.tags,
+    sessionId: record.sessionId,
+  })
+
   return record
 }
 

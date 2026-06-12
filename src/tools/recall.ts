@@ -3,6 +3,7 @@ import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimKind } from '../context/claims.js'
 import type { ToolDefinition } from '../api/types.js'
 import { loadAllProjectMemoryEntries } from '../context/project-memory-loader.js'
+import { recallMemoryEntries, type MemoryKind } from '../memory/unified-memory.js'
 import { stat, readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -87,6 +88,20 @@ export function createRecallTool(store: ContextClaimStore, ctx?: RecallContext &
           `[claim:${c.id.slice(0, 8)}] (${c.kind}, ${c.status}, confidence=${c.confidence.toFixed(2)})\n  ${c.text.slice(0, 200)}`
         ).join('\n')
         parts.push(`Claims (${matches.length}):\n${formatted}`)
+      }
+
+      // Cross-session unified memory search (~/.rivet/memory/<hash>/memory.jsonl)
+      const unifiedCwd = ctx?.cwd ?? params.cwd
+      if (unifiedCwd) {
+        const unifiedKind: MemoryKind | undefined = input.kind as MemoryKind | undefined
+        const unifiedHits = recallMemoryEntries(unifiedCwd, input.query, limit, unifiedKind)
+
+        if (unifiedHits.length > 0) {
+          const unifiedFormatted = unifiedHits.map(e =>
+            `[memory:${e.id.slice(0, 8)}] (${e.kind}, ${e.status}, c=${e.confidence.toFixed(2)}, repeats=${e.repeatCount})\n  ${e.text.slice(0, 200)}`,
+          ).join('\n')
+          parts.push(`Cross-session memory (${unifiedHits.length}):\n${unifiedFormatted}`)
+        }
       }
 
       // Structured project memory search (.rivet/knowledge/memory.jsonl)
