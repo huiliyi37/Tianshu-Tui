@@ -1381,7 +1381,6 @@ describe('DelegationCoordinator', () => {
           usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
         }
       },
-      resumeEnabled: false,
     })
 
     const run = await coordinator.delegate({
@@ -1435,7 +1434,6 @@ describe('DelegationCoordinator', () => {
         failCount++
         throw new Error(`Worker failure #${failCount}`)
       },
-      resumeEnabled: false,
     })
 
     // Run 4 failing delegates — only first 3 should escalate

@@ -550,6 +550,7 @@ export function createAgentRuntime(deps: {
     },
     sessionRegistry: refs.sessionRegistry ?? undefined,
     sessionId: refs.sessionId ?? undefined,
+    resumeEnabled: true,
   })
 
   const agent = new AgentLoop(

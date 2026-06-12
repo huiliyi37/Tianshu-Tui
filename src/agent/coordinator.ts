@@ -191,7 +191,7 @@ export interface DelegationCoordinatorConfig {
   workerStallMs?: number
   /** Injectable clock for liveness tests. */
   livenessClock?: () => number
-  /** T5: enable fingerprint-based result resume. Default true; set false in tests. */
+  /** T5: enable fingerprint-based result resume. Default false (opt-in); set true in bootstrap. */
   resumeEnabled?: boolean
 }
 
@@ -624,7 +624,7 @@ export class DelegationCoordinator {
       }
 
       // T5: fingerprint-based resume — reuse a recently completed identical worker result
-      const resumeHit = this.config.resumeEnabled !== false
+      const resumeHit = this.config.resumeEnabled === true
         ? tryResumeWorkerResult(request.objective, request.scope.files, request.profile, Date.now())
         : null
       if (resumeHit) {
