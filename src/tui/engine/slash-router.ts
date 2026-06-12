@@ -108,6 +108,9 @@ export class SlashRouter {
       claimStoreRef: {
         current: this.ctx.claimStore,
       } as any,
+      // T5: bandit promotion observability — without this, /status in T9
+      // always shows the "(no bandit state available)" placeholder.
+      banditState: this.ctx.refs.banditState ?? undefined,
     }
 
     // Special-case /exit and /quit — shutdown handler already persists session
