@@ -132,6 +132,9 @@ export interface ToolPipelineDeps {
   artifactIdsAccessed?: string[]
   /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy */
   lspManager?: LspManager
+  /** T4: late-bound LSP manager getter. Checked first, falls back to `lspManager`.
+   *  Enables T9 path where LSP initializes asynchronously after AgentLoop construction. */
+  getLspManager?: () => LspManager | null
 }
 
 export interface ToolExecResult {
@@ -667,13 +670,14 @@ export async function executeToolUse(
     // LSP: notify the language server that a file changed on disk.
     // Must happen BEFORE diagnostics so the server's view is current.
     if (!harnessResult.isError && (tu.name === 'edit_file' || tu.name === 'write_file' || tu.name === 'apply_patch')) {
-      deps.lspManager?.changeFile(tu.input.file_path as string)
+      (deps.getLspManager?.() ?? deps.lspManager)?.changeFile(tu.input.file_path as string)
    }
 
     // T4: LSP diagnostics via lspManager (async file-level, ~2s timeout)
-    if (!harnessResult.isError && deps.lspManager?.isReady() && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
+    const mgr = deps.getLspManager?.() ?? deps.lspManager
+    if (!harnessResult.isError && mgr?.isReady() && shouldRunDiagnostics(tu.name, tu.input.file_path as string | undefined)) {
       try {
-        const diagnostics = await deps.lspManager.getFileDiagnostics(tu.input.file_path as string)
+        const diagnostics = await mgr.getFileDiagnostics(tu.input.file_path as string)
         if (diagnostics.length > 0) {
           const formatted = diagnostics
             .filter(d => d.severity <= 2) // errors and warnings only

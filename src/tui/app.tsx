@@ -102,6 +102,8 @@ interface AppProps {
   mcpManagerRef: RefObject<McpManager | null>
   claimStoreRef: RefObject<import('../context/claim-store.js').ContextClaimStore | null>
   approvalMode?: 'auto-accept' | 'auto-safe' | 'suggest' | 'manual' | 'dangerously-skip-permissions'
+  /** T5: bandit promotion state for /status observability. */
+  banditState?: import('../server/routes.js').BanditStatusEntry[]
 }
 
 const THINKING_FLUSH_MS = 1000
@@ -217,7 +219,7 @@ export function estimateLiveChromeRows(input: {
 
 // --- Main App ---
 
-export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode }: AppProps) {
+export function App({ agent, session, persist, model, maxTokens, availableModels, onModelSwitch, allProviders, currentProvider, currentSessionId, initialInput, mcpManagerRef, claimStoreRef, approvalMode, banditState }: AppProps) {
   const { stdout } = useStdout()
   const supportsAnsiEscapes = (stdout as NodeJS.WriteStream & { supportsAnsiEscapes?: boolean }).supportsAnsiEscapes ?? process.stdout.isTTY
   const { rows: termRows } = useTerminalSize()
@@ -801,6 +803,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           agent.setReasoningEffort(effort)
         },
         reasoningEffort: agent.getReasoningEffort() ?? 'medium',
+        banditState,
       }
       if (await handleSlashCommand(slashCtx)) return
     }

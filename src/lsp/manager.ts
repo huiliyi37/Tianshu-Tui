@@ -246,12 +246,22 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
           if (result?.items) return result.items
         }
 
-        // Fallback: trigger a didChange to refresh publishDiagnostics, then return cached
+        // Fallback: trigger a didChange with real file content to refresh publishDiagnostics
         await ensureDocument(filePath)
+        // Read actual file content — empty text would tell tsserver the file is empty (false green)
+        let fileText = ''
+        try {
+          const { readFileSync } = await import('node:fs')
+          fileText = readFileSync(absPath, 'utf-8')
+        } catch {
+          // File may not exist on disk — use empty text as last resort
+        }
         rpc.notify('textDocument/didChange', {
           textDocument: { uri, version: Date.now() },
-          contentChanges: [{ text: '' }],
+          contentChanges: [{ text: fileText }],
         })
+        // Clear stale cache before waiting for fresh publishDiagnostics
+        diagnosticCache.delete(uri)
         // Wait for publishDiagnostics to arrive (server pushes asynchronously)
         await new Promise<void>((resolve) => {
           const start = Date.now()

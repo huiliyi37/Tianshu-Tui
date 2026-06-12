@@ -141,6 +141,8 @@ let _fileHistoryRef: FileHistory | null = null
 let _claimStoreRef: import('./context/claim-store.js').ContextClaimStore | null = null
 let _sessionIdRef: string | null = null
 let _sessionRegistryRef: import('./agent/session-registry.js').SessionRegistry | null = null
+/** T5: bandit state bridge — set in useMemo, read by createElement for /status */
+let _banditStateRef: import('./server/routes.js').BanditStatusEntry[] | null = null
 // Module-level TaskLedger reference — created in tool registry, read by AgentLoop config
 let _taskLedgerRef: import('./agent/task-ledger.js').TaskLedger | null = null
 let _ownershipLedgerRef: import('./agent/ownership-ledger.js').OwnershipLedger | null = null
@@ -693,6 +695,16 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       store: promotionStore,
     })
 
+    // T5: bandit state for /status observability
+    const banditState = [modelTierGate, modelRoutingGate, effortGate].map(g => ({
+      source: g.source,
+      mode: g.mode,
+      enabled: g.enabled,
+      reason: g.reason,
+      totalShadowSamples: g.evidence.totalShadowSamples,
+    }))
+    _banditStateRef = banditState
+
     _coordinatorRef = new DelegationCoordinator({
       baseToolRegistry: toolRegistry,
       modelCards,
@@ -827,6 +839,7 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
     mcpManagerRef,
     claimStoreRef,
     approvalMode: config.agent.approval,
+    banditState: _banditStateRef ?? undefined,
   })
 }
 

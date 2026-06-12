@@ -155,6 +155,7 @@ return new ToolExecutionController({
       cacheAdvisor: self.cacheAdvisor,
       p3: self.p3,
       lspManager: self.config.lspManager,
+      getLspManager: self.config.getLspManager,
       getEstimatedTokens: () => self.session.getEstimatedTokens(),
       getToolNameHistory: () => self.traceStore?.toolNameHistory ?? [],
       recordToolNamedFingerprint: (fingerprint: string, toolName: string) => {

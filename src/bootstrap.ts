@@ -566,6 +566,8 @@ export function createAgentRuntime(deps: {
       effortBanditEnabled: effortGate.enabled,
       taskLedger: refs.taskLedger ?? undefined,
       ownershipLedger: refs.ownershipLedger ?? undefined,
+      // T4: late-bound LSP manager — initialized asynchronously after agent creation
+      getLspManager: () => refs.lspManager,
       // Track 3 门禁合一：badge 与收敛检测读权威 v2 状态。
       deliveryGateV2: refs.deliveryGate
         ? (dirty) => refs.deliveryGate!.assess([], dirty)

@@ -98,6 +98,8 @@ export interface SlashHandlerContext {
   claimStoreRef: React.MutableRefObject<ContextClaimStore | null>
   setReasoningEffort?: (effort: import('../agent/auto-reasoning.js').ReasoningEffort) => void
   reasoningEffort?: string
+  /** T5: bandit promotion state for /status observability. */
+  banditState?: import('../server/routes.js').BanditStatusEntry[]
 }
 
 function formatClaimLine(claim: import('../context/claims.js').ContextClaim): string {
@@ -206,6 +208,22 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: HELP_TEXT }))
       setIsStreaming(false)
       return true
+
+    case '/status': {
+      const lines: string[] = ['Bandit Promotion State', '═══════════════════════']
+      if (ctx.banditState && ctx.banditState.length > 0) {
+        for (const b of ctx.banditState) {
+          lines.push(`${b.source}: ${b.mode} (enabled=${b.enabled})`)
+          lines.push(`  reason: ${b.reason}`)
+          lines.push(`  samples: ${b.totalShadowSamples}`)
+        }
+      } else {
+        lines.push('(no bandit state available — run bootstrap first)')
+      }
+      pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      setIsStreaming(false)
+      return true
+    }
 
     case '/exit':
     case '/quit':

@@ -79,8 +79,12 @@ export interface AgentConfig {
     backoffMs?: number
   }
   lspEnabled?: boolean
-  /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
+  /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy.
+   *  Use `getLspManager` for late-binding (LSP initialized asynchronously after AgentLoop). */
   lspManager?: import('../lsp/manager.js').LspManager
+  /** T4: late-bound LSP manager getter. Preferred over static `lspManager` for T9 path
+   *  where LSP initializes asynchronously after AgentLoop construction. */
+  getLspManager?: () => import('../lsp/manager.js').LspManager | null
   permissions?: PermissionConfig
   contextClaimStore?: ContextClaimStore
   /** Optional provider health tracker for Physarum-style routing.

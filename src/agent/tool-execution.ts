@@ -80,8 +80,9 @@ export interface ToolExecutionDeps {
    *  prediction recording — e.g., TDD RED in verify phase is NOT a prediction error. */
   getPhaseHint?: () => string | undefined
   /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
-  /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy. */
   lspManager?: LspManager
+  /** T4: late-bound LSP manager getter. */
+  getLspManager?: () => LspManager | null
   /** Session-level estimated token count — enables context-pressure-aware truncation. */
   getEstimatedTokens?: () => number
   /** Tool name history — for tool storm detection. */
@@ -208,6 +209,7 @@ export class ToolExecutionController {
           artifactIdsEvicted,
           artifactIdsAccessed,
           lspManager: this.deps.lspManager,
+          getLspManager: this.deps.getLspManager,
           // Thread the batch-level abort signal into per-tool deps. Without this,
           // deps.abortSignal stays undefined, delegate_task passes undefined to
           // coordinator.delegate, and the entire coordinator abort path becomes
@@ -270,6 +272,7 @@ export class ToolExecutionController {
           artifactIdsEvicted,
           artifactIdsAccessed,
           lspManager: this.deps.lspManager,
+          getLspManager: this.deps.getLspManager,
           // See makeDeps above — same abort-signal threading for the sequential
           // (non-safe) tool path. (root-cause analysis 2026-06-05)
           abortSignal: input.abortSignal,
