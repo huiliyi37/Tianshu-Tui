@@ -103,6 +103,7 @@ export const DEFAULT_CONFIG: Config = {
       projectionThreshold: 0.4,
       seedMaxTokens: 512,
     },
+    autoDelegateEnabled: false,
     intentRetrievalRouter: {
       enabled: true,
       classifier: 'heuristic',

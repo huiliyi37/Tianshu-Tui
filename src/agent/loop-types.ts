@@ -119,6 +119,8 @@ export interface AgentConfig {
   domainKnowledgeStore?: DomainKnowledgeStore
   /** Lazy getter for DelegationCoordinator — wired by main.tsx for auto-delegation hooks. */
   coordinatorRef?: () => import('./coordinator.js').DelegationCoordinator | null
+  /** Explicit opt-in for auto-delegation. Default false — workers cost API budget. */
+  autoDelegateEnabled?: boolean
 }
 
 export interface AgentCallbacks {

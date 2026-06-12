@@ -415,7 +415,7 @@ export class AgentLoop {
         },
       },
       // ── Auto-delegation (lazy getter, wired by main.tsx) ──
-      autoDelegate: this.config.coordinatorRef ? {
+      autoDelegate: (this.config.coordinatorRef && this.config.autoDelegateEnabled) ? {
         coordinator: () => this.config.coordinatorRef?.() ?? null,
         getTaskContract: () => this.getTaskContract(),
         getSensorium: () => this.sensorium,

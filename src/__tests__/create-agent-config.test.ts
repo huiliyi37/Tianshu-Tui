@@ -31,6 +31,7 @@ const testConfig = {
     desktopTools: false,
     hearthObserveEnabled: false,
     antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 256 },
+    autoDelegateEnabled: false,
     intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 100, maxTokens: 128, temperature: 0 },
     teamSchedulerBanditEnabled: false,
     modelTierBanditEnabled: false,

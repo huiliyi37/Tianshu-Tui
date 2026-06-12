@@ -33,6 +33,7 @@ export interface AgentConfigInput {
   hearthObserveEnabled?: boolean
   antiAnchoring?: AntiAnchoringConfig
   intentRetrievalRouter?: IntentRetrievalRouterConfigInput
+  autoDelegateEnabled?: boolean
   auth?: AuthProvider
   habituationThreshold?: number
   /** Optional permission config — allowlists, bash command prefixes, etc. */
@@ -68,6 +69,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     hearthObserveEnabled: params.config.agent.hearthObserveEnabled,
     antiAnchoring: params.config.agent.antiAnchoring,
     intentRetrievalRouter: params.config.agent.intentRetrievalRouter,
+    autoDelegateEnabled: params.config.agent.autoDelegateEnabled,
     auth: params.auth,
     habituationThreshold: params.habituationThreshold,
     permissions: params.config.agent.permissions as PermissionConfig,
@@ -76,7 +78,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'permissions'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'permissions'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -119,6 +121,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     hearthObserveEnabled: input.hearthObserveEnabled,
     antiAnchoring: input.antiAnchoring,
     intentRetrievalRouter: input.intentRetrievalRouter,
+    autoDelegateEnabled: input.autoDelegateEnabled,
     autoReasoning: true,
     reasoningFloor: model.reasoningEffort,
     // GLM turn-level thinking: disable thinking on tool execution turns

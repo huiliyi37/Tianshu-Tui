@@ -99,6 +99,8 @@ export const agentSchema = z.object({
   hearthObserveEnabled: z.boolean().default(false),
   /** Explicit opt-in for anti-anchoring harness hooks (prompt-flow intervention). */
   antiAnchoring: antiAnchoringSchema,
+  /** Explicit opt-in for auto-delegation of exploration tasks. Default off — workers cost API budget. */
+  autoDelegateEnabled: z.boolean().default(false),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */
