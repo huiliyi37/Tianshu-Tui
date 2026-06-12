@@ -31,7 +31,7 @@ import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
 import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet, type ReviewScale } from './review-discipline.js'
-import { routeReviewWorkflow, type ReviewRouterDeps, type ReviewOutcome } from './review-router.js'
+import { routeReviewWorkflow, reviewWorkflowBudgetMs, type ReviewRouterDeps, type ReviewOutcome, type ReviewMode } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 
@@ -167,7 +167,7 @@ When the task implements a complex spec or cross-module integration, include the
           review_level: {
             type: 'string',
             enum: ['L2', 'L3'],
-            description: 'Explicitly set review workflow depth. L2 = single adversarial verifier. L3 = Review Squadron (4 inspectors). When omitted, review level is auto-classified from change structure (default: L1 nudge-only). Use this to manually trigger deeper review for high-risk or critical-path changes.',
+            description: 'Explicitly set review workflow depth. L2 = single adversarial verifier. L3 = Review Squadron (5 inspectors). When omitted, review level is auto-classified from change structure (default: L1 nudge-only). Use this to manually trigger deeper review for high-risk or critical-path changes.',
           },
         },
       },
@@ -327,7 +327,20 @@ When the task implements a complex spec or cross-module integration, include the
           lines.push(`  ⚠️  NOT DONE: ${entry.item}`)
         }
         if (incomplete.length > 0) {
-          lines.push('', '  ⚠️  Incomplete tasks detected. Verify these are intentionally deferred, not forgotten.')
+          // P2: wave-split detection — when a large plan has been partially executed,
+          // suggest finishing the current wave before starting the next batch.
+          const totalCount = auditList.length
+          const doneCount = complete.length
+          if (totalCount > 5) {
+            const remainingRatio = incomplete.length / totalCount
+            if (remainingRatio > 0.4) {
+              lines.push('', `  💡 ${incomplete.length}/${totalCount} tasks remaining (${Math.round(remainingRatio * 100)}%). Consider pausing after this wave — typecheck+test the completed batch, then continue with the next ${Math.min(incomplete.length, 3)} tasks.`)
+            } else {
+              lines.push('', `  ⚠️  ${incomplete.length} of ${totalCount} tasks incomplete. Verify these are intentionally deferred to the next wave, not forgotten.`)
+            }
+          } else {
+            lines.push('', '  ⚠️  Incomplete tasks detected. Verify these are intentionally deferred, not forgotten.')
+          }
         }
       }
 
@@ -467,11 +480,12 @@ When the task implements a complex spec or cross-module integration, include the
         // L1 stays advisory, while L2/L3 require independent evidence before commit.
         // The reviewDepth guard prevents verifier/patcher child contexts from recursively reviewing themselves.
         // RIVET_REVIEW_DISCIPLINE=0 / false / off / no disables the gate (default: enabled).
+        const explicitReviewLevel = params.input.review_level as ReviewScale | undefined
         const change: ChangeSet = {
           files: filesToCommit,
           crossModule: isCrossModule(filesToCommit),
           isFix: isFixContext(message),
-          forceLevel: (params.input.review_level as ReviewScale | undefined),
+          ...(explicitReviewLevel ? { forceLevel: explicitReviewLevel } : {}),
         }
         if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
@@ -483,11 +497,16 @@ When the task implements a complex spec or cross-module integration, include the
             }
             lines.push('', '⚠️ ReviewRouter skipped (force=true): review dependencies are unavailable. Verify equivalent independent review evidence exists.')
           } else {
-            // REVIEW_TIMEOUT: cap review workflow at 90s to prevent tool timeout (120s default).
-            // If review times out, reject with a clear message and ABORT child workers.
-            // Previously the timeout only rejected the Promise.race but left zombie
-            // worker sessions consuming API quota — causing 245s stalls.
-            const REVIEW_TIMEOUT_MS = 90_000
+            // P0 timeout alignment: the workflow cap is derived from the worker
+            // budgets instead of a fixed 90s (which killed every reviewer long
+            // before its profile budget could matter — dead wiring).
+            //   auto   (no review_level): 180s — single wiring inspector, never stalls.
+            //   manual (review_level)   : worker profile budget + grace. The
+            //   deliver_task tool-level timeout is raised accordingly (see timeoutMs).
+            // On timeout: reject with a clear message and ABORT child workers
+            // (zombie workers previously kept consuming API quota — 245s stalls).
+            const reviewMode: ReviewMode = change.forceLevel ? 'manual' : 'auto'
+            const REVIEW_TIMEOUT_MS = reviewWorkflowBudgetMs(reviewMode, change.forceLevel)
             const reviewAbort = new AbortController()
             // Link to tool-level abort signal so tool cancellation also stops workers
             if (params.abortSignal) {
@@ -498,22 +517,34 @@ When the task implements a complex spec or cross-module integration, include the
               params.abortSignal.addEventListener('abort', () => reviewAbort.abort(), { once: true })
             }
             let outcome: ReviewOutcome
+            // The timer must be cleared on the success path too — a dangling
+            // multi-minute timeout keeps the event loop (and test runners) alive.
+            let reviewTimer: NodeJS.Timeout | undefined
             try {
-              const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => {
+              const timeoutPromise = new Promise<never>((_, reject) => {
+                reviewTimer = setTimeout(() => {
                   reviewAbort.abort()
                   reject(new Error('Review workflow timed out'))
-                }, REVIEW_TIMEOUT_MS),
-              )
+                }, REVIEW_TIMEOUT_MS)
+              })
               outcome = await Promise.race([
-                route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal }),
+                route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode }),
                 timeoutPromise,
               ])
             } catch (err) {
               const reason = err instanceof Error ? err.message : String(err)
-              lines.push('', `⚠️  Review workflow ${reason.includes('timed out') ? 'timed out' : 'failed'}: ${reason}`)
-              lines.push('   → Use force=true to skip review for this delivery.')
-              return { content: lines.join('\n'), isError: true }
+              if (reviewMode === 'auto') {
+                // Auto review is best-effort: a timeout/crash must never block
+                // the delivery it was meant to assist. Surface and proceed.
+                lines.push('', `⚠️ Auto review ${reason.includes('timed out') ? 'timed out' : 'failed'} (${reason}) — delivery not blocked. Run /review max for a full squadron review.`)
+                outcome = { tier: 'auto', verdict: 'nudge', rounds: 0 }
+              } else {
+                lines.push('', `⚠️  Review workflow ${reason.includes('timed out') ? 'timed out' : 'failed'}: ${reason}`)
+                lines.push('   → Use force=true to skip review for this delivery.')
+                return { content: lines.join('\n'), isError: true }
+              }
+            } finally {
+              if (reviewTimer) clearTimeout(reviewTimer)
             }
             if (outcome.verdict === 'rejected' || outcome.escalated) {
               lines.push('', `❌ ReviewRouter RED (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this delivery'}`)
@@ -591,5 +622,15 @@ When the task implements a complex spec or cross-module integration, include the
 
     isConcurrencySafe: () => true,
     isEnabled: () => true,
+
+    // P0 timeout alignment: the tool-level timeout must dominate the review
+    // workflow cap, otherwise the pipeline default (120s) kills the review
+    // before its own budget fires (which is why the cap used to be 90s).
+    // +60s slack covers gates/commit work around the review itself.
+    timeoutMs: (params) => {
+      const level = params?.input?.review_level as ReviewScale | undefined
+      const mode: ReviewMode = level ? 'manual' : 'auto'
+      return reviewWorkflowBudgetMs(mode, level) + 60_000
+    },
   }
 }
