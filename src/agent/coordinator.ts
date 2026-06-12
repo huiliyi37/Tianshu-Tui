@@ -623,8 +623,9 @@ export class DelegationCoordinator {
         }
       }
 
-      // T5: fingerprint-based resume — reuse a recently completed identical worker result
-      const resumeHit = this.config.resumeEnabled === true
+      // T5: fingerprint-based resume — only read-only profiles can resume; write results are never safe to replay
+      const _isWrite = classifyProfile(request.profile) === 'hands'
+      const resumeHit = !_isWrite && this.config.resumeEnabled === true
         ? tryResumeWorkerResult(request.objective, request.scope.files, request.profile, Date.now())
         : null
       if (resumeHit) {
@@ -969,7 +970,6 @@ export class DelegationCoordinator {
         const strongCard = strongCards[0]
         if (strongCard) {
           this.proUpgradeCount++
-          order.budget.modelOverride = strongCard.model
           // Re-create worker config with Pro model
           const upgradedConfig = this.config.runtimeFactory(order, strongCard, workerRegistry)
           upgradedConfig.reviewDepth = order.reviewDepth
