@@ -601,12 +601,14 @@ function truncateBlock(block: string, maxChars: number, kind: string): string {
     const truncated = block.slice(0, maxChars)
     return `${truncated}\n<!-- codebase index truncated (${block.length} chars → ${maxChars}); use repo_map/repo_graph tools for details -->`
   }
-  // XML-wrapped blocks (project-memory, seed-capsule): peel outer tag,
-  // truncate content, re-wrap to keep XML well-formed for prefix cache.
-  const tagMatch = block.match(/^<([a-z-]+)[^>]*>([\s\S]*)<\/\1>$/)
-  if (tagMatch) {
-    const [_full, tag, content] = tagMatch
-    const trimmed = content!.slice(0, maxChars - tag!.length * 2 - 7)
+  // XML-wrapped blocks: try single-root match first. Multi-root blocks
+  // (seedCapsuleBlock) fall back to plain truncation — they can't be cleanly
+  // truncated while preserving well-formedness, but the prefix cache doesn't
+  // depend on XML validity, only byte stability.
+  const singleRootMatch = block.match(/^<([a-z-]+)[^>]*>([\s\S]*)<\/\1>$/m)
+  if (singleRootMatch) {
+    const [_full, tag, content] = singleRootMatch
+    const trimmed = content!.slice(0, maxChars - tag!.length * 2 - 10)
     return `<${tag}>\n${trimmed}\n<!-- truncated: ${block.length} → ${maxChars} chars -->\n</${tag}>`
   }
   return block.slice(0, maxChars) + `\n<!-- ${kind} truncated: ${block.length} → ${maxChars} chars -->`

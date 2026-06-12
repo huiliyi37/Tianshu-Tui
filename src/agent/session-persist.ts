@@ -446,9 +446,12 @@ export class SessionPersist {
       if (cwd) {
         const fileEvidence = claim.evidence.filter(e => e.path)
         if (fileEvidence.length > 0) {
+          const sep = cwd.endsWith('/') ? '' : '/'
+          const cwdPrefix = cwd + sep
           const hasRelevantFile = fileEvidence.some(e => {
             const abs = resolve(cwd, e.path!)
-            return abs.startsWith(cwd)
+            // P3: exact prefix boundary — /Users/a/proj must not match /Users/a/proj-backup
+            return abs === cwd || abs.startsWith(cwdPrefix)
           })
           if (!hasRelevantFile) continue
         }
