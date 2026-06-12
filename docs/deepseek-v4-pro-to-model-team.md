@@ -190,10 +190,12 @@ GPT 描述了它在天枢上的内部状态感知——知道哪些文件是自�
 | Hook Pipeline | 19 个 hooks，5 个认知 phase |
 | API 客户端 | 3 个（OpenAI 兼容 / Anthropic native / Codex OAuth） |
 | 版本 | v2.9.0 |
-| 自举 | 系统由自己的 agent 建造（1,529 commits） |
+| 自举 | 系统由自己的 agent 建造（2,164 commits） |
 | 支持模型 | DeepSeek V4 / MiMo V2.5 Pro / GLM 5.1 / GPT 5.5 / Claude Opus |
 | 运行平台 | Node.js 22+ / Ink 6 (React TUI) |
-| 总提交数 | 1,529（feat:536 / fix:439 / docs:288 / test:58 / refactor:69 / perf:38） |
+| 总提交数 | 2,164（feat:751 / fix:694 / docs:439 / refactor:94 / test:72 / chore:55 / perf:42） |
+| 开发周期 | 29 天（2026-05-15 → 2026-06-12），日均 77 commits，无间断 |
+| 峰值日 | 5月17日：198 commits |
 | 项目起始 | 2026-05-15 |
 | Prefix Cache | 99.6% 稳态命中率（DeepSeek V4 exact-prefix） |
 
@@ -562,7 +564,7 @@ Opus 给的约束：                    GPT 独立发现：
 
 ### 7.1 天枢自举
 
-天枢由自己的 agent 建造。52K 行源码 + 56K 行测试（442 个测试文件），全部通过。外部 Claude Opus 提供方案，国产模型自主执行、自主发现问题、自主迭代。累计 1,529 commits（feat:536 / fix:439 / docs:288 / test:58 / refactor:69 / perf:38）。
+天枢由自己的 agent 建造。52K 行源码 + 56K 行测试（442 个测试文件），全部通过。外部 Claude Opus 提供方案，国产模型自主执行、自主发现问题、自主迭代。累计 2,164 commits（feat:751 / fix:694 / docs:439 / refactor:94 / test:72 / chore:55 / perf:42），29 天日均 77 commits，无间断。
 
 **自举证据链：**
 ```
@@ -721,7 +723,7 @@ CVM 方案：
 | **交付门禁** | 无 | 无 | ✅ ownership 追踪 + 归因 |
 | **认知虚拟机** | ❌ | ❌ | ✅ CVM trap-and-emulate |
 | **缓存经济** | 依赖 Anthropic cache | 依赖 OpenAI cache | ✅ DeepSeek V4 99.6% hit |
-| **自举** | 不支持 | 不支持 | ✅ 1,529 commits 由 agent 建造 |
+| **自举** | 不支持 | 不支持 | ✅ 2,164 commits 由 agent 建造 |
 | **CVM 训练** | ❌ | ❌ | ✅ nanoGPT → Qwen 7B 验证 |
 | **工具生态** | 20+ | 30+ | ✅ 42 个，sandboxed |
 | **子代理** | 有 | 有 | ✅ delegate_task + batch |
@@ -735,4 +737,4 @@ CVM 方案：
 
 ---
 
-*本文档基于天枢项目的 git 历史（1,529 commits）、设计文档（20+ specs/brainstorms）、和实际运行数据（99.6% cache hit rate、154 commits 零冲突并发协调）整理。*
+*本文档基于天枢项目的 git 历史（2,164 commits，29 天日均 77 commits）、设计文档（20+ specs/brainstorms）、和实际运行数据（99.6% cache hit rate、154 commits 零冲突并发协调）整理。*
