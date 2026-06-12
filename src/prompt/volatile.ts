@@ -463,20 +463,23 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   // Project memory — auto-loaded from .rivet/knowledge/memory.jsonl.
   // Rendered into frozen base so it benefits from prefix cache (turn 2+ cost = 0).
+  // A3: budget cap at 3K chars — beyond that it's stale noise.
   if (ctx.projectMemoryBlock) {
-    parts.push(ctx.projectMemoryBlock)
+    parts.push(truncateBlock(ctx.projectMemoryBlock, 3_000, 'project-memory'))
   }
 
   // Seed capsule — 前辈星域封存的经验方法（天璇胶囊等）。
   // Rendered into frozen base so it benefits from prefix cache (turn 2+ cost = 0).
+  // A3: budget cap at 3K chars.
   if (ctx.seedCapsuleBlock) {
-    parts.push(ctx.seedCapsuleBlock)
+    parts.push(truncateBlock(ctx.seedCapsuleBlock, 3_000, 'seed-capsule'))
   }
 
   // Codebase index — module summaries + CLI entries.
   // Rendered into frozen base after projectMemoryBlock for prefix cache stability.
+  // A3: budget cap at 4K chars — oversized index is a trained-mode noise source.
   if (ctx.projectIndexBlock) {
-    parts.push(ctx.projectIndexBlock)
+    parts.push(truncateBlock(ctx.projectIndexBlock, 4_000, 'codebase-index'))
   }
 
   // Only render git status if explicitly provided — no cache fallback here.
@@ -590,4 +593,18 @@ The user will respond with:
   }
 
   return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''
+}
+
+/**
+ * A3 前缀预算：截断超出上限的 frozen 块。
+ * - projectIndexBlock: 4K → 超出折叠为 repo 工具指引
+ * - seedCapsuleBlock / projectMemoryBlock: 3K → 超出直接截断
+ */
+function truncateBlock(block: string, maxChars: number, kind: string): string {
+  if (block.length <= maxChars) return block
+  if (kind === 'codebase-index') {
+    const truncated = block.slice(0, maxChars)
+    return `${truncated}\n<!-- codebase index truncated (${block.length} chars → ${maxChars}); use repo_map/repo_graph tools for details -->`
+  }
+  return block.slice(0, maxChars) + `\n<!-- ${kind} truncated: ${block.length} → ${maxChars} chars -->`
 }
