@@ -18,7 +18,7 @@ import { buildImportGraph, invalidateFile } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
 import { shouldRunDiagnostics, runTypeCheck } from '../lsp/client.js'
 import type { LspManager } from '../lsp/manager.js'
-import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent } from './trace-store.js'
+import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
@@ -475,18 +475,34 @@ export async function executeToolUse(
     const hint = suggestStrategyShift(trajectorySummary, doomLevel)
     deps.config.promptEngine.setStrategyShift(hint)
     if (doomLevel === 'blocked') {
-      // 计算连续失败次数和 fingerprint 信息，让 agent 知道发生了什么
-      const fps = traceStore.toolFingerprints
-      const lastFp = fps.at(-1)
-      const maxCount = lastFp ? fps.filter(f => f === lastFp).length : 0
-      const baseMsg = hint ?? 'Repeated identical failures detected.'
-      const msg = [
-        baseMsg,
-        `Tool: ${tu.name} | Consecutive same-pattern failures: ${maxCount} | Fingerprint: ${lastFp?.slice(0, 8) ?? 'unknown'}`,
-        'Recovery: try a different tool (e.g. read_file, todo), change the input, or modify the target path.',
-      ].join('\n')
-      callbacks.onToolResult(tu.id, tu.name, msg, true)
-      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+      // Block ONLY repeats of the call(s) that are actually looping — not every
+      // tool. The looping fingerprints are recorded with outputClass 'error'
+      // (a passing call breaks the loop and wouldn't be blocked), so compare the
+      // current call's error-variant fingerprint against the offenders. Letting
+      // different tools/inputs through is what refreshes the window out of
+      // 'blocked'; blocking everything deadlocks the turn (blocked calls are
+      // never recorded, so the window never changes — see offendingFingerprints).
+      const exactOffenders = offendingFingerprints(traceStore.toolFingerprints, 8, 6, 3)
+      const classOffenders = offendingFingerprints(traceStore.bashClassFingerprints ?? [], 10, 8, 6)
+      const curExactFp = fingerprintToolCall(tu.name, tu.input, 'error')
+      const curClassFp = fingerprintToolClass(tu.name, tu.input, 'error')
+      const isOffendingCall = exactOffenders.has(curExactFp) || (curClassFp != null && classOffenders.has(curClassFp))
+
+      if (isOffendingCall) {
+        const fps = traceStore.toolFingerprints
+        const lastFp = fps.at(-1)
+        const maxCount = lastFp ? fps.filter(f => f === lastFp).length : 0
+        const baseMsg = hint ?? 'Repeated identical failures detected.'
+        const msg = [
+          baseMsg,
+          `Tool: ${tu.name} | Consecutive same-pattern failures: ${maxCount} | Fingerprint: ${curExactFp.slice(0, 8)}`,
+          'Recovery: try a different tool (e.g. read_file, todo), change the input, or modify the target path.',
+        ].join('\n')
+        callbacks.onToolResult(tu.id, tu.name, msg, true)
+        return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+      }
+      // Different tool/input under 'blocked' — let it run. It will be recorded
+      // and slide the offending fingerprints out of the detection window.
    }
 
     // Plan-mode gate — block write tools during planning phase

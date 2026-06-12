@@ -8,6 +8,7 @@ import {
   getDoomLoopLevel,
   getClassDoomLoopLevel,
   combineDoomLoopLevels,
+  offendingFingerprints,
   getToolStormLevel,
   fingerprintToolCall,
   fingerprintToolClass,
@@ -269,5 +270,42 @@ describe('combineDoomLoopLevels', () => {
     assert.equal(combineDoomLoopLevels('blocked', 'warn'), 'blocked')
     assert.equal(combineDoomLoopLevels('none', 'none'), 'none')
     assert.equal(combineDoomLoopLevels('warn', 'blocked'), 'blocked')
+  })
+})
+
+describe('offendingFingerprints', () => {
+  it('returns empty when nothing is looping', () => {
+    assert.equal(offendingFingerprints(['a', 'b', 'c', 'a', 'b']).size, 0)
+  })
+
+  it('flags a fingerprint repeated to the frequency threshold (6+ in window)', () => {
+    // 6 of 'x' in an 8-window → 'x' is the offender, 'y' is not.
+    const offenders = offendingFingerprints(['x', 'x', 'x', 'y', 'x', 'x', 'y', 'x'])
+    assert.ok(offenders.has('x'))
+    assert.ok(!offenders.has('y'))
+  })
+
+  it('flags a fingerprint repeated consecutively to threshold (4 identical)', () => {
+    const offenders = offendingFingerprints(['a', 'b', 'x', 'x', 'x', 'x'])
+    assert.ok(offenders.has('x'))
+    assert.ok(!offenders.has('a'))
+    assert.ok(!offenders.has('b'))
+  })
+
+  it('isolates the offender so a different call would not match (deadlock fix)', () => {
+    // The bug: hitting blocked blocked every tool. The fix blocks only the
+    // looping fingerprint, so a fresh tool's fingerprint is absent here and
+    // would be allowed through to refresh the window.
+    const looping = Array(6).fill('loop-fp')
+    const offenders = offendingFingerprints(looping)
+    assert.ok(offenders.has('loop-fp'))
+    assert.ok(!offenders.has('some-other-tool-fp'))
+  })
+
+  it('honors custom class-level thresholds (window 10, freq 8, consec 6)', () => {
+    // Below class thresholds → no offender.
+    assert.equal(offendingFingerprints(Array(5).fill('c'), 10, 8, 6).size, 0)
+    // 7 consecutive identical (consec run of 6 repeats) → offender.
+    assert.ok(offendingFingerprints(Array(7).fill('c'), 10, 8, 6).has('c'))
   })
 })

@@ -257,6 +257,44 @@ export function getClassDoomLoopLevel(classFingerprints: string[]): DoomLoopLeve
   return 'none'
 }
 
+/**
+ * Identify the specific fingerprints that pushed a window to `blocked` — i.e.
+ * the actual offenders in the loop, not every fingerprint in the window.
+ *
+ * Used by the doom-loop gate to block *only* repeats of the looping call while
+ * letting different tools/inputs through. Without this, hitting `blocked` once
+ * blocks every subsequent tool unconditionally; since blocked calls never get
+ * recorded, the window never refreshes and the turn deadlocks until the next
+ * user input. Returns the set of offending fingerprints (empty if not blocked).
+ *
+ * Mirrors getDoomLoopLevel's thresholds: a fingerprint is an offender if it
+ * appears 3+ times consecutively OR 6+ times within the last WINDOW entries.
+ */
+export function offendingFingerprints(fingerprints: string[], window = 8, freqThreshold = 6, consecThreshold = 3): Set<string> {
+  const recent = fingerprints.slice(-window)
+  const offenders = new Set<string>()
+
+  // Frequency offenders.
+  const counts = new Map<string, number>()
+  for (const fp of recent) counts.set(fp, (counts.get(fp) ?? 0) + 1)
+  for (const [fp, n] of counts) {
+    if (n >= freqThreshold) offenders.add(fp)
+  }
+
+  // Consecutive-run offenders.
+  let run = 1
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i] === recent[i - 1]) {
+      run++
+      // consecThreshold consecutive *repeats* = consecThreshold+1 identical calls.
+      if (run >= consecThreshold + 1) offenders.add(recent[i]!)
+    } else {
+      run = 1
+    }
+  }
+  return offenders
+}
+
 const DOOM_LEVEL_ORDER: Record<DoomLoopLevel, number> = { none: 0, warn: 1, blocked: 2 }
 
 /** Combine exact-fingerprint and class-fingerprint detection — strictest wins. */

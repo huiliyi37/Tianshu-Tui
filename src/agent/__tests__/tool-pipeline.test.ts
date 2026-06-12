@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { executeToolUse, type ToolPipelineDeps } from '../tool-pipeline.js'
 import { createTurnBudget } from '../turn-budget.js'
+import { fingerprintToolCall } from '../trace-store.js'
 import type { EvidenceTrackerPublic } from '../evidence.js'
 import { ArtifactStore } from '../../artifact/store.js'
 
@@ -671,6 +672,72 @@ describe('executeToolUse', () => {
     // Must still contain the payload
     assert.ok(rawContent.includes('hello world'),
       'tool result must still contain the payload')
+  })
+
+  describe('doom-loop blocked gate (deadlock fix)', () => {
+    const cb = { onToolResult: () => {}, onApprovalRequired: async () => false } as any
+    // A fingerprint window where read_file('looping.ts','error') repeats to the
+    // blocking threshold — that exact call is the offender.
+    function loopingTraceStore() {
+      const offenderFp = fingerprintToolCall('read_file', { file_path: 'looping.ts' }, 'error')
+      return { events: [], toolFingerprints: Array(6).fill(offenderFp), bashClassFingerprints: [] } as any
+    }
+
+    it('blocks the offending call when doomLevel is blocked', async () => {
+      const deps = makeDeps({ getDoomLoopLevel: () => 'blocked' as const, traceStore: loopingTraceStore() })
+      const result = await executeToolUse(
+        { id: 'tu-offend', name: 'read_file', input: { file_path: 'looping.ts' } },
+        deps, cb, 1, false,
+      )
+      assert.equal((result.toolResult as any).is_error, true)
+      assert.ok(((result.toolResult as any).content as string).includes('Recovery: try a different tool'))
+    })
+
+    it('lets a DIFFERENT tool through under blocked — the deadlock fix', async () => {
+      // Before the fix this returned is_error with "Repeated identical failures";
+      // now a non-offending call executes normally so the window can refresh.
+      let executed = false
+      const deps = makeDeps({
+        getDoomLoopLevel: () => 'blocked' as const,
+        traceStore: loopingTraceStore(),
+        config: {
+          ...makeDeps().config,
+          toolRegistry: {
+            execute: async () => { executed = true; return { content: 'todo updated', isError: false } },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+          },
+        } as any,
+      })
+      const result = await executeToolUse(
+        { id: 'tu-different', name: 'todo', input: { action: 'list' } },
+        deps, cb, 1, false,
+      )
+      assert.equal(executed, true, 'different tool must actually execute under blocked')
+      assert.notEqual((result.toolResult as any).is_error, true)
+    })
+
+    it('lets the same tool with DIFFERENT input through under blocked', async () => {
+      let executed = false
+      const deps = makeDeps({
+        getDoomLoopLevel: () => 'blocked' as const,
+        traceStore: loopingTraceStore(),
+        config: {
+          ...makeDeps().config,
+          toolRegistry: {
+            execute: async () => { executed = true; return { content: 'file body', isError: false } },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+          },
+        } as any,
+      })
+      const result = await executeToolUse(
+        { id: 'tu-diff-input', name: 'read_file', input: { file_path: 'other.ts' } },
+        deps, cb, 1, false,
+      )
+      assert.equal(executed, true, 'same tool / different target must execute under blocked')
+      assert.notEqual((result.toolResult as any).is_error, true)
+    })
   })
 })
 
