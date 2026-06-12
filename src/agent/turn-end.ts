@@ -56,7 +56,6 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
     const inference = inferTaskType(recentCalls)
     if (inference) {
       const recommended = recommendModelForTask(inference.task, config.modelCards)
-      config.promptEngine.setRoutingReason(`${inference.task} · ${recommended.model} ${inference.reason}`)
       if (recommended.model !== currentModel && config.onModelSwitch) {
         routingMetrics.record({
           turn: session.getTurnCount(),
