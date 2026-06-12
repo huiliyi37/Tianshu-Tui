@@ -1,10 +1,12 @@
 import { readFile, stat } from 'node:fs/promises'
 import { createHash } from 'crypto'
+import { relative } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
 import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
+import { trackFileChange } from '../agent/recovery-stack.js'
 
 /**
  * Compute a 8-char hex hash of a line's content (stripped of trailing \r).
@@ -230,6 +232,10 @@ This avoids the read→truncate→re-read loop for large files.`,
     const after = lines.slice(lastLine) // lastLine is 1-based inclusive, slice is exclusive
     const newLines = newString === '' ? [] : newString.split('\n')
     const newContent = [...before, ...newLines, ...after].join('\n')
+
+    // Record file change for recovery tracking (backup created by trackFileChange)
+    const relPath = relative(params.cwd, filePath)
+    trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
 
     await writeFileAtomicAsync(filePath, newContent)
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)

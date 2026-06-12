@@ -1,10 +1,11 @@
 import { mkdir, stat } from 'node:fs/promises'
-import { dirname } from 'path'
+import { dirname, relative } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
 import { refreshFileReadMtime, getFileReadMtime } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
+import { trackFileChange } from '../agent/recovery-stack.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -52,6 +53,19 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     }
 
     await mkdir(dir, { recursive: true })
+
+    // If overwriting an existing file, back it up for recovery
+    let fileExists = false
+    try {
+      await stat(filePath)
+      fileExists = true
+    } catch {
+      // File doesn't exist yet — skip backup
+    }
+    if (fileExists) {
+      const relPath = relative(params.cwd, filePath)
+      trackFileChange(params.cwd, { filePath: relPath, action: 'write', toolCallId: params.toolUseId ?? 'write_file' })
+    }
 
     // Staleness check: warn if file was read earlier and has since been modified
     // by another process/tool (prevents silent overwrite of external changes).

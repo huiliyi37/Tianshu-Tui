@@ -81,6 +81,18 @@ export function wrapSandboxCommand(command: string): { command: string; sandboxe
     }
   }
 
+  // macOS sandbox-exec fallback: process-level Seatbelt profile.
+  // Weaker than firejail/bwrap (not a container), but provides readonly
+  // filesystem isolation on macOS where container tools are unavailable.
+  // Set RIVET_MACOS_SANDBOX=0 to opt out.
+  if (process.platform === 'darwin' && process.env.RIVET_MACOS_SANDBOX !== '0') {
+    return {
+      command: `sandbox-exec -p '(version 1)(allow default)(deny file-write*)' bash -lc '${escaped}'`,
+      sandboxed: true,
+      note: 'macOS sandbox-exec (read-only filesystem, process-level)',
+    }
+  }
+
   return {
     command,
     sandboxed: false,
