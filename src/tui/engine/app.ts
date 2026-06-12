@@ -475,16 +475,23 @@ export class TuiApp {
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
       if (inputVal.startsWith('/') && !inputVal.includes(' ')) {
-        const filtered = filterSlashCommands(this.slashCommands, inputVal.slice(1))
-        if (key.name === 'up' && filtered.length > 0) {
-          this.slashSelectedIdx = (this.slashSelectedIdx - 1 + filtered.length) % filtered.length
-          this.renderLive()
-          return
-        }
-        if (key.name === 'down' && filtered.length > 0) {
-          this.slashSelectedIdx = (this.slashSelectedIdx + 1) % filtered.length
-          this.renderLive()
-          return
+      // ── Slash command handling ──────────────────────────────
+      const inputVal = this.inputLine.value
+      if (inputVal.startsWith('/')) {
+        // ↑↓ 选择仅对无参数命令生效（Tab 补全同理）
+        if (!inputVal.includes(' ')) {
+          const filtered = filterSlashCommands(this.slashCommands, inputVal.slice(1))
+          if (key.name === 'up' && filtered.length > 0) {
+            this.slashSelectedIdx = (this.slashSelectedIdx - 1 + filtered.length) % filtered.length
+            this.renderLive()
+            return
+          }
+          if (key.name === 'down' && filtered.length > 0) {
+            this.slashSelectedIdx = (this.slashSelectedIdx + 1) % filtered.length
+            this.renderLive()
+            return
+          }
+          // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
         }
         if (key.name === 'return') {
           // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
@@ -493,9 +500,9 @@ export class TuiApp {
           void this.submitSlashCommand(inputVal)
           return
         }
-        // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
       } else {
         this.slashSelectedIdx = 0
+      }
       }
       // ── W4a: Up 箭头取回最近 queued 消息到输入框编辑 ─────────
       if (key.name === 'up' && !this.inputLine.value && this.steerBuffer.hasPending()) {
