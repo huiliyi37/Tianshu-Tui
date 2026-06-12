@@ -4,22 +4,33 @@ import { BaseTextInput } from './base-text-input.js'
 import { loadHistory, appendHistory, nextHistoryAfterSubmit } from './history.js'
 import { SlashHint } from './slash-hint.js'
 import { getPaletteCommands, filterCommands } from './command-palette.js'
-import { getTheme } from './theme.js'
+import { getTheme, type RivetTheme } from './theme.js'
+import { STAR_DOMAINS, type StarDomainId } from '../agent/star-domain.js'
 
 const COMMANDS = getPaletteCommands()
 
 /** Breathing diamond frames — subtle pulse when agent is thinking */
 const PULSE_FRAMES = ['◇', '◈', '◆', '◈'] as const
 
+/** Resolve the active star domain's accent color for prompt + text coloring.
+ *  When no domain is active (undefined), returns muted grey. */
+function getDomainAccentColor(domainName: string | undefined, theme: RivetTheme): string {
+  if (!domainName) return theme.muted
+  const domain = STAR_DOMAINS[domainName as StarDomainId]
+  if (!domain) return theme.muted
+  return theme[domain.uiPersona.accent]
+}
+
 interface InputBarProps {
   onSubmit: (value: string) => void
   disabled?: boolean
   vimEnabled?: boolean
   steerMode?: boolean
+  starDomain?: string
   inputRef?: React.MutableRefObject<{ clear: () => void; hasContent: () => boolean; setValue: (v: string) => void }>
 }
 
-export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }: InputBarProps) {
+export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, starDomain, inputRef }: InputBarProps) {
   const [value, setValue] = useState('')
   const [history, setHistory] = useState(() => loadHistory())
   const [slashIdx, setSlashIdx] = useState(0)
@@ -50,7 +61,8 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
   // breathing icon — so there's no long glaring box; the pulse is calm silver,
   // not warning-yellow.
   const borderColor = isSlash ? theme.primary : theme.dim
-  const promptColor = isSlash ? theme.primary : steerMode ? theme.secondary : theme.success
+  const domainAccent = getDomainAccentColor(starDomain, theme)
+  const promptColor = isSlash ? theme.primary : domainAccent
 
   const handleTabComplete = useCallback(() => {
     if (isSlash && filtered.length > 0) {
@@ -84,6 +96,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, inputRef }
           value={value}
           onChange={handleChange}
           vimEnabled={vimEnabled}
+          textColor={domainAccent}
           onSubmit={(v) => {
             const trimmed = v.trim()
             if (trimmed) {

@@ -14,6 +14,7 @@ interface BaseTextInputProps {
   onSubmit: (value: string) => void
   disabled?: boolean
   placeholder?: string
+  textColor?: string
   history?: string[]
   vimEnabled?: boolean
   onTabComplete?: () => boolean
@@ -80,7 +81,7 @@ function posFromLineCol(lines: string[], line: number, col: number): number {
   return pos
 }
 
-export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder, history, vimEnabled, onTabComplete, isSlashMode, slashSelectedIdx = 0, slashFilteredCount = 0, onSlashNavigate }: BaseTextInputProps) {
+export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder, textColor, history, vimEnabled, onTabComplete, isSlashMode, slashSelectedIdx = 0, slashFilteredCount = 0, onSlashNavigate }: BaseTextInputProps) {
   const [cursorPos, setCursorPos] = useState(0)
   const [cursorShown, setCursorShown] = useState(true)
   const historyIndexRef = useRef(-1)
@@ -419,16 +420,16 @@ export function BaseTextInput({ value, onChange, onSubmit, disabled, placeholder
             </>
           ) : (
             <>
-              <Text>{before}</Text>
+              <Text color={textColor}>{before}</Text>
               <Text bold backgroundColor={cursorShown ? 'white' : undefined} color={cursorShown ? 'black' : undefined}>
                 {at}
               </Text>
-              <Text>{after}</Text>
+              <Text color={textColor}>{after}</Text>
             </>
           )}
         </>
       ) : (
-        <Text color={getTheme().muted}>{placeholder ?? ''}{cursorShown ? '█' : ' '}</Text>
+        <Text color={textColor ?? getTheme().muted}>{placeholder ?? ''}{cursorShown ? '█' : ' '}</Text>
       )}
     </Text>
   )

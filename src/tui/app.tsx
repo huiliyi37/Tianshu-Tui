@@ -1614,7 +1614,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           } else {
             handleSubmit(text)
           }
-        }} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} steerMode={isStreaming} inputRef={inputBarRef} />
+        }} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} steerMode={isStreaming} starDomain={starDomain} inputRef={inputBarRef} />
         {steerPending && isStreaming && (
           <Box paddingX={2} borderStyle="round" borderColor="yellow">
             <Text color="yellow">📨 Queued ({steerBuffer.current.getPending().length}): </Text>
