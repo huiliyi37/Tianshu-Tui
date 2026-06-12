@@ -26,6 +26,7 @@ import { SteerBuffer } from '../steer-buffer.js'
 import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
+import { formatToolGroup, shouldFlushGroup, canCollapse, groupFamily, toolEntryDisplay, type ToolGroup } from '../format/tool-group.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar } from '../format/glance-bar.js'
 import { formatTaskList } from '../format/task-list.js'
@@ -164,6 +165,8 @@ export class TuiApp {
   private pendingTools = new Map<string, { name: string; input: Record<string, unknown>; startMs: number }>()
   /** 最近一条被截断的工具结果（ctrl+o 展开用） */
   private lastTruncatedTool: { toolName: string; content: string; isError: boolean; rawPath?: string; toolInput?: Record<string, unknown> } | null = null
+  /** 工具折叠组缓冲区：连续同族 read/grep/glob 调用在此累积，异族到达或 turn 结束时 flush */
+  private toolGroupBuffer: ToolGroup | null = null
 
   // ── W3: 渲染 ticker + 指标 ───────────────────────────────────
   /** 渲染 ticker（streaming/thinking 时 120ms 驱动 spinner，idle 停止） */
@@ -1022,12 +1025,43 @@ export class TuiApp {
         this.state.domainName = badge.name
       }
     }
+
+    // 工具折叠组：同族可折叠 tool 到达时入组，异族或不可折叠时 flush
+    const family = groupFamily(name)
+    if (canCollapse(family)) {
+      if (this.toolGroupBuffer && shouldFlushGroup(this.toolGroupBuffer, name)) {
+        this.flushToolGroup()
+      }
+      if (!this.toolGroupBuffer) {
+        this.toolGroupBuffer = { family, entries: [], startMs: Date.now() }
+      }
+      this.toolGroupBuffer.entries.push({
+        toolName: name,
+        input,
+        displayName: toolEntryDisplay(name, input),
+      })
+    } else {
+      // 不可折叠族 → flush 已有组，该 tool 单独渲染
+      if (this.toolGroupBuffer) this.flushToolGroup()
+    }
+
     // Commit thinking if any
     if (this.state.thinkingText) {
       this.commitAbove(() => this.commitThinking())
     } else {
       this.renderLive()
     }
+  }
+
+  /** 将折叠组 buffer 刷新到 scrollback */
+  private flushToolGroup(): void {
+    if (!this.toolGroupBuffer || this.toolGroupBuffer.entries.length === 0) return
+    const formatted = formatToolGroup({ group: this.toolGroupBuffer, theme: this.theme })
+    this.commitAbove(() => {
+      this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+      this.state.committedCount++
+    })
+    this.toolGroupBuffer = null
   }
 
   private handleToolResult(id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string): void {
@@ -1051,6 +1085,13 @@ export class TuiApp {
     const meta = this.pendingTools.get(id)
     this.pendingTools.delete(id)
     const finalContent = toolAcc ? toolAcc + displayContent : displayContent
+
+    // 已通过折叠组渲染的 tool（read/grep/glob）不再单独 commit
+    const family = groupFamily(name)
+    if (canCollapse(family)) {
+      // 更新 pending — 这些 tool 的结果已在 flushToolGroup 中作为组渲染
+      return
+    }
 
     // team_orchestrate：把编码串 rivet:team-panel:v1:{...} 解码为 TeamPanel 面板，
     // 而非把裸编码串当工具卡片输出（对齐 Ink decodeTeamPanelModel + TeamPanel）。
@@ -1131,6 +1172,9 @@ export class TuiApp {
 
   private async handleTurnComplete(usage: Partial<Usage>, turnNumber: number, isFinal: boolean): Promise<void> {
     this.state.turnNumber = turnNumber
+
+    // Flush 工具折叠组残余
+    if (this.toolGroupBuffer) this.flushToolGroup()
 
     // Flush any pending blocks from the writer, then commit the remaining tail
     await this.blockWriter.flush()
@@ -1236,6 +1280,8 @@ export class TuiApp {
     // 输入框无法使用（这是 abort 中途审批"假死"的一个分支）。
     if (this.approvalPending) this.resolveApproval(false)
     if (this.intentPending) this.resolveIntent('veto')
+    // Flush 工具折叠组残余
+    if (this.toolGroupBuffer) this.flushToolGroup()
     // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
     // 下次 submit 会把排队内容归并进新 prompt（见 onSubmit 的 steer 收口）。
     this.streamRenderer.reset()
