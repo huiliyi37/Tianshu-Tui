@@ -483,6 +483,13 @@ export class TuiApp {
         this.expandLastTruncatedTool()
         return
       }
+      if (key.name === 'ctrl_t') {
+        if (this.state.isThinking) {
+          this.state.thinkingExpanded = !this.state.thinkingExpanded
+          this.renderLive()
+        }
+        return
+      }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
       if (inputVal.startsWith('/')) {

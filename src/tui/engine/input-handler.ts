@@ -62,6 +62,7 @@ export type KeyName =
   | 'ctrl_n'
   | 'ctrl_o'
   | 'ctrl_p'
+  | 'ctrl_t'
   | 'ctrl_b'
   | 'ctrl_f'
   | 'unknown'
@@ -102,6 +103,7 @@ const CTRL_CODES: Record<number, KeyName> = {
   0x0e: 'ctrl_n',
   0x0f: 'ctrl_o',
   0x10: 'ctrl_p',
+  0x14: 'ctrl_t',
   0x15: 'ctrl_u',
   0x17: 'ctrl_w',
   0x1a: 'ctrl_z',
