@@ -13,7 +13,6 @@ function makeConfig(): AgentConfig {
     promptEngine: {
       setTaskProgress: () => {},
       setBehaviorMirror: () => {},
-      setRoutingReason: () => {},
       setDecisions: () => {},
     } as unknown as AgentConfig['promptEngine'],
     toolRegistry: {} as AgentConfig['toolRegistry'],

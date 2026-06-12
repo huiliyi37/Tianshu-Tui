@@ -12,7 +12,6 @@ export interface ModelPanelProps {
   cacheReadTokens: number
   cacheWriteTokens: number
   cost: number
-  routingReason?: string | null
   perTurnHitRate?: number | null
   recentTurnHitRate?: number | null
   prewarmHits?: number
@@ -40,7 +39,7 @@ const EFFORT_COLOR: Record<string, string> = {
 }
 
 export const ModelPanel = memo(function ModelPanel({
-  model, cacheHitRate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost, routingReason,
+  model, cacheHitRate, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost,
   perTurnHitRate = null, recentTurnHitRate = null, prewarmHits = 0, prewarmMisses = 0, prewarmHitRate = 0,
   physarumShadow, cacheDiagnostic = null, reasoningEffort = 'medium',
 }: ModelPanelProps) {
@@ -52,12 +51,6 @@ export const ModelPanel = memo(function ModelPanel({
       <Text>
         <Text color={theme.secondary}>{model}</Text>
       </Text>
-      {routingReason && (
-        <Text>
-          <Text color={theme.muted}>Selected for: </Text>
-          <Text color={theme.secondary}>{routingReason}</Text>
-        </Text>
-      )}
       <Text>
         <Text color={theme.muted}>Effort:  </Text>
         <Text color={EFFORT_COLOR[reasoningEffort] ?? 'white'}>{EFFORT_BAR[reasoningEffort] ?? '◑'} {reasoningEffort}</Text>

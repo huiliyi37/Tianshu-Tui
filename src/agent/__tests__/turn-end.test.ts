@@ -9,7 +9,6 @@ describe('processTurnEnd', () => {
         promptEngine: {
           setTaskProgress: () => {},
           setBehaviorMirror: () => {},
-          setRoutingReason: () => {},
           setDecisions: () => {},
         },
         modelCards: undefined,
@@ -46,7 +45,6 @@ describe('processTurnEnd', () => {
         promptEngine: {
           setTaskProgress: () => { called = true },
           setBehaviorMirror: () => {},
-          setRoutingReason: () => {},
           setDecisions: () => {},
         },
       } as any,
@@ -62,7 +60,6 @@ describe('processTurnEnd', () => {
         promptEngine: {
           setTaskProgress: () => { called = true },
           setBehaviorMirror: () => {},
-          setRoutingReason: () => {},
           setDecisions: () => {},
         },
       } as any,

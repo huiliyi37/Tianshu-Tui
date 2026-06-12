@@ -123,8 +123,7 @@ export class ContextInjectionController {
   setCerebellarHint(level: 'none' | 'hint' | 'gate' | 'escalate'): void {
     if (level !== 'none') {
       const msg = `Prediction error rate elevated (${level}). Mental model may be stale — verify assumptions before proceeding.`
-      this.deps.promptEngine.setCerebellarHint(msg)
-      // A6: redirect cerebellar hint to A1 bus instead of dead-end setter
+      // A6: redirect cerebellar hint to A1 bus instead of dead-end promptEngine setter
       this.deps.advisoryBus?.submit({
         key: 'cerebellar',
         priority: level === 'escalate' ? 0.9 : level === 'gate' ? 0.85 : 0.7,
@@ -133,11 +132,11 @@ export class ContextInjectionController {
       })
       return
     }
-    this.deps.promptEngine.setCerebellarHint(null)
+    // 'none' → hint cleared; advisory bus auto-expires by key on next build
   }
 
   clearCerebellarHint(): void {
-    this.deps.promptEngine.setCerebellarHint(null)
+    // Advisory bus auto-expires by key on next build; no explicit clear needed
   }
 
   refreshLedger(): void {

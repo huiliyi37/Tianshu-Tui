@@ -69,8 +69,6 @@ export class PromptEngine {
   private strategyShift?: string | null
   private repairHint?: string | null
   private impactHint?: string | null
-  private routingReason?: string | null
-  private cerebellarHint?: string | null
   private affordanceHint?: string | null
   private policyGuidance?: string | null
   private planCacheAdvisory?: string | null
@@ -585,17 +583,7 @@ export class PromptEngine {
     this.impactHint = hint
   }
 
-  setRoutingReason(reason: string | null): void {
-    this.routingReason = reason
-  }
 
-  getRoutingReason(): string | null {
-    return this.routingReason ?? null
-  }
-
-  setCerebellarHint(hint: string | null): void {
-    this.cerebellarHint = hint ?? undefined
-  }
 
   setAffordanceHint(hint: string | null): void {
     this.affordanceHint = hint ?? undefined

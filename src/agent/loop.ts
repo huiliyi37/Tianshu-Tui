@@ -947,8 +947,6 @@ export class AgentLoop {
 
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }
 
-  getRoutingReason() { return this.config.promptEngine.getRoutingReason() }
-
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' {
     // 精确指纹（同 hash 重复）+ bash 命令类指纹（sed/head/tee 变体归并）取最严级别。
     return combineDoomLoopLevels(

@@ -92,7 +92,6 @@ export interface CockpitSnapshot {
     cacheReadTokens: number
     cacheWriteTokens: number
     cost: number
-    routingReason: string | null
     perTurnHitRate: number | null
     recentTurnHitRate: number | null
     prewarmHits: number
