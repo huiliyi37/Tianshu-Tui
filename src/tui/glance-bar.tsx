@@ -49,11 +49,6 @@ function findDomain(domainName: string | undefined) {
 }
 
 function getDomainColor(domainName: string | undefined, theme: RivetTheme): string {
-  // Per-domain qi: resolve uiPersona.accent (a theme color-key) through the
-  // active theme so 天枢/天璇 read as distinct identities, while still adapting
-  // to starfield/midnight. Paired with a per-domain glyph (see getDomainGlyph)
-  // for a color+symbol dual channel — domains stay distinguishable even on
-  // colorblind / low-contrast terminals (WCAG color-not-only).
   const domain = findDomain(domainName)
   if (!domain) return theme.dim
   return theme[domain.uiPersona.accent]
@@ -77,6 +72,11 @@ export function getDomainSeparatorStyle(domainName: string | undefined): Separat
 }
 const MOON_PHASES = ['◐', '◑', '◒', '◓'] as const
 
+/**
+ * GlanceBar — 玄夜墨色 status strip.
+ * Design: 95% 墨灰 (dim/muted), 紫微紫 (primary) reserved for the ONE active
+ * element — the five-element phase glyph. No gold, no large color blocks.
+ */
 export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHitRate, cost, model, isStreaming, historyCount, domain, branch, estimatedTokens, maxTokens, elapsedMs, reasoningEffort }: GlanceBarProps) {
   const theme = getTheme()
   const [moonIdx, setMoonIdx] = useState(0)
@@ -84,8 +84,6 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
   useEffect(() => {
     if (!isStreaming) return
     const interval = setInterval(() => {
-      // Don't animate mid-resize: a commit now under-erases at an intermediate
-      // width and stacks ghost copies of this bar (see use-terminal-size.ts).
       if (isResizeSettling()) return
       setMoonIdx(i => (i + 1) % MOON_PHASES.length)
     }, 600)
@@ -99,9 +97,7 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
   const alertPulse = pulses.find(p => p.level === 'alert')
   const hasActive = pulses.some(p => p.level === 'active')
 
-  // Adaptive layout: narrow terminal → compact mode
   const narrow = columns < 60
-  // Branch names can be long (e.g. feat/...); cap to keep GlanceBar single-line (flicker budget)
   const branchLabel = branch && branch.length > 24 ? branch.slice(0, 23) + '…' : branch
 
   const ratio = maxTokens > 0 ? estimatedTokens / maxTokens : 0
@@ -110,67 +106,57 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
   const pct = Math.round(ratio * 100)
 
   const tokenColor = ratio >= 0.88 ? theme.error
-    : ratio >= 0.78 ? theme.warning
-    : ratio >= 0.60 ? theme.warning
-    : theme.success
+    : ratio >= 0.75 ? theme.warning
+    : theme.dim
 
   const domainColor = getDomainColor(domain, theme)
   const domainGlyph = getDomainGlyph(domain)
 
-  // ── Single-line cohesive status bar — │ separators, no spatial gaps ──
   const modelLabel = narrow ? model.slice(0, 12) : model.slice(0, 20)
   const elapsedLabel = elapsedMs !== undefined ? formatToolElapsed(elapsedMs) : ''
 
-  // Full-width rule: pass columns as maxWidth to remove the 72-char cap
   const rule = horizontalRule(columns, getDomainSeparatorStyle(domain), columns)
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      {/* Full-width separator line */}
-      <Text color={domainColor}>{rule}</Text>
-      {/* Single cohesive status line: identity │ phase │ metrics ……… elapsed */}
+      {/* Full-width separator line — dim, barely visible */}
+      <Text color={theme.dim}>{rule}</Text>
+      {/* Single cohesive status line: identity · phase · metrics ……… elapsed */}
       <Box flexDirection="row" width="100%">
-        {/* Zone 1 · identity — star domain (bold + domain color) + branch.
-            Idle (no worker domain active) = 天枢, the navigator/pivot star,
-            in calm silver. Worker domains carry their own qi (color+glyph). */}
-        {domain
-          ? <Text bold color={domainColor}>{domainGlyph} {domain}</Text>
-          : <Text bold color={theme.secondary}>❂ 天枢</Text>
-        }
-        {branchLabel && !narrow && <Text color={theme.secondary}> ⎇ {branchLabel}</Text>}
+        {/* Zone 1 · identity — muted, not gold/purple. 95% 墨灰. */}
+        <Text color={theme.muted}>{domainGlyph} {domain ?? '天枢'}</Text>
+        {branchLabel && !narrow && <Text color={theme.dim}> ⎇ {branchLabel}</Text>}
 
-        <Text color={theme.secondary} bold>{'  ┃  '}</Text>
+        {/* Zone separator — dim dot, NOT bold purple */}
+        <Text color={theme.dim}>  ·  </Text>
 
-        {/* Zone 2 · phase + streaming indicator */}
+        {/* Zone 2 · phase — 五行 glyph in ziwei (primary), label in muted.
+            This is the ONE accent point in the entire status bar. */}
         {phaseGlyph
-          ? <Text bold color={hasActive ? theme.primary : theme.secondary}>{phaseGlyph} {phaseLabel}</Text>
-          : <Text color={theme.secondary}>{phaseLabel || 'idle'}</Text>
-        }
+          ? <Text color={theme.primary}>{phaseGlyph} </Text>
+          : null}
+        <Text color={theme.muted}>{phaseLabel || 'idle'}</Text>
         {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
 
-        <Text color={theme.secondary} bold>{'  ┃  '}</Text>
+        <Text color={theme.dim}>  ·  </Text>
 
-        {/* Zone 3 · metrics — model (bold), cache, cost, tokens */}
-        <Text bold color={theme.primary}>「{modelLabel}」</Text>
-        <Text color={theme.dim}> </Text>
-        {reasoningEffort && <Text color={reasoningEffort === 'high' || reasoningEffort === 'max' ? theme.warning : theme.muted}>{EFFORT_GLYPH[reasoningEffort]}{reasoningEffort}</Text>}
-        {reasoningEffort && <Text color={theme.dim}> · </Text>}
-        <Text color={cacheColor}>⚡{cachePct}%</Text>
-        <Text color={theme.dim}> · </Text>
-        <Text color={theme.muted}>${cost.toFixed(2)}</Text>
-        {!narrow && <Text color={theme.dim}> · </Text>}
-        {!narrow && <Text color={tokenColor}>◧ {estimatedK}k/{maxK}k ({pct}%)</Text>}
+        {/* Zone 3 · metrics — all muted/dim, dot-separated */}
+        <Text color={theme.muted}>{modelLabel}</Text>
+        {reasoningEffort && <Text color={theme.dim}> · {EFFORT_GLYPH[reasoningEffort]}{reasoningEffort}</Text>}
+        <Text color={cacheColor}> ⚡{cachePct}%</Text>
+        <Text color={theme.dim}> · ${cost.toFixed(2)}</Text>
+        {!narrow && <Text color={tokenColor}> · ◧ {estimatedK}k/{maxK}k ({pct}%)</Text>}
         {narrow && <Text color={tokenColor}> · {pct}%</Text>}
         {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
         {historyCount !== undefined && !narrow && (
-          <Text color={theme.muted}> · {historyCount} msgs</Text>
+          <Text color={theme.dim}> · {historyCount} msgs</Text>
         )}
         {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
 
         {/* Flexible spacer pushes elapsed to the far right edge */}
         <Box flexGrow={1} />
 
-        {/* Zone 4 · elapsed — flows live on the far right */}
+        {/* Zone 4 · elapsed — ziwei when streaming, dim when idle */}
         {elapsedLabel && (
           <Text color={isStreaming ? theme.primary : theme.dim}>⧗ {elapsedLabel}</Text>
         )}

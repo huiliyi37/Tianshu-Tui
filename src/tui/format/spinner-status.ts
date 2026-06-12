@@ -21,13 +21,14 @@ const PHASE_VERBS: Record<Exclude<SpinnerPhase, 'idle'>, string> = {
   waiting: '候待',
 }
 
-/** GlanceBar 用的 phase glyph + 标签 */
+/** GlanceBar 用的 phase glyph + 标签 — 五行运行态（对齐设计稿）
+ *  ◐ 水·凝思  ✦ 火·书写  ⚙ 风·运作  ▲ 山·候待  ❧ 林·归航 */
 export function phaseIndicator(phase: SpinnerPhase): { glyph: string; label: string } {
   switch (phase) {
     case 'thinking': return { glyph: '◐', label: '凝思' }
     case 'streaming': return { glyph: '✦', label: '书写' }
-    case 'analyzing': return { glyph: '⚙', label: '工具' }
-    case 'waiting': return { glyph: '◌', label: '候待' } // 五行·候待 — 与 v2 waiting 字形(远星灰 ◌)对齐
+    case 'analyzing': return { glyph: '⚙', label: '运作' }
+    case 'waiting': return { glyph: '▲', label: '候待' }
     case 'idle': return { glyph: '·', label: 'idle' }
   }
 }
@@ -56,7 +57,7 @@ export function formatSpinnerStatus(input: SpinnerStatusInput, theme: RivetTheme
   const frame = brailleSpinnerFrame(input.tick)
   const verb = PHASE_VERBS[input.phase]
   const text = `${frame} ${verb}… (${formatElapsedHuman(input.elapsedMs)} · esc to interrupt)`
-  return color(text, input.stalled ? theme.warning : theme.secondary)
+  return color(text, input.stalled ? theme.warning : theme.muted)
 }
 
 /** token 数量人类可读化：890 / 12.3k / 1.2M */

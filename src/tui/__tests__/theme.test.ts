@@ -8,8 +8,8 @@ describe('getTheme', () => {
   it('defaults to tianshu theme', () => {
     assert.equal(getActiveThemeName(), 'tianshu')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#d4a574') // 星金 accent
-    assert.equal(theme.error, '#d07065')   // 朱砂赤
+    assert.equal(theme.primary, '#c9b8ff') // 紫微紫 accent
+    assert.equal(theme.error, '#c1655c')   // 朱砂赤 (desaturated)
   })
 
   it('tianshu uses cinnabar seal for user mark + alert pulse', () => {
@@ -28,22 +28,23 @@ describe('getTheme', () => {
   it('maps tool names to colors (tianshu: multi-color per HTML design)', () => {
     const theme = getTheme(3)
     // tianshu overrides: toolShell ≠ primary, toolEdit ≠ secondary
-    assert.equal(theme.toolColor('bash'), '#9a9dab')        // shell grey
-    assert.equal(theme.toolColor('grep'), '#9a9dab')        // same as bash
-    assert.equal(theme.toolColor('glob'), '#9a9dab')        // same as bash
-    assert.equal(theme.toolColor('edit_file'), '#a095b8')   // 墨紫灰
-    assert.equal(theme.toolColor('write_file'), '#a095b8')  // same as edit
-    assert.equal(theme.toolColor('run_tests'), '#a89060')   // 金褐
-    assert.equal(theme.toolColor('delegate_task'), '#c4a565') // 星金
+    assert.equal(theme.toolColor('bash'), '#8c8f9d')        // shell grey (design --tc-shell)
+    assert.equal(theme.toolColor('grep'), '#8c8f9d')        // same as bash
+    assert.equal(theme.toolColor('glob'), '#8c8f9d')        // same as bash
+    assert.equal(theme.toolColor('edit_file'), '#9a90c2')   // 墨紫灰 (design --tc-edit)
+    assert.equal(theme.toolColor('write_file'), '#9a90c2')  // same as edit
+    assert.equal(theme.toolColor('run_tests'), '#9c8a63')   // 金褐 (design --tc-test)
+    assert.equal(theme.toolColor('delegate_task'), '#b09155') // 星金 (design --tc-delegate)
     assert.equal(theme.toolColor('read_file'), theme.dim)
     assert.equal(theme.toolColor('unknown_tool'), theme.dim)
   })
 
-  it('returns context bar color by percentage', () => {
+  it('returns context bar color — dim for normal, warning/error for high', () => {
     const theme = getTheme(3)
-    assert.equal(theme.contextColor(0.3), theme.primary)
-    assert.equal(theme.contextColor(0.7), theme.warning)
-    assert.equal(theme.contextColor(0.85), theme.error)
+    assert.equal(theme.contextColor(0.3), theme.dim)    // normal → dim (NOT primary)
+    assert.equal(theme.contextColor(0.7), theme.dim)    // still normal → dim
+    assert.equal(theme.contextColor(0.76), theme.warning) // 75%+ → warning
+    assert.equal(theme.contextColor(0.89), theme.error)   // 88%+ → error
   })
 
   it('exposes muted color for secondary readable text', () => {
@@ -68,6 +69,6 @@ describe('theme switching', () => {
     setTheme('tianshu')
     assert.equal(getActiveThemeName(), 'tianshu')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#d4a574')
+    assert.equal(theme.primary, '#c9b8ff')
   })
 })

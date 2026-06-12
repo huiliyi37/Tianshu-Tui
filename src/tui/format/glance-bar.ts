@@ -50,34 +50,36 @@ export interface GlanceBarInput {
 export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): string {
   const narrow = input.narrow ?? input.width < 60
 
-  // Zone 1: Domain identity
+  // Zone 1: Domain identity — muted (NOT primary/gold). 95% 墨灰.
   const domainGlyph = input.domainGlyph ?? '❂'
   const domainLabel = input.domainName ?? '天枢'
   const branchPart = !narrow && input.branch ? ` (${input.branch})` : ''
-  const zone1 = `${color(domainGlyph, theme.primary, { bold: true })} ${color(domainLabel, theme.primary)}${color(branchPart, theme.dim)}`
+  const zone1 = `${color(domainGlyph, theme.muted)} ${color(domainLabel, theme.muted)}${color(branchPart, theme.dim)}`
 
-  // Zone 2: Phase
-  let zone2 = ''
+  // Zone 2: Phase — glyph uses primary (ziwei, the ONE accent); label muted.
+  // 五行符号（◐✦⚙▲❧）是状态栏唯一的彩色亮点。
+  let zone2Glyph = ''
+  let zone2Label = ''
   if (input.phaseGlyph) {
-    zone2 = `${input.phaseGlyph} ${input.phaseLabel ?? ''}`
+    zone2Glyph = color(input.phaseGlyph, theme.primary)
+    zone2Label = color(input.phaseLabel ?? '', theme.muted)
   }
-  zone2 = color(zone2, theme.secondary)
+  const zone2 = `${zone2Glyph} ${zone2Label}`.trim()
 
-  // Zone 3: Model + Cache + Tokens
+  // Zone 3: Model + Cache + Tokens — all muted/dim, dot-separated for breathing room
   const parts: string[] = []
   if (input.modelName) {
-    parts.push(narrow ? input.modelName.slice(0, 12) : input.modelName)
+    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.muted))
   }
   if (input.reasoningEffort) {
-    parts.push(input.reasoningEffort)
+    parts.push(color(input.reasoningEffort, theme.dim))
   }
   if (input.cacheHitRate !== undefined && input.cacheHitRate > 0) {
-    parts.push(`⚡${(input.cacheHitRate * 100).toFixed(0)}%`)
+    parts.push(color(`⚡${(input.cacheHitRate * 100).toFixed(0)}%`, theme.dim))
   }
   if (input.contextRatio !== undefined) {
     const pct = Math.round(input.contextRatio * 100)
-    // ≥78% 显示 compact 警告（对齐 Claude Code 的 "Context left until auto-compact"）
-    const ratioColor = pct >= 88 ? theme.error : pct >= 78 ? theme.warning : theme.primary
+    const ratioColor = pct >= 88 ? theme.error : pct >= 75 ? theme.warning : theme.dim
     const compactWarn = pct >= 78 ? ' ⚠compact' : ''
     parts.push(color(`ctx ${pct}%${compactWarn}`, ratioColor))
   }
@@ -85,9 +87,10 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
     parts.push(color(`◧ ${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, theme.dim))
   }
   if (input.cost !== undefined && input.cost > 0) {
-    parts.push(`$${input.cost.toFixed(2)}`)
+    parts.push(color(`${input.cost.toFixed(2)}`, theme.dim))
   }
-  const zone3 = parts.join(' ')
+  const dotSep = color(' · ', theme.dim)
+  const zone3 = parts.join(dotSep)
 
   // Zone 4: Elapsed
   let zone4 = ''
