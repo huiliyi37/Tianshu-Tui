@@ -363,6 +363,17 @@ export class DelegationCoordinator {
     this.backgroundRuns.set(id, handle)
     const promise = this.delegate(request, abortSignal).then(
       (run) => {
+        // T3 alignment: delegate() now converts worker exceptions into degraded
+        // completed results (Flash→Pro escalation). Detect degraded runs so the
+        // background handle still reflects failure for waitBackgroundRun() callers.
+        const resultStatus = run.results[0]?.status
+        if (run.status === 'completed' && resultStatus && resultStatus !== 'passed') {
+          const reason = run.results[0]?.summary ?? `Worker returned ${resultStatus}`
+          handle.status = 'failed'
+          handle.error = reason
+          handle.run = run
+          throw new Error(reason)
+        }
         handle.status = 'completed'
         handle.run = run
         return run
