@@ -57,6 +57,10 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal and historical user-message injection. */
   intentRetrievalRoute?: string | null
+  /** Harness advisory block — unified corrective guidance from advisory bus (A1).
+   *  Cache-safe: rendered ONLY into the dynamic appendix.
+   *  Max 3 advisories per turn. */
+  harnessAdvisoryBlock?: string | null
   /** Cross-session events formatted for injection (cache-safe: only in dynamic appendix) */
   crossSessionEvents?: string
   /**
@@ -163,6 +167,8 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     policyGuidance: undefined,
     planCacheAdvisory: undefined,
     intentRetrievalRoute: undefined,
+    // Harness advisory — per-turn dynamic, stripped from FROZEN
+    harnessAdvisoryBlock: undefined,
     // gitStatus moved to dynamic appendix — changes every turn, breaks prefix cache
     gitStatus: undefined,
     // planModeState and worktreeReality rendered in buildVolatileBlockInternal
@@ -322,6 +328,11 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
   }
 
+  // Harness advisory: unified corrective guidance (A1 bus, max 3 entries)
+  if (ctx.harnessAdvisoryBlock) {
+    parts.push(ctx.harnessAdvisoryBlock)
+  }
+
   // Worktree warning: cache-safe — rendered ONLY into dynamic appendix
   if (ctx.worktreeReality && ctx.worktreeReality.severity !== 'green') {
     const reasons = ctx.worktreeReality.mismatchReasons
@@ -369,6 +380,7 @@ export interface SalientBlock {
 export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<star-domain')) return 1.0
   if (blockContent.startsWith('<repair-hint>')) return 0.8
+  if (blockContent.startsWith('<harness-advisory>')) return 0.8
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
   if (blockContent.startsWith('<affordance-hint>')) return 0.7
   if (blockContent.startsWith('<policy-guidance>')) return 0.7
