@@ -102,7 +102,7 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
         const meta = { command: 'git diff', exitCode: code ?? 0, durationMs }
         const rawPath = await persistRawOutput(params.toolUseId, stdout)
         resolve({
-          content: buildModelOutput(truncateDiff(stdout), meta),
+          content: buildModelOutput(truncateDiff(stdout), { ...meta, rawPath }),
           uiContent: buildUiOutput(stdout, meta),
           rawPath,
         })

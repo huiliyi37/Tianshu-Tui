@@ -6,8 +6,12 @@ import {
   finishTraceEvent,
   recordTraceEvent,
   getDoomLoopLevel,
+  getClassDoomLoopLevel,
+  combineDoomLoopLevels,
   getToolStormLevel,
   fingerprintToolCall,
+  fingerprintToolClass,
+  bashCommandClass,
   recordToolFingerprint,
   recordToolNamedFingerprint,
   type TraceEvent,
@@ -164,5 +168,106 @@ describe('recordToolNamedFingerprint', () => {
     assert.equal(store.toolNameHistory!.length, 20)
     assert.equal(store.toolNameHistory![0], 'tool5')
     assert.equal(store.toolNameHistory![19], 'tool24')
+  })
+})
+
+describe('bashCommandClass', () => {
+  it('merges git status pipe variants into one class', () => {
+    assert.equal(bashCommandClass('git status --porcelain'), 'git:status')
+    assert.equal(bashCommandClass('git status --porcelain | sed -n 1,50p'), 'git:status')
+    assert.equal(bashCommandClass('git status --porcelain | head -100'), 'git:status')
+    assert.equal(bashCommandClass('git status --porcelain | tee /tmp/s.txt'), 'git:status')
+    assert.equal(bashCommandClass('git status --porcelain > /tmp/out && cat /tmp/out'), 'git:status')
+  })
+
+  it('detects git embedded after other binaries (cd, env vars)', () => {
+    assert.equal(bashCommandClass('cd /repo && git log --oneline'), 'git:log')
+    assert.equal(bashCommandClass('GIT_PAGER=cat git diff --stat'), 'git:diff')
+  })
+
+  it('distinguishes git subcommands', () => {
+    assert.notEqual(bashCommandClass('git status'), bashCommandClass('git add -A'))
+    assert.notEqual(bashCommandClass('git log'), bashCommandClass('git commit -m x'))
+  })
+
+  it('includes subcommand for known multi-sub binaries', () => {
+    assert.equal(bashCommandClass('npm test'), 'npm:test')
+    assert.equal(bashCommandClass('npm run build'), 'npm:run')
+    assert.notEqual(bashCommandClass('npm test'), bashCommandClass('npm install'))
+  })
+
+  it('falls back to binary name for plain commands', () => {
+    assert.equal(bashCommandClass('ls -la src'), 'ls')
+    assert.equal(bashCommandClass('/usr/bin/python3 script.py'), 'python3')
+    assert.equal(bashCommandClass(''), 'empty')
+  })
+
+  it('skips leading env assignments', () => {
+    assert.equal(bashCommandClass('NODE_ENV=test npx tsx --test foo.ts'), 'npx:tsx')
+  })
+})
+
+describe('fingerprintToolClass', () => {
+  it('returns a class fingerprint for bash including output class', () => {
+    assert.equal(fingerprintToolClass('bash', { command: 'git status | head' }, 'success'), 'git:status·success')
+  })
+
+  it('returns null for non-bash tools', () => {
+    assert.equal(fingerprintToolClass('read_file', { path: '/a.ts' }, 'success'), null)
+    assert.equal(fingerprintToolClass('grep', { pattern: 'x' }, 'error'), null)
+  })
+})
+
+describe('recordToolFingerprint with class fingerprint', () => {
+  it('records class fingerprint alongside exact fingerprint', () => {
+    let store = createTraceStore()
+    store = recordToolFingerprint(store, 'fp1', 'git:status·success')
+    store = recordToolFingerprint(store, 'fp2', null)
+    assert.deepEqual(store.toolFingerprints, ['fp1', 'fp2'])
+    assert.deepEqual(store.bashClassFingerprints, ['git:status·success'])
+  })
+
+  it('caps class fingerprints to 20', () => {
+    let store = createTraceStore()
+    for (let i = 0; i < 25; i++) {
+      store = recordToolFingerprint(store, `fp${i}`, `class${i}`)
+    }
+    assert.equal(store.bashClassFingerprints!.length, 20)
+  })
+})
+
+describe('getClassDoomLoopLevel', () => {
+  it('returns none for varied command classes', () => {
+    assert.equal(getClassDoomLoopLevel(['git:status·success', 'npm:test·success', 'rg·success', 'ls·success']), 'none')
+  })
+
+  it('warns on 5th consecutive same-class call (sed/head/tee variants merged)', () => {
+    const fps = Array(5).fill('git:status·success')
+    assert.equal(getClassDoomLoopLevel(fps), 'warn')
+  })
+
+  it('blocks on 7th consecutive same-class call', () => {
+    const fps = Array(7).fill('git:status·success')
+    assert.equal(getClassDoomLoopLevel(fps), 'blocked')
+  })
+
+  it('does not flag 4 consecutive same-class calls (legit iteration headroom)', () => {
+    assert.equal(getClassDoomLoopLevel(Array(4).fill('rg·success')), 'none')
+  })
+
+  it('blocks when one class dominates the window even non-consecutively', () => {
+    const fps = ['git:status·success', 'ls·success', 'git:status·success', 'git:status·success',
+      'rg·success', 'git:status·success', 'git:status·success', 'git:status·success',
+      'git:status·success', 'git:status·success']
+    assert.equal(getClassDoomLoopLevel(fps), 'blocked')
+  })
+})
+
+describe('combineDoomLoopLevels', () => {
+  it('returns the strictest level', () => {
+    assert.equal(combineDoomLoopLevels('none', 'warn'), 'warn')
+    assert.equal(combineDoomLoopLevels('blocked', 'warn'), 'blocked')
+    assert.equal(combineDoomLoopLevels('none', 'none'), 'none')
+    assert.equal(combineDoomLoopLevels('warn', 'blocked'), 'blocked')
   })
 })

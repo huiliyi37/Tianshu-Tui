@@ -161,7 +161,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
             debugLog(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
             const rawPath = await persistRawOutput(params.toolUseId, raw)
             return {
-              content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
+              content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath }),
               uiContent: buildUiOutput(raw, meta),
               rawPath,
               isError,
@@ -196,7 +196,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
 
         const rawPath = await persistRawOutput(params.toolUseId, raw)
         return {
-          content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta),
+          content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath }),
           uiContent: buildUiOutput(raw, meta),
           rawPath,
           isError,

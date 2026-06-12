@@ -14,6 +14,10 @@ export interface ToolOutputMeta {
   command: string
   exitCode: number
   durationMs: number
+  /** Path to the persisted full raw output. When present, truncation footers
+   *  include a recovery hint so the model reads the file instead of re-running
+   *  the command with sed/head/tee variants (doom-loop root cause, 会话 43443098). */
+  rawPath?: string
 }
 
 function safeRawFileName(id: string): string {
@@ -76,10 +80,14 @@ export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
   const lineCount = countLines(effectiveRaw)
   const header = `[${meta.command}] exit=${meta.exitCode} time=${(meta.durationMs / 1000).toFixed(1)}s lines=${lineCount}`
 
+  // Recovery hint: without it the model retries the same command with
+  // sed/head/python/tee variants to "see the rest" — the doom-loop trigger.
+  const recovery = meta.rawPath ? ` · full output: read_file ${meta.rawPath} — 不要重跑命令` : ''
+
   if (meta.exitCode === 0 && lineCount > SUCCESS_INLINE_LINES) {
     const tail = lines.slice(-SUCCESS_TAIL_LINES)
     const omitted = lineCount - SUCCESS_TAIL_LINES
-    return `${header}\n... ${omitted} lines omitted ...\n${tail.join('\n')}\n[truncated: ${lineCount} lines → ${SUCCESS_TAIL_LINES} shown]`
+    return `${header}\n... ${omitted} lines omitted ...\n${tail.join('\n')}\n[truncated: ${lineCount} lines → ${SUCCESS_TAIL_LINES} shown${recovery}]`
   }
 
   if (lines.length <= MODEL_MAX_LINES) {
@@ -90,7 +98,7 @@ export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
   const tail = lines.slice(-MODEL_TAIL_LINES)
   const omitted = lines.length - MODEL_HEAD_LINES - MODEL_TAIL_LINES
   const kept = MODEL_HEAD_LINES + MODEL_TAIL_LINES
-  return `${header}\n${head.join('\n')}\n... (${omitted} lines omitted) ...\n${tail.join('\n')}\n[truncated: ${lines.length} lines → ${kept} shown]`
+  return `${header}\n${head.join('\n')}\n... (${omitted} lines omitted) ...\n${tail.join('\n')}\n[truncated: ${lines.length} lines → ${kept} shown${recovery}]`
 }
 
 export function buildUiOutput(raw: string, meta: ToolOutputMeta, maxLines = 20): string {

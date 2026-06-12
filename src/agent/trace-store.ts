@@ -25,6 +25,11 @@ export interface TraceStore {
   events: TraceEvent[]
   toolFingerprints: string[]
   toolNameHistory?: string[]
+  /** bash 命令类指纹（归一化后的命令类，如 "git:status·success"）。
+   *  精确指纹对 sed/head/python/tee 变体免疫——每个变体都是新 hash，
+   *  doom-loop 检测器全程不拦（会话 43443098：28 次 git status 变体零拦截）。
+   *  类指纹把同一命令类的变体归并，配合 getClassDoomLoopLevel 的保守阈值拦截。 */
+  bashClassFingerprints?: string[]
 }
 
 export function createTraceStore(maxEvents = 50): TraceStore {
@@ -82,8 +87,60 @@ export function fingerprintToolCall(
   return createHash('sha256').update(payload).digest('hex').slice(0, 16)
 }
 
-export function recordToolFingerprint(store: TraceStore, fingerprint: string): TraceStore {
-  return { ...store, toolFingerprints: [...store.toolFingerprints, fingerprint].slice(-20) }
+/** Binaries whose first non-flag argument is a subcommand worth distinguishing
+ *  (npm test ≠ npm install). Keeps class granularity coarse enough to merge
+ *  variants but fine enough to avoid flagging normal multi-step workflows. */
+const SUBCOMMAND_BINARIES = new Set(['git', 'npm', 'pnpm', 'yarn', 'cargo', 'docker', 'kubectl', 'go', 'npx'])
+
+/**
+ * Normalize a bash command string into a command class.
+ *
+ * Doom-loop 变体归并：`git status --porcelain | sed -n 1,50p`、
+ * `git status --porcelain | head -100`、`git status --porcelain | tee /tmp/s`
+ * 全部归并为 "git:status"。git 出现在管道/子串中也能匹配（python -c 内嵌同理）。
+ */
+export function bashCommandClass(command: string): string {
+  // git anywhere in the command dominates — pipes/tee/embedding included.
+  const gitMatch = command.match(/\bgit\s+(?:-[^\s]+\s+)*([a-z][a-z-]*)/)
+  if (gitMatch) return `git:${gitMatch[1]}`
+
+  const tokens = command.trim().split(/\s+/)
+  let i = 0
+  // Skip leading env assignments (FOO=bar cmd ...)
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]!)) i++
+  const bin = (tokens[i] ?? '').replace(/^.*\//, '')
+  if (!bin) return 'empty'
+  const next = tokens[i + 1]
+  if (SUBCOMMAND_BINARIES.has(bin) && next && !next.startsWith('-')) {
+    return `${bin}:${next}`
+  }
+  return bin
+}
+
+/**
+ * Class fingerprint for a tool call. Only bash gets one — bash is the
+ * text-parsing escape hatch where the model mutates flags/pipes to "retry";
+ * structured tools (read_file/grep/...) legitimately repeat with new inputs.
+ * Returns null for non-bash tools.
+ */
+export function fingerprintToolClass(
+  name: string,
+  input: Record<string, unknown>,
+  outputClass: string,
+): string | null {
+  if (name !== 'bash') return null
+  const command = typeof input.command === 'string' ? input.command : ''
+  return `${bashCommandClass(command)}·${outputClass}`
+}
+
+export function recordToolFingerprint(store: TraceStore, fingerprint: string, classFingerprint?: string | null): TraceStore {
+  return {
+    ...store,
+    toolFingerprints: [...store.toolFingerprints, fingerprint].slice(-20),
+    ...(classFingerprint
+      ? { bashClassFingerprints: [...(store.bashClassFingerprints ?? []), classFingerprint].slice(-20) }
+      : {}),
+  }
 }
 
 export function recordToolNamedFingerprint(
@@ -165,4 +222,44 @@ export function getDoomLoopLevel(fingerprints: string[]): DoomLoopLevel {
   // Warn: 1+ consecutive identical (2nd same call) OR 4+ out of 8 window
   if (maxConsecutive >= 1 || maxCount >= 4) return 'warn'
   return 'none'
+}
+
+/**
+ * Class-level doom-loop detection over bash command-class fingerprints.
+ *
+ * 比精确指纹阈值保守（类粒度更粗，避免把"连续几次不同的 rg 搜索"误判为循环）：
+ * - 4+ 连续同类（第 5 次同类调用）→ warn
+ * - 6+ 连续同类 OR 8+/10 窗口占比 → blocked
+ *
+ * 会话 43443098 的 28 次 git status 变体在第 5 次就会进入 warn、第 7 次 blocked。
+ */
+export function getClassDoomLoopLevel(classFingerprints: string[]): DoomLoopLevel {
+  const WINDOW = 10
+  const recent = classFingerprints.slice(-WINDOW)
+
+  let maxConsecutive = 0
+  let currentConsecutive = 0
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i] === recent[i - 1]) {
+      currentConsecutive++
+    } else {
+      currentConsecutive = 0
+    }
+    maxConsecutive = Math.max(maxConsecutive, currentConsecutive)
+  }
+
+  const counts = new Map<string, number>()
+  for (const fp of recent) counts.set(fp, (counts.get(fp) ?? 0) + 1)
+  const maxCount = Math.max(0, ...counts.values())
+
+  if (maxConsecutive >= 6 || maxCount >= 8) return 'blocked'
+  if (maxConsecutive >= 4) return 'warn'
+  return 'none'
+}
+
+const DOOM_LEVEL_ORDER: Record<DoomLoopLevel, number> = { none: 0, warn: 1, blocked: 2 }
+
+/** Combine exact-fingerprint and class-fingerprint detection — strictest wins. */
+export function combineDoomLoopLevels(a: DoomLoopLevel, b: DoomLoopLevel): DoomLoopLevel {
+  return DOOM_LEVEL_ORDER[a] >= DOOM_LEVEL_ORDER[b] ? a : b
 }
