@@ -39,6 +39,9 @@ import { extractAtToken, getCompletions, applyCompletion } from '../file-complet
 import { appendHistory, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData } from '../format/overlay.js'
+import { renderCockpit } from '../format/cockpit.js'
+import type { CockpitSnapshot } from '../cockpit/types.js'
+import { renderRewind, type RewindData } from '../format/rewind.js'
 
 function formatElapsedShort(ms: number): string {
   if (ms < 60000) return `${Math.floor(ms / 1000)}s`
@@ -137,7 +140,7 @@ export class TuiApp {
 
   // Overlay 交互导航状态（pager 翻页 / palette 选中）。
   // 渲染器是纯函数，page/selectedIndex 由此状态注入并在激活时复位。
-  private overlayNav = { pagerPage: 0, paletteIndex: 0 }
+  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0 }
   /** 注册时保存的 overlay 数据提供函数（供导航处理器查边界 / 执行命令） */
   private overlayData?: {
     pagerContent?: () => PagerData
@@ -449,6 +452,12 @@ export class TuiApp {
         }
         return
       }
+      if (key.name === 'escape' && key.ctrl) {
+        // Ctrl+Esc → 激活命令面板
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0 }
+        this.overlay.activate('command-palette')
+        return
+      }
       if (key.name === 'escape' && !this.inputLine.vimEnabled) {
         if (this.overlay.isActive()) {
           // Close active overlay
@@ -640,9 +649,11 @@ export class TuiApp {
       case 'pager':
       case 'starmap':
       case 'command-palette':
+      case 'cockpit':
+      case 'rewind':
       case 'chronicle': {
         // 复位导航状态，避免上次的翻页/选中残留到新 overlay
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0 }
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0 }
         return this.overlay.activate(id)
       }
       default:
@@ -654,6 +665,11 @@ export class TuiApp {
   deactivateOverlay(): void {
     this.overlay.deactivate()
     this.renderLive()
+  }
+
+  /** 返回 scrollback 完整文本（供 pager overlay 读取） */
+  getScrollbackContent(): string {
+    return this.commit.getContent()
   }
 
   /**
@@ -706,6 +722,32 @@ export class TuiApp {
           const idx = cur
           this.deactivateOverlay()
           this.paletteExec(idx)
+        } else {
+          this.deactivateOverlay()
+        }
+        return true
+      }
+      return false
+    }
+
+    if (id === 'rewind') {
+      const count = (this.overlayData as any)?.rewindEntries?.().entries.length ?? 0
+      const cur = this.overlayNav.rewindIndex
+      if (key.name === 'down') {
+        if (count > 0) { this.overlayNav.rewindIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (count > 0) { this.overlayNav.rewindIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        if (count > 0) {
+          const entry = (this.overlayData as any)?.rewindEntries?.().entries[cur]
+          this.deactivateOverlay()
+          if (entry) {
+            this.commitStatic(`[Rewind] Would undo to message #${entry.index}: ${entry.content.slice(0, 80)}…`)
+          }
         } else {
           this.deactivateOverlay()
         }
@@ -1510,8 +1552,10 @@ export class TuiApp {
     starmapEntries?: () => StarmapData
     paletteCommands?: () => PaletteData
     chronicleEntries?: () => ChronicleData
+    cockpitSnapshot?: () => CockpitSnapshot
+    rewindEntries?: () => RewindData
   }, paletteExec?: (index: number) => void): void {
-    this.overlayData = overlayData
+    this.overlayData = overlayData as any
     this.paletteExec = paletteExec
     // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {
@@ -1534,6 +1578,23 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.paletteCommands?.() ?? { commands: [], selectedIndex: 0 }
         return renderCommandPalette({ ...data, selectedIndex: this.overlayNav.paletteIndex }, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Cockpit
+    this.overlay.register('cockpit', {
+      render: (_w, _h) => {
+        const data = overlayData?.cockpitSnapshot?.()
+        if (!data) return ['Cockpit data not available.']
+        return renderCockpit(data, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Rewind — selectedIndex 由 overlayNav 注入
+    this.overlay.register('rewind', {
+      render: (_w, _h) => {
+        const data = overlayData?.rewindEntries?.() ?? { entries: [], selectedIndex: 0 }
+        return renderRewind({ ...data, selectedIndex: this.overlayNav.rewindIndex }, this.columns, this.rows, this.theme)
       },
     })
 

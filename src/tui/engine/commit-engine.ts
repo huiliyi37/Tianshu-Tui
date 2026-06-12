@@ -33,10 +33,17 @@ export interface CommitEngineOptions {
 export class CommitEngine {
   private stdout: WriteStream
   private flush: boolean
+  /** Scrollback buffer: 累积所有已提交文本，供 pager overlay 读取。 */
+  private buffer: string[] = []
 
   constructor(options: CommitEngineOptions) {
     this.stdout = options.stdout
     this.flush = options.flush ?? false
+  }
+
+  /** 返回 scrollback 完整文本（各条目以换行符连接）。 */
+  getContent(): string {
+    return this.buffer.join('\n')
   }
 
   /**
@@ -52,6 +59,7 @@ export class CommitEngine {
     let content = entry.ansi ?? entry.text
     if (!content.endsWith('\n')) content += '\n'
     if (entry.trailingNewline) content += '\n'
+    this.buffer.push(content.trimEnd())
     this.stdout.write(content)
   }
 
@@ -63,9 +71,9 @@ export class CommitEngine {
     let buf = ''
     for (const entry of entries) {
       const content = entry.ansi ?? entry.text
-      buf += content
-      if (!content.endsWith('\n')) buf += '\n'
-      if (entry.trailingNewline) buf += '\n'
+      const line = content + (content.endsWith('\n') ? '' : '\n') + (entry.trailingNewline ? '\n' : '')
+      this.buffer.push(line.trimEnd())
+      buf += line
     }
     this.stdout.write(buf)
   }

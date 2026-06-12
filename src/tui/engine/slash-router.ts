@@ -127,13 +127,29 @@ export class SlashRouter {
       return true
     }
 
-    // Special-case /starmap, /chronicle — overlays
+    // Special-case /starmap, /chronicle, /scroll, /cockpit, /palette, /rewind — overlays
     if (command === '/starmap') {
       this.app.activateOverlay('starmap')
       return true
     }
     if (command === '/chronicle') {
       this.app.activateOverlay('chronicle')
+      return true
+    }
+    if (command === '/scroll' || command === '/pager') {
+      this.app.activateOverlay('pager')
+      return true
+    }
+    if (command === '/cockpit') {
+      this.app.activateOverlay('cockpit')
+      return true
+    }
+    if (command === '/palette') {
+      this.app.activateOverlay('command-palette')
+      return true
+    }
+    if (command === '/rewind') {
+      this.app.activateOverlay('rewind')
       return true
     }
 
