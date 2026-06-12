@@ -107,8 +107,9 @@ export class ContextInjectionController {
 
   refreshRepairHint(): void {
     const hint = this.deps.getRepairHintTracker().getHint()
-    this.deps.promptEngine.setRepairHint(hint)
-    // A1: also submit to unified advisory bus
+    // A1: route through advisory bus — suppress legacy <repair-hint> block
+    // to avoid double-rendering the same content in one turn.
+    this.deps.promptEngine.setRepairHint(null)
     if (hint && this.deps.advisoryBus) {
       this.deps.advisoryBus.submit({
         key: 'repair-hint',

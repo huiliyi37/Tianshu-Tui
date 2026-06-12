@@ -1,7 +1,7 @@
 import { appendFile } from 'fs/promises'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync, statSync } from 'fs'
 import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { homedir } from 'os'
 import type { ContentBlock, Message } from '../api/types.js'
 import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
@@ -440,10 +440,18 @@ export class SessionPersist {
     for (const claim of durableClaims) {
       // A4 TTL gate: skip claims older than 7 days
       if (now - claim.createdAt > TTL_MS) continue
-      // A4 file intersection gate: skip claims with no evidence files in current project
+      // A4 file intersection gate: skip claims whose evidence files don't
+      // intersect with current project. Normalize relative paths with cwd.
+      // Claims with no file evidence (conceptual/verification) always pass.
       if (cwd) {
-        const hasRelevantFile = claim.evidence.some(e => e.path?.startsWith(cwd))
-        if (!hasRelevantFile) continue
+        const fileEvidence = claim.evidence.filter(e => e.path)
+        if (fileEvidence.length > 0) {
+          const hasRelevantFile = fileEvidence.some(e => {
+            const abs = resolve(cwd, e.path!)
+            return abs.startsWith(cwd)
+          })
+          if (!hasRelevantFile) continue
+        }
       }
       store.propose({
         kind: claim.kind,

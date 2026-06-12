@@ -323,10 +323,7 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(ctx.planCacheAdvisory)
   }
 
-  // Repair hint: ephemeral — keep at very end
-  if (ctx.repairHint) {
-    parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
-  }
+  // Repair hint: routed through A1 harness-advisory bus — legacy <repair-hint> block removed.
 
   // Harness advisory: unified corrective guidance (A1 bus, max 3 entries)
   if (ctx.harnessAdvisoryBlock) {
@@ -523,9 +520,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
   }
 
-  if (ctx.repairHint) {
-    parts.push(`<repair-hint>\n${escapeXml(ctx.repairHint)}\n</repair-hint>`)
-  }
+  // Repair hint: routed through A1 harness-advisory bus
 
   if (ctx.decisions && ctx.decisions.length > 0) {
     const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
@@ -598,13 +593,21 @@ The user will respond with:
 /**
  * A3 前缀预算：截断超出上限的 frozen 块。
  * - projectIndexBlock: 4K → 超出折叠为 repo 工具指引
- * - seedCapsuleBlock / projectMemoryBlock: 3K → 超出直接截断
+ * - seedCapsuleBlock / projectMemoryBlock: 3K → 超出截断但保持 XML 标签闭合
  */
 function truncateBlock(block: string, maxChars: number, kind: string): string {
   if (block.length <= maxChars) return block
   if (kind === 'codebase-index') {
     const truncated = block.slice(0, maxChars)
     return `${truncated}\n<!-- codebase index truncated (${block.length} chars → ${maxChars}); use repo_map/repo_graph tools for details -->`
+  }
+  // XML-wrapped blocks (project-memory, seed-capsule): peel outer tag,
+  // truncate content, re-wrap to keep XML well-formed for prefix cache.
+  const tagMatch = block.match(/^<([a-z-]+)[^>]*>([\s\S]*)<\/\1>$/)
+  if (tagMatch) {
+    const [_full, tag, content] = tagMatch
+    const trimmed = content!.slice(0, maxChars - tag!.length * 2 - 7)
+    return `<${tag}>\n${trimmed}\n<!-- truncated: ${block.length} → ${maxChars} chars -->\n</${tag}>`
   }
   return block.slice(0, maxChars) + `\n<!-- ${kind} truncated: ${block.length} → ${maxChars} chars -->`
 }
