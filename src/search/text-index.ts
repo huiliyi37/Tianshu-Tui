@@ -103,6 +103,45 @@ export class BM25Index {
     this.df.clear()
     this.avgLength = 0
   }
+
+  /** Remove all chunks belonging to a file, updating DF counts. */
+  removeFileChunks(file: string): number {
+    const before = this.chunks.length
+    const removed: IndexedChunk[] = []
+
+    this.chunks = this.chunks.filter(chunk => {
+      if (chunk.file === file) {
+        removed.push(chunk)
+        return false
+      }
+      return true
+    })
+
+    // Decrement DF for terms in removed chunks
+    for (const chunk of removed) {
+      for (const term of chunk.terms.keys()) {
+        const current = this.df.get(term)
+        if (current !== undefined) {
+          if (current <= 1) this.df.delete(term)
+          else this.df.set(term, current - 1)
+        }
+      }
+    }
+
+    // Update avgLength
+    if (this.chunks.length > 0) {
+      this.avgLength = this.chunks.reduce((s, c) => s + c.length, 0) / this.chunks.length
+    } else {
+      this.avgLength = 0
+    }
+
+    return before - this.chunks.length
+  }
+
+  /** Check if index has any chunks for a given file. */
+  hasFile(file: string): boolean {
+    return this.chunks.some(c => c.file === file)
+  }
 }
 
 /** Split file content into overlapping line-based chunks for indexing. */

@@ -40,6 +40,22 @@ Rebuild the index with /index or by setting rebuild: true if results seem stale.
       return { content: `Index rebuilt (${stats.indexed} files). Top ${hits.length} matches:\n\n${lines.join('\n\n---\n\n')}` }
     }
 
+    // Auto-incremental update when stale (lazy refresh)
+    if (idx.isStale()) {
+      const update = idx.incrementalUpdate()
+      const note = update.fallbackRebuild
+        ? ` (full rebuild: ${update.reindexed} files)`
+        : ` (${update.reindexed} changed, ${update.removed} removed)`
+      const hits = idx.search(query, limit)
+      if (hits.length === 0) {
+        return { content: `Index refreshed${note}. No matches for: ${query}` }
+      }
+      const lines = hits.map(h =>
+        `${h.file}:${h.startLine}-${h.endLine} (score ${h.score.toFixed(2)})\n${h.text.slice(0, 300)}`,
+      )
+      return { content: `Index refreshed${note}. Top ${hits.length} matches:\n\n${lines.join('\n\n---\n\n')}` }
+    }
+
     const hits = idx.search(query, limit)
     if (hits.length === 0) {
       return { content: `No semantic matches for: ${query}\nTry rebuild: true or run /index` }
