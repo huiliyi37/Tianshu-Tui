@@ -537,6 +537,8 @@ export function createAgentRuntime(deps: {
       enabled: modelRoutingGate.enabled,
       getSignals: () => agentForSignals?.getPolicySignals(),
     },
+    sessionRegistry: refs.sessionRegistry ?? undefined,
+    sessionId: refs.sessionId ?? undefined,
   })
 
   const agent = new AgentLoop(

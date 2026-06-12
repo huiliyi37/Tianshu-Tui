@@ -1288,6 +1288,63 @@ describe('DelegationCoordinator', () => {
     assert.equal(sessionRegistry.acquireClaim('other-session', 'src/claim-failure-cleanup.ts'), true)
   })
 
+  it('blocks write worker when files are already claimed by another session', async () => {
+    const claims = new Map<string, string>()
+    // Pre-claim a file for another session
+    claims.set('src/blocked-file.ts', 'other-session')
+    const sessionRegistry = {
+      acquireClaim: (sessionId: string, filePath: string) => {
+        const owner = claims.get(filePath)
+        if (owner && owner !== sessionId) return false
+        claims.set(filePath, sessionId)
+        return true
+      },
+      releaseClaim: (sessionId: string, filePath: string) => {
+        if (claims.get(filePath) === sessionId) claims.delete(filePath)
+      },
+    }
+    let runHandsCalled = false
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      sessionRegistry: sessionRegistry as never,
+      sessionId: 's-main',
+      runHands: async () => {
+        runHandsCalled = true
+        return { result: resultFor('unreachable'), usage: {} }
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_claim_blocked',
+      objective: 'Patch a file that is already claimed by another session.',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      scope: { files: ['src/blocked-file.ts'] },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results[0]?.status, 'blocked')
+    assert.ok(run.results[0]?.summary?.includes('File claim conflict'))
+    assert.ok(run.results[0]?.summary?.includes('src/blocked-file.ts'))
+    // Worker should NOT be dispatched
+    assert.equal(runHandsCalled, false)
+    // Claim should still belong to other session
+    assert.equal(claims.get('src/blocked-file.ts'), 'other-session')
+    assert.equal(sessionRegistry.acquireClaim('s-main', 'src/blocked-file.ts'), false)
+  })
+
   it('blocks exploration worker when scope exceeds maxFiles budget without acquiring semantic locks', async () => {
     let runtimeCalled = false
     const coordinator = new DelegationCoordinator({
