@@ -520,12 +520,12 @@ describe('GWT salience and Top-K selection', () => {
       assert.equal(assignSalience('<decisions>\n  <decision>d1</decision>\n</decisions>'), 0.7)
     })
 
-    it('returns 0.6 for git-status', () => {
-      assert.equal(assignSalience('<git-status>M src/main.ts</git-status>'), 0.6)
+    it('returns 0.7 for git-status (task-foundation tier — must survive Top-K under budget pressure)', () => {
+      assert.equal(assignSalience('<git-status>M src/main.ts</git-status>'), 0.7)
     })
 
-    it('returns 0.6 for recent-commits', () => {
-      assert.equal(assignSalience('<recent-commits>abc123 fix</recent-commits>'), 0.6)
+    it('returns 0.7 for recent-commits', () => {
+      assert.equal(assignSalience('<recent-commits>abc123 fix</recent-commits>'), 0.7)
     })
 
     it('returns 0.5 for tool-history', () => {

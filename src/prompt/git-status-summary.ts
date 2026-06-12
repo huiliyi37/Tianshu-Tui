@@ -139,7 +139,14 @@ export function parseGitStatus(status: string): GitStatusSummary {
 }
 
 function renderSummary(summary: GitStatusSummary): string {
-  const parts: string[] = [`[${summary.branch}]`]
+  // 完整性标注：摘要必须自我声明"这就是全貌"，否则模型会把摘要当成不完整的
+  // 截断输出，转头用 bash 重跑 git status 形成 doom-loop（会话 43443098 取证）。
+  const total = summary.staged.length + summary.modified.length + summary.untracked.length + summary.deleted.length
+  const foldedTotal = summary.foldedRuntimeFragments + summary.foldedForeignFootprints + summary.omittedBuildOutputs
+  const completeness = foldedTotal > 0
+    ? `共 ${total} 个任务相关文件（完整列表），另有 ${foldedTotal} 个无关项已折叠`
+    : `共 ${total} 个文件（完整列表）`
+  const parts: string[] = [`[${summary.branch}] ${completeness} — 此状态即当前工作区全貌，无需再跑 git status`]
 
   if (summary.staged.length > 0) {
     parts.push(`${summary.staged.length} staged: ${summary.staged.join(', ')}`)
@@ -161,6 +168,9 @@ function renderSummary(summary: GitStatusSummary): string {
   }
   if (summary.omittedBuildOutputs > 0) {
     parts.push(`${summary.omittedBuildOutputs} build outputs omitted`)
+  }
+  if (foldedTotal > 0) {
+    parts.push('被折叠项均与编码任务无关（运行时碎片/外部工具足迹/构建产物）；如确需查看，用 git 工具，不要用 bash 重跑 git status。')
   }
 
   return parts.join('\n')

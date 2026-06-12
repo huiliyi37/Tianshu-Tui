@@ -108,6 +108,28 @@ describe('summarizeGitStatus', () => {
     assert.doesNotMatch(result, /\[unknown\]/)
   })
 
+  it('annotates the summary as the complete worktree state (anti doom-loop)', () => {
+    const long = makeLongStatus({ modified: 15, untracked: 10 })
+    const result = summarizeGitStatus(long)
+
+    assert.match(result, /共 25 个文件（完整列表）/)
+    assert.match(result, /无需再跑 git status/)
+  })
+
+  it('explains folded items and points to the git tool when noise is folded', () => {
+    const status = [
+      'Current branch: main',
+      'Status:',
+      ' M src/prompt/volatile.ts',
+      '?? layout.log',
+      '?? node_modules/pkg/index.js',
+    ].join('\n')
+    const result = summarizeGitStatus(status)
+
+    assert.match(result, /共 1 个任务相关文件（完整列表），另有 2 个无关项已折叠/)
+    assert.match(result, /用 git 工具，不要用 bash 重跑 git status/)
+  })
+
   it('folds attention noise in long short-status input while keeping content visible', () => {
     const status = [
       'Current branch: main',

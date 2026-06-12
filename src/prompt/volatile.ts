@@ -359,8 +359,9 @@ export interface SalientBlock {
  * Salience reflects information value per token:
  * - 1.0: identity-critical (star-domain)
  * - 0.8: directly actionable (repair-hint, historical-lessons)
- * - 0.7: task-relevant (intent-retrieval-route, task-progress, decisions)
- * - 0.6: environmental awareness (git-status, recent-commits)
+ * - 0.7: task-relevant (intent-retrieval-route, task-progress, decisions,
+ *        git-status, recent-commits — git 状态是任务地基：被 Top-K 丢弃会诱发
+ *        模型用 bash 重新获取，形成训练模式 doom-loop，见会话 43443098 取证)
  * - 0.5: operational context (tool-history)
  * - 0.4: session housekeeping (session-state, cross-session-events)
  * - 0.3: deduplication hints (read-file-dedup-hint)
@@ -376,8 +377,8 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<task-progress')) return 0.7
   if (blockContent.startsWith('<decisions>')) return 0.7
   if (blockContent.startsWith('<worktree-warning')) return 0.7
-  if (blockContent.startsWith('<git-status>')) return 0.6
-  if (blockContent.startsWith('<recent-commits>')) return 0.6
+  if (blockContent.startsWith('<git-status>')) return 0.7
+  if (blockContent.startsWith('<recent-commits>')) return 0.7
   if (blockContent.startsWith('<tool-history>')) return 0.5
   if (blockContent.startsWith('<session-state>')) return 0.4
   if (blockContent.startsWith('<cross-session')) return 0.4
