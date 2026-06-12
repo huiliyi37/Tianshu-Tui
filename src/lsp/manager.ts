@@ -256,12 +256,12 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
         } catch {
           // File may not exist on disk — use empty text as last resort
         }
+        // Clear stale cache BEFORE notify — avoid racing server publishDiagnostics
+        diagnosticCache.delete(uri)
         rpc.notify('textDocument/didChange', {
           textDocument: { uri, version: Date.now() },
           contentChanges: [{ text: fileText }],
         })
-        // Clear stale cache before waiting for fresh publishDiagnostics
-        diagnosticCache.delete(uri)
         // Wait for publishDiagnostics to arrive (server pushes asynchronously)
         await new Promise<void>((resolve) => {
           const start = Date.now()
