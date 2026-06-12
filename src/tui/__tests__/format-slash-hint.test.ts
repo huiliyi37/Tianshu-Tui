@@ -56,7 +56,7 @@ describe('formatSlashHint', () => {
   it('renders selected marker on first entry + footer', () => {
     const lines = formatSlashHint({ input: '/he', commands: COMMANDS }, theme).map(stripAnsi)
     assert.ok(lines[0]!.startsWith('❯ /help'))
-    assert.ok(lines[lines.length - 1]!.includes('tab to complete'))
+    assert.ok(lines[lines.length - 1]!.includes('tab complete'))
   })
 
   it('caps visible entries and shows overflow count', () => {
@@ -79,5 +79,17 @@ describe('slashCompletionTarget', () => {
   it('returns null without matches or slash prefix', () => {
     assert.equal(slashCompletionTarget('/zzzzqq', COMMANDS), null)
     assert.equal(slashCompletionTarget('he', COMMANDS), null)
+  })
+
+  it('honours selectedIdx for arrow-key navigation', () => {
+    // filterSlashCommands uses substring match, so query 'co' matches
+    // /compact, /cost, /clear (and others whose description contains 'co')
+    // We verify idx selection within that filtered set.
+    const filtered = filterSlashCommands(COMMANDS, 'co')
+    assert.ok(filtered.length >= 2, 'expected at least 2 matches for "co"')
+    assert.equal(slashCompletionTarget('/co', COMMANDS, 0), filtered[0]!.name)
+    assert.equal(slashCompletionTarget('/co', COMMANDS, 1), filtered[1]!.name)
+    // out-of-range idx clamps to last
+    assert.equal(slashCompletionTarget('/co', COMMANDS, 99), filtered[filtered.length - 1]!.name)
   })
 })

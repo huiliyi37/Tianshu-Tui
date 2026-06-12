@@ -34,7 +34,7 @@ import { formatTeamPanel } from '../format/team-panel.js'
 import { decodeTeamPanelModel } from '../team-panel-model.js'
 import { domainBadge, isDelegationTool } from '../format/tool-domain.js'
 import { formatSpinnerStatus, formatTurnWorkSummary, phaseIndicator } from '../format/spinner-status.js'
-import { formatSlashHint, slashCompletionTarget, type SlashHintEntry } from '../format/slash-hint.js'
+import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import { appendHistory, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle } from '../format/overlay.js'
@@ -213,6 +213,8 @@ export class TuiApp {
   // ── W4b: 输入辅助 ────────────────────────────────────────────
   /** slash 命令列表（外部注入，提示 + Tab 补全用） */
   private slashCommands: SlashHintEntry[] = []
+  /** slash hint 当前选中项索引（输入以 / 开头时，Tab 补全目标） */
+  private slashSelectedIdx = 0
   /** @ 文件补全状态（Tab 循环） */
   private fileCompletion: { baseText: string; baseCursor: number; candidates: string[]; idx: number } | null = null
   /** 输入历史（最新在前，submit 时更新 + 持久化） */
@@ -472,13 +474,28 @@ export class TuiApp {
       }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
-      if (inputVal.startsWith('/')) {
+      if (inputVal.startsWith('/') && !inputVal.includes(' ')) {
+        const filtered = filterSlashCommands(this.slashCommands, inputVal.slice(1))
+        if (key.name === 'up' && filtered.length > 0) {
+          this.slashSelectedIdx = (this.slashSelectedIdx - 1 + filtered.length) % filtered.length
+          this.renderLive()
+          return
+        }
+        if (key.name === 'down' && filtered.length > 0) {
+          this.slashSelectedIdx = (this.slashSelectedIdx + 1) % filtered.length
+          this.renderLive()
+          return
+        }
         if (key.name === 'return') {
           // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
           this.inputLine.setValue('')
+          this.slashSelectedIdx = 0
           void this.submitSlashCommand(inputVal)
           return
         }
+        // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
+      } else {
+        this.slashSelectedIdx = 0
       }
       // ── W4a: Up 箭头取回最近 queued 消息到输入框编辑 ─────────
       if (key.name === 'up' && !this.inputLine.value && this.steerBuffer.hasPending()) {
@@ -494,6 +511,8 @@ export class TuiApp {
       if (event?.type === 'change') {
         // 输入变化使 @ 补全循环失效
         this.fileCompletion = null
+        // 普通文本输入重置 slash 选中项（避免选了第 3 项又打字导致选中越界）
+        this.slashSelectedIdx = 0
         // 批渲染：快速输入/分 chunk 到达时合并为单次 LiveEngine.render，
         // 避免逐 chunk 全量重写造成的闪烁/残影。
         this.writeBatcher.schedule()
@@ -784,9 +803,10 @@ export class TuiApp {
 
     // slash 命令补全
     if (value.startsWith('/') && !value.includes(' ')) {
-      const target = slashCompletionTarget(value, this.slashCommands)
+      const target = slashCompletionTarget(value, this.slashCommands, this.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
+        this.slashSelectedIdx = 0
         return true
       }
       return false
@@ -1352,7 +1372,7 @@ export class TuiApp {
       // 5b. slash 命令提示（输入以 / 开头且未含空格）
       const inputVal = this.inputLine.value
       if (inputVal.startsWith('/') && !inputVal.includes(' ')) {
-        for (const hintLine of formatSlashHint({ input: inputVal, commands: this.slashCommands }, this.theme)) {
+        for (const hintLine of formatSlashHint({ input: inputVal, commands: this.slashCommands, selectedIdx: this.slashSelectedIdx }, this.theme)) {
           lines.push({ text: hintLine })
         }
       }

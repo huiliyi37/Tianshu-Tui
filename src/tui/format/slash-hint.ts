@@ -72,7 +72,7 @@ export function formatSlashHint(input: FormatSlashHintInput, theme: RivetTheme):
     const desc = color(` — ${cmd.description}`, theme.muted)
     lines.push(`${marker}${name}${desc}`)
   }
-  const footer = overflow > 0 ? `… ${overflow} more · tab to complete` : 'tab to complete'
+  const footer = overflow > 0 ? `… ${overflow} more · ↑↓ select · tab complete` : '↑↓ select · tab complete'
   lines.push(color(footer, theme.dim))
   return lines
 }
