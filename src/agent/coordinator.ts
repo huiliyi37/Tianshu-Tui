@@ -977,9 +977,14 @@ export class DelegationCoordinator {
               const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
               run = { result: workerRun.result, transcript: workerRun.transcript }
             }
-            // Upgrade succeeded — record provider outcome and update selected model
+            // Upgrade succeeded — record provider outcome, update selected model, rebuild tierShadow
             this.recordProviderOutcome(strongCard.model, true)
             selected = strongCard
+            // Rebuild tierShadow for the Pro model so telemetry is coherent
+            const freshTierShadow = this.buildTierShadow(order, selected, tierRecommendation)
+            persistModelTierShadow(this.config.modelTierShadowStore, freshTierShadow)
+            // Replace the stale flash-tier tierShadow; escalation shadow records the retry event
+            escalationShadows.push(freshTierShadow)
           } catch (_retryError) {
             // Pro upgrade also failed — record provider outcome, return degraded
             this.recordProviderOutcome(strongCard.model, false)
@@ -1035,7 +1040,7 @@ export class DelegationCoordinator {
         escalated: true,
         order,
         selectedModel: selected.model,
-        modelTierShadows: [tierShadow, ...escalationShadows],
+        modelTierShadows: escalationShadows.length > 0 ? escalationShadows : [tierShadow],
         modelTierGatedDecisions: [tierGatedDecision],
         gatedInfluenceAudits: [gatedInfluenceAudit],
         results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
@@ -1065,7 +1070,7 @@ export class DelegationCoordinator {
       status: 'completed' as const,
       order,
       selectedModel: selected.model,
-      modelTierShadows: [tierShadow, ...escalationShadows],
+      modelTierShadows: escalationShadows.length > 0 ? escalationShadows : [tierShadow],
       modelTierGatedDecisions: [tierGatedDecision],
       gatedInfluenceAudits: [gatedInfluenceAudit],
       results,
