@@ -125,7 +125,7 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
       <Box flexDirection="row" width="100%" gap={4}>
         {/* Left cluster — who I am + what I'm doing */}
         <Box flexDirection="row">
-          <Text color={theme.muted}>{domainGlyph} {domain ?? '天枢'}</Text>
+          <Text color={domain ? domainColor : theme.muted}>{domainGlyph}</Text>{' '}<Text color={theme.muted}>{domain ?? '天枢'}</Text>
           {branchLabel && !narrow && <Text color={theme.dim}> ⎇ {branchLabel}</Text>}
           {phaseGlyph && <Text color={theme.primary}>  {phaseGlyph}</Text>}
           <Text color={theme.muted}> {phaseLabel || '候待'}</Text>
