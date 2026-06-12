@@ -57,7 +57,7 @@ const optionalNativeModulePlugin = {
 }
 
 export default defineConfig({
-  entry: ['src/main.tsx'],
+  entry: ['src/main.ts'],
   format: ['esm'],
   target: 'node22',
   // dts:false — 声明文件对 CLI 运行毫无用处，且 Windows 上对 100+ 文件生成 .d.ts

@@ -8,7 +8,7 @@
  * 渲染节奏：事件触发 → 更新状态 → 调用 engine 渲染。
  *
  * 阶段 5 定义架构骨架和渲染管线。
- * 阶段 6 会完成与 main.tsx 和 AgentLoop 的实际接线。
+ * 阶段 6 会完成与 main.ts 和 AgentLoop 的实际接线。
  */
 
 import type { WriteStream, ReadStream } from 'node:tty'

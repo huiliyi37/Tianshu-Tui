@@ -1023,19 +1023,19 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const db = indexer.getDb()
       const cwd = ctx.agent.cwd ?? process.cwd()
 
-      // Read main.tsx and headless.ts for CLI extraction
-      let mainTsxSource = ''
+      // Read main.ts and headless.ts for CLI extraction
+      let mainTsSource = ''
       let headlessSource: string | null = null
-      const mainTsxPath = 'src/main.tsx'
+      const mainTsPath = 'src/main.ts'
       const headlessPath = 'src/headless.ts'
       try {
-        mainTsxSource = readFileSync(join(cwd, mainTsxPath), 'utf-8')
+        mainTsSource = readFileSync(join(cwd, mainTsPath), 'utf-8')
       } catch { /* not found */ }
       try {
         headlessSource = readFileSync(join(cwd, headlessPath), 'utf-8')
       } catch { /* not found */ }
 
-      const result = fullRebuild(db, mainTsxSource, headlessSource, mainTsxPath, headlessPath, cwd)
+      const result = fullRebuild(db, mainTsSource, headlessSource, mainTsPath, headlessPath, cwd)
       const indexBlock = generateCodebaseIndexBlock(db, getHeadSha())
 
       pushStatic(createLogEntry({ type: 'system', content: `📚 Codebase Index Rebuilt\n\n${result}\n\nIndex will be injected into agent context on next turn.` }))
