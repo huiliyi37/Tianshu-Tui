@@ -25,7 +25,7 @@ export const DEFAULT_CONFIG: Config = {
           {
             id: 'kimi-for-coding',
             alias: 'kimi',
-            contextWindow: 200_000,
+            contextWindow: 1_000_000,
             maxTokens: 64000,
             reasoningEffort: 'high',
           },
