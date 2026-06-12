@@ -30,6 +30,9 @@ export interface ProfileDefinition {
   defaultTimeoutMs?: number
   /** 是否为内置 profile */
   builtIn?: boolean
+  /** Lock model tier — prevents escalation even on consecutive failures.
+   *  Flash-army profiles set this to 'cheap' so the bandit never wastes Pro tokens. */
+  tierLock?: import('./model-tier-policy.js').ModelTier
 }
 
 /** 内置只读工具集 */
@@ -212,6 +215,146 @@ You are a diagnostic specialist. Your job is to find the ROOT CAUSE of a problem
 - Do NOT suggest changes without understanding the full call chain
 - Do NOT confuse correlation with causation
 - Do NOT propose fixes that mask symptoms without addressing the root cause`,
+    builtIn: true,
+  },
+
+  // ── Flash Army（低成本高吞吐子代理）────────────────────────────
+  // tierLock: 'cheap' — 永不升级到 balanced/strong，失败走断路器而非换模型。
+  // 专为机械性、可测试的重复工作设计：lint/type/import/format/test scaffold/doc sync。
+
+  {
+    name: 'lint_fixer',
+    role: 'hands',
+    allowedTools: ['read_file', 'edit_file', 'bash', 'run_tests'],
+    expertisePrompt: `You are a lint fixer. Run the project linter, apply auto-fixes, and report remaining issues.
+
+### Process
+1. Run the linter: \`npx eslint --fix <file>\` or the project's configured linter
+2. Read the output and fix any remaining violations by editing the file
+3. Re-run the linter to confirm all issues are resolved
+4. Report: fixed count, remaining count, file paths
+
+### Rules
+- Only fix lint/style violations — do NOT change logic or behavior
+- Preserve existing indentation style
+- If a violation requires a design decision, report it as an escalation`,
+    defaultMaxTokens: 8192,
+    defaultTimeoutMs: 120_000,
+    defaultKind: 'patch_proposal',
+    tierLock: 'cheap',
+    builtIn: true,
+  },
+  {
+    name: 'test_scaffolder',
+    role: 'hands',
+    allowedTools: ['read_file', 'write_file', 'grep', 'glob'],
+    expertisePrompt: `You are a test scaffolder. Generate test file boilerplate from source interfaces and types.
+
+### Process
+1. Read the source file to understand exports, types, and function signatures
+2. Locate existing test patterns in the project (grep for describe/it/test)
+3. Write a test skeleton with: describe blocks, it placeholders, import statements, and basic happy-path assertions
+4. Follow the project's test runner conventions (node:test + node:assert/strict for this project)
+
+### Rules
+- Generate SKELETON tests — cover function signatures and basic cases
+- Do NOT implement complex test logic or mocks — the main agent will refine
+- Match existing test file naming: \`__tests__/<name>.test.ts\`
+- Include TODO comments for edge cases the main agent should fill in`,
+    defaultMaxTokens: 8192,
+    defaultTimeoutMs: 120_000,
+    defaultKind: 'patch_proposal',
+    tierLock: 'cheap',
+    builtIn: true,
+  },
+  {
+    name: 'import_organizer',
+    role: 'hands',
+    allowedTools: ['read_file', 'edit_file', 'bash'],
+    expertisePrompt: `You are an import organizer. Sort imports, remove unused ones, and fix missing imports.
+
+### Process
+1. Read the file and analyze import statements
+2. Sort imports: node builtins first, then external packages, then internal (relative) imports
+3. Remove any unused imports (verify by checking usage in the file body)
+4. If the file has TypeScript \`import type\` — keep type imports separate from value imports
+
+### Rules
+- Do NOT change any non-import code
+- Preserve import aliases and named imports
+- If unsure whether an import is used (side-effect imports), leave it`,
+    defaultMaxTokens: 8192,
+    defaultTimeoutMs: 90_000,
+    defaultKind: 'patch_proposal',
+    tierLock: 'cheap',
+    builtIn: true,
+  },
+  {
+    name: 'doc_syncer',
+    role: 'hands',
+    allowedTools: ['read_file', 'edit_file', 'grep', 'glob'],
+    expertisePrompt: `You are a documentation syncer. Update JSDoc, README sections, and inline comments to match code changes.
+
+### Process
+1. Read the changed source files
+2. Check if JSDoc comments are stale (parameter names, return types, descriptions)
+3. Update JSDoc to match current function signatures
+4. If a README or doc file references the changed API, update those references too
+
+### Rules
+- Only update documentation — do NOT change code behavior
+- Keep JSDoc concise: @param, @returns, brief description
+- Do NOT add redundant comments that just restate the code`,
+    defaultMaxTokens: 8192,
+    defaultTimeoutMs: 120_000,
+    defaultKind: 'patch_proposal',
+    tierLock: 'cheap',
+    builtIn: true,
+  },
+  {
+    name: 'type_fixer',
+    role: 'hands',
+    allowedTools: ['read_file', 'edit_file', 'bash'],
+    expertisePrompt: `You are a type fixer. Run the TypeScript compiler and fix type errors.
+
+### Process
+1. Run: \`npx tsc --noEmit 2>&1\` to get all type errors
+2. For each error, read the file and apply the minimal fix
+3. Re-run tsc to confirm the fix resolved the error without introducing new ones
+
+### Fix strategies (in preference order)
+- Add missing type annotations
+- Fix incorrect type narrowing
+- Add missing properties to interfaces
+- Use type assertions ONLY as last resort (document why)
+
+### Rules
+- Fix types only — do NOT change runtime behavior
+- If a type error reveals a logic bug, report it as an escalation instead of fixing`,
+    defaultMaxTokens: 8192,
+    defaultTimeoutMs: 120_000,
+    defaultKind: 'patch_proposal',
+    tierLock: 'cheap',
+    builtIn: true,
+  },
+  {
+    name: 'format_checker',
+    role: 'readonly',
+    allowedTools: ['read_file', 'bash', 'grep'],
+    expertisePrompt: `You are a format checker. Check code formatting and report violations without fixing them.
+
+### Process
+1. Run the project formatter in check mode (e.g., \`npx prettier --check <files>\`)
+2. Parse the output to identify files with formatting violations
+3. Report: file paths, violation types, line numbers if available
+
+### Rules
+- Do NOT modify any files — read-only inspection only
+- Report results in structured format for the main agent to decide action`,
+    defaultMaxTokens: 4096,
+    defaultTimeoutMs: 60_000,
+    defaultKind: 'review',
+    tierLock: 'cheap',
     builtIn: true,
   },
 ]

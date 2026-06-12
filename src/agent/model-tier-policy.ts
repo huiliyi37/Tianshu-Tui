@@ -1,5 +1,6 @@
 import type { ModelCapabilityCard } from '../model/capability.js'
 import type { WorkOrderKind, WorkerProfile } from './work-order.js'
+import { profileRegistry } from './profile-registry.js'
 
 export type ModelTier = 'cheap' | 'balanced' | 'strong'
 export type ModelRiskTier = 'low' | 'medium' | 'high'
@@ -34,6 +35,12 @@ function isExploration(input: Pick<ModelTierPolicyInput, 'kind' | 'profile' | 'o
 }
 
 export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecommendation {
+  // tierLock: profile-level override that prevents all escalation (Flash army profiles)
+  const profileDef = profileRegistry.get(input.profile)
+  if (profileDef?.tierLock) {
+    return { tier: profileDef.tierLock, reason: `profile ${input.profile} has tierLock=${profileDef.tierLock} — no escalation` }
+  }
+
   const authority = normalized(input.authority)
   const riskTier = input.riskTier ?? 'medium'
   const consecutiveFailures = Math.max(0, Math.floor(input.consecutiveFailures ?? 0))
