@@ -1000,29 +1000,46 @@ export class DelegationCoordinator {
 
           try {
             if (role === 'hands') {
-              const cwd = this.config.cwd ?? upgradedConfig.cwd
-              const handsRun = await wrapAbort(this.runHands({
-                order,
-                wtCoordinator: new WorktreeCoordinator(cwd),
-                cwd,
-                maxTurns: upgradedConfig.maxTurns,
-                contextWindow: upgradedConfig.contextWindow,
-                compact: upgradedConfig.compact,
-                activeClaims: upgradedConfig.activeClaims ?? [],
-                domainKnowledgeStore: this.config.domainKnowledgeStore,
-                runAgent: async (prompt, callbacks, workerCwd) => {
-                  const sessionRun = await this.runWorker({
-                    ...upgradedConfig,
-                    order,
-                    cwd: workerCwd,
-                    activeClaims: upgradedConfig.activeClaims ?? [],
-                    domainKnowledgeStore: this.config.domainKnowledgeStore,
-                  })
-                  callbacks.onTurnComplete(sessionRun.usage, 1, true)
-                  return JSON.stringify(sessionRun.result)
-                },
-              }))
-              run = { result: handsRun.result }
+              // P1-1: re-acquire claims before Pro retry (original claims released in inner finally)
+              const retryClaimFiles: string[] = []
+              try {
+                if (this.config.sessionRegistry && this.config.sessionId && order.scope.files?.length) {
+                  const registry = this.config.sessionRegistry
+                  const sid = this.config.sessionId
+                  const conflictedFiles: string[] = []
+                  for (const f of order.scope.files) {
+                    if (registry.acquireClaim(sid, f, 'exclusive')) {
+                      retryClaimFiles.push(f)
+                    } else {
+                      conflictedFiles.push(f)
+                    }
+                  }
+                  if (conflictedFiles.length > 0) {
+                    for (const f of retryClaimFiles) registry.releaseClaim(sid, f)
+                    const degraded = workerFailureResult(order, new Error(`Retry blocked: ${conflictedFiles.join(', ')} claimed by another session`))
+                    return { status: 'completed' as const, order, selectedModel: strongCard.model, modelTierShadows: [tierShadow, ...escalationShadows], modelTierGatedDecisions: [tierGatedDecision], gatedInfluenceAudits: [gatedInfluenceAudit], results: [degraded], packet: await buildPrimaryWorkerPacket([degraded]) }
+                  }
+                }
+                const cwd = this.config.cwd ?? upgradedConfig.cwd
+                const handsRun = await wrapAbort(this.runHands({
+                  order, wtCoordinator: new WorktreeCoordinator(cwd), cwd,
+                  maxTurns: upgradedConfig.maxTurns,
+                  contextWindow: upgradedConfig.contextWindow,
+                  compact: upgradedConfig.compact,
+                  activeClaims: upgradedConfig.activeClaims ?? [],
+                  domainKnowledgeStore: this.config.domainKnowledgeStore,
+                  runAgent: async (prompt, callbacks, workerCwd) => {
+                    const sessionRun = await this.runWorker({ ...upgradedConfig, order, cwd: workerCwd, activeClaims: upgradedConfig.activeClaims ?? [], domainKnowledgeStore: this.config.domainKnowledgeStore })
+                    callbacks.onTurnComplete(sessionRun.usage, 1, true)
+                    return JSON.stringify(sessionRun.result)
+                  },
+                }))
+                run = { result: handsRun.result }
+              } finally {
+                if (this.config.sessionRegistry && this.config.sessionId)
+                  for (const f of retryClaimFiles)
+                    this.config.sessionRegistry.releaseClaim(this.config.sessionId, f)
+              }
             } else {
               const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
               run = { result: workerRun.result, transcript: workerRun.transcript }
