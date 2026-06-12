@@ -631,6 +631,10 @@ export class DelegationCoordinator {
       if (resumeHit) {
         return {
           status: 'completed',
+          selectedModel: '[resumed]',
+          modelTierShadows: [],
+          modelTierGatedDecisions: [],
+          gatedInfluenceAudits: [],
           results: [resumeHit],
           packet: await buildPrimaryWorkerPacket([resumeHit]),
         }
