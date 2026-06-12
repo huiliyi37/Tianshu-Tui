@@ -20,22 +20,45 @@ export interface SlashHintEntry {
 
 export const SLASH_HINT_MAX_VISIBLE = 5
 
+type ScoredEntry = { entry: SlashHintEntry; score: number }
+
 /**
- * 过滤命令：子串匹配（name/description）或 name 的有序子序列（fuzzy）。
- * 与 command-palette.tsx 的 filterCommands 行为一致。
+ * 过滤并按相关性排序命令。
+ *
+ * 排序优先级（score 越小越靠前）：
+ *   0 = name 前缀匹配（如 "revi" → /review）
+ *   1 = name 子串匹配（如 "ewi" → /review）
+ *   2 = name 有序子序列 fuzzy（如 "rvw" → /review）
+ *   3 = description 子串匹配
+ *
+ * 同分时保持原始顺序（stable sort）。
  */
 export function filterSlashCommands(commands: readonly SlashHintEntry[], query: string): SlashHintEntry[] {
   if (!query) return [...commands]
   const lower = query.toLowerCase()
-  return commands.filter(c => {
-    if (c.name.toLowerCase().includes(lower)) return true
-    if (c.description.toLowerCase().includes(lower)) return true
-    let qi = 0
-    for (let i = 0; i < c.name.length && qi < lower.length; i++) {
-      if (c.name[i]!.toLowerCase() === lower[qi]) qi++
+  const scored: ScoredEntry[] = []
+  for (const c of commands) {
+    // Strip leading "/" for matching — query is already slash-stripped
+    const name = c.name.toLowerCase().replace(/^\//, '')
+    const desc = c.description.toLowerCase()
+    let score: number | null = null
+    if (name.startsWith(lower)) {
+      score = 0
+    } else if (name.includes(lower)) {
+      score = 1
+    } else {
+      // name fuzzy: ordered subsequence
+      let qi = 0
+      for (let i = 0; i < name.length && qi < lower.length; i++) {
+        if (name[i] === lower[qi]) qi++
+      }
+      if (qi === lower.length) score = 2
     }
-    return qi === lower.length
-  })
+    if (score === null && desc.includes(lower)) score = 3
+    if (score !== null) scored.push({ entry: c, score })
+  }
+  scored.sort((a, b) => a.score - b.score)
+  return scored.map(s => s.entry)
 }
 
 export interface FormatSlashHintInput {

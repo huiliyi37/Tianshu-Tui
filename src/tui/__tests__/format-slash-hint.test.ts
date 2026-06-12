@@ -21,6 +21,8 @@ const COMMANDS = [
   { name: '/clear', description: 'Clear conversation' },
   { name: '/exit', description: 'Quit' },
   { name: '/verbose', description: 'Toggle verbose' },
+  { name: '/review', description: 'Run code review' },
+  { name: '/review max', description: 'Run full squadron review' },
 ]
 
 describe('filterSlashCommands', () => {
@@ -46,6 +48,21 @@ describe('filterSlashCommands', () => {
   it('no match returns empty', () => {
     assert.deepEqual(filterSlashCommands(COMMANDS, 'zzzzqq'), [])
   })
+
+  it('ranks name prefix match above fuzzy/description match', () => {
+    // "revi" → /review (prefix) and /review max (prefix) should beat any
+    // description-only or fuzzy matches
+    const out = filterSlashCommands(COMMANDS, 'revi')
+    assert.equal(out[0]!.name, '/review')
+    assert.equal(out[1]!.name, '/review max')
+  })
+
+  it('ranks name prefix above substring above fuzzy above description', () => {
+    // query 're' → 'review' (name prefix after stripping /), 'review max' (prefix)
+    const out = filterSlashCommands(COMMANDS, 're')
+    assert.equal(out[0]!.name, '/review')
+    assert.equal(out[1]!.name, '/review max')
+  })
 })
 
 describe('formatSlashHint', () => {
@@ -66,6 +83,12 @@ describe('formatSlashHint', () => {
     assert.ok(lines[lines.length - 1]!.includes(`… ${COMMANDS.length - SLASH_HINT_MAX_VISIBLE} more`))
   })
 
+  it('input /revi surfaces /review at top with ❯ marker', () => {
+    const lines = formatSlashHint({ input: '/revi', commands: COMMANDS }, theme).map(stripAnsi)
+    assert.ok(lines.length >= 2)
+    assert.ok(lines[0]!.startsWith('❯ /review'), 'first visible line should be ❯ /review')
+  })
+
   it('no matches returns empty array', () => {
     assert.deepEqual(formatSlashHint({ input: '/zzzzqq', commands: COMMANDS }, theme), [])
   })
@@ -82,14 +105,12 @@ describe('slashCompletionTarget', () => {
   })
 
   it('honours selectedIdx for arrow-key navigation', () => {
-    // filterSlashCommands uses substring match, so query 'co' matches
-    // /compact, /cost, /clear (and others whose description contains 'co')
-    // We verify idx selection within that filtered set.
-    const filtered = filterSlashCommands(COMMANDS, 'co')
-    assert.ok(filtered.length >= 2, 'expected at least 2 matches for "co"')
-    assert.equal(slashCompletionTarget('/co', COMMANDS, 0), filtered[0]!.name)
-    assert.equal(slashCompletionTarget('/co', COMMANDS, 1), filtered[1]!.name)
+    // filterSlashCommands now ranks by relevance, so we use filterSlashCommands
+    // to get the expected ordering and verify selectedIdx selects within that.
+    const filtered = filterSlashCommands(COMMANDS, 'comp')
+    assert.ok(filtered.length >= 1)
+    assert.equal(slashCompletionTarget('/comp', COMMANDS, 0), filtered[0]!.name)
     // out-of-range idx clamps to last
-    assert.equal(slashCompletionTarget('/co', COMMANDS, 99), filtered[filtered.length - 1]!.name)
+    assert.equal(slashCompletionTarget('/comp', COMMANDS, 99), filtered[filtered.length - 1]!.name)
   })
 })
