@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDeliveryGateV2 } from '../delivery-gate-v2.js'
+import { createDeliveryGateV2, filterExternalNoise, isJunkExternalPath } from '../delivery-gate-v2.js'
 import { createOwnershipLedger } from '../ownership-ledger.js'
 import { createWorktreeBaseline, type BaselineSnapshot } from '../worktree-baseline.js'
 import { createTaskLedger } from '../task-ledger.js'
@@ -256,5 +256,40 @@ describe('delivery-gate-v2 — ownership-aware delivery gate with GREEN/YELLOW/R
     assert.equal(result.ownedFileCount, 0)
     assert.equal(result.isBlocked, false)
     assert.deepEqual(result.toolInvocationFailureCandidates, ['run_tests src/tools/__tests__/git.test.ts'])
+  })
+})
+
+describe('external-file noise filtering (C-fix, session 803d897d)', () => {
+  it('classifies junk directory paths', () => {
+    assert.equal(isJunkExternalPath('.test-tmp/x.json'), true)
+    assert.equal(isJunkExternalPath('.rivet/external/y.md'), true)
+    assert.equal(isJunkExternalPath('node_modules/pkg/index.js'), true)
+    assert.equal(isJunkExternalPath('src/agent/loop.ts'), false)
+    assert.equal(isJunkExternalPath('docs/notes.md'), false)
+  })
+
+  it('splits signal from noise and counts filtered paths', () => {
+    const files = [
+      '.test-tmp/a.json',
+      '.test-tmp/b.json',
+      'src/real.ts',
+      '.rivet/external/c.md',
+      'docs/keep.md',
+    ]
+    const split = filterExternalNoise(files)
+    assert.deepEqual(split.files, ['src/real.ts', 'docs/keep.md'])
+    assert.equal(split.noiseCount, 3)
+  })
+
+  it('returns all files when nothing is junk', () => {
+    const split = filterExternalNoise(['src/a.ts', 'src/b.ts'])
+    assert.deepEqual(split.files, ['src/a.ts', 'src/b.ts'])
+    assert.equal(split.noiseCount, 0)
+  })
+
+  it('fails open when cwd is not a git repo', () => {
+    const split = filterExternalNoise(['src/a.ts'], '/nonexistent-dir-for-test')
+    assert.deepEqual(split.files, ['src/a.ts'])
+    assert.equal(split.noiseCount, 0)
   })
 })

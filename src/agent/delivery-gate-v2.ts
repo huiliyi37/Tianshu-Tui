@@ -16,12 +16,69 @@
  * @task B1-7
  */
 
+import { spawnSync } from 'node:child_process'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
 import type { VerificationAttribution } from './verification-attribution.js'
 import { getEffectiveVerifications } from './verification-attribution.js'
 import { summarizeOwnershipHealth } from './ownership-health.js'
 import type { VerificationMetadata } from '../tools/types.js'
+
+// ─── External-file noise filtering (C-fix, session 803d897d) ───────────────
+// 67 untracked .test-tmp files drowned the GREEN/YELLOW signal in every
+// delivery report. External files from junk directories are noise, not
+// blockers — filter them from display and summarize the count.
+
+const JUNK_PATH_PREFIXES = [
+  '.test-tmp/',
+  '.rivet/',
+  'node_modules/',
+  '.git/',
+  'dist/',
+  'build/',
+  'coverage/',
+  'tmp/',
+]
+
+export function isJunkExternalPath(file: string): boolean {
+  return JUNK_PATH_PREFIXES.some(prefix => file.startsWith(prefix))
+}
+
+/** Files matched by .gitignore (batched `git check-ignore`). Fails open to []. */
+function gitIgnoredSubset(files: string[], cwd: string): Set<string> {
+  if (files.length === 0) return new Set()
+  try {
+    const r = spawnSync('git', ['check-ignore', '--stdin'], {
+      cwd,
+      input: files.join('\n'),
+      encoding: 'utf-8',
+      timeout: 5000,
+    })
+    // exit 0: some ignored; exit 1: none ignored; other: error → fail open
+    if (r.status !== 0 && r.status !== 1) return new Set()
+    return new Set(r.stdout.split('\n').filter(Boolean))
+  } catch {
+    return new Set()
+  }
+}
+
+export interface ExternalNoiseSplit {
+  /** Signal-bearing external files, in original order. */
+  files: string[]
+  /** Count of filtered junk/gitignored paths. */
+  noiseCount: number
+}
+
+/**
+ * Split external files into signal vs noise (junk dirs + gitignored paths).
+ * cwd is used for the gitignore check; omit to use prefix rules only.
+ */
+export function filterExternalNoise(files: string[], cwd?: string): ExternalNoiseSplit {
+  const prefixKept = files.filter(f => !isJunkExternalPath(f))
+  const ignored = cwd ? gitIgnoredSubset(prefixKept, cwd) : new Set<string>()
+  const kept = prefixKept.filter(f => !ignored.has(f))
+  return { files: kept, noiseCount: files.length - kept.length }
+}
 
 export type GateState = 'GREEN' | 'YELLOW' | 'RED'
 
