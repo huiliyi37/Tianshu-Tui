@@ -29,7 +29,7 @@ export function phaseIndicator(phase: SpinnerPhase): { glyph: string; label: str
     case 'streaming': return { glyph: '✦', label: '书写' }
     case 'analyzing': return { glyph: '⚙', label: '运作' }
     case 'waiting': return { glyph: '▲', label: '候待' }
-    case 'idle': return { glyph: '·', label: 'idle' }
+    case 'idle': return { glyph: '▲', label: '候待' }
   }
 }
 

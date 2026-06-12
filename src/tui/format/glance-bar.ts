@@ -62,7 +62,7 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   let zone2Label = ''
   if (input.phaseGlyph) {
     zone2Glyph = color(input.phaseGlyph, theme.primary)
-    zone2Label = color(input.phaseLabel ?? '', theme.muted)
+    zone2Label = color(input.phaseLabel || '候待', theme.muted)
   }
   const zone2 = `${zone2Glyph} ${zone2Label}`.trim()
 
@@ -99,40 +99,41 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   }
   zone4 = color(zone4, theme.dim)
 
-  // ── Assembly ────────────────────────────────────────────────
-  const sep = ` ${color('┃', theme.dim)} `
+  // ── Assembly — 双 cluster 左右分布 ──────────────────────
+  // 左 cluster: identity + phase    右 cluster: metrics + elapsed
+  // 中间用空格撑满终端宽度，呼吸感拉满
 
-  // Calculate available width for zone3 (flex zone)
-  const prefixLen = stripAnsiLen(`${zone1}${sep}${zone2}${sep}`)
-  const suffixLen = stripAnsiLen(`${sep}${zone4}`)
-  const maxZone3 = Math.max(10, input.width - prefixLen - suffixLen - 2)
+  const leftParts: string[] = [zone1]
+  if (zone2) leftParts.push(zone2)
+  const left = leftParts.join('  ')
 
-  let zone3Clipped = zone3
-  if (stripAnsiLen(zone3) > maxZone3) {
-    // Truncate zone3
-    let accumulated = 0
-    const truncatedParts: string[] = []
-    for (const p of parts) {
-      const plen = stripAnsiLen(p) + 1 // +1 for space
-      if (accumulated + plen <= maxZone3) {
-        truncatedParts.push(p)
-        accumulated += plen
-      } else {
-        break
-      }
+  // Build right cluster items for progressive truncation
+  const rightItems: string[] = []
+  if (zone3) rightItems.push(zone3)
+  if (zone4) rightItems.push(zone4)
+  const rightSep = '  '
+
+  // Truncate right cluster if left + right exceeds terminal width
+  const leftLen = stripAnsiLen(left)
+  const maxRight = input.width - 1 - leftLen - 4  // 4 = min gap
+  let right = ''
+  let accumulated = 0
+  for (const item of rightItems) {
+    const itemLen = stripAnsiLen(item)
+    const addLen = accumulated > 0 ? rightSep.length + itemLen : itemLen
+    if (accumulated + addLen <= maxRight) {
+      right = accumulated > 0 ? right + rightSep + item : item
+      accumulated += addLen
+    } else {
+      break
     }
-    zone3Clipped = truncatedParts.join(' ')
   }
 
-  // Right-pad zone4
-  const totalLen = stripAnsiLen(`${zone1}${sep}${zone2}${sep}${zone3Clipped}${sep}${zone4}`)
-  const padding = Math.max(0, input.width - totalLen - 1)
-  zone4 = ' '.repeat(padding) + zone4
+  const gap = Math.max(4, input.width - 1 - leftLen - stripAnsiLen(right))
 
-  // Separator line above
   const sepLine = color('─'.repeat(Math.max(1, input.width - 1)), theme.dim)
 
-  return `${sepLine}\n${zone1}${sep}${zone2}${sep}${zone3Clipped}${sep}${zone4}`
+  return `${sepLine}\n${left}${' '.repeat(gap)}${right}`
 }
 
 function stripAnsiLen(s: string): number {

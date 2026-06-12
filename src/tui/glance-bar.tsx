@@ -121,45 +121,36 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
     <Box flexDirection="column" marginTop={1}>
       {/* Full-width separator line — dim, barely visible */}
       <Text color={theme.dim}>{rule}</Text>
-      {/* Single cohesive status line: identity · phase · metrics ……… elapsed */}
-      <Box flexDirection="row" width="100%">
-        {/* Zone 1 · identity — muted, not gold/purple. 95% 墨灰. */}
-        <Text color={theme.muted}>{domainGlyph} {domain ?? '天枢'}</Text>
-        {branchLabel && !narrow && <Text color={theme.dim}> ⎇ {branchLabel}</Text>}
+      {/* Two-cluster layout: left (identity · phase) ………… right (metrics · elapsed) */}
+      <Box flexDirection="row" width="100%" gap={4}>
+        {/* Left cluster — who I am + what I'm doing */}
+        <Box flexDirection="row">
+          <Text color={theme.muted}>{domainGlyph} {domain ?? '天枢'}</Text>
+          {branchLabel && !narrow && <Text color={theme.dim}> ⎇ {branchLabel}</Text>}
+          {phaseGlyph && <Text color={theme.primary}>  {phaseGlyph}</Text>}
+          <Text color={theme.muted}> {phaseLabel || '候待'}</Text>
+          {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
+        </Box>
 
-        {/* Zone separator — dim dot, NOT bold purple */}
-        <Text color={theme.dim}>  ·  </Text>
-
-        {/* Zone 2 · phase — 五行 glyph in ziwei (primary), label in muted.
-            This is the ONE accent point in the entire status bar. */}
-        {phaseGlyph
-          ? <Text color={theme.primary}>{phaseGlyph} </Text>
-          : null}
-        <Text color={theme.muted}>{phaseLabel || 'idle'}</Text>
-        {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
-
-        <Text color={theme.dim}>  ·  </Text>
-
-        {/* Zone 3 · metrics — all muted/dim, dot-separated */}
-        <Text color={theme.muted}>{modelLabel}</Text>
-        {reasoningEffort && <Text color={theme.dim}> · {EFFORT_GLYPH[reasoningEffort]}{reasoningEffort}</Text>}
-        <Text color={cacheColor}> ⚡{cachePct}%</Text>
-        <Text color={theme.dim}> · ${cost.toFixed(2)}</Text>
-        {!narrow && <Text color={tokenColor}> · ◧ {estimatedK}k/{maxK}k ({pct}%)</Text>}
-        {narrow && <Text color={tokenColor}> · {pct}%</Text>}
-        {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
-        {historyCount !== undefined && !narrow && (
-          <Text color={theme.dim}> · {historyCount} msgs</Text>
-        )}
-        {alertPulse?.hint && <Text color={theme.error}> · {alertPulse.hint}</Text>}
-
-        {/* Flexible spacer pushes elapsed to the far right edge */}
+        {/* Flexible spacer — pushes right cluster to the edge */}
         <Box flexGrow={1} />
 
-        {/* Zone 4 · elapsed — ziwei when streaming, dim when idle */}
-        {elapsedLabel && (
-          <Text color={isStreaming ? theme.primary : theme.dim}>⧗ {elapsedLabel}</Text>
-        )}
+        {/* Right cluster — metrics + elapsed */}
+        <Box flexDirection="row" gap={1}>
+          <Text color={theme.muted}>{modelLabel}</Text>
+          {reasoningEffort && <Text color={theme.dim}>{EFFORT_GLYPH[reasoningEffort]}{reasoningEffort}</Text>}
+          {!narrow && <Text color={cacheColor}>⚡{cachePct}%</Text>}
+          <Text color={theme.dim}>${cost.toFixed(2)}</Text>
+          {!narrow && <Text color={tokenColor}>◧{estimatedK}k/{maxK}k</Text>}
+          {narrow && <Text color={tokenColor}>{pct}%</Text>}
+          {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
+          {historyCount !== undefined && !narrow && (
+            <Text color={theme.dim}>{historyCount}msgs</Text>
+          )}
+          {elapsedLabel && (
+            <Text color={isStreaming ? theme.primary : theme.dim}>⧗{elapsedLabel}</Text>
+          )}
+        </Box>
       </Box>
     </Box>
   )
