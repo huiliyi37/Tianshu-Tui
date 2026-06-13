@@ -274,7 +274,7 @@ function buildNotFoundError(filePath: string, oldString: string, fileContent: st
 function buildMultipleMatchError(filePath: string, oldString: string, fileContent: string): string {
   const matches: Array<{ lineNumber: number; context: string }> = []
   let searchFrom = 0
-  while (matches.length < 5) {
+  while (matches.length < 3) {
     const idx = fileContent.indexOf(oldString, searchFrom)
     if (idx === -1) break
     const lineNumber = fileContent.slice(0, idx).split('\n').length

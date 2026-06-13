@@ -234,8 +234,12 @@ When the task implements a complex spec or cross-module integration, include the
         }
         if (report.toolInvocationFailureCandidates.length > 0) {
           lines.push('  Tool invocation failure candidates:')
-          for (const candidate of report.toolInvocationFailureCandidates) {
+          const shown = report.toolInvocationFailureCandidates.slice(0, 2)
+          for (const candidate of shown) {
             lines.push(`    - ${candidate}`)
+          }
+          if (report.toolInvocationFailureCandidates.length > 2) {
+            lines.push(`    ... and ${report.toolInvocationFailureCandidates.length - 2} more`)
           }
         }
         if (report.shortestNextStep) {
@@ -255,19 +259,13 @@ When the task implements a complex spec or cross-module integration, include the
         }
       }
 
-      // Memory-driven review checklist (non-blocking, informational only)
+      // Memory-driven review checklist (non-blocking, informational only).
+      // Deferred: only append after commit determination so it doesn't
+      // clutter the primary gate output.
       const projectMemory = ctx.getProjectMemoryContent?.(params.cwd) ?? readProjectMemory(params.cwd)
-      const checklist = projectMemory
+      const reviewChecklist = projectMemory
         ? buildReviewPrincipleChecklist({ knowledgeMarkdown: projectMemory, changedFiles: report.ownedFiles })
         : []
-      if (checklist.length > 0) {
-        lines.push('', 'Review principle checklist:')
-        for (const item of checklist) {
-          lines.push(`  - ${item.question}`)
-          lines.push(`    Source: ${item.source}`)
-          lines.push(`    Reason: ${item.reason}`)
-        }
-      }
 
       const health = summarizeOwnershipHealth({
         ownedFiles: report.ownedFiles,
@@ -641,6 +639,17 @@ When the task implements a complex spec or cross-module integration, include the
               }
             }
           }
+        }
+      }
+
+      // Append review principle checklist at end (non-blocking, informational)
+      if (reviewChecklist.length > 0) {
+        lines.push('', 'Review principle checklist:')
+        for (const item of reviewChecklist.slice(0, 2)) {
+          lines.push(`  - ${item.question}`)
+        }
+        if (reviewChecklist.length > 2) {
+          lines.push(`  ... and ${reviewChecklist.length - 2} more principles`)
         }
       }
 

@@ -162,14 +162,26 @@ async function buildTestCommand(cwd: string, filter?: string): Promise<TestComma
 
   const safeFilter = filter.replace(/[`$\\;"'|]/g, '')
   if (runner === 'node-test' && isTestFileFilter(safeFilter)) {
-    if (base.includes('tsx') || base.includes('run-node-tests')) {
-      // Do not spawn `npx tsx ...`: npm 11 can parse that form as an npm
-      // command and fail with `Missing script: "tsx"` / `Unknown command: "tsx"`.
-      // buildExecutionEnv prepends local node_modules/.bin, so invoking `tsx`
-      // directly is both faster and deterministic.
-      return { type: 'run', command: 'tsx', args: ['--test', safeFilter], display: `tsx --test ${safeFilter}`, runner, scope: 'targeted' }
+    // Resolve relative test file names to actual paths.
+    // run_tests(filter="compaction-controller.test.ts") sends the bare filename
+    // to tsx, which fails because the file is in src/agent/__tests__/.
+    // glob for the file first; if the filter IS a valid path, use it directly.
+    let resolvedFilter = safeFilter
+    try {
+      const s = await stat(join(cwd, safeFilter))
+      if (!s.isFile()) {
+        const found = await resolveFilterToTestFile(cwd, safeFilter)
+        if (found) resolvedFilter = found
+      }
+    } catch {
+      // File doesn't exist at the direct path — try glob resolution
+      const found = await resolveFilterToTestFile(cwd, safeFilter)
+      if (found) resolvedFilter = found
     }
-    return { type: 'run', command: 'node', args: ['--test', safeFilter], display: `node --test ${safeFilter}`, runner, scope: 'targeted' }
+    if (base.includes('tsx') || base.includes('run-node-tests')) {
+      return { type: 'run', command: 'tsx', args: ['--test', resolvedFilter], display: `tsx --test ${resolvedFilter}`, runner, scope: 'targeted' }
+    }
+    return { type: 'run', command: 'node', args: ['--test', resolvedFilter], display: `node --test ${resolvedFilter}`, runner, scope: 'targeted' }
   }
 
   // Resolve non-file-path filter to actual test file via find
