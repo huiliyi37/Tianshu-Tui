@@ -77,8 +77,74 @@ async function main() {
   const stdout = process.stdout
   const stdin = process.stdin
 
+  // ── Headless / config routing ──────────────────────────────
+  // 在 TTY 检查之前：先检测无头模式（-p/--print/--json）、配置命令（config），
+  // 若命中则直接路由到对应处理器，不启动 TUI。
+
+  // rivet config ...
+  if (args[0] === 'config') {
+    const { runConfigCLI } = await import('./config/manager.js')
+    await runConfigCLI(args.slice(1))
+    return
+  }
+
+  // rivet -p "prompt" / rivet --print "prompt" [--json] [--stream-json]
+  const isHeadless = args.includes('-p') || args.includes('--print')
+
+  if (isHeadless) {
+    const { parseCliArgs, runHeadless } = await import('./headless.js')
+    const { loadConfig } = await import('./config/manager.js')
+    const { AgentLoop } = await import('./agent/loop.js')
+    const { SessionContext } = await import('./agent/context.js')
+    const { createAgentConfig, createMainAgentConfigInput } = await import('./agent/create-agent-config.js')
+    const { createDefaultToolRegistry } = await import('./tools/default-registry.js')
+
+    const parsed = parseCliArgs(args)
+    if (!parsed.prompt) {
+      process.stderr.write('Usage: rivet -p "<prompt>" [--json] [--stream-json]\n')
+      process.exit(2)
+    }
+
+    const cfg = loadConfig()
+    const prov = cfg.provider.providers[cfg.provider.default]
+    if (!prov) { process.stderr.write('Provider not configured. Run: rivet config setup <provider>\n'); process.exit(1) }
+    const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
+    if (!key) { process.stderr.write(`API key not set. Export ${prov.apiKeyEnv ?? 'API_KEY'} or run: rivet config setup ${prov.name}\n`); process.exit(1) }
+
+    const model = prov.models[0]!
+    const sessionId = crypto.randomUUID()
+
+    const result = await runHeadless({
+      prompt: parsed.prompt,
+      json: parsed.json,
+      streamJson: parsed.streamJson,
+      createAgent: () => {
+        const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
+        const agentCfg = createAgentConfig(createMainAgentConfigInput({
+          apiKey: key,
+          model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
+          cwd: process.cwd(),
+          provider: prov,
+          config: cfg,
+          sessionId,
+          toolDefinitions: toolRegistry.getDefinitions(),
+          sessionMemoryBlock: undefined,
+          auth: undefined,
+        }))
+        const session = new SessionContext()
+        return new AgentLoop({ ...agentCfg, toolRegistry, maxTurns: 15 }, session, process.cwd())
+      },
+    })
+
+    if (result.stdout) process.stdout.write(result.stdout + '\n')
+    else if (result.json) process.stdout.write(JSON.stringify(result.json) + '\n')
+    process.exit(result.exitCode)
+  }
+
+  // ── Interactive TUI (requires TTY) ──────────────────────────
+
   if (!stdout.isTTY || !stdin.isTTY) {
-    process.stderr.write('[T9] stdout and stdin must be TTY.\n')
+    process.stderr.write('[T9] stdout and stdin must be TTY (use -p for headless mode).\n')
     process.exit(1)
   }
 

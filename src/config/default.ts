@@ -36,7 +36,8 @@ export const DEFAULT_CONFIG: Config = {
       claude: {
         name: 'claude',
         apiKeyEnv: 'CLAUDE_API_KEY',
-        baseUrl: 'http://85.137.242.133:8080/v1',
+        // Anthropic 无原生 OpenAI 兼容端点；需自行部署代理（如 litellm/openrouter）并替换此 URL。
+        baseUrl: 'https://api.anthropic.com/v1',
         protocol: 'openai' as const,
         capabilities: {
           cacheControl: false,
@@ -50,8 +51,7 @@ export const DEFAULT_CONFIG: Config = {
         models: [
           {
             id: 'claude-opus-4-8',
-            // 代理（85.137.242.133）将 claude-opus-4-8 映射到 qwen37-max；
-            // alias 用真实后端名，消除"名为 opus 实为 qwen"的迷惑。id 不可改（代理按 id 路由）。
+            // alias 用实际后端名，消除迷惑。id 不可改（代理按 id 路由）。
             alias: 'qwen37-max',
             contextWindow: 1_000_000,
             maxTokens: 128000,
