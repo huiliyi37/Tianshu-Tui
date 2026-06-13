@@ -22,6 +22,7 @@ import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme } from './tui/theme.js'
+import { resolveAppPromptInput } from './tui/slash-commands.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
@@ -276,12 +277,17 @@ async function main() {
     const trimmed = text.trim()
     if (!trimmed) return
 
+    // 将 slash 命令解析为 agent prompt（对齐 Ink resolveAppPromptInput）。
+    // /review → "deliver_task(...)"；未知 slash → null → 静默跳过。
+    const prompt = resolveAppPromptInput(trimmed, process.cwd())
+    if (prompt === null) return
+
     // 单一权威：TuiApp.agentBusy 是唯一的 streaming 闩。app.onSubmit 只在 TuiApp
     // 判定空闲时触发（busy 时输入已被 TuiApp 入队 steerBuffer），故此处无需再自管
     // isStreaming 标志——正是「双门异步清除时机不同」造成 Esc 后死会话的根因。
     // run 生命周期回调（完成/错误/中止）由 bridge 桥接到 TuiApp，并带世代守卫。
     const callbacks = wrapCallbacksWithTuiApp(app!)
-    ctx!.agent.run(trimmed, callbacks).catch((err) => {
+    ctx!.agent.run(prompt, callbacks).catch((err) => {
       process.stderr.write(`[T9] Agent error: ${(err as Error)?.message}\n`)
     })
   })
