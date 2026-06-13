@@ -104,8 +104,6 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
   const ratio = (estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0) ? estimatedTokens / maxTokens : 0
   const estimatedK = estimatedTokens !== undefined ? Math.round(estimatedTokens / 1000) : 0
   const maxK = maxTokens !== undefined ? Math.round(maxTokens / 1000) : 0
-  const pct = Math.round(ratio * 100)
-
   const tokenColor = ratio >= 0.88 ? theme.error
     : ratio >= 0.75 ? theme.warning
     : theme.dim
@@ -119,7 +117,7 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
   const rule = horizontalRule(columns, getDomainSeparatorStyle(domain), columns)
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={0}>
       {/* Full-width separator line — dim, barely visible */}
       <Text color={theme.dim}>{rule}</Text>
       {/* Two-cluster layout: left (identity · phase) ………… right (metrics · elapsed) */}
@@ -136,20 +134,16 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
         {/* Flexible spacer — pushes right cluster to the edge */}
         <Box flexGrow={1} />
 
-        {/* Right cluster — metrics + elapsed */}
+        {/* Right cluster — progressive disclosure: only show what's actionable */}
         <Box flexDirection="row" gap={1}>
           <Text color={theme.muted}>{modelLabel}</Text>
-          {reasoningEffort && <Text color={theme.dim}>{EFFORT_GLYPH[reasoningEffort]}{reasoningEffort}</Text>}
-          {!narrow && cacheHitRate !== undefined && <Text color={cacheColor}>⚡{cachePct}%</Text>}
+          {cacheHitRate !== undefined && cacheHitRate < 0.5 && <Text color={cacheColor}>⚡{cachePct}%</Text>}
           <Text color={theme.dim}>${cost.toFixed(2)}</Text>
-          {!narrow && estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0 && <Text color={tokenColor}>◧{estimatedK}k/{maxK}k</Text>}
-          {narrow && estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0 && <Text color={tokenColor}>{pct}%</Text>}
-          {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
-          {historyCount !== undefined && !narrow && (
-            <Text color={theme.dim}>{historyCount}msgs</Text>
+          {estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0 && ratio >= 0.7 && (
+            <Text color={tokenColor}>◧{estimatedK}k/{maxK}k</Text>
           )}
-          {elapsedLabel && (
-            <Text color={isStreaming ? theme.primary : theme.dim}>⧗{elapsedLabel}</Text>
+          {elapsedLabel && isStreaming && (
+            <Text color={theme.primary}>⧗{elapsedLabel}</Text>
           )}
         </Box>
       </Box>

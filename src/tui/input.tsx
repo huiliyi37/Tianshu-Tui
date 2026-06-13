@@ -108,7 +108,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, starDomain
             }
           }}
           disabled={disabled}
-          placeholder={steerMode ? "Agent is thinking…" : "Type a message... (↑↓ history)"}
+          placeholder={steerMode ? "凝思中…" : "询问任何事，或 / 唤起命令"}
           history={history}
           onTabComplete={handleTabComplete}
           isSlashMode={isSlash}
