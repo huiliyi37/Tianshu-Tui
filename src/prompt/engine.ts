@@ -5,7 +5,7 @@ import { detectStaleness } from '../compact/staleness-detect.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import type { ToolDefinition } from '../api/types.js'
-import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, renderTaskDepthAdvisory, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, renderTaskDepthAdvisory, renderPlanMethodologyAdvisory, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import { analyzeVolatilePayload, LARGE_VOLATILE_PAYLOAD_CHARS, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
@@ -74,6 +74,8 @@ export class PromptEngine {
   private planCacheAdvisory?: string | null
   private intentRetrievalRoute?: string | null
   private taskDepthLayer?: import('../context/task-contract.js').TaskDepthLayer
+  private planMethodology?: import('../context/task-contract.js').PlanMethodology
+  private planMethodologyReason?: string
   private skillAdvisoryBlock?: string | null
   private crossSessionMemoryBlock?: string | null
   private mentionContextBlock?: string | null
@@ -241,7 +243,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason), skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -610,6 +612,15 @@ export class PromptEngine {
     this.taskDepthLayer = layer
   }
 
+  setPlanMethodology(methodology: import('../context/task-contract.js').PlanMethodology | undefined, reason?: string): void {
+    this.planMethodology = methodology
+    this.planMethodologyReason = reason
+  }
+
+  getPlanMethodology(): import('../context/task-contract.js').PlanMethodology | undefined {
+    return this.planMethodology
+  }
+
   setSkillAdvisoryBlock(block: string | null): void {
     this.skillAdvisoryBlock = block
   }
@@ -745,6 +756,7 @@ export class PromptEngine {
       planCacheAdvisory: this.planCacheAdvisory,
       intentRetrievalRoute: this.intentRetrievalRoute,
       taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer),
+      planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason),
       harnessAdvisoryBlock: this.harnessAdvisoryBlock,
       decisions: this.decisions,
       activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain,

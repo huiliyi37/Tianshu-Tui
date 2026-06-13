@@ -22,6 +22,24 @@ export function renderTaskDepthAdvisory(layer: TaskDepthLayer | undefined): stri
   return DEPTH_ADVISORY[layer]
 }
 
+import type { PlanMethodology } from '../context/task-contract.js'
+
+const METHODOLOGY_ADVISORY_TEMPLATES: Record<PlanMethodology, string> = {
+  lightweight: '<plan-methodology route="lightweight">推荐使用轻量版计划模板（5阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md。本任务 scope 内聚，单模块边界内变更，轻量版足以覆盖。</plan-methodology>',
+  full: '<plan-methodology route="full">推荐使用完整版计划模板（9阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-template.md。必须包含: 安全不变量、触发路径清单、双门对齐数据流图。</plan-methodology>',
+}
+
+export function renderPlanMethodologyAdvisory(
+  methodology: PlanMethodology | undefined,
+  reason?: string,
+): string | null {
+  if (!methodology) return null
+  const base = METHODOLOGY_ADVISORY_TEMPLATES[methodology]
+  if (!reason || methodology === 'lightweight') return base
+  // For 'full' with a reason, append it for traceability
+  return base.replace('</plan-methodology>', `\n路由理由: ${reason}</plan-methodology>`)
+}
+
 export interface ToolHistoryEntry {
   tool: string
   target: string
@@ -70,6 +88,11 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Only present when taskDepthLayer !== 'unit'. */
   taskDepthAdvisory?: string | null
+  /** Plan methodology routing advisory — which plan template (lightweight/full)
+   *  the PlanDesignIntentRouter recommends for this task.
+   *  Cache-safe: rendered ONLY into the dynamic appendix.
+   *  Only present for non-unit tasks or when methodology === 'full'. */
+  planMethodologyAdvisory?: string | null
   /** Matched .rivet/skills — cache-safe dynamic appendix. */
   skillAdvisoryBlock?: string | null
   /** Cross-session memory recall — cache-safe dynamic appendix. */
@@ -315,6 +338,11 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
   // Task depth advisory: TDD strategy for wiring/system tasks
   if (ctx.taskDepthAdvisory) {
     parts.push(ctx.taskDepthAdvisory)
+  }
+
+  // Plan methodology advisory: which template (lightweight/full) to use
+  if (ctx.planMethodologyAdvisory) {
+    parts.push(ctx.planMethodologyAdvisory)
   }
 
   if (ctx.skillAdvisoryBlock) {

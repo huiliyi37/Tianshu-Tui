@@ -103,7 +103,7 @@ import { createTurnBudget, type TurnBudget } from './turn-budget.js'
 import { classifyRecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
 import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
-import { advanceContractStatus, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, type TaskContract, type TaskDepthLayer, type TurnMode } from '../context/task-contract.js'
+import { advanceContractStatus, classifyPlanMethodology, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, type PlanMethodology, type TaskContract, type TaskDepthLayer, type TurnMode } from '../context/task-contract.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { renderMemoryBlock } from '../memory/unified-memory.js'
 import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
@@ -264,6 +264,7 @@ export class AgentLoop {
   private lastCompactTurn: number | null = null
   private _lastRetrievalRoute: import('./intent-retrieval-route.js').RetrievalRoute | null = null
   private _taskDepthLayer: TaskDepthLayer | undefined = undefined
+  private _planMethodology: PlanMethodology | undefined = undefined
   private _prevPhaseHint: string | undefined = undefined
   /**
    * P2-5: mid-round history rewrites break the prefix cache between two API
@@ -1428,9 +1429,13 @@ export class AgentLoop {
       const routeKinds = this._lastRetrievalRoute?.taskKinds
       this._taskDepthLayer = classifyTaskDepth(this.taskContract, undefined, routeKinds)
       this.config.promptEngine.setTaskDepthLayer(this._taskDepthLayer)
+      this._planMethodology = classifyPlanMethodology(this.taskContract, this._taskDepthLayer)
+      this.config.promptEngine.setPlanMethodology(this._planMethodology)
     } else {
       this._taskDepthLayer = undefined
+      this._planMethodology = undefined
       this.config.promptEngine.setTaskDepthLayer(undefined)
+      this.config.promptEngine.setPlanMethodology(undefined)
     }
 
     this.config.promptEngine.setSkillAdvisoryBlock(skillRegistry.renderMatchedBlock(userInput))
