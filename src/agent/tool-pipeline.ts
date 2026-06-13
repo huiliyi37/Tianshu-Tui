@@ -8,7 +8,9 @@ import type { TraceStore } from './trace-store.js'
 import type { RepairHintTracker } from './repair-hint.js'
 import type { ImportGraph } from './import-graph.js'
 import { createCheckpoint, recordAgentTouchedFile, recordBashSideEffects, makeOwnershipGuard, type OwnershipGuard, type ClaimLookup } from './checkpoint.js'
-import { validatePath } from '../tools/path-validate.js'
+import { validatePath, validatePathSafe } from '../tools/path-validate.js'
+import { grantPath } from '../tools/path-grants.js'
+import { dirname, resolve as resolvePath } from 'node:path'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
 import { appendProjectMemory, compactProjectMemory } from '../context/project-memory-writer.js'
@@ -67,6 +69,40 @@ const MUTATING_TOOLS: ReadonlySet<string> = new Set([
 ])
 function isMutatingTool(name: string): boolean {
   return MUTATING_TOOLS.has(name)
+}
+
+/**
+ * File tools whose path operand may target a path outside the workspace, with
+ * the access mode they need. Used to gate out-of-workspace file ops behind an
+ * approval-driven path grant (rather than a hard "Path outside workspace" error).
+ * `read_section` is artifact-id based and `apply_patch` embeds paths in a patch
+ * body — neither has a single extractable path, so they rely on request_path_access.
+ */
+const FILE_TOOL_MODES: Record<string, 'read' | 'write'> = {
+  read_file: 'read',
+  write_file: 'write',
+  edit_file: 'write',
+  hash_edit: 'write',
+}
+
+/**
+ * Resolve the absolute paths a file tool would touch that currently fall OUTSIDE
+ * the workspace and are not yet covered by a grant. Empty when in-workspace or
+ * already granted (validatePathSafe consults the grant store).
+ */
+function outOfWorkspaceFilePaths(cwd: string, toolName: string, input: Record<string, unknown>): { mode: 'read' | 'write'; paths: string[] } | null {
+  const mode = FILE_TOOL_MODES[toolName]
+  if (!mode) return null
+  const candidates: string[] = []
+  if (typeof input.file_path === 'string') candidates.push(input.file_path)
+  if (Array.isArray(input.file_paths)) {
+    for (const p of input.file_paths) if (typeof p === 'string') candidates.push(p)
+  }
+  const paths: string[] = []
+  for (const c of candidates) {
+    if (!validatePathSafe(cwd, c, mode).ok) paths.push(resolvePath(cwd, c))
+  }
+  return paths.length > 0 ? { mode, paths } : null
 }
 
 /** Build a cross-session ownership guard from the live session registry, if any. */
@@ -580,21 +616,34 @@ export async function executeToolUse(
     // approval. warn is the live window (blocked is short-circuited earlier).
     const protectionMode = deps.getDoomLoopLevel() !== 'none' && isDestructiveGitAction(tu.name, tu.input)
 
+    // Out-of-workspace file op: the path is outside the workspace and not yet
+    // granted. Instead of hard-blocking in execute(), route through the approval
+    // flow — on approval we record a directory-subtree grant so the op proceeds.
+    let pathGrantNeed = outOfWorkspaceFilePaths(deps.cwd, tu.name, tu.input)
+    // In dangerously-skip-permissions the user opted out of all prompts: record
+    // the grant directly so the op isn't blocked by the path guard.
+    if (skipAllApproval && pathGrantNeed) {
+      for (const p of pathGrantNeed.paths) grantPath(dirname(p), pathGrantNeed.mode)
+      pathGrantNeed = null
+    }
+
     const shouldAsk = skipAllApproval
       ? false
-      : protectionMode
+      : pathGrantNeed
         ? true
-        : bashWriteRequiresApproval
+        : protectionMode
           ? true
-          : allowlisted
-            ? false
-            : canAutoApprove
+          : bashWriteRequiresApproval
+            ? true
+            : allowlisted
               ? false
-              : approvalMode === 'manual'
-                ? needsApproval
-                : approvalMode === 'auto-safe'
-                  ? isHighRisk
-                  : false
+              : canAutoApprove
+                ? false
+                : approvalMode === 'manual'
+                  ? needsApproval
+                  : approvalMode === 'auto-safe'
+                    ? isHighRisk
+                    : false
 
     if (shouldAsk) {
       const approvalResult = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
@@ -615,6 +664,13 @@ export async function executeToolUse(
       if (tu.name === 'bash' && typeof tu.input.command === 'string') {
         learnBashPrefix(tu.input.command, deps.config.permissions)
      }
+      // Out-of-workspace file op approved: record a directory-subtree grant so
+      // both gates (validatePathSafe + sandbox) accept it. Recompute from the
+      // (possibly edited) final input so an edited path is granted, not the stale one.
+      const approvedGrant = outOfWorkspaceFilePaths(deps.cwd, tu.name, tu.input)
+      if (approvedGrant) {
+        for (const p of approvedGrant.paths) grantPath(dirname(p), approvedGrant.mode)
+      }
    }
 
     // Checkpoint before the first MUTATING tool of the turn. Beyond file edits
