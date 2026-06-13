@@ -809,7 +809,10 @@ export class DelegationCoordinator {
 
     const tierRecommendation = this.buildTierRecommendation(order)
     const tierInfluence = this.evaluateTierInfluence(tierRecommendation)
-    let selected = this.selectModelForTask(task, tierRecommendation.tier)
+    const preferredTier = tierInfluence.gate.applied
+      ? tierInfluence.gate.effectiveTier
+      : tierRecommendation.tier
+    let selected = this.selectModelForTask(task, preferredTier)
     const selectedTier = inferModelTierFromCard(selected)
     const tierShadow = this.buildTierShadow(order, selected, tierRecommendation)
     const tierGatedDecision = buildModelTierGatedDecisionEvent({
