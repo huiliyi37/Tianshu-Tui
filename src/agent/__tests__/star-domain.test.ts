@@ -17,21 +17,38 @@ describe('StarDomain', () => {
     }
   })
 
-  it('routes exploration keywords to pojun', () => {
-    // '突破' and '实验' are unique to pojun (tianxuan shares '探索')
+  it('routes exploration keywords to pojun (探索 is exclusive to pojun)', () => {
     assert.equal(matchDomain('尝试突破一个新的缓存方案'), 'pojun')
     assert.equal(matchDomain('实验性地尝试 WebSocket'), 'pojun')
+    assert.equal(matchDomain('探索新的可能性'), 'pojun')
   })
 
-  it('routes stability keywords to tianfu', () => {
-    // '优化' and '性能' are unique to tianfu (tianji shares '重构')
+  it('routes stability keywords to tianfu (审查 moved to tianquan)', () => {
     assert.equal(matchDomain('优化 session 管理模块'), 'tianfu')
     assert.equal(matchDomain('修复内存泄漏'), 'tianfu')
+    assert.equal(matchDomain('重构优化性能'), 'tianfu')
   })
 
   it('routes delivery keywords to tianliang', () => {
     assert.equal(matchDomain('按计划实现用户注册'), 'tianliang')
     assert.equal(matchDomain('编写单元测试覆盖'), 'tianliang')
+    assert.equal(matchDomain('编码开发新模块'), 'tianliang')
+  })
+
+  it('routes review/plan keywords to tianquan', () => {
+    assert.equal(matchDomain('审查这个方案'), 'tianquan')
+    assert.equal(matchDomain('评估架构设计'), 'tianquan')
+    assert.equal(matchDomain('审查代码质量'), 'tianquan')
+  })
+
+  it('routes challenge keywords to tianji (方案 shared but tianji wins with quality keywords)', () => {
+    assert.equal(matchDomain('质疑这个方案的前提'), 'tianji')
+    assert.equal(matchDomain('反思当前视角'), 'tianji')
+  })
+
+  it('routes pattern/discovery keywords to tianxuan', () => {
+    assert.equal(matchDomain('发现新的模式'), 'tianxuan')
+    assert.equal(matchDomain('复盘总结洞察'), 'tianxuan')
   })
 
   it('returns null for ambiguous tasks', () => {
@@ -45,13 +62,13 @@ describe('StarDomain', () => {
     assert.ok(STAR_DOMAINS.pojun.toolWhitelist.includes('bash'))
   })
 
-  it('tianfu toolWhitelist is read-only but has delegation (guardian cannot modify)', () => {
-    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('read_file'))
-    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('write_file'))
-    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('edit_file'))
-    assert.ok(!STAR_DOMAINS.tianfu.toolWhitelist.includes('bash'))
-    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('delegate_task'))
-    assert.ok(STAR_DOMAINS.tianfu.toolWhitelist.includes('delegate_batch'))
+  it('all domains have full tool access (cognitive posture, not tool restriction)', () => {
+    const fullTools = ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests']
+    for (const domain of Object.values(STAR_DOMAINS)) {
+      for (const tool of fullTools) {
+        assert.ok(domain.toolWhitelist.includes(tool), `${domain.name} missing ${tool}`)
+      }
+    }
   })
 
   it('tianliang toolWhitelist includes write_file + run_tests (executor delivers)', () => {

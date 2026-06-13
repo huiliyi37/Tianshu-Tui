@@ -65,12 +65,11 @@ describe('V3 Component A — authority injection', () => {
     assert.equal(order.authority, undefined)
   })
 
-  test('toolWhitelist intersection: tianfu read-only has no write tools', () => {
+  test('toolWhitelist intersection: tianfu read-only keeps read tools', () => {
     const order = readOnlyOrder({ authority: 'tianfu' })
-    // tianfu's toolWhitelist is read-only: no write_file, edit_file, bash
-    assert.ok(!order.allowedTools.includes('write_file'))
-    assert.ok(!order.allowedTools.includes('edit_file'))
-    assert.ok(!order.allowedTools.includes('bash'))
+    assert.ok(order.allowedTools.includes('read_file'))
+    assert.ok(order.allowedTools.includes('grep'))
+    assert.ok(order.allowedTools.includes('glob'))
   })
 
   test('toolWhitelist intersection: pojun read-only keeps exploration tools', () => {
@@ -89,12 +88,11 @@ describe('V3 Component A — authority injection', () => {
     assert.ok(order.allowedTools.includes('bash'))
   })
 
-  test('toolWhitelist intersection: tianfu write gets empty tools (strict)', () => {
+  test('toolWhitelist intersection: tianfu write keeps write tools (full access)', () => {
     const order = writeOrder({ authority: 'tianfu' })
-    // tianfu's whitelist has no write tools → intersection is empty
-    // This is correct: tianfu shouldn't be doing writes
-    assert.ok(!order.allowedTools.includes('write_file'))
-    assert.ok(!order.allowedTools.includes('bash'))
+    assert.ok(order.allowedTools.includes('write_file'))
+    assert.ok(order.allowedTools.includes('edit_file'))
+    assert.ok(order.allowedTools.includes('bash'))
   })
 
   test('unknown authority fails closed: no injection and no allowed tools', () => {

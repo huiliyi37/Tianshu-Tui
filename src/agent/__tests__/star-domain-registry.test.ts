@@ -34,18 +34,18 @@ describe('StarDomainRegistry — built-in domains', () => {
 
   test('matchDomain returns correct domain for known keywords', () => {
     const reg = new StarDomainRegistry()
-    // '按计划实现功能' → tianliang scores 2 ('实现'+'按计划'), tianji scores 1 → tianliang
+    // '按计划实现功能' → tianliang scores 2 ('实现'+'按计划')
     assert.equal(reg.matchDomain('按计划实现功能'), 'tianliang')
-    // '重构优化性能' → tianfu scores 3, tianji scores 1 → tianfu
+    // '重构优化性能' → tianfu scores 3 (重构+优化+性能), tianji no longer has 重构
     assert.equal(reg.matchDomain('重构优化性能'), 'tianfu')
   })
 
-  test('matchDomain returns null on keyword tie', () => {
+  test('resolved former ties: 审查 exclusive to tianquan, 探索 exclusive to pojun', () => {
     const reg = new StarDomainRegistry()
-    // '审查代码质量' → tianfu=1 ('审查'), tianquan=1 ('审查') → tie → null
-    assert.equal(reg.matchDomain('审查代码质量'), null)
-    // '探索新的可能性' → pojun=1 ('探索'), tianxuan=1 ('探索') → tie → null
-    assert.equal(reg.matchDomain('探索新的可能性'), null)
+    // '审查' is now exclusive to tianquan (removed from tianfu)
+    assert.equal(reg.matchDomain('审查代码质量'), 'tianquan')
+    // '探索' is now exclusive to pojun (removed from tianxuan)
+    assert.equal(reg.matchDomain('探索新的可能性'), 'pojun')
   })
 
   test('matchDomain returns null when no keywords match', () => {
@@ -53,19 +53,14 @@ describe('StarDomainRegistry — built-in domains', () => {
     assert.equal(reg.matchDomain('hello world xyz'), null)
   })
 
-  test('matchDomain returns null on tie', () => {
-    // Both pojun and tianxuan have '探索' keyword → tie
+  test('方案 shared between tianquan and tianji — context keywords break tie', () => {
     const reg = new StarDomainRegistry()
-    // pojun: '探索', tianxuan: '探索' — both score 1, tie → null
-    const result = reg.matchDomain('探索')
-    // If both score equal and there are only 2, result is null
-    // Let's verify the actual keyword overlap
-    const pojunKw = reg.get('pojun')!.keywords
-    const tianxuanKw = reg.get('tianxuan')!.keywords
-    const bothHaveExplore = pojunKw.some(k => k === '探索') && tianxuanKw.some(k => k === '探索')
-    if (bothHaveExplore) {
-      assert.equal(result, null)
-    }
+    // '审查方案' → tianquan:2(审查+方案) vs tianji:1(方案) → tianquan
+    assert.equal(reg.matchDomain('审查方案'), 'tianquan')
+    // '质疑方案' → tianquan:1(方案) vs tianji:2(质疑+方案) → tianji
+    assert.equal(reg.matchDomain('质疑方案'), 'tianji')
+    // '方案' alone → tianquan:1 vs tianji:1 → tie → null
+    assert.equal(reg.matchDomain('这个方案'), null)
   })
 
   test('list() returns all domains', () => {
