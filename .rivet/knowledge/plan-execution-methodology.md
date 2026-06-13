@@ -38,7 +38,7 @@
 
 **检查方法**：grep 共享 enforcement 状态的导入方（不是 guard 函数的调用者——两个门可能不共享函数，只共享状态模块），或枚举"这个操作的所有拒绝点"（沿着操作往下数门，而非沿着函数往上数调用者）。
 
-**实证**：path-grants 场景中，`path-validate.ts` 和 `sandbox-profile.ts` 不共享 guard 函数（sandbox 不调用 validatePathSafe），但共享同一个状态模块 `path-grants.ts`。grep `validatePathSafe` 调用者返回 8 个文件工具但漏掉 sandbox 门；grep `path-grants` 导入方返回两个门。教训：**枚举执行点，不枚举调用者**。
+**实证**：path-grants 场景中，`path-validate.ts` 和 `sandbox-profile.ts` 不共享 guard 函数（sandbox 不调用 validatePathSafe），但共享同一个状态模块 `path-grants.ts`。grep `validatePathSafe` 调用者返回一批文件工具与管线，但**不含 sandbox-profile.ts**——沙箱门不调用该 guard，所以 grep 调用者必然漏掉它。grep `path-grants` 导入方则两个门都出现。教训：**枚举执行点，不枚举调用者**。
 
 ### 原则 B：存储模式跟随既有先例
 

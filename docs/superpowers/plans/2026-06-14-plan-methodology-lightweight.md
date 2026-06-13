@@ -67,7 +67,8 @@
 rg -l "path-grants" src/    # → path-validate.ts + sandbox-profile.ts 两个都出现
 
 # 反例：只 grep guard 函数调用者——在 path-grants 场景会漏掉 sandbox 门
-# rg -l "validatePathSafe" src/  → 返回 6 个文件工具，不包含 sandbox-profile.ts ✗
+# rg -l "validatePathSafe" src/  → 返回一批文件工具与管线，但不含 sandbox-profile.ts ✗
+#                                  沙箱门不调用该 guard，grep 调用者必然漏掉它
 ```
 
 **心智操作**："有哪些独立的执行点能拒绝这个操作？"不是"有哪些代码调用了这个函数？"
