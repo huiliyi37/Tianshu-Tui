@@ -252,36 +252,48 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
     return lines
   }
 
-  if (expanded || completed.length <= 3) {
-    const maxShow = expanded ? completed.length : 3
-    const displayCount = expanded ? 30 : 3 // max content preview lines
-    for (const entry of completed.slice(0, maxShow)) {
+  if (expanded) {
+    // 展开模式：显示所有 entry 的完整内容
+    for (const entry of completed) {
       const lineCount = entry.content ? entry.content.split('\n').length : 0
       const lc = lineCount > 0 ? ` (${lineCount}L)` : ''
       const kindGlyph = entry.kind === 'read' ? '📖' : entry.kind === 'search' ? '🔍' : '📂'
       lines.push(`  ⎿  ${kindGlyph} ${color(entry.displayName, theme.muted)}${lc}`)
-
-      // 内容预览
       if (entry.content) {
-        const previewMax = expanded ? 30 : Math.min(displayCount, 3)
-        const previewLines = entry.content.split('\n').slice(0, previewMax)
+        const previewLines = entry.content.split('\n').slice(0, 30)
         for (const pl of previewLines) {
           const trimmed = pl.length > 80 ? pl.slice(0, 79) + '…' : pl
           lines.push(`     ${color(trimmed, theme.dim)}`)
         }
-        if (lineCount > previewMax) {
-          lines.push(color(`     … +${lineCount - previewMax} more lines`, theme.dim))
+        if (lineCount > 30) {
+          lines.push(color(`     … +${lineCount - 30} more lines`, theme.dim))
         }
       }
     }
-    if (!expanded && completed.length > 3) {
-      lines.push(color(`     … +${completed.length - 3} more (ctrl+o to expand)`, theme.dim))
+  } else if (completed.length <= 3) {
+    // 小折叠：显示全部 entry + 内容预览（最多 3 行/entry）
+    for (const entry of completed) {
+      const lineCount = entry.content ? entry.content.split('\n').length : 0
+      const lc = lineCount > 0 ? ` (${lineCount}L)` : ''
+      const kindGlyph = entry.kind === 'read' ? '📖' : entry.kind === 'search' ? '🔍' : '📂'
+      lines.push(`  ⎿  ${kindGlyph} ${color(entry.displayName, theme.muted)}${lc}`)
+      if (entry.content) {
+        const previewLines = entry.content.split('\n').slice(0, 3)
+        for (const pl of previewLines) {
+          const trimmed = pl.length > 80 ? pl.slice(0, 79) + '…' : pl
+          lines.push(`     ${color(trimmed, theme.dim)}`)
+        }
+        if (lineCount > 3) {
+          lines.push(color(`     … +${lineCount - 3} more lines`, theme.dim))
+        }
+      }
     }
   } else {
-    // 紧凑折叠：仅路径列表
+    // 大折叠（>3 条）：紧凑路径列表 + ctrl+o 提示
     const files = completed.map(e => e.displayName).join(', ')
     const preview = files.length > 80 ? files.slice(0, 79) + '…' : files
     lines.push(`  ⎿  ${color(preview, theme.muted)}`)
+    lines.push(color(`     … +${completed.length - 3} more files (ctrl+o to expand)`, theme.dim))
   }
 
   return lines

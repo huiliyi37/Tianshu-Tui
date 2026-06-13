@@ -169,3 +169,48 @@ test('turnComplete 时 flush 残余折叠组', () => {
   const text = scrollbackPlain(app)
   assert.ok(text.includes('Read 1 file'), 'group should be flushed on turnComplete')
 })
+
+// ── abort 后 flush ────────────────────────────────────────────
+
+test('abort 时 flush 残余折叠组', () => {
+  const { app } = makeApp()
+
+  app.callbacks.onToolUse('r1', 'read_file', { file_path: 'a.ts' })
+  app.callbacks.onToolUse('r2', 'read_file', { file_path: 'b.ts' })
+  tr(app, 'r1', 'read_file', 'content a')
+  tr(app, 'r2', 'read_file', 'content b')
+  // abort 应在清理前 flush 组
+  app.callbacks.onAbort()
+
+  const text = scrollbackPlain(app)
+  assert.ok(text.includes('Read 2 files'), 'group should be flushed on abort')
+  assert.ok(text.includes('content a'), 'r1 content should be present')
+  assert.ok(text.includes('content b'), 'r2 content should be present')
+})
+
+// ── ctrl+o 展开 lastCollapsedGroup ────────────────────────────
+
+test('flush 后 scrollback 中折叠组渲染正确，含 ctrl+o 提示', () => {
+  const { app } = makeApp()
+
+  // read×4（超过 3 条）→ group flushed by write
+  app.callbacks.onToolUse('r1', 'read_file', { file_path: 'a.ts' })
+  tr(app, 'r1', 'read_file', 'line1\nline2\nline3\nline4\nline5')
+  app.callbacks.onToolUse('r2', 'read_file', { file_path: 'b.ts' })
+  tr(app, 'r2', 'read_file', 'b content')
+  app.callbacks.onToolUse('r3', 'read_file', { file_path: 'c.ts' })
+  tr(app, 'r3', 'read_file', 'c content')
+  app.callbacks.onToolUse('r4', 'read_file', { file_path: 'd.ts' })
+  tr(app, 'r4', 'read_file', 'd content')
+  app.callbacks.onToolUse('w1', 'write_file', { file_path: 'out.ts' })
+  tr(app, 'w1', 'write_file', 'ok')
+
+  const text = scrollbackPlain(app)
+  assert.ok(text.includes('Read 4 files'), 'collapsed group summary')
+  // 超过 3 条 entry 时显示 ctrl+o 提示 + 紧凑路径列表
+  assert.ok(text.includes('ctrl+o to expand'), 'should hint ctrl+o for >3 entries')
+  // 紧凑模式下显示文件路径（逗号分隔）
+  assert.ok(text.includes('a.ts'), 'a.ts in collapsed group')
+  assert.ok(text.includes('b.ts'), 'b.ts in collapsed group')
+})
+
