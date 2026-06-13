@@ -676,4 +676,89 @@ describe('CompactionController', () => {
     }
     // If not compacted, still a valid outcome (token estimate might not cross threshold)
   })
+
+  // ── prefixOverhead 在 AgentLoop 构造时立刻设置 ──────────────────
+  // 根因：旧 _ensurePrefixOverhead 只在 maybeCompact 入口调，
+  // UI 启动到 maybeCompact 之间的窗口期内 getEstimatedTokens() 不含
+  // system prompt + tool definition 的开销 → GlanceBar 显示 ctx 0%、◧ 0/1.0M。
+  // 修复后在 AgentLoop 构造后立即调一次，关闭窗口。
+
+  it('ensurePrefixOverhead is a public method', () => {
+    const session = new SessionContext()
+    const controller = makeController(session)
+    assert.equal(typeof (controller as any).ensurePrefixOverhead, 'function')
+  })
+
+  it('ensurePrefixOverhead sets prefixOverhead on session', () => {
+    const session = new SessionContext()
+    const engine = makeEngine()
+    const controller = new CompactionController({
+      session,
+      promptEngine: engine,
+      contextWindow: 128_000,
+      pressureMonitor: new PressureMonitor(128_000),
+      getTrajectoryEntries: () => [],
+      getStreamedText: () => '',
+      refreshLedger: () => {},
+    })
+
+    // Before: estimatedTokens should be 0 (no messages, no overhead)
+    const before = session.getEstimatedTokens()
+    assert.equal(before, 0)
+
+    // After: overhead should be set
+    controller.ensurePrefixOverhead()
+    const after = session.getEstimatedTokens()
+    assert.ok(after > 0, `expected estimatedTokens > 0 after ensurePrefixOverhead, got ${after}`)
+  })
+
+  it('ensurePrefixOverhead is idempotent', () => {
+    const session = new SessionContext()
+    const engine = makeEngine()
+    const controller = new CompactionController({
+      session,
+      promptEngine: engine,
+      contextWindow: 128_000,
+      pressureMonitor: new PressureMonitor(128_000),
+      getTrajectoryEntries: () => [],
+      getStreamedText: () => '',
+      refreshLedger: () => {},
+    })
+
+    controller.ensurePrefixOverhead()
+    const first = session.getEstimatedTokens()
+
+    // Second call should NOT change the value (idempotent)
+    controller.ensurePrefixOverhead()
+    const second = session.getEstimatedTokens()
+
+    assert.equal(second, first, 'second call must not change prefixOverhead')
+  })
+
+  it('ensurePrefixOverhead reflects PromptEngine tool count', () => {
+    const session = new SessionContext()
+    const engine = makeEngine()
+    // Override getToolCount to simulate more tools
+    const engineWithTools = {
+      ...engine,
+      getToolCount: () => 25,
+      getSystemPrompt: () => engine.getSystemPrompt(),
+    }
+    const controller = new CompactionController({
+      session,
+      promptEngine: engineWithTools as any,
+      contextWindow: 128_000,
+      pressureMonitor: new PressureMonitor(128_000),
+      getTrajectoryEntries: () => [],
+      getStreamedText: () => '',
+      refreshLedger: () => {},
+    })
+
+    controller.ensurePrefixOverhead()
+    const overhead = session.getEstimatedTokens()
+
+    // With 25 tools × 50 tokens/tool = 1250 tool tokens
+    // System prompt + 1250 + 400 volatile should be well above 500
+    assert.ok(overhead > 500, `expected overhead > 500 with 25 tools, got ${overhead}`)
+  })
 })

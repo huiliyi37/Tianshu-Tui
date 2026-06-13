@@ -503,6 +503,9 @@ export class AgentLoop {
       },
       getAbortSignal: () => this.abortController?.signal,
     })
+    // 在 AgentLoop 构造时立即设置 prefixOverhead，关闭 UI 启动到 maybeCompact 之间的窗口。
+    // 否则首次响应前 GlanceBar 显示 ctx 0%、◧ 0/1.0M（数据未接入而非真的 0%）。
+    this.compaction.ensurePrefixOverhead()
     this.turnStream = this.createTurnStreamController()
     this.turnCompletion = this.createTurnCompletionController()
     this.toolExecution = this.createToolExecutionController()

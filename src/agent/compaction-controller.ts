@@ -252,7 +252,7 @@ export class CompactionController {
    * systematically 5K-8K tokens too low, causing compaction decisions to
    * trigger too late.
    */
-  private _ensurePrefixOverhead(): void {
+  ensurePrefixOverhead(): void {
     if (this._prefixOverheadSet) return
     this._prefixOverheadSet = true
 
@@ -277,7 +277,7 @@ export class CompactionController {
     // Ensure prefix overhead is always set before any early return.
     // Without this, getEstimatedTokens() omits the system prompt + tool
     // definition cost, making GlanceBar show ctx 0% and ◧ 0/1.0M.
-    this._ensurePrefixOverhead()
+    this.ensurePrefixOverhead()
 
     if (this.deps.compactEnabled === false) {
       return { failures: input.failures, compacted: false }
@@ -289,7 +289,7 @@ export class CompactionController {
     // stats — it never mutated storage. The actual request-time pruning happens in
     // PromptEngine.buildOaiRequest via semanticPruneLayer1 + detectStaleness.
 
-    this._ensurePrefixOverhead()
+    this.ensurePrefixOverhead()
     const estimatedTokens = this.deps.session.getEstimatedTokens()
     const contextWindow = this.deps.contextWindow
     const ratio = contextWindow > 0 ? estimatedTokens / contextWindow : 0
