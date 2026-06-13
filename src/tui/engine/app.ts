@@ -34,7 +34,12 @@ import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
 import { decodeTeamPanelModel } from '../team-panel-model.js'
-import { domainBadge, isDelegationTool } from '../format/tool-domain.js'
+import {
+  delegationObjectiveFromInput,
+  delegationProfileFromInput,
+  domainBadge,
+  isDelegationTool,
+} from '../format/tool-domain.js'
 import { formatSpinnerStatus, formatTurnWorkSummary, phaseIndicator } from '../format/spinner-status.js'
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
@@ -758,12 +763,9 @@ export class TuiApp {
       .filter(([, meta]) => isDelegationTool(meta.name))
       .map(([, meta]) => {
         const badge = domainBadge(meta.name)
-        const input = meta.input as Record<string, unknown>
-        const objective = typeof input.objective === 'string' ? input.objective.slice(0, 80) : ''
-        const profile = typeof input.profile === 'string' ? input.profile : meta.name
         return {
-          profile,
-          objective,
+          profile: delegationProfileFromInput(meta.name, meta.input),
+          objective: delegationObjectiveFromInput(meta.input),
           elapsedMs: Date.now() - meta.startMs,
           glyph: badge?.glyph ?? '⚙',
         }
@@ -1501,17 +1503,18 @@ export class TuiApp {
       lines.push({ text: color(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.muted) })
     }
 
-      // 2b2. Worker pills — 运行中子代理摘要（delegate_*/team_orchestrate）
-      const delegationTools = [...this.pendingTools.entries()]
-        .filter(([, meta]) => isDelegationTool(meta.name))
-      if (delegationTools.length > 0) {
-        const pills = delegationTools.map(([, meta]) => {
-          const elapsed = Date.now() - meta.startMs
-          const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
-          const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
-            ? color('[auto]', this.theme.success)
-            : color('[ask]', this.theme.warning)
-          return `${domainBadge(meta.name)?.glyph ?? '⚙'} ${meta.name} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
+    // 2b2. Worker pills — 运行中子代理摘要（delegate_*/team_orchestrate）
+    const delegationTools = [...this.pendingTools.entries()]
+      .filter(([, meta]) => isDelegationTool(meta.name))
+    if (delegationTools.length > 0) {
+      const pills = delegationTools.map(([, meta]) => {
+        const elapsed = Date.now() - meta.startMs
+        const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
+        const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
+          ? color('[auto]', this.theme.success)
+          : color('[ask]', this.theme.warning)
+        const profile = delegationProfileFromInput(meta.name, meta.input)
+        return `${domainBadge(meta.name)?.glyph ?? '⚙'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
       })
       lines.push({ text: ` ${pills.join('  ')}` })
     }

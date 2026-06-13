@@ -118,3 +118,22 @@ test('q 在 overlay 内关闭', async () => {
   // 关闭后退出 alt-screen（ALT_SCREEN_OFF = \x1B[?1049l）
   assert.ok(out.chunks.join('').includes('\x1B[?1049l'), 'q 关闭 overlay（退出 alt-screen）')
 })
+
+test('tasks overlay: register + activate 渲染 worker 列表', () => {
+  const { app, out } = makeApp()
+  app.registerOverlays({
+    tasksData: () => ({
+      workers: [{
+        profile: 'code_scout',
+        objective: 'find routing seams',
+        elapsedMs: 1500,
+        glyph: '⚙',
+      }],
+    }),
+  })
+  assert.equal(app.activateOverlay('tasks'), true, 'tasks overlay 应成功激活')
+  const visible = stripAnsi(out.chunks.join(''))
+  assert.ok(visible.includes('Running Agents'), '应显示 tasks 标题')
+  assert.ok(visible.includes('code_scout'), '应显示 worker profile')
+  assert.ok(visible.includes('find routing seams'), '应显示 objective')
+})

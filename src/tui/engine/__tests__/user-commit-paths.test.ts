@@ -149,3 +149,19 @@ test('steer 归并后：不重复生成用户气泡', async () => {
   // task A 1个 + note 1 1个 = 2个 You，不应有第 3 个（task B merged bubble）
   assert.equal(youCount, 2, `应为 2 个 You 气泡（task A + note 1），实际 ${youCount}`)
 })
+
+// ── rejectSubmit：main 层 resolve null 时清 busy ─────────────────
+
+test('rejectSubmit 撤销 passthrough 设置的 agentBusy', async () => {
+  const { app, stdin } = makeApp()
+  app.onSubmit(() => {})
+  app.setSlashHandler(async () => false)
+
+  app.setInput('/typo-slash')
+  stdin.dataHandler!('\r')
+  await tick()
+
+  assert.equal(app.busy, true, 'slash passthrough 应先置 busy')
+  app.rejectSubmit()
+  assert.equal(app.busy, false, 'rejectSubmit 应清 busy')
+})
