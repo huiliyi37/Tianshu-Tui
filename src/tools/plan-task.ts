@@ -4,6 +4,46 @@ import { taskGraphToUnifiedPlan, unifiedPlanToTeamTasks, serializeUnifiedPlan, r
 import { runTeamSkeleton } from '../agent/team-orchestrator.js'
 import type { DelegationCoordinator } from '../agent/coordinator.js'
 import type { TeamOrchestratorDeps, TeamRunInput } from '../agent/team-orchestrator.js'
+import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
+
+const FULL_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-template.md'
+const LIGHTWEIGHT_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md'
+
+/**
+ * Build a methodology guidance block for injection into plan_task output.
+ * Pure function — never writes to static tool definitions (prefix-cache safe).
+ */
+function buildMethodologyGuidance(objective: string, files: string[]): string {
+  const contract: TaskContract = {
+    id: 'plan-task',
+    objective,
+    scope: { mentionedFiles: files },
+    constraints: [],
+    successCriteria: [],
+    status: 'planning',
+    createdAtTurn: 0,
+    updatedAtTurn: 0,
+    isActionable: true,
+  }
+  const depth = classifyTaskDepth(contract)
+  const methodology = classifyPlanMethodology(contract, depth)
+
+  const templatePath = methodology === 'full' ? FULL_TEMPLATE_PATH : LIGHTWEIGHT_TEMPLATE_PATH
+  const templateType = methodology === 'full' ? '完整版（9阶段）' : '轻量版（5阶段）'
+
+  return [
+    '## 计划方法论路由',
+    '',
+    `任务深度: ${depth} | 推荐模板: ${methodology} | ${templateType}`,
+    `模板路径: ${templatePath}`,
+    '',
+    methodology === 'full'
+      ? '必须包含: 安全不变量、触发路径清单、双门对齐数据流图。系统边界标定和跨模块协调说明不可省略。'
+      : '本任务 scope 内聚，单模块边界内变更，聚焦核心改动与验证即可。',
+    '',
+    '如用户已显式指定模板，以用户指定为准。',
+  ].join('\n')
+}
 
 export function createPlanTaskTool(deps: {
   getCoordinator: () => DelegationCoordinator | null
@@ -64,10 +104,11 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
       }
 
       if (params.input.execute !== true) {
-        // Return JSON + human-readable summary
+        // Return JSON + human-readable summary with methodology guidance
         const json = serializeUnifiedPlan(plan)
+        const guidance = buildMethodologyGuidance(objective, files ?? [])
         return {
-          content: `${renderUnifiedPlanSummary(plan)}\n\n---\n## UnifiedPlan JSON (pass to team_orchestrate as planJson)\n\`\`\`json\n${json}\n\`\`\``,
+          content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}\n\n---\n## UnifiedPlan JSON (pass to team_orchestrate as planJson)\n\`\`\`json\n${json}\n\`\`\``,
         }
       }
 
@@ -100,7 +141,8 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
 
       try {
         const summary = await runTeamSkeleton(input, orchestratorDeps)
-        return { content: `${renderUnifiedPlanSummary(plan)}\n\n${summary.packet}` }
+        const guidance = buildMethodologyGuidance(objective, files ?? [])
+        return { content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}\n\n${summary.packet}` }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: `${renderUnifiedPlanSummary(plan)}\n\nExecution failed: ${msg}`, isError: true }
