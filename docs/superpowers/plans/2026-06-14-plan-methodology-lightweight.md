@@ -56,6 +56,19 @@
 ### 要求
 这是单模块重构**最容易跳但最关键**的阶段。不列消费者清单 = 合并后消费者构建失败。
 
+### 不可删的最小步骤（2026-06-14 补强）
+
+> ⚠️ 以下步骤即使在轻量版中也**不可跳过**——它是原则 A（双门模型）的最小防御。
+
+**Grep 同一 guard 的所有调用路径**：如果改动涉及任何 guard/validate/check/sandbox/permission 函数，必须 grep 所有调用该 guard 的路径。这防止"看起来只碰了一个门，实际有第二个门被漏掉"的静默失效。
+
+```bash
+# 示例：改 path-validate.ts 时必须执行
+grep -r "validatePathSafe\|validatePath\b" src/ --include="*.ts" -l
+```
+
+如果 grep 结果跨多个 enforcement 子系统（tools/ + agent/），应升级为完整版模板。
+
 ### 模板
 
 ```markdown

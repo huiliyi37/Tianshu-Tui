@@ -85,6 +85,11 @@ Rule 2 — Multi-gate signal → 'full'
     b. File pattern: mentionedFiles 同时包含不同 enforcement 子系统的文件
        - Enforcement subsystems 定义见下方 ENFORCEMENT_SUBSYSTEM_FILES 常量
     c. Constraint signal: contract.constraints 含 "security" | "permission" | "sandbox"
+    d. **Safety keyword in objective → 'full'（2026-06-14 补强）**
+       即使 mentionedFiles 只含 0~1 个 enforcement 文件，如果 objective 包含
+       安全语义关键词，也必须走完整版模板——因为"存在第二个门"这个事实往往在
+       问题建模阶段才浮现（见下方"已知局限：鸡生蛋裂缝"）。
+       关键词：/授权|越界|放行|sandbox|permission|path.*(safe|grant|allow)|安全|沙箱|权限/i
 
 Rule 3 — WIRING depth + multi-file → 'full' if ≥2 enforcement files, else 'lightweight'
   理由：wiring 任务可能只是连两个普通模块（lightweight），也可能是连
@@ -169,6 +174,28 @@ const ENFORCEMENT_SUBSYSTEM_FILES: ReadonlySet<string> = new Set([
 `ENFORCEMENT_SUBSYSTEM_FILES` 设计为可扩展列表。未来新增领域时，只需向该常量追加文件路径，路由器规则无需修改。若列表膨胀到 30+ 文件，再迁移为目录约定 glob（如 `tools/*-validate.ts` / `tools/*-profile.ts` / `agent/permissions*.ts`），但 MVP 阶段 flat list 的维护成本远低于 glob 的误匹配风险。
 
 天璇方法第 4 条（"找温跃层"）：文件数和 gate 数是两个正交维度的边界。一个任务可能改 10 个文件但全是同一子系统内的纯函数重命名（lightweight）；另一个任务可能只改 2 个文件但分别是 path-validate.ts 和 sandbox-profile.ts（full）。文件数不是 gate 数的代理。
+
+### 已知局限：鸡生蛋裂缝（2026-06-14 对抗审查发现）
+
+路由器依赖 `mentionedFiles` 来检测 enforcement 文件。但**"存在第二个门"这个事实，常常在问题建模阶段才浮现**——即完整版模板的第一阶段产物。这构成了一个结构性悖论：
+
+```
+"给越界路径放行" — mentionedFiles 可能只提 path-validate.ts
+→ 路由器：0 enforcement files，unit depth → lightweight
+→ lightweight 模板砍掉了边界标定和双门对齐
+→ 永远不会触发"grep 还有没有别的门"这一步
+→ defaultWritableRoots（第二个门）被漏掉
+```
+
+**代价不对称**：重构任务误判成 full 浪费几页文档；安全任务误判成 lightweight 留下可利用的裂缝。默认值 lightweight 对两类错误一视同仁，但后果不对称。
+
+**已实施的补强（Rule 2d）**：objective 含 `授权|越界|放行|sandbox|permission|path安全` 等安全语义词时，即使 0 个 enforcement 文件也升级到 full。这覆盖了"伪装成简单"的安全任务。
+
+**待评估的更彻底方案**（未实施，供后续决策）：
+- 引入第三档 `lightweight-with-boundary-scan`：不走完整九阶段，但强制保留不可删的边界扫描步骤
+- 让 lightweight 模板第二阶段内置 `grep 调用同一 guard 函数的所有路径`（原则 A 的检查方法），这样即使误判到 lightweight，第二个门也会被 grep 抓出来
+
+感谢 Cursor Opus 4.8（sandbox-path-grants 执行当事人）发现这个裂缝。
 
 ---
 
