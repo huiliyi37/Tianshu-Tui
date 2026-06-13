@@ -411,7 +411,7 @@ export interface SalientBlock {
 export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<star-domain')) return 1.0
   if (blockContent.startsWith('<repair-hint>')) return 0.8
-  if (blockContent.startsWith('<harness-advisory>')) return 0.8
+  if (blockContent.startsWith('<星域-advisory>')) return 0.8
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
   if (blockContent.startsWith('<affordance-hint>')) return 0.7
   if (blockContent.startsWith('<policy-guidance>')) return 0.7

@@ -8,14 +8,14 @@ describe('AdvisoryBus', () => {
     assert.equal(bus.render(), '')
   })
 
-  it('renders single entry as harness-advisory XML', () => {
+  it('renders single entry as 星域-advisory XML', () => {
     const bus = new AdvisoryBus()
     bus.submit({ key: 'test', priority: 0.8, category: 'repair', content: 'check file X' })
     const result = bus.render()
-    assert.match(result, /<harness-advisory>/)
+    assert.match(result, /<星域-advisory>/)
     assert.match(result, /<entry key="test"/)
     assert.match(result, /check file X/)
-    assert.match(result, /<\/harness-advisory>/)
+    assert.match(result, /<\/星域-advisory>/)
   })
 
   it('deduplicates by key — keeps highest priority', () => {

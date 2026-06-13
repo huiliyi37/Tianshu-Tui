@@ -110,6 +110,6 @@ describe('ContextInjectionController', () => {
     const rendered = bus.render()
     assert.match(rendered, /check path/)
     assert.match(rendered, /Prediction error rate elevated/)
-    assert.match(rendered, /<harness-advisory>/)
+    assert.match(rendered, /<星域-advisory>/)
   })
 })

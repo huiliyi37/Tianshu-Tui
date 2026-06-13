@@ -419,19 +419,20 @@ function buildInjectedMessage(
   // hesitation or stuck state — the model is producing text/thinking but not
   // taking any action. This is a different failure mode from tool oscillation.
   if (noToolTurnCount && noToolTurnCount >= 2) {
-    lines.push(`**系统感知：连续 ${noToolTurnCount} 轮未执行任何工具调用。**`)
+    lines.push(`**天璇-感知：连续 ${noToolTurnCount} 轮未执行任何工具调用。你可能陷入了隧道视野。**`)
     lines.push('')
-    lines.push('模型可能陷入犹豫或重复输出文本但未采取实际行动。')
+    lines.push('停下来，换个角度看当前状态：')
     lines.push('- 如果你发现了问题但不确定，请直接向用户指出')
     lines.push('- 如果需要更多信息，请调用 read_file / grep 等工具')
     lines.push('- 如果任务已完成，请输出摘要并结束回合')
+    lines.push('- 天璇胶囊（docs/seed-capsule-tianxuan.md）有换视角方法论可供 recall')
     return lines.join('\n')
   }
 
   // Delivery-completion variant: when task is verified and convergence fires,
   // signal completion instead of asking the model to try harder.
   if (deliveryStatus === 'verified' && level === 2) {
-    lines.push('**系统感知：所有代码变更已验证通过，任务可能已完成。**')
+    lines.push('**天枢-感知：所有代码变更已验证通过，任务可能已完成。**')
     lines.push('')
     lines.push('如果所有子任务已完成且验证通过，请结束当前回合。')
     lines.push('- 检查是否有遗漏的 deliver_task 调用')
@@ -440,9 +441,9 @@ function buildInjectedMessage(
   }
 
   if (level === 2) {
-    lines.push('**系统感知：当前任务可能进入低效循环。**')
+    lines.push('**天璇-感知：当前任务可能进入低效循环。换个角度看问题。**')
   } else {
-    lines.push('**系统感知：任务未能在预期轮次内收敛，建议中断当前探索。**')
+    lines.push('**天枢-感知：任务未能在预期轮次内收敛，建议中断当前探索。**')
   }
 
   if (signals.editRatio < 0.1 && phaseClass === 'execute') {
@@ -477,6 +478,7 @@ function buildInjectedMessage(
     lines.push('- 对当前最可能的方案进行编辑或测试')
     lines.push('- 重新阅读用户原始请求，确认方向')
     lines.push('- 缩小范围：只解决一个子问题')
+    lines.push('- 天璇胶囊（docs/seed-capsule-tianxuan.md）有换视角方法论可供 recall')
   }
 
   return lines.join('\n')

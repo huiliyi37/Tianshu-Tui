@@ -135,8 +135,8 @@ describe('formatDeadEndRules', () => {
   it('outputs correct XML format with compressed="true"', () => {
     const rules = compressDeadEnds([{ path: 'printenv API_KEY' }])
     const output = formatDeadEndRules(rules)
-    assert.match(output, /<file-warnings kind="dead-end" compressed="true">/)
-    assert.match(output, /<\/file-warnings>/)
+    assert.match(output, /<天枢-观测 type="dead-end" compressed="true">/)
+    assert.match(output, /<\/天枢-观测>/)
   })
 
   it('includes rule kind in brackets', () => {
@@ -160,7 +160,7 @@ describe('formatDeadEndRules', () => {
     const lines = output.split('\n')
     // First line: open tag, last line: close tag, middle: rules
     assert.ok(lines.length >= 4, `expected >= 4 lines, got ${lines.length}`)
-    assert.match(lines[0]!, /<file-warnings/)
-    assert.match(lines[lines.length - 1]!, /<\/file-warnings>/)
+    assert.match(lines[0]!, /<天枢-观测/)
+    assert.match(lines[lines.length - 1]!, /<\/天枢-观测>/)
   })
 })

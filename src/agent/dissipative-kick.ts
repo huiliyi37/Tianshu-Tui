@@ -64,7 +64,7 @@ export function buildKickActions(
     : []
 
   const parts: string[] = [
-    '**系统感知：当前策略进入低效状态。**',
+    '**天璇-感知：当前策略进入低效状态。停下来，换个角度看。**',
   ]
 
   if (s.confidence < 0.3) {
@@ -80,7 +80,7 @@ export function buildKickActions(
   }
 
   parts.push('- 重新阅读用户原始请求，确认当前方向是否偏离')
-  parts.push('- 考虑2-3个替代实现框架，选择最简单且能被测试验证的那个')
+  parts.push('- 天璇胶囊（docs/seed-capsule-tianxuan.md）有换视角方法论可供 recall')
 
   return {
     deadEndPaths,

@@ -23,10 +23,10 @@ export function createBlindExplorationHook(opts: BlindExplorationHookOpts = {}):
       if (!activeTurns.has(ctx.snapshot.turn)) return
 
       ctx.effects.injectUserMessage(
-        '[blind-exploration] Before committing to an approach: ' +
+        '<破军-探索 type="blind-exploration">Before committing to an approach: ' +
         'explore the problem space broadly. Consider alternative framings, ' +
         'adjacent problems, and non-obvious angles. ' +
-        'Do not fixate on the most obvious interpretation of the request.',
+        'Do not fixate on the most obvious interpretation of the request.</破军-探索>',
       )
     },
   }

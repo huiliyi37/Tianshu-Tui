@@ -192,8 +192,8 @@ export function formatDeadEndRules(rules: DeadEndRule[]): string {
 
   const lines = rules.map(r => `- [${r.kind}] ${r.recommendation}`)
   return [
-    '<file-warnings kind="dead-end" compressed="true">',
+    '<天枢-观测 type="dead-end" compressed="true">',
     ...lines,
-    '</file-warnings>',
+    '</天枢-观测>',
   ].join('\n')
 }

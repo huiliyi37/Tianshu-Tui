@@ -55,15 +55,15 @@ export function createMCTSPlanningHook(opts: MCTSPlanningHookOpts): PreTurnRunti
 
       if (result.allJunk) {
         ctx.effects.injectUserMessage(
-          '[mcts-seeds] WARNING: All explored paths are pure echo of the task wording. ' +
-          'Consider reframing at a higher level of abstraction.',
+          '<破军-探索 type="mcts">WARNING: All explored paths are pure echo of the task wording. ' +
+          'Consider reframing at a higher level of abstraction. 贪狼胶囊（docs/seed-capsule-tanlang.md）有探索方法论。</破军-探索>',
         )
       } else {
         const seedList = result.seeds
           .map((s, i) => `- Seed ${i + 1}: ${s.text}`)
           .join('\n')
         ctx.effects.injectUserMessage(
-          `[mcts-seeds] 以下是从不同角度生成的探索路径，供参考：\n${seedList}`,
+          `<破军-探索 type="mcts">以下是从不同角度生成的探索路径，供参考：\n${seedList}</破军-探索>`,
         )
       }
     },

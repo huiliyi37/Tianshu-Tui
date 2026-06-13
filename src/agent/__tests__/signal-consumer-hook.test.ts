@@ -115,8 +115,7 @@ describe('createSignalConsumerRuntimeHook', () => {
     await hook.run(ctx)
 
     assert.equal(messages.length, 1)
-    assert.match(messages[0]!, /<file-warnings kind="dead-end" compressed="true">/)
-    // Generic rule since these paths don't match specific patterns
+    assert.match(messages[0]!, /<天枢-观测 type="dead-end" compressed="true">/)
     assert.match(messages[0]!, /\[generic\]/)
   })
 
@@ -133,7 +132,7 @@ describe('createSignalConsumerRuntimeHook', () => {
     await hook.run(ctx)
 
     assert.equal(messages.length, 1)
-    assert.match(messages[0]!, /<file-warnings kind="dead-end" compressed="true">/)
+    assert.match(messages[0]!, /<天枢-观测 type="dead-end" compressed="true">/)
     assert.match(messages[0]!, /\[security\]/)
     assert.match(messages[0]!, /\[test-runner\]/)
   })
@@ -161,7 +160,7 @@ describe('createSignalConsumerRuntimeHook', () => {
     await hook.run(ctx)
 
     assert.equal(messages.length, 1)
-    assert.match(messages[0]!, /<file-warnings/)
+    assert.match(messages[0]!, /<天枢-观测/)
     assert.match(messages[0]!, /npm run build failed with TS2345/)
   })
 })

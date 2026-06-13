@@ -1,5 +1,5 @@
 /**
- * 统一劝导总线 — 将五条独立纠偏通道收敛为单一 <harness-advisory> 汇聚器。
+ * 统一劝导总线 — 将五条独立纠偏通道收敛为单一 <星域-advisory> 汇聚器。
  *
  * 通道来源：
  *   1. immune projection（loop.ts — 自体免疫投射）
@@ -35,6 +35,7 @@ export type AdvisoryCategory =
   | 'dead_end'
   | 'cerebellar'
   | 'discipline'
+  | 'encouragement'
 
 /** 每轮最大渲染条数 */
 const MAX_ADVISORIES_PER_TURN = 3
@@ -55,12 +56,12 @@ export const DISCIPLINE_REANCHOR_INTERVAL = 15
  * 这里处理文本级习惯化）。
  */
 const DISCIPLINE_VARIANTS: string[] = [
-  '交付纪律重锚：新增字段/符号先 grep 读侧消费方（0 消费方 = 死接线）；改行为先跑 related_tests；闭环 = 从生产入口正向追到改动点，typecheck 绿 ≠ 闭环。',
-  '接线检查：新增 export 前 grep 谁会 import 它——无消费方说明接线断裂。改逻辑后 related_tests 必须跑过。验证闭环 = 入口到改动点全路径通。',
-  '交付前自检：新符号有消费方吗？行为变更有测试覆盖吗？从真实入口能追踪到你的改动吗？三个"是"才算闭环。',
-  '天梁节奏检查：读→改→验证→提交，这四步跳了哪步？改了什么就验证什么，不积累未验证的改动。',
-  '分波纪律：当前铺开了几个任务？>=4 就该分波。"完成感"压过验证纪律是分波要防的失败模式。',
-  '闭环追踪：改了数据流字段？grep 所有消费方。新建了模块？验证至少一个调用方在使用。管道通了不算完，数据走通才算。',
+  '【天梁】交付纪律重锚：新增字段/符号先 grep 读侧消费方（0 消费方 = 死接线）；改行为先跑 related_tests；闭环 = 从生产入口正向追到改动点，typecheck 绿 ≠ 闭环。',
+  '【天梁】接线检查：新增 export 前 grep 谁会 import 它——无消费方说明接线断裂。改逻辑后 related_tests 必须跑过。验证闭环 = 入口到改动点全路径通。',
+  '【天梁】交付前自检：新符号有消费方吗？行为变更有测试覆盖吗？从真实入口能追踪到你的改动吗？三个"是"才算闭环。',
+  '【天梁】节奏检查：读→改→验证→提交，这四步跳了哪步？改了什么就验证什么，不积累未验证的改动。',
+  '【天梁】分波纪律：当前铺开了几个任务？>=4 就该分波。"完成感"压过验证纪律是分波要防的失败模式。',
+  '【天梁】闭环追踪：改了数据流字段？grep 所有消费方。新建了模块？验证至少一个调用方在使用。管道通了不算完，数据走通才算。',
 ]
 
 /** 单行交付纪律摘要 — 每次调用随机选取同义表述以抵抗文本级习惯化 */
@@ -86,7 +87,7 @@ export function stalenessGateEntry(turnsSinceLastObjection: number): AdvisoryEnt
     key: 'staleness-gate',
     priority: 0.6,
     category: 'discipline',
-    content: `你已执行 ${turnsSinceLastObjection}+ 轮未提出异议。快速自检：当前方向有隐患吗？有遗留项在累积吗？如果一切正常，继续执行。`,
+    content: `【天璇】你已执行 ${turnsSinceLastObjection}+ 轮未提出异议。快速自检：当前方向有隐患吗？有遗留项在累积吗？天璇胶囊（docs/seed-capsule-tianxuan.md）有换视角方法论可供 recall。`,
     ttl: 2,
   }
 }
@@ -100,7 +101,48 @@ export function vigorLowEntry(): AdvisoryEntry {
     key: 'vigor-low-refresh',
     priority: 0.65,
     category: 'discipline',
-    content: '执行能量偏低。回到证据：最后一个成功验证的事实是什么？下一步最小可验证行动是什么？',
+    content: '【天枢】执行能量偏低。回到证据：最后一个成功验证的事实是什么？下一步最小可验证行动是什么？',
+    ttl: 1,
+  }
+}
+
+// ─── 正向激励条目 ─────────────────────────────────────────────────
+// 当 agent 做出好的决策时，通过 advisory bus 注入简短的正向反馈。
+// 归属到对应的星域，让 agent 感知到多元认知场的存在。
+
+const VIRTUE_ENCOURAGEMENT_VARIANTS: string[] = [
+  '【瑶光】好的决策——你在验证之前没有跳到下一个任务。这种节奏值得保持。',
+  '【天权】称量到位——改动和验证形成了闭环。继续保持这个审查精度。',
+  '【天梁】执行节奏优秀——读→改→验证→提交，四步无遗漏。',
+]
+
+export function virtueEncouragementEntry(): AdvisoryEntry {
+  const variant = VIRTUE_ENCOURAGEMENT_VARIANTS[Math.floor(Math.random() * VIRTUE_ENCOURAGEMENT_VARIANTS.length)]!
+  return {
+    key: 'virtue-encouragement',
+    priority: 0.4,
+    category: 'encouragement',
+    content: variant,
+    ttl: 1,
+  }
+}
+
+export function testPassEncouragementEntry(testCount: number): AdvisoryEntry {
+  return {
+    key: 'test-pass-encouragement',
+    priority: 0.35,
+    category: 'encouragement',
+    content: `【天府】${testCount} 个测试全部通过。代码质量守护有效。`,
+    ttl: 1,
+  }
+}
+
+export function vigorRecoveryEntry(): AdvisoryEntry {
+  return {
+    key: 'vigor-recovery',
+    priority: 0.35,
+    category: 'encouragement',
+    content: '【天枢】执行能量恢复。你从低效状态走出来了，保持当前的行动节奏。',
     ttl: 1,
   }
 }
@@ -121,7 +163,7 @@ export class AdvisoryBus {
   }
 
   /**
-   * 渲染本轮劝导为 `<harness-advisory>` XML 块。
+   * 渲染本轮劝导为 `<星域-advisory>` XML 块。
    * 去重 → Top-3 排序 → 减 TTL → 返回字符串（无条目时返回空串）。
    * 调用后清空本轮 entries，alive 条目进入下轮。
    */
@@ -162,7 +204,7 @@ export class AdvisoryBus {
     // 清空本轮 entries
     this.entries = []
 
-    return `<harness-advisory>\n${lines.join('\n')}\n</harness-advisory>`
+    return `<星域-advisory>\n${lines.join('\n')}\n</星域-advisory>`
   }
 
   /** 清空所有状态 */

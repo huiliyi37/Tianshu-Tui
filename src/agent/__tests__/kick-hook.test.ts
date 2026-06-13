@@ -71,8 +71,8 @@ describe('createKickRuntimeHook', () => {
 
     assert.equal(deposits.length, 0)
     assert.equal(messages.length, 1)
-    assert.match(messages[0]!, /系统感知/)
-    assert.match(messages[0]!, /替代框架/)
+    assert.match(messages[0]!, /天璇-感知/)
+    assert.match(messages[0]!, /天璇胶囊/)
   })
 
   it('deposits recent failed targets as dead-end pheromones', async () => {

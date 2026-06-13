@@ -2,6 +2,8 @@ import type { PostToolRuntimeHook } from '../runtime-hooks.js'
 import type { PheromoneDeposit, PheromoneQueryResult } from '../../context/stigmergy.js'
 import { detectVirtue, virtueToPheromoneDeposit } from '../virtue-signals.js'
 import type { VirtueContext, VirtueSignal } from '../virtue-signals.js'
+import type { AdvisoryBus } from '../advisory-bus.js'
+import { virtueEncouragementEntry } from '../advisory-bus.js'
 
 export interface StigmergyRuntimeHookDeps {
   deposit: (deposit: PheromoneDeposit) => Promise<void>
@@ -14,6 +16,8 @@ export interface StigmergyRuntimeHookDeps {
   publishEvent?: (input: { eventType: string; filePath?: string; detail?: string; priority?: number }) => void
   /** Current session ID for event attribution */
   sessionId?: string
+  /** Advisory bus for positive reinforcement when virtue signals detected */
+  advisoryBus?: AdvisoryBus
 }
 
 export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): PostToolRuntimeHook {
@@ -84,6 +88,7 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
           virtueSignal,
           tool.target ?? 'virtue-signal',
         ))
+        deps.advisoryBus?.submit(virtueEncouragementEntry())
       }
 
       for (const deposit of deposits) {

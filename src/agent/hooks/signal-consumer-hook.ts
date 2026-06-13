@@ -40,7 +40,7 @@ export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHo
 
       if (pressure?.suggestion === 'task_decomposition') {
         once('pressure:task-decomposition', () => {
-          ctx.effects.injectUserMessage('⚠ 检测到任务过大，建议拆分为子步骤后逐一完成。')
+          ctx.effects.injectUserMessage('<天梁-感知 type="decomposition">检测到任务过大，建议拆分为子步骤后逐一完成。天梁的分波执行节奏：先完成一个子目标并验证，再推进下一步。</天梁-感知>')
         })
       }
 

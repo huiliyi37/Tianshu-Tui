@@ -109,8 +109,8 @@ describe('createDedupGuardHook', () => {
     // Second turn with same text: injects suppression
     hook.run(makeCtx(injected))
     assert.equal(injected.length, 1)
-    assert.ok(injected[0]!.includes('[dedup-guard]'), `Expected dedup-guard tag, got: ${injected[0]}`)
-    assert.ok(injected[0]!.includes('不要重复'), `Expected suppression instruction, got: ${injected[0]}`)
+    assert.ok(injected[0]!.includes('天璇-感知'), `Expected 天璇-感知 tag, got: ${injected[0]}`)
+    assert.ok(injected[0]!.includes('换个角度'), `Expected perspective shift instruction, got: ${injected[0]}`)
   })
 
   it('respects custom threshold', () => {
