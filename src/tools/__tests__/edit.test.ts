@@ -93,20 +93,47 @@ describe('edit_file tool', () => {
     assert.equal(EDIT_FILE_TOOL.requiresApproval(makeParams({})), true)
   })
 
-  it('shows closest match when old_string differs by whitespace', async () => {
+  it('applies the edit when old_string differs only by whitespace (fuzzy fallback)', async () => {
     const file = join(TEST_DIR, 'whitespace.txt')
-    // File uses tabs, model passed spaces
+    // File uses tabs, model passed spaces — C3 whitespace-tolerant matching
+    // should land the edit instead of bouncing back a diagnostic error.
     writeFileSync(file, 'function foo() {\n\treturn 1\n}\n')
     const result = await EDIT_FILE_TOOL.execute(makeParams({
       file_path: file,
       old_string: 'function foo() {\n    return 1\n}',
       new_string: 'function foo() {\n\treturn 2\n}',
     }))
+    assert.ok(!result.isError, `Expected fuzzy success, got: ${result.content}`)
+    assert.match(result.content, /whitespace-tolerant/i)
+    const content = readFileSync(file, 'utf-8')
+    assert.ok(content.includes('return 2'), `edit should have landed, got: ${content}`)
+  })
+
+  it('still reports a not-found error when the block is genuinely absent (no false fuzzy match)', async () => {
+    const file = join(TEST_DIR, 'no-fuzzy.txt')
+    writeFileSync(file, 'function foo() {\n\treturn 1\n}\n')
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      old_string: 'function bar() {\n  return 42\n}',
+      new_string: 'x',
+    }))
     assert.equal(result.isError, true)
-    // Should expose the actual file content as a diff so model can fix whitespace
-    assert.ok(result.content.includes('Closest match'), `Expected diff hint, got: ${result.content}`)
-    assert.ok(result.content.includes('expected'), 'should label expected vs actual')
-    assert.ok(result.content.includes('actual'), 'should show actual file lines')
+    assert.ok(result.content.includes('not found') || result.content.includes('Closest match'))
+  })
+
+  it('edits a large file above the old 100KB cap', async () => {
+    const file = join(TEST_DIR, 'big.txt')
+    // ~300KB of filler — comfortably over the retired 100KB limit, under 8MB.
+    const filler = 'x'.repeat(300 * 1024)
+    writeFileSync(file, `${filler}\nUNIQUE_ANCHOR\n${filler}`)
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      old_string: 'UNIQUE_ANCHOR',
+      new_string: 'REPLACED_ANCHOR',
+    }))
+    assert.ok(!result.isError, `Expected large-file edit to succeed, got: ${result.content.slice(0, 200)}`)
+    const content = readFileSync(file, 'utf-8')
+    assert.ok(content.includes('REPLACED_ANCHOR'))
   })
 
   it('shows line numbers for multiple matches', async () => {

@@ -5,8 +5,12 @@ import { hashLine } from './hash-edit.js'
 import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
 import { syntaxCheck } from './syntax-check.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
+import { findFuzzyMatch, applyFuzzyReplacement } from './fuzzy-match.js'
 
-const MAX_EDIT_FILE_BYTES = 100 * 1024 // 100KB — match read_file guard
+// Large files are common (generated code, lockfiles, big modules). 100KB was
+// far too small. 8MB reads comfortably into the Node heap; anything larger is
+// almost certainly machine-generated and better edited with apply_patch/sed.
+const MAX_EDIT_FILE_BYTES = 8 * 1024 * 1024 // 8MB
 
 
 export const EDIT_FILE_TOOL: Tool = {
@@ -71,7 +75,7 @@ Bad: using a too-short old_string that matches multiple locations`,
       try {
         // OOM guard: check file size before reading (same as normal path above)
         if (fileStat.size > MAX_EDIT_FILE_BYTES) {
-          return { content: `File was modified externally and is now too large (${Math.round(fileStat.size / 1024)}KB > 100KB limit) for auto-recovery. Use hash_edit with current anchors instead.`, isError: true }
+          return { content: `File was modified externally and is now too large (${Math.round(fileStat.size / 1024 / 1024)}MB > ${MAX_EDIT_FILE_BYTES / 1024 / 1024}MB limit) for auto-recovery. Use hash_edit with current anchors instead.`, isError: true }
         }
         const freshContent = await readFile(filePath, 'utf-8')
         const freshLines = freshContent.split('\n')
@@ -137,12 +141,11 @@ Bad: using a too-short old_string that matches multiple locations`,
       }
     }
 
-    // OOM guard: reject large files that would blow the heap on readFile.
-    // For files >100KB, direct the model to apply_patch or sed instead.
+    // OOM guard: reject only truly huge files that would blow the heap.
     if (fileStat.size > MAX_EDIT_FILE_BYTES) {
-      const sizeKB = (fileStat.size / 1024).toFixed(0)
+      const sizeMB = (fileStat.size / 1024 / 1024).toFixed(1)
       return {
-        content: `Error: File too large for edit_file (${sizeKB}KB). Use apply_patch with a unified diff for targeted edits, or use bash with sed for simple string replacements on large files.`,
+        content: `Error: File too large for edit_file (${sizeMB}MB > ${MAX_EDIT_FILE_BYTES / 1024 / 1024}MB). Use apply_patch with a unified diff for targeted edits, or use bash with sed for simple string replacements on very large files.`,
         isError: true,
       }
     }
@@ -174,6 +177,17 @@ Bad: using a too-short old_string that matches multiple locations`,
 
     const firstIndex = content.indexOf(oldString)
     if (firstIndex === -1) {
+      // Whitespace-tolerant fallback: if the block exists modulo indentation /
+      // tab-vs-space / trailing-space drift AND is unique, splice the edit onto
+      // the file's real text instead of bouncing back a "not found" error.
+      const fuzzy = findFuzzyMatch(content, oldString)
+      if (fuzzy) {
+        const recovered = applyFuzzyReplacement(content, fuzzy, newString)
+        await writeFileAtomicAsync(filePath, recovered)
+        refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+        const warn = syntaxCheck(filePath, recovered)
+        return { content: `Applied edit to ${filePath} (whitespace-tolerant match: old_string differed only in indentation/whitespace)` + (warn ? '\n\n' + warn : '') }
+      }
       return {
         content: buildNotFoundError(filePath, oldString, content),
         isError: true,
