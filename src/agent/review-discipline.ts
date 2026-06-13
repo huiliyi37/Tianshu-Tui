@@ -82,6 +82,29 @@ export function formatWiringEffectivenessReviewStance(): string {
   return WIRING_EFFECTIVENESS_REVIEW_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
 }
 
+/**
+ * 方法论文档验证姿态（2026-06-14 PlanDesignIntentRouter 对抗审查反推）：
+ * 方法论文档（知识文件、计划模板、规则、自检清单）包含可执行指令——
+ * grep 命令、正则表达式、心智操作步骤。这些与代码函数实现具有相同的性质：
+ * 可执行、可验证、可能出错。"写完一条 grep 示例而不跑它" = "写完一个函数
+ * 而不跑它的测试"。本姿态专抓方法论文档中的隐蔽缺陷——它们不会报测试红，
+ * 但会在执行者遵循时静默失效。
+ *
+ * 三条核心教训：
+ *  1. 方法论文档是代码——grep/regex/命令必须经实证验证
+ *  2. "数门"和"数调用者"是两件事——沿操作往下数门，而非沿函数往上数调用者
+ *  3. 递归自验证——方法论能在自己的规则里发现错误并修正 = 活系统
+ */
+export const METHODOLOGY_VERIFICATION_STANCE: readonly string[] = [
+  '方法论文档中的每一条可执行指令（grep、regex、shell 命令、心智操作步骤）必须在真实代码库中跑一遍并确认输出覆盖预期目标，然后才能提交。不跑不交付。理由：补丁里写的那条 grep "validatePathSafe" 在写作模式下"看起来对"，但实证验证发现它漏掉了 sandbox-profile.ts——因为两个门的关系不是 caller/callee，而是并行执行点共享状态模块。',
+  '核实"门"之间的关系是 caller/callee 还是并行执行点：不要假设两个 enforcement point 共享 guard 函数。grep 共享状态的导入方（rg -l "state-module" src/），或枚举"这个操作的所有拒绝点"——沿着操作往下数门，而非沿着函数往上数调用者。原则 A 的原始措辞用"guard 函数"隐喻把并行执行点压缩成了调用链，遮蔽了真实架构。',
+  '修复方法论文档的补丁，用方法论自己的原则递归审查它自己：补丁是否引入了与原始缺陷同族的错误？补丁中的可执行指令是否经实证验证？方法论能抓住自己的错误 = 活的系统；补丁写了就冻结从不回头验证 = 死的文档。',
+]
+
+export function formatMethodologyVerificationStance(): string {
+  return METHODOLOGY_VERIFICATION_STANCE.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
+}
+
 const FIX_PATTERNS = [
   /\bfix(?:\(|:|\b)/i,
   /\bbugfix\b/i,

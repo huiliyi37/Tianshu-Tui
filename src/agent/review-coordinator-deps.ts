@@ -1,5 +1,5 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
-import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatWeighingReviewStance, formatWiringEffectivenessReviewStance, type ChangeSet } from './review-discipline.js'
+import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatWeighingReviewStance, formatWiringEffectivenessReviewStance, formatMethodologyVerificationStance, type ChangeSet } from './review-discipline.js'
 import type { PatcherResult, ReviewFinding, ReviewInfraFailure, ReviewRouterDeps, SquadronResult, VerifierResult } from './review-router.js'
 import type { AggregationPolicy, WorkerProfile, WorkerResult, WorkOrderKind } from './work-order.js'
 
@@ -65,6 +65,13 @@ function wiringEffectivenessBlock(): string {
   return [
     'Wiring & effectiveness review stance (2026-06-12 噪音治理复审教训; "built ≠ wired ≠ effective" — apply to every feature/config/param/bus/gate addition):',
     formatWiringEffectivenessReviewStance(),
+  ].join('\n')
+}
+
+function methodologyVerificationBlock(): string {
+  return [
+    'Methodology verification stance (2026-06-14 PlanDesignIntentRouter 对抗审查反推; "methodology docs are code — executable instructions require empirical verification" — apply when reviewing knowledge files, plan templates, rules, checklists):',
+    formatMethodologyVerificationStance(),
   ].join('\n')
 }
 
@@ -195,6 +202,7 @@ function verifierObjective(change: ChangeSet): string {
     pathBoundaryReviewBlock(),
     weighingReviewBlock(),
     wiringEffectivenessBlock(),
+    methodologyVerificationBlock(),
     `Files: ${files(change).join(', ') || '(none)'}`,
     'Run targeted existing tests when possible and return command + observed output evidence.',
     'Do not stop at green tests: try at least one counterexample or boundary/error-path probe relevant to the changed files.',
@@ -220,7 +228,7 @@ function patcherObjective(change: ChangeSet, verifier: VerifierResult): string {
 // Stacking all stances on all five inspectors quintupled prompt size and
 // diluted each inspector's focus — the axis IS the specialization.
 
-type InspectorStance = 'dataflow' | 'pathBoundary' | 'wiring'
+type InspectorStance = 'dataflow' | 'pathBoundary' | 'wiring' | 'methodology'
 
 const WIRING_INSPECTOR_METHOD = [
   'Method (run these checks, cite file:line evidence for each):',
@@ -265,6 +273,7 @@ function stanceBlocks(stances: InspectorStance[]): string[] {
   if (stances.includes('dataflow')) blocks.push(dataflowVerifierBlock())
   if (stances.includes('pathBoundary')) blocks.push(pathBoundaryReviewBlock())
   if (stances.includes('wiring')) blocks.push(wiringEffectivenessBlock())
+  if (stances.includes('methodology')) blocks.push(methodologyVerificationBlock())
   return blocks
 }
 

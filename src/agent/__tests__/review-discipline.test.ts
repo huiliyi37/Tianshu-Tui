@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { OBJECTIVE_REVIEW_STANCE, PATH_BOUNDARY_REVIEW_STANCE, REVIEW_DISCIPLINES, classifyChangeScale, formatObjectiveReviewStance, formatPathBoundaryReviewStance, isCrossModule, isFixContext, shouldRouteReviewWorkflow } from '../review-discipline.js'
+import { OBJECTIVE_REVIEW_STANCE, PATH_BOUNDARY_REVIEW_STANCE, REVIEW_DISCIPLINES, METHODOLOGY_VERIFICATION_STANCE, classifyChangeScale, formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatMethodologyVerificationStance, isCrossModule, isFixContext, shouldRouteReviewWorkflow } from '../review-discipline.js'
 
 describe('review disciplines', () => {
   it('contains all four review disciplines', () => {
@@ -79,5 +79,15 @@ describe('review disciplines', () => {
     assert.equal(isCrossModule(['src/agent/a.ts', 'src/tools/b.ts']), true)
     assert.equal(isCrossModule(['src/agent/a.ts', 'src/agent/b.ts']), false)
     assert.equal(isCrossModule(['README.md', 'docs/notes.md']), false)
+  })
+
+  it('captures methodology verification stance from PlanDesignIntentRouter adversarial review lesson', () => {
+    assert.equal(METHODOLOGY_VERIFICATION_STANCE.length, 3)
+    const text = formatMethodologyVerificationStance()
+    assert.match(text, /可执行指令.*grep.*regex.*shell.*命令/)
+    assert.match(text, /在真实代码库中跑一遍/)
+    assert.match(text, /caller.*callee.*并行执行点/)
+    assert.match(text, /沿着操作往下数门/)
+    assert.match(text, /递归.*验证.*自己/)
   })
 })
