@@ -195,11 +195,11 @@ export interface ActiveStarDomain {
   motto: string
 }
 
-export function buildActiveDomain(taskDescription: string): ActiveStarDomain | null {
-  const id = matchDomain(taskDescription)
-  if (!id) return null
-  const domain = starDomainRegistry.get(id)
-  if (!domain) return null
+const DEFAULT_DOMAIN: StarDomainId = 'tianshu'
+
+export function buildActiveDomain(taskDescription: string): ActiveStarDomain {
+  const id = matchDomain(taskDescription) ?? DEFAULT_DOMAIN
+  const domain = starDomainRegistry.get(id) ?? STAR_DOMAINS[DEFAULT_DOMAIN]
   return {
     id: id as StarDomainId,
     name: domain.name,

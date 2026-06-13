@@ -108,8 +108,10 @@ describe('buildActiveDomain', () => {
     assert.ok(result.motto)
   })
 
-  it('returns null for ambiguous task', () => {
-    assert.equal(buildActiveDomain('帮我看看'), null)
+  it('falls back to tianshu for ambiguous task', () => {
+    const result = buildActiveDomain('帮我看看')
+    assert.equal(result.id, 'tianshu')
+    assert.equal(result.name, '天枢')
   })
 })
 
