@@ -1170,9 +1170,6 @@ export class TuiApp {
 
     // 工具折叠组：collapsible → push entry；non-collapsible → 先 flush 再单独走 tool card
     if (isCollapsibleTool(name)) {
-      if (this.toolGroupBuffer.shouldBreak(name)) {
-        this.flushToolGroup()
-      }
       this.toolGroupBuffer.pushUse(id, name, input)
     } else {
       if (this.toolGroupBuffer.isActive()) this.flushToolGroup()
