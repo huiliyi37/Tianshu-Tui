@@ -3,7 +3,7 @@ import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { aggregationPolicySchema, workOrderKindSchema, type AggregationPolicy } from '../agent/work-order.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
-import { profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
+import { DEFAULT_DELEGATE_PROFILE, profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { createActivityStreamer } from './worker-activity-stream.js'
@@ -155,7 +155,7 @@ export function createDelegateBatchTool(
         parentTurnId: `${params.toolUseId}:${i}`,
         objective: t.objective,
         kind: t.kind ?? 'code_search',
-        profile: (t.profile ?? 'code_scout') as import('../agent/work-order.js').WorkerProfile,
+        profile: (t.profile ?? DEFAULT_DELEGATE_PROFILE) as import('../agent/work-order.js').WorkerProfile,
         scope: { files: t.files, symbols: t.symbols },
         reviewDepth: params.reviewDepth,
         delegationDepth: params.delegationDepth ?? 0,

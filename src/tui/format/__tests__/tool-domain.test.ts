@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { DEFAULT_DELEGATE_PROFILE } from '../../../agent/profile-registry.js'
 import { delegationProfileFromInput, delegationObjectiveFromInput } from '../tool-domain.js'
 
 describe('delegationProfileFromInput', () => {
@@ -10,8 +11,8 @@ describe('delegationProfileFromInput', () => {
     )
   })
 
-  it('defaults delegate_task to code_scout', () => {
-    assert.equal(delegationProfileFromInput('delegate_task', { objective: 'x' }), 'code_scout')
+  it('defaults delegate_task to DEFAULT_DELEGATE_PROFILE', () => {
+    assert.equal(delegationProfileFromInput('delegate_task', { objective: 'x' }), DEFAULT_DELEGATE_PROFILE)
   })
 
   it('falls back to tool name for team_orchestrate', () => {

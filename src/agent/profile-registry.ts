@@ -11,6 +11,9 @@ import { progressiveTimeout, WORKER_EXIT_GRACE_MS } from './timeout-ladder.js'
 
 export type AgentRole = 'brain' | 'hands' | 'readonly' | 'readonly_plus_test'
 
+/** delegate_task / delegate_batch 缺省 worker profile（与 tools/delegate-task.ts 一致） */
+export const DEFAULT_DELEGATE_PROFILE = 'code_scout' as const
+
 /** 单个 Profile 的完整定义 */
 export interface ProfileDefinition {
   /** Profile 名称（唯一标识，对应 WorkerProfile） */

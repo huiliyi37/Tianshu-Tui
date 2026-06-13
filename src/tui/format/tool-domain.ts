@@ -5,6 +5,7 @@
  * 子代理编排（delegate_* / team_orchestrate）归天机域。
  */
 
+import { DEFAULT_DELEGATE_PROFILE } from '../../agent/profile-registry.js'
 import { STAR_DOMAINS, type StarDomainId } from '../../agent/star-domain.js'
 
 const TOOL_DOMAIN_MAP: Record<string, StarDomainId> = {
@@ -40,15 +41,14 @@ export function domainBadge(name: string): { glyph: string; name: string } | nul
   return { glyph: d.uiPersona.glyph, name: d.name }
 }
 
-const DELEGATE_DEFAULT_PROFILE = 'code_scout'
-
-/** delegate_* 工具 input.profile，缺省对齐 delegate-task 默认 profile。 */
+/** TUI 展示用 profile：与 delegate-task 的 `input.profile ?? DEFAULT_DELEGATE_PROFILE` 对齐。 */
 export function delegationProfileFromInput(toolName: string, input: Record<string, unknown>): string {
-  if (typeof input.profile === 'string' && input.profile.length > 0) {
-    return input.profile
+  const explicit = input.profile
+  if (typeof explicit === 'string' && explicit.length > 0) {
+    return explicit
   }
   if (toolName === 'delegate_task' || toolName === 'delegate_batch') {
-    return DELEGATE_DEFAULT_PROFILE
+    return DEFAULT_DELEGATE_PROFILE
   }
   return toolName
 }

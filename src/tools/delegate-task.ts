@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
-import { profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
+import { DEFAULT_DELEGATE_PROFILE, profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { createActivityStreamer } from './worker-activity-stream.js'
@@ -88,7 +88,7 @@ export function createDelegateTaskTool(
         parentTurnId: params.toolUseId,
         objective: parsed.data.objective,
         kind: parsed.data.kind ?? 'code_search',
-        profile: (parsed.data.profile ?? 'code_scout') as import('../agent/work-order.js').WorkerProfile,
+        profile: (parsed.data.profile ?? DEFAULT_DELEGATE_PROFILE) as import('../agent/work-order.js').WorkerProfile,
         scope: {
           files: parsed.data.files,
           symbols: parsed.data.symbols,
