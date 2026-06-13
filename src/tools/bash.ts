@@ -4,6 +4,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
 import { getShellCommand } from '../platform.js'
+import { wrapSandboxCommand as sandboxWrap } from './sandbox-profile.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { summarizeBashOutput } from '../artifact/summarize.js'
 import { pruneThresholds } from '../compact/constants.js'
@@ -50,54 +51,15 @@ export function isExecFailure(exitCode: number): boolean {
   return exitCode === -1 || exitCode === 126 || exitCode === 127 || exitCode > 128
 }
 
-/** Wrap command in a lightweight sandbox when RIVET_BASH_SANDBOX=1. */
-export function wrapSandboxCommand(command: string): { command: string; sandboxed: boolean; note?: string } {
-  if (process.env.RIVET_BASH_SANDBOX !== '1') {
-    return { command, sandboxed: false }
-  }
-
-  const tryWhich = (bin: string): boolean => {
-    try {
-      execFileSync('which', [bin], { encoding: 'utf-8', timeout: 500 })
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  const escaped = command.replace(/'/g, `'\\''`)
-  if (tryWhich('firejail')) {
-    return {
-      command: `firejail --private --net=none -- bash -lc '${escaped}'`,
-      sandboxed: true,
-      note: 'firejail (network disabled)',
-    }
-  }
-  if (tryWhich('bwrap')) {
-    return {
-      command: `bwrap --ro-bind / / --dev-bind /dev /dev --unshare-net -- bash -lc '${escaped}'`,
-      sandboxed: true,
-      note: 'bwrap (network disabled)',
-    }
-  }
-
-  // macOS sandbox-exec fallback: process-level Seatbelt profile.
-  // Weaker than firejail/bwrap (not a container), but provides readonly
-  // filesystem isolation on macOS where container tools are unavailable.
-  // Set RIVET_MACOS_SANDBOX=0 to opt out.
-  if (process.platform === 'darwin' && process.env.RIVET_MACOS_SANDBOX !== '0') {
-    return {
-      command: `sandbox-exec -p '(version 1)(allow default)(deny file-write*)' bash -lc '${escaped}'`,
-      sandboxed: true,
-      note: 'macOS sandbox-exec (read-only filesystem, process-level)',
-    }
-  }
-
-  return {
-    command,
-    sandboxed: false,
-    note: 'RIVET_BASH_SANDBOX=1 but firejail/bwrap not found — running unsandboxed',
-  }
+/**
+ * Wrap a command in a workspace-scoped sandbox. Default-ON (opt out with
+ * RIVET_NO_SANDBOX=1). The actual backend/profile logic lives in
+ * sandbox-profile.ts (pure + unit-testable per platform); this thin wrapper
+ * threads the workspace cwd through so writes are confined to it.
+ */
+export function wrapSandboxCommand(command: string, cwd?: string): { command: string; sandboxed: boolean; note?: string } {
+  const decision = sandboxWrap(command, { cwd: cwd ?? process.cwd() })
+  return { command: decision.command, sandboxed: decision.sandboxed, note: decision.note }
 }
 
 /**
@@ -150,7 +112,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
   async execute(params: ToolCallParams) {
     const rawCommand = params.input.command as string
     const rewritten = rtkRewrite(rawCommand, params.toolUseId)
-    const sandbox = wrapSandboxCommand(rewritten)
+    const sandbox = wrapSandboxCommand(rewritten, params.cwd)
     const command = sandbox.command
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
