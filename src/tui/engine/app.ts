@@ -26,7 +26,7 @@ import { SteerBuffer } from '../steer-buffer.js'
 import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
-import { formatToolGroup, shouldFlushGroup, canCollapse, groupFamily, toolEntryDisplay, type ToolGroup } from '../format/tool-group.js'
+import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar } from '../format/glance-bar.js'
@@ -175,8 +175,10 @@ export class TuiApp {
   private pendingTools = new Map<string, { name: string; input: Record<string, unknown>; startMs: number; _approvalMode?: string }>()
   /** 最近一条被截断的工具结果（ctrl+o 展开用） */
   private lastTruncatedTool: { toolName: string; content: string; isError: boolean; rawPath?: string; toolInput?: Record<string, unknown> } | null = null
-  /** 工具折叠组缓冲区：连续同族 read/grep/glob 调用在此累积，异族到达或 turn 结束时 flush */
-  private toolGroupBuffer: ToolGroup | null = null
+  /** 最近一个被 flush 的折叠组（ctrl+o 展开用） */
+  private lastCollapsedGroup: CollapsedReadSearchGroup | null = null
+  /** 工具折叠组缓冲区：连续 collapsible 调用在此累积，非 collapsible 到达或 turn 结束时 flush */
+  private toolGroupBuffer = new CollapsedReadSearchBuffer()
 
   // ── W3: 渲染 ticker + 指标 ───────────────────────────────────
   /** 渲染 ticker（streaming/thinking 时 120ms 驱动 spinner，idle 停止） */
@@ -1166,22 +1168,14 @@ export class TuiApp {
       }
     }
 
-    // 工具折叠组：同族 tool 到达时，若异族则先 flush 旧组，再开新组
-    const family = groupFamily(name)
-    if (canCollapse(family)) {
-      if (this.toolGroupBuffer && shouldFlushGroup(this.toolGroupBuffer, name)) {
+    // 工具折叠组：collapsible → push entry；non-collapsible → 先 flush 再单独走 tool card
+    if (isCollapsibleTool(name)) {
+      if (this.toolGroupBuffer.shouldBreak(name)) {
         this.flushToolGroup()
       }
-      if (!this.toolGroupBuffer) {
-        this.toolGroupBuffer = { family, entries: [], startMs: Date.now() }
-      }
-      this.toolGroupBuffer.entries.push({
-        toolName: name,
-        input,
-        displayName: toolEntryDisplay(name, input),
-      })
+      this.toolGroupBuffer.pushUse(id, name, input)
     } else {
-      if (this.toolGroupBuffer) this.flushToolGroup()
+      if (this.toolGroupBuffer.isActive()) this.flushToolGroup()
     }
 
     // Commit thinking if any
@@ -1191,16 +1185,17 @@ export class TuiApp {
       this.renderLive()
     }
   }
-
   /** 将折叠组 buffer 刷新到 scrollback */
   private flushToolGroup(): void {
-    if (!this.toolGroupBuffer || this.toolGroupBuffer.entries.length === 0) return
-    const formatted = formatToolGroup({ group: this.toolGroupBuffer, theme: this.theme })
+    const group = this.toolGroupBuffer.flush()
+    if (!group || group.entries.length === 0) return
+    // 记录最近 flush 的组供 ctrl+o 展开
+    this.lastCollapsedGroup = group
+    const formatted = formatCollapsedGroup({ group, theme: this.theme })
     this.commitAbove(() => {
       this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
       this.state.committedCount++
     })
-    this.toolGroupBuffer = null
   }
 
   private handleToolResult(id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string): void {
@@ -1225,14 +1220,12 @@ export class TuiApp {
     this.pendingTools.delete(id)
     const finalContent = toolAcc ? toolAcc + displayContent : displayContent
 
-    // 可折叠 tool（read/grep/glob/ls/semantic_search）：累积内容到折叠组
-    const family = groupFamily(name)
-    if (canCollapse(family) && this.toolGroupBuffer) {
-      const entry = this.toolGroupBuffer.entries[this.toolGroupBuffer.entries.length - 1]
-      if (entry && entry.toolName === name) {
-        entry.content = finalContent
-        entry.lineCount = finalContent.split('\n').length
-      }
+    // 可折叠 tool（read/grep/glob/repo_map 等探索型）：按 toolUseId 绑定结果到折叠组
+    if (isCollapsibleTool(name) && this.toolGroupBuffer.isActive()) {
+      this.toolGroupBuffer.attachResult(id, finalContent, isError)
+      // G3 修复：collapsible terminal result 后必须从 pendingTools 中删除，
+      // 否则 live 区会永久显示已完成工具的卡片。
+      this.pendingTools.delete(id)
       // 不单独 commit — 将在 flushToolGroup 时作为组渲染
       return
     }
@@ -1285,8 +1278,20 @@ export class TuiApp {
     }
   }
 
-  /** ctrl+o：将最近一条被截断的工具结果完整展开重新 commit 到 scrollback */
+  /** ctrl+o：展开最近被截断的工具结果或折叠组 */
   private expandLastTruncatedTool(): void {
+    // 优先展开折叠组
+    if (this.lastCollapsedGroup) {
+      const g = this.lastCollapsedGroup
+      this.lastCollapsedGroup = null
+      const formatted = formatCollapsedGroup({ group: g, expanded: true, theme: this.theme })
+      this.commitAbove(() => {
+        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+        this.state.committedCount++
+      })
+      return
+    }
+    // 回退：展开单个截断工具卡片
     const t = this.lastTruncatedTool
     if (!t) return
     this.lastTruncatedTool = null
@@ -1318,7 +1323,7 @@ export class TuiApp {
     this.state.turnNumber = turnNumber
 
     // Flush 工具折叠组残余
-    if (this.toolGroupBuffer) this.flushToolGroup()
+    if (this.toolGroupBuffer.isActive()) this.flushToolGroup()
 
     // Flush any pending blocks from the writer, then commit the remaining tail
     await this.blockWriter.flush()
@@ -1425,7 +1430,7 @@ export class TuiApp {
     if (this.approvalPending) { this.approvalEditMode = false; this.approvalEditError = ''; this.resolveApproval(false) }
     if (this.intentPending) this.resolveIntent('veto')
     // Flush 工具折叠组残余
-    if (this.toolGroupBuffer) this.flushToolGroup()
+    if (this.toolGroupBuffer.isActive()) this.flushToolGroup()
     // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
     // 下次 submit 会把排队内容归并进新 prompt（见 onSubmit 的 steer 收口）。
     this.streamRenderer.reset()
@@ -1519,9 +1524,22 @@ export class TuiApp {
       lines.push({ text: ` ${pills.join('  ')}` })
     }
 
-    // 2c. 进行中工具：● 标题行 + 末 3 行输出（⎿ 缩进）
+    // 2c. Collapsible 探索工具聚合行（避免 read×5 + grep×3 刷屏 live 区）
+    if (this.toolGroupBuffer.isActive()) {
+      const activeGroup = this.toolGroupBuffer.getActive()
+      if (activeGroup && activeGroup.entries.length > 0) {
+        const groupLines = formatCollapsedGroupLive(activeGroup, this.theme, this.columns)
+        for (const line of groupLines) {
+          lines.push({ text: line })
+        }
+      }
+    }
+
+    // 2d. 进行中非 collapsible 工具：● 标题行 + 末 3 行输出（⎿ 缩进）
     if (this.pendingTools.size > 0) {
       for (const [id, meta] of this.pendingTools) {
+        // 跳过已归入折叠组的 collapsible 工具（它们在 2c 聚合行中显示）
+        if (isCollapsibleTool(meta.name)) continue
         const toolLines = formatToolCardLive({
           toolName: meta.name,
           toolInput: meta.input,

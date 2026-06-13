@@ -1,8 +1,9 @@
 /**
- * T9 工具折叠组 — 将连续同族工具调用合并为一行摘要。
+ * @deprecated 已迁移至 collapsed-read-search.ts。保留此文件仅用于向后兼容，
+ * 将在 2026-06-28 后删除。新代码请使用：
+ *   import { CollapsedReadSearchBuffer, isCollapsibleTool, formatCollapsedGroup } from './collapsed-read-search.js'
  *
- * read / grep / glob 连续调用 → "Reading (3 files)" / "Searching (5 files)"
- * 展开时显示完整列表。
+ * T9 工具折叠组 — 将连续同族工具调用合并为一行摘要。
  */
 
 import { color } from '../engine/ansi.js'
@@ -24,7 +25,9 @@ export interface ToolGroup {
   startMs: number
 }
 
-/** 判断工具是否属于可折叠族 */
+/**
+ * @deprecated 使用 isCollapsibleTool() 替代
+ */
 export function groupFamily(toolName: string): GroupFamily {
   const t = toolName.toLowerCase()
   if (t === 'read_file' || t === 'read' || t === 'read-file') return 'read'
@@ -35,7 +38,9 @@ export function groupFamily(toolName: string): GroupFamily {
   return 'other'
 }
 
-/** 工具折叠族可否合并 */
+/**
+ * @deprecated 使用 isCollapsibleTool() 替代
+ */
 export function canCollapse(family: GroupFamily): boolean {
   return family === 'read' || family === 'search'
 }
@@ -71,7 +76,9 @@ export interface FormatToolGroupInput {
   columns?: number
 }
 
-/** 渲染折叠的工具组 */
+/**
+ * @deprecated 使用 formatCollapsedGroup() 替代
+ */
 export function formatToolGroup(input: FormatToolGroupInput): string[] {
   const { group, expanded, theme } = input
   const lines: string[] = []
@@ -119,7 +126,9 @@ export function formatToolGroup(input: FormatToolGroupInput): string[] {
   return lines
 }
 
-/** 从 tool 输入中提取可读的文件名/查询摘要 */
+/**
+ * @deprecated 使用 entryDisplayName() from collapsed-read-search.ts 替代
+ */
 export function toolEntryDisplay(toolName: string, input: Record<string, unknown>): string {
   const t = toolName.toLowerCase()
   if (t === 'read_file' || t === 'read') {
@@ -128,14 +137,12 @@ export function toolEntryDisplay(toolName: string, input: Record<string, unknown
   }
   if (t === 'grep') {
     const pattern = input.pattern ?? input.query ?? '?'
-    const path = input.path ?? input.dir ?? ''
     const p = typeof pattern === 'string' ? pattern : '?'
-    const d = typeof path === 'string' && path ? ` in ${path}` : ''
-    return `"${p}"${d}`
+    return `"${p}"`
   }
   if (t === 'glob') {
-    const pattern = input.pattern ?? input.query ?? '?'
-    return typeof pattern === 'string' ? pattern : '?'
+    const inputPattern = input.pattern ?? input.query ?? '?'
+    return typeof inputPattern === 'string' ? inputPattern : '?'
   }
   if (t === 'ls') {
     const path = input.path ?? input.dir ?? '.'
@@ -149,7 +156,9 @@ export function toolEntryDisplay(toolName: string, input: Record<string, unknown
   return toolName
 }
 
-/** 判断是否应触发 flush（新 tool 非同族或不可折叠） */
+/**
+ * @deprecated 使用 shouldBreakGroup() from collapsed-read-search.ts 替代
+ */
 export function shouldFlushGroup(current: ToolGroup | null, newToolName: string): boolean {
   if (!current) return false
   const newFamily = groupFamily(newToolName)
