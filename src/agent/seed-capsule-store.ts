@@ -181,7 +181,7 @@ export const CORE_GUARDRAILS: string[] = [
  *   - 贪狼：能力勘探/系统联合——面对"休眠/半接系统"判断时才调
  *   - 天府：守护/fail-closed——核心已蒸馏进 CORE_GUARDRAILS，全文按需取
  */
-const RECALL_ONLY_STARS = new Set<string>(['瑶光', '摇光', '贪狼', '天府'])
+const RECALL_ONLY_STARS = new Set<string>(['瑶光', '摇光', '贪狼', '天府', '辅'])
 
 export function renderResidentCapsuleBlock(cwd: string): string | undefined {
   const capsules = loadAllCapsules(cwd)
