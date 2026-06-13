@@ -629,6 +629,18 @@ export class DelegationCoordinator {
     return { candidate, gate }
   }
 
+  /** Drain mailbox into run packet and clear. Called after every wave (batch or single). */
+  private async drainMailboxIntoRun(run: CoordinatorRun): Promise<CoordinatorRun> {
+    const findings = this.mailbox.byType('finding')
+    const escalations = this.mailbox.byType('escalation')
+    const notes: string[] = []
+    for (const f of findings) notes.push(`📬 ${f.from}: ${f.payload.summary}`)
+    for (const e of escalations) notes.push(`🚨 ${e.from}: ${e.payload.summary}`)
+    this.mailbox.clear()
+    if (notes.length === 0) return run
+    return { ...run, packet: `${run.packet}\n\nMailbox:\n${notes.join('\n')}` }
+  }
+
   async delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun> {
     // Per-call abort signal override — allows the tool pipeline to propagate
     // its timeout signal to the coordinator without mutating config.
@@ -747,7 +759,8 @@ export class DelegationCoordinator {
 
       // T9 P3: callbacks don't survive zod parsing — stash by order id.
       if (request.onActivity) this.activityUpstream.set(order.id, request.onActivity)
-      return await this.delegateOrder(order)
+      const run = await this.delegateOrder(order)
+      return this.drainMailboxIntoRun(run)
     } finally {
       this.config.abortSignal = savedSignal
     }
@@ -1353,33 +1366,17 @@ export class DelegationCoordinator {
       persistWorkerResult(r)
     }
 
-    // Drain mailbox: append structured findings and escalations to packet
-    const mailboxFindings = this.mailbox.byType('finding')
-    const mailboxEscalations = this.mailbox.byType('escalation')
-    const mailboxNotes: string[] = []
-    for (const f of mailboxFindings) {
-      mailboxNotes.push(`📬 ${f.from}: ${f.payload.summary}`)
-    }
-    for (const e of mailboxEscalations) {
-      mailboxNotes.push(`🚨 ${e.from}: ${e.payload.summary}`)
-    }
-    this.mailbox.clear()
-
-    const basePacket = await buildPrimaryWorkerPacket(aggregated)
-    const packet = mailboxNotes.length > 0
-      ? `${basePacket}\n\nMailbox:\n${mailboxNotes.join('\n')}`
-      : basePacket
-
-    return {
+    const baseRun: CoordinatorRun = {
       status: 'completed',
       results: aggregated,
-      packet,
+      packet: await buildPrimaryWorkerPacket(aggregated),
       aggregationPolicy: policy,
       ...(workerModels.length > 0 ? { workerModels } : {}),
       ...(modelTierShadows.length > 0 ? { modelTierShadows } : {}),
       ...(modelTierGatedDecisions.length > 0 ? { modelTierGatedDecisions } : {}),
       ...(gatedInfluenceAudits.length > 0 ? { gatedInfluenceAudits } : {}),
     }
+    return this.drainMailboxIntoRun(baseRun)
     // NOTE: If delegateBatch is ever changed from serial (processNext recursion)
     // to true concurrent execution, the finally-based signal restoration below
     // will race with in-flight orders — they'll lose access to the signal
