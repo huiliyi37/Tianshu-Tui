@@ -8,6 +8,7 @@ import { createTurnBudget } from '../turn-budget.js'
 import { fingerprintToolCall } from '../trace-store.js'
 import type { EvidenceTrackerPublic } from '../evidence.js'
 import { ArtifactStore } from '../../artifact/store.js'
+import { _setSandboxBackendForTest, _resetSandboxBackendCache } from '../../tools/sandbox-profile.js'
 
 const mockEvidence = {
   trackFileRead: () => {},
@@ -562,7 +563,10 @@ describe('executeToolUse', () => {
     assert.equal((result.toolResult as any).is_error, false)
   })
 
-  it('requires approval for bash writes even with high confidence auto-safe mode', async () => {
+  it('requires approval for bash writes when NO sandbox boundary is active (fail-closed)', async () => {
+    // Without a kernel sandbox the write could escape the workspace, so the
+    // approval gate must stay closed even at high confidence.
+    _setSandboxBackendForTest('none')
     let approvalCalls = 0
     let executed = false
     const deps = makeDeps({
@@ -580,15 +584,52 @@ describe('executeToolUse', () => {
     })
     const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
 
-    const result = await executeToolUse(
-      { id: 'tu-bash-write', name: 'bash', input: { command: 'echo hello > out.txt' } },
-      deps, callbacks as any, 1, false,
-    )
+    try {
+      const result = await executeToolUse(
+        { id: 'tu-bash-write', name: 'bash', input: { command: 'echo hello > out.txt' } },
+        deps, callbacks as any, 1, false,
+      )
 
-    assert.equal(approvalCalls, 1)
-    assert.equal(executed, false)
-    assert.equal((result.toolResult as any).is_error, true)
-    assert.match((result.toolResult as any).content, /requires user approval/)
+      assert.equal(approvalCalls, 1)
+      assert.equal(executed, false)
+      assert.equal((result.toolResult as any).is_error, true)
+      assert.match((result.toolResult as any).content, /requires user approval/)
+    } finally {
+      _resetSandboxBackendCache()
+    }
+  })
+
+  it('autonomy-first: bash writes do NOT require approval when a sandbox boundary is active', async () => {
+    // The kernel boundary confines writes to the workspace and B2 rollback makes
+    // them reversible, so an unattended run must not be interrupted for approval.
+    _setSandboxBackendForTest('seatbelt')
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+      getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+
+    try {
+      await executeToolUse(
+        { id: 'tu-bash-write-sb', name: 'bash', input: { command: 'echo hello > out.txt' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approvalCalls, 0, 'sandboxed bash write must not prompt for approval')
+      assert.equal(executed, true, 'sandboxed bash write should execute')
+    } finally {
+      _resetSandboxBackendCache()
+    }
   })
 
   it('lets explicit allowlist override bash write approval', async () => {

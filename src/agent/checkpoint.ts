@@ -18,6 +18,51 @@ export interface RollbackPreview {
   confirmationToken: string
 }
 
+/**
+ * Cross-session ownership guard for parallel sessions on the same branch.
+ *
+ * Multiple sessions may run concurrently on one branch. A blanket worktree
+ * restore would clobber files another session just changed. So rollback and
+ * bash side-effect capture consult this guard: any path exclusively claimed by
+ * ANOTHER live session is never attributed to, nor restored by, this session.
+ *
+ * Injected (rather than importing SessionRegistry) so checkpoint.ts stays
+ * decoupled from the DB and unit-testable with a plain stub.
+ */
+export interface OwnershipGuard {
+  /** True if relPath is exclusively claimed by a different, live session. */
+  isOwnedByOther(relPath: string): boolean
+}
+
+/** Minimal structural view of SessionRegistry needed for ownership checks. */
+export interface ClaimLookup {
+  reapStaleClaims(): string[]
+  checkClaim(filePath: string): { sessionId: string; claimType: string } | null
+}
+
+/**
+ * Build an OwnershipGuard backed by the session registry. Reaps dead sessions'
+ * claims first so a crashed peer can't permanently block rollback, then treats
+ * a path as another-session-owned only when a *different* session holds an
+ * exclusive claim. Checks both the relative and absolute path forms because
+ * claims may be stored either way.
+ */
+export function makeOwnershipGuard(registry: ClaimLookup, mySessionId: string, cwd: string): OwnershipGuard {
+  try { registry.reapStaleClaims() } catch { /* best-effort */ }
+  return {
+    isOwnedByOther(relPath: string): boolean {
+      const candidates = [relPath, join(cwd, relPath)]
+      for (const key of candidates) {
+        const claim = registry.checkClaim(key)
+        if (claim && claim.sessionId !== mySessionId && claim.claimType === 'exclusive') {
+          return true
+        }
+      }
+      return false
+    },
+  }
+}
+
 interface CheckpointData {
   version: 2
   hash: string
@@ -235,8 +280,77 @@ export function recordAgentTouchedFile(cwd: string, file: string, sessionId?: st
   writeFileAtomicSync(outFile, JSON.stringify(data, null, 2))
 }
 
+/**
+ * All paths currently changed in the worktree (modified / added / deleted /
+ * untracked / renamed), relative to repo root. Captures bash/tool side effects
+ * that the per-edit recorder cannot see (file creation, deletion, in-place
+ * mutation by arbitrary shell commands).
+ */
+async function getChangedPaths(cwd: string): Promise<string[]> {
+  const { stdout } = await execFileP(
+    'git',
+    ['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-uall'],
+    { cwd, timeout: 5000, encoding: 'utf-8' },
+  )
+  const paths = new Set<string>()
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) continue
+    const body = line.slice(3) // strip "XY " status prefix
+    const arrow = body.indexOf(' -> ')
+    if (arrow >= 0) {
+      paths.add(body.slice(0, arrow).trim())
+      paths.add(body.slice(arrow + 4).trim())
+    } else {
+      paths.add(body.trim())
+    }
+  }
+  return [...paths]
+}
+
+/**
+ * Capture bash / shell side effects into the checkpoint's agent-touched set so
+ * a rollback can undo them. Parallel-safe: never claims a path exclusively
+ * owned by another live session, and never claims a pre-existing dirty file.
+ * Returns the list of newly-recorded paths.
+ */
+export async function recordBashSideEffects(
+  cwd: string,
+  sessionId?: string,
+  guard?: OwnershipGuard,
+): Promise<string[]> {
+  const data = sessionId ? loadCheckpointDataForSession(sessionId) : loadCheckpointData(cwd)
+  if (!data) return []
+
+  const baseline = new Set([...data.preExistingDirtyFiles, ...data.preExistingUntrackedFiles])
+  let changed: string[]
+  try {
+    changed = await getChangedPaths(cwd)
+  } catch {
+    return []
+  }
+
+  const owned = new Set(data.agentTouchedFiles)
+  const recorded: string[] = []
+  for (const raw of changed) {
+    const f = raw.replace(/^\.\//, '')
+    if (!f || f.startsWith('/') || f.includes('..')) continue
+    if (baseline.has(f) || owned.has(f)) continue
+    // Parallel-session safety: a path another live session owns is theirs.
+    if (guard?.isOwnedByOther(f)) continue
+    owned.add(f)
+    recorded.push(f)
+  }
+
+  if (recorded.length === 0) return []
+  data.agentTouchedFiles = [...owned].sort()
+  const outFile = sessionId ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
+  writeFileAtomicSync(outFile, JSON.stringify(data, null, 2))
+  if (sessionId) addToCheckpointIndex(cwd, sessionId, data.agentTouchedFiles)
+  return recorded
+}
+
 /** Preview what a rollback would affect. Returns null if nothing to rollback. */
-export async function getRollbackPreview(cwd: string, sessionId?: string): Promise<RollbackPreview | null> {
+export async function getRollbackPreview(cwd: string, sessionId?: string, guard?: OwnershipGuard): Promise<RollbackPreview | null> {
   const data = sessionId
     ? (loadCheckpointDataForSession(sessionId) ?? loadCheckpointData(cwd))
     : loadCheckpointData(cwd)
@@ -249,7 +363,9 @@ export async function getRollbackPreview(cwd: string, sessionId?: string): Promi
   writeFileAtomicSync(file, JSON.stringify(data, null, 2))
 
   const protectedFiles = new Set([...data.preExistingDirtyFiles, ...data.preExistingUntrackedFiles])
-  const rollbackFiles = data.agentTouchedFiles.filter(f => !protectedFiles.has(f))
+  const candidate = data.agentTouchedFiles.filter(f => !protectedFiles.has(f))
+  const rollbackFiles = candidate.filter(f => !guard?.isOwnedByOther(f))
+  const blockedByOther = candidate.filter(f => guard?.isOwnedByOther(f))
 
   if (rollbackFiles.length === 0) return null
 
@@ -257,6 +373,9 @@ export async function getRollbackPreview(cwd: string, sessionId?: string): Promi
     `Checkpoint: ${data.hash.slice(0, 8)} (${new Date(data.timestamp).toLocaleString()})`,
     'Agent-owned files to restore/remove:',
     ...rollbackFiles.map(f => `- ${f}`),
+    ...(blockedByOther.length > 0
+      ? ['', 'Skipped (owned by another live session):', ...blockedByOther.map(f => `- ${f}`)]
+      : []),
   ].join('\n')
 
   return { text, confirmationToken: token }
@@ -267,7 +386,8 @@ export async function rollbackToCheckpoint(
   cwd: string,
   confirmationToken?: string,
   sessionId?: string,
-): Promise<{ success: boolean; hash?: string }> {
+  guard?: OwnershipGuard,
+): Promise<{ success: boolean; hash?: string; skipped?: string[] }> {
   const data = sessionId
     ? (loadCheckpointDataForSession(sessionId) ?? loadCheckpointData(cwd))
     : loadCheckpointData(cwd)
@@ -276,8 +396,17 @@ export async function rollbackToCheckpoint(
   }
 
   const protectedFiles = new Set([...data.preExistingDirtyFiles, ...data.preExistingUntrackedFiles])
-  const files = data.agentTouchedFiles.filter(f => !protectedFiles.has(f))
-  if (files.length === 0) return { success: false }
+  const candidate = data.agentTouchedFiles.filter(f => !protectedFiles.has(f))
+
+  // Parallel-session safety: never restore a path a different live session owns.
+  // We scope the restore strictly to this session's own touched set; anything
+  // contested is skipped and surfaced rather than blanket-reverted.
+  const skipped: string[] = []
+  const files = candidate.filter(f => {
+    if (guard?.isOwnedByOther(f)) { skipped.push(f); return false }
+    return true
+  })
+  if (files.length === 0) return { success: false, skipped: skipped.length ? skipped : undefined }
 
   try {
     for (const file of files) {
@@ -291,9 +420,9 @@ export async function rollbackToCheckpoint(
         if (existsSync(fullPath)) rmSync(fullPath, { recursive: true, force: true })
       }
     }
-    return { success: true, hash: data.hash.slice(0, 7) }
+    return { success: true, hash: data.hash.slice(0, 7), skipped: skipped.length ? skipped : undefined }
   } catch {
-    return { success: false }
+    return { success: false, skipped: skipped.length ? skipped : undefined }
   }
 }
 

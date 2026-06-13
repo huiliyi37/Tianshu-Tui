@@ -10,7 +10,10 @@ import {
   rollbackToCheckpoint,
   listCheckpoints,
   recordAgentTouchedFile,
+  recordBashSideEffects,
+  makeOwnershipGuard,
   pruneOrphanCheckpoints,
+  type ClaimLookup,
 } from '../checkpoint.js'
 import { homedir } from 'os'
 
@@ -57,6 +60,76 @@ describe('checkpoint module', () => {
         pruneOrphanCheckpoints()
         assert.ok(existsSync(live), 'checkpoint with a live cwd must survive')
         rmSync(live, { force: true })
+      } finally {
+        cleanupRepo(repo)
+      }
+    })
+  })
+
+  describe('recordBashSideEffects (B2: full rollback of shell side effects)', () => {
+    it('captures bash create/modify/delete and rolls them back, leaving pre-existing files alone', async () => {
+      const repo = makeTempGitRepo()
+      const sid = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      try {
+        await createCheckpoint(repo, 'auto', sid)
+        // Simulate bash side effects: create a new file, modify the tracked one.
+        writeFileSync(join(repo, 'created-by-bash.txt'), 'new')
+        writeFileSync(join(repo, 'initial.txt'), 'MUTATED')
+
+        const recorded = await recordBashSideEffects(repo, sid)
+        assert.ok(recorded.includes('created-by-bash.txt'), 'new file captured')
+        assert.ok(recorded.includes('initial.txt'), 'modified tracked file captured')
+
+        const preview = await getRollbackPreview(repo, sid)
+        assert.ok(preview, 'preview should exist')
+        const result = await rollbackToCheckpoint(repo, preview!.confirmationToken, sid)
+        assert.equal(result.success, true)
+
+        // Created file deleted, tracked file restored to committed content.
+        assert.equal(existsSync(join(repo, 'created-by-bash.txt')), false, 'bash-created file removed')
+        assert.equal(readFileSync(join(repo, 'initial.txt'), 'utf-8'), 'hello', 'tracked file restored')
+      } finally {
+        cleanupRepo(repo)
+      }
+    })
+
+    it('PARALLEL SAFETY: never rolls back a path owned by another live session', async () => {
+      const repo = makeTempGitRepo()
+      const sidA = `A-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      const sidB = `B-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      try {
+        await createCheckpoint(repo, 'auto', sidA)
+
+        // Session A's bash touches two files: its own + one that B owns.
+        writeFileSync(join(repo, 'a-owned.txt'), 'A change')
+        writeFileSync(join(repo, 'b-owned.txt'), 'A clobbered B!')
+
+        // Registry stub: B holds an exclusive claim on b-owned.txt.
+        const registry: ClaimLookup = {
+          reapStaleClaims: () => [],
+          checkClaim: (filePath: string) =>
+            filePath.endsWith('b-owned.txt')
+              ? { sessionId: sidB, claimType: 'exclusive' }
+              : null,
+        }
+        const guard = makeOwnershipGuard(registry, sidA, repo)
+
+        // Capture must NOT attribute b-owned.txt to session A.
+        const recorded = await recordBashSideEffects(repo, sidA, guard)
+        assert.ok(recorded.includes('a-owned.txt'))
+        assert.ok(!recorded.includes('b-owned.txt'), 'must not claim B-owned file')
+
+        // Even if a-owned set somehow contained it, rollback guard must skip it.
+        recordAgentTouchedFile(repo, 'b-owned.txt', sidA)
+        const preview = await getRollbackPreview(repo, sidA, guard)
+        assert.ok(preview)
+        const result = await rollbackToCheckpoint(repo, preview!.confirmationToken, sidA, guard)
+        assert.equal(result.success, true)
+        assert.ok((result.skipped ?? []).includes('b-owned.txt'), 'B-owned path reported as skipped')
+
+        // B's change is intact; A's own change reverted.
+        assert.equal(readFileSync(join(repo, 'b-owned.txt'), 'utf-8'), 'A clobbered B!', 'B-owned file untouched by A rollback')
+        assert.equal(existsSync(join(repo, 'a-owned.txt')), false, 'A own file reverted')
       } finally {
         cleanupRepo(repo)
       }

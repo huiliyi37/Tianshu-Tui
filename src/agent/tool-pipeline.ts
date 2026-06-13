@@ -7,7 +7,7 @@ import type { EvidenceTrackerPublic } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
 import type { RepairHintTracker } from './repair-hint.js'
 import type { ImportGraph } from './import-graph.js'
-import { createCheckpoint, recordAgentTouchedFile } from './checkpoint.js'
+import { createCheckpoint, recordAgentTouchedFile, recordBashSideEffects, makeOwnershipGuard, type OwnershipGuard, type ClaimLookup } from './checkpoint.js'
 import { validatePath } from '../tools/path-validate.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
@@ -24,6 +24,7 @@ import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed, isBashCommandAllowlisted, learnBashPrefix } from './permissions.js'
+import { isSandboxActive } from '../tools/sandbox-profile.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { debugLog } from '../utils/debug.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
@@ -59,6 +60,25 @@ const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
 ])
 
 const DEFAULT_TOOL_TIMEOUT_MS = 120_000 // 2 minutes
+
+/** Tools that may mutate the workspace and therefore open the rollback window. */
+const MUTATING_TOOLS: ReadonlySet<string> = new Set([
+  'write_file', 'edit_file', 'apply_patch', 'bash',
+])
+function isMutatingTool(name: string): boolean {
+  return MUTATING_TOOLS.has(name)
+}
+
+/** Build a cross-session ownership guard from the live session registry, if any. */
+function buildOwnershipGuard(deps: {
+  cwd: string
+  config: { sessionRegistry?: ClaimLookup; sessionId?: string }
+}): OwnershipGuard | undefined {
+  const registry = deps.config.sessionRegistry
+  const sessionId = deps.config.sessionId
+  if (!registry || !sessionId) return undefined
+  return makeOwnershipGuard(registry, sessionId, deps.cwd)
+}
 
 function withToolTimeout<T>(
   promise: Promise<T>,
@@ -546,7 +566,15 @@ export async function executeToolUse(
     const bashAllowlisted = tu.name === 'bash' && typeof tu.input.command === 'string'
       ? isBashCommandAllowlisted(tu.input.command, deps.config.permissions?.bash?.allowlist)
       : false
-    const bashWriteRequiresApproval = requiresBashWriteApproval(tu.name, tu.input) && !allowlisted && !bashAllowlisted
+    // Autonomy-first: when a real kernel sandbox boundary is in effect, an
+    // in-workspace bash write is safe-by-construction (writes can't escape the
+    // workspace, and B2 rollback makes them reversible), so it must NOT
+    // interrupt an unattended run for approval. When no sandbox is available we
+    // stay fail-closed and keep requiring approval for write commands.
+    const bashWriteRequiresApproval =
+      requiresBashWriteApproval(tu.name, tu.input)
+      && !allowlisted && !bashAllowlisted
+      && !isSandboxActive()
 
     // Protection mode: during doom-loop, destructive git actions always require
     // approval. warn is the live window (blocked is short-circuited earlier).
@@ -589,8 +617,11 @@ export async function executeToolUse(
      }
    }
 
-    // Checkpoint before first write
-    if ((tu.name === 'write_file' || tu.name === 'edit_file') && !checkpointCreated) {
+    // Checkpoint before the first MUTATING tool of the turn. Beyond file edits
+    // this now covers bash (and apply_patch): any shell side effect must fall
+    // inside the rollback window, so the snapshot baseline has to be taken
+    // before bash runs — not only before write_file/edit_file.
+    if (isMutatingTool(tu.name) && !checkpointCreated) {
       const cp = await createCheckpoint(deps.cwd, 'auto', deps.config.sessionId)
       checkpointCreated = true
       if (cp) callbacks.onCheckpoint?.(cp.hash)
@@ -692,6 +723,18 @@ export async function executeToolUse(
         // Silent: LSP diagnostics are best-effort, never fail the turn
       }
    }
+
+    // Capture bash/shell side effects into the rollback window. The per-edit
+    // recorder above only sees write_file/edit_file; bash can create, delete or
+    // rewrite arbitrary files. We diff the worktree against the turn's snapshot
+    // baseline and attribute the changes to THIS session — never to paths a
+    // different live session exclusively owns (parallel-branch safety).
+    if (!harnessResult.isError && tu.name === 'bash' && checkpointCreated) {
+      try {
+        const guard = buildOwnershipGuard(deps)
+        await recordBashSideEffects(deps.cwd, deps.config.sessionId, guard)
+      } catch { /* best-effort: capture failure must not fail the turn */ }
+    }
 
     if (!harnessResult.isError) {
       // Artifact intercept: persist long output to disk, replace with compact ref.
