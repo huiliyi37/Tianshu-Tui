@@ -1499,10 +1499,6 @@ export class TuiApp {
     // 3. Approval prompt (when pending)
     if (this.approvalPending) {
       const p = this.approvalPending
-      const inputSummary = JSON.stringify(p.input).slice(0, 80)
-    // 3. Approval prompt (when pending)
-    if (this.approvalPending) {
-      const p = this.approvalPending
       if (this.approvalEditMode) {
         // Edit mode: show edit header, InputLine contains the JSON
         lines.push({ text: ` ╭─ Edit Tool Input ───────────────────────────────` })
@@ -1519,7 +1515,6 @@ export class TuiApp {
         lines.push({ text: ` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}` })
         lines.push({ text: ` ╰─ [y] approve  [n] deny  [e] edit ───────────────` })
       }
-    }
     }
 
     // 3a. Intent preview prompt (when pending) — 意图闸确认框
