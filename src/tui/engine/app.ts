@@ -38,7 +38,7 @@ import { domainBadge, isDelegationTool } from '../format/tool-domain.js'
 import { formatSpinnerStatus, formatTurnWorkSummary, phaseIndicator } from '../format/spinner-status.js'
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
-import { appendHistory, nextHistoryAfterSubmit } from '../history.js'
+import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData } from '../format/overlay.js'
 import { renderCockpit } from '../format/cockpit.js'
@@ -280,7 +280,7 @@ export class TuiApp {
         if (trimmed) {
           this.inputHistory = nextHistoryAfterSubmit(this.inputHistory, trimmed)
           this.inputLine.setHistory(this.inputHistory)
-          try { appendHistory(trimmed) } catch { /* 持久化失败不阻塞输入 */ }
+          appendHistoryAsync(trimmed).catch(() => { /* 持久化失败静默 */ })
         }
 
         // W4a: agent 执行中 → 入队（turn 边界 drain 注入），不直接 submit

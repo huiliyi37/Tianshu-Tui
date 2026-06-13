@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'fs'
-import { writeFileAtomicSync } from '../fs-atomic.js'
+import { readFile } from 'fs/promises'
+import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -15,6 +16,14 @@ export function loadHistory(): string[] {
   }
 }
 
+async function loadHistoryAsync(): Promise<string[]> {
+  try {
+    return JSON.parse(await readFile(HISTORY_PATH, 'utf-8'))
+  } catch {
+    return []
+  }
+}
+
 export function nextHistoryAfterSubmit(history: string[], entry: string): string[] {
   const trimmed = entry.trim()
   if (!trimmed) return history
@@ -25,6 +34,12 @@ export function nextHistoryAfterSubmit(history: string[], entry: string): string
 export function appendHistory(entry: string): void {
   const history = nextHistoryAfterSubmit(loadHistory(), entry)
   writeFileAtomicSync(HISTORY_PATH, JSON.stringify(history, null, 2))
+}
+
+/** 异步持久化历史记录，不阻塞调用方。供 key handler 等延迟敏感路径使用。 */
+export async function appendHistoryAsync(entry: string): Promise<void> {
+  const history = nextHistoryAfterSubmit(await loadHistoryAsync(), entry)
+  await writeFileAtomicAsync(HISTORY_PATH, JSON.stringify(history, null, 2))
 }
 
 /** 模糊搜索历史记录，返回匹配项及得分 */
