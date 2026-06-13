@@ -5,6 +5,9 @@
  * 导致透传命令（/team、/review、/plan <x>）的输入被吞，agent 永远收不到。
  *
  * 契约：await handler 结果——resolve(false) 时透传给 onSubmit，resolve(true) 时不透传。
+ *
+ * 追加（Phase 6）：passthrough 时也应 commit 用户气泡到 scrollback，
+ * 而非仅有 agent 回复无用户输入。
  */
 
 import { test } from 'node:test'
@@ -73,4 +76,21 @@ test('提交后输入框被清空', async () => {
   stdin.dataHandler!('\r')
   await tick()
   assert.equal(app.getModelInfo().modelName, 'test') // sanity
+})
+
+test('passthrough 后 scrollback 包含用户气泡', async () => {
+  const { app, stdin } = makeApp()
+  let passed: string | null = null
+  app.onSubmit((t) => { passed = t })
+  app.setSlashHandler(async () => false) // 透传
+
+  app.setInput('/review src/app.ts')
+  stdin.dataHandler!('\r')
+  await tick()
+
+  assert.equal(passed, '/review src/app.ts', '应透传给 agent')
+  const scrollback = app.getScrollbackContent()
+  // ANSI 转义码穿插在 ▍/You 之间，无法做字面匹配，仅断言关键子串存在
+  assert.ok(scrollback.includes('You'), 'scrollback 应包含 You 标签')
+  assert.ok(scrollback.includes('/review src/app.ts'), 'scrollback 应包含用户原始输入')
 })
