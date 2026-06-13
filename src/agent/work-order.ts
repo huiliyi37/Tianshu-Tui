@@ -390,11 +390,20 @@ function normalizeWorkerResult(raw: z.infer<typeof workerResultIngestSchema>): W
 }
 
 function parseWorkerResultObject(parsed: unknown, expectedWorkOrderId: string): WorkerResult {
-  // Fault tolerance: force workOrderId to the expected value.
-  // Cheap models may omit, blank, or hallucinate a different workOrderId.
+  // Fault tolerance for cheap models:
+  // - Force workOrderId to expected value (models may omit or hallucinate it).
+  // - Default missing status to 'blocked' (flash models frequently omit it).
+  // Only apply when the JSON has at least workOrderId (real worker packet),
+  // NOT for incidental JSON objects (e.g. {"note":"not the result"}).
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const obj = parsed as Record<string, unknown>
-    obj.workOrderId = expectedWorkOrderId
+    const hasWorkOrderId = typeof obj.workOrderId === 'string' && obj.workOrderId.length > 0
+    if (hasWorkOrderId || typeof obj.summary === 'string') {
+      obj.workOrderId = expectedWorkOrderId
+      if (obj.status === undefined || obj.status === null || obj.status === '') {
+        obj.status = 'blocked'
+      }
+    }
   }
 
   const ingested = workerResultIngestSchema.parse(parsed)

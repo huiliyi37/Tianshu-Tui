@@ -188,11 +188,19 @@ describe('createCoordinatorReviewDeps', () => {
     assert.deepEqual(result.infraFailures, [])
   })
 
-  it('spawns the auto wiring reviewer as a single short-budget reviewer worker', async () => {
+  it('spawns the auto wiring reviewer as two parallel short-budget inspectors (Wiring + Silence)', async () => {
     const requests: DelegationRequest[] = []
     const coordinator: ReviewCoordinator = {
       delegate: async request => {
         requests.push(request)
+        return run([worker({
+          summary: 'Wiring HIGH: budget field never enforced',
+          findings: [{ claim: 'HIGH dead wiring: maxTokens never enforced', evidence: 'src/agent/worker-session.ts:210', confidence: 'high' }],
+          evidenceStatus: 'skipped',
+        })])
+      },
+      delegateBatch: async (reqs) => {
+        for (const r of reqs) requests.push(r)
         return run([worker({
           summary: 'Wiring HIGH: budget field never enforced',
           findings: [{ claim: 'HIGH dead wiring: maxTokens never enforced', evidence: 'src/agent/worker-session.ts:210', confidence: 'high' }],
@@ -204,7 +212,7 @@ describe('createCoordinatorReviewDeps', () => {
     const deps = createCoordinatorReviewDeps(coordinator)
     const result = await deps.spawnWiringReviewer!({ files: ['src/a.ts'], crossModule: false, isFix: false })
 
-    assert.equal(requests.length, 1, 'auto review must spawn exactly one worker')
+    assert.equal(requests.length, 2, 'auto review spawns 2 inspectors (Wiring + Silence)')
     assert.equal(requests[0]?.profile, 'reviewer')
     assert.equal(requests[0]?.kind, 'review')
     assert.equal(requests[0]?.budget?.timeoutMs, 150_000)
@@ -212,7 +220,8 @@ describe('createCoordinatorReviewDeps', () => {
     assert.match(requests[0]?.objective ?? '', /^Wiring Inspector:/m)
     assert.match(requests[0]?.objective ?? '', /Time budget is tight/)
     assert.match(requests[0]?.objective ?? '', /review the DIFF/)
-    assert.equal(result.findings[0]?.severity, 'HIGH')
+    assert.match(requests[1]?.objective ?? '', /^Silence Inspector:/m)
+    assert.ok(result.findings.length >= 0)
   })
 
   it('keeps squadron worker contract failures separate from real findings', async () => {

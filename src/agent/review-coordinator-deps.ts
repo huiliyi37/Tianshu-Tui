@@ -354,7 +354,28 @@ export function createCoordinatorReviewDeps(
     },
 
     spawnWiringReviewer: async (change): Promise<SquadronResult> => {
-      const run = await coordinator.delegate(wiringReviewerRequest(change, options), options.abortSignal)
+      // Auto review: 2 inspectors in parallel (Wiring + Silence).
+      // Wiring catches "built ≠ wired ≠ effective", Silence catches
+      // swallowed errors, false green claims, and counterexample gaps.
+      // Flash models are reliable enough at these focused axes.
+      const wiring = INSPECTORS.find(i => i.name === 'Wiring')!
+      const silence = INSPECTORS.find(i => i.name === 'Silence')!
+      const requests = [wiring, silence].map(inspector => ({
+        ...request({
+          change,
+          options,
+          kind: 'review' as const,
+          profile: 'reviewer' as const,
+          objective: [
+            inspectorObjective(inspector, change),
+            `Time budget is tight (~${Math.round(AUTO_WIRING_WORKER_TIMEOUT_MS / 1000)}s): review the DIFF of the listed files first (git diff/read targeted ranges), do not read whole files or explore beyond scope. Report what you covered.`,
+          ].join('\n'),
+        }),
+        budget: { timeoutMs: AUTO_WIRING_WORKER_TIMEOUT_MS, maxTurns: AUTO_WIRING_WORKER_MAX_TURNS },
+      }))
+      const run = coordinator.delegateBatch
+        ? await coordinator.delegateBatch(requests, 'all_required', options.abortSignal)
+        : await runSquadronSerially(coordinator, requests, options.abortSignal)
       return { findings: mapSquadronFindings(run), infraFailures: mapSquadronInfraFailures(run) }
     },
   }
